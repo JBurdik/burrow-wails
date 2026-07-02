@@ -13,3 +13,4 @@ src-tauri/gen
 *.key
 *.mobileprovision
 .gitnexus
+src-server/target
