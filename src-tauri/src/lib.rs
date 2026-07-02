@@ -1,4 +1,5 @@
 mod daemon_client;
+mod dispatch;
 
 use base64::{engine::general_purpose, Engine};
 use daemon_client::DaemonClient;
