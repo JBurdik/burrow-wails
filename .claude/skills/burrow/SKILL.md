@@ -5,7 +5,10 @@ description: Delegate work to sub-agents by spawning new terminal tabs from insi
 
 # Delegating with `burrow`
 
-You are running inside **Burrow**. The `burrow` CLI opens new terminal tabs running sub-agents, so you can delegate work. The model is **fire-and-forget + collect**: spawn agents, keep doing your own work, then pull their results when you want — never sit blocked waiting on them.
+You are running inside **Burrow**. You can delegate work to sub-agents in new tabs. The model is **fire-and-forget + collect**: spawn agents, keep doing your own work, then pull their results when you want — never sit blocked waiting on them.
+
+## Prefer the Burrow MCP tools
+If you have MCP tools whose names are `spawn`, `create_worktree`, `list_workspaces`, `collect_results`, `send_to_tab`, `wait_result`, `pr_create`/`pr_list`/`pr_view`/`pr_merge`, `focus_tab`, `focus_workspace`, `new_tab`, `worktree_remove` (served by the **burrow** MCP server), **use those** — they are typed, validated, and return structured results. `spawn` with `wait: true` blocks and returns the sub-agent's captured result directly (no separate collect step); omit `wait` to fire-and-forget and pick results up later with `collect_results`. The `burrow` shell CLI below is the **fallback** for shells and non-MCP contexts, and every CLI subcommand maps to an equivalent tool.
 
 ## Spawn sub-agents (fire-and-forget)
 ```
