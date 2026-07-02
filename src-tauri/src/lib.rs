@@ -1847,6 +1847,35 @@ fn burrow_mcp_flag(cwd: String, app: AppHandle) -> String {
     format!("--mcp-config {quoted}")
 }
 
+/// Build the Burrow MCP server entry in **ACP format** for an `acp_start` session's
+/// `session/new`|`session/load` `mcpServers` array. ACP uses a flat
+/// `{name,command,args,env:[{name,value}]}` shape (env is an array of objects),
+/// unlike Claude's `--mcp-config` object map. Returns `Null` when the socket isn't
+/// available (browser-only dev) so the caller can filter it out. depth 0 = top of
+/// the chain; the child proxy sees `BURROW_MCP_DEPTH=1`.
+fn build_burrow_acp_server(app: &AppHandle, ws_cwd: &str) -> serde_json::Value {
+    let socket = match burrow_mcp_socket::socket_path(app) {
+        Some(p) => p.to_string_lossy().to_string(),
+        None => return serde_json::Value::Null,
+    };
+    let command = std::env::current_exe()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "burrow".to_string());
+    let token = burrow_mcp_socket::socket_token(app).unwrap_or_default();
+    json!({
+        "name": "burrow",
+        "command": command,
+        "args": [burrow_mcp_core::BURROW_MCP_STDIO_ARG],
+        "env": [
+            { "name": burrow_mcp_core::BURROW_MCP_SOCKET_ENV, "value": socket },
+            { "name": burrow_mcp_core::BURROW_MCP_TOKEN_ENV, "value": token },
+            { "name": burrow_mcp_core::BURROW_MCP_SESSION_ENV, "value": ws_cwd },
+            { "name": burrow_mcp_core::BURROW_MCP_DEPTH_ENV, "value": "1" },
+        ]
+    })
+}
+
 /// Merge Burrow's MCP server into a `{"mcpServers":{...}}` blob so a `claude_start`
 /// session (Manager float chat + native ClaudeChat, both stream-json) gets the
 /// spawn/worktree/pr tools alongside the user's own MCP servers. depth 0 = top of
@@ -3409,6 +3438,12 @@ async fn acp_start(
     let cwd_hs = cwd.clone();
     let stdin_hs = stdin.clone();
     let resume_hs = resume_session_id.clone();
+    // Burrow MCP server (ACP array format) so ACP agents (codex/gemini/…) get the
+    // spawn/worktree/pr tools too. Empty array when the socket is unavailable.
+    let burrow_mcp_hs: Vec<serde_json::Value> = match build_burrow_acp_server(&app, &cwd) {
+        serde_json::Value::Null => vec![],
+        v => vec![v],
+    };
     let app_hs = app.clone();
     let emit_history_hs = emit_history;
 
@@ -3475,7 +3510,7 @@ async fn acp_start(
         if let Some(sid) = resume_hs.as_deref().filter(|s| !s.trim().is_empty()) {
             acp_write(&stdin_hs, &serde_json::json!({
                 "jsonrpc": "2.0", "id": 1, "method": "session/load",
-                "params": { "sessionId": sid, "cwd": cwd_hs, "mcpServers": [] }
+                "params": { "sessionId": sid, "cwd": cwd_hs, "mcpServers": burrow_mcp_hs.clone() }
             }))?;
             // session/load REPLAYS the prior conversation as session/update notifications
             // before responding — forward those to the frontend so the picker renders
@@ -3507,7 +3542,7 @@ async fn acp_start(
         if session_id.is_empty() {
             acp_write(&stdin_hs, &serde_json::json!({
                 "jsonrpc": "2.0", "id": 2, "method": "session/new",
-                "params": { "cwd": cwd_hs, "mcpServers": [] }
+                "params": { "cwd": cwd_hs, "mcpServers": burrow_mcp_hs.clone() }
             }))?;
             let resp = read_response(&mut reader, 2)?;
             result = resp.get("result").cloned().unwrap_or(serde_json::Value::Null);
