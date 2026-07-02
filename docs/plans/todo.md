@@ -6,5 +6,6 @@ Deferred items from the router + MCP work (see `docs/plans/checklist.md` for the
 - [ ] **MCP Phase 2 (optional)** — `bin/burrow`'s `spawn`/`worktree` shell arms don't read `BURROW_MCP_DEPTH` yet, so the CLI fallback path has no depth cap (the MCP path already does). Small, low-risk shell guard — quick win whenever picked up.
 - [x] **Mobile web UI over `/ws`** — merged. `src/mobile/` rebuilt against `/ws` (ConnectView/SessionsView/TerminalView, xterm.js live PTY, `tower-http` ServeDir at `/`, unauthed like `/healthz`). `cargo check` + `VITE_TARGET=mobile` build both pass on main. Untested on a real phone yet — see manual test steps below.
   - [x] **Manual phone test** — PASS. Confirmed working from a real phone over Tailscale (Connect → Sessions → Terminal).
-  - [ ] **Stale branch cleanup** — `feat/mobile-remote-web` (113 commits behind, old REST API) is now fully superseded. Safe to delete once confirmed nothing in it is still wanted.
+  - [x] **Stale branch cleanup** — `feat/mobile-remote-web` deleted (worktree + branch), fully superseded.
+  - [ ] **UI pass** — functional but rough ("šílený" per user); needs a design/UX pass once other work settles.
 - [ ] **WS event replay ring buffers** — `WsBroadcaster` (§4) is a live broadcast channel only, no replay buffer. A mobile client reconnecting after a network blip misses events in between. Noted as a future enhancement when §4 was built.
