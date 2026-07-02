@@ -21,7 +21,13 @@ Two structural borrows from competitor `coollabsio/jean` (Apache-2.0). Specs:
 
 - [x] **Phase 0** — `burrow_mcp_{core,socket,stdio}.rs`: in-process Unix-socket server (`0o600` + bearer token), `--burrow-mcp-stdio` exe proxy, depth-capped SPAWNING tools `{spawn,create_worktree,new_tab}`, `send_to_tab`, `burrow_mcp_max_depth` pref (default 3). *(merged: 1724f2f)*
 - [x] **Wire startup** — start the socket server at Tauri `setup` (alongside `start_hook_server`); write `burrow-mcp.sock` + `.token` in `BURROW_HOME_DIR` (= `app_data_dir`); `--burrow-mcp-stdio` branch dispatch at the top of `run()` before the Tauri builder.
-- [x] **`--mcp-config` injection** — `build_burrow_mcp_config(app,ws_cwd,depth)` appended to newly spawned claude tabs in `take_spawn_requests`' spawn arm via `inject_burrow_mcp_config` (claude-only, non-destructive: Claude merges repeated `--mcp-config`); child `BURROW_MCP_DEPTH = depth+1`, depth defaults 0 (app can't read the spawning PTY env).
+- [x] **MCP reachable from ALL launch paths** (depth 0 → children depth 1, non-destructive):
+  - `burrow spawn` delegation → `inject_burrow_mcp_config` in `take_spawn_requests`
+  - button/in-app claude terminal tab → `burrow_mcp_flag` spliced into XTerm `launchArgs` (skips if cmd already has `--mcp-config`)
+  - Manager float chat + native ClaudeChat (`claude_start`) → `merge_burrow_into_mcp` into `build_mcp_config`
+  - ACP agents (codex/gemini/opencode, `acp_start`) → `build_burrow_acp_server` spliced into `session/new`+`session/load`
+  - hand-typed `claude` in a shell → NOT covered (needs persistent install; deferred)
+- [x] **`dispatch` bridge command** — `#[tauri::command] dispatch(command,args)` → `dispatch_command`; router testable via devtools before the transport lands.
 - [ ] **Live capture-parity check (§5.5)** — confirm Stop-hook `burrow capture` fires for MCP-spawned tabs so `spawn({wait})` returns a result. Blocker before Phase 1.
 - [ ] **Phase 1** — update `BURROW_SKILL_MD` to teach MCP tools first, CLI as fallback.
 - [ ] **Phase 2** (optional) — `bin/burrow` spawn/worktree arms read `BURROW_MCP_DEPTH`, refuse over limit.
