@@ -1835,6 +1835,18 @@ fn inject_burrow_mcp_config(app: &AppHandle, cmd: &str, ws_cwd: &str) -> String 
     format!("{cmd} --mcp-config {quoted}")
 }
 
+/// Frontend button-launch path: return the `--mcp-config '<json>'` flag to splice
+/// into a claude launch's argv (XTerm prepends it alongside `--settings`). The
+/// `take_spawn_requests` delegation path uses `inject_burrow_mcp_config` instead;
+/// this covers agent-button and other in-app claude tab launches. depth 0 = a
+/// human/button launch is the top of the chain (child gets depth 1).
+#[tauri::command]
+fn burrow_mcp_flag(cwd: String, app: AppHandle) -> String {
+    let cfg = build_burrow_mcp_config(&app, &cwd, 0);
+    let quoted = format!("'{}'", cfg.replace('\'', "'\\''"));
+    format!("--mcp-config {quoted}")
+}
+
 #[tauri::command]
 fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<SpawnRequest> {
     let mut out = Vec::new();
@@ -5199,6 +5211,7 @@ pub fn run() {
             repair_agent_status,
             set_max_agents,
             set_burrow_mcp_max_depth,
+            burrow_mcp_flag,
             register_tmux_win,
             list_skills,
             set_skill_enabled,

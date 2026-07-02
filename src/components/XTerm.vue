@@ -422,6 +422,17 @@ onMounted(async () => {
     });
   }
 
+  // Give button/in-app-launched claude tabs the Burrow MCP tools. The
+  // `burrow spawn` delegation path already injects `--mcp-config` into the cmd
+  // body (take_spawn_requests), so skip if it's already present to avoid a
+  // duplicate. Hand-typed `claude` can't be covered here (no launch cmd).
+  if (baseCmd === "claude" && !props.initialCmd!.includes("--mcp-config")) {
+    try {
+      const flag = await invoke<string>("burrow_mcp_flag", { cwd: props.cwd });
+      if (flag) launchArgs = launchArgs ? `${launchArgs} ${flag}` : flag;
+    } catch { /* MCP unavailable (browser-only dev) — launch without tools */ }
+  }
+
   // Register all three listeners in parallel before creating the PTY — they are
   // independent and each round-trips to the Tauri IPC bridge, so sequencing them
   // added ~3× the latency for no reason.
