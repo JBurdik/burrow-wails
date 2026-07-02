@@ -48,7 +48,7 @@ function load(): ChatAgent[] {
     if (!Array.isArray(saved)) return base;
     const byId = new Map(base.map((a) => [a.id, a]));
     for (const s of saved) {
-      byId.set(s.id, { shortcut: "", ...byId.get(s.id), ...s, args: [...(s.args ?? [])], env: { ...(s.env ?? {}) } } as ChatAgent);
+      byId.set(s.id, { ...byId.get(s.id), ...s, args: [...(s.args ?? [])], env: { ...(s.env ?? {}) }, shortcut: s.shortcut ?? byId.get(s.id)?.shortcut ?? "" } as ChatAgent);
     }
     return Array.from(byId.values());
   } catch {
