@@ -55,6 +55,7 @@ interface Prefs {
   soundWaitingCustomPath: string;
   soundVolume: number; // 0-100
   maxAgents: number; // soft per-workspace sub-agent cap for the /burrow skill
+  mcpMaxDepth: number; // recursion depth cap for Burrow MCP spawning tools
   debugOverlay: boolean; // show the per-terminal diagnostic overlay (XTerm.vue)
   floatCorner: string; // which screen corner floating windows snap+stack to
   worktreesDir: string; // parent dir for git worktrees: <dir>/<repo>/<branch>
@@ -135,6 +136,7 @@ const DEFAULT_PREFS: Prefs = {
   soundWaitingCustomPath: "",
   soundVolume: 70,
   maxAgents: 3,
+  mcpMaxDepth: 3,
   debugOverlay: false,
   floatCorner: "top-right",
   worktreesDir: "~/burrow-worktrees",
@@ -201,6 +203,7 @@ export const useUIStore = defineStore("ui", () => {
   const soundWaitingCustomPath = ref(loaded.soundWaitingCustomPath);
   const soundVolume = ref(loaded.soundVolume);
   const maxAgents = ref(loaded.maxAgents);
+  const mcpMaxDepth = ref(loaded.mcpMaxDepth);
   const debugOverlay = ref(loaded.debugOverlay);
   const floatCorner = ref(loaded.floatCorner);
   const worktreesDir = ref(loaded.worktreesDir);
@@ -246,6 +249,13 @@ export const useUIStore = defineStore("ui", () => {
   watch(
     maxAgents,
     (n) => { invoke("set_max_agents", { n }).catch(() => {}); },
+    { immediate: true },
+  );
+
+  // Publish the MCP recursion depth cap to the file mcp_max_depth() reads.
+  watch(
+    mcpMaxDepth,
+    (n) => { invoke("set_burrow_mcp_max_depth", { n }).catch(() => {}); },
     { immediate: true },
   );
 
@@ -357,6 +367,7 @@ export const useUIStore = defineStore("ui", () => {
         soundWaitingCustomPath: soundWaitingCustomPath.value,
         soundVolume: soundVolume.value,
         maxAgents: maxAgents.value,
+        mcpMaxDepth: mcpMaxDepth.value,
         debugOverlay: debugOverlay.value,
         floatCorner: floatCorner.value,
         worktreesDir: worktreesDir.value,
@@ -397,7 +408,7 @@ export const useUIStore = defineStore("ui", () => {
   watch(
     [uiFont, uiFontSize, uiScale, terminalFont, terminalFontSize, swapPanels, theme,
      soundEnabled, soundDoneEnabled, soundWaitingEnabled, soundDoneId, soundDoneCustomPath,
-     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, debugOverlay, floatCorner, worktreesDir, mode, missionShowActivity,
+     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode, missionShowActivity,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
      sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode],
@@ -501,6 +512,7 @@ export const useUIStore = defineStore("ui", () => {
     soundWaitingCustomPath,
     soundVolume,
     maxAgents,
+    mcpMaxDepth,
     debugOverlay,
     floatCorner,
     worktreesDir,

@@ -297,6 +297,23 @@
                 <span class="size-unit">agents</span>
               </div>
             </div>
+            <div class="field">
+              <div class="field-info">
+                <span class="field-name">MCP recursion depth</span>
+                <span class="field-desc">How deep MCP-spawned sub-agents may spawn further sub-agents before the depth cap refuses (1–10)</span>
+              </div>
+              <div class="size-ctl">
+                <input
+                  class="select size-inp"
+                  type="number"
+                  min="1"
+                  max="10"
+                  :value="ui.mcpMaxDepth"
+                  @input="ui.mcpMaxDepth = clampRange(val($event), 1, 10, 3)"
+                />
+                <span class="size-unit">levels</span>
+              </div>
+            </div>
           </div>
 
           <div class="settings-group">

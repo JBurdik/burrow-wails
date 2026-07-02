@@ -29,9 +29,9 @@ Two structural borrows from competitor `coollabsio/jean` (Apache-2.0). Specs:
   - hand-typed `claude` in a shell → NOT covered (needs persistent install; deferred)
 - [x] **`dispatch` bridge command** — `#[tauri::command] dispatch(command,args)` → `dispatch_command`; router testable via devtools before the transport lands.
 - [ ] **Live capture-parity check (§5.5)** — confirm Stop-hook `burrow capture` fires for MCP-spawned tabs so `spawn({wait})` returns a result. Blocker before Phase 1.
-- [ ] **Phase 1** — update `BURROW_SKILL_MD` to teach MCP tools first, CLI as fallback.
+- [x] **Phase 1** — `BURROW_SKILL_MD` now teaches the MCP tools first (CLI as documented fallback). Installed wholesale each launch by `install_agent_docs`.
 - [ ] **Phase 2** (optional) — `bin/burrow` spawn/worktree arms read `BURROW_MCP_DEPTH`, refuse over limit.
-- [ ] **Settings** — surface `burrow_mcp_max_depth` in the Settings UI.
+- [x] **Settings** — `mcpMaxDepth` in ui.ts (watch → `set_burrow_mcp_max_depth`, immediate) + number input in Settings.vue (1–10).
 
 **§5 decisions (locked):** app-exe stdio proxy · `send_to_tab` any depth-0 · depth default 3 · Unix-socket only (`cfg(windows)` stub) · capture-parity live-check before Phase 1.
 
