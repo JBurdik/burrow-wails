@@ -1840,6 +1840,20 @@ fn inject_burrow_mcp_config(app: &AppHandle, cmd: &str, ws_cwd: &str) -> String 
 /// `take_spawn_requests` delegation path uses `inject_burrow_mcp_config` instead;
 /// this covers agent-button and other in-app claude tab launches. depth 0 = a
 /// human/button launch is the top of the chain (child gets depth 1).
+/// Thin bridge onto the command-dispatch router. Lets any transport (or the
+/// devtools console) exercise `dispatch_command` before the HTTP/WS layer exists —
+/// `invoke('dispatch', {command, args})` should return the same result as calling
+/// the underlying `#[tauri::command]` directly. This is the seam a future
+/// HTTP/WS/MCP transport routes through.
+#[tauri::command]
+async fn dispatch(
+    command: String,
+    args: serde_json::Value,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    crate::dispatch::dispatch_command(&app, &command, args).await
+}
+
 #[tauri::command]
 fn burrow_mcp_flag(cwd: String, app: AppHandle) -> String {
     let cfg = build_burrow_mcp_config(&app, &cwd, 0);
@@ -5270,6 +5284,7 @@ pub fn run() {
             set_max_agents,
             set_burrow_mcp_max_depth,
             burrow_mcp_flag,
+            dispatch,
             register_tmux_win,
             list_skills,
             set_skill_enabled,
