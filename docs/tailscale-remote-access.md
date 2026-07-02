@@ -83,3 +83,28 @@ event name:
 Matching events arrive as `{"event": "pty-data-42", "payload": ...}`. There
 is currently no replay buffer — you only receive events emitted after you
 subscribe.
+
+## 6. Mobile UI
+
+A touch-first web UI (`src/mobile/`) talks to the same `/ws` transport above
+— Connect / Sessions / Terminal screens, xterm.js rendering, no separate
+pairing flow (just the host + bearer token from step 4).
+
+```bash
+pnpm build:mobile
+```
+
+This produces `dist-mobile/mobile.html` + assets. Enable the HTTP toggle in
+Settings (desktop app → Settings → the HTTP/WS transport section), restart
+Burrow, then from your phone (on the same tailnet) visit:
+
+```
+http://<tailscale-host>:<port>/
+```
+
+`/` is served straight from `dist-mobile/`, unauthenticated (a plain browser
+GET can't send an `Authorization` header — same reasoning as `/healthz`).
+Paste that same base URL and the bearer token (Settings shows the token
+*file path*; `cat` it, e.g. `cat ~/Library/Application\ Support/com.agenticide.app/http.token`)
+into the Connect screen. Sessions lists every open workspace/tab with a live
+status dot; tapping one opens a real terminal.

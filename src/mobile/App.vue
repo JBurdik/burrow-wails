@@ -1,19 +1,24 @@
 <template>
   <div class="m-root">
-    <router-view />
+    <ConnectView v-if="store.view === 'connect'" />
+    <SessionsView v-else-if="store.view === 'sessions'" />
+    <TerminalView v-else-if="store.view === 'terminal'" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted } from 'vue';
-import { useRouter } from 'vue-router';
 import { useRemoteStore } from './store';
+import ConnectView from './views/ConnectView.vue';
+import SessionsView from './views/SessionsView.vue';
+import TerminalView from './views/TerminalView.vue';
 
-const store  = useRemoteStore();
-const router = useRouter();
+const store = useRemoteStore();
 
 onMounted(() => {
-  if (store.paired) router.replace('/home');
+  if (store.baseUrl && store.token) {
+    store.connect(store.baseUrl, store.token).catch(() => {});
+  }
 });
 </script>
 

@@ -1,93 +1,160 @@
-import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
-import { BurrowClient, type Workspace, type Session } from './api';
+import { defineStore } from "pinia";
+import { reactive, ref } from "vue";
+import { BurrowWsClient } from "./api";
 
-const URL_KEY = 'burrow-remote-url';
-const TOK_KEY = 'burrow-remote-token';
+const URL_KEY = "burrow-mobile-url";
+const TOKEN_KEY = "burrow-mobile-token";
 
-export const useRemoteStore = defineStore('remote', () => {
-  const baseUrl = ref(localStorage.getItem(URL_KEY) ?? '');
-  const token   = ref(localStorage.getItem(TOK_KEY) ?? '');
-  const workspaces = ref<Workspace[]>([]);
-  const loading    = ref(false);
-  const error      = ref<string | null>(null);
-  const offline    = ref(false);
+export type TabStatus = "idle" | "running" | "waiting" | "permission" | "done";
 
-  const paired = computed(() => !!baseUrl.value && !!token.value);
+export interface Tab {
+  ptyId: number;
+  title: string;
+  cwd: string;
+  workspaceId: number;
+  workspaceName: string;
+}
 
-  let client: BurrowClient | null = paired.value
-    ? new BurrowClient({ baseUrl: baseUrl.value, token: token.value })
-    : null;
-  let pollTimer: number | null = null;
+export interface WorkspaceGroup {
+  id: number;
+  name: string;
+  path: string;
+  tabs: Tab[];
+}
 
-  const allSessions = computed<Session[]>(() =>
-    workspaces.value.flatMap((w) => w.sessions),
-  );
+export type View = "connect" | "sessions" | "terminal";
 
-  async function pair(url: string, code: string) {
-    stopLive();
-    baseUrl.value = url.replace(/\/$/, '');
-    const pairingClient = new BurrowClient({ baseUrl: baseUrl.value, token: '' });
-    token.value = await pairingClient.pair(code);
-    localStorage.setItem(URL_KEY, baseUrl.value);
-    localStorage.setItem(TOK_KEY, token.value);
-    client = new BurrowClient({ baseUrl: baseUrl.value, token: token.value });
+export const useRemoteStore = defineStore("remote", () => {
+  const baseUrl = ref(localStorage.getItem(URL_KEY) ?? "");
+  const token = ref(localStorage.getItem(TOKEN_KEY) ?? "");
+  const connected = ref(false);
+  const connecting = ref(false);
+  const connectError = ref("");
+
+  const view = ref<View>("connect");
+  const workspaces = ref<WorkspaceGroup[]>([]);
+  const statuses = reactive(new Map<number, TabStatus>());
+  const loading = ref(false);
+  const listError = ref("");
+  const activeTab = ref<Tab | null>(null);
+
+  let client: BurrowWsClient | null = null;
+  const doneTimers = new Map<number, number>();
+
+  function statusFor(ptyId: number): TabStatus {
+    return statuses.get(ptyId) ?? "idle";
   }
 
-  function unpair() {
-    stopLive();
-    baseUrl.value = '';
-    token.value   = '';
-    workspaces.value = [];
+  function watchTabStatus(ptyId: number) {
+    client?.subscribe(`pty-hook-${ptyId}`, (payload) => {
+      // Broadcast branch only ever sends the bare state string (see api.ts note).
+      const state = typeof payload === "string" ? payload : payload?.state;
+      if (state === "running" || state === "waiting" || state === "permission") {
+        const t = doneTimers.get(ptyId);
+        if (t !== undefined) { window.clearTimeout(t); doneTimers.delete(ptyId); }
+        statuses.set(ptyId, state);
+      } else if (state === "done") {
+        statuses.set(ptyId, "done");
+        const t = window.setTimeout(() => statuses.set(ptyId, "idle"), 4000);
+        doneTimers.set(ptyId, t);
+      }
+    });
+  }
+
+  async function connect(url: string, tok: string): Promise<void> {
+    connecting.value = true;
+    connectError.value = "";
+    const normalized = url.replace(/\/$/, "");
+    try {
+      const ok = await BurrowWsClient.healthCheck(normalized);
+      if (!ok) throw new Error("Server reachable but /healthz did not return 200");
+
+      const c = new BurrowWsClient();
+      await c.connect(normalized, tok);
+      c.onClose = () => {
+        connected.value = false;
+        if (view.value === "terminal") view.value = "sessions";
+      };
+      client = c;
+      connected.value = true;
+      baseUrl.value = normalized;
+      token.value = tok;
+      localStorage.setItem(URL_KEY, normalized);
+      localStorage.setItem(TOKEN_KEY, tok);
+      view.value = "sessions";
+      await loadSessions();
+    } catch (e: any) {
+      connectError.value = e?.message ?? "Connection failed";
+      connected.value = false;
+      throw e;
+    } finally {
+      connecting.value = false;
+    }
+  }
+
+  function disconnect() {
+    client?.close();
     client = null;
-    localStorage.removeItem(URL_KEY);
-    localStorage.removeItem(TOK_KEY);
+    connected.value = false;
+    workspaces.value = [];
+    statuses.clear();
+    view.value = "connect";
   }
 
-  async function refresh() {
+  async function loadSessions() {
     if (!client) return;
     loading.value = true;
-    error.value   = null;
+    listError.value = "";
     try {
-      workspaces.value = await client.listWorkspaces();
-      offline.value    = false;
+      const wss: { id: number; name: string; path: string }[] = await client.call("list_workspaces");
+      const groups: WorkspaceGroup[] = [];
+      for (const ws of wss) {
+        const tabs: any[] = await client.call("list_terminal_tabs", { workspaceId: ws.id });
+        const liveTabs: Tab[] = tabs
+          .filter((t) => typeof t.pty_id === "number")
+          .map((t) => ({
+            ptyId: t.pty_id,
+            title: t.title || t.default_title || `PTY ${t.pty_id}`,
+            cwd: t.cwd ?? ws.path,
+            workspaceId: ws.id,
+            workspaceName: ws.name,
+          }));
+        groups.push({ id: ws.id, name: ws.name, path: ws.path, tabs: liveTabs });
+        for (const t of liveTabs) {
+          if (!statuses.has(t.ptyId)) statuses.set(t.ptyId, "idle");
+          watchTabStatus(t.ptyId);
+        }
+      }
+      workspaces.value = groups;
     } catch (e: any) {
-      error.value  = e.message ?? 'Connection failed';
-      offline.value = true;
+      listError.value = e?.message ?? "Failed to load sessions";
     } finally {
       loading.value = false;
     }
   }
 
-  function startLive() {
-    stopLive();
-    if (!client) return;
-    pollTimer = window.setInterval(() => refresh(), 3000);
+  function openTerminal(tab: Tab) {
+    activeTab.value = tab;
+    view.value = "terminal";
   }
 
-  function stopLive() {
-    if (pollTimer !== null) window.clearInterval(pollTimer);
-    pollTimer = null;
+  function closeTerminal() {
+    if (activeTab.value) {
+      client?.unsubscribe(`pty-data-${activeTab.value.ptyId}`);
+    }
+    activeTab.value = null;
+    view.value = "sessions";
   }
 
-  async function getOutput(ptyId: number): Promise<string> {
-    if (!client) throw new Error('Not paired');
-    return client.getOutput(ptyId);
-  }
-
-  async function sendInput(ptyId: number, text: string) {
-    if (!client) throw new Error('Not paired');
-    await client.sendInput(ptyId, text);
-  }
-
-  async function interrupt(ptyId: number) {
-    if (!client) throw new Error('Not paired');
-    await client.interrupt(ptyId);
+  function getClient(): BurrowWsClient {
+    if (!client) throw new Error("not connected");
+    return client;
   }
 
   return {
-    baseUrl, token, workspaces, allSessions,
-    loading, error, offline, paired,
-    pair, unpair, refresh, startLive, stopLive, getOutput, sendInput, interrupt,
+    baseUrl, token, connected, connecting, connectError,
+    view, workspaces, loading, listError, activeTab,
+    connect, disconnect, loadSessions, openTerminal, closeTerminal,
+    statusFor, getClient,
   };
 });

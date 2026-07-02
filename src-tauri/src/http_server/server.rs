@@ -16,6 +16,7 @@ use axum::{
     Router,
 };
 use tauri::{AppHandle, Manager};
+use tower_http::services::{ServeDir, ServeFile};
 
 use super::{auth, websocket};
 use crate::emit::WsBroadcaster;
@@ -70,10 +71,49 @@ async fn serve(state: ServerState, port: u16) -> Result<(), String> {
 }
 
 fn build_router(state: ServerState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/ws", get(ws_upgrade))
-        .with_state(state)
+        .with_state(state.clone());
+
+    // Serve the mobile web UI at `/`, unauthenticated (matches `/healthz` — a plain
+    // browser GET can't attach an Authorization header; only `/ws` needs the token).
+    // Only mounted when `dist-mobile/` actually exists on disk, so an app that never
+    // ran `pnpm build:mobile` still serves `/ws` + `/healthz` fine.
+    match dist_mobile_dir(&state.app) {
+        Some(dir) if dir.join("mobile.html").is_file() => {
+            log::info!("HTTP transport: serving mobile UI from {}", dir.display());
+            let index = dir.join("mobile.html");
+            let serve_dir = ServeDir::new(&dir).fallback(ServeFile::new(index));
+            router.fallback_service(serve_dir)
+        }
+        _ => {
+            log::warn!("HTTP transport: dist-mobile/ not found, mobile UI not served (run `pnpm build:mobile`)");
+            router
+        }
+    }
+}
+
+/// Resolve the built mobile bundle directory. Supports both `pnpm tauri:dev`
+/// (repo root, two levels up from `src-tauri`) and a bundled app (Tauri
+/// resource dir, mirroring `find_daemon_binary`'s resource-dir fallback).
+fn dist_mobile_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        // src-tauri/target/debug/agentic-ide -> repo root is 3 parents up.
+        if let Some(dev_root) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()).and_then(|p| p.parent()) {
+            let candidate = dev_root.join("dist-mobile");
+            if candidate.join("mobile.html").is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    if let Ok(res) = app.path().resource_dir() {
+        let candidate = res.join("dist-mobile");
+        if candidate.join("mobile.html").is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 async fn healthz() -> impl IntoResponse {
