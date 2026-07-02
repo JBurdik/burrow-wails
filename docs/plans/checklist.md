@@ -11,9 +11,11 @@ Two structural borrows from competitor `coollabsio/jean` (Apache-2.0). Specs:
 - [x] **Batch 3** — PTY control + daemon: `write_pty`, `resize_pty`, `kill_pty`, `detach_pty`, `list_pty_sessions`, `get_pty_foreground`, `register_tmux_win`, `is_pid_alive`, `daemon_stats`, `clean_daemon`, `kill_orphan_sessions`, `restart_daemon`, `system_stats`, `set_max_agents`.
 - [x] **Batch 4** — Agent IPC send-side: `claude_*` (send/stop/abort/respond), `acp_*`, `lsp_send`/`lsp_stop`.
 - [x] **Batch 5** — Config/skills/MCP + Claude reads + misc.
-- [ ] **§4** — `emit.rs`: `EmitExt` + `WsBroadcaster` stub; mechanical `app.emit(`→`app.emit_all(`. No-op until a transport exists.
-- [ ] **§5** — transport: `http_server/{server,websocket}.rs` (axum), off by default, behind auth. + `src-server` 4-line headless binary.
-- [ ] **Fallout (free after §4/§5)** — headless server + Docker, WebSocket event replay ring buffers.
+- [x] **§4** — `emit.rs`: `EmitExt` + `WsBroadcaster` (live broadcast channel, no replay buffer yet). Mechanical `app.emit(`→`app.emit_all(` for `pty-data-{id}` (`daemon_client.rs`), `claude-data-{id}`, `acp-data-{id}`, `pty-hook-{id}` (`lib.rs`). No-op with no `WsBroadcaster` registered — verified by reading `EmitExt::emit_all`.
+- [x] **§5** — transport: `http_server/{mod,server,websocket,auth}.rs` (axum), off by default via `http_enabled` pref file, loopback-only bind, bearer-token auth on `/ws` (`/healthz` open). `get_http_server_status`/`set_http_enabled` Tauri commands wired.
+  - [ ] **Deferred:** Settings-UI toggle (commands exist, no UI control yet — pref file is manual for now).
+  - [ ] **Deferred:** live start/stop of the HTTP server without an app restart (`set_http_enabled` only writes the pref file; `maybe_start` runs once at `setup`).
+- [ ] **Fallout (free after §4/§5)** — `src-server` headless binary is a **stub only** (agentic_ide_lib's `run()` always builds a Tauri window; wiring a real `BURROW_HEADLESS` window-skip was judged too invasive/risky for this pass — deferred, tracked here). WebSocket event replay ring buffers (still none, per §4).
 
 **Never migrate (UI/native):** float-window commands (`open_float_window`, `set_window_size`, `snap_float_window`, …), the `SpawnRequest` action half of `take_spawn_requests`.
 

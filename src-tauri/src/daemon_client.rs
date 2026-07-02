@@ -8,7 +8,8 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use crate::emit::EmitExt;
+use tauri::AppHandle;
 
 pub struct DaemonClient {
     socket_path: PathBuf,
@@ -133,7 +134,7 @@ impl DaemonClient {
                     Some("PtyData") => {
                         if let Some(enc) = event["data"].as_str() {
                             if let Ok(bytes) = general_purpose::STANDARD.decode(enc) {
-                                let _ = app.emit(&event_name, bytes);
+                                let _ = app.emit_all(&event_name, bytes);
                             }
                         }
                     }

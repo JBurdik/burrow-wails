@@ -3,9 +3,12 @@ mod burrow_mcp_socket;
 mod burrow_mcp_stdio;
 mod daemon_client;
 mod dispatch;
+pub mod emit;
+mod http_server;
 
 use base64::{engine::general_purpose, Engine};
 use daemon_client::DaemonClient;
+use emit::EmitExt;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -969,7 +972,7 @@ fn start_hook_server(app: AppHandle) {
                                     serde_json::Value::Object(payload),
                                 );
                             } else {
-                                let _ = app.emit(&format!("pty-hook-{pty_id}"), state.to_string());
+                                let _ = app.emit_all(&format!("pty-hook-{pty_id}"), state.to_string());
                             }
                         }
                     }
@@ -3191,12 +3194,12 @@ async fn claude_start(
                 Ok(l) => {
                     let t = l.trim().to_string();
                     if t.is_empty() { continue; }
-                    let _ = app2.emit(&format!("claude-data-{id}"), t);
+                    let _ = app2.emit_all(&format!("claude-data-{id}"), t);
                 }
                 Err(_) => break,
             }
         }
-        let _ = app2.emit(&format!("claude-data-{id}"), r#"{"type":"exit"}"#);
+        let _ = app2.emit_all(&format!("claude-data-{id}"), r#"{"type":"exit"}"#);
     });
     // Drain stderr to prevent pipe stall.
     std::thread::spawn(move || {
@@ -3542,7 +3545,7 @@ async fn acp_start(
                 if t.is_empty() { continue; }
                 let v: serde_json::Value = match serde_json::from_str(t) { Ok(v) => v, Err(_) => continue };
                 if v.get("method").and_then(|m| m.as_str()) == Some("session/update") {
-                    if emit_history_hs { let _ = app_hs.emit(&format!("acp-data-{id}"), t.to_string()); }
+                    if emit_history_hs { let _ = app_hs.emit_all(&format!("acp-data-{id}"), t.to_string()); }
                     continue;
                 }
                 if v.get("method").is_none() && v.get("id").and_then(|i| i.as_u64()) == Some(1) {
@@ -3590,7 +3593,7 @@ async fn acp_start(
 
     // Surface the session info (sessionId + modes + configOptions) to the frontend
     // so the model / permission-mode selectors can populate.
-    let _ = app.emit(&format!("acp-data-{id}"), serde_json::json!({
+    let _ = app.emit_all(&format!("acp-data-{id}"), serde_json::json!({
         "_burrow": "session",
         "sessionId": session_id,
         "modes": session_result.get("modes").cloned().unwrap_or(serde_json::Value::Null),
@@ -3622,7 +3625,7 @@ async fn acp_start(
             let _ = app2.emit(&topic, t.to_string());
         }
         acp_dbg(&dbg_reader, "reader <eof>");
-        let _ = app2.emit(&format!("acp-data-{id}"), r#"{"_burrow":"exit"}"#);
+        let _ = app2.emit_all(&format!("acp-data-{id}"), r#"{"_burrow":"exit"}"#);
     });
 
     state.procs.lock().unwrap().insert(id, AcpProc { stdin, child, next_id, session_id });
@@ -5210,6 +5213,7 @@ pub fn run() {
 
             start_hook_server(app.handle().clone());
             burrow_mcp_socket::start(app.handle());
+            http_server::server::maybe_start(app.handle());
             install_agent_docs(app.handle());
             // Write the burrow bin now so the global hook command path is valid even
             // before the first PTY spawn, then register the persistent status hooks.
@@ -5285,6 +5289,8 @@ pub fn run() {
             repair_agent_status,
             set_max_agents,
             set_burrow_mcp_max_depth,
+            http_server::get_http_server_status,
+            http_server::set_http_enabled,
             burrow_mcp_flag,
             dispatch,
             register_tmux_win,
