@@ -1,3 +1,6 @@
+mod burrow_mcp_core;
+mod burrow_mcp_socket;
+mod burrow_mcp_stdio;
 mod daemon_client;
 mod dispatch;
 
@@ -1490,6 +1493,324 @@ fn write_control_result(app: &AppHandle, token: &str, text: &str) {
     }
 }
 
+/// Workspaces as `<id>\t<name>\t<path>\n` lines. Shared by the `burrow
+/// list-workspaces` control command and the MCP `list_workspaces` tool.
+fn query_workspaces_tsv(conn: &Connection) -> String {
+    let mut s = String::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, name, path FROM workspaces ORDER BY COALESCE(last_opened,0) DESC, created_at DESC",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        }) {
+            for row in rows.flatten() {
+                s.push_str(&format!("{}\t{}\t{}\n", row.0, row.1, row.2));
+            }
+        }
+    }
+    s
+}
+
+/// A workspace's tabs as `<pty_id>\t<title>\n` lines. Shared by `burrow
+/// list-tabs` and the MCP `list_tabs` tool.
+fn query_tabs_tsv(conn: &Connection, ws_id: i64) -> String {
+    let mut s = String::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT pty_id, COALESCE(title, default_title, '') FROM terminal_tabs WHERE workspace_id = ?1 ORDER BY ord ASC",
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![ws_id], |r| {
+            Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, String>(1)?))
+        }) {
+            for row in rows.flatten() {
+                let pid = row.0.map(|v| v.to_string()).unwrap_or_default();
+                s.push_str(&format!("{}\t{}\n", pid, row.1));
+            }
+        }
+    }
+    s
+}
+
+// ── MCP server glue ────────────────────────────────────────────────────────────
+// The MCP layer is a typed front door onto the SAME file-request-dir transport
+// the `burrow` CLI writes (so Terminal.vue's poll claims MCP-spawned tabs
+// identically) plus the same Rust-answered bodies the control commands use.
+// Tool bodies live here (private app state); protocol/registry/depth live in
+// burrow_mcp_core.
+
+/// User-configurable recursion depth cap for spawning MCP tools. Stored as a
+/// file under app-data (same file-bridge pattern as `max_agents`), default 3.
+pub(crate) fn mcp_max_depth(app: &AppHandle) -> u32 {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .and_then(|d| std::fs::read_to_string(d.join("burrow_mcp_max_depth")).ok())
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(3)
+}
+
+/// Persist the recursion depth cap (Settings → published to a file the depth
+/// check reads). Mirrors `set_max_agents`.
+#[tauri::command]
+fn set_burrow_mcp_max_depth(n: u32, app: AppHandle) {
+    if let Ok(data) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&data);
+        let _ = std::fs::write(data.join("burrow_mcp_max_depth"), n.to_string());
+    }
+}
+
+/// Ephemeral result token when a caller wants `spawn({wait:true})` without
+/// supplying one. Must be non-empty so the frontend wires up the capture hook.
+fn mcp_gen_token() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("mcp{nanos:x}")
+}
+
+/// Write a request dir the frontend / Rust control path polls — the exact
+/// files `bin/burrow` writes, so `take_spawn_requests` claims it identically.
+/// `ready` is written LAST so a half-written request is never read.
+fn mcp_write_request(app: &AppHandle, fields: &[(&str, &str)]) -> Result<(), String> {
+    let reqdir = burrow_session_dir(app).ok_or("no session dir")?.join("requests");
+    std::fs::create_dir_all(&reqdir).map_err(|e| e.to_string())?;
+    let dir = reqdir.join(format!("req.{}", mcp_gen_token()));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    for (k, v) in fields {
+        std::fs::write(dir.join(k), v).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(dir.join("ready"), "").map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Block until `<session>/<token>.done` appears (or timeout), then return
+/// `<token>.result`. Same convention as `burrow wait` / the Stop-hook capture.
+fn mcp_block_on_done(app: &AppHandle, token: &str, timeout_secs: u64) -> Result<String, String> {
+    let dir = burrow_session_dir(app).ok_or("no session dir")?;
+    let done = dir.join(format!("{token}.done"));
+    let result = dir.join(format!("{token}.result"));
+    let mut waited = 0;
+    while !done.exists() {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        waited += 1;
+        if timeout_secs > 0 && waited >= timeout_secs {
+            return Err(format!("timed out after {timeout_secs}s waiting for token {token}"));
+        }
+    }
+    Ok(std::fs::read_to_string(&result).unwrap_or_default())
+}
+
+/// Reuse of `write_pty`'s daemon body for the `send_to_tab` tool.
+fn mcp_write_pty(app: &AppHandle, id: u32, data: &[u8]) -> Result<(), String> {
+    let daemon = app.state::<DaemonState>();
+    let client = daemon.client().ok_or("daemon not connected")?;
+    let enc = general_purpose::STANDARD.encode(data);
+    client.cmd(json!({"cmd": "WritePty", "pty_id": id, "data": enc}))?;
+    Ok(())
+}
+
+fn arg_str(args: &serde_json::Value, key: &str) -> Option<String> {
+    args.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+/// Dispatch an MCP tool to the same Rust logic the `burrow` CLI actions use.
+/// `source` is the calling session's `BURROW_CWD` (routing key `ws`).
+pub(crate) fn mcp_run_tool(
+    app: &AppHandle,
+    name: &str,
+    args: serde_json::Value,
+    source: &str,
+) -> Result<serde_json::Value, String> {
+    match name {
+        "spawn" => {
+            let cmd = arg_str(&args, "cmd").ok_or("missing 'cmd'")?;
+            let cwd = arg_str(&args, "cwd").unwrap_or_else(|| source.to_string());
+            let wait = args.get("wait").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mut token = arg_str(&args, "token").unwrap_or_default();
+            if wait && token.is_empty() {
+                token = mcp_gen_token();
+            }
+            mcp_write_request(app, &[
+                ("cmd", &cmd),
+                ("token", &token),
+                ("cwd", &cwd),
+                ("ws", source),
+                ("tmux_win", ""),
+            ])?;
+            if wait {
+                let timeout = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(600);
+                let result = mcp_block_on_done(app, &token, timeout)?;
+                Ok(json!({ "token": token, "status": "done", "result": result }))
+            } else {
+                Ok(json!({ "token": token, "status": "spawned" }))
+            }
+        }
+        "create_worktree" => {
+            let branch = arg_str(&args, "branch").ok_or("missing 'branch'")?;
+            let base = arg_str(&args, "base").unwrap_or_default();
+            let path = arg_str(&args, "path").unwrap_or_default();
+            mcp_write_request(app, &[
+                ("kind", "worktree"),
+                ("branch", &branch),
+                ("base", &base),
+                ("path", &path),
+                ("ws", source),
+            ])?;
+            Ok(json!({ "status": "requested", "branch": branch }))
+        }
+        "new_tab" => {
+            let wsid = arg_str(&args, "ws").unwrap_or_default();
+            let cmd = arg_str(&args, "cmd").unwrap_or_default();
+            mcp_write_request(app, &[
+                ("kind", "new-tab"),
+                ("ws", source),
+                ("wsid", &wsid),
+                ("cmd", &cmd),
+            ])?;
+            Ok(json!({ "status": "requested" }))
+        }
+        "focus_tab" => {
+            let tabid = arg_str(&args, "tabid")
+                .or_else(|| args.get("tabid").and_then(|v| v.as_u64()).map(|n| n.to_string()))
+                .ok_or("missing 'tabid'")?;
+            mcp_write_request(app, &[("kind", "focus-tab"), ("ws", source), ("tabid", &tabid)])?;
+            Ok(json!({ "status": "requested" }))
+        }
+        "focus_workspace" => {
+            let wsid = arg_str(&args, "wsid").ok_or("missing 'wsid'")?;
+            mcp_write_request(app, &[("kind", "focus-workspace"), ("ws", source), ("wsid", &wsid)])?;
+            Ok(json!({ "status": "requested" }))
+        }
+        "list_workspaces" => {
+            let db = app.state::<DbState>();
+            let text = query_workspaces_tsv(&db.conn.lock().unwrap());
+            let rows: Vec<serde_json::Value> = text
+                .lines()
+                .filter_map(|l| {
+                    let mut p = l.splitn(3, '\t');
+                    Some(json!({ "id": p.next()?, "name": p.next()?, "path": p.next()? }))
+                })
+                .collect();
+            Ok(json!({ "workspaces": rows }))
+        }
+        "list_tabs" => {
+            let db = app.state::<DbState>();
+            let conn = db.conn.lock().unwrap();
+            let id: Option<i64> = match arg_str(&args, "ws") {
+                Some(w) => w.parse::<i64>().ok(),
+                None => conn
+                    .query_row("SELECT id FROM workspaces WHERE path = ?1", rusqlite::params![source], |r| r.get(0))
+                    .ok(),
+            };
+            let text = id.map(|i| query_tabs_tsv(&conn, i)).unwrap_or_default();
+            let rows: Vec<serde_json::Value> = text
+                .lines()
+                .filter_map(|l| {
+                    let mut p = l.splitn(2, '\t');
+                    Some(json!({ "ptyId": p.next()?, "title": p.next().unwrap_or("") }))
+                })
+                .collect();
+            Ok(json!({ "tabs": rows }))
+        }
+        "send_to_tab" => {
+            let tabid = args
+                .get("tabid")
+                .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+                .ok_or("missing/invalid 'tabid'")? as u32;
+            let text = arg_str(&args, "text").ok_or("missing 'text'")?;
+            mcp_write_pty(app, tabid, text.as_bytes())?;
+            Ok(json!({ "ok": true }))
+        }
+        "wait_result" => {
+            let token = arg_str(&args, "token").ok_or("missing 'token'")?;
+            let timeout = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(600);
+            let result = mcp_block_on_done(app, &token, timeout)?;
+            Ok(json!({ "token": token, "result": result }))
+        }
+        "collect_results" => {
+            let dir = burrow_session_dir(app).ok_or("no session dir")?;
+            let tokens = args.get("tokens").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let mut out = serde_json::Map::new();
+            for t in tokens {
+                let Some(tok) = t.as_str() else { continue };
+                let done = dir.join(format!("{tok}.done")).exists();
+                let result = std::fs::read_to_string(dir.join(format!("{tok}.result"))).unwrap_or_default();
+                out.insert(tok.to_string(), json!({ "done": done, "result": result }));
+            }
+            Ok(json!({ "results": out }))
+        }
+        "worktree_remove" => {
+            let branch = arg_str(&args, "branch").unwrap_or_default();
+            let path = arg_str(&args, "path").unwrap_or_default();
+            let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+            let db = app.state::<DbState>();
+            let msg = remove_worktree_by(&db, source, &branch, &path, force)?;
+            let _ = app.emit("workspaces-changed", ());
+            Ok(json!({ "status": "removed", "message": msg }))
+        }
+        "pr_create" | "pr_list" | "pr_view" | "pr_merge" => {
+            let run_dir = arg_str(&args, "cwd").unwrap_or_else(|| source.to_string());
+            let gh_args: Vec<String> = match name {
+                "pr_create" => {
+                    let mut a = vec![
+                        "pr".into(), "create".into(),
+                        "--title".into(), arg_str(&args, "title").ok_or("missing 'title'")?,
+                        "--body".into(), arg_str(&args, "body").ok_or("missing 'body'")?,
+                    ];
+                    if let Some(b) = arg_str(&args, "base") { a.push("--base".into()); a.push(b); }
+                    if let Some(h) = arg_str(&args, "head") { a.push("--head".into()); a.push(h); }
+                    a
+                }
+                "pr_list" => {
+                    let mut a = vec!["pr".into(), "list".into()];
+                    if let Some(s) = arg_str(&args, "state") { a.push("--state".into()); a.push(s); }
+                    a
+                }
+                "pr_view" => {
+                    let n = args.get("number").and_then(|v| v.as_u64()).ok_or("missing 'number'")?;
+                    vec!["pr".into(), "view".into(), n.to_string()]
+                }
+                _ => {
+                    let n = args.get("number").and_then(|v| v.as_u64()).ok_or("missing 'number'")?;
+                    let squash = args.get("squash").and_then(|v| v.as_bool()).unwrap_or(false);
+                    vec!["pr".into(), "merge".into(), n.to_string(),
+                         if squash { "--squash".into() } else { "--merge".into() }]
+                }
+            };
+            let argref: Vec<&str> = gh_args.iter().map(|s| s.as_str()).collect();
+            let out = gh_in(&run_dir, &argref)?;
+            Ok(json!({ "output": out }))
+        }
+        other => Err(format!("Unknown tool: {other}")),
+    }
+}
+
+/// Build the `--mcp-config` JSON injected into a spawned agent so it gets the
+/// Burrow MCP tools. The child's `BURROW_MCP_DEPTH` is `depth + 1` (the
+/// increment site for the recursion cap). Not wired into spawned tabs yet —
+/// that flip is the next step (Phase 0 ships this builder only).
+#[allow(dead_code)]
+pub(crate) fn build_burrow_mcp_config(app: &AppHandle, ws_cwd: &str, depth: u32) -> String {
+    let command = std::env::current_exe()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "burrow".to_string());
+    let socket = burrow_mcp_socket::socket_path(app)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let token = burrow_mcp_socket::socket_token(app).unwrap_or_default();
+    json!({ "mcpServers": { "burrow": {
+        "type": "stdio",
+        "command": command,
+        "args": [burrow_mcp_core::BURROW_MCP_STDIO_ARG],
+        "env": {
+            burrow_mcp_core::BURROW_MCP_SOCKET_ENV: socket,
+            burrow_mcp_core::BURROW_MCP_TOKEN_ENV: token,
+            burrow_mcp_core::BURROW_MCP_SESSION_ENV: ws_cwd,
+            burrow_mcp_core::BURROW_MCP_DEPTH_ENV: (depth + 1).to_string(),
+        }
+    } } })
+    .to_string()
+}
+
 #[tauri::command]
 fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<SpawnRequest> {
     let mut out = Vec::new();
@@ -1525,22 +1846,7 @@ fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<S
             let cmd = read("cmd");
             match kind_peek.as_str() {
                 "list-workspaces" => {
-                    let text = {
-                        let conn = db.conn.lock().unwrap();
-                        let mut s = String::new();
-                        if let Ok(mut stmt) = conn.prepare(
-                            "SELECT id, name, path FROM workspaces ORDER BY COALESCE(last_opened,0) DESC, created_at DESC",
-                        ) {
-                            if let Ok(rows) = stmt.query_map([], |r| {
-                                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
-                            }) {
-                                for row in rows.flatten() {
-                                    s.push_str(&format!("{}\t{}\t{}\n", row.0, row.1, row.2));
-                                }
-                            }
-                        }
-                        s
-                    };
+                    let text = query_workspaces_tsv(&db.conn.lock().unwrap());
                     write_control_result(&app, &token, &text);
                 }
                 "list-tabs" => {
@@ -1556,22 +1862,7 @@ fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<S
                                 |r| r.get::<_, i64>(0),
                             ).ok()
                         };
-                        let mut s = String::new();
-                        if let Some(id) = target_id {
-                            if let Ok(mut stmt) = conn.prepare(
-                                "SELECT pty_id, COALESCE(title, default_title, '') FROM terminal_tabs WHERE workspace_id = ?1 ORDER BY ord ASC",
-                            ) {
-                                if let Ok(rows) = stmt.query_map(rusqlite::params![id], |r| {
-                                    Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, String>(1)?))
-                                }) {
-                                    for row in rows.flatten() {
-                                        let pid = row.0.map(|v| v.to_string()).unwrap_or_default();
-                                        s.push_str(&format!("{}\t{}\n", pid, row.1));
-                                    }
-                                }
-                            }
-                        }
-                        s
+                        target_id.map(|id| query_tabs_tsv(&conn, id)).unwrap_or_default()
                     };
                     write_control_result(&app, &token, &text);
                 }
@@ -4740,6 +5031,18 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Stdio MCP proxy mode: the app exe is launched by an MCP-client CLI as
+    // `<exe> --burrow-mcp-stdio`. Run the JSON-RPC stdin/stdout loop (proxying
+    // tools/call over the Unix socket to the running desktop app) and exit
+    // BEFORE building the Tauri app — this process is a disposable proxy.
+    if std::env::args().any(|a| a == burrow_mcp_core::BURROW_MCP_STDIO_ARG) {
+        if let Err(e) = burrow_mcp_stdio::run_stdio_server() {
+            eprintln!("[burrow] MCP stdio proxy error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -4792,6 +5095,7 @@ pub fn run() {
             app.manage(AccountInfoCache::default());
 
             start_hook_server(app.handle().clone());
+            burrow_mcp_socket::start(app.handle());
             install_agent_docs(app.handle());
             // Write the burrow bin now so the global hook command path is valid even
             // before the first PTY spawn, then register the persistent status hooks.
@@ -4866,6 +5170,7 @@ pub fn run() {
             get_hook_server_port,
             repair_agent_status,
             set_max_agents,
+            set_burrow_mcp_max_depth,
             register_tmux_win,
             list_skills,
             set_skill_enabled,
