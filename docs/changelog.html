@@ -79,11 +79,35 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v2.19.1 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v2.19.1</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">červenec 2026</span>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Agent v chatu už se náhodně nezastavuje („blik“)</strong> — životnost backendového procesu (ACP adaptér / <code>claude</code> CLI) byla svázaná s připojením komponenty <code>ClaudeChat</code>: <code>onBeforeUnmount</code> volal <code>acp_stop</code>/<code>claude_stop</code>. Chat běžící na pozadí se ale odpojí, kdykoli se zruší jeho hostitel (<code>FloatChat</code> při změně aktivního workspace, <code>ManagerBar</code> při změně sady repozitářů, workspace opouštějící <code>opened</code>) — a to živého agenta uprostřed odpovědi zabíjelo. Teardown se nyní děje jen při explicitním zavření (<code>Terminal.closeTab</code>/<code>closePane</code> → <code>stopChatSession</code>) a v <code>claudeChats.remove()</code> (nově dle transportu: <code>acp_stop</code> vs <code>claude_stop</code>).</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Jak se otevírají spouštění sub-agenti</div>
+      <ul>
+        <li><strong>Volba <code>spawnMode</code></strong> — v Nastavení → Chat lze zvolit, jak <code>burrow spawn</code> otevírá sub-agenty: jako <em>terminálovou záložku</em> (výchozí, zachovává zachytávání výsledku přes <code>burrow wait</code>), nebo jako <em>chat</em> — nové chatové vlákno s předvyplněným zadáním v poli pro vstup, které uživatel zkontroluje a odešle.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v2.19.0 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v2.19.0</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">červenec 2026</span>
     </div>
 
