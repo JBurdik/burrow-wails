@@ -2376,10 +2376,6 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  // DIAG (remove once the "blik/agent stops" cause is found): an unexpected
-  // unmount tears down the adapter below. If this logs while you're mid-turn and
-  // didn't close the tab, the bug is a spurious remount — the stack shows why.
-  console.warn(`[chat-diag] ClaudeChat UNMOUNT chatId=${props.chatId} busy=${busy.value}`, new Error().stack);
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("mousedown", onPermMenuOutside);
   window.removeEventListener("mousedown", onModelMenuOutside);
@@ -2389,11 +2385,13 @@ onBeforeUnmount(() => {
   unlisten?.();
   acpDataUL?.();
   acpReqUL?.();
-  if (effectiveTransport.value === "acp") {
-    invoke("acp_stop", { id: props.chatId }).catch(() => {});
-  } else {
-    invoke("claude_stop", { id: props.chatId }).catch(() => {});
-  }
+  // NOTE: deliberately do NOT stop the adapter/CLI here. The backend process
+  // lifetime is tied to the SESSION, not this component's mount — a background
+  // chat gets unmounted whenever its host tears down (FloatChat when ws.active
+  // flips, ManagerBar when the repo set changes, a workspace leaving `opened`),
+  // and killing the proc there halted live agents mid-turn ("blik"). Teardown
+  // now happens on explicit close (Terminal.closeTab / closePane → stopChatSession)
+  // and on `remove()` in the claudeChats store.
 });
 
 watch(() => props.chatId, () => nextTick(() => inputEl.value?.focus()));

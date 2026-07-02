@@ -318,6 +318,20 @@
             </div>
             <div class="field">
               <div class="field-info">
+                <span class="field-name">Spawn sub-agents as</span>
+                <span class="field-desc">How <code>burrow spawn</code> sub-agents open. Chat prefills the task in a new chat's input; Terminal keeps <code>burrow wait</code> result capture.</span>
+              </div>
+              <select
+                class="select"
+                :value="ui.spawnMode"
+                @change="ui.spawnMode = ($event.target as HTMLSelectElement).value as 'terminal' | 'chat'"
+              >
+                <option value="terminal">Terminal tab</option>
+                <option value="chat">Chat</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="field-info">
                 <span class="field-name">Chat agents</span>
                 <span class="field-desc">Add / edit ACP agents — command, args, environment variables, icon &amp; color.</span>
               </div>

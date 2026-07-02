@@ -87,6 +87,7 @@ interface Prefs {
   rightPanelWidth: number; // right panel width in px
   toastPosition: ToastPosition; // screen anchor for toast notifications
   defaultChatAgent: string; // default agent for new chat sessions (chatAgents store id)
+  spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
 }
 
 // Screen anchor for the toast stack (ToastStack.vue).
@@ -161,6 +162,7 @@ const DEFAULT_PREFS: Prefs = {
   rightPanelWidth: 300,
   toastPosition: "bottom-left",
   defaultChatAgent: "claude",
+  spawnMode: "terminal",
 };
 
 function loadPrefs(): Prefs {
@@ -226,6 +228,7 @@ export const useUIStore = defineStore("ui", () => {
   const rightPanelWidth = ref(loaded.rightPanelWidth ?? 300);
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "bottom-left");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
+  const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
   const missionActiveCount = ref(0);
@@ -381,6 +384,7 @@ export const useUIStore = defineStore("ui", () => {
         rightPanelWidth: rightPanelWidth.value,
         toastPosition: toastPosition.value,
         defaultChatAgent: defaultChatAgent.value,
+        spawnMode: spawnMode.value,
       } satisfies Prefs),
     );
   }
@@ -396,7 +400,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, debugOverlay, floatCorner, worktreesDir, mode, missionShowActivity,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarWidth, rightPanelWidth, toastPosition],
+     sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode],
     () => {
       savePrefs();
       applyTheme();
@@ -535,5 +539,6 @@ export const useUIStore = defineStore("ui", () => {
     rightPanelWidth,
     toastPosition,
     defaultChatAgent,
+    spawnMode,
   };
 });

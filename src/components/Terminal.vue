@@ -967,7 +967,7 @@ function activateTab(id: number) {
   nextTick(() => xtermRefs.get(leaf.id)?.focus());
 }
 
-function openClaudeChat(chatId?: number, agentId?: string) {
+function openClaudeChat(chatId?: number, agentId?: string, cwd?: string) {
   let session: import("@/stores/claudeChats").ClaudeSession;
   if (chatId != null) {
     session = chatsStore.sessions.find((s) => s.id === chatId) ?? chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
@@ -991,6 +991,7 @@ function openClaudeChat(chatId?: number, agentId?: string) {
     status: "idle",
     leafType: "chat",
     chatId: session.id,
+    cwd: cwd || undefined,
   };
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
@@ -1236,6 +1237,8 @@ async function closeTab(tabId: number) {
         return p;
       }),
   );
+  // Chat leaves have no PTY — stop their adapter/CLI on explicit close instead.
+  leaves.filter((l) => l.leafType === "chat").forEach(stopChatSession);
 
   const idx = tabs.value.findIndex((t) => t.id === tabId);
   tabs.value.splice(idx, 1);
@@ -1259,6 +1262,27 @@ function tabLeafCount(tab: Tab): number {
   return getAllLeaves(tab.root).length;
 }
 
+// Pull the task prompt out of a `burrow spawn` command line for chat-mode spawns.
+// burrow re-quotes args single-quoted, so the prompt is the last quoted chunk;
+// fall back to everything after the program name. ponytail: naive quote scan,
+// good enough for `claude 'task'` / `claude --model x 'task'`.
+function spawnPrompt(cmd: string): string {
+  const quoted = [...cmd.matchAll(/'([^']*)'/g)].map((m) => m[1]);
+  if (quoted.length) return quoted[quoted.length - 1];
+  return cmd.replace(/^\S+\s*/, "").trim();
+}
+
+// Explicit teardown of a chat leaf's backend adapter/CLI. Called ONLY on user
+// close (closeTab/closePane) — ClaudeChat.onBeforeUnmount deliberately no longer
+// stops the proc, so a background remount can't kill a live agent. Transport is
+// per-session; a wrong-map stop is a harmless no-op, but resolve it to be clean.
+function stopChatSession(leaf: Leaf) {
+  if (leaf.chatId == null) return;
+  const sess = chatsStore.sessions.find((s) => s.id === leaf.chatId);
+  const cmd = sess?.transport === "acp" ? "acp_stop" : "claude_stop";
+  invoke(cmd, { id: leaf.chatId }).catch(() => {});
+}
+
 async function closePane(leafId: number) {
   const tab = tabs.value.find((t) => findLeaf(t.root, leafId));
   if (!tab) return;
@@ -1276,7 +1300,9 @@ async function closePane(leafId: number) {
     const ok = await confirmClose(leaf.title, "unsaved");
     if (!ok) return;
   }
-  if (leaf && leaf.leafType !== "editor" && leaf.leafType !== "diff" && leaf.leafType !== "chat") {
+  if (leaf?.leafType === "chat") {
+    stopChatSession(leaf);
+  } else if (leaf && leaf.leafType !== "editor" && leaf.leafType !== "diff") {
     // Await the kill (see closeTab) so it lands before re-persist / app-quit.
     await invoke("kill_pty", { id: leafId }).catch(() => {});
     unregisterLeafListeners(leafId);
@@ -1615,6 +1641,15 @@ onMounted(() => {
           } catch (err) {
             console.error("burrow workspace-create failed:", err);
           }
+        } else if (uiStore.spawnMode === "chat") {
+          // Sub-agent spawn opens as a chat instead of a terminal tab. Seed the
+          // prompt as the input draft (ClaudeChat loads DRAFT_KEY on mount) so the
+          // user reviews + sends. ponytail: prefill, not auto-send — dodges ACP
+          // session-ready timing; `burrow wait` result-capture stays terminal-only.
+          const session = chatsStore.create(props.workspaceId, { agentKind: uiStore.defaultChatAgent });
+          const prompt = spawnPrompt(r.cmd);
+          if (prompt) localStorage.setItem(`burrow.draft.chat.${session.id}`, prompt);
+          openClaudeChat(session.id, undefined, r.cwd || undefined);
         } else {
           const leaf = addTab(r.cmd, { cwd: r.cwd || undefined, resultToken: r.token || undefined, background: true });
           if (r.tmuxWin) {

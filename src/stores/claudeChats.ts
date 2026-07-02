@@ -175,7 +175,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     if (!s) return;
     actors.get(id)?.stop();
     actors.delete(id);
-    await invoke("claude_stop", { id }).catch(() => {});
+    await invoke(s.transport === "acp" ? "acp_stop" : "claude_stop", { id }).catch(() => {});
     sessions.value = sessions.value.filter((x) => x.id !== id);
     // If removed was active, fall back to first remaining for that ws.
     if (activeByWs.value[s.workspaceId] === id) {
