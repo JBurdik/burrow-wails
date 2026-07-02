@@ -13,7 +13,7 @@ Two structural borrows from competitor `coollabsio/jean` (Apache-2.0). Specs:
 - [x] **Batch 5** — Config/skills/MCP + Claude reads + misc.
 - [x] **§4** — `emit.rs`: `EmitExt` + `WsBroadcaster` (live broadcast channel, no replay buffer yet). Mechanical `app.emit(`→`app.emit_all(` for `pty-data-{id}` (`daemon_client.rs`), `claude-data-{id}`, `acp-data-{id}`, `pty-hook-{id}` (`lib.rs`). No-op with no `WsBroadcaster` registered — verified by reading `EmitExt::emit_all`.
 - [x] **§5** — transport: `http_server/{mod,server,websocket,auth}.rs` (axum), off by default via `http_enabled` pref file, loopback-only bind, bearer-token auth on `/ws` (`/healthz` open). `get_http_server_status`/`set_http_enabled` Tauri commands wired.
-  - [ ] **Deferred:** Settings-UI toggle (commands exist, no UI control yet — pref file is manual for now).
+  - [x] **Settings-UI toggle** — "Remote access (HTTP/WS)" group in Settings.vue: toggle + live status (port/token path), calls `get_http_server_status`/`set_http_enabled`. Effect on next restart (noted in the UI copy).
   - [ ] **Deferred:** live start/stop of the HTTP server without an app restart (`set_http_enabled` only writes the pref file; `maybe_start` runs once at `setup`).
 - [ ] **Fallout (free after §4/§5)** — `src-server` headless binary is a **stub only** (agentic_ide_lib's `run()` always builds a Tauri window; wiring a real `BURROW_HEADLESS` window-skip was judged too invasive/risky for this pass — deferred, tracked here). WebSocket event replay ring buffers (still none, per §4).
 

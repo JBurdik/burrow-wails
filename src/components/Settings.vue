@@ -317,6 +317,29 @@
           </div>
 
           <div class="settings-group">
+            <span class="group-label">Remote access (HTTP/WS)</span>
+            <div class="field">
+              <div class="field-info">
+                <span class="field-name">Enable HTTP/WebSocket server</span>
+                <span class="field-desc">Loopback-only, token-authed transport for the dispatch router. Use <code>tailscale serve</code> to reach it remotely — never exposes 0.0.0.0. Takes effect on next app restart.</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" :checked="httpEnabled" @change="onToggleHttp(($event.target as HTMLInputElement).checked)" />
+                <span class="toggle-track"><span class="toggle-thumb" /></span>
+              </label>
+            </div>
+            <div v-if="httpStatus" class="field">
+              <div class="field-info">
+                <span class="field-name">Status</span>
+                <span class="field-desc">
+                  <template v-if="httpStatus.enabled">Port <code>{{ httpStatus.port }}</code> — restart to bind. Token: <code>{{ httpStatus.tokenPath }}</code></template>
+                  <template v-else>Disabled</template>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
             <span class="group-label">Chat</span>
             <div class="field">
               <div class="field-info">
@@ -1872,6 +1895,28 @@ function clampRange(v: string, min: number, max: number, fallback: number): numb
   if (Number.isNaN(n)) return fallback;
   return Math.min(max, Math.max(min, Math.round(n)));
 }
+
+// §5 HTTP/WS transport toggle. Read-only status (port/token path) refreshed
+// on mount + after every toggle; actual bind only happens on next restart
+// (server::maybe_start runs once at Tauri setup), so this just writes the
+// pref file and reflects the pending state back.
+const httpEnabled = ref(false);
+const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string } | null>(null);
+async function refreshHttpStatus() {
+  try {
+    const s = await invoke<{ enabled: boolean; port: number; tokenPath: string }>("get_http_server_status");
+    httpStatus.value = s;
+    httpEnabled.value = s.enabled;
+  } catch { /* browser-only dev — no Tauri backend */ }
+}
+async function onToggleHttp(checked: boolean) {
+  httpEnabled.value = checked;
+  try {
+    await invoke("set_http_enabled", { enabled: checked });
+  } catch { /* browser-only dev */ }
+  await refreshHttpStatus();
+}
+refreshHttpStatus();
 
 const SHORTCUT_GROUPS = [
   {
