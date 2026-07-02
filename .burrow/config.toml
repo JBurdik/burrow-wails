@@ -1,6 +1,9 @@
+[settings]
+claude_config_dir = "/Users/jirkab/claude-work"
+
 [[scripts]]
 id = "script-1-20-36"
 name = "START APP"
-steps = ["podman start", "pc -f docker-compose.local.yml up -d", "vpr dev:full"]
+steps = ["podman start", " pc -f docker-compose.local.yml up -d", "vpr dev:full"]
 continueOnError = false
 color = "#60a5fa"

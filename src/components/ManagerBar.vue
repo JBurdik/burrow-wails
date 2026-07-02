@@ -718,8 +718,24 @@ function flushDoneTokens() {
   chatRefs.get(repoId)?.sendMessage(msg);
 }
 
-listen<string>("agent-done", (e) => {
-  const token = e.payload;
+// Resolve a spawning workspace's path to its ROOT repo id (same climb as
+// `root` above), so a token only gets injected into the Manager whose repo
+// actually spawned it — not every open Manager.
+function rootIdForWsPath(path: string): number | null {
+  const w = wsStore.workspaces.find((x) => x.path === path);
+  if (!w) return null;
+  if (w.parent_id) {
+    const parent = wsStore.workspaces.find((x) => x.id === w.parent_id);
+    if (parent) return parent.id;
+  }
+  return w.id;
+}
+
+listen<{ token: string; originWs?: string }>("agent-done", (e) => {
+  const { token, originWs } = e.payload;
+  // Unknown origin (e.g. token recorded before an app restart) still injects,
+  // matching pre-fix behavior rather than silently dropping the notification.
+  if (originWs != null && rootIdForWsPath(originWs) !== rootId.value) return;
   if (token && !pendingDoneTokens.includes(token)) pendingDoneTokens.push(token);
   if (doneDebounce) clearTimeout(doneDebounce);
   doneDebounce = setTimeout(flushDoneTokens, 500);

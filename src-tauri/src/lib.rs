@@ -148,6 +148,13 @@ struct FloatParamsState {
     map: Mutex<std::collections::HashMap<String, FloatParams>>,
 }
 
+/// token -> spawning workspace path, so /agent-done can scope its broadcast to
+/// the Manager whose repo actually spawned that sub-agent.
+#[derive(Default)]
+struct SpawnTokenOrigin {
+    map: Mutex<std::collections::HashMap<String, String>>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Corner {
     TopLeft,
@@ -1014,8 +1021,20 @@ fn start_hook_server(app: AppHandle) {
                     }
                     "/agent-done" => {
                         // burrow capture: sub-agent finished, result ready for collect.
+                        // Scope the broadcast with the spawning workspace path so only
+                        // the Manager whose repo actually spawned this token reacts —
+                        // origin is recorded in take_spawn_requests when the token was
+                        // first seen. Unknown origin (e.g. app restarted mid-spawn)
+                        // still emits with originWs omitted, matching old behavior.
                         if let Some(token) = val["token"].as_str() {
-                            let _ = app.emit("agent-done", token.to_string());
+                            let origin: State<SpawnTokenOrigin> = app.state();
+                            let origin_ws = origin.map.lock().unwrap().remove(token);
+                            let mut payload = serde_json::Map::new();
+                            payload.insert("token".into(), serde_json::json!(token));
+                            if let Some(ws) = origin_ws {
+                                payload.insert("originWs".into(), serde_json::json!(ws));
+                            }
+                            let _ = app.emit("agent-done", serde_json::Value::Object(payload));
                         }
                     }
                     "/log" => {
@@ -1747,6 +1766,10 @@ fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<S
                 out.push(SpawnRequest { kind, cmd: String::new(), token: String::new(), cwd: newcwd, branch, base, tmux_win: String::new(), wsid: String::new(), tabid: String::new(), content: String::new() });
             }
             _ if !cmd.is_empty() => {
+                if !token.is_empty() {
+                    let origin: State<SpawnTokenOrigin> = app.state();
+                    origin.map.lock().unwrap().insert(token.clone(), ws.clone());
+                }
                 out.push(SpawnRequest { kind: "spawn".to_string(), cmd, token, cwd: newcwd, branch: String::new(), base: String::new(), tmux_win, wsid: String::new(), tabid: String::new(), content: String::new() });
             }
             _ => {}
@@ -1787,6 +1810,70 @@ async fn run_git(cwd: String, args: Vec<String>) -> GitOutput {
     })
     .await
     .unwrap_or_else(|e| GitOutput { stdout: String::new(), stderr: e.to_string(), code: -1 })
+}
+
+// ── Format document ───────────────────────────────────────────────────────────
+
+// Pipe `content` into `bin args...`'s stdin, return stdout if it exits 0. Used
+// for both rustfmt and prettier — same stdin-in/stdout-out contract.
+fn run_formatter(bin: &Path, args: &[&str], content: &str) -> Result<String, String> {
+    use std::io::Write;
+    let mut child = std::process::Command::new(bin)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    child.stdin.take().unwrap().write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+// Project-local prettier first (picks up the project's config/plugins), else
+// `npx --no-install` (already-installed global via npx cache), else a bare
+// `prettier` on PATH. Mirrors resolve_lsp_bin's search-known-locations style.
+fn resolve_prettier(cwd: &str) -> Option<(PathBuf, Vec<String>)> {
+    let local = Path::new(cwd).join("node_modules/.bin/prettier");
+    if local.exists() {
+        return Some((local, vec![]));
+    }
+    if let Some(npx) = resolve_lsp_bin("npx", cwd) {
+        return Some((npx, vec!["--no-install".into(), "prettier".into()]));
+    }
+    resolve_lsp_bin("prettier", cwd).map(|p| (p, vec![]))
+}
+
+// Formats `content` (the file at `path` in `cwd`) by extension, returning the
+// formatted text WITHOUT writing to disk — the frontend decides whether/where
+// to apply it. Unknown extension or missing formatter → returns content
+// unchanged rather than erroring, so a stale toolchain never blocks the UI.
+#[tauri::command]
+async fn format_source(path: String, content: String, cwd: String) -> Result<String, String> {
+    let ext = Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    tauri::async_runtime::spawn_blocking(move || match ext.as_str() {
+        "rs" => match resolve_lsp_bin("rustfmt", &cwd) {
+            Some(bin) => run_formatter(&bin, &["--edition", "2021"], &content),
+            None => Ok(content),
+        },
+        "js" | "jsx" | "ts" | "tsx" | "json" | "css" | "scss" | "html" | "vue" | "md" | "yaml" | "yml" => {
+            match resolve_prettier(&cwd) {
+                Some((bin, mut args)) => {
+                    args.push("--stdin-filepath".into());
+                    args.push(path.clone());
+                    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+                    run_formatter(&bin, &arg_refs, &content)
+                }
+                None => Ok(content),
+            }
+        }
+        _ => Ok(content),
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 // ── gh CLI (PR status) ────────────────────────────────────────────────────────
@@ -4669,6 +4756,7 @@ pub fn run() {
             let conn = init_db(app.handle()).expect("DB init failed");
             app.manage(DbState { conn: Mutex::new(conn) });
             app.manage(FloatParamsState { map: Mutex::new(std::collections::HashMap::new()) });
+            app.manage(SpawnTokenOrigin::default());
             app.manage(FloatLayoutState {
                 corner: Mutex::new(Corner::TopRight),
                 wins: Mutex::new(Vec::new()),
@@ -4739,6 +4827,7 @@ pub fn run() {
             set_config_dirs,
             run_git,
             run_gh,
+            format_source,
             open_path_in,
             read_dir_shallow,
             list_workspaces,

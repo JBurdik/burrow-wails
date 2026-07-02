@@ -33,6 +33,7 @@ export function parseAcpUpdate(params: unknown): AgentEvent | null {
 
 export function parseAcpPermRequest(raw: unknown): {
   rpcId: number; sessionId: string; toolCallId: string; options: PermissionOption[]
+  title: string; kind: string; rawInput: Record<string, unknown>
 } | null {
   const msg = raw as Record<string, unknown>
   if (msg.method !== 'session/request_permission') return null
@@ -42,5 +43,13 @@ export function parseAcpPermRequest(raw: unknown): {
   const options = ((p?.options ?? []) as Array<Record<string, unknown>>).map(o => ({
     optionId: o.optionId as string, name: o.name as string, kind: o.kind as string
   }))
-  return { rpcId, sessionId: p?.sessionId as string, toolCallId: toolCall?.toolCallId as string, options }
+  return {
+    rpcId,
+    sessionId: p?.sessionId as string,
+    toolCallId: toolCall?.toolCallId as string,
+    options,
+    title: (toolCall?.title as string) ?? 'Tool',
+    kind: (toolCall?.kind as string) ?? 'other',
+    rawInput: (toolCall?.rawInput as Record<string, unknown>) ?? {},
+  }
 }

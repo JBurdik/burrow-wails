@@ -4,6 +4,13 @@
     <div class="chat-header">
       <component :is="currentAgentIcon" :size="16" class="chat-header-icon" :style="{ color: currentAgent?.color }" />
       <span class="chat-header-title">{{ currentAgent?.name ?? 'Claude' }}</span>
+      <span
+        v-if="effectiveTransport === 'acp' && acpModelOption"
+        class="chat-header-model"
+        :title="`Model: ${acpModelLabel}${acpActiveModelId ? ' — ' + acpActiveModelId : ''}`"
+      >
+        {{ acpModelLabel }}<span v-if="acpActiveModelId && acpActiveModelId !== acpModelLabel" class="chat-header-model-ver">{{ acpActiveModelId }}</span>
+      </span>
       <span class="chat-header-cwd" :title="cwd">{{ cwdDisplay }}</span>
       <button class="chat-header-btn" title="New conversation" @click="clearChat">
         <PhArrowCounterClockwise :size="13" />
@@ -39,16 +46,6 @@
         title="Browse past sessions"
         @click="openSessionBrowser"
       >⏱</button>
-      <button
-        v-if="!compact"
-        class="chat-header-btn"
-        :class="{ 'btn-active': changesVisible }"
-        :title="changesVisible ? 'Hide changes' : 'Show changes'"
-        @click="changesVisible = !changesVisible"
-      >
-        <PhGitDiff :size="13" />
-        <span v-if="changedFiles.length > 0" class="changes-badge">{{ changedFiles.length }}</span>
-      </button>
       <div class="agent-dropdown">
         <button ref="agentBtnEl" class="chat-header-btn chat-header-agent" :title="`Agent: ${currentAgent?.name}`" @click="toggleAgentMenu">
           <component :is="currentAgentIcon" :size="13" :style="{ color: currentAgent?.color }" />
@@ -188,10 +185,37 @@
       </div>
     </div>
 
+    <!-- ACP permission request — renders the adapter's real option set -->
+    <div v-if="acpPermReq" class="permission-banner acp-perm-banner" :class="{ 'acp-perm-plan': acpPermPlan, 'acp-perm-diff': acpPermDiff && !acpPermPlan }">
+      <div class="acp-perm-head">
+        <PhListChecks v-if="acpPermPlan" :size="14" class="perm-icon" />
+        <PhGitDiff v-else-if="acpPermDiff" :size="14" class="perm-icon" />
+        <PhShieldWarning v-else :size="14" class="perm-icon" />
+        <span class="perm-title">{{ acpPermPlan ? 'Review plan' : acpPermReq.title }}</span>
+        <code v-if="acpPermDiff" class="perm-detail" :title="acpPermDiff.path">{{ acpPermDiff.path }}</code>
+      </div>
+      <!-- eslint-disable-next-line vue/no-v-html -->
+      <div v-if="acpPermPlan" class="plan-body md-body" v-html="acpPermPlan" />
+      <pre v-else-if="acpPermDiff && acpPermDiff.isWrite" class="diff-banner-body"><span
+        v-for="(line, i) in acpPermDiff.content.split('\n')" :key="i" class="diff-line diff-add">{{ line }}</span></pre>
+      <pre v-else-if="acpPermDiff" class="diff-banner-body"><span
+        v-for="(line, i) in acpPermDiff.oldStr.split('\n')" :key="'o'+i" class="diff-line diff-del">{{ line }}</span><span
+        v-for="(line, i) in acpPermDiff.newStr.split('\n')" :key="'n'+i" class="diff-line diff-add">{{ line }}</span></pre>
+      <div class="acp-perm-actions">
+        <button
+          v-for="o in acpPermReq.options"
+          :key="o.optionId"
+          class="perm-btn"
+          :class="acpOptClass(o.kind)"
+          @click="acpRespond(o.optionId, o.name, o.kind)"
+        >{{ o.name }}</button>
+      </div>
+    </div>
+
     <div ref="scrollEl" class="chat-messages">
       <div v-if="messages.length === 0" class="chat-empty">
         <div class="chat-empty-avatar">
-          <component :is="currentAgentIcon" :size="28" :style="{ color: currentAgent?.color }" />
+          <component :is="currentAgentIcon" :size="28" :style="{ color: '#fff' }" />
         </div>
         <span class="chat-empty-title">How can I help you?</span>
         <span class="chat-empty-sub">Working in {{ cwdDisplay }}</span>
@@ -222,24 +246,30 @@
           </div>
         </template>
 
-        <!-- Tool call — compact pill, expandable -->
+        <!-- Tool call — compact row, expandable -->
         <template v-else-if="msg.role === 'tool'">
           <div class="agent-msg-row">
             <div class="agent-avatar-spacer" />
-            <div class="tool-pill" @click="msg.toolExpanded = !msg.toolExpanded">
+            <div class="tool-row" :class="`tool-row-${toolStatus(msg)}`" @click="msg.toolExpanded = !msg.toolExpanded">
               <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': msg.toolExpanded }" />
-              <PhWrench :size="11" class="tool-icon" />
-              <span class="tool-name">{{ msg.text }}</span>
+              <component :is="toolIconFor(msg)" :size="12" class="tool-icon" />
+              <span class="tool-name" :class="{ 'tool-name-mono': toolMonospace(msg) }">{{ toolSummaryFor(msg) }}</span>
+              <PhCircleNotch v-if="toolStatus(msg) === 'running'" :size="10" class="tool-status-icon tool-spin" />
+              <PhWarningCircle v-else-if="toolStatus(msg) === 'failed'" :size="10" class="tool-status-icon tool-status-failed" />
               <span v-if="msg.toolOutput && !msg.toolExpanded" class="tool-output-preview">{{ msg.toolOutput.split('\n')[0].slice(0, 60) }}</span>
             </div>
           </div>
           <div v-if="msg.toolExpanded" class="agent-msg-row">
             <div class="agent-avatar-spacer" />
-            <pre class="tool-args">{{ JSON.stringify(msg.toolInput, null, 2) }}</pre>
-          </div>
-          <div v-if="msg.toolExpanded && msg.toolOutput" class="agent-msg-row">
-            <div class="agent-avatar-spacer" />
-            <pre class="tool-output">{{ msg.toolOutput }}</pre>
+            <div class="tool-detail">
+              <div v-if="msg.toolInput && Object.keys(msg.toolInput).length" class="tool-detail-args">
+                <div v-for="k in ['file_path','command','pattern','url','description']" :key="k" v-show="msg.toolInput[k] !== undefined" class="tool-arg-row">
+                  <span class="tool-arg-key">{{ k }}</span><span class="tool-arg-val">{{ msg.toolInput[k] }}</span>
+                </div>
+                <pre class="tool-args">{{ JSON.stringify(msg.toolInput, null, 2) }}</pre>
+              </div>
+              <pre v-if="msg.toolOutput" class="tool-output" :class="{ 'tool-output-failed': msg.toolFailed }">{{ msg.toolOutput }}</pre>
+            </div>
           </div>
         </template>
 
@@ -286,7 +316,7 @@
         <template v-else>
           <div class="agent-msg-row">
             <div class="agent-avatar">
-              <component :is="currentAgentIcon" :size="14" :style="{ color: currentAgent?.color }" />
+              <component :is="currentAgentIcon" :size="14" :style="{ color: '#fff' }" />
             </div>
             <div class="assistant-content">
               <!-- eslint-disable-next-line vue/no-v-html -->
@@ -298,7 +328,7 @@
 
       <div v-if="busy && !hasPartialAssistant" class="chat-thinking">
         <div class="agent-avatar agent-avatar-sm">
-          <component :is="currentAgentIcon" :size="12" :style="{ color: currentAgent?.color }" />
+          <component :is="currentAgentIcon" :size="12" :style="{ color: '#fff' }" />
         </div>
         <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
       </div>
@@ -485,8 +515,9 @@
 
             <!-- ACP model switcher (driven by the adapter's configOptions) -->
             <div v-if="effectiveTransport === 'acp' && acpModelOption" class="model-dropdown">
-              <button ref="acpModelBtnEl" class="toolbar-btn toolbar-btn-label" @click="openAcpMenu('model')">
+              <button ref="acpModelBtnEl" class="toolbar-btn toolbar-btn-label" :title="acpActiveModelId" @click="openAcpMenu('model')">
                 {{ acpModelLabel }}
+                <span v-if="acpActiveModelId && acpActiveModelId !== acpModelLabel" class="model-id-hint">{{ acpActiveModelId }}</span>
                 <PhCaretDown :size="9" weight="bold" class="btn-caret" />
               </button>
               <Teleport to="body">
@@ -496,10 +527,11 @@
                     :key="c.value"
                     class="floating-menu-item"
                     :class="{ 'floating-menu-item-active': acpModelOption.currentValue === c.value }"
-                    :title="c.description"
+                    :title="c.description || c.value"
                     @click="acpSelectModel(c.value)"
                   >
                     {{ c.name }}
+                    <span v-if="c.value" class="model-id-hint">{{ c.value }}</span>
                   </button>
                 </div>
               </Teleport>
@@ -589,41 +621,6 @@
     </div>
     </div><!-- end .chat-main -->
 
-    <!-- Changes panel -->
-    <div v-if="changesVisible && !compact" class="chat-changes">
-      <div class="chg-header">
-        <PhGitDiff :size="12" class="chg-header-icon" />
-        <span>Changes</span>
-        <span v-if="changedFiles.length" class="chg-count">{{ changedFiles.length }}</span>
-        <button class="chg-refresh-btn" title="Refresh" @click="refreshChanges">
-          <PhArrowsClockwise :size="11" />
-        </button>
-      </div>
-      <div class="chg-body">
-        <div v-if="changedFiles.length === 0" class="chg-empty">No changes yet</div>
-        <template v-for="f in changedFiles" :key="f.path">
-          <div
-            class="chg-file"
-            :class="{ 'chg-file-open': diffFile === f.path }"
-            @click="toggleFileDiff(f.path)"
-          >
-            <span class="chg-stats">
-              <span class="chg-add">+{{ f.added }}</span>
-              <span class="chg-del">-{{ f.deleted }}</span>
-            </span>
-            <span class="chg-path" :title="f.path">{{ f.shortPath }}</span>
-            <span class="chg-status" :class="`chg-status-${f.status}`">{{ f.status }}</span>
-          </div>
-          <pre v-if="diffFile === f.path && fileDiff" class="chg-diff"><span
-            v-for="(line, i) in fileDiff.split('\n')"
-            :key="i"
-            class="diff-line"
-            :class="diffLineClass(line)"
-          >{{ line }}</span></pre>
-        </template>
-      </div>
-    </div>
-
     <!-- Session browser modal -->
     <div v-if="sessionBrowserOpen" class="session-browser-overlay" @click.self="sessionBrowserOpen = false">
       <div class="session-browser-modal">
@@ -649,7 +646,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
-import { PhArrowUp, PhArrowCounterClockwise, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhArrowsClockwise, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhFile, PhSparkle, PhFastForward, PhGear, PhClockCounterClockwise } from "@phosphor-icons/vue";
+import { PhArrowUp, PhArrowCounterClockwise, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhFile, PhSparkle, PhFastForward, PhGear, PhClockCounterClockwise, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCircleNotch } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
@@ -720,6 +717,47 @@ const agentAccentColor = computed(() =>
 );
 // ACP permission: JSON-RPC id of the agent's blocking request_permission.
 const acpPermRpcId = ref<number | null>(null);
+// Rich ACP permission request — carries the adapter's own option list (allow/
+// reject variants, or ExitPlanMode's auto/acceptEdits/manual/keep-planning) so
+// we render the REAL choices instead of collapsing everything to Allow/Deny.
+interface AcpPermReq {
+  rpcId: number;
+  toolCallId: string;
+  title: string;
+  kind: string;
+  options: Array<{ optionId: string; name: string; kind: string }>;
+  rawInput: Record<string, unknown>;
+}
+const acpPermReq = ref<AcpPermReq | null>(null);
+const acpPermMsgId = ref<number | null>(null);
+// ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
+const acpPermPlan = computed(() => {
+  const p = acpPermReq.value?.rawInput?.plan;
+  return typeof p === "string" && p.trim() ? renderMd(p) : "";
+});
+// Edit/Write arrive with file_path + old/new (or content) — show the diff inline.
+const acpPermDiff = computed(() => {
+  const r = acpPermReq.value;
+  if (!r) return null;
+  const i = r.rawInput;
+  const path = (i.file_path ?? i.path) as string | undefined;
+  const hasEdit = i.old_string !== undefined || i.new_string !== undefined;
+  const hasWrite = i.content !== undefined && !hasEdit;
+  if (!path || (r.kind !== "edit" && !hasEdit && !hasWrite)) return null;
+  return {
+    path,
+    isWrite: hasWrite,
+    content: String(i.content ?? ""),
+    oldStr: String(i.old_string ?? ""),
+    newStr: String(i.new_string ?? ""),
+  };
+});
+// Icon class by option kind (allow → green, reject → red, else neutral).
+function acpOptClass(kind: string) {
+  if (kind.startsWith("allow")) return "perm-allow";
+  if (kind.startsWith("reject")) return "perm-deny";
+  return "perm-neutral";
+}
 
 // ── ACP session state (model + permission mode + resume) ──────────────────────
 interface AcpMode { id: string; name: string; description?: string }
@@ -774,6 +812,7 @@ const acpModelOption = computed(() => acpConfigOptions.value.find((o) => o.id ==
 const acpEffortOption = computed(() => acpConfigOptions.value.find((o) => o.id === "effort"));
 const acpModeLabel = computed(() => acpModes.value?.availableModes.find((m) => m.id === acpModes.value?.currentModeId)?.name ?? "Mode");
 const acpModelLabel = computed(() => { const o = acpModelOption.value; return o?.options.find((c) => c.value === o.currentValue)?.name ?? "Model"; });
+const acpActiveModelId = computed(() => acpModelOption.value?.currentValue ?? "");
 const acpEffortLabel = computed(() => { const o = acpEffortOption.value; return o?.options.find((c) => c.value === o.currentValue)?.name ?? "Effort"; });
 
 const acpModeMenuOpen = ref(false);
@@ -1024,7 +1063,72 @@ interface ChatMessage {
   toolOutput?: string;  // captured tool result (first 2000 chars)
   toolUseId?: string;   // matches tool_result blocks back to tool cards
   toolExpanded?: boolean;
+  toolFailed?: boolean; // tool_result came back is_error
+  toolRawName?: boolean; // true when `text` is a raw tool name (native transport) vs already-human ACP title
   _acpMsgId?: string;   // ACP messageId — identity for incremental chunk append
+}
+
+// Per-tool icon + one-line human summary for the compact tool-call row.
+const TOOL_ICONS: Record<string, unknown> = {
+  Read: PhFileText, Edit: PhPencilSimple, Write: PhPencilSimple, MultiEdit: PhPencilSimple,
+  Bash: PhTerminalWindow, Grep: PhMagnifyingGlass, Glob: PhMagnifyingGlass,
+  TodoWrite: PhListChecks, WebFetch: PhGlobe, WebSearch: PhGlobe, Task: PhRobot,
+};
+function toolIcon(name: string): unknown {
+  return TOOL_ICONS[name] ?? PhWrench;
+}
+function toolIconFor(msg: ChatMessage): unknown {
+  if (msg.toolRawName) return toolIcon(msg.text);
+  const t = msg.text.toLowerCase();
+  if (t.startsWith("read")) return PhFileText;
+  if (t.startsWith("edit") || t.startsWith("write") || t.startsWith("creat")) return PhPencilSimple;
+  if (t.startsWith("run") || t.startsWith("execut") || t.startsWith("bash") || t.startsWith("$")) return PhTerminalWindow;
+  if (t.startsWith("search") || t.startsWith("find") || t.startsWith("grep") || t.startsWith("glob")) return PhMagnifyingGlass;
+  if (t.startsWith("fetch") || t.startsWith("http")) return PhGlobe;
+  return PhWrench;
+}
+function basename(p: unknown): string {
+  if (typeof p !== "string" || !p) return "";
+  return p.split("/").filter(Boolean).pop() ?? p;
+}
+function toolSummary(name: string, input: Record<string, unknown> | undefined): string {
+  const inp = input ?? {};
+  switch (name) {
+    case "Read":
+      return basename(inp.file_path) ? `Read ${basename(inp.file_path)}` : "Read file";
+    case "Edit":
+    case "MultiEdit":
+    case "Write":
+      return basename(inp.file_path) ? `Edit ${basename(inp.file_path)}` : "Edit file";
+    case "Bash":
+      return typeof inp.command === "string" ? inp.command.slice(0, 60) : "Run command";
+    case "Grep":
+    case "Glob":
+      return typeof inp.pattern === "string" ? `Search "${inp.pattern}"` : "Search";
+    case "TodoWrite":
+      return "Updated plan";
+    case "WebFetch":
+      case "WebSearch": {
+        const url = typeof inp.url === "string" ? inp.url : (typeof inp.query === "string" ? inp.query : "");
+        try { return url ? new URL(url).host : "Web search"; } catch { return url || "Web search"; }
+      }
+    case "Task":
+      return typeof inp.description === "string" ? inp.description : "Sub-agent task";
+    default:
+      return name.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+}
+function toolSummaryFor(msg: ChatMessage): string {
+  return msg.toolRawName ? toolSummary(msg.text, msg.toolInput) : msg.text;
+}
+function toolMonospace(msg: ChatMessage): boolean {
+  return msg.toolRawName ? msg.text === "Bash" : /^[$#]|[/.]\w|\(\)/.test(msg.text);
+}
+type ToolStatus = "running" | "done" | "failed";
+function toolStatus(msg: ChatMessage): ToolStatus {
+  if (msg.toolFailed) return "failed";
+  if (msg.toolOutput !== undefined) return "done";
+  return "running";
 }
 
 // Built-in claude slash commands
@@ -1184,66 +1288,6 @@ function onPermMenuOutside(e: MouseEvent) {
   permMenuOpen.value = false;
 }
 
-// ── Changes panel ────────────────────────────────────────────────────────────
-interface ChangedFile { path: string; shortPath: string; added: number; deleted: number; status: string }
-const changesVisible = ref(false);
-const changedFiles = ref<ChangedFile[]>([]);
-const diffFile = ref<string | null>(null);
-const fileDiff = ref("");
-
-interface GitOut { stdout: string; stderr: string; code: number }
-
-async function refreshChanges() {
-  if (!props.cwd) return;
-  try {
-    const [numstat, statusOut] = await Promise.all([
-      invoke<GitOut>("run_git", { cwd: props.cwd, args: ["diff", "--numstat", "HEAD"] }),
-      invoke<GitOut>("run_git", { cwd: props.cwd, args: ["status", "--porcelain"] }),
-    ]);
-    const files = new Map<string, ChangedFile>();
-    // Parse numstat: "<added>\t<deleted>\t<path>"
-    for (const line of numstat.stdout.split("\n")) {
-      const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
-      if (!m) continue;
-      const path = m[3].trim();
-      files.set(path, {
-        path,
-        shortPath: path.split("/").pop() ?? path,
-        added: parseInt(m[1]) || 0,
-        deleted: parseInt(m[2]) || 0,
-        status: "M",
-      });
-    }
-    // Layer in status codes (A=added, D=deleted, ?)
-    for (const line of statusOut.stdout.split("\n")) {
-      if (line.length < 3) continue;
-      const xy = line.slice(0, 2).trim();
-      const rawPath = line.slice(3).trim();
-      const path = rawPath.includes(" -> ") ? rawPath.split(" -> ")[1] : rawPath;
-      if (!files.has(path)) {
-        files.set(path, { path, shortPath: path.split("/").pop() ?? path, added: 0, deleted: 0, status: xy || "?" });
-      } else {
-        files.get(path)!.status = xy || "M";
-      }
-    }
-    changedFiles.value = [...files.values()];
-    // Auto-show panel when changes appear
-    if (files.size > 0 && !changesVisible.value) changesVisible.value = true;
-    // Refresh open diff if its file is still changed
-    if (diffFile.value && !files.has(diffFile.value)) { diffFile.value = null; fileDiff.value = ""; }
-  } catch { /* git not available or not a repo */ }
-}
-
-async function toggleFileDiff(path: string) {
-  if (diffFile.value === path) { diffFile.value = null; fileDiff.value = ""; return; }
-  diffFile.value = path;
-  fileDiff.value = "";
-  try {
-    const out = await invoke<GitOut>("run_git", { cwd: props.cwd, args: ["diff", "HEAD", "--", path] });
-    fileDiff.value = out.stdout || "(no diff — file may be untracked or binary)";
-  } catch { fileDiff.value = ""; }
-}
-
 async function notifyDone() {
   const session = chats.sessions.find((s) => s.id === props.chatId);
   const body = session?.title || "Claude finished";
@@ -1267,13 +1311,6 @@ async function notifyPermission(cr: CanUseToolReq) {
     if (!granted) { const p = await requestPermission(); granted = p === "granted"; }
     if (granted) sendNotification({ title: "Burrow — povolení", body });
   }
-}
-
-function diffLineClass(line: string) {
-  if (line.startsWith("+") && !line.startsWith("+++")) return "diff-add";
-  if (line.startsWith("-") && !line.startsWith("---")) return "diff-del";
-  if (line.startsWith("@@")) return "diff-hunk";
-  return "diff-ctx";
 }
 
 // A `can_use_tool` control_request from claude. Every blocking surface (permission,
@@ -1575,7 +1612,7 @@ function onLine(line: string) {
       const name = (tb.name as string) ?? "tool";
       const toolInput = (tb.input ?? {}) as Record<string, unknown>;
       const toolUseId = (tb.id as string) ?? undefined;
-      messages.value.push({ id: nextMsgId++, role: "tool", text: name, toolInput, toolUseId, toolExpanded: false });
+      messages.value.push({ id: nextMsgId++, role: "tool", text: name, toolInput, toolUseId, toolExpanded: false, toolRawName: true });
     }
     scrollToBottom();
     return;
@@ -1589,7 +1626,10 @@ function onLine(line: string) {
       const rc = block.content as Array<Record<string, unknown>> | string | undefined;
       let out = typeof rc === "string" ? rc : (Array.isArray(rc) ? rc.filter((b) => b.type === "text").map((b) => b.text as string).join("\n") : "");
       const toolMsg = [...messages.value].reverse().find((m) => m.role === "tool" && m.toolUseId === toolUseId);
-      if (toolMsg && out) toolMsg.toolOutput = out.slice(0, 2000);
+      if (toolMsg) {
+        toolMsg.toolOutput = out ? out.slice(0, 2000) : "";
+        toolMsg.toolFailed = block.is_error === true;
+      }
     }
     return;
   }
@@ -1616,7 +1656,6 @@ function onLine(line: string) {
     saveMessages(props.chatId, messages.value);
     syncStore();
     scrollToBottom();
-    refreshChanges();
     // An `exit` from an intentional restart (mode switch / abort) is not a real
     // turn boundary — skip the "finished" toast/notification once.
     if ((type === "exit" || type === "result") && suppressNextDone.value) {
@@ -1695,7 +1734,6 @@ function onAcpData(raw: string) {
     saveMessages(props.chatId, messages.value);
     syncStore();
     scrollToBottom();
-    refreshChanges();
     if (!suppressNextDone.value) {
       chats.sendStatusEvent(props.chatId, { type: "STOP", watching: document.hasFocus() });
       notifyDone();
@@ -1712,6 +1750,9 @@ function onAcpData(raw: string) {
 
   // EOF from the Rust reader thread.
   if (msg._burrow === "exit") {
+    // DIAG (remove later): adapter process ended. If this fires mid-turn with no
+    // unmount log, the ACP/CLI subprocess died server-side — check acp-debug.log.
+    console.warn(`[chat-diag] adapter EXIT chatId=${props.chatId} busy=${busy.value}`);
     if (busy.value) {
       busy.value = false;
       for (const m of messages.value) { if (m.partial) m.partial = false; }
@@ -1759,12 +1800,15 @@ function onAcpData(raw: string) {
       break;
     }
     case "tool_call":
-      messages.value.push({ id: nextMsgId++, role: "tool", text: event.title, toolInput: {}, toolUseId: event.toolCallId, toolExpanded: false });
+      messages.value.push({ id: nextMsgId++, role: "tool", text: event.title, toolInput: {}, toolUseId: event.toolCallId, toolExpanded: false, toolRawName: false });
       scrollToBottom();
       break;
     case "tool_output": {
       const toolMsg = [...messages.value].reverse().find((m) => m.role === "tool" && m.toolUseId === event.toolCallId);
-      if (toolMsg && event.output) toolMsg.toolOutput = event.output.slice(0, 2000);
+      if (toolMsg) {
+        toolMsg.toolOutput = event.output ? event.output.slice(0, 2000) : "";
+        toolMsg.toolFailed = !event.done;
+      }
       scrollToBottom();
       break;
     }
@@ -1779,21 +1823,42 @@ function onAcpReq(raw: string) {
   if (!perm) return;
 
   acpPermRpcId.value = perm.rpcId;
-  // Reuse the existing permission banner — map ACP options onto CanUseToolReq.
-  pendingPermission.value = {
-    requestId: String(perm.rpcId),
-    toolName: "Tool",
-    input: { toolCallId: perm.toolCallId },
-    suggestions: perm.options.map((o) => ({ label: o.name, optionId: o.optionId, kind: o.kind })),
-  } as CanUseToolReq;
+  // Render the adapter's OWN option list (allow_once/allow_always/reject, or
+  // ExitPlanMode's auto/acceptEdits/manual/keep-planning) — don't flatten to Y/N.
+  acpPermReq.value = {
+    rpcId: perm.rpcId,
+    toolCallId: perm.toolCallId,
+    title: perm.title,
+    kind: perm.kind,
+    options: perm.options,
+    rawInput: perm.rawInput,
+  };
 
+  const isPlan = typeof perm.rawInput?.plan === "string";
   const pmMid = nextMsgId++;
-  pendingPermissionMsgId.value = pmMid;
-  messages.value.push({ id: pmMid, role: "system-info", text: "⚡ Permission requested" });
+  acpPermMsgId.value = pmMid;
+  messages.value.push({ id: pmMid, role: "system-info", text: isPlan ? "📋 Plan ready for review" : `⚡ Permission: ${perm.title}` });
   chats.sendStatusEvent(props.chatId, { type: "PERMISSION_REQUEST" });
-  notifyPermission(pendingPermission.value);
+  notifyPermission({ requestId: String(perm.rpcId), toolName: perm.title, input: perm.rawInput, suggestions: [] } as CanUseToolReq);
   syncStore();
   scrollToBottom();
+}
+
+// Reply to a rich ACP permission request with the chosen adapter optionId.
+function acpRespond(optionId: string, optName: string, kind: string) {
+  const r = acpPermReq.value;
+  if (!r) return;
+  removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
+  acpPermReq.value = null;
+  const reject = kind.startsWith("reject");
+  messages.value.push({ id: nextMsgId++, role: "permission", text: `${reject ? "✗" : "✓"} ${optName}: ${r.title}` });
+  saveMessages(props.chatId, messages.value);
+  invoke("acp_respond_permission", { id: props.chatId, rpcId: r.rpcId, optionId }).catch((e) => {
+    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
+  });
+  acpPermRpcId.value = null;
+  chats.sendStatusEvent(props.chatId, { type: "RESUME" });
+  syncStore();
 }
 
 async function sendMessage(forcedText?: string, extraImages?: string[]) {
@@ -2000,6 +2065,9 @@ async function restartClaude() {
     await ensureAcpListeners();
     await invoke("acp_stop", { id: props.chatId }).catch(() => {});
     await invoke("acp_start", acpStartPayload()).catch(() => {});
+    // Drop any in-flight permission gate — the rpc id is dead after restart.
+    removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
+    acpPermReq.value = null; acpPermRpcId.value = null;
     busy.value = false;
     messageQueue.value = [];
     messages.value = messages.value.filter((m) => m.role !== "queued");
@@ -2274,7 +2342,6 @@ onMounted(async () => {
     if (startErr) {
       messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ACP adapter: ${startErr}` });
     }
-    refreshChanges();
     return;
   }
   await invoke("claude_start", {
@@ -2295,8 +2362,6 @@ onMounted(async () => {
     .then((info) => { accountInfo.value = info; })
     .catch(() => {});
 
-  refreshChanges();
-
   // Load installed skills and merge with built-ins. Skills override same-named built-ins.
   // Map-based dedup ensures no duplicates regardless of list_skills returning overlaps.
   try {
@@ -2311,6 +2376,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  // DIAG (remove once the "blik/agent stops" cause is found): an unexpected
+  // unmount tears down the adapter below. If this logs while you're mid-turn and
+  // didn't close the tab, the bug is a spurious remount — the stack shows why.
+  console.warn(`[chat-diag] ClaudeChat UNMOUNT chatId=${props.chatId} busy=${busy.value}`, new Error().stack);
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("mousedown", onPermMenuOutside);
   window.removeEventListener("mousedown", onModelMenuOutside);
@@ -2374,138 +2443,11 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   background: #0f0f11;
 }
 
-/* Changes panel */
-.chat-changes {
-  width: 230px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-panel);
-  overflow: hidden;
-}
-
-.chg-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.chg-header-icon { color: var(--accent); }
-
-.chg-count {
-  background: var(--bg-hover);
-  border-radius: 8px;
-  padding: 0 5px;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-
-.chg-refresh-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  padding: 2px;
-  border-radius: 3px;
-  margin-left: auto;
-}
-.chg-refresh-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-
-.chg-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-
-.chg-empty {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-align: center;
-  padding: 20px 12px;
-}
-
-.chg-file {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  cursor: pointer;
-  border-radius: 4px;
-  margin: 1px 4px;
-  transition: background .1s;
-}
-.chg-file:hover { background: var(--bg-hover); }
-.chg-file.chg-file-open { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-
-.chg-stats {
-  display: flex;
-  gap: 3px;
-  font-size: 9px;
-  font-family: var(--font-mono);
-  flex-shrink: 0;
-}
-.chg-add { color: var(--green); }
-.chg-del { color: var(--red); }
-
-.chg-path {
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chg-status {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 1px 4px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-.chg-status-M { color: var(--yellow); }
-.chg-status-A { color: var(--green); }
-.chg-status-D { color: var(--red); }
-.chg-status-\? { color: var(--text-muted); }
-
-.chg-diff {
-  margin: 0 4px 4px;
-  padding: 6px 8px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  font-size: 9.5px;
-  font-family: var(--font-mono);
-  overflow-x: auto;
-  white-space: pre;
-  max-height: 320px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-
 .diff-line { line-height: 1.5; }
 .diff-add { color: var(--green); }
 .diff-del { color: var(--red); }
-.diff-hunk { color: var(--accent); opacity: 0.8; }
-.diff-ctx { color: var(--text-secondary); }
 
-/* Toggle button badge */
+/* Toggle button badge (legacy) */
 .changes-badge {
   position: absolute;
   top: 1px;
@@ -2552,6 +2494,26 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.chat-header-model {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary, var(--text-primary));
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--agent-accent, #a855f7) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--agent-accent, #a855f7) 30%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.chat-header-model-ver {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .chat-header-btn {
@@ -2614,10 +2576,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
-  background: color-mix(in srgb, #f59e0b 10%, var(--bg-panel));
-  border-bottom: 2px solid color-mix(in srgb, #f59e0b 50%, transparent);
-  border-top: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+  padding: 10px 12px 10px 14px;
+  margin: 8px 12px 2px;
+  background: color-mix(in srgb, #f59e0b 12%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+  border-left: 3px solid #f59e0b;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
   flex-shrink: 0;
   animation: perm-slide-in 0.15s ease-out;
 }
@@ -2656,7 +2621,20 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .perm-allow { background: #16a34a; color: #fff; }
 .perm-always { background: color-mix(in srgb, #16a34a 22%, var(--bg-panel)); color: var(--text-primary); }
 .perm-deny  { background: #b91c1c; color: #fff; }
+.perm-neutral { background: color-mix(in srgb, var(--agent-accent, #a855f7) 20%, var(--bg-panel)); color: var(--text-primary); border: 1px solid color-mix(in srgb, var(--agent-accent, #a855f7) 35%, transparent); }
 .perm-btn:disabled { opacity: 0.4; cursor: default; filter: none; }
+
+/* ACP permission banner: real adapter options + optional plan/diff body */
+.acp-perm-banner { flex-direction: column; align-items: stretch; gap: 8px; }
+.acp-perm-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.acp-perm-head .perm-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acp-perm-plan { background: color-mix(in srgb, #10b981 10%, var(--bg-panel)); border-color: color-mix(in srgb, #10b981 28%, transparent); border-left-color: #10b981; }
+.acp-perm-plan .perm-icon { color: #10b981; }
+.acp-perm-diff { background: var(--bg-panel); border-color: color-mix(in srgb, #6366f1 28%, transparent); border-left-color: #6366f1; }
+.acp-perm-diff .perm-icon { color: #818cf8; }
+.acp-perm-plan .plan-body { max-height: 320px; overflow: auto; }
+.acp-perm-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.acp-perm-actions .perm-btn { flex: 0 1 auto; }
 .perm-kbd {
   font-size: 9px;
   font-family: var(--font-mono);
@@ -2670,9 +2648,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 /* ── File-edit diff banner ─────────────────────────────────────────────── */
 .diff-banner {
   flex-shrink: 0;
+  margin: 8px 12px 2px;
   background: var(--bg-panel);
-  border-top: 1px solid color-mix(in srgb, #6366f1 30%, transparent);
-  border-bottom: 2px solid color-mix(in srgb, #6366f1 45%, transparent);
+  border: 1px solid color-mix(in srgb, #6366f1 28%, transparent);
+  border-left: 3px solid #6366f1;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
   animation: perm-slide-in 0.15s ease-out;
 }
 .diff-banner-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
@@ -2692,10 +2674,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 /* ── ExitPlanMode banner ───────────────────────────────────────────────── */
 .plan-banner {
   flex-shrink: 0;
-  padding: 10px 12px;
-  background: color-mix(in srgb, #10b981 8%, var(--bg-panel));
-  border-top: 1px solid color-mix(in srgb, #10b981 30%, transparent);
-  border-bottom: 2px solid color-mix(in srgb, #10b981 45%, transparent);
+  padding: 11px 13px;
+  margin: 8px 12px 2px;
+  background: color-mix(in srgb, #10b981 10%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, #10b981 28%, transparent);
+  border-left: 3px solid #10b981;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
   animation: perm-slide-in 0.15s ease-out;
 }
 .plan-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
@@ -2719,10 +2704,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 /* ── AskUserQuestion banner ────────────────────────────────────────────── */
 .question-banner {
   flex-shrink: 0;
-  padding: 10px 12px;
-  background: color-mix(in srgb, #3b82f6 8%, var(--bg-panel));
-  border-top: 1px solid color-mix(in srgb, #3b82f6 30%, transparent);
-  border-bottom: 2px solid color-mix(in srgb, #3b82f6 45%, transparent);
+  padding: 11px 13px;
+  margin: 8px 12px 2px;
+  background: color-mix(in srgb, #3b82f6 10%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, #3b82f6 28%, transparent);
+  border-left: 3px solid #3b82f6;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
   animation: perm-slide-in 0.15s ease-out;
 }
 .question-block { margin-bottom: 10px; }
@@ -2771,16 +2759,16 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   padding: 40px 24px;
 }
 .chat-empty-avatar {
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  background: radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--agent-accent, #7c3aed) 70%, #fff) 0%, var(--agent-accent, #7c3aed) 45%, color-mix(in srgb, var(--agent-accent, #7c3aed) 60%, #000) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   margin-bottom: 10px;
-  box-shadow: 0 0 0 3px rgba(124,58,237,0.2);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--agent-accent, #7c3aed) 18%, transparent), 0 8px 24px color-mix(in srgb, var(--agent-accent, #7c3aed) 30%, transparent);
 }
 .chat-empty-title {
   font-size: 15px;
@@ -2823,13 +2811,14 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--agent-accent, #7c3aed) 80%, #fff) 0%, var(--agent-accent, #7c3aed) 60%, color-mix(in srgb, var(--agent-accent, #7c3aed) 55%, #000) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   flex-shrink: 0;
   margin-top: 2px;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--agent-accent, #7c3aed) 28%, transparent);
 }
 .agent-avatar-sm {
   width: 22px;
@@ -2845,13 +2834,14 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .bubble-user {
   max-width: 72%;
   padding: 10px 14px;
-  border-radius: 14px 14px 4px 14px;
+  border-radius: 16px 16px 5px 16px;
   font-size: 13px;
   line-height: 1.55;
   word-break: break-word;
   background: var(--chat-user-bg, #1e1b2e);
   border: 1px solid var(--chat-user-border, rgba(124,58,237,0.35));
   color: var(--chat-text, rgba(255,255,255,0.88));
+  box-shadow: 0 2px 10px rgba(0,0,0,0.22);
 }
 
 .msg-images {
@@ -2918,56 +2908,75 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   scrollbar-width: thin;
 }
 
-/* Tool pill — compact, expandable */
-.tool-pill {
+/* Tool row — quiet activity-log line, expandable */
+.tool-row {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 3px 9px 3px 6px;
-  background: rgba(124,58,237,0.08);
-  border: 1px solid rgba(124,58,237,0.22);
-  border-radius: 20px;
+  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--agent-accent, #7c3aed) 18%, transparent);
+  border-radius: 8px;
   font-size: 11px;
-  font-family: var(--font-mono);
-  color: rgba(255,255,255,0.55);
+  color: var(--text-secondary, rgba(255,255,255,0.55));
   cursor: pointer;
   user-select: none;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: background .1s, color .1s;
+  transition: background .1s, color .1s, border-color .1s;
 }
-.tool-pill:hover {
-  background: rgba(124,58,237,0.14);
-  color: rgba(255,255,255,0.8);
+.tool-row:hover {
+  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 13%, transparent);
+  color: var(--text-primary);
+}
+.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, #7c3aed) 32%, transparent); }
+.tool-row-failed {
+  background: color-mix(in srgb, var(--red, #ef4444) 8%, transparent);
+  border-color: color-mix(in srgb, var(--red, #ef4444) 30%, transparent);
 }
 .tool-caret {
   flex-shrink: 0;
-  color: rgba(124,58,237,0.7);
+  color: var(--agent-accent, #7c3aed);
   transition: transform .15s;
 }
 .tool-caret-open { transform: rotate(90deg); }
-.tool-icon { color: rgba(124,58,237,0.8); flex-shrink: 0; }
+.tool-icon { color: var(--agent-accent, #7c3aed); flex-shrink: 0; }
+.tool-row-failed .tool-icon { color: var(--red, #ef4444); }
 .tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-name-mono { font-family: var(--font-mono); }
+.tool-status-icon { flex-shrink: 0; }
+.tool-spin { animation: tool-spin 0.9s linear infinite; color: var(--agent-accent, #7c3aed); }
+.tool-status-failed { color: var(--red, #ef4444); }
+@keyframes tool-spin { to { transform: rotate(360deg); } }
 .tool-output-preview {
-  color: rgba(255,255,255,0.3);
+  color: var(--text-muted, rgba(255,255,255,0.3));
   font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 160px;
+  max-width: 220px;
   flex-shrink: 1;
 }
+.tool-detail { display: flex; flex-direction: column; gap: 6px; }
+.tool-detail-args { display: flex; flex-direction: column; gap: 3px; }
+.tool-arg-row {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  max-width: min(560px, 90vw);
+}
+.tool-arg-key { color: var(--text-muted); flex-shrink: 0; }
+.tool-arg-val { color: var(--text-secondary, var(--text-primary)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-args {
   margin: 0;
   padding: 8px 12px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.07);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   border-radius: 8px;
   font-size: 10px;
   font-family: var(--font-mono);
-  color: rgba(255,255,255,0.5);
+  color: var(--text-secondary, var(--text-primary));
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 200px;
@@ -2977,17 +2986,21 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .tool-output {
   margin: 0;
   padding: 8px 12px;
-  background: rgba(22,163,74,0.04);
-  border: 1px solid rgba(22,163,74,0.15);
+  background: color-mix(in srgb, var(--green, #16a34a) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green, #16a34a) 16%, transparent);
   border-radius: 8px;
   font-size: 10px;
   font-family: var(--font-mono);
-  color: rgba(255,255,255,0.45);
+  color: var(--text-secondary, var(--text-primary));
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 200px;
   overflow-y: auto;
   max-width: min(560px, 90vw);
+}
+.tool-output-failed {
+  background: color-mix(in srgb, var(--red, #ef4444) 6%, transparent);
+  border-color: color-mix(in srgb, var(--red, #ef4444) 20%, transparent);
 }
 
 /* System info markers (permission/plan in feed) */
@@ -3301,14 +3314,17 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 
 .chat-input-box {
-  background: #1a1a20;
+  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 5%, #1a1a20);
   border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 14px;
+  border-radius: 16px;
   overflow: hidden;
-  transition: border-color .15s;
+  transition: border-color .15s, box-shadow .15s;
 }
-.chat-input-box:focus-within { border-color: rgba(124,58,237,0.5); }
-.input-queued { border-color: rgba(124,58,237,0.35) !important; }
+.chat-input-box:focus-within {
+  border-color: color-mix(in srgb, var(--agent-accent, #7c3aed) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, #7c3aed) 15%, transparent);
+}
+.input-queued { border-color: color-mix(in srgb, var(--agent-accent, #7c3aed) 40%, transparent) !important; }
 
 .chat-input {
   display: block;
@@ -3451,9 +3467,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   width: 30px;
   height: 30px;
   flex-shrink: 0;
-  transition: background .12s, opacity .12s;
+  transition: background .12s, opacity .12s, box-shadow .12s, transform .12s;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--agent-accent, #7c3aed) 40%, transparent);
 }
-.send-btn:hover:not(:disabled) { background: #6d28d9; }
+.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--agent-accent, #7c3aed) 80%, #000); transform: translateY(-1px); }
 .send-btn:disabled { opacity: 0.35; cursor: default; }
 .send-btn-abort { background: #dc2626; }
 .send-btn-abort:hover:not(:disabled) { background: #b91c1c; }

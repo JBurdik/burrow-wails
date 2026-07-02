@@ -48,6 +48,25 @@
             </div>
           </div>
 
+          <div class="ac-field">
+            <span>Launch shortcut</span>
+            <div class="ac-shortcut-row">
+              <button
+                class="ac-kbd-rec"
+                :class="{ recording: recordingId === agent.id }"
+                :title="recordingId === agent.id ? 'Press keys… (Esc to cancel)' : 'Click to set shortcut — always opens a new chat'"
+                @click="startRecording(agent.id, $event)"
+                @keydown="onRecordKey(agent.id, $event)"
+                @blur="recordingId === agent.id && (recordingId = null)"
+              >
+                {{ recordingId === agent.id ? "Press…" : (agent.shortcut || "—") }}
+              </button>
+              <button v-if="agent.shortcut && recordingId !== agent.id" class="ac-kbd-clear" title="Clear shortcut" @click.stop="agent.shortcut = ''">
+                <PhX :size="11" />
+              </button>
+            </div>
+          </div>
+
           <label class="ac-field">
             <span>Transport</span>
             <select v-model="agent.transport">
@@ -116,6 +135,7 @@ import { PhX, PhPlus } from "@phosphor-icons/vue";
 import { useChatAgentsStore } from "@/stores/chatAgents";
 import { agentIconComp, AGENT_ICON_KEYS } from "@/lib/agentIcons";
 import { useScriptsStore, type ProjectSettings } from "@/stores/scripts";
+import { eventToShortcut } from "@/lib/shortcuts";
 
 const props = defineProps<{ cwd?: string }>();
 defineEmits<{ close: [] }>();
@@ -139,6 +159,23 @@ function commitEnv() {
 function addEnv() { envRows.value.push({ k: "", v: "" }); }
 function removeEnv(i: number) { envRows.value.splice(i, 1); commitEnv(); }
 function setArgs(v: string) { if (agent.value) agent.value.args = v.split(/\s+/).filter(Boolean); }
+
+const recordingId = ref<string | null>(null);
+function startRecording(id: string, e: MouseEvent) {
+  recordingId.value = recordingId.value === id ? null : id;
+  if (recordingId.value === id) (e.currentTarget as HTMLElement)?.focus();
+}
+function onRecordKey(id: string, e: KeyboardEvent) {
+  if (recordingId.value !== id) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.key === "Escape") { recordingId.value = null; return; }
+  const sc = eventToShortcut(e);
+  if (!sc) return;
+  const a = chatAgents.agents.find((x) => x.id === id);
+  if (a) a.shortcut = sc;
+  recordingId.value = null;
+}
 
 function onAdd() { selectedId.value = chatAgents.add().id; }
 function onDelete() { const id = selectedId.value; chatAgents.remove(id); selectedId.value = chatAgents.agents[0]?.id ?? "claude"; }
@@ -177,6 +214,12 @@ function setProj(key: keyof ProjectSettings, val: string) {
 .ac-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; cursor: pointer; }
 .ac-icon-btn:hover { background: rgba(255,255,255,0.06); }
 .ac-icon-btn.active { border-color: currentColor; background: rgba(255,255,255,0.06); }
+.ac-shortcut-row { display: flex; align-items: center; gap: 5px; }
+.ac-kbd-rec { display: inline-flex; align-items: center; justify-content: center; background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; padding: 6px 10px; min-width: 60px; color: #777; font-family: var(--font-ui); font-size: 11px; cursor: pointer; }
+.ac-kbd-rec:hover { color: #aaa; border-color: rgba(255,255,255,0.25); }
+.ac-kbd-rec.recording { color: #a78bfa; border-color: #7c3aed66; background: #7c3aed14; }
+.ac-kbd-clear { display: flex; align-items: center; justify-content: center; background: none; border: none; color: #444; cursor: pointer; padding: 2px; border-radius: 3px; flex-shrink: 0; }
+.ac-kbd-clear:hover { color: #ef4444; background: rgba(239,68,68,0.12); }
 .ac-color { width: 34px; height: 30px; padding: 2px; background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; cursor: pointer; margin-left: 4px; }
 .ac-env { display: flex; flex-direction: column; gap: 5px; }
 .ac-env-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.55); }

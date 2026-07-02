@@ -17,6 +17,7 @@ export interface ChatAgent {
   kind: "claude" | "gemini" | "codex" | "custom";
   color: string;
   icon: string; // key into AGENT_ICONS (see src/lib/agentIcons.ts)
+  shortcut: string; // launch shortcut, e.g. "⌘⇧6" — always opens a new chat tab
   builtin?: boolean;
 }
 
@@ -25,11 +26,11 @@ const STORAGE_KEY = "agentic-ide.chatAgents";
 // Built-in agents. claude-acp/codex use the @agentclientprotocol npx adapters
 // (same org, subscription-safe); gemini/opencode have native ACP modes.
 export const BUILTIN_AGENTS: ChatAgent[] = [
-  { id: "claude", name: "Claude Code", transport: "stream-json", command: "claude", args: [], env: {}, kind: "claude", color: "#d97757", icon: "claude", builtin: true },
-  { id: "claude-acp", name: "Claude (ACP)", transport: "acp", command: "npx", args: ["@agentclientprotocol/claude-agent-acp"], env: {}, kind: "claude", color: "#a855f7", icon: "claude", builtin: true },
-  { id: "gemini", name: "Gemini", transport: "acp", command: "gemini", args: ["--acp"], env: {}, kind: "gemini", color: "#1a73e8", icon: "gemini", builtin: true },
-  { id: "codex", name: "Codex", transport: "acp", command: "npx", args: ["@agentclientprotocol/codex-acp"], env: {}, kind: "codex", color: "#74aa9c", icon: "openai", builtin: true },
-  { id: "opencode", name: "opencode", transport: "acp", command: "opencode", args: ["acp"], env: {}, kind: "custom", color: "#f59e0b", icon: "terminal", builtin: true },
+  { id: "claude", name: "Claude Code", transport: "stream-json", command: "claude", args: [], env: {}, kind: "claude", color: "#d97757", icon: "claude", shortcut: "", builtin: true },
+  { id: "claude-acp", name: "Claude (ACP)", transport: "acp", command: "npx", args: ["@agentclientprotocol/claude-agent-acp"], env: {}, kind: "claude", color: "#a855f7", icon: "claude", shortcut: "", builtin: true },
+  { id: "gemini", name: "Gemini", transport: "acp", command: "gemini", args: ["--acp"], env: {}, kind: "gemini", color: "#1a73e8", icon: "gemini", shortcut: "", builtin: true },
+  { id: "codex", name: "Codex", transport: "acp", command: "npx", args: ["@agentclientprotocol/codex-acp"], env: {}, kind: "codex", color: "#74aa9c", icon: "openai", shortcut: "", builtin: true },
+  { id: "opencode", name: "opencode", transport: "acp", command: "opencode", args: ["acp"], env: {}, kind: "custom", color: "#f59e0b", icon: "terminal", shortcut: "", builtin: true },
 ];
 
 function clone(list: ChatAgent[]): ChatAgent[] {
@@ -47,7 +48,7 @@ function load(): ChatAgent[] {
     if (!Array.isArray(saved)) return base;
     const byId = new Map(base.map((a) => [a.id, a]));
     for (const s of saved) {
-      byId.set(s.id, { ...byId.get(s.id), ...s, args: [...(s.args ?? [])], env: { ...(s.env ?? {}) } } as ChatAgent);
+      byId.set(s.id, { shortcut: "", ...byId.get(s.id), ...s, args: [...(s.args ?? [])], env: { ...(s.env ?? {}) } } as ChatAgent);
     }
     return Array.from(byId.values());
   } catch {
@@ -66,7 +67,7 @@ export const useChatAgentsStore = defineStore("chatAgents", () => {
 
   function add(): ChatAgent {
     const id = `custom-${agents.value.length}-${Date.now().toString(36)}`;
-    const a: ChatAgent = { id, name: "New Agent", transport: "acp", command: "", args: [], env: {}, kind: "custom", color: "#9ca3af", icon: "robot" };
+    const a: ChatAgent = { id, name: "New Agent", transport: "acp", command: "", args: [], env: {}, kind: "custom", color: "#9ca3af", icon: "robot", shortcut: "" };
     agents.value.push(a);
     return a;
   }

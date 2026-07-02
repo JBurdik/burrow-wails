@@ -967,12 +967,12 @@ function activateTab(id: number) {
   nextTick(() => xtermRefs.get(leaf.id)?.focus());
 }
 
-function openClaudeChat(chatId?: number) {
+function openClaudeChat(chatId?: number, agentId?: string) {
   let session: import("@/stores/claudeChats").ClaudeSession;
   if (chatId != null) {
-    session = chatsStore.sessions.find((s) => s.id === chatId) ?? chatsStore.create(props.workspaceId, { agentKind: uiStore.defaultChatAgent });
+    session = chatsStore.sessions.find((s) => s.id === chatId) ?? chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   } else {
-    session = chatsStore.create(props.workspaceId, { agentKind: uiStore.defaultChatAgent });
+    session = chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   }
   // Focus existing tab if already open
   const existing = tabs.value.find(
@@ -1444,7 +1444,7 @@ watch(
     else if (req.action === "reorder" && req.fromIdx != null && req.toIdx != null) {
       reorderTabs(req.fromIdx, req.toIdx);
     }
-    else if (req.action === "openChat") openClaudeChat(req.chatId);
+    else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId);
     else if (req.action === "rename" && req.tabId != null && req.title != null) {
       const tab = tabs.value.find((t) => t.id === req.tabId);
       if (tab) getAllLeaves(tab.root).forEach((l) => { l.title = req.title!; });

@@ -199,6 +199,10 @@ function recomputeDirty() {
 async function save() {
   if (!view || saving) return;
   saving = true;
+  // Format before writing so the saved file matches what formatDocument would
+  // produce. formatDocument never throws (reports via 'error' emit), so a
+  // formatter failure can't block or corrupt the save.
+  await formatDocument();
   const content = view.state.doc.toString();
   try {
     await invoke("write_text_file", { path: props.path, content });
@@ -213,6 +217,26 @@ async function save() {
   } finally {
     saving = false;
   }
+}
+
+// Format via the backend (rustfmt/prettier by extension) and replace the doc
+// in place. Resilient by design: on error or no-op change it just returns.
+async function formatDocument() {
+  if (!view) return;
+  const content = view.state.doc.toString();
+  let formatted: string;
+  try {
+    formatted = await invoke<string>("format_source", { path: props.path, content, cwd: props.cwd });
+  } catch (e) {
+    emit("error", String(e));
+    return;
+  }
+  if (formatted === content) return;
+  const cursor = Math.min(view.state.selection.main.head, formatted.length);
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: formatted },
+    selection: { anchor: cursor },
+  });
 }
 
 function isDirty(): boolean {
@@ -278,7 +302,10 @@ onMounted(async () => {
       // High precedence so ⌘S beats CM defaults and never reaches the OS
       // "save page" dialog (run returns true → preventDefault).
       Prec.highest(
-        keymap.of([{ key: "Mod-s", run: () => { void save(); return true; } }]),
+        keymap.of([
+          { key: "Mod-s", run: () => { void save(); return true; } },
+          { key: "Shift-Alt-f", run: () => { void formatDocument(); return true; } },
+        ]),
       ),
       keymap.of([indentWithTab]),
     ],
@@ -309,7 +336,7 @@ onBeforeUnmount(() => {
   view = null;
 });
 
-defineExpose({ focus, save, isDirty });
+defineExpose({ focus, save, isDirty, formatDocument });
 </script>
 
 <style scoped>

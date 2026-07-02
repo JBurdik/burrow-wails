@@ -22,6 +22,7 @@ type TabRequest = {
   action: "activate" | "add" | "close" | "reorder" | "openChat" | "rename";
   tabId?: number;
   chatId?: number;
+  agentId?: string;
   fromIdx?: number;
   toIdx?: number;
   title?: string;
@@ -59,8 +60,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   function reorder(wsId: number, fromIdx: number, toIdx: number) {
     request.value = { wsId, action: "reorder", fromIdx, toIdx, nonce: ++nonce };
   }
-  function openChat(wsId: number, chatId?: number) {
-    request.value = { wsId, action: "openChat", chatId, nonce: ++nonce };
+  function openChat(wsId: number, chatId?: number, agentId?: string) {
+    request.value = { wsId, action: "openChat", chatId, agentId, nonce: ++nonce };
   }
   function rename(wsId: number, tabId: number, title: string) {
     request.value = { wsId, action: "rename", tabId, title, nonce: ++nonce };

@@ -369,13 +369,23 @@ onBeforeUnmount(() => {
 });
 
 function onKeydown(e: KeyboardEvent) {
+  // Don't let agent-launch shortcuts fire while the user is typing in a text
+  // field (chat textarea, rename input, …) unless a ⌘/⌃ modifier is held — a
+  // bare/Shift-only agent shortcut would otherwise match a normal keystroke and
+  // yank focus to a freshly spawned tab. ponytail: matches on element type, not
+  // a focus registry; add contenteditable check if a rich editor lands.
+  const t = e.target as HTMLElement | null;
+  const typing =
+    !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   // Agent launch shortcuts (user-configured per agent). Checked first so a
   // bound combo wins; defaults use ⌘⇧1-5 to avoid the plain ⌘1-9 ws switch.
-  for (const a of agents.agents) {
-    if (a.command.trim() && matchesShortcut(e, a.shortcut)) {
-      e.preventDefault();
-      activeTerm()?.spawnAgent(agents.commandLine(a));
-      return;
+  if (!typing || e.metaKey || e.ctrlKey) {
+    for (const a of agents.agents) {
+      if (a.command.trim() && matchesShortcut(e, a.shortcut)) {
+        e.preventDefault();
+        activeTerm()?.spawnAgent(agents.commandLine(a));
+        return;
+      }
     }
   }
   // ⌘⇧R — repaint terminals (un-scramble) even when xterm isn't focused.
