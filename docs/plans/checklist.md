@@ -7,8 +7,8 @@ Two structural borrows from competitor `coollabsio/jean` (Apache-2.0). Specs:
 
 - [x] **Phase 0** — `dispatch.rs` scaffold: `dispatch_command(app,command,args)` + helpers (`to_value`/`from_field`/`field`/`field_opt`), `mod dispatch;` in lib.rs. Scheme A (handlers untouched). *(merged: ace405c)*
 - [x] **Batch 1** — FS + git: `read_dir_shallow`, `read_text_file(_checked)`, `write_text_file`, `read_file_base64`, `run_git`, `run_gh`, `format_source`, `open_path_in`, `save_temp_image`, `scaffold_burrow_dir`.
-- [ ] **Batch 2** — Workspaces/DB (12): `list_workspaces`, `create_workspace`, `delete_workspace`, `rename_workspace`, `touch_workspace`, `create_worktree`, `remove_worktree`, `list_terminal_tabs`, `save_terminal_tabs`, `list_mission_tasks`, `upsert_mission_task`, `delete_mission_task`.
-- [ ] **Batch 3** — PTY control + daemon: `write_pty`, `resize_pty`, `kill_pty`, `detach_pty`, `list_pty_sessions`, `get_pty_foreground`, `register_tmux_win`, `is_pid_alive`, `daemon_stats`, `clean_daemon`, `kill_orphan_sessions`, `restart_daemon`, `system_stats`, `set_max_agents`.
+- [x] **Batch 2** — Workspaces/DB (12): `list_workspaces`, `create_workspace`, `delete_workspace`, `rename_workspace`, `touch_workspace`, `create_worktree`, `remove_worktree`, `list_terminal_tabs`, `save_terminal_tabs`, `list_mission_tasks`, `upsert_mission_task`, `delete_mission_task`.
+- [x] **Batch 3** — PTY control + daemon: `write_pty`, `resize_pty`, `kill_pty`, `detach_pty`, `list_pty_sessions`, `get_pty_foreground`, `register_tmux_win`, `is_pid_alive`, `daemon_stats`, `clean_daemon`, `kill_orphan_sessions`, `restart_daemon`, `system_stats`, `set_max_agents`.
 - [ ] **Batch 4** — Agent IPC send-side: `claude_*` (send/stop/abort/respond), `acp_*`, `lsp_send`/`lsp_stop`.
 - [ ] **Batch 5** — Config/skills/MCP + Claude reads + misc.
 - [ ] **§4** — `emit.rs`: `EmitExt` + `WsBroadcaster` stub; mechanical `app.emit(`→`app.emit_all(`. No-op until a transport exists.

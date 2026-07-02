@@ -7,12 +7,12 @@
 //! calls the *same* `#[tauri::command]` fn the IPC layer exposes — no handler edits.
 
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 /// Dispatch a command by name to the corresponding Rust handler.
 /// Mirrors Tauri's invoke system but transport-agnostic.
 pub async fn dispatch_command(
-    _app: &AppHandle,
+    app: &AppHandle,
     command: &str,
     args: Value,
 ) -> Result<Value, String> {
@@ -76,6 +76,146 @@ pub async fn dispatch_command(
             crate::scaffold_burrow_dir(workspace_path, default_manager_prompt)?;
             Ok(Value::Null)
         }
+        // =====================================================================
+        // Batch 2 — Workspaces / DB
+        // =====================================================================
+        "list_workspaces" => {
+            to_value(crate::list_workspaces(app.state::<crate::DbState>())?)
+        }
+        "create_workspace" => {
+            let name: String = from_field(&args, "name")?;
+            let path: String = from_field(&args, "path")?;
+            to_value(crate::create_workspace(name, path, app.state::<crate::DbState>())?)
+        }
+        "delete_workspace" => {
+            let id: i64 = from_field(&args, "id")?;
+            crate::delete_workspace(id, app.state::<crate::DbState>())?;
+            Ok(Value::Null)
+        }
+        "rename_workspace" => {
+            let id: i64 = from_field(&args, "id")?;
+            let name: String = from_field(&args, "name")?;
+            crate::rename_workspace(id, name, app.state::<crate::DbState>())?;
+            Ok(Value::Null)
+        }
+        "touch_workspace" => {
+            let id: i64 = from_field(&args, "id")?;
+            crate::touch_workspace(id, app.state::<crate::DbState>())?;
+            Ok(Value::Null)
+        }
+        "create_worktree" => {
+            let parent_id: i64 = field(&args, "parentId", "parent_id")?;
+            let branch: String = from_field(&args, "branch")?;
+            let base_ref: Option<String> = field_opt(&args, "baseRef", "base_ref")?;
+            let path: String = from_field(&args, "path")?;
+            to_value(crate::create_worktree(
+                parent_id,
+                branch,
+                base_ref,
+                path,
+                app.clone(),
+                app.state::<crate::DbState>(),
+            )?)
+        }
+        "remove_worktree" => {
+            let id: i64 = from_field(&args, "id")?;
+            let force: bool = from_field(&args, "force")?;
+            crate::remove_worktree(id, force, app.state::<crate::DbState>())?;
+            Ok(Value::Null)
+        }
+        "list_terminal_tabs" => {
+            let workspace_id: i64 = field(&args, "workspaceId", "workspace_id")?;
+            to_value(crate::list_terminal_tabs(workspace_id, app.state::<crate::DbState>())?)
+        }
+        "save_terminal_tabs" => {
+            let workspace_id: i64 = field(&args, "workspaceId", "workspace_id")?;
+            let tabs: Vec<crate::TerminalTab> = from_field(&args, "tabs")?;
+            crate::save_terminal_tabs(workspace_id, tabs, app.state::<crate::DbState>())?;
+            Ok(Value::Null)
+        }
+        "list_mission_tasks" => {
+            to_value(crate::list_mission_tasks(app.state::<crate::DbState>())?)
+        }
+        "upsert_mission_task" => {
+            let task: crate::MissionTask = from_field(&args, "task")?;
+            crate::upsert_mission_task(task, app.state::<crate::DbState>())?;
+            Ok(Value::Null)
+        }
+        "delete_mission_task" => {
+            let id: String = from_field(&args, "id")?;
+            crate::delete_mission_task(id, app.state::<crate::DbState>())?;
+            Ok(Value::Null)
+        }
+
+        // =====================================================================
+        // Batch 3 — PTY control + daemon
+        // =====================================================================
+        "write_pty" => {
+            let id: u32 = from_field(&args, "id")?;
+            let data: Vec<u8> = from_field(&args, "data")?;
+            crate::write_pty(id, data, app.state::<crate::DaemonState>())?;
+            Ok(Value::Null)
+        }
+        "resize_pty" => {
+            let id: u32 = from_field(&args, "id")?;
+            let cols: u16 = from_field(&args, "cols")?;
+            let rows: u16 = from_field(&args, "rows")?;
+            crate::resize_pty(id, cols, rows, app.state::<crate::DaemonState>())?;
+            Ok(Value::Null)
+        }
+        "kill_pty" => {
+            let id: u32 = from_field(&args, "id")?;
+            crate::kill_pty(id, app.state::<crate::DaemonState>());
+            Ok(Value::Null)
+        }
+        "detach_pty" => {
+            let id: u32 = from_field(&args, "id")?;
+            crate::detach_pty(id, app.state::<crate::DaemonState>());
+            Ok(Value::Null)
+        }
+        "list_pty_sessions" => {
+            to_value(crate::list_pty_sessions(app.state::<crate::DaemonState>()))
+        }
+        "get_pty_foreground" => {
+            let id: u32 = from_field(&args, "id")?;
+            to_value(crate::get_pty_foreground(id, app.state::<crate::DaemonState>()))
+        }
+        "register_tmux_win" => {
+            let win_id: String = field(&args, "winId", "win_id")?;
+            let pty_id: u32 = field(&args, "ptyId", "pty_id")?;
+            crate::register_tmux_win(win_id, pty_id, app.clone());
+            Ok(Value::Null)
+        }
+        "is_pid_alive" => {
+            let pid: u32 = from_field(&args, "pid")?;
+            to_value(crate::is_pid_alive(pid))
+        }
+        "daemon_stats" => {
+            to_value(crate::daemon_stats(app.state::<crate::DaemonState>(), app.clone()))
+        }
+        "clean_daemon" => {
+            to_value(crate::clean_daemon(app.state::<crate::DaemonState>()))
+        }
+        "kill_orphan_sessions" => {
+            let keep_ids: Vec<u32> = field(&args, "keepIds", "keep_ids")?;
+            to_value(crate::kill_orphan_sessions(
+                keep_ids,
+                app.state::<crate::DaemonState>(),
+                app.state::<crate::DbState>(),
+            ))
+        }
+        "restart_daemon" => {
+            to_value(crate::restart_daemon(app.state::<crate::DaemonState>(), app.clone())?)
+        }
+        "system_stats" => {
+            to_value(crate::system_stats())
+        }
+        "set_max_agents" => {
+            let n: u32 = from_field(&args, "n")?;
+            crate::set_max_agents(n, app.clone());
+            Ok(Value::Null)
+        }
+
         _ => Err(format!("Unknown command: {command}")),
     }
 }
