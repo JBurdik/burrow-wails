@@ -28,7 +28,7 @@ Two structural borrows from competitor `coollabsio/jean` (Apache-2.0). Specs:
   - ACP agents (codex/gemini/opencode, `acp_start`) → `build_burrow_acp_server` spliced into `session/new`+`session/load`
   - hand-typed `claude` in a shell → NOT covered (needs persistent install; deferred)
 - [x] **`dispatch` bridge command** — `#[tauri::command] dispatch(command,args)` → `dispatch_command`; router testable via devtools before the transport lands.
-- [ ] **Live capture-parity check (§5.5)** — confirm Stop-hook `burrow capture` fires for MCP-spawned tabs so `spawn({wait})` returns a result. Blocker before Phase 1.
+- [x] **Live capture-parity check (§5.5)** — PASS. `spawn({wait:true})` blocked, sub-agent ran, result returned inline (no separate collect). Full MCP chain verified end-to-end at runtime.
 - [x] **Phase 1** — `BURROW_SKILL_MD` now teaches the MCP tools first (CLI as documented fallback). Installed wholesale each launch by `install_agent_docs`.
 - [ ] **Phase 2** (optional) — `bin/burrow` spawn/worktree arms read `BURROW_MCP_DEPTH`, refuse over limit.
 - [x] **Settings** — `mcpMaxDepth` in ui.ts (watch → `set_burrow_mcp_max_depth`, immediate) + number input in Settings.vue (1–10).
