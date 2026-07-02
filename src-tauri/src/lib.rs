@@ -1847,6 +1847,29 @@ fn burrow_mcp_flag(cwd: String, app: AppHandle) -> String {
     format!("--mcp-config {quoted}")
 }
 
+/// Merge Burrow's MCP server into a `{"mcpServers":{...}}` blob so a `claude_start`
+/// session (Manager float chat + native ClaudeChat, both stream-json) gets the
+/// spawn/worktree/pr tools alongside the user's own MCP servers. depth 0 = top of
+/// the chain (spawned children get depth 1). Non-destructive: user servers kept.
+fn merge_burrow_into_mcp(app: &AppHandle, base: String, ws_cwd: &str) -> String {
+    let burrow = build_burrow_mcp_config(app, ws_cwd, 0);
+    let mut v: serde_json::Value =
+        serde_json::from_str(&base).unwrap_or_else(|_| serde_json::json!({ "mcpServers": {} }));
+    let bv: serde_json::Value = match serde_json::from_str(&burrow) {
+        Ok(x) => x,
+        Err(_) => return base,
+    };
+    if let (Some(dst), Some(src)) = (
+        v.get_mut("mcpServers").and_then(|m| m.as_object_mut()),
+        bv.get("mcpServers").and_then(|m| m.as_object()),
+    ) {
+        for (k, val) in src {
+            dst.insert(k.clone(), val.clone());
+        }
+    }
+    serde_json::to_string(&v).unwrap_or(base)
+}
+
 #[tauri::command]
 fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<SpawnRequest> {
     let mut out = Vec::new();
@@ -3003,7 +3026,7 @@ async fn claude_start(
     let bin = resolve_lsp_bin(cmd_name, &cwd)
         .ok_or_else(|| format!("{cmd_name} binary not found (checked ~/.local/bin, homebrew, PATH)"))?;
 
-    let mcp_config = build_mcp_config();
+    let mcp_config = merge_burrow_into_mcp(&app, build_mcp_config(), &cwd);
 
     // User-chosen mode (header switch). Default `default` so edits surface as can_use_tool
     // → diff Accept/Reject (VS Code "review changes" parity). `acceptEdits` auto-applies
