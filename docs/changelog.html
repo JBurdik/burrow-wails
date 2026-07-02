@@ -79,11 +79,40 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v2.20.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v2.20.0</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">červenec 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">MCP server pro sub-agenty</div>
+      <ul>
+        <li><strong>Burrow teď má vlastní MCP server</strong> — agenti dostávají nástroje <code>spawn</code>, <code>create_worktree</code>, <code>list_workspaces</code>, <code>list_tabs</code>, <code>send_to_tab</code>, <code>focus_tab</code>/<code>focus_workspace</code>, <code>collect_results</code>/<code>wait_result</code> a <code>pr_create</code>/<code>pr_list</code>/<code>pr_view</code>/<code>pr_merge</code> místo (nebo vedle) ručního volání CLI <code>burrow</code>. Přenos jde přes lokální Unix socket (chmod <code>0600</code> + bearer token), <code>--burrow-mcp-stdio</code> proxy je přímo aplikace samotná — žádný nový binární soubor.</li>
+        <li><strong>Rekurzní hloubka je omezená</strong> — nastavitelný strop (<code>Nastavení → Sub-agent delegation → MCP recursion depth</code>, výchozí 3) brání sub-agentovi spustit sub-agenta do nekonečna. Nástroje pro spawnování to kontrolují, čtecí nástroje ne.</li>
+        <li><strong>Dostupné odevšad</strong> — terminálová záložka spuštěná tlačítkem, Manager (plovoucí chat), nativní chat i ACP agenti (Codex, Gemini…) dostávají stejné MCP nástroje, každý svým vlastním mechanismem vstřikování configu. Ručně napsaný <code>claude</code> v shellu zatím pokrytý není.</li>
+        <li><strong>Globální skill dokument</strong> teď učí agenty použít MCP nástroje jako první volbu, CLI <code>burrow</code> zůstává jako záloha pro shelly bez MCP.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Vzdálený přístup přes web/mobil (Tailscale)</div>
+      <ul>
+        <li><strong>HTTP/WebSocket server</strong> (vypnutý ve výchozím stavu, zapíná se v <code>Nastavení → Remote access</code>) zpřístupňuje celý backend přes jediný <code>/ws</code> endpoint — JSON-RPC dotaz <code>{command, args}</code> se vyřídí přes stejný <code>dispatch_command</code> router jako desktopová appka. Poslouchá výhradně na <code>127.0.0.1</code>, nikdy na <code>0.0.0.0</code>; vzdálený přístup se řeší přes <code>tailscale serve</code>, ne otevřením portu. Autorizace bearer tokenem (soubor chmod <code>0600</code>), jen <code>/healthz</code> je bez ověření.</li>
+        <li><strong>Mobilní webové rozhraní</strong> — nová stránka (<code>/</code> na HTTP serveru) s obrazovkami Connect → Sessions → Terminal: připojení podle hostitele+tokenu, přehled workspaců/záložek se stejnými stavovými tečkami jako desktop, a živý terminál (přes <code>xterm.js</code>) s lištou pro Ctrl+C/Esc/Tab/šipky, protože mobilní klávesnice tyhle klávesy nemá. Ověřeno funkční z reálného telefonu přes Tailscale.</li>
+        <li><strong>Centrální dispatch router</strong> (<code>dispatch_command</code>) sjednocuje 72 backendových příkazů za jedno rozhraní — díky tomu je stejná logika dosažitelná z Tauri IPC, MCP i HTTP/WS bez duplikace kódu.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v2.19.1 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v2.19.1</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">červenec 2026</span>
     </div>
 
