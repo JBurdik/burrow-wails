@@ -1785,9 +1785,7 @@ pub(crate) fn mcp_run_tool(
 
 /// Build the `--mcp-config` JSON injected into a spawned agent so it gets the
 /// Burrow MCP tools. The child's `BURROW_MCP_DEPTH` is `depth + 1` (the
-/// increment site for the recursion cap). Not wired into spawned tabs yet —
-/// that flip is the next step (Phase 0 ships this builder only).
-#[allow(dead_code)]
+/// increment site for the recursion cap).
 pub(crate) fn build_burrow_mcp_config(app: &AppHandle, ws_cwd: &str, depth: u32) -> String {
     let command = std::env::current_exe()
         .ok()
@@ -1809,6 +1807,32 @@ pub(crate) fn build_burrow_mcp_config(app: &AppHandle, ws_cwd: &str, depth: u32)
         }
     } } })
     .to_string()
+}
+
+/// True when a spawn command line launches Claude Code (first token is `claude`
+/// or `.../claude`). Only these tabs get the Burrow MCP `--mcp-config`.
+fn is_claude_cmd(cmd: &str) -> bool {
+    cmd.split_whitespace()
+        .next()
+        .map(|prog| prog.rsplit('/').next().unwrap_or(prog) == "claude")
+        .unwrap_or(false)
+}
+
+/// Append Burrow's `--mcp-config` to a spawned claude command so the sub-agent
+/// gets the MCP tools. Non-destructive: Claude Code merges repeated
+/// `--mcp-config` flags, so an existing one is left intact and ours is added
+/// alongside rather than clobbering it. `ws_cwd` is the tab's workspace (routing
+/// key); depth defaults to 0 (the desktop app can't read the spawning PTY's env,
+/// and `build_burrow_mcp_config` increments to depth+1 for the child).
+fn inject_burrow_mcp_config(app: &AppHandle, cmd: &str, ws_cwd: &str) -> String {
+    if !is_claude_cmd(cmd) {
+        return cmd.to_string();
+    }
+    let depth = burrow_mcp_core::current_depth(); // app-process env → 0 in practice
+    let cfg = build_burrow_mcp_config(app, ws_cwd, depth);
+    // Single-quote the JSON for the shell; escape any embedded single quotes.
+    let quoted = format!("'{}'", cfg.replace('\'', "'\\''"));
+    format!("{cmd} --mcp-config {quoted}")
 }
 
 #[tauri::command]
@@ -2062,6 +2086,10 @@ fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<S
                     let origin: State<SpawnTokenOrigin> = app.state();
                     origin.map.lock().unwrap().insert(token.clone(), ws.clone());
                 }
+                // Give claude sub-agent tabs the Burrow MCP tools. Routing key is
+                // the tab's own dir (newcwd if set, else the spawning workspace).
+                let tab_cwd = if newcwd.is_empty() { ws.clone() } else { newcwd.clone() };
+                let cmd = inject_burrow_mcp_config(&app, &cmd, &tab_cwd);
                 out.push(SpawnRequest { kind: "spawn".to_string(), cmd, token, cwd: newcwd, branch: String::new(), base: String::new(), tmux_win, wsid: String::new(), tabid: String::new(), content: String::new() });
             }
             _ => {}

@@ -20,8 +20,8 @@ Two structural borrows from competitor `coollabsio/jean` (Apache-2.0). Specs:
 ## Tah 2 — MCP server
 
 - [x] **Phase 0** — `burrow_mcp_{core,socket,stdio}.rs`: in-process Unix-socket server (`0o600` + bearer token), `--burrow-mcp-stdio` exe proxy, depth-capped SPAWNING tools `{spawn,create_worktree,new_tab}`, `send_to_tab`, `burrow_mcp_max_depth` pref (default 3). *(merged: 1724f2f)*
-- [ ] **Wire startup** — start the socket server at Tauri `setup` (alongside `start_hook_server`); write `burrow-mcp.sock` + `.token` in `BURROW_HOME_DIR`; add `--burrow-mcp-stdio` branch dispatch in `main()`.
-- [ ] **`--mcp-config` injection** — `build_burrow_mcp_config(app,ws_cwd,depth)` into newly spawned claude tabs; `BURROW_MCP_DEPTH = next_depth()`. This makes the tools actually reachable.
+- [x] **Wire startup** — start the socket server at Tauri `setup` (alongside `start_hook_server`); write `burrow-mcp.sock` + `.token` in `BURROW_HOME_DIR` (= `app_data_dir`); `--burrow-mcp-stdio` branch dispatch at the top of `run()` before the Tauri builder.
+- [x] **`--mcp-config` injection** — `build_burrow_mcp_config(app,ws_cwd,depth)` appended to newly spawned claude tabs in `take_spawn_requests`' spawn arm via `inject_burrow_mcp_config` (claude-only, non-destructive: Claude merges repeated `--mcp-config`); child `BURROW_MCP_DEPTH = depth+1`, depth defaults 0 (app can't read the spawning PTY env).
 - [ ] **Live capture-parity check (§5.5)** — confirm Stop-hook `burrow capture` fires for MCP-spawned tabs so `spawn({wait})` returns a result. Blocker before Phase 1.
 - [ ] **Phase 1** — update `BURROW_SKILL_MD` to teach MCP tools first, CLI as fallback.
 - [ ] **Phase 2** (optional) — `bin/burrow` spawn/worktree arms read `BURROW_MCP_DEPTH`, refuse over limit.
