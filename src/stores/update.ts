@@ -1,5 +1,6 @@
 import { ref, computed } from "vue";
 import { defineStore } from "pinia";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 // Lazy-imported so a browser-only `pnpm dev` (no Tauri) doesn't crash on the
 // plugin's window.__TAURI__ access at module load.
@@ -14,7 +15,8 @@ type DownloadEvent =
   | { event: "Progress"; data: { chunkLength: number } }
   | { event: "Finished" };
 
-const DISMISS_KEY = "agentic-ide.update.dismissed"; // version the user dismissed
+const DISMISS_LEGACY_KEY = "agentic-ide.update.dismissed"; // version the user dismissed
+const DISMISS_CONFIG_KEY = "updateDismissedVersion";
 
 export const useUpdateStore = defineStore("update", () => {
   const available = ref(false);
@@ -32,14 +34,18 @@ export const useUpdateStore = defineStore("update", () => {
 
   // Banner shows only if an update is available AND the user hasn't dismissed
   // this exact version (dismissal is per-version so a newer one re-nags).
-  const dismissed = ref(localStorage.getItem(DISMISS_KEY) ?? "");
+  const dismissed = ref("");
+  configReady.then(() => {
+    migrateFromLocalStorage(DISMISS_LEGACY_KEY, DISMISS_CONFIG_KEY);
+    dismissed.value = getConfig<string>(DISMISS_CONFIG_KEY, "");
+  });
   const bannerVisible = computed(
     () => available.value && !installed.value && newVersion.value !== dismissed.value,
   );
 
   function dismiss() {
     dismissed.value = newVersion.value;
-    localStorage.setItem(DISMISS_KEY, newVersion.value);
+    setConfig(DISMISS_CONFIG_KEY, newVersion.value);
   }
 
   async function check(opts: { silent?: boolean } = {}) {

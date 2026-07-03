@@ -1,9 +1,12 @@
 import { defineStore } from "pinia";
 import { reactive, ref } from "vue";
 import { BurrowWsClient } from "./api";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
-const URL_KEY = "burrow-mobile-url";
-const TOKEN_KEY = "burrow-mobile-token";
+const URL_LEGACY_KEY = "burrow-mobile-url";
+const TOKEN_LEGACY_KEY = "burrow-mobile-token";
+const URL_CONFIG_KEY = "mobileBaseUrl";
+const TOKEN_CONFIG_KEY = "mobileToken";
 
 export type TabStatus = "idle" | "running" | "waiting" | "permission" | "done";
 
@@ -25,8 +28,14 @@ export interface WorkspaceGroup {
 export type View = "connect" | "sessions" | "terminal";
 
 export const useRemoteStore = defineStore("remote", () => {
-  const baseUrl = ref(localStorage.getItem(URL_KEY) ?? "");
-  const token = ref(localStorage.getItem(TOKEN_KEY) ?? "");
+  const baseUrl = ref("");
+  const token = ref("");
+  configReady.then(() => {
+    migrateFromLocalStorage(URL_LEGACY_KEY, URL_CONFIG_KEY);
+    migrateFromLocalStorage(TOKEN_LEGACY_KEY, TOKEN_CONFIG_KEY);
+    baseUrl.value = getConfig<string>(URL_CONFIG_KEY, "");
+    token.value = getConfig<string>(TOKEN_CONFIG_KEY, "");
+  });
   const connected = ref(false);
   const connecting = ref(false);
   const connectError = ref("");
@@ -79,8 +88,8 @@ export const useRemoteStore = defineStore("remote", () => {
       connected.value = true;
       baseUrl.value = normalized;
       token.value = tok;
-      localStorage.setItem(URL_KEY, normalized);
-      localStorage.setItem(TOKEN_KEY, tok);
+      setConfig(URL_CONFIG_KEY, normalized);
+      setConfig(TOKEN_CONFIG_KEY, tok);
       view.value = "sessions";
       await loadSessions();
     } catch (e: any) {
