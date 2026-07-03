@@ -369,6 +369,10 @@ fn install_agent_docs(app: &AppHandle) {
         if std::fs::create_dir_all(&skill_dir).is_ok() {
             let _ = std::fs::write(skill_dir.join("SKILL.md"), BURROW_SKILL_MD);
         }
+        let kanban_skill_dir = claude_dir.join("skills").join("kanban");
+        if std::fs::create_dir_all(&kanban_skill_dir).is_ok() {
+            let _ = std::fs::write(kanban_skill_dir.join("SKILL.md"), KANBAN_SKILL_MD);
+        }
         // Inject a brief always-in-context rule into ~/.claude/CLAUDE.md so Claude
         // never reaches for its built-in Agent/fork tool before loading the skill.
         let claude_md = claude_dir.join("CLAUDE.md");
@@ -414,6 +418,10 @@ fn install_agent_docs(app: &AppHandle) {
         let skill_dir = skills_root.join("burrow");
         if std::fs::create_dir_all(&skill_dir).is_ok() {
             let _ = std::fs::write(skill_dir.join("SKILL.md"), BURROW_SKILL_MD);
+        }
+        let kanban_skill_dir = skills_root.join("kanban");
+        if std::fs::create_dir_all(&kanban_skill_dir).is_ok() {
+            let _ = std::fs::write(kanban_skill_dir.join("SKILL.md"), KANBAN_SKILL_MD);
         }
         register_copilot_skill_dir(
             &Path::new(copilot_dir).join("settings.json"),
@@ -716,6 +724,21 @@ You are running inside Burrow, which gives you a `burrow` CLI to delegate work t
 - `burrow focus-workspace ID` / `burrow focus-tab ID` — switch the UI to a workspace / tab.\n\
 - `burrow new-tab [--ws ID] [--cmd CMD]` — open a new terminal tab (any workspace).\n\n\
 Do NOT block waiting on sub-agents. Fan out the work, continue your own, then `burrow collect` for a recap. Respect the soft per-workspace concurrency limit `burrow spawn` reports. Sub-agents run interactively on the subscription (never use `claude -p`).";
+
+const KANBAN_SKILL_MD: &str = "---\n\
+name: kanban\n\
+description: Read or manage this repo's Burrow Mission Control Kanban board (Backlog → Todo → In Progress → For Review → Done) via the `burrow` CLI. Use when the user says \"/kanban\", \"add this to the board\", \"create a task\", \"what's on the board\", \"move this card\", or wants work tracked/started through the board instead of a plain spawned agent.\n\
+---\n\n\
+# Kanban board (Mission Control)\n\n\
+Burrow's board backs its cards with `mission_tasks` rows, reachable from any shell via the `burrow` CLI (same transport as `spawn`/`worktree`). Board tasks run as **embedded ACP chat sessions only** — Claude, Codex, Gemini, opencode, whatever `--agent` names — never a terminal tab. Starting one never opens a tab in the main view; only an explicit worktree creation shows up there (nested under its repo).\n\n\
+## Commands\n\n\
+- `burrow board-list [--column backlog|todo|in_progress|for_review|done]` — list this repo's cards as `id<TAB>column<TAB>title<TAB>status` lines. **Always run this before creating a task**, to avoid duplicating one that already exists.\n\
+- `burrow board-create --title T [--description D] [--agent claude|claude-acp|codex|gemini|opencode] [--model M] [--worktree|--no-worktree]` — create a card in **Backlog**. Omit `--agent` to default to `claude-acp`. Prints the new task id — report it back to the user. Backlog is the default column: spawning is the human's/board's job unless the user explicitly says \"start it now\".\n\
+- `burrow board-move <taskId> <backlog|todo|in_progress|for_review|done>` — move a card. You may move a card up to `for_review` (e.g. when a sub-agent you spawned for that task finishes and you judge the work ready). You may **not** move a card to `done` — that's rejected outright; only a human marks a task done from the board UI.\n\n\
+## Starting a task now\n\n\
+If asked to start a Backlog task immediately: `board-create ... && board-move <id> todo`. The actual worktree creation + agent spawn only happens once the app's own Backlog→Todo handler picks up the move — confirm with the user that the card moved, and have them check the board if the agent doesn't appear to start.\n\n\
+## When NOT to use this\n\n\
+Ad-hoc work with no need for board tracking (a quick refactor, a one-off question) — just do it, or use `burrow spawn` for a fire-and-forget sub-agent. Reach for the board when the user wants the work visible/tracked as a card, or explicitly asks for \"/kanban\" / \"the board\".";
 
 const BURROW_SKILL_MD: &str = "---\n\
 name: burrow\n\
@@ -3056,6 +3079,10 @@ fn scaffold_burrow_dir(workspace_path: String, default_manager_prompt: String) -
     std::fs::create_dir_all(&skill_dir).map_err(|e| e.to_string())?;
     let skill_file = skill_dir.join("SKILL.md");
     std::fs::write(&skill_file, BURROW_SKILL_MD).map_err(|e| e.to_string())?;
+
+    let kanban_skill_dir = base.join(".claude").join("skills").join("kanban");
+    std::fs::create_dir_all(&kanban_skill_dir).map_err(|e| e.to_string())?;
+    std::fs::write(kanban_skill_dir.join("SKILL.md"), KANBAN_SKILL_MD).map_err(|e| e.to_string())?;
 
     Ok(())
 }
