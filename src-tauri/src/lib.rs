@@ -2958,6 +2958,31 @@ fn unix_now() -> i64 {
 }
 
 #[tauri::command]
+fn read_config(app: AppHandle) -> Result<String, String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("config.json");
+    match std::fs::read_to_string(&path) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("{}".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn write_config(app: AppHandle, content: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("config.json");
+    let tmp = dir.join("config.json.tmp");
+    std::fs::write(&tmp, &content).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
@@ -5803,6 +5828,8 @@ pub fn run() {
             write_text_file,
             read_text_file,
             read_text_file_checked,
+            read_config,
+            write_config,
             scaffold_burrow_dir,
             lsp_start,
             lsp_send,
