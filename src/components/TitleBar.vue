@@ -266,13 +266,20 @@ import { useProfilesStore, DEFAULT_PROFILE_ID } from "@/stores/profiles";
 import { useGitStore } from "@/stores/git";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?: string; rightPanelVisible?: boolean }>();
 defineEmits(["back", "toggle-rightpanel", "open-settings"]);
 
 const menuOpen = ref(false);
 type OpenInTarget = "finder" | "vscode" | "zed";
-const lastOpenIn = ref<OpenInTarget>((localStorage.getItem("tb-last-open-in") as OpenInTarget) ?? "finder");
+const LAST_OPEN_IN_LEGACY_KEY = "tb-last-open-in";
+const LAST_OPEN_IN_CONFIG_KEY = "titlebarLastOpenIn";
+const lastOpenIn = ref<OpenInTarget>("finder");
+configReady.then(() => {
+  migrateFromLocalStorage(LAST_OPEN_IN_LEGACY_KEY, LAST_OPEN_IN_CONFIG_KEY);
+  lastOpenIn.value = getConfig<OpenInTarget>(LAST_OPEN_IN_CONFIG_KEY, "finder");
+});
 const OPEN_IN_META: Record<OpenInTarget, { title: string; label: string }> = {
   finder: { title: "Reveal in Finder", label: "Finder" },
   vscode:  { title: "Open in VS Code", label: "VS Code" },
@@ -356,13 +363,18 @@ type UsageBar = { key: string; label: string; pct: number; resets?: string; loca
 
 // ── Usage profile selector ──────────────────────────────────────────────────
 const profilesStore = useProfilesStore();
-const USAGE_PROFILE_KEY = "burrow.titlebar.usageProfileId";
-const usageProfileId = ref<string>(localStorage.getItem(USAGE_PROFILE_KEY) ?? DEFAULT_PROFILE_ID);
+const USAGE_PROFILE_LEGACY_KEY = "burrow.titlebar.usageProfileId";
+const USAGE_PROFILE_CONFIG_KEY = "titlebarUsageProfileId";
+const usageProfileId = ref<string>(DEFAULT_PROFILE_ID);
+configReady.then(() => {
+  migrateFromLocalStorage(USAGE_PROFILE_LEGACY_KEY, USAGE_PROFILE_CONFIG_KEY);
+  usageProfileId.value = getConfig<string>(USAGE_PROFILE_CONFIG_KEY, DEFAULT_PROFILE_ID);
+});
 const usageProfile = computed(() => profilesStore.get(usageProfileId.value));
 const usageProfileMenuOpen = ref(false);
 function selectUsageProfile(id: string) {
   usageProfileId.value = id;
-  localStorage.setItem(USAGE_PROFILE_KEY, id);
+  setConfig(USAGE_PROFILE_CONFIG_KEY, id);
   usageProfileMenuOpen.value = false;
   refreshUsage();
 }
@@ -625,7 +637,7 @@ async function openIn(target: OpenInTarget) {
   menuOpen.value = false;
   if (!props.folderPath) return;
   lastOpenIn.value = target;
-  localStorage.setItem("tb-last-open-in", target);
+  setConfig(LAST_OPEN_IN_CONFIG_KEY, target);
   try {
     await invoke("open_path_in", { path: props.folderPath, target });
   } catch (e) {
