@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { attachRenderer } from "@/lib/termRenderer";
@@ -49,6 +49,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, emit, type UnlistenFn } from "@tauri-apps/api/event";
 import { PhArrowSquareOut, PhMinus, PhRobot, PhTerminal, PhX, PhSpinner, PhFolder } from "@phosphor-icons/vue";
 import { useUIStore } from "@/stores/ui";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { applyAgentEvent, type TermStatus, type StatusLeaf, type ReducerCtx } from "@/lib/terminalStatus";
 import { playSound } from "@/lib/sounds";
 import "@xterm/xterm/css/xterm.css";
@@ -56,6 +57,7 @@ import "@xterm/xterm/css/xterm.css";
 const props = defineProps<{ ptyId: number; wsId: number; initTitle: string }>();
 
 const ui = useUIStore();
+const wsStore = useWorkspaceStore();
 const hostEl = ref<HTMLElement>();
 const displayTitle = ref(props.initTitle || `PTY ${props.ptyId}`);
 const status = ref<TermStatus>("idle");
@@ -64,14 +66,11 @@ const isAgentSession = ref(false);
 const _leaf: StatusLeaf = { id: props.ptyId, status: "idle", busy: false, isAgent: false };
 const expanded = ref(false);
 
-// Project (workspace) icon — read from the shared localStorage the workspace
-// store persists to (`ws-icons`: { wsId: dataURL }). Shows which project this
-// floating terminal belongs to. Null → fall back to a folder glyph.
-const projectIcon = ref<string | null>(null);
-try {
-  const icons = JSON.parse(localStorage.getItem("ws-icons") || "{}");
-  if (icons[props.wsId]) projectIcon.value = icons[props.wsId];
-} catch { /* no icons */ }
+// Project (workspace) icon — read reactively from the workspace store's
+// `icons` computed (SQLite-backed `icon` column, keyed by workspace id).
+// Shows which project this floating terminal belongs to. Null → fall back to
+// a folder glyph.
+const projectIcon = computed<string | null>(() => wsStore.icons[props.wsId] ?? null);
 
 let term: Terminal | null = null;
 let renderAddon: ITerminalAddon | null = null;
