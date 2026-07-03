@@ -15,6 +15,10 @@ export interface TabSummary {
   status: TermStatus;
   leafCount?: number;
   round?: number;
+  /** Kanban board task id, when this tab's first leaf was spawned by TaskDetail.vue. */
+  taskId?: string;
+  /** Agent-native session id (for --resume), mirrored from the leaf. */
+  sessionId?: string;
 }
 
 type TabRequest = {
@@ -28,6 +32,8 @@ type TabRequest = {
   title?: string;
   /** Optional command to run in a newly-added tab (action: "add"). */
   cmd?: string;
+  /** Optional Kanban board task id to stamp onto the newly-added tab's leaf (action: "add"). */
+  taskId?: string;
   nonce: number;
 };
 
@@ -51,8 +57,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   function activate(wsId: number, tabId: number) {
     request.value = { wsId, action: "activate", tabId, nonce: ++nonce };
   }
-  function add(wsId: number, cmd?: string) {
-    request.value = { wsId, action: "add", cmd, nonce: ++nonce };
+  function add(wsId: number, cmd?: string, taskId?: string) {
+    request.value = { wsId, action: "add", cmd, taskId, nonce: ++nonce };
   }
   function close(wsId: number, tabId: number) {
     request.value = { wsId, action: "close", tabId, nonce: ++nonce };

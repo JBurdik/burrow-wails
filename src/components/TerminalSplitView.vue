@@ -93,6 +93,7 @@ export interface Leaf {
   progress?: number;    // 0.0–1.0; set by `burrow set-progress`
   progressLabel?: string;
   sessionId?: string;   // Claude session_id for cross-restart resume
+  taskId?: string;      // Kanban board task id, when this leaf was spawned by TaskDetail.vue
   diffFile?: string;
   diffStaged?: boolean;
   diff?: string;

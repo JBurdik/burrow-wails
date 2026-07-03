@@ -101,6 +101,9 @@
           >
             <span class="pr-dot" />#{{ git.prByWs[item.id]!.number }}
           </span>
+          <button class="ws-add-chat" title="Board" data-no-drag @click.stop="ui.openBoard(item.id)">
+            <PhKanban :size="12" />
+          </button>
           <button class="ws-add-chat" title="New chat" data-no-drag @click.stop="newChatSession(item.id)">
             <ClaudeIcon :size="12" />
             <PhPlus :size="8" weight="bold" class="ws-add-chat-plus" />
@@ -402,6 +405,7 @@ import {
   PhRobot,
   PhBell,
   PhPlus,
+  PhKanban,
   PhGitBranch,
   PhPencilSimple,
   PhImage,

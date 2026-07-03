@@ -253,6 +253,7 @@ import AgentTimeline from "@/components/AgentTimeline.vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
+import { useBoardTasksStore } from "@/stores/boardTasks";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useGitStore } from "@/stores/git";
 import { usePointerReorder } from "@/composables/usePointerReorder";
@@ -266,6 +267,7 @@ const uiStore = useUIStore();
 const { showDiagram } = useDiagram();
 const chatsStore = useClaudeChatsStore();
 const tabsStore = useTerminalTabsStore();
+const boardTasksStore = useBoardTasksStore();
 const notifStore = useNotificationsStore();
 const gitStore = useGitStore();
 const historyStore = useAgentHistoryStore();
@@ -672,7 +674,7 @@ function makeCtx(tab: Tab): ReducerCtx {
   };
 }
 
-function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; id?: number }): Leaf {
+function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; id?: number; taskId?: string }): Leaf {
   terminalCounter++;
   return {
     type: "leaf",
@@ -685,6 +687,7 @@ function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: str
     initialCmd,
     cwd: extra?.cwd,
     resultToken: extra?.resultToken,
+    taskId: extra?.taskId,
   };
 }
 
@@ -1016,7 +1019,7 @@ function openBrowserTab(url?: string) {
   activateTab(tab.id);
 }
 
-function addTab(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; background?: boolean }): Leaf {
+function addTab(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; background?: boolean; taskId?: string }): Leaf {
   const leaf = makeLeaf(initialCmd, extra);
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
@@ -1408,6 +1411,8 @@ function syncStore() {
       status: tabStatus(t),
       leafCount: getAllLeaves(t.root).length,
       round: Math.max(0, ...getAllLeaves(t.root).map((l) => l.round ?? 0)),
+      taskId: getAllLeaves(t.root)[0]?.taskId,
+      sessionId: getAllLeaves(t.root)[0]?.sessionId,
     })),
   );
   tabsStore.setActive(props.workspaceId, activeTabId.value);
@@ -1465,7 +1470,7 @@ watch(
   (req) => {
     if (!req || req.wsId !== props.workspaceId) return;
     if (req.action === "activate" && req.tabId != null) activateTab(req.tabId);
-    else if (req.action === "add") addTab(req.cmd || undefined);
+    else if (req.action === "add") addTab(req.cmd || undefined, { taskId: req.taskId });
     else if (req.action === "close" && req.tabId != null) closeTab(req.tabId);
     else if (req.action === "reorder" && req.fromIdx != null && req.toIdx != null) {
       reorderTabs(req.fromIdx, req.toIdx);
@@ -1631,6 +1636,23 @@ onMounted(() => {
           const tabId = Number(r.tabid);
           for (const [wid, list] of Object.entries(tabsStore.tabsByWs)) {
             if (list.some((t) => t.id === tabId)) { tabsStore.close(Number(wid), tabId); break; }
+          }
+        } else if (r.kind === "board-move") {
+          // Frontend half of `burrow board-move <taskId> todo` (lib.rs's
+          // take_spawn_requests board-move arm pushes this instead of answering
+          // purely in Rust, since the Backlog→Todo transition needs worktree
+          // creation + agent spawn — client-only logic). r.wsid carries the task
+          // id (reusing the generic field slot); r.tabid is always "todo" here
+          // (every other column is answered in Rust with no frontend involved).
+          // The claiming Terminal (ws === cwd, i.e. this workspace) is the task's
+          // repo — that's where the Manager runs `burrow board-move` from.
+          const taskId = r.wsid;
+          try {
+            await boardTasksStore.load(props.workspaceId);
+            const task = (boardTasksStore.tasksByRepo[props.workspaceId] || []).find((t) => t.id === taskId);
+            if (task && task.board_column === "backlog") await boardTasksStore.startTask(task);
+          } catch (err) {
+            console.error("burrow board-move (todo) failed:", err);
           }
         } else if (r.kind === "workspace-create") {
           // Add a workspace (DB insert via the store) and open it. r.cmd = name,

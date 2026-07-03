@@ -10,6 +10,7 @@
       @open-settings="ui.openSettings()"
     />
     <Settings v-if="ui.settingsOpen" @close="ui.closeSettings()" />
+    <KanbanBoard v-if="ui.boardRepoId !== null" :repo-id="ui.boardRepoId" @close="ui.closeBoard()" />
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
       <ActivityBar class="panel-activity" />
       <Sidebar class="panel-sidebar" />
@@ -105,6 +106,7 @@ import GitPanel from "@/components/GitPanel.vue";
 import MissionControl from "@/components/MissionControl.vue";
 import Dashboard from "@/components/Dashboard.vue";
 import Settings from "@/components/Settings.vue";
+import KanbanBoard from "@/components/KanbanBoard.vue";
 import Spotlight from "@/components/Spotlight.vue";
 import ToastStack from "@/components/ToastStack.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
@@ -435,6 +437,9 @@ function onKeydown(e: KeyboardEvent) {
     } else if (ui.settingsOpen) {
       e.preventDefault();
       ui.closeSettings();
+    } else if (ui.boardRepoId !== null) {
+      e.preventDefault();
+      ui.closeBoard();
     }
   }
 }

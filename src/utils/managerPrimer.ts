@@ -76,6 +76,13 @@ ${worktreeMode ? SPAWN_MODE_WORKTREE : SPAWN_MODE_BRANCH}
 - \`burrow wait <token> [--timeout S]\` — block until the spawned agent with that token finishes; prints its result. Default timeout is 300 s.
 - \`burrow worktree-remove <branch|path> [--force]\` — delete a worktree (git worktree + its Burrow row). **Always ask the user to confirm before removing a worktree**, and only after the work on it is merged or no longer needed.
 
+## Kanban board (Mission Control)
+The user may have a Kanban board open for this repo (Backlog → Todo → In Progress → For Review → Done), backed by the same task rows you can read/write via these commands:
+- \`burrow board-list [--column backlog|todo|in_progress|for_review|done]\` — list this repo's cards as \`id<TAB>column<TAB>title<TAB>status\` lines. **Always run this before creating a task**, to avoid duplicating one that already exists.
+- \`burrow board-create --title T [--description D] [--agent claude|codex|aider] [--model M] [--worktree|--no-worktree]\` — create a new card in **Backlog** (the default — spawning is the human's/board's job unless the user explicitly says "start it now"). Prints the new task id; report it back to the user so they can find the card. Only pass \`--worktree\`/\`--no-worktree\` if the user has a preference; otherwise leave the board's default in place.
+- \`burrow board-move <taskId> <backlog|todo|in_progress|for_review|done>\` — move a card. **You may move a card up to \`for_review\` (e.g. when a sub-agent you spawned for that task finishes and you believe the work is ready). You may NOT move a card to \`done\` — that command rejects it outright.** Only a human, acting in the board UI, marks a task done.
+- If asked to "start" a Backlog task now, you may do \`board-create ... && board-move <id> todo\` yourself — understand that the actual worktree-creation + agent-spawn only happens once the app's own Backlog→Todo handler picks it up, so confirm with the user that the card moved and let them check the board if the agent doesn't appear to start.
+
 ## Pull requests (via the \`gh\` CLI under the hood)
 - \`burrow pr-create --title T --body B [--base main]\` — open a PR for the current branch.
 - \`burrow pr-list [--state open|closed|all]\` — list PRs.
