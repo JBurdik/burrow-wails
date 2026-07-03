@@ -212,6 +212,8 @@ pub struct Workspace {
     /// Whether this workspace's directory is a git repo. Non-git folders are
     /// first-class workspaces but hide all git UI (branch, worktrees, diff panel).
     pub is_git: bool,
+    pub icon: Option<String>,
+    pub sort_order: i64,
 }
 
 /// Detect whether `path` lives inside a git work tree. Uses `git rev-parse` so it
@@ -2623,7 +2625,7 @@ fn read_dir_shallow(path: String) -> Result<Vec<DirEntry>, String> {
 fn list_workspaces(db: State<DbState>) -> Result<Vec<Workspace>, String> {
     let conn = db.conn.lock().unwrap();
     let mut stmt = conn
-        .prepare("SELECT id, name, path, created_at, last_opened, parent_id, worktree_branch, is_git FROM workspaces ORDER BY COALESCE(last_opened, 0) DESC, created_at DESC")
+        .prepare("SELECT id, name, path, created_at, last_opened, parent_id, worktree_branch, is_git, icon, sort_order FROM workspaces ORDER BY COALESCE(last_opened, 0) DESC, created_at DESC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| Ok(Workspace {
@@ -2635,6 +2637,8 @@ fn list_workspaces(db: State<DbState>) -> Result<Vec<Workspace>, String> {
             parent_id: row.get(5)?,
             worktree_branch: row.get(6)?,
             is_git: row.get(7)?,
+            icon: row.get(8)?,
+            sort_order: row.get(9)?,
         }))
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
@@ -2652,7 +2656,7 @@ fn create_workspace(name: String, path: String, db: State<DbState>) -> Result<Wo
         rusqlite::params![name, path, now, is_git],
     ).map_err(|e| e.to_string())?;
     let id = conn.last_insert_rowid();
-    Ok(Workspace { id, name, path, created_at: now, last_opened: None, parent_id: None, worktree_branch: None, is_git })
+    Ok(Workspace { id, name, path, created_at: now, last_opened: None, parent_id: None, worktree_branch: None, is_git, icon: None, sort_order: 0 })
 }
 
 #[tauri::command]
@@ -2676,6 +2680,27 @@ fn touch_workspace(id: i64, db: State<DbState>) -> Result<(), String> {
     db.conn.lock().unwrap()
         .execute("UPDATE workspaces SET last_opened = ?1 WHERE id = ?2", rusqlite::params![unix_now(), id])
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_workspace_icon(id: i64, icon: Option<String>, db: State<DbState>) -> Result<(), String> {
+    db.conn.lock().unwrap()
+        .execute("UPDATE workspaces SET icon = ?1 WHERE id = ?2", rusqlite::params![icon, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_workspace_order(ids: Vec<i64>, db: State<DbState>) -> Result<(), String> {
+    let conn = db.conn.lock().unwrap();
+    for (i, id) in ids.iter().enumerate() {
+        conn.execute(
+            "UPDATE workspaces SET sort_order = ?1 WHERE id = ?2",
+            rusqlite::params![i as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -2809,6 +2834,8 @@ fn create_worktree(
         parent_id: Some(parent_id),
         worktree_branch: Some(branch),
         is_git: true,
+        icon: None,
+        sort_order: 0,
     })
 }
 
@@ -4280,6 +4307,8 @@ fn init_db(app: &AppHandle) -> Result<Connection, rusqlite::Error> {
     let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN session_id TEXT");
     let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN board_order REAL NOT NULL DEFAULT 0");
     let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN updated_at INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE workspaces ADD COLUMN icon TEXT");
+    let _ = conn.execute_batch("ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS task_attachments (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5820,6 +5849,8 @@ pub fn run() {
             delete_workspace,
             rename_workspace,
             touch_workspace,
+            set_workspace_icon,
+            set_workspace_order,
             create_worktree,
             remove_worktree,
             list_terminal_tabs,
