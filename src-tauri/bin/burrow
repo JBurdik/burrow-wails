@@ -22,7 +22,7 @@
 # Sub-agents run INTERACTIVELY on your subscription (plain `claude`, never -p).
 
 sub="$1"
-[ -n "$sub" ] || { echo "usage: burrow spawn|worktree|diagram|collect|wait|sessions|status|hook|notify|set-status|set-progress|trigger-flash|log|diff|top|capture-pane|list-workspaces|list-tabs|focus-workspace|focus-tab|new-tab|tab-rename|tab-close|workspace-create|git-status|git-log|git-diff|run <args>" >&2; exit 1; }
+[ -n "$sub" ] || { echo "usage: burrow spawn|worktree|diagram|collect|wait|sessions|status|hook|notify|set-status|set-progress|trigger-flash|log|diff|top|capture-pane|list-workspaces|list-tabs|focus-workspace|focus-tab|new-tab|tab-rename|tab-close|workspace-create|git-status|git-log|git-diff|run|board-move|board-list|board-create|board-attach <args>" >&2; exit 1; }
 shift
 
 case "$sub" in
@@ -1046,8 +1046,142 @@ PY
     exit 1
     ;;
 
+  board-move)
+    # burrow board-move <taskId> <column>
+    #   column: backlog|todo|in_progress|for_review|done
+    # Move a Kanban board card. Moves to 'todo' trigger worktree creation +
+    # agent spawn client-side, so Burrow always routes that case through the
+    # frontend; every other column is a pure DB write answered here directly.
+    # Agents may move a card up to 'for_review' — 'done' is rejected: only a
+    # human/Manager moving it in the UI can mark a task done.
+    task_id="$1"; column="$2"
+    [ -n "$task_id" ] && [ -n "$column" ] || { echo "usage: burrow board-move <taskId> <backlog|todo|in_progress|for_review|done>" >&2; exit 1; }
+    dir="${BURROW_SESSION_DIR:?burrow: BURROW_SESSION_DIR unset — run inside Burrow}"
+    reqdir="$dir/requests"; mkdir -p "$reqdir" || { echo "burrow: cannot create $reqdir" >&2; exit 1; }
+    ws="${BURROW_CWD:-$PWD}"
+    token="ctl.$$.${RANDOM:-0}"
+    d=$(mktemp -d "$reqdir/req.XXXXXX") || { echo "burrow: mktemp failed" >&2; exit 1; }
+    printf '%s' "board-move" > "$d/kind"
+    printf '%s' "$ws"        > "$d/ws"
+    printf '%s' "$token"     > "$d/token"
+    printf '%s' "$task_id"   > "$d/task_id"
+    printf '%s' "$column"    > "$d/column"
+    : > "$d/ready"
+    waited=0
+    while [ ! -f "$dir/$token.done" ]; do
+      sleep 1; waited=$((waited + 1))
+      [ "$waited" -ge 20 ] && { echo "burrow board-move: timed out (is Burrow running?)" >&2; exit 1; }
+    done
+    [ -f "$dir/$token.result" ] && cat "$dir/$token.result"
+    rm -f "$dir/$token.done" "$dir/$token.result"
+    exit 0
+    ;;
+
+  board-list)
+    # burrow board-list [--column backlog|todo|in_progress|for_review|done]
+    # List Kanban board cards for this repo as id<TAB>column<TAB>title<TAB>status
+    # lines. Read command, answered entirely in Rust.
+    column=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --column) column="$2"; shift 2 ;;
+        *)        shift ;;
+      esac
+    done
+    dir="${BURROW_SESSION_DIR:?burrow: BURROW_SESSION_DIR unset — run inside Burrow}"
+    reqdir="$dir/requests"; mkdir -p "$reqdir" || { echo "burrow: cannot create $reqdir" >&2; exit 1; }
+    ws="${BURROW_CWD:-$PWD}"
+    token="ctl.$$.${RANDOM:-0}"
+    d=$(mktemp -d "$reqdir/req.XXXXXX") || { echo "burrow: mktemp failed" >&2; exit 1; }
+    printf '%s' "board-list" > "$d/kind"
+    printf '%s' "$ws"        > "$d/ws"
+    printf '%s' "$token"     > "$d/token"
+    printf '%s' "$column"    > "$d/column"
+    : > "$d/ready"
+    waited=0
+    while [ ! -f "$dir/$token.done" ]; do
+      sleep 1; waited=$((waited + 1))
+      [ "$waited" -ge 15 ] && { echo "burrow board-list: timed out (is Burrow running?)" >&2; exit 1; }
+    done
+    [ -f "$dir/$token.result" ] && cat "$dir/$token.result"
+    rm -f "$dir/$token.done" "$dir/$token.result"
+    exit 0
+    ;;
+
+  board-create)
+    # burrow board-create --title T [--description D] [--agent claude|codex|aider]
+    #   [--model M] [--worktree|--no-worktree]
+    # Create a new Backlog-column card. Prints the new task id. Pure DB write,
+    # answered entirely in Rust — task creation touches no PTY/UI.
+    title=""; description=""; agent=""; model=""; no_worktree=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --title)        title="$2";       shift 2 ;;
+        --description)  description="$2"; shift 2 ;;
+        --agent)        agent="$2";       shift 2 ;;
+        --model)        model="$2";       shift 2 ;;
+        --worktree)     no_worktree="";   shift ;;
+        --no-worktree)  no_worktree="1";  shift ;;
+        --)             shift; break ;;
+        -*)             echo "burrow board-create: unknown flag $1" >&2; exit 1 ;;
+        *)              shift ;;
+      esac
+    done
+    [ -n "$title" ] || { echo "burrow board-create: --title is required" >&2; exit 1; }
+    dir="${BURROW_SESSION_DIR:?burrow: BURROW_SESSION_DIR unset — run inside Burrow}"
+    reqdir="$dir/requests"; mkdir -p "$reqdir" || { echo "burrow: cannot create $reqdir" >&2; exit 1; }
+    ws="${BURROW_CWD:-$PWD}"
+    token="ctl.$$.${RANDOM:-0}"
+    d=$(mktemp -d "$reqdir/req.XXXXXX") || { echo "burrow: mktemp failed" >&2; exit 1; }
+    printf '%s' "board-create"  > "$d/kind"
+    printf '%s' "$ws"           > "$d/ws"
+    printf '%s' "$token"        > "$d/token"
+    printf '%s' "$title"        > "$d/title"
+    printf '%s' "$description"  > "$d/description"
+    printf '%s' "$agent"        > "$d/agent"
+    printf '%s' "$model"        > "$d/model"
+    printf '%s' "$no_worktree"  > "$d/no_worktree"
+    : > "$d/ready"
+    waited=0
+    while [ ! -f "$dir/$token.done" ]; do
+      sleep 1; waited=$((waited + 1))
+      [ "$waited" -ge 15 ] && { echo "burrow board-create: timed out (is Burrow running?)" >&2; exit 1; }
+    done
+    [ -f "$dir/$token.result" ] && cat "$dir/$token.result"
+    rm -f "$dir/$token.done" "$dir/$token.result"
+    exit 0
+    ;;
+
+  board-attach)
+    # burrow board-attach <taskId> <imagePath>   (optional/phase-2)
+    # Attach a local file (e.g. a screenshot the agent produced) to its own
+    # board card. Pure Rust — reads the file straight off disk. Prints the
+    # staged attachment path on success.
+    task_id="$1"; image_path="$2"
+    [ -n "$task_id" ] && [ -n "$image_path" ] || { echo "usage: burrow board-attach <taskId> <imagePath>" >&2; exit 1; }
+    dir="${BURROW_SESSION_DIR:?burrow: BURROW_SESSION_DIR unset — run inside Burrow}"
+    reqdir="$dir/requests"; mkdir -p "$reqdir" || { echo "burrow: cannot create $reqdir" >&2; exit 1; }
+    ws="${BURROW_CWD:-$PWD}"
+    token="ctl.$$.${RANDOM:-0}"
+    d=$(mktemp -d "$reqdir/req.XXXXXX") || { echo "burrow: mktemp failed" >&2; exit 1; }
+    printf '%s' "board-attach" > "$d/kind"
+    printf '%s' "$ws"          > "$d/ws"
+    printf '%s' "$token"       > "$d/token"
+    printf '%s' "$task_id"     > "$d/task_id"
+    printf '%s' "$image_path"  > "$d/image_path"
+    : > "$d/ready"
+    waited=0
+    while [ ! -f "$dir/$token.done" ]; do
+      sleep 1; waited=$((waited + 1))
+      [ "$waited" -ge 15 ] && { echo "burrow board-attach: timed out (is Burrow running?)" >&2; exit 1; }
+    done
+    [ -f "$dir/$token.result" ] && cat "$dir/$token.result"
+    rm -f "$dir/$token.done" "$dir/$token.result"
+    exit 0
+    ;;
+
   *)
-    echo "burrow: unknown command '$sub' (use spawn|worktree|worktree-remove|collect|wait|sessions|status|hook|notify|set-status|set-progress|trigger-flash|log|diff|top|capture-pane|list-workspaces|list-tabs|focus-workspace|focus-tab|new-tab|tab-rename|tab-close|workspace-create|git-status|git-log|git-diff|run|pr-create|pr-list|pr-view|pr-merge)" >&2
+    echo "burrow: unknown command '$sub' (use spawn|worktree|worktree-remove|collect|wait|sessions|status|hook|notify|set-status|set-progress|trigger-flash|log|diff|top|capture-pane|list-workspaces|list-tabs|focus-workspace|focus-tab|new-tab|tab-rename|tab-close|workspace-create|git-status|git-log|git-diff|run|pr-create|pr-list|pr-view|pr-merge|board-move|board-list|board-create|board-attach)" >&2
     exit 1
     ;;
 esac

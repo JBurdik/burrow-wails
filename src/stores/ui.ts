@@ -184,6 +184,9 @@ function loadPrefs(): Prefs {
 
 export const useUIStore = defineStore("ui", () => {
   const settingsOpen = ref(false);
+  // Kanban board overlay (KanbanBoard.vue), keyed by root repo workspace id — same
+  // full-screen-overlay pattern as Settings. Not persisted: reopens closed on restart.
+  const boardRepoId = ref<number | null>(null);
 
   const loaded = loadPrefs();
   const uiFont = ref(loaded.uiFont);
@@ -452,6 +455,12 @@ export const useUIStore = defineStore("ui", () => {
   function toggleSettings() {
     settingsOpen.value = !settingsOpen.value;
   }
+  function openBoard(repoId: number) {
+    boardRepoId.value = repoId;
+  }
+  function closeBoard() {
+    boardRepoId.value = null;
+  }
   function toggleRightPanel() {
     rightPanelVisible.value = !rightPanelVisible.value;
   }
@@ -490,6 +499,9 @@ export const useUIStore = defineStore("ui", () => {
 
   return {
     settingsOpen,
+    boardRepoId,
+    openBoard,
+    closeBoard,
     uiFont,
     uiFontSize,
     uiScale,

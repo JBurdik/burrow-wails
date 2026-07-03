@@ -1516,6 +1516,22 @@ fn query_workspaces_tsv(conn: &Connection) -> String {
     s
 }
 
+/// Resolve the ROOT repo workspace id for a workspace path: if it's a worktree
+/// (has a `parent_id`), returns the parent's id; otherwise returns its own id.
+/// Worktree-of-a-worktree is disallowed elsewhere (`create_worktree` enforces
+/// `parent_id IS NULL` on the parent), so this is at most one hop. Used to key
+/// the Kanban board (`mission_tasks.repo_workspace_id`) the same way regardless
+/// of which of a repo's worktrees the request originates from.
+fn resolve_repo_workspace_id(conn: &Connection, ws_path: &str) -> Option<i64> {
+    conn.query_row(
+        "SELECT id, parent_id FROM workspaces WHERE path = ?1",
+        rusqlite::params![ws_path],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)),
+    )
+    .ok()
+    .map(|(id, parent_id)| parent_id.unwrap_or(id))
+}
+
 /// A workspace's tabs as `<pty_id>\t<title>\n` lines. Shared by `burrow
 /// list-tabs` and the MCP `list_tabs` tool.
 fn query_tabs_tsv(conn: &Connection, ws_id: i64) -> String {
@@ -1531,6 +1547,36 @@ fn query_tabs_tsv(conn: &Connection, ws_id: i64) -> String {
                 s.push_str(&format!("{}\t{}\n", pid, row.1));
             }
         }
+    }
+    s
+}
+
+/// Board tasks for a repo (optionally filtered to one column) as
+/// `<id>\t<column>\t<title>\t<status>\n` lines. Shared by `burrow board-list`.
+fn query_board_tasks_tsv(conn: &Connection, repo_workspace_id: i64, column: &str) -> String {
+    let mut s = String::new();
+    let sql = if column.is_empty() {
+        "SELECT id, board_column, COALESCE(title,''), COALESCE(status,'') FROM mission_tasks \
+         WHERE repo_workspace_id = ?1 ORDER BY board_column ASC, board_order ASC, created_at ASC"
+    } else {
+        "SELECT id, board_column, COALESCE(title,''), COALESCE(status,'') FROM mission_tasks \
+         WHERE repo_workspace_id = ?1 AND board_column = ?2 ORDER BY board_order ASC, created_at ASC"
+    };
+    let Ok(mut stmt) = conn.prepare(sql) else { return s };
+    let map_row = |r: &rusqlite::Row| -> rusqlite::Result<(String, String, String, String)> {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+    };
+    let rows: Vec<(String, String, String, String)> = if column.is_empty() {
+        stmt.query_map(rusqlite::params![repo_workspace_id], map_row)
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    } else {
+        stmt.query_map(rusqlite::params![repo_workspace_id, column], map_row)
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    };
+    for (id, col, title, status) in rows {
+        s.push_str(&format!("{id}\t{col}\t{title}\t{status}\n"));
     }
     s
 }
@@ -1945,6 +1991,7 @@ fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<S
                 | "tab-rename" | "tab-close" | "workspace-create"
                 | "git-status" | "git-log" | "git-diff" | "run" | "tab-output"
                 | "diagram"
+                | "board-move" | "board-list" | "board-create" | "board-attach"
         ) {
             if ws != cwd { continue; }
             let token = read("token");
@@ -2093,6 +2140,171 @@ fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<S
                         tabid: String::new(),
                         content,
                     });
+                }
+                "board-list" => {
+                    // Read command, answered entirely in Rust — pure DB read, no
+                    // frontend involvement (same "no frontend" model as
+                    // list-workspaces/git-status).
+                    let column = read("column");
+                    let text = {
+                        let conn = db.conn.lock().unwrap();
+                        match resolve_repo_workspace_id(&conn, &ws) {
+                            Some(rid) => query_board_tasks_tsv(&conn, rid, &column),
+                            None => "error: could not resolve this repo's workspace".to_string(),
+                        }
+                    };
+                    write_control_result(&app, &token, &text);
+                }
+                "board-create" => {
+                    // Creates a new Backlog-column task row. Pure DB write — task
+                    // creation touches no PTY/UI, so (unlike board-move → todo) it
+                    // needs no frontend round-trip.
+                    let title = read("title");
+                    let description = read("description");
+                    let agent = read("agent");
+                    let model = read("model");
+                    let use_worktree = if read("no_worktree") == "1" { 0 } else { 1 };
+                    let text = if title.trim().is_empty() {
+                        "error: --title is required".to_string()
+                    } else {
+                        let conn = db.conn.lock().unwrap();
+                        match resolve_repo_workspace_id(&conn, &ws) {
+                            Some(rid) => {
+                                let id = format!("task_{}", now_millis());
+                                let now = now_millis();
+                                let res = conn.execute(
+                                    "INSERT INTO mission_tasks (
+                                        id, created_at, repo_workspace_id, board_column, title,
+                                        description, agent_kind, model, use_worktree, board_order, updated_at
+                                     ) VALUES (?1, ?2, ?3, 'backlog', ?4, ?5, ?6, ?7, ?8, 0, ?9)",
+                                    rusqlite::params![id, now, rid, title,
+                                        if description.is_empty() { None } else { Some(description) },
+                                        if agent.is_empty() { None } else { Some(agent) },
+                                        if model.is_empty() { None } else { Some(model) },
+                                        use_worktree, now],
+                                );
+                                match res {
+                                    Ok(_) => id,
+                                    Err(e) => format!("error: {e}"),
+                                }
+                            }
+                            None => "error: could not resolve this repo's workspace".to_string(),
+                        }
+                    };
+                    if !text.starts_with("error:") {
+                        let _ = app.emit("board-task-moved", json!({ "taskId": text, "column": "backlog" }));
+                    }
+                    write_control_result(&app, &token, &text);
+                }
+                "board-move" => {
+                    // Column-move policy split (docs/plans/mission-control-kanban.md
+                    // §9.2, confirmed by the user): a move INTO 'todo' is the
+                    // Backlog→Todo transition, which needs worktree creation +
+                    // agent spawn — logic that only exists client-side — so it MUST
+                    // go through the frontend (pushed as a SpawnRequest, like
+                    // focus-tab). Every other destination column is a pure DB
+                    // write, answered right here with no frontend involvement.
+                    // Agents/CLI may never move a card to 'done' — that's reserved
+                    // for a human/Manager via the UI's own `move_board_task` Tauri
+                    // call (not reachable from this file-based CLI transport).
+                    let task_id = read("task_id");
+                    let column = read("column");
+                    if task_id.is_empty() || column.is_empty() {
+                        write_control_result(&app, &token, "error: task_id and column are required");
+                    } else if !BOARD_COLUMNS.contains(&column.as_str()) {
+                        write_control_result(&app, &token, &format!("error: invalid column '{column}' (must be one of backlog|todo|in_progress|for_review|done)"));
+                    } else if column == "done" {
+                        write_control_result(
+                            &app, &token,
+                            "error: agents cannot move a task to 'done' — move it to 'for_review' and let a human/Manager mark it done",
+                        );
+                    } else if column == "todo" {
+                        write_control_result(&app, &token, "requested: frontend will create the worktree (if any) and spawn the agent, then move this card to 'todo'");
+                        out.push(SpawnRequest {
+                            kind: "board-move".to_string(),
+                            cmd: String::new(),
+                            token: String::new(),
+                            cwd: String::new(),
+                            branch: String::new(),
+                            base: String::new(),
+                            tmux_win: String::new(),
+                            wsid: task_id,
+                            tabid: column,
+                            content: String::new(),
+                        });
+                    } else {
+                        let text = {
+                            let conn = db.conn.lock().unwrap();
+                            match move_board_task_db(&conn, &task_id, &column, 0.0) {
+                                Ok(()) => "ok".to_string(),
+                                Err(e) => format!("error: {e}"),
+                            }
+                        };
+                        if !text.starts_with("error:") {
+                            let _ = app.emit("board-task-moved", json!({ "taskId": task_id, "column": column }));
+                        }
+                        write_control_result(&app, &token, &text);
+                    }
+                }
+                "board-attach" => {
+                    // Optional/phase-2 (docs/plans/mission-control-kanban.md §3):
+                    // let an agent attach a file it produced (e.g. a screenshot)
+                    // back onto its own card. Pure Rust — reads the file straight
+                    // off disk (the agent already has it locally), no base64
+                    // round-trip needed like the frontend's write_task_attachment.
+                    let task_id = read("task_id");
+                    let image_path = read("image_path");
+                    let text = if task_id.is_empty() || image_path.is_empty() {
+                        "error: task_id and image_path are required".to_string()
+                    } else {
+                        match std::fs::read(&image_path) {
+                            Ok(bytes) => {
+                                let mime = match std::path::Path::new(&image_path).extension().and_then(|e| e.to_str()) {
+                                    Some("png") => "image/png",
+                                    Some("jpg") | Some("jpeg") => "image/jpeg",
+                                    Some("gif") => "image/gif",
+                                    Some("webp") => "image/webp",
+                                    Some("svg") => "image/svg+xml",
+                                    _ => "application/octet-stream",
+                                };
+                                let data_dir = app.path().app_data_dir();
+                                match data_dir {
+                                    Ok(data_dir) => {
+                                        let dir = data_dir.join("attachments").join(&task_id);
+                                        match std::fs::create_dir_all(&dir) {
+                                            Ok(()) => {
+                                                let conn = db.conn.lock().unwrap();
+                                                let next_ord: i64 = conn.query_row(
+                                                    "SELECT COALESCE(MAX(ord), -1) + 1 FROM task_attachments WHERE task_id = ?1",
+                                                    rusqlite::params![task_id], |r| r.get(0),
+                                                ).unwrap_or(0);
+                                                let ext = attachment_ext_for_mime(mime);
+                                                let dest = dir.join(format!("{next_ord}.{ext}"));
+                                                match std::fs::write(&dest, &bytes) {
+                                                    Ok(()) => {
+                                                        let dest_str = dest.to_string_lossy().to_string();
+                                                        let created_at = now_millis();
+                                                        match conn.execute(
+                                                            "INSERT INTO task_attachments (task_id, ord, mime_type, file_path, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                                                            rusqlite::params![task_id, next_ord, mime, dest_str, created_at],
+                                                        ) {
+                                                            Ok(_) => dest_str,
+                                                            Err(e) => format!("error: {e}"),
+                                                        }
+                                                    }
+                                                    Err(e) => format!("error: {e}"),
+                                                }
+                                            }
+                                            Err(e) => format!("error: {e}"),
+                                        }
+                                    }
+                                    Err(e) => format!("error: {e}"),
+                                }
+                            }
+                            Err(e) => format!("error: cannot read {image_path}: {e}"),
+                        }
+                    };
+                    write_control_result(&app, &token, &text);
                 }
                 "tab-rename" | "tab-close" | "workspace-create" => {
                     // UI actions carrying extra fields: tab-rename uses name→cmd +
@@ -4029,6 +4241,31 @@ fn init_db(app: &AppHandle) -> Result<Connection, rusqlite::Error> {
     let _ = conn.execute_batch("ALTER TABLE terminal_tabs ADD COLUMN session_id TEXT");
     let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN handed_off INTEGER");
     let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN profile_id TEXT");
+    // Kanban board columns (docs/plans/mission-control-kanban.md §1.1) — mission_tasks
+    // doubles as the board's task table rather than a parallel `board_tasks` table.
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN repo_workspace_id INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN board_column TEXT NOT NULL DEFAULT 'backlog'");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN description TEXT");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN agent_kind TEXT");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN transport TEXT");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN use_worktree INTEGER NOT NULL DEFAULT 1");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN worktree_branch TEXT");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN task_workspace_id INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN chat_id INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN session_id TEXT");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN board_order REAL NOT NULL DEFAULT 0");
+    let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN updated_at INTEGER");
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS task_attachments (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id     TEXT NOT NULL,
+            ord         INTEGER NOT NULL,
+            mime_type   TEXT NOT NULL,
+            file_path   TEXT NOT NULL,
+            created_at  INTEGER NOT NULL,
+            FOREIGN KEY(task_id) REFERENCES mission_tasks(id) ON DELETE CASCADE
+        );",
+    )?;
     Ok(conn)
 }
 
@@ -4322,7 +4559,7 @@ fn notify_float_grid(app: AppHandle, pty_id: u32, cols: u16, rows: u16) {
 // shared workspaces.db (mission_tasks table), keyed to a workspace like every
 // other Burrow feature.
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct MissionTask {
     pub id: String,
     pub workspace_id: Option<i64>,
@@ -4343,6 +4580,44 @@ pub struct MissionTask {
     /// per config dir). NULL = the default profile.
     #[serde(default)]
     pub profile_id: Option<String>,
+    // ── Kanban board fields (docs/plans/mission-control-kanban.md §1.1) ────────
+    /// Root repo workspace id (parent_id climbed) — the board is keyed by this,
+    /// not by `workspace_id`/`task_workspace_id`, so a task shows up regardless
+    /// of which worktree it's currently running in.
+    #[serde(default)]
+    pub repo_workspace_id: Option<i64>,
+    /// 'backlog' | 'todo' | 'in_progress' | 'for_review' | 'done'
+    #[serde(default)]
+    pub board_column: Option<String>,
+    /// Markdown body shown on the Backlog card before any agent exists.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// 'claude' | 'codex' | 'aider' | ... (chatAgents registry id).
+    #[serde(default)]
+    pub agent_kind: Option<String>,
+    /// 'pty' | 'acp' | 'stream-json' | NULL (no agent yet).
+    #[serde(default)]
+    pub transport: Option<String>,
+    /// 0 = work directly on the current branch, no worktree. Defaults to 1.
+    #[serde(default)]
+    pub use_worktree: Option<i64>,
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
+    /// The workspace row the agent actually runs in (== repo_workspace_id if
+    /// use_worktree=0, else the worktree's workspace id).
+    #[serde(default)]
+    pub task_workspace_id: Option<i64>,
+    /// claudeChats.ts session id, when transport='acp'/'stream-json'.
+    #[serde(default)]
+    pub chat_id: Option<i64>,
+    /// Agent-native session id, for --resume across transport switches.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Float order for drag-reorder within a column.
+    #[serde(default)]
+    pub board_order: Option<f64>,
+    #[serde(default)]
+    pub updated_at: Option<i64>,
 }
 
 #[tauri::command]
@@ -4364,6 +4639,7 @@ fn list_mission_tasks(db: State<DbState>) -> Result<Vec<MissionTask>, String> {
             created_at: row.get(8)?,
             handed_off: row.get(9)?,
             profile_id: row.get(10)?,
+            ..Default::default()
         }))
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
@@ -4392,6 +4668,267 @@ fn delete_mission_task(id: String, db: State<DbState>) -> Result<(), String> {
     conn.execute("DELETE FROM mission_tasks WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ── Kanban board (docs/plans/mission-control-kanban.md) ─────────────────────
+// mission_tasks doubles as the board's task table (§0/§1.1) — these commands
+// read/write the full extended row, keyed by repo_workspace_id rather than
+// workspace_id so a task shows up regardless of which worktree it's running
+// in. Column-move policy: `move_board_task` is a raw Tauri command, reachable
+// ONLY from frontend JS (drag-drop / TaskDetail.vue) — there is no path for a
+// CLI-driven agent to invoke a Tauri command directly, so no `done`-guard is
+// needed here. The equivalent guard for the agent-facing path lives in
+// `take_spawn_requests`'s "board-move" arm, which rejects `column == "done"`
+// outright (agents may move a card up to `for_review`; only a human/Manager
+// via the UI may mark it `done`).
+
+const BOARD_TASK_COLS: &str = "id, workspace_id, pty_id, title, cwd, model, status, turns, created_at, handed_off, profile_id, repo_workspace_id, board_column, description, agent_kind, transport, use_worktree, worktree_branch, task_workspace_id, chat_id, session_id, board_order, updated_at";
+
+fn row_to_board_task(row: &rusqlite::Row) -> rusqlite::Result<MissionTask> {
+    Ok(MissionTask {
+        id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        pty_id: row.get(2)?,
+        title: row.get(3)?,
+        cwd: row.get(4)?,
+        model: row.get(5)?,
+        status: row.get(6)?,
+        turns: row.get(7)?,
+        created_at: row.get(8)?,
+        handed_off: row.get(9)?,
+        profile_id: row.get(10)?,
+        repo_workspace_id: row.get(11)?,
+        board_column: row.get(12)?,
+        description: row.get(13)?,
+        agent_kind: row.get(14)?,
+        transport: row.get(15)?,
+        use_worktree: row.get(16)?,
+        worktree_branch: row.get(17)?,
+        task_workspace_id: row.get(18)?,
+        chat_id: row.get(19)?,
+        session_id: row.get(20)?,
+        board_order: row.get(21)?,
+        updated_at: row.get(22)?,
+    })
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Board columns in the fixed pipeline order (docs/plans/mission-control-kanban.md §1.1/§7).
+const BOARD_COLUMNS: [&str; 5] = ["backlog", "todo", "in_progress", "for_review", "done"];
+
+#[tauri::command]
+fn list_board_tasks(repo_workspace_id: i64, db: State<DbState>) -> Result<Vec<MissionTask>, String> {
+    let conn = db.conn.lock().unwrap();
+    let sql = format!(
+        "SELECT {BOARD_TASK_COLS} FROM mission_tasks WHERE repo_workspace_id = ?1 ORDER BY board_column ASC, board_order ASC, created_at ASC"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![repo_workspace_id], row_to_board_task)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn upsert_board_task(task: MissionTask, db: State<DbState>) -> Result<MissionTask, String> {
+    let conn = db.conn.lock().unwrap();
+    let board_column = task.board_column.clone().unwrap_or_else(|| "backlog".to_string());
+    let use_worktree = task.use_worktree.unwrap_or(1);
+    let board_order = task.board_order.unwrap_or(0.0);
+    let updated_at = now_millis();
+    conn.execute(
+        "INSERT INTO mission_tasks (
+            id, workspace_id, pty_id, title, cwd, model, status, turns, created_at, handed_off, profile_id,
+            repo_workspace_id, board_column, description, agent_kind, transport, use_worktree, worktree_branch,
+            task_workspace_id, chat_id, session_id, board_order, updated_at
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+         ON CONFLICT(id) DO UPDATE SET
+            workspace_id=excluded.workspace_id, pty_id=excluded.pty_id, title=excluded.title,
+            cwd=excluded.cwd, model=excluded.model, status=excluded.status, turns=excluded.turns,
+            handed_off=excluded.handed_off, profile_id=excluded.profile_id,
+            repo_workspace_id=excluded.repo_workspace_id, board_column=excluded.board_column,
+            description=excluded.description, agent_kind=excluded.agent_kind, transport=excluded.transport,
+            use_worktree=excluded.use_worktree, worktree_branch=excluded.worktree_branch,
+            task_workspace_id=excluded.task_workspace_id, chat_id=excluded.chat_id,
+            session_id=excluded.session_id, board_order=excluded.board_order, updated_at=excluded.updated_at",
+        rusqlite::params![
+            task.id, task.workspace_id, task.pty_id, task.title, task.cwd, task.model, task.status, task.turns,
+            task.created_at, task.handed_off, task.profile_id, task.repo_workspace_id, board_column,
+            task.description, task.agent_kind, task.transport, use_worktree, task.worktree_branch,
+            task.task_workspace_id, task.chat_id, task.session_id, board_order, updated_at,
+        ],
+    ).map_err(|e| e.to_string())?;
+    let sql = format!("SELECT {BOARD_TASK_COLS} FROM mission_tasks WHERE id = ?1");
+    conn.query_row(&sql, rusqlite::params![task.id], row_to_board_task)
+        .map_err(|e| e.to_string())
+}
+
+/// Narrow column-move used by both UI drag-drop (this Tauri command, called
+/// directly from the frontend) and the pure-Rust "board-move" arm of
+/// `take_spawn_requests` (which itself validates the column and enforces the
+/// agent-can't-mark-done rule before ever calling into DB logic like this).
+fn move_board_task_db(conn: &Connection, task_id: &str, column: &str, order: f64) -> Result<(), String> {
+    if !BOARD_COLUMNS.contains(&column) {
+        return Err(format!("invalid board column '{column}'"));
+    }
+    let updated_at = now_millis();
+    conn.execute(
+        "UPDATE mission_tasks SET board_column = ?1, board_order = ?2, updated_at = ?3 WHERE id = ?4",
+        rusqlite::params![column, order, updated_at, task_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn move_board_task(task_id: String, column: String, order: f64, db: State<DbState>, app: AppHandle) -> Result<(), String> {
+    {
+        let conn = db.conn.lock().unwrap();
+        move_board_task_db(&conn, &task_id, &column, order)?;
+    }
+    let _ = app.emit("board-task-moved", json!({ "taskId": task_id, "column": column }));
+    Ok(())
+}
+
+/// Unlinks/orphans the task's live pty/chat/worktree rather than killing or
+/// deleting them — they keep existing as an ordinary standalone terminal tab
+/// / chat / workspace the user can still deal with manually (docs/plans/
+/// mission-control-kanban.md §9.5, "detach don't destroy"). Only the board
+/// row (and its attachment rows/files) are removed.
+#[tauri::command]
+fn delete_board_task(task_id: String, db: State<DbState>, app: AppHandle) -> Result<(), String> {
+    let attachments = {
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT file_path FROM task_attachments WHERE task_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let paths: Vec<String> = stmt
+            .query_map(rusqlite::params![task_id], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        conn.execute("DELETE FROM mission_tasks WHERE id = ?1", rusqlite::params![task_id])
+            .map_err(|e| e.to_string())?;
+        // FK ON DELETE CASCADE removes the task_attachments rows; still need to
+        // clean up the files themselves (best-effort).
+        paths
+    };
+    for p in attachments {
+        let _ = std::fs::remove_file(p);
+    }
+    let _ = app.emit("board-task-moved", json!({ "taskId": task_id, "column": null }));
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TaskAttachment {
+    pub id: i64,
+    pub task_id: String,
+    pub ord: i64,
+    pub mime_type: String,
+    pub file_path: String,
+    pub created_at: i64,
+}
+
+fn attachment_ext_for_mime(mime: &str) -> &'static str {
+    match mime {
+        "image/png" => "png",
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ => "bin",
+    }
+}
+
+#[tauri::command]
+fn write_task_attachment(task_id: String, base64_data: String, mime_type: String, app: AppHandle, db: State<DbState>) -> Result<String, String> {
+    let bytes = general_purpose::STANDARD
+        .decode(base64_data.as_bytes())
+        .map_err(|e| e.to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = data_dir.join("attachments").join(&task_id);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let conn = db.conn.lock().unwrap();
+    let next_ord: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(ord), -1) + 1 FROM task_attachments WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let ext = attachment_ext_for_mime(&mime_type);
+    let path = dir.join(format!("{next_ord}.{ext}"));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let path_str = path.to_string_lossy().to_string();
+    let created_at = now_millis();
+    conn.execute(
+        "INSERT INTO task_attachments (task_id, ord, mime_type, file_path, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![task_id, next_ord, mime_type, path_str, created_at],
+    ).map_err(|e| e.to_string())?;
+    Ok(path_str)
+}
+
+#[tauri::command]
+fn list_task_attachments(task_id: String, db: State<DbState>) -> Result<Vec<TaskAttachment>, String> {
+    let conn = db.conn.lock().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT id, task_id, ord, mime_type, file_path, created_at FROM task_attachments WHERE task_id = ?1 ORDER BY ord ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![task_id], |row| Ok(TaskAttachment {
+            id: row.get(0)?,
+            task_id: row.get(1)?,
+            ord: row.get(2)?,
+            mime_type: row.get(3)?,
+            file_path: row.get(4)?,
+            created_at: row.get(5)?,
+        }))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn delete_task_attachment(attachment_id: i64, db: State<DbState>) -> Result<(), String> {
+    let conn = db.conn.lock().unwrap();
+    let path: Option<String> = conn
+        .query_row(
+            "SELECT file_path FROM task_attachments WHERE id = ?1",
+            rusqlite::params![attachment_id],
+            |r| r.get(0),
+        )
+        .ok();
+    conn.execute("DELETE FROM task_attachments WHERE id = ?1", rusqlite::params![attachment_id])
+        .map_err(|e| e.to_string())?;
+    if let Some(p) = path {
+        let _ = std::fs::remove_file(p);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn read_task_attachment_base64(attachment_id: i64, db: State<DbState>) -> Result<(String, String), String> {
+    let (path, mime): (String, String) = {
+        let conn = db.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT file_path, mime_type FROM task_attachments WHERE id = ?1",
+            rusqlite::params![attachment_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).map_err(|e| e.to_string())?
+    };
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    Ok((general_purpose::STANDARD.encode(&bytes), mime))
 }
 
 /// Claude stores each session transcript at
@@ -5322,6 +5859,14 @@ pub fn run() {
             list_mission_tasks,
             upsert_mission_task,
             delete_mission_task,
+            list_board_tasks,
+            upsert_board_task,
+            move_board_task,
+            delete_board_task,
+            write_task_attachment,
+            list_task_attachments,
+            delete_task_attachment,
+            read_task_attachment_base64,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");
