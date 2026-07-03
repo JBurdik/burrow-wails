@@ -7,6 +7,7 @@
 
 pub mod auth;
 pub mod server;
+pub mod tailscale;
 pub mod websocket;
 
 use tauri::AppHandle;
@@ -56,10 +57,20 @@ pub fn get_http_server_status(app: AppHandle) -> serde_json::Value {
         .ok()
         .map(|d| d.join(auth::TOKEN_FILE).to_string_lossy().to_string())
         .unwrap_or_default();
+    // Token doesn't rotate today (generated once, reused indefinitely) —
+    // out of scope to add rotation here.
+    let token = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .and_then(|d| std::fs::read_to_string(d.join(auth::TOKEN_FILE)).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
     serde_json::json!({
         "enabled": is_enabled(&app),
         "port": port(&app),
         "tokenPath": token_path,
+        "token": token,
     })
 }
 

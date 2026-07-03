@@ -332,10 +332,46 @@
               <div class="field-info">
                 <span class="field-name">Status</span>
                 <span class="field-desc">
-                  <template v-if="httpStatus.enabled">Port <code>{{ httpStatus.port }}</code> — restart to bind. Token: <code>{{ httpStatus.tokenPath }}</code></template>
+                  <template v-if="httpStatus.enabled">
+                    Port <code>{{ httpStatus.port }}</code> — restart to bind.<br />
+                    Token: <code>{{ httpStatus.token }}</code>
+                    <button class="copy-btn" type="button" @click="copyToClipboard(httpStatus.token, 'token')">
+                      {{ copiedLabel === 'token' ? 'Copied' : 'Copy' }}
+                    </button>
+                  </template>
                   <template v-else>Disabled</template>
                 </span>
               </div>
+            </div>
+            <div class="field">
+              <div class="field-info">
+                <span class="field-name">Tailscale tunnel</span>
+                <span class="field-desc">
+                  <template v-if="!tailscaleStatus?.installed">Install the Tailscale app to enable remote tunneling.</template>
+                  <template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable remote tunneling.</template>
+                  <template v-else-if="!httpEnabled">Enable the HTTP/WS server above first.</template>
+                  <template v-else>Proxies the loopback server onto your tailnet via <code>tailscale serve</code> (never public internet).</template>
+                  <template v-if="tailscaleStatus?.serving">
+                    <br />URL: <code>{{ tailscaleStatus.serve_url }}</code>
+                    <button class="copy-btn" type="button" @click="copyToClipboard(tailscaleStatus.serve_url ?? '', 'url')">
+                      {{ copiedLabel === 'url' ? 'Copied' : 'Copy' }}
+                    </button>
+                    <br />Open this on your phone, paste the token above.
+                  </template>
+                </span>
+              </div>
+              <label
+                class="toggle"
+                :title="!httpEnabled ? 'Enable the HTTP/WS server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))"
+              >
+                <input
+                  type="checkbox"
+                  :checked="tailscaleStatus?.serving ?? false"
+                  :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in"
+                  @change="onToggleTailscale(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="toggle-track"><span class="toggle-thumb" /></span>
+              </label>
             </div>
           </div>
 
@@ -1901,10 +1937,10 @@ function clampRange(v: string, min: number, max: number, fallback: number): numb
 // (server::maybe_start runs once at Tauri setup), so this just writes the
 // pref file and reflects the pending state back.
 const httpEnabled = ref(false);
-const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string } | null>(null);
+const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string; token: string } | null>(null);
 async function refreshHttpStatus() {
   try {
-    const s = await invoke<{ enabled: boolean; port: number; tokenPath: string }>("get_http_server_status");
+    const s = await invoke<{ enabled: boolean; port: number; tokenPath: string; token: string }>("get_http_server_status");
     httpStatus.value = s;
     httpEnabled.value = s.enabled;
   } catch { /* browser-only dev — no Tauri backend */ }
@@ -1917,6 +1953,39 @@ async function onToggleHttp(checked: boolean) {
   await refreshHttpStatus();
 }
 refreshHttpStatus();
+
+interface TailscaleStatus {
+  installed: boolean;
+  logged_in: boolean;
+  dns_name: string | null;
+  serving: boolean;
+  serve_url: string | null;
+}
+const tailscaleStatus = ref<TailscaleStatus | null>(null);
+async function refreshTailscaleStatus() {
+  try {
+    tailscaleStatus.value = await invoke<TailscaleStatus>("get_tailscale_status");
+  } catch { /* browser-only dev */ }
+}
+async function onToggleTailscale(checked: boolean) {
+  try {
+    tailscaleStatus.value = await invoke<TailscaleStatus>("set_tailscale_serve", {
+      enabled: checked,
+      port: httpStatus.value?.port ?? 8420,
+    });
+  } catch { /* leaves tailscaleStatus as-is; toggle snaps back via v-model binding to server state */ }
+  await refreshTailscaleStatus();
+}
+refreshTailscaleStatus();
+
+const copiedLabel = ref<string | null>(null);
+async function copyToClipboard(text: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    copiedLabel.value = label;
+    setTimeout(() => { if (copiedLabel.value === label) copiedLabel.value = null; }, 1500);
+  } catch { /* clipboard unavailable */ }
+}
 
 const SHORTCUT_GROUPS = [
   {
@@ -2381,6 +2450,17 @@ const SHORTCUT_GROUPS = [
 .field-info { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
 .field-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
 .field-desc { font-size: 11px; color: var(--text-muted); }
+.copy-btn {
+  font-size: 10px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #444);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.copy-btn:hover { color: var(--text-primary); }
 
 .select {
   background: var(--bg-hover);

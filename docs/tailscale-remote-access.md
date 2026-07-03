@@ -40,18 +40,31 @@ tailscale up
 ## 3. Publish the loopback port with Tailscale Serve
 
 Burrow only ever binds loopback — it deliberately does not bind
-`0.0.0.0` or a tailnet interface itself. Use `tailscale serve` to proxy the
-local port onto your tailnet instead of relaxing Burrow's own bind:
+`0.0.0.0` or a tailnet interface itself. Flip the **Tailscale tunnel**
+toggle in Settings → the "Remote access (HTTP/WS)" group (only enabled once
+the HTTP/WS server toggle above it is on). It runs `tailscale serve --bg
+<port>` for you and shows the resulting `https://<your-machine>.<tailnet>.ts.net`
+URL right there, with a copy button, next to the bearer token (also shown
+in Settings now, not just its file path).
+
+Turning the toggle off runs `tailscale serve --https=443 off`.
+
+### Manual CLI (fallback / troubleshooting)
+
+If you'd rather drive it by hand, or need to debug why the toggle isn't
+working:
 
 ```bash
-tailscale serve --bg 8420
+tailscale serve --bg 8420          # enable
+tailscale serve status --json      # check current state
+tailscale serve --https=443 off    # disable
 ```
 
 This makes the server reachable at `https://<your-machine>.<tailnet>.ts.net`
 from any device on your tailnet, with Tailscale handling TLS. (Use
 `tailscale funnel` instead of `serve` only if you intentionally want the
 port reachable from the public internet — not recommended for this
-transport.)
+transport, and the Settings toggle never does this.)
 
 ## 4. Auth
 
@@ -104,7 +117,7 @@ http://<tailscale-host>:<port>/
 
 `/` is served straight from `dist-mobile/`, unauthenticated (a plain browser
 GET can't send an `Authorization` header — same reasoning as `/healthz`).
-Paste that same base URL and the bearer token (Settings shows the token
-*file path*; `cat` it, e.g. `cat ~/Library/Application\ Support/com.agenticide.app/http.token`)
-into the Connect screen. Sessions lists every open workspace/tab with a live
-status dot; tapping one opens a real terminal.
+Paste that same base URL and the bearer token — Settings now shows the
+token itself with a copy button, no need to `cat` the file — into the
+Connect screen. Sessions lists every open workspace/tab with a live status
+dot; tapping one opens a real terminal.

@@ -5291,6 +5291,8 @@ pub fn run() {
             set_burrow_mcp_max_depth,
             http_server::get_http_server_status,
             http_server::set_http_enabled,
+            http_server::tailscale::get_tailscale_status,
+            http_server::tailscale::set_tailscale_serve,
             burrow_mcp_flag,
             dispatch,
             register_tmux_win,
