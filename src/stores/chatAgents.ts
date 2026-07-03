@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "../lib/config";
 
 // A chat agent backs a ClaudeChat session. "stream-json" agents use the native
 // claude_* commands; "acp" agents are spawned through acp_start with the
@@ -21,7 +22,8 @@ export interface ChatAgent {
   builtin?: boolean;
 }
 
-const STORAGE_KEY = "agentic-ide.chatAgents";
+const CONFIG_KEY = "chatAgentPresets";
+const LEGACY_STORAGE_KEY = "agentic-ide.chatAgents";
 
 // Built-in agents. claude-acp/codex use the @agentclientprotocol npx adapters
 // (same org, subscription-safe); gemini/opencode have native ACP modes.
@@ -39,27 +41,26 @@ function clone(list: ChatAgent[]): ChatAgent[] {
 
 // Merge persisted agents over the built-in seeds: built-ins always present (so a
 // new release's additions appear), but user edits to a built-in win.
-function load(): ChatAgent[] {
+function normalize(parsed: unknown): ChatAgent[] {
   const base = clone(BUILTIN_AGENTS);
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return base;
-    const saved = JSON.parse(raw) as ChatAgent[];
-    if (!Array.isArray(saved)) return base;
-    const byId = new Map(base.map((a) => [a.id, a]));
-    for (const s of saved) {
-      byId.set(s.id, { ...byId.get(s.id), ...s, args: [...(s.args ?? [])], env: { ...(s.env ?? {}) }, shortcut: s.shortcut ?? byId.get(s.id)?.shortcut ?? "" } as ChatAgent);
-    }
-    return Array.from(byId.values());
-  } catch {
-    return base;
+  if (!Array.isArray(parsed)) return base;
+  const saved = parsed as ChatAgent[];
+  const byId = new Map(base.map((a) => [a.id, a]));
+  for (const s of saved) {
+    byId.set(s.id, { ...byId.get(s.id), ...s, args: [...(s.args ?? [])], env: { ...(s.env ?? {}) }, shortcut: s.shortcut ?? byId.get(s.id)?.shortcut ?? "" } as ChatAgent);
   }
+  return Array.from(byId.values());
 }
 
 export const useChatAgentsStore = defineStore("chatAgents", () => {
-  const agents = ref<ChatAgent[]>(load());
+  const agents = ref<ChatAgent[]>(clone(BUILTIN_AGENTS));
 
-  watch(agents, (val) => localStorage.setItem(STORAGE_KEY, JSON.stringify(val)), { deep: true });
+  configReady.then(() => {
+    migrateFromLocalStorage(LEGACY_STORAGE_KEY, CONFIG_KEY);
+    agents.value = normalize(getConfig<unknown>(CONFIG_KEY, clone(BUILTIN_AGENTS)));
+  });
+
+  watch(agents, (val) => setConfig(CONFIG_KEY, val), { deep: true });
 
   function byId(id: string): ChatAgent {
     return agents.value.find((a) => a.id === id) ?? agents.value[0];

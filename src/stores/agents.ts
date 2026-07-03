@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "../lib/config";
 
 export type AgentIcon = "sparkle" | "code" | "git-branch" | "robot" | "terminal" | "claude" | "openai" | "github-copilot";
 
@@ -13,7 +14,8 @@ export interface AgentConfig {
   icon: AgentIcon;
 }
 
-const STORAGE_KEY = "agentic-ide.agents";
+const CONFIG_KEY = "agentPresets";
+const LEGACY_STORAGE_KEY = "agentic-ide.agents";
 
 // Maps built-in agent IDs to their canonical icon (upgraded when loading old localStorage data).
 const ICON_MIGRATIONS: Record<string, AgentIcon> = {
@@ -31,20 +33,13 @@ const DEFAULTS: AgentConfig[] = [
   { id: "cursor", name: "Cursor AI", command: "cursor-agent", args: "", shortcut: "⌘⇧5", color: "#f472b6", icon: "terminal" },
 ];
 
-function load(): AgentConfig[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return clone(DEFAULTS);
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length) {
-      return parsed.map((a) => {
-        const base: AgentConfig = { args: "", shortcut: "", icon: "robot", color: "#888888", ...a };
-        if (ICON_MIGRATIONS[base.id]) base.icon = ICON_MIGRATIONS[base.id];
-        return base;
-      });
-    }
-  } catch {
-    /* fall through to defaults */
+function normalize(parsed: unknown): AgentConfig[] {
+  if (Array.isArray(parsed) && parsed.length) {
+    return parsed.map((a) => {
+      const base: AgentConfig = { args: "", shortcut: "", icon: "robot", color: "#888888", ...a };
+      if (ICON_MIGRATIONS[base.id]) base.icon = ICON_MIGRATIONS[base.id];
+      return base;
+    });
   }
   return clone(DEFAULTS);
 }
@@ -60,11 +55,16 @@ function makeId(): string {
 }
 
 export const useAgentsStore = defineStore("agents", () => {
-  const agents = ref<AgentConfig[]>(load());
+  const agents = ref<AgentConfig[]>(clone(DEFAULTS));
+
+  configReady.then(() => {
+    migrateFromLocalStorage(LEGACY_STORAGE_KEY, CONFIG_KEY);
+    agents.value = normalize(getConfig<unknown>(CONFIG_KEY, clone(DEFAULTS)));
+  });
 
   watch(
     agents,
-    (val) => localStorage.setItem(STORAGE_KEY, JSON.stringify(val)),
+    (val) => setConfig(CONFIG_KEY, val),
     { deep: true },
   );
 
