@@ -43,13 +43,20 @@ fn gen_token() -> String {
     format!("{nanos:x}{pid:x}{stack:x}")
 }
 
-/// Start the socket server (called once at Tauri setup). Generates + persists a
-/// token, binds `<app_data>/burrow-mcp.sock` (chmod 0600), and serves in a
+/// Start the socket server (called once at Tauri setup). Reuses a persisted
+/// token across restarts when present (so an already-connected MCP client's
+/// cached `BURROW_MCP_TOKEN` — baked in once at session-spawn time and never
+/// re-read — keeps working after the app is quit/relaunched), else generates a
+/// fresh one. Binds `<app_data>/burrow-mcp.sock` (chmod 0600) and serves in a
 /// background task. Idempotent-ish: rebinds on each launch.
 pub fn start(app: &AppHandle) {
     let Some(path) = socket_path(app) else { return };
     let Some(tok_path) = token_path(app) else { return };
-    let token = gen_token();
+    let token = std::fs::read_to_string(&tok_path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(gen_token);
     if let Some(parent) = tok_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
