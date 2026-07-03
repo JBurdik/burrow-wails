@@ -13,6 +13,8 @@ export interface Workspace {
   // Whether the directory is a git repo. Non-git folders hide all git UI.
   // Older payloads may omit it — treat undefined as git (back-compat).
   is_git?: boolean;
+  icon?: string | null;
+  sort_order: number;
 }
 
 export const useWorkspaceStore = defineStore("workspace", () => {
@@ -22,34 +24,11 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   // so switching between them never tears down running processes.
   const opened = ref<Workspace[]>([]);
 
-  // Custom icons stored as data URLs in localStorage
-  const icons = ref<Record<number, string>>({});
-
-  // Persisted manual order of top-level workspaces (array of ids). The DB has no
-  // sort column, so the user's drag order lives in localStorage and is applied as
-  // a sort over the raw list. Unknown ids (newly created) sort to the end.
-  const ORDER_KEY = "burrow.ws.order";
-  const order = ref<number[]>(_loadOrder());
-
-  function _loadOrder(): number[] {
-    try { return JSON.parse(localStorage.getItem(ORDER_KEY) || "[]"); }
-    catch { return []; }
-  }
-  function _saveOrder() {
-    localStorage.setItem(ORDER_KEY, JSON.stringify(order.value));
-  }
-
-  // Top-level repo workspaces (no parent), in the user's manual order. Worktrees
-  // are nested under their parent.
+  // Top-level repo workspaces (no parent), ordered by the SQLite-backed
+  // sort_order column. Worktrees are nested under their parent.
   const topLevel = computed(() => {
     const tops = workspaces.value.filter((w) => !w.parent_id);
-    const pos = new Map(order.value.map((id, i) => [id, i]));
-    return [...tops].sort((a, b) => {
-      const pa = pos.has(a.id) ? pos.get(a.id)! : Infinity;
-      const pb = pos.has(b.id) ? pos.get(b.id)! : Infinity;
-      if (pa !== pb) return pa - pb;
-      return a.id - b.id; // stable fallback for ids not yet in the order list
-    });
+    return [...tops].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
   });
 
   // Move a top-level workspace from one visible position to another, persisting
@@ -59,8 +38,11 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     if (from < 0 || from >= ids.length || to < 0 || to >= ids.length) return;
     const [moved] = ids.splice(from, 1);
     ids.splice(to, 0, moved);
-    order.value = ids;
-    _saveOrder();
+    ids.forEach((id, i) => {
+      const w = workspaces.value.find((x) => x.id === id);
+      if (w) w.sort_order = i;
+    });
+    invoke("set_workspace_order", { ids }).catch(() => {});
   }
   // Worktree rows grouped by their parent repo id.
   const worktreesByParent = computed(() => {
@@ -71,30 +53,55 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     return m;
   });
 
-  function _loadIcons() {
-    try {
-      const stored = localStorage.getItem("ws-icons");
-      if (stored) icons.value = JSON.parse(stored);
-    } catch {}
-  }
-
-  function _saveIcons() {
-    localStorage.setItem("ws-icons", JSON.stringify(icons.value));
-  }
+  const icons = computed(() => {
+    const m: Record<number, string> = {};
+    for (const w of workspaces.value) if (w.icon) m[w.id] = w.icon;
+    return m;
+  });
 
   function setIcon(id: number, dataUrl: string) {
-    icons.value[id] = dataUrl;
-    _saveIcons();
+    const w = workspaces.value.find((x) => x.id === id);
+    if (w) w.icon = dataUrl;
+    invoke("set_workspace_icon", { id, icon: dataUrl }).catch(() => {});
   }
 
   function clearIcon(id: number) {
-    delete icons.value[id];
-    _saveIcons();
+    const w = workspaces.value.find((x) => x.id === id);
+    if (w) w.icon = null;
+    invoke("set_workspace_icon", { id, icon: null }).catch(() => {});
+  }
+
+  async function migrateLegacyLocalStorage() {
+    const iconsRaw = localStorage.getItem("ws-icons");
+    if (iconsRaw) {
+      try {
+        const legacy: Record<string, string> = JSON.parse(iconsRaw);
+        for (const [idStr, dataUrl] of Object.entries(legacy)) {
+          const id = Number(idStr);
+          if (workspaces.value.some((w) => w.id === id)) {
+            await invoke("set_workspace_icon", { id, icon: dataUrl }).catch(() => {});
+          }
+        }
+      } catch {}
+      localStorage.removeItem("ws-icons");
+    }
+    const orderRaw = localStorage.getItem("burrow.ws.order");
+    if (orderRaw) {
+      try {
+        const legacyOrder: number[] = JSON.parse(orderRaw);
+        const known = legacyOrder.filter((id) => workspaces.value.some((w) => w.id === id));
+        if (known.length) await invoke("set_workspace_order", { ids: known }).catch(() => {});
+      } catch {}
+      localStorage.removeItem("burrow.ws.order");
+    }
   }
 
   async function load() {
     workspaces.value = await invoke<Workspace[]>("list_workspaces");
-    _loadIcons();
+    await migrateLegacyLocalStorage();
+    if (localStorage.getItem("ws-icons") === null && localStorage.getItem("burrow.ws.order") === null) {
+      workspaces.value = await invoke<Workspace[]>("list_workspaces"); // re-fetch with migrated values
+    }
   }
 
   async function create(name: string, path: string): Promise<Workspace> {
