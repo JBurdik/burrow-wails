@@ -6,6 +6,7 @@ import type { TermStatus } from "@/lib/terminalStatus";
 import { agentStatusMachine } from "@/machines/agentStatus";
 import type { AgentStatusEvent } from "@/machines/agentStatus";
 import { useChatAgentsStore } from "@/stores/chatAgents";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 export interface ClaudeSession {
   id: number;
@@ -28,11 +29,16 @@ export interface ClaudeSession {
   transport?: 'stream-json' | 'acp';
 }
 
-const SESSIONS_KEY = "burrow.claude.sessions";
-const ACTIVE_KEY = "burrow.claude.active";
-const COUNTER_KEY = "burrow.claude.nextId";
-const TURNS_KEY = "burrow.claude.turns";
-const RULES_KEY = "burrow.claude.permRules";
+const SESSIONS_KEY = "chatSessions";
+const SESSIONS_LEGACY_KEY = "burrow.claude.sessions";
+const ACTIVE_KEY = "chatActiveByWs";
+const ACTIVE_LEGACY_KEY = "burrow.claude.active";
+const COUNTER_KEY = "chatIdCounter";
+const COUNTER_LEGACY_KEY = "burrow.claude.nextId";
+const TURNS_KEY = "chatTurns";
+const TURNS_LEGACY_KEY = "burrow.claude.turns";
+const RULES_KEY = "chatPermissionRules";
+const RULES_LEGACY_KEY = "burrow.claude.permRules";
 
 export interface TurnEvent {
   ts: number;
@@ -42,48 +48,16 @@ export interface TurnEvent {
 
 const WINDOW_MS = 5 * 60 * 60 * 1000; // 5 hours
 
-function loadTurns(): TurnEvent[] {
-  try {
-    const raw = localStorage.getItem(TURNS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-function loadSessions(): ClaudeSession[] {
-  try {
-    const raw = localStorage.getItem(SESSIONS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-function loadActive(): Record<number, number> {
-  try {
-    const raw = localStorage.getItem(ACTIVE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function loadCounter(): number {
-  return parseInt(localStorage.getItem(COUNTER_KEY) ?? "1", 10);
-}
-
-function loadRules(): string[] {
-  try {
-    const raw = localStorage.getItem(RULES_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
 type SessionActor = ReturnType<typeof createActor<typeof agentStatusMachine>>;
 
 export const useClaudeChatsStore = defineStore("claudeChats", () => {
-  const sessions = ref<ClaudeSession[]>(loadSessions());
-  const activeByWs = ref<Record<number, number>>(loadActive());
-  let nextId = loadCounter();
-  const turns = ref<TurnEvent[]>(loadTurns());
+  const sessions = ref<ClaudeSession[]>([]);
+  const activeByWs = ref<Record<number, number>>({});
+  let nextId = 1;
+  const turns = ref<TurnEvent[]>([]);
   // "Allow always" rules — opaque match keys (e.g. "Bash:git" or "Write").
   // Matched against the key(s) derived from an incoming can_use_tool request.
-  const permissionRules = ref<string[]>(loadRules());
+  const permissionRules = ref<string[]>([]);
 
   // XState actors — one per session, keyed by session id. Not persisted.
   const actors = new Map<number, SessionActor>();
@@ -97,27 +71,43 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     return actor;
   }
 
-  // Restore actors for sessions loaded from localStorage (all start idle — correct since busy=false on persist).
-  sessions.value.forEach(spawnActor);
+  configReady.then(() => {
+    migrateFromLocalStorage(SESSIONS_LEGACY_KEY, SESSIONS_KEY);
+    sessions.value = getConfig<ClaudeSession[]>(SESSIONS_KEY, []);
+    // Restore actors for sessions loaded from config (all start idle — correct since busy=false on persist).
+    sessions.value.forEach(spawnActor);
+
+    migrateFromLocalStorage(ACTIVE_LEGACY_KEY, ACTIVE_KEY);
+    activeByWs.value = getConfig<Record<number, number>>(ACTIVE_KEY, {});
+
+    migrateFromLocalStorage(COUNTER_LEGACY_KEY, COUNTER_KEY);
+    nextId = getConfig<number>(COUNTER_KEY, 1);
+
+    migrateFromLocalStorage(TURNS_LEGACY_KEY, TURNS_KEY);
+    turns.value = getConfig<TurnEvent[]>(TURNS_KEY, []);
+
+    migrateFromLocalStorage(RULES_LEGACY_KEY, RULES_KEY);
+    permissionRules.value = getConfig<string[]>(RULES_KEY, []);
+  });
 
   function addPermissionRule(key: string) {
     if (!key || permissionRules.value.includes(key)) return;
     permissionRules.value.push(key);
-    localStorage.setItem(RULES_KEY, JSON.stringify(permissionRules.value));
+    setConfig(RULES_KEY, permissionRules.value);
   }
   function hasPermissionRule(keys: string[]): boolean {
     return keys.some((k) => permissionRules.value.includes(k));
   }
   function clearPermissionRules() {
     permissionRules.value = [];
-    localStorage.removeItem(RULES_KEY);
+    setConfig(RULES_KEY, []);
   }
 
   function persist() {
     const toSave = sessions.value.map((s) => ({ ...s, busy: false }));
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(toSave));
-    localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeByWs.value));
-    localStorage.setItem(COUNTER_KEY, String(nextId));
+    setConfig(SESSIONS_KEY, toSave);
+    setConfig(ACTIVE_KEY, activeByWs.value);
+    setConfig(COUNTER_KEY, nextId);
   }
 
   function sessionsForWs(workspaceId: number): ClaudeSession[] {
@@ -192,7 +182,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     turns.value.push({ ts: now, inputTokens, outputTokens });
     // Prune events older than 5h to keep storage small.
     turns.value = turns.value.filter((t) => now - t.ts < WINDOW_MS);
-    localStorage.setItem(TURNS_KEY, JSON.stringify(turns.value));
+    setConfig(TURNS_KEY, turns.value);
   }
 
   const turnsInWindow = computed(() => {
