@@ -661,6 +661,7 @@ import ChatAgentConfig from "@/components/ChatAgentConfig.vue";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string);
@@ -805,9 +806,17 @@ async function pickSession(sid: string) {
 const acpHistoryBtnEl = ref<HTMLElement | null>(null);
 const acpHistoryMenuEl = ref<HTMLElement | null>(null);
 const acpHistoryPos = ref({ top: 0, left: 0 });
-const acpModelKey = (cid: number) => `burrow.acpModel.${cid}`;
-const acpModeKey = (cid: number) => `burrow.acpMode.${cid}`;
-const acpEffortKey = (cid: number) => `burrow.acpEffort.${cid}`;
+// Legacy per-chat localStorage key prefixes (kept only for the one-time migration below).
+type AcpChatSettings = { mode?: string; model?: string; effort?: string };
+function getAcpSetting(cid: number, field: keyof AcpChatSettings): string | undefined {
+  const rec = getConfig<Record<string, AcpChatSettings>>("chatAcpSettings", {});
+  return rec[String(cid)]?.[field];
+}
+function setAcpSetting(cid: number, field: keyof AcpChatSettings, value: string) {
+  const rec = { ...getConfig<Record<string, AcpChatSettings>>("chatAcpSettings", {}) };
+  rec[String(cid)] = { ...rec[String(cid)], [field]: value };
+  setConfig("chatAcpSettings", rec);
+}
 const acpModelOption = computed(() => acpConfigOptions.value.find((o) => o.id === "model"));
 const acpEffortOption = computed(() => acpConfigOptions.value.find((o) => o.id === "effort"));
 const acpModeLabel = computed(() => acpModes.value?.availableModes.find((m) => m.id === acpModes.value?.currentModeId)?.name ?? "Mode");
@@ -849,7 +858,7 @@ function onAcpMenuOutside(e: MouseEvent) {
 async function acpSelectMode(modeId: string) {
   acpModeMenuOpen.value = false;
   if (acpModes.value) acpModes.value.currentModeId = modeId;
-  localStorage.setItem(acpModeKey(props.chatId), modeId);
+  setAcpSetting(props.chatId, "mode", modeId);
   try {
     const rid = await invoke<number>("acp_set_mode", { id: props.chatId, modeId });
     acpControlIds.add(rid);
@@ -860,7 +869,7 @@ async function acpSelectMode(modeId: string) {
 async function acpSelectModel(value: string) {
   acpModelMenuOpen.value = false;
   if (acpModelOption.value) acpModelOption.value.currentValue = value;
-  localStorage.setItem(acpModelKey(props.chatId), value);
+  setAcpSetting(props.chatId, "model", value);
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "model", value });
     acpControlIds.add(rid);
@@ -871,7 +880,7 @@ async function acpSelectModel(value: string) {
 async function acpSelectEffort(value: string) {
   acpEffortMenuOpen.value = false;
   if (acpEffortOption.value) acpEffortOption.value.currentValue = value;
-  localStorage.setItem(acpEffortKey(props.chatId), value);
+  setAcpSetting(props.chatId, "effort", value);
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "effort", value });
     acpControlIds.add(rid);
@@ -904,7 +913,7 @@ async function resumeAcpSession(sid: string) {
   busy.value = false;
   sessionId.value = sid;
   chats.sync(props.chatId, { claudeSessionId: sid });
-  localStorage.removeItem(msgKey(props.chatId)); // replayed history repopulates it
+  clearMessageHistory(props.chatId); // replayed history repopulates it
   await ensureAcpListeners();
   await invoke("acp_stop", { id: props.chatId }).catch(() => {});
   // emitHistory:true → Rust forwards the session/load replay so old turns render.
@@ -978,9 +987,15 @@ function shareSelection() {
 
 // Profile switcher
 const profilesStore = useProfilesStore();
-const PROFILE_KEY = (id: number) => `burrow.claude.profileId.${id}`;
+// Legacy per-chat localStorage key prefix (kept only for the one-time migration below).
 function loadProfileId(id: number): string {
-  return localStorage.getItem(PROFILE_KEY(id)) ?? DEFAULT_PROFILE_ID;
+  const rec = getConfig<Record<string, string>>("chatProfileSelection", {});
+  return rec[String(id)] ?? DEFAULT_PROFILE_ID;
+}
+function saveProfileId(id: number, profileId: string) {
+  const rec = { ...getConfig<Record<string, string>>("chatProfileSelection", {}) };
+  rec[String(id)] = profileId;
+  setConfig("chatProfileSelection", rec);
 }
 const selectedProfileId = ref<string>(loadProfileId(props.chatId));
 const selectedProfile = computed(() => profilesStore.get(selectedProfileId.value));
@@ -1005,7 +1020,7 @@ async function selectProfile(id: string) {
   profileMenuOpen.value = false;
   if (id === selectedProfileId.value) return;
   selectedProfileId.value = id;
-  localStorage.setItem(PROFILE_KEY(props.chatId), id);
+  saveProfileId(props.chatId, id);
   await restartClaude();
 }
 
@@ -1016,9 +1031,14 @@ const CLAUDE_MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ] as const;
 type ClaudeModelId = typeof CLAUDE_MODELS[number]["id"];
+// Legacy localStorage key (kept only for the one-time migration below).
 const MODEL_KEY = props.modelKey ?? "burrow.claude.model";
+// Config key: dedicated per-modelKey key (mirrors the old dedicated-localStorage-key
+// behavior) so a future caller passing modelKey still gets an isolated selection;
+// with no modelKey it collapses to the single global "chatLastUsedModel" key.
+const MODEL_CONFIG_KEY = props.modelKey ? `chatLastUsedModel:${props.modelKey}` : "chatLastUsedModel";
 function loadModel(): ClaudeModelId {
-  const v = localStorage.getItem(MODEL_KEY);
+  const v = getConfig<string | null>(MODEL_CONFIG_KEY, null);
   if (CLAUDE_MODELS.some((m) => m.id === v)) return v as ClaudeModelId;
   if (props.defaultModel && CLAUDE_MODELS.some((m) => m.id === props.defaultModel)) {
     return props.defaultModel as ClaudeModelId;
@@ -1048,7 +1068,7 @@ async function selectModel(id: ClaudeModelId) {
   modelMenuOpen.value = false;
   if (id === selectedModel.value) return;
   selectedModel.value = id;
-  localStorage.setItem(MODEL_KEY, id);
+  setConfig(MODEL_CONFIG_KEY, id);
   await restartClaude();
 }
 const selectedModelLabel = computed(() => CLAUDE_MODELS.find((m) => m.id === selectedModel.value)?.label ?? selectedModel.value);
@@ -1177,21 +1197,26 @@ interface AccountInfo {
   status_text: string;        // raw `claude status` stdout
 }
 
-function msgKey(chatId: number) { return `burrow.claude.msgs.${chatId}`; }
+// Legacy per-chat localStorage key prefix (kept only for the one-time migration below).
 
 function loadMessages(chatId: number): ChatMessage[] {
-  try {
-    const raw = localStorage.getItem(msgKey(chatId));
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+  const rec = getConfig<Record<string, unknown>>("chatMessageHistory", {});
+  const raw = rec[String(chatId)];
+  return Array.isArray(raw) ? (raw as ChatMessage[]) : [];
 }
 
 function saveMessages(chatId: number, msgs: ChatMessage[]) {
-  try {
-    // Only persist non-partial messages, cap at 200 to bound storage
-    const toSave = msgs.filter((m) => !m.partial).slice(-200);
-    localStorage.setItem(msgKey(chatId), JSON.stringify(toSave));
-  } catch {}
+  // Only persist non-partial messages, cap at 200 to bound storage
+  const toSave = msgs.filter((m) => !m.partial).slice(-200);
+  const rec = { ...getConfig<Record<string, unknown>>("chatMessageHistory", {}) };
+  rec[String(chatId)] = toSave;
+  setConfig("chatMessageHistory", rec);
+}
+
+function clearMessageHistory(chatId: number) {
+  const rec = { ...getConfig<Record<string, unknown>>("chatMessageHistory", {}) };
+  delete rec[String(chatId)];
+  setConfig("chatMessageHistory", rec);
 }
 
 let nextMsgId = 0;
@@ -1233,21 +1258,32 @@ async function ensureAcpListeners() {
 // Permission mode (per-chat, persisted). Mirrors `claude --permission-mode`:
 // default | auto | acceptEdits | plan | dontAsk | bypassPermissions.
 type PermMode = "default" | "auto" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions";
-const PERM_KEY = (id: number) => `burrow.claude.permMode.${id}`;
+// Legacy per-chat localStorage key prefixes (kept only for the one-time migration below).
 const PERM_LAST_KEY = "burrow.claude.permMode.last";
 const PERM_VALUES: PermMode[] = ["default", "auto", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
 function isPermMode(v: unknown): v is PermMode {
   return typeof v === "string" && (PERM_VALUES as string[]).includes(v);
 }
+interface ChatPermissionModeConfig {
+  byChat: Record<string, string>;
+  last?: string;
+  dangerousByChat: Record<string, boolean>;
+}
 function loadPermMode(id: number): PermMode {
-  const v = localStorage.getItem(PERM_KEY(id));
+  const cfg = getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} });
+  const v = cfg.byChat[String(id)];
   if (isPermMode(v)) return v;
   // Migrate the old boolean "dangerous mode" flag → bypassPermissions.
-  if (localStorage.getItem(`burrow.claude.dangerous.${id}`) === "1") return "bypassPermissions";
+  if (cfg.dangerousByChat[String(id)]) return "bypassPermissions";
   // New chat: inherit the last-used mode so the user doesn't have to re-pick every time.
-  const last = localStorage.getItem(PERM_LAST_KEY);
-  if (isPermMode(last)) return last;
+  if (isPermMode(cfg.last)) return cfg.last;
   return "default";
+}
+function savePermMode(id: number, mode: PermMode) {
+  const cfg = { ...getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }) };
+  cfg.byChat = { ...cfg.byChat, [String(id)]: mode };
+  cfg.last = mode;
+  setConfig("chatPermissionMode", cfg);
 }
 const permMode = ref<PermMode>(loadPermMode(props.chatId));
 const PERM_META: Record<PermMode, { label: string; title: string; danger?: boolean }> = {
@@ -1699,15 +1735,15 @@ function onAcpData(raw: string) {
     }
     // Re-apply the chat's persisted model / permission mode (selectors reset to the
     // adapter default on each (re)start, so restore the user's choice).
-    const savedModel = localStorage.getItem(acpModelKey(props.chatId));
+    const savedModel = getAcpSetting(props.chatId, "model");
     if (savedModel && acpModelOption.value && acpModelOption.value.currentValue !== savedModel) {
       acpSelectModel(savedModel);
     }
-    const savedMode = localStorage.getItem(acpModeKey(props.chatId));
+    const savedMode = getAcpSetting(props.chatId, "mode");
     if (savedMode && acpModes.value && acpModes.value.currentModeId !== savedMode) {
       acpSelectMode(savedMode);
     }
-    const savedEffort = localStorage.getItem(acpEffortKey(props.chatId));
+    const savedEffort = getAcpSetting(props.chatId, "effort");
     if (savedEffort && acpEffortOption.value && acpEffortOption.value.currentValue !== savedEffort) {
       acpSelectEffort(savedEffort);
     }
@@ -2049,8 +2085,7 @@ async function selectPermMode(mode: PermMode) {
   permMenuOpen.value = false;
   if (mode === permMode.value) return;
   permMode.value = mode;
-  localStorage.setItem(PERM_KEY(props.chatId), permMode.value);
-  localStorage.setItem(PERM_LAST_KEY, permMode.value);
+  savePermMode(props.chatId, permMode.value);
   await restartClaude();
 }
 
@@ -2121,7 +2156,7 @@ async function clearChat() {
   sessionCost.value = 0;
   claudeGeneratedTitle.value = false;
   acpPermRpcId.value = null;
-  localStorage.removeItem(msgKey(props.chatId));
+  clearMessageHistory(props.chatId);
   chats.sync(props.chatId, { claudeSessionId: "", busy: false, messageCount: 0, title: `Chat` });
   const projSettings = scriptsStore.settingsFor(props.cwd);
   if (acp) {
@@ -2321,7 +2356,101 @@ function onWindowKeydown(e: KeyboardEvent) {
   if (e.key === "n" || e.key === "N") { e.preventDefault(); respondPermission(false); }
 }
 
+// One-time migration of the legacy per-chat-id localStorage keys into config.json.
+// Enumerates ALL chat ids found in localStorage (not just props.chatId), so every
+// chat's history/settings survive the move. Guarded per config-key so it only runs
+// once app-wide (subsequent calls see the config key already populated and no-op).
+function migrateLegacyChatConfig() {
+  const MISSING = Symbol("missing");
+
+  // chatMessageHistory: burrow.claude.msgs.<id>
+  if (getConfig<unknown>("chatMessageHistory", MISSING) === MISSING) {
+    const re = /^burrow\.claude\.msgs\.(\d+)$/;
+    const rec: Record<string, unknown> = {};
+    const keys = Object.keys(localStorage).filter((k) => re.test(k));
+    for (const k of keys) {
+      const id = k.match(re)![1];
+      const raw = localStorage.getItem(k);
+      if (raw === null) continue;
+      try { rec[id] = JSON.parse(raw); } catch { /* skip malformed entry */ continue; }
+    }
+    setConfig("chatMessageHistory", rec);
+    for (const k of keys) localStorage.removeItem(k);
+  }
+
+  // chatAcpSettings: burrow.acpMode.<id> / burrow.acpModel.<id> / burrow.acpEffort.<id>
+  if (getConfig<unknown>("chatAcpSettings", MISSING) === MISSING) {
+    const reMode = /^burrow\.acpMode\.(\d+)$/;
+    const reModel = /^burrow\.acpModel\.(\d+)$/;
+    const reEffort = /^burrow\.acpEffort\.(\d+)$/;
+    const rec: Record<string, AcpChatSettings> = {};
+    const keys = Object.keys(localStorage).filter((k) => reMode.test(k) || reModel.test(k) || reEffort.test(k));
+    for (const k of keys) {
+      const raw = localStorage.getItem(k);
+      if (raw === null) continue;
+      let m = k.match(reMode);
+      if (m) { (rec[m[1]] ??= {}).mode = raw; continue; }
+      m = k.match(reModel);
+      if (m) { (rec[m[1]] ??= {}).model = raw; continue; }
+      m = k.match(reEffort);
+      if (m) { (rec[m[1]] ??= {}).effort = raw; continue; }
+    }
+    setConfig("chatAcpSettings", rec);
+    for (const k of keys) localStorage.removeItem(k);
+  }
+
+  // chatProfileSelection: burrow.claude.profileId.<id>
+  if (getConfig<unknown>("chatProfileSelection", MISSING) === MISSING) {
+    const re = /^burrow\.claude\.profileId\.(\d+)$/;
+    const rec: Record<string, string> = {};
+    const keys = Object.keys(localStorage).filter((k) => re.test(k));
+    for (const k of keys) {
+      const id = k.match(re)![1];
+      const raw = localStorage.getItem(k);
+      if (raw !== null) rec[id] = raw;
+    }
+    setConfig("chatProfileSelection", rec);
+    for (const k of keys) localStorage.removeItem(k);
+  }
+
+  // chatLastUsedModel: global "burrow.claude.model" (or the per-instance MODEL_KEY).
+  migrateFromLocalStorage(MODEL_KEY, MODEL_CONFIG_KEY);
+
+  // chatPermissionMode: burrow.claude.permMode.<id> / burrow.claude.permMode.last /
+  // burrow.claude.dangerous.<id> — collapse into one record.
+  if (getConfig<unknown>("chatPermissionMode", MISSING) === MISSING) {
+    const rePerm = /^burrow\.claude\.permMode\.(\d+)$/;
+    const reDanger = /^burrow\.claude\.dangerous\.(\d+)$/;
+    const byChat: Record<string, string> = {};
+    const dangerousByChat: Record<string, boolean> = {};
+    const keys = Object.keys(localStorage).filter(
+      (k) => k !== PERM_LAST_KEY && (rePerm.test(k) || reDanger.test(k)),
+    );
+    for (const k of keys) {
+      let m = k.match(rePerm);
+      if (m) { const v = localStorage.getItem(k); if (v !== null) byChat[m[1]] = v; continue; }
+      m = k.match(reDanger);
+      if (m) { dangerousByChat[m[1]] = localStorage.getItem(k) === "1"; continue; }
+    }
+    const last = localStorage.getItem(PERM_LAST_KEY);
+    const cfg: ChatPermissionModeConfig = { byChat, dangerousByChat };
+    if (last !== null) cfg.last = last;
+    setConfig("chatPermissionMode", cfg);
+    for (const k of keys) localStorage.removeItem(k);
+    if (last !== null) localStorage.removeItem(PERM_LAST_KEY);
+  }
+}
+
 onMounted(async () => {
+  // Config must be loaded (and legacy localStorage migrated) before any of the
+  // config-backed refs below are trusted — reload them here once configReady settles.
+  await configReady;
+  migrateLegacyChatConfig();
+  messages.value = loadMessages(props.chatId);
+  selectedProfileId.value = loadProfileId(props.chatId);
+  selectedModel.value = loadModel();
+  permMode.value = loadPermMode(props.chatId);
+
   chats.markSeen(props.chatId);
   window.addEventListener("keydown", onWindowKeydown);
   window.addEventListener("mousedown", onPermMenuOutside);
