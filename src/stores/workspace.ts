@@ -71,9 +71,11 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     invoke("set_workspace_icon", { id, icon: null }).catch(() => {});
   }
 
-  async function migrateLegacyLocalStorage() {
+  async function migrateLegacyLocalStorage(): Promise<boolean> {
+    let migrated = false;
     const iconsRaw = localStorage.getItem("ws-icons");
     if (iconsRaw) {
+      migrated = true;
       try {
         const legacy: Record<string, string> = JSON.parse(iconsRaw);
         for (const [idStr, dataUrl] of Object.entries(legacy)) {
@@ -87,6 +89,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     }
     const orderRaw = localStorage.getItem("burrow.ws.order");
     if (orderRaw) {
+      migrated = true;
       try {
         const legacyOrder: number[] = JSON.parse(orderRaw);
         const known = legacyOrder.filter((id) => workspaces.value.some((w) => w.id === id));
@@ -94,12 +97,13 @@ export const useWorkspaceStore = defineStore("workspace", () => {
       } catch {}
       localStorage.removeItem("burrow.ws.order");
     }
+    return migrated;
   }
 
   async function load() {
     workspaces.value = await invoke<Workspace[]>("list_workspaces");
-    await migrateLegacyLocalStorage();
-    if (localStorage.getItem("ws-icons") === null && localStorage.getItem("burrow.ws.order") === null) {
+    const migrated = await migrateLegacyLocalStorage();
+    if (migrated) {
       workspaces.value = await invoke<Workspace[]>("list_workspaces"); // re-fetch with migrated values
     }
   }
