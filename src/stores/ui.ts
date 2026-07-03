@@ -2,6 +2,7 @@ import { ref, computed, watch } from "vue";
 import { defineStore } from "pinia";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, DEFAULT_THEME_KEY, findTheme } from "@/themes";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace("#", "");
@@ -12,7 +13,8 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-const PREFS_KEY = "agentic-ide.prefs";
+const PREFS_KEY = "agentic-ide.prefs"; // legacy localStorage key, migrated once into config.json
+const CONFIG_KEY = "uiPrefs";
 
 // Font family presets. `value` is the CSS font-family stack applied.
 export interface FontPreset {
@@ -167,17 +169,12 @@ const DEFAULT_PREFS: Prefs = {
   spawnMode: "terminal",
 };
 
-function loadPrefs(): Prefs {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) {
-      const stored = { ...DEFAULT_PREFS, ...JSON.parse(raw) };
-      // Migrate installs saved below the current default up to it.
-      if (stored.uiFontSize < DEFAULT_PREFS.uiFontSize) stored.uiFontSize = DEFAULT_PREFS.uiFontSize;
-      return stored;
-    }
-  } catch {
-    /* ignore */
+function normalize(parsed: unknown): Prefs {
+  if (parsed && typeof parsed === "object") {
+    const stored = { ...DEFAULT_PREFS, ...(parsed as Partial<Prefs>) };
+    // Migrate installs saved below the current default up to it.
+    if (stored.uiFontSize < DEFAULT_PREFS.uiFontSize) stored.uiFontSize = DEFAULT_PREFS.uiFontSize;
+    return stored;
   }
   return { ...DEFAULT_PREFS };
 }
@@ -188,7 +185,7 @@ export const useUIStore = defineStore("ui", () => {
   // full-screen-overlay pattern as Settings. Not persisted: reopens closed on restart.
   const boardRepoId = ref<number | null>(null);
 
-  const loaded = loadPrefs();
+  const loaded = { ...DEFAULT_PREFS };
   const uiFont = ref(loaded.uiFont);
   const uiFontSize = ref(loaded.uiFontSize);
   const uiScale = ref(loaded.uiScale);
@@ -238,6 +235,57 @@ export const useUIStore = defineStore("ui", () => {
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
   const missionActiveCount = ref(0);
+
+  configReady.then(() => {
+    migrateFromLocalStorage(PREFS_KEY, CONFIG_KEY);
+    const p = normalize(getConfig<unknown>(CONFIG_KEY, DEFAULT_PREFS));
+    uiFont.value = p.uiFont;
+    uiFontSize.value = p.uiFontSize;
+    uiScale.value = p.uiScale;
+    terminalFont.value = p.terminalFont;
+    terminalFontSize.value = p.terminalFontSize;
+    swapPanels.value = p.swapPanels;
+    rightPanelVisible.value = p.rightPanelVisible;
+    theme.value = p.theme;
+    soundEnabled.value = p.soundEnabled;
+    soundDoneEnabled.value = p.soundDoneEnabled;
+    soundWaitingEnabled.value = p.soundWaitingEnabled;
+    soundDoneId.value = p.soundDoneId;
+    soundDoneCustomPath.value = p.soundDoneCustomPath;
+    soundWaitingId.value = p.soundWaitingId;
+    soundWaitingCustomPath.value = p.soundWaitingCustomPath;
+    soundVolume.value = p.soundVolume;
+    maxAgents.value = p.maxAgents;
+    mcpMaxDepth.value = p.mcpMaxDepth;
+    debugOverlay.value = p.debugOverlay;
+    floatCorner.value = p.floatCorner;
+    worktreesDir.value = p.worktreesDir;
+    mode.value = p.mode;
+    missionShowActivity.value = p.missionShowActivity;
+    bgImagePath.value = p.bgImagePath;
+    bgOpacity.value = p.bgOpacity;
+    blurPanels.value = p.blurPanels;
+    blurContent.value = p.blurContent;
+    blurTerminal.value = p.blurTerminal;
+    blurOverlay.value = p.blurOverlay;
+    blurDropdown.value = p.blurDropdown ?? 18;
+    ntfyEnabled.value = p.ntfyEnabled;
+    ntfyServer.value = p.ntfyServer;
+    ntfyTopic.value = p.ntfyTopic;
+    ntfyToken.value = p.ntfyToken;
+    ntfyEvents.value = p.ntfyEvents;
+    ntfyOnlyWhenAway.value = p.ntfyOnlyWhenAway;
+    petsEnabled.value = p.petsEnabled;
+    petsSpeech.value = p.petsSpeech;
+    petsLeveling.value = p.petsLeveling;
+    floatChatEnabled.value = p.floatChatEnabled;
+    floatChatOpen.value = p.floatChatOpen;
+    sidebarWidth.value = p.sidebarWidth ?? 220;
+    rightPanelWidth.value = p.rightPanelWidth ?? 300;
+    toastPosition.value = p.toastPosition ?? "bottom-left";
+    defaultChatAgent.value = p.defaultChatAgent ?? "claude";
+    spawnMode.value = p.spawnMode ?? "terminal";
+  });
 
   // Push the float-window corner to Rust whenever it changes (and on load), so
   // every floating window snaps + stacks at the chosen corner.
@@ -350,9 +398,9 @@ export const useUIStore = defineStore("ui", () => {
   if (bgImagePath.value) loadAndApplyBg(bgImagePath.value);
 
   function savePrefs() {
-    localStorage.setItem(
-      PREFS_KEY,
-      JSON.stringify({
+    setConfig(
+      CONFIG_KEY,
+      {
         uiFont: uiFont.value,
         uiFontSize: uiFontSize.value,
         uiScale: uiScale.value,
@@ -399,7 +447,7 @@ export const useUIStore = defineStore("ui", () => {
         toastPosition: toastPosition.value,
         defaultChatAgent: defaultChatAgent.value,
         spawnMode: spawnMode.value,
-      } satisfies Prefs),
+      } satisfies Prefs,
     );
   }
 
