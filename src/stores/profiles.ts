@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "../lib/config";
 
 // A Claude "profile" = a launch identity: which binary to run, which config dir
 // (CLAUDE_CONFIG_DIR — sessions/auth/settings live there, so a profile is really
@@ -15,7 +16,8 @@ export interface ClaudeProfile {
   orgAccount: boolean; // org/team accounts can't use OAuth usage API — skip to local JSONL scan
 }
 
-const STORAGE_KEY = "agentic-ide.claude-profiles";
+const CONFIG_KEY = "claudeProfiles";
+const LEGACY_STORAGE_KEY = "agentic-ide.claude-profiles";
 
 // The built-in profile is always present and can't be deleted — it's the plain
 // `claude` launch with no overrides (matches the pre-profiles behaviour).
@@ -25,26 +27,19 @@ function defaults(): ClaudeProfile[] {
   return [{ id: DEFAULT_PROFILE_ID, name: "Default", command: "claude", configDir: "", args: "", orgAccount: false }];
 }
 
-function load(): ClaudeProfile[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaults();
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length) {
-      const list: ClaudeProfile[] = parsed.map((p) => ({
-        id: String(p.id),
-        name: String(p.name ?? "Profile"),
-        command: String(p.command ?? "claude"),
-        configDir: String(p.configDir ?? ""),
-        args: String(p.args ?? ""),
-        orgAccount: Boolean(p.orgAccount ?? false),
-      }));
-      // Guarantee the default profile exists (first slot).
-      if (!list.some((p) => p.id === DEFAULT_PROFILE_ID)) list.unshift(defaults()[0]);
-      return list;
-    }
-  } catch {
-    /* fall through */
+function normalize(parsed: unknown): ClaudeProfile[] {
+  if (Array.isArray(parsed) && parsed.length) {
+    const list: ClaudeProfile[] = parsed.map((p: any) => ({
+      id: String(p.id),
+      name: String(p.name ?? "Profile"),
+      command: String(p.command ?? "claude"),
+      configDir: String(p.configDir ?? ""),
+      args: String(p.args ?? ""),
+      orgAccount: Boolean(p.orgAccount ?? false),
+    }));
+    // Guarantee the default profile exists (first slot).
+    if (!list.some((p) => p.id === DEFAULT_PROFILE_ID)) list.unshift(defaults()[0]);
+    return list;
   }
   return defaults();
 }
@@ -56,9 +51,14 @@ function makeId(): string {
 }
 
 export const useProfilesStore = defineStore("claude-profiles", () => {
-  const profiles = ref<ClaudeProfile[]>(load());
+  const profiles = ref<ClaudeProfile[]>(defaults());
 
-  watch(profiles, (v) => localStorage.setItem(STORAGE_KEY, JSON.stringify(v)), { deep: true });
+  configReady.then(() => {
+    migrateFromLocalStorage(LEGACY_STORAGE_KEY, CONFIG_KEY);
+    profiles.value = normalize(getConfig<unknown>(CONFIG_KEY, defaults()));
+  });
+
+  watch(profiles, (v) => setConfig(CONFIG_KEY, v), { deep: true });
 
   function get(id: string | null | undefined): ClaudeProfile | undefined {
     if (!id) return profiles.value.find((p) => p.id === DEFAULT_PROFILE_ID);
