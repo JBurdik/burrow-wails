@@ -479,11 +479,11 @@ function selectWorktreeMode(v: boolean) {
 // Manager model — its own key, default Sonnet, switchable from the strip.
 const MANAGER_MODEL_KEY = "burrow.manager.model";
 const MANAGER_MODELS = [
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", note: "Recommended — balanced orchestration" },
+  { id: "claude-sonnet-5", label: "Sonnet 5", note: "Recommended — balanced orchestration" },
   { id: "claude-opus-4-8", label: "Opus 4.8", note: "Strongest judgment — heavy multi-agent work" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", note: "Cheapest — simple dispatch only" },
 ] as const;
-const DEFAULT_MANAGER_MODEL = "claude-sonnet-4-6";
+const DEFAULT_MANAGER_MODEL = "claude-sonnet-5";
 function loadManagerModel(): string {
   const v = localStorage.getItem(MANAGER_MODEL_KEY);
   return MANAGER_MODELS.some((m) => m.id === v) ? (v as string) : DEFAULT_MANAGER_MODEL;

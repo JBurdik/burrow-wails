@@ -3324,7 +3324,7 @@ async fn claude_start(
         args.push("--append-system-prompt".to_string());
         args.push(sys.to_string());
     }
-    let allowed_models = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
+    let allowed_models = ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5-20251001"];
     if let Some(m) = model.as_deref().filter(|m| allowed_models.contains(m)) {
         args.push("--model".to_string());
         args.push(m.to_string());

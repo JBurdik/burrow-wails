@@ -1011,7 +1011,7 @@ async function selectProfile(id: string) {
 
 // Model switcher
 const CLAUDE_MODELS = [
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+  { id: "claude-sonnet-5", label: "Sonnet 5" },
   { id: "claude-opus-4-8", label: "Opus 4.8" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ] as const;
@@ -1023,7 +1023,7 @@ function loadModel(): ClaudeModelId {
   if (props.defaultModel && CLAUDE_MODELS.some((m) => m.id === props.defaultModel)) {
     return props.defaultModel as ClaudeModelId;
   }
-  return "claude-sonnet-4-6";
+  return "claude-sonnet-5";
 }
 const selectedModel = ref<ClaudeModelId>(loadModel());
 const modelMenuOpen = ref(false);

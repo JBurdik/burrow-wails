@@ -49,7 +49,7 @@ burrow spawn --cwd <dir> claude --model claude-opus-4-8 "Debug the intermittent 
 \`\`\`
 Model ids and when to use each:
 - \`claude-haiku-4-5-20251001\` — **Haiku**: cheap/fast. Mechanical or narrow work — renames, simple edits, formatting, lookups, boilerplate.
-- \`claude-sonnet-4-6\` — **Sonnet**: the **default** for normal coding tasks (features, bug fixes, refactors). When unsure, use this (or omit \`--model\` to inherit the user's default).
+- \`claude-sonnet-5\` — **Sonnet**: the **default** for normal coding tasks (features, bug fixes, refactors). When unsure, use this (or omit \`--model\` to inherit the user's default).
 - \`claude-opus-4-8\` — **Opus**: hardest work — tricky debugging, architecture, security-sensitive or wide-blast-radius changes.
 Match the model to the task's difficulty, not its size. Don't burn Opus on a rename; don't send a subtle race condition to Haiku.
 

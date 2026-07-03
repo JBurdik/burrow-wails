@@ -55,7 +55,7 @@
           <div class="td-field">
             <label class="td-label">Agent</label>
             <select v-model="local.agent_kind" class="td-select">
-              <option v-for="a in chatAgents.agents" :key="a.id" :value="a.id">{{ a.name }}</option>
+              <option v-for="a in cliAgents" :key="a.id" :value="a.id">{{ a.name }}</option>
             </select>
           </div>
           <div class="td-field">
@@ -108,10 +108,27 @@
               :default-model="local.model || undefined"
             />
           </div>
-          <div v-else-if="local.transport === 'pty'" class="td-pty-note">
-            Running in a terminal tab in <b>{{ taskWs?.name }}</b>.
+          <div v-else-if="local.transport === 'pty' && local.pty_id != null" class="td-term-embed">
+            <XTerm
+              :pty-id="local.pty_id"
+              :cwd="taskCwd"
+              initially-titled
+            />
+          </div>
+          <div v-if="local.transport === 'pty'" class="td-pty-note">
+            in <b>{{ taskWs?.name }}</b>
             <button class="td-jump-btn" @click="jumpToTab">Open tab</button>
           </div>
+          <form v-if="local.transport === 'pty' && local.pty_id != null" class="td-followup" @submit.prevent="sendFollowup">
+            <input
+              v-model="followupText"
+              class="td-followup-input"
+              placeholder="Follow up… (sent to the running agent)"
+            />
+            <button type="submit" class="td-followup-btn" :disabled="!followupText.trim()">
+              <PhPaperPlaneTilt :size="13" weight="bold" />
+            </button>
+          </form>
         </div>
 
         <!-- Actions -->
@@ -136,7 +153,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import {
-  PhX, PhImage, PhGitBranch, PhTree, PhTerminalWindow, PhChatCircleDots,
+  PhX, PhImage, PhGitBranch, PhTree, PhTerminalWindow, PhChatCircleDots, PhPaperPlaneTilt,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { spinnerFrame } from "@/lib/spinner";
@@ -149,6 +166,7 @@ import {
   type MissionTask, type BoardColumn,
 } from "@/stores/boardTasks";
 import ClaudeChat from "@/components/ClaudeChat.vue";
+import XTerm from "@/components/XTerm.vue";
 
 const props = defineProps<{ task: MissionTask; repoId: number }>();
 const emit = defineEmits<{ close: []; deleted: [] }>();
@@ -161,11 +179,11 @@ const board = useBoardTasksStore();
 
 const MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+  { id: "claude-sonnet-5", label: "Sonnet 5" },
   { id: "claude-opus-4-8", label: "Opus 4.8" },
 ];
 
-const local = reactive<MissionTask>({ ...props.task, agent_kind: props.task.agent_kind || "claude", model: props.task.model || "claude-sonnet-4-6" });
+const local = reactive<MissionTask>({ ...props.task, agent_kind: props.task.agent_kind || "claude", model: props.task.model || "claude-sonnet-5" });
 watch(() => props.task, (t) => Object.assign(local, t));
 
 const status = computed(() => liveStatusForTask(local as MissionTask));
@@ -173,6 +191,11 @@ const colLabel = computed(() => BOARD_COLUMNS.find((c) => c.id === local.board_c
 const taskWs = computed(() => wsStore.workspaces.find((w) => w.id === local.task_workspace_id));
 const taskCwd = computed(() => taskWs.value?.path ?? "");
 const chatId = computed(() => local.chat_id ?? undefined);
+// Board tasks only support raw-terminal prompt/follow-up delivery, proven for
+// CLI agents (currently just Claude Code) — ACP agents need a mounted chat to
+// speak the protocol, which doesn't fit the "fire and forget, iterate later"
+// board flow. Keep ACP agents for regular chat tabs, just not selectable here.
+const cliAgents = computed(() => chatAgents.agents.filter((a) => a.transport !== "acp"));
 
 function shortModel(m?: string | null): string {
   if (!m) return "";
@@ -345,6 +368,14 @@ async function switchToChat() {
   } finally {
     switching.value = false;
   }
+}
+
+const followupText = ref("");
+async function sendFollowup() {
+  const text = followupText.value.trim();
+  if (!text || local.pty_id == null) return;
+  followupText.value = "";
+  await invoke("write_pty", { id: local.pty_id, data: Array.from(new TextEncoder().encode(`${text}\r`)) });
 }
 
 function jumpToTab() {
@@ -532,8 +563,12 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
 .td-switch-btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); color: var(--text-primary, #e2e8f0); }
 .td-chat-embed { height: 360px; border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; overflow: hidden; }
 .td-chat-embed :deep(.claude-chat) { background: transparent; }
+.td-term-embed {
+  height: 360px; border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 8px; overflow: hidden; position: relative; background: #000;
+}
 .td-pty-note {
-  font-size: 12px; color: var(--text-secondary, #94a3b8);
+  font-size: 11px; color: var(--text-muted, #64748b);
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .td-jump-btn {
@@ -542,6 +577,23 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
   padding: 4px 10px; cursor: pointer;
 }
 .td-jump-btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); }
+
+.td-followup { display: flex; gap: 6px; }
+.td-followup-input {
+  flex: 1; min-width: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 7px; padding: 6px 10px;
+  color: var(--text-primary, #e2e8f0); font-size: 12px; font-family: var(--font-ui);
+  outline: none;
+}
+.td-followup-input:focus { border-color: var(--accent, #3b82f6); }
+.td-followup-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; border: none; border-radius: 7px;
+  background: var(--accent, #3b82f6); color: #fff; cursor: pointer;
+}
+.td-followup-btn:disabled { opacity: 0.4; cursor: default; }
 
 .td-actions { display: flex; gap: 8px; padding-top: 4px; }
 .td-btn {
