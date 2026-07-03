@@ -20,7 +20,7 @@ pub const BURROW_MCP_DEPTH_ENV: &str = "BURROW_MCP_DEPTH";
 /// Tools that fan out (open a tab / worktree). Only these are subject to the
 /// recursion depth cap — read/observe/route tools are exempt, mirroring jean's
 /// RATE_LIMITED_TOOLS split.
-const SPAWNING_TOOLS: &[&str] = &["spawn", "create_worktree", "new_tab"];
+const SPAWNING_TOOLS: &[&str] = &["spawn", "create_worktree", "new_tab", "board_move"];
 
 #[derive(Debug)]
 pub struct ToolError {
@@ -115,7 +115,10 @@ pub fn tool_registry() -> Value {
         {"name":"pr_create","description":"Create a GitHub PR via gh in the given cwd (a worktree dir) or the calling session's repo.","inputSchema":{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"base":{"type":"string"},"head":{"type":"string"},"cwd":{"type":"string"}},"required":["title","body"],"additionalProperties":false}},
         {"name":"pr_list","description":"List GitHub PRs via gh.","inputSchema":{"type":"object","properties":{"state":{"type":"string","enum":["open","closed","merged","all"]},"cwd":{"type":"string"}},"additionalProperties":false}},
         {"name":"pr_view","description":"View a GitHub PR via gh.","inputSchema":{"type":"object","properties":{"number":{"type":"integer"},"cwd":{"type":"string"}},"required":["number"],"additionalProperties":false}},
-        {"name":"pr_merge","description":"Merge a GitHub PR via gh.","inputSchema":{"type":"object","properties":{"number":{"type":"integer"},"squash":{"type":"boolean","default":false},"cwd":{"type":"string"}},"required":["number"],"additionalProperties":false}}
+        {"name":"pr_merge","description":"Merge a GitHub PR via gh.","inputSchema":{"type":"object","properties":{"number":{"type":"integer"},"squash":{"type":"boolean","default":false},"cwd":{"type":"string"}},"required":["number"],"additionalProperties":false}},
+        {"name":"board_list","description":"List this repo's Mission Control Kanban cards. Always call this before board_create to avoid duplicating a task that already exists.","inputSchema":{"type":"object","properties":{"column":{"type":"string","enum":["backlog","todo","in_progress","for_review","done"],"description":"Filter to one column (default: all)."}},"additionalProperties":false}},
+        {"name":"board_create","description":"Create a new Kanban card in Backlog for this repo. Board tasks run as embedded ACP chat sessions (never a terminal tab) once moved to Todo.","inputSchema":{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"agent":{"type":"string","enum":["claude","claude-acp","codex","gemini","opencode"],"description":"Defaults to claude-acp."},"model":{"type":"string"},"worktree":{"type":"boolean","description":"Create a new worktree for this task (default: the board's own default)."}},"required":["title"],"additionalProperties":false}},
+        {"name":"board_move","description":"Move a Kanban card to another column. Moving to 'todo' creates the worktree (if requested) and spawns the agent — that happens asynchronously in the app, so this call returns once it's requested, not once the agent is running. Moving to 'done' is rejected: only a human marks a task done from the board UI.","inputSchema":{"type":"object","properties":{"taskId":{"type":"string"},"column":{"type":"string","enum":["backlog","todo","in_progress","for_review","done"]}},"required":["taskId","column"],"additionalProperties":false}}
     ])
 }
 

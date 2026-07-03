@@ -727,18 +727,19 @@ Do NOT block waiting on sub-agents. Fan out the work, continue your own, then `b
 
 const KANBAN_SKILL_MD: &str = "---\n\
 name: kanban\n\
-description: Read or manage this repo's Burrow Mission Control Kanban board (Backlog → Todo → In Progress → For Review → Done) via the `burrow` CLI. Use when the user says \"/kanban\", \"add this to the board\", \"create a task\", \"what's on the board\", \"move this card\", or wants work tracked/started through the board instead of a plain spawned agent.\n\
+description: Read or manage this repo's Burrow Mission Control Kanban board (Backlog → Todo → In Progress → For Review → Done). Use when the user says \"/kanban\", \"add this to the board\", \"create a task\", \"what's on the board\", \"move this card\", or wants work tracked/started through the board instead of a plain spawned agent.\n\
 ---\n\n\
 # Kanban board (Mission Control)\n\n\
-Burrow's board backs its cards with `mission_tasks` rows, reachable from any shell via the `burrow` CLI (same transport as `spawn`/`worktree`). Board tasks run as **embedded ACP chat sessions only** — Claude, Codex, Gemini, opencode, whatever `--agent` names — never a terminal tab. Starting one never opens a tab in the main view; only an explicit worktree creation shows up there (nested under its repo).\n\n\
-## Commands\n\n\
-- `burrow board-list [--column backlog|todo|in_progress|for_review|done]` — list this repo's cards as `id<TAB>column<TAB>title<TAB>status` lines. **Always run this before creating a task**, to avoid duplicating one that already exists.\n\
-- `burrow board-create --title T [--description D] [--agent claude|claude-acp|codex|gemini|opencode] [--model M] [--worktree|--no-worktree]` — create a card in **Backlog**. Omit `--agent` to default to `claude-acp`. Prints the new task id — report it back to the user. Backlog is the default column: spawning is the human's/board's job unless the user explicitly says \"start it now\".\n\
-- `burrow board-move <taskId> <backlog|todo|in_progress|for_review|done>` — move a card. You may move a card up to `for_review` (e.g. when a sub-agent you spawned for that task finishes and you judge the work ready). You may **not** move a card to `done` — that's rejected outright; only a human marks a task done from the board UI.\n\n\
+Burrow's board backs its cards with `mission_tasks` rows. Board tasks run as **embedded ACP chat sessions only** — Claude, Codex, Gemini, opencode, whatever `agent` names — never a terminal tab. Starting one never opens a tab in the main view; only an explicit worktree creation shows up there (nested under its repo).\n\n\
+## Prefer the Burrow MCP tools\n\n\
+If you have MCP tools named `board_list`, `board_create`, `board_move` (served by the **burrow** MCP server), **use those** — typed, validated, structured results. The `burrow` shell CLI below is the **fallback** for shells and non-MCP contexts; every CLI subcommand maps to an equivalent tool.\n\n\
+- `board_list({column?})` / `burrow board-list [--column backlog|todo|in_progress|for_review|done]` — list this repo's cards. **Always call this before creating a task**, to avoid duplicating one that already exists.\n\
+- `board_create({title, description?, agent?, model?, worktree?})` / `burrow board-create --title T [--description D] [--agent claude|claude-acp|codex|gemini|opencode] [--model M] [--worktree|--no-worktree]` — create a card in **Backlog**. Omit `agent` to default to `claude-acp`. Returns/prints the new task id — report it back to the user. Backlog is the default: spawning is the human's/board's job unless the user explicitly says \"start it now\".\n\
+- `board_move({taskId, column})` / `burrow board-move <taskId> <backlog|todo|in_progress|for_review|done>` — move a card. You may move a card up to `for_review` (e.g. when a sub-agent you spawned for that task finishes and you judge the work ready). You may **not** move a card to `done` — that's rejected outright; only a human marks a task done from the board UI.\n\n\
 ## Starting a task now\n\n\
-If asked to start a Backlog task immediately: `board-create ... && board-move <id> todo`. The actual worktree creation + agent spawn only happens once the app's own Backlog→Todo handler picks up the move — confirm with the user that the card moved, and have them check the board if the agent doesn't appear to start.\n\n\
+If asked to start a Backlog task immediately: create it, then move it to `todo`. The actual worktree creation + agent spawn only happens once the app's own Backlog→Todo handler picks up the move (async — the call returns once it's requested, not once the agent is running) — confirm with the user that the card moved, and have them check the board if the agent doesn't appear to start.\n\n\
 ## When NOT to use this\n\n\
-Ad-hoc work with no need for board tracking (a quick refactor, a one-off question) — just do it, or use `burrow spawn` for a fire-and-forget sub-agent. Reach for the board when the user wants the work visible/tracked as a card, or explicitly asks for \"/kanban\" / \"the board\".";
+Ad-hoc work with no need for board tracking (a quick refactor, a one-off question) — just do it, or use `spawn`/`burrow spawn` for a fire-and-forget sub-agent. Reach for the board when the user wants the work visible/tracked as a card, or explicitly asks for \"/kanban\" / \"the board\".";
 
 const BURROW_SKILL_MD: &str = "---\n\
 name: burrow\n\
@@ -1854,6 +1855,75 @@ pub(crate) fn mcp_run_tool(
             let argref: Vec<&str> = gh_args.iter().map(|s| s.as_str()).collect();
             let out = gh_in(&run_dir, &argref)?;
             Ok(json!({ "output": out }))
+        }
+        "board_list" => {
+            let db = app.state::<DbState>();
+            let conn = db.conn.lock().unwrap();
+            let rid = resolve_repo_workspace_id(&conn, source).ok_or("could not resolve this repo's workspace")?;
+            let column = arg_str(&args, "column").unwrap_or_default();
+            let text = query_board_tasks_tsv(&conn, rid, &column);
+            let rows: Vec<serde_json::Value> = text
+                .lines()
+                .filter_map(|l| {
+                    let mut p = l.splitn(4, '\t');
+                    Some(json!({ "id": p.next()?, "column": p.next()?, "title": p.next()?, "status": p.next().unwrap_or("") }))
+                })
+                .collect();
+            Ok(json!({ "tasks": rows }))
+        }
+        "board_create" => {
+            let title = arg_str(&args, "title").ok_or("missing 'title'")?;
+            let description = arg_str(&args, "description").unwrap_or_default();
+            let agent = arg_str(&args, "agent").unwrap_or_default();
+            let model = arg_str(&args, "model").unwrap_or_default();
+            let use_worktree = if args.get("worktree").and_then(|v| v.as_bool()) == Some(false) { 0 } else { 1 };
+            let db = app.state::<DbState>();
+            let id = {
+                let conn = db.conn.lock().unwrap();
+                let rid = resolve_repo_workspace_id(&conn, source).ok_or("could not resolve this repo's workspace")?;
+                let id = format!("task_{}", now_millis());
+                let now = now_millis();
+                conn.execute(
+                    "INSERT INTO mission_tasks (
+                        id, created_at, repo_workspace_id, board_column, title,
+                        description, agent_kind, model, use_worktree, board_order, updated_at
+                     ) VALUES (?1, ?2, ?3, 'backlog', ?4, ?5, ?6, ?7, ?8, 0, ?9)",
+                    rusqlite::params![id, now, rid, title,
+                        if description.is_empty() { None } else { Some(description) },
+                        if agent.is_empty() { None } else { Some(agent) },
+                        if model.is_empty() { None } else { Some(model) },
+                        use_worktree, now],
+                ).map_err(|e| e.to_string())?;
+                id
+            };
+            let _ = app.emit("board-task-moved", json!({ "taskId": id, "column": "backlog" }));
+            Ok(json!({ "taskId": id, "column": "backlog" }))
+        }
+        "board_move" => {
+            let task_id = arg_str(&args, "taskId").ok_or("missing 'taskId'")?;
+            let column = arg_str(&args, "column").ok_or("missing 'column'")?;
+            if !BOARD_COLUMNS.contains(&column.as_str()) {
+                return Err(format!("invalid column '{column}' (must be one of backlog|todo|in_progress|for_review|done)"));
+            }
+            if column == "done" {
+                return Err("agents cannot move a task to 'done' — move it to 'for_review' and let a human/Manager mark it done".to_string());
+            }
+            if column == "todo" {
+                // Backlog→Todo needs worktree creation + agent spawn, which only
+                // exists client-side — route through the same request-dir the
+                // `burrow board-move` CLI writes, so Terminal.vue's poll picks it
+                // up identically (see the CLI's "board-move" arm in take_spawn_requests).
+                mcp_write_request(app, &[("kind", "board-move"), ("ws", source), ("wsid", &task_id), ("tabid", &column)])?;
+                Ok(json!({ "status": "requested", "taskId": task_id, "column": column }))
+            } else {
+                let db = app.state::<DbState>();
+                {
+                    let conn = db.conn.lock().unwrap();
+                    move_board_task_db(&conn, &task_id, &column, 0.0)?;
+                }
+                let _ = app.emit("board-task-moved", json!({ "taskId": task_id.clone(), "column": column.clone() }));
+                Ok(json!({ "status": "ok", "taskId": task_id, "column": column }))
+            }
         }
         other => Err(format!("Unknown tool: {other}")),
     }
