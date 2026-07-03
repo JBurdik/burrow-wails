@@ -426,6 +426,7 @@ import { spinnerFrame } from "@/lib/spinner";
 import { usePointerReorder } from "@/composables/usePointerReorder";
 import { aggregateStatus, STATUS_PRIORITY, type TermStatus } from "@/lib/terminalStatus";
 import { useGitStore, type PrInfo } from "@/stores/git";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
@@ -434,19 +435,21 @@ const git = useGitStore();
 
 // ── collapse / expand per workspace ──────────────────────────────────────────
 const COLLAPSE_KEY = "burrow.ws.collapsed";
-const collapsed = ref<Record<number, boolean>>(loadCollapsed());
+const CONFIG_COLLAPSE_KEY = "sidebarCollapseState";
+const collapsed = ref<Record<number, boolean>>({});
 
-function loadCollapsed(): Record<number, boolean> {
-  try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "{}"); }
-  catch { return {}; }
-}
+configReady.then(() => {
+  migrateFromLocalStorage(COLLAPSE_KEY, CONFIG_COLLAPSE_KEY);
+  collapsed.value = getConfig<Record<number, boolean>>(CONFIG_COLLAPSE_KEY, {});
+});
+
 // Default collapsed: a workspace with no stored value reads as collapsed.
 function isCollapsed(id: number): boolean {
   return collapsed.value[id] !== false;
 }
 function setCollapsed(id: number, val: boolean) {
   collapsed.value[id] = val;
-  localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed.value));
+  setConfig(CONFIG_COLLAPSE_KEY, collapsed.value);
 }
 function toggleCollapse(id: number) {
   const next = !isCollapsed(id);
