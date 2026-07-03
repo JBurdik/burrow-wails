@@ -79,11 +79,45 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v2.24.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v2.24.0</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">červenec 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Kanban board: MCP nástroje a ACP-only agenti</div>
+      <ul>
+        <li><strong>Typované MCP nástroje pro board</strong> — <code>board_list</code>/<code>board_create</code>/<code>board_move</code> vedle stávajícího <code>burrow</code> CLI. <code>board_list</code>/<code>board_create</code> odpovídají přímo z DB, <code>board_move</code> routuje přesun do „todo" přes stejný request-dir transport jako <code>spawn</code>/<code>create_worktree</code> (worktree + spawn agenta existuje jen na klientu); přesun do „done" je zamítnutý stejně jako u CLI. Kanban skill teď učí MCP nástroje jako první volbu, CLI jako fallback — a instaluje se globálně pro každého agenta, ne jen pro tenhle repo.</li>
+        <li><strong>Board úkoly jen přes ACP</strong> — zrušena pty/terminal-tab cesta pro kanban úkoly; každý agent (Claude, Codex, Gemini, opencode…) teď běží jako embedded ACP chat session, takže výběr agenta není natvrdo na Claude CLI a board nepotřebuje live terminal embed ani follow-up-to-pty plumbing.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Konfigurace mimo localStorage</div>
+      <ul>
+        <li><strong>Root cause: localStorage sdílí adresář s WebView cache</strong> — na macOS žije Tauri WKWebView <code>localStorage</code> v <code>~/Library/WebKit/&lt;bundle-id&gt;</code>, stejném adresáři jako vymazatelná HTTP/JS cache. Vyčištění „cache" kvůli zaseknutému buildu smazalo i ikony projektů, pořadí záložek a další nastavení uživatele.</li>
+        <li><strong>Ikony a pořadí workspace tabů → SQLite</strong> — <code>workspaces</code> tabulka má nové sloupce <code>icon</code>/<code>sort_order</code>, nové Tauri příkazy <code>set_workspace_icon</code>/<code>set_workspace_order</code>. <code>FloatBubble.vue</code> opravena, aby ikonu četla ze store místo mrtvého localStorage klíče.</li>
+        <li><strong>Zbytek konfigurace → <code>config.json</code></strong> — nové Tauri příkazy <code>read_config</code>/<code>write_config</code> a frontendový helper <code>src/lib/config.ts</code> (<code>getConfig</code>/<code>setConfig</code>/<code>migrateFromLocalStorage</code>) přesouvají Claude profily, agent presety, UI preference, mobile pairing, historii chatů (zprávy, ACP nastavení, permission mode), Manager panel nastavení, titlebar preference a collapse stav Sidebaru — s jednorázovou automatickou migrací starých localStorage dat při prvním spuštění.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Burrow MCP token po restartu appky</div>
+      <ul>
+        <li><strong>Token se generoval při každém startu appky</strong> — <code>burrow_mcp_socket.rs</code> přepisoval <code>burrow-mcp.token</code> na každém spuštění, takže už připojená Claude Code session s cachovaným starým tokenem dostávala „unauthorized" po restartu Burrow appky. Token se teď generuje jen jednou a napříč restarty appky zůstává stejný.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v2.23.0 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v2.23.0</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">červenec 2026</span>
     </div>
 
