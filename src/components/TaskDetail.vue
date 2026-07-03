@@ -55,7 +55,7 @@
           <div class="td-field">
             <label class="td-label">Agent</label>
             <select v-model="local.agent_kind" class="td-select">
-              <option v-for="a in cliAgents" :key="a.id" :value="a.id">{{ a.name }}</option>
+              <option v-for="a in chatAgents.agents" :key="a.id" :value="a.id">{{ a.name }}</option>
             </select>
           </div>
           <div class="td-field">
@@ -83,52 +83,22 @@
         <p v-if="startError" class="td-error">{{ startError }}</p>
 
         <!-- Live view (post-spawn only) -->
-        <div v-if="local.board_column !== 'backlog'" class="td-section td-live">
+        <div v-if="local.board_column !== 'backlog' && chatId" class="td-section td-live">
           <div class="td-live-head">
             <label class="td-label">Live view</label>
-            <span v-if="switching" class="td-switching">switching…</span>
-            <template v-else>
-              <button v-if="local.transport === 'acp'" class="td-switch-btn" @click="switchToTerminal">
-                <PhTerminalWindow :size="12" weight="bold" /> Switch to terminal
-              </button>
-              <button v-else-if="local.transport === 'pty'" class="td-switch-btn" @click="switchToChat">
-                <PhChatCircleDots :size="12" weight="bold" /> Switch to chat
-              </button>
-            </template>
           </div>
-          <div v-if="local.transport === 'acp' && chatId" class="td-chat-embed">
+          <div class="td-chat-embed">
             <ClaudeChat
               :ref="setChatRef"
               :chat-id="chatId"
               :workspace-id="local.task_workspace_id!"
               :cwd="taskCwd"
-              :agent-kind="local.agent_kind || 'claude'"
-              :transport="chatAgents.byId(local.agent_kind || 'claude').transport"
+              :agent-kind="local.agent_kind || 'claude-acp'"
+              :transport="chatAgents.byId(local.agent_kind || 'claude-acp').transport"
               compact
               :default-model="local.model || undefined"
             />
           </div>
-          <div v-else-if="local.transport === 'pty' && local.pty_id != null" class="td-term-embed">
-            <XTerm
-              :pty-id="local.pty_id"
-              :cwd="taskCwd"
-              initially-titled
-            />
-          </div>
-          <div v-if="local.transport === 'pty'" class="td-pty-note">
-            in <b>{{ taskWs?.name }}</b>
-            <button class="td-jump-btn" @click="jumpToTab">Open tab</button>
-          </div>
-          <form v-if="local.transport === 'pty' && local.pty_id != null" class="td-followup" @submit.prevent="sendFollowup">
-            <input
-              v-model="followupText"
-              class="td-followup-input"
-              placeholder="Follow up… (sent to the running agent)"
-            />
-            <button type="submit" class="td-followup-btn" :disabled="!followupText.trim()">
-              <PhPaperPlaneTilt :size="13" weight="bold" />
-            </button>
-          </form>
         </div>
 
         <!-- Actions -->
@@ -153,12 +123,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import {
-  PhX, PhImage, PhGitBranch, PhTree, PhTerminalWindow, PhChatCircleDots, PhPaperPlaneTilt,
+  PhX, PhImage, PhGitBranch, PhTree,
 } from "@phosphor-icons/vue";
-import { invoke } from "@tauri-apps/api/core";
 import { spinnerFrame } from "@/lib/spinner";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useChatAgentsStore } from "@/stores/chatAgents";
 import {
@@ -166,13 +134,11 @@ import {
   type MissionTask, type BoardColumn,
 } from "@/stores/boardTasks";
 import ClaudeChat from "@/components/ClaudeChat.vue";
-import XTerm from "@/components/XTerm.vue";
 
 const props = defineProps<{ task: MissionTask; repoId: number }>();
 const emit = defineEmits<{ close: []; deleted: [] }>();
 
 const wsStore = useWorkspaceStore();
-const termTabs = useTerminalTabsStore();
 const chats = useClaudeChatsStore();
 const chatAgents = useChatAgentsStore();
 const board = useBoardTasksStore();
@@ -183,7 +149,7 @@ const MODELS = [
   { id: "claude-opus-4-8", label: "Opus 4.8" },
 ];
 
-const local = reactive<MissionTask>({ ...props.task, agent_kind: props.task.agent_kind || "claude", model: props.task.model || "claude-sonnet-5" });
+const local = reactive<MissionTask>({ ...props.task, agent_kind: props.task.agent_kind || "claude-acp", model: props.task.model || "claude-sonnet-5" });
 watch(() => props.task, (t) => Object.assign(local, t));
 
 const status = computed(() => liveStatusForTask(local as MissionTask));
@@ -191,11 +157,6 @@ const colLabel = computed(() => BOARD_COLUMNS.find((c) => c.id === local.board_c
 const taskWs = computed(() => wsStore.workspaces.find((w) => w.id === local.task_workspace_id));
 const taskCwd = computed(() => taskWs.value?.path ?? "");
 const chatId = computed(() => local.chat_id ?? undefined);
-// Board tasks only support raw-terminal prompt/follow-up delivery, proven for
-// CLI agents (currently just Claude Code) — ACP agents need a mounted chat to
-// speak the protocol, which doesn't fit the "fire and forget, iterate later"
-// board flow. Keep ACP agents for regular chat tabs, just not selectable here.
-const cliAgents = computed(() => chatAgents.agents.filter((a) => a.transport !== "acp"));
 
 function shortModel(m?: string | null): string {
   if (!m) return "";
@@ -288,12 +249,9 @@ async function start() {
   try {
     const saved = await board.startTask({ ...local } as MissionTask);
     Object.assign(local, saved);
-    if (saved.transport === "acp" && saved.chat_id != null) {
-      // ACP chat just got created — startTask() seeded the first-prompt draft
-      // under the same localStorage convention Terminal.vue's CLI chat-spawn
-      // path uses; deliver it via sendMessage() once the embedded ClaudeChat
-      // mounts (watched below), same as the terminal path's immediate dispatch.
-    }
+    // ACP chat just got created — startTask() seeded the first-prompt draft
+    // under the same localStorage convention; delivered via sendMessage() once
+    // the embedded ClaudeChat mounts (watched below).
   } catch (e) {
     startError.value = `Failed to start: ${e}`;
   } finally {
@@ -325,66 +283,6 @@ watch(
     }
   },
 );
-
-// ── View switcher: resumed handoff, not literal shared attach (§5 of the plan) ──
-const switching = ref(false);
-
-async function switchToTerminal() {
-  if (local.transport !== "acp" || switching.value) return;
-  switching.value = true;
-  try {
-    const oldChatId = local.chat_id;
-    const resumeId = local.session_id;
-    if (oldChatId != null) await chats.remove(oldChatId);
-    const wsId = local.task_workspace_id!;
-    const cmd = resumeId ? `claude --resume ${resumeId}` : "claude";
-    termTabs.add(wsId, cmd, local.id);
-    const ptyId = await board.waitForTabId(local.id, wsId);
-    local.transport = "pty";
-    local.pty_id = ptyId ?? null;
-    local.chat_id = null;
-    await board.upsert({ ...local } as MissionTask);
-  } finally {
-    switching.value = false;
-  }
-}
-
-async function switchToChat() {
-  if (local.transport !== "pty" || switching.value) return;
-  switching.value = true;
-  try {
-    const wsId = local.task_workspace_id!;
-    const tab = (termTabs.tabsByWs[wsId] || []).find((t) => t.taskId === local.id);
-    const resumeId = tab?.sessionId || local.session_id;
-    // Detach (don't kill) the old PTY — the daemon keeps it alive cheaply in
-    // case the user switches straight back (§5 of the board plan).
-    if (local.pty_id != null) await invoke("detach_pty", { id: local.pty_id }).catch(() => {});
-    const session = chats.create(wsId, { agentKind: local.agent_kind || "claude" });
-    if (resumeId) chats.sync(session.id, { claudeSessionId: resumeId });
-    local.transport = local.agent_kind && local.agent_kind !== "claude" ? "acp" : "stream-json";
-    local.chat_id = session.id;
-    local.pty_id = null;
-    await board.upsert({ ...local } as MissionTask);
-  } finally {
-    switching.value = false;
-  }
-}
-
-const followupText = ref("");
-async function sendFollowup() {
-  const text = followupText.value.trim();
-  if (!text || local.pty_id == null) return;
-  followupText.value = "";
-  await invoke("write_pty", { id: local.pty_id, data: Array.from(new TextEncoder().encode(`${text}\r`)) });
-}
-
-function jumpToTab() {
-  const ws = taskWs.value;
-  if (!ws || local.pty_id == null) return;
-  wsStore.open(ws);
-  termTabs.activate(ws.id, local.pty_id);
-  emit("close");
-}
 
 async function moveTo(col: BoardColumn) {
   await board.move(local.id, col, Date.now());
@@ -553,47 +451,8 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
 
 .td-live { border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08)); padding-top: 12px; }
 .td-live-head { display: flex; align-items: center; gap: 10px; }
-.td-switching { font-size: 11px; color: var(--text-muted, #64748b); font-style: italic; }
-.td-switch-btn {
-  display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12)); border-radius: 7px;
-  background: transparent; color: var(--text-secondary, #94a3b8); font-size: 11px;
-  padding: 4px 9px; cursor: pointer;
-}
-.td-switch-btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); color: var(--text-primary, #e2e8f0); }
 .td-chat-embed { height: 360px; border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; overflow: hidden; }
 .td-chat-embed :deep(.claude-chat) { background: transparent; }
-.td-term-embed {
-  height: 360px; border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  border-radius: 8px; overflow: hidden; position: relative; background: #000;
-}
-.td-pty-note {
-  font-size: 11px; color: var(--text-muted, #64748b);
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-.td-jump-btn {
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12)); border-radius: 7px;
-  background: transparent; color: var(--text-primary, #e2e8f0); font-size: 11px;
-  padding: 4px 10px; cursor: pointer;
-}
-.td-jump-btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); }
-
-.td-followup { display: flex; gap: 6px; }
-.td-followup-input {
-  flex: 1; min-width: 0;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  border-radius: 7px; padding: 6px 10px;
-  color: var(--text-primary, #e2e8f0); font-size: 12px; font-family: var(--font-ui);
-  outline: none;
-}
-.td-followup-input:focus { border-color: var(--accent, #3b82f6); }
-.td-followup-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 30px; border: none; border-radius: 7px;
-  background: var(--accent, #3b82f6); color: #fff; cursor: pointer;
-}
-.td-followup-btn:disabled { opacity: 0.4; cursor: default; }
 
 .td-actions { display: flex; gap: 8px; padding-top: 4px; }
 .td-btn {
