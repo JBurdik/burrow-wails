@@ -1,10 +1,11 @@
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "../lib/config";
 
 export const AUTO_REFRESH_INTERVALS = [5, 10, 30, 60, 0] as const; // 0 = off
 
 export function useAutoRefresh(callback: () => void, storageKey = "burrow-git-refresh-interval") {
-  const stored = parseInt(localStorage.getItem(storageKey) ?? "30");
-  const currentInterval = ref(AUTO_REFRESH_INTERVALS.includes(stored as any) ? stored : 30);
+  const configKey = `autoRefreshInterval.${storageKey}`;
+  const currentInterval = ref(30);
   const nextRefreshIn = ref(0);
 
   const isRunning = computed(() => currentInterval.value > 0);
@@ -31,7 +32,7 @@ export function useAutoRefresh(callback: () => void, storageKey = "burrow-git-re
 
   function setRefreshInterval(n: number) {
     currentInterval.value = n;
-    localStorage.setItem(storageKey, String(n));
+    setConfig(configKey, n);
     start();
   }
 
@@ -41,7 +42,15 @@ export function useAutoRefresh(callback: () => void, storageKey = "burrow-git-re
     setRefreshInterval(next);
   }
 
-  onMounted(start);
+  onMounted(() => {
+    start();
+    configReady.then(() => {
+      migrateFromLocalStorage(storageKey, configKey);
+      const stored = getConfig<number>(configKey, 30);
+      currentInterval.value = AUTO_REFRESH_INTERVALS.includes(stored as any) ? stored : 30;
+      start();
+    });
+  });
   onBeforeUnmount(stop);
 
   return { currentInterval, isRunning, nextRefreshIn, setRefreshInterval, toggle };
