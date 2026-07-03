@@ -223,6 +223,7 @@ import { useUIStore } from "@/stores/ui";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { getDefaultManagerPrimer, SPAWN_MODE_WORKTREE, SPAWN_MODE_BRANCH } from "@/utils/managerPrimer";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 const props = defineProps<{ cwd: string; wsId: number }>();
 const emit = defineEmits<{ openProjectConfig: [] }>();
@@ -467,9 +468,13 @@ watch(rootCwd, async (cwd) => {
 }, { immediate: true });
 
 // Worktree spawn preference (persisted globally) — reflected in the primer.
-const WT_KEY = "burrow.floatchat.worktreeMode";
-const worktreeMode = ref<boolean>(localStorage.getItem(WT_KEY) === "1");
-watch(worktreeMode, (v) => localStorage.setItem(WT_KEY, v ? "1" : "0"));
+// NOTE: unlike the brief's assumption, this is a single global boolean (not
+// keyed by repo) — the actual per-repo map at MAP_KEY above is the unrelated
+// session-id-by-repo map, out of scope for this migration.
+const WT_LS_KEY = "burrow.floatchat.worktreeMode";
+const WT_CONFIG_KEY = "managerWorktreeMode";
+const worktreeMode = ref<boolean>(false);
+watch(worktreeMode, (v) => setConfig(WT_CONFIG_KEY, v));
 const wtMenuOpen = ref(false);
 function selectWorktreeMode(v: boolean) {
   worktreeMode.value = v;
@@ -484,11 +489,12 @@ const MANAGER_MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", note: "Cheapest — simple dispatch only" },
 ] as const;
 const DEFAULT_MANAGER_MODEL = "claude-sonnet-5";
+const MANAGER_MODEL_CONFIG_KEY = "managerModel";
 function loadManagerModel(): string {
-  const v = localStorage.getItem(MANAGER_MODEL_KEY);
+  const v = getConfig<string | null>(MANAGER_MODEL_CONFIG_KEY, null);
   return MANAGER_MODELS.some((m) => m.id === v) ? (v as string) : DEFAULT_MANAGER_MODEL;
 }
-const managerModel = ref<string>(loadManagerModel());
+const managerModel = ref<string>(DEFAULT_MANAGER_MODEL);
 const managerModelLabel = computed(
   () => MANAGER_MODELS.find((m) => m.id === managerModel.value)?.label ?? "Model",
 );
@@ -497,7 +503,7 @@ function selectManagerModel(id: string) {
   mdlMenuOpen.value = false;
   if (id === managerModel.value) return;
   managerModel.value = id;
-  localStorage.setItem(MANAGER_MODEL_KEY, id);
+  setConfig(MANAGER_MODEL_CONFIG_KEY, id);
   // Apply live to every mounted Manager chat (they share this model key).
   chatRefs.forEach((c) => (c as { selectModel?: (m: string) => void }).selectModel?.(id));
 }
@@ -522,15 +528,24 @@ const PERM_ICON: Record<PermMode, unknown> = {
   bypassPermissions: PhShieldWarning,
 };
 const permMenuOpen = ref(false);
-// localStorage isn't reactive — mirror the active session's perm mode in a ref and
-// re-read whenever the active session changes. Keys match ClaudeChat's so a mode set
-// here is picked up by the child on mount (loadPermMode) and vice-versa.
-const PERM_KEY = (id: number) => `burrow.claude.permMode.${id}`;
-const PERM_LAST_KEY = "burrow.claude.permMode.last";
+// config isn't reactive — mirror the active session's perm mode in a ref and
+// re-read whenever the active session changes. Config key ("chatPermissionMode")
+// and shape match ClaudeChat's exactly (same legacy keys: burrow.claude.permMode.<id> /
+// .last), so a mode set here is picked up by the child on mount (loadPermMode)
+// and vice-versa. ClaudeChat.vue's own onMounted migration already folds the
+// legacy per-chat localStorage keys into this config key; the guard below makes
+// this migration idempotent and order-independent with that one.
+interface ChatPermissionModeConfig {
+  byChat: Record<string, string>;
+  last?: string;
+  dangerousByChat: Record<string, boolean>;
+}
+const PERM_CONFIG_KEY = "chatPermissionMode";
 const activePermMode = ref<PermMode>("default");
 function refreshPermMode() {
   const sid = activeSessionId.value;
-  const v = sid ? localStorage.getItem(PERM_KEY(sid)) : null;
+  const cfg = getConfig<ChatPermissionModeConfig>(PERM_CONFIG_KEY, { byChat: {}, dangerousByChat: {} });
+  const v = sid ? cfg.byChat[String(sid)] : undefined;
   activePermMode.value = (v && (PERM_MODES as string[]).includes(v)) ? (v as PermMode) : "default";
 }
 watch(activeSessionId, refreshPermMode, { immediate: true });
@@ -544,8 +559,10 @@ async function selectPermMode(m: PermMode) {
   // (bar collapsed). The child reads the same key via loadPermMode on next mount.
   const sid = activeSessionId.value;
   if (sid) {
-    localStorage.setItem(PERM_KEY(sid), m);
-    localStorage.setItem(PERM_LAST_KEY, m);
+    const cfg = { ...getConfig<ChatPermissionModeConfig>(PERM_CONFIG_KEY, { byChat: {}, dangerousByChat: {} }) };
+    cfg.byChat = { ...cfg.byChat, [String(sid)]: m };
+    cfg.last = m;
+    setConfig(PERM_CONFIG_KEY, cfg);
   }
   // If the chat is mounted & running, apply live (restarts claude with the new mode).
   await (chatRefs.get(rootId.value) as any)?.selectPermMode?.(m);
@@ -663,10 +680,12 @@ async function quickSend() {
 }
 
 // ── Resizable expanded panel height ──
-const HEIGHT_KEY = "burrow.manager.height";
-const panelHeight = ref<number>(
-  Math.min(Math.max(parseInt(localStorage.getItem(HEIGHT_KEY) ?? "360", 10) || 360, 160), 900),
-);
+const HEIGHT_LS_KEY = "burrow.manager.height";
+const HEIGHT_CONFIG_KEY = "managerPanelHeight";
+function clampHeight(v: number): number {
+  return Math.min(Math.max(v || 360, 160), 900);
+}
+const panelHeight = ref<number>(360);
 const isResizing = ref(false);
 let startY = 0;
 let startH = 0;
@@ -684,7 +703,7 @@ function onResizeMove(e: MouseEvent) {
 function onResizeUp() {
   if (!isResizing.value) return;
   isResizing.value = false;
-  localStorage.setItem(HEIGHT_KEY, String(panelHeight.value));
+  setConfig(HEIGHT_CONFIG_KEY, panelHeight.value);
 }
 
 // Publish the always-visible strip height so the pet overlay walks ON TOP of
@@ -702,7 +721,7 @@ function onDocMouseDown(e: MouseEvent) {
 // inline; collect_results otherwise), so the injected "Run: burrow collect …"
 // message was redundant noise. The backend `agent-done` emit is now unconsumed.
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener("mousemove", onResizeMove);
   window.addEventListener("mouseup", onResizeUp);
   window.addEventListener("mousedown", onDocMouseDown);
@@ -711,6 +730,60 @@ onMounted(() => {
     started.value = true;
     ensureControlSession(rootId.value);
   }
+
+  // Config must be loaded (and legacy localStorage migrated) before any of the
+  // config-backed refs below are trusted.
+  await configReady;
+
+  // managerWorktreeMode: single global boolean, legacy value was "1"/"0" strings
+  // (not JSON), so migrate by hand rather than via migrateFromLocalStorage.
+  const MISSING = Symbol("missing");
+  if (getConfig<unknown>(WT_CONFIG_KEY, MISSING) === MISSING) {
+    const raw = localStorage.getItem(WT_LS_KEY);
+    if (raw !== null) {
+      setConfig(WT_CONFIG_KEY, raw === "1");
+      localStorage.removeItem(WT_LS_KEY);
+    }
+  }
+  worktreeMode.value = getConfig<boolean>(WT_CONFIG_KEY, false);
+
+  // managerModel: simple global scalar, 1:1 port.
+  migrateFromLocalStorage(MANAGER_MODEL_KEY, MANAGER_MODEL_CONFIG_KEY);
+  managerModel.value = loadManagerModel();
+
+  // managerPanelHeight: simple global scalar, 1:1 port.
+  migrateFromLocalStorage(HEIGHT_LS_KEY, HEIGHT_CONFIG_KEY);
+  panelHeight.value = clampHeight(getConfig<number>(HEIGHT_CONFIG_KEY, 360));
+
+  // chatPermissionMode: shared with ClaudeChat.vue — that component's own
+  // onMounted migration already folds the legacy burrow.claude.permMode.<id> /
+  // .last keys into this same config key. If no ClaudeChat has mounted yet,
+  // run the identical migration here so the Manager still sees a migrated
+  // value; the getConfig(...) === MISSING guard makes running it from both
+  // places idempotent and order-independent.
+  if (getConfig<unknown>(PERM_CONFIG_KEY, MISSING) === MISSING) {
+    const rePerm = /^burrow\.claude\.permMode\.(\d+)$/;
+    const reDanger = /^burrow\.claude\.dangerous\.(\d+)$/;
+    const permLastKey = "burrow.claude.permMode.last";
+    const byChat: Record<string, string> = {};
+    const dangerousByChat: Record<string, boolean> = {};
+    const keys = Object.keys(localStorage).filter(
+      (k) => k !== permLastKey && (rePerm.test(k) || reDanger.test(k)),
+    );
+    for (const k of keys) {
+      let m = k.match(rePerm);
+      if (m) { const v = localStorage.getItem(k); if (v !== null) byChat[m[1]] = v; continue; }
+      m = k.match(reDanger);
+      if (m) { dangerousByChat[m[1]] = localStorage.getItem(k) === "1"; continue; }
+    }
+    const last = localStorage.getItem(permLastKey);
+    const cfg: ChatPermissionModeConfig = { byChat, dangerousByChat };
+    if (last !== null) cfg.last = last;
+    setConfig(PERM_CONFIG_KEY, cfg);
+    for (const k of keys) localStorage.removeItem(k);
+    if (last !== null) localStorage.removeItem(permLastKey);
+  }
+  refreshPermMode();
 });
 onBeforeUnmount(() => {
   window.removeEventListener("mousemove", onResizeMove);
