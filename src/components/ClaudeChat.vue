@@ -693,6 +693,11 @@ const props = defineProps<{
   transport?: 'stream-json' | 'acp';
   // Which agent to run — a chatAgents store id (default 'claude').
   agentKind?: string;
+  // Whether this chat's tab is actually the one on screen (its workspace active,
+  // terminal mode, this tab selected) — passed by Terminal.vue via its isWatching()
+  // helper. Callers that don't track tab-level visibility (float chat, Manager bar)
+  // omit it and fall back to plain window focus.
+  isWatching?: boolean;
 }>();
 
 const chats = useClaudeChatsStore();
@@ -1697,7 +1702,7 @@ function onLine(line: string) {
     if ((type === "exit" || type === "result") && suppressNextDone.value) {
       suppressNextDone.value = false;
     } else {
-      chats.sendStatusEvent(props.chatId, { type: "STOP", watching: document.hasFocus() });
+      chats.sendStatusEvent(props.chatId, { type: "STOP", watching: props.isWatching ?? document.hasFocus() });
       notifyDone();
     }
     // Flush one queued message (next turn will flush the next one).
@@ -1771,7 +1776,7 @@ function onAcpData(raw: string) {
     syncStore();
     scrollToBottom();
     if (!suppressNextDone.value) {
-      chats.sendStatusEvent(props.chatId, { type: "STOP", watching: document.hasFocus() });
+      chats.sendStatusEvent(props.chatId, { type: "STOP", watching: props.isWatching ?? document.hasFocus() });
       notifyDone();
     }
     suppressNextDone.value = false;

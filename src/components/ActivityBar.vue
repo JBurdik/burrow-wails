@@ -26,18 +26,18 @@
     </button>
     <button
       class="ab-btn"
-      :class="{ active: ui.mode === 'mission' }"
-      title="Mission Control (task dashboard)"
-      @click="toggleMission()"
+      :class="{ active: ui.boardRepoId === ws.active?.id }"
+      title="Kanban board"
+      :disabled="!ws.active"
+      @click="ws.active && ui.openBoard(ws.active.id)"
     >
-      <PhRocketLaunch :size="18" />
-      <span v-if="ui.missionActiveCount > 0" class="mc-badge">{{ ui.missionActiveCount > 9 ? '9+' : ui.missionActiveCount }}</span>
+      <PhKanban :size="18" />
     </button>
   </nav>
 </template>
 
 <script setup lang="ts">
-import { PhTerminal, PhGitBranch, PhRocketLaunch, PhSquaresFour } from "@phosphor-icons/vue";
+import { PhTerminal, PhGitBranch, PhKanban, PhSquaresFour } from "@phosphor-icons/vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
@@ -51,10 +51,6 @@ function newTerminal() {
   // terminal first instead of silently adding a hidden tab.
   if (ui.mode !== 'terminal') { ui.setMode('terminal'); return; }
   if (ws.active) termTabs.add(ws.active.id);
-}
-
-function toggleMission() {
-  ui.setMode(ui.mode === "mission" ? "terminal" : "mission");
 }
 </script>
 
@@ -99,22 +95,4 @@ function toggleMission() {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
-.mc-badge {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  min-width: 14px;
-  height: 14px;
-  border-radius: 7px;
-  background: var(--yellow);
-  color: #000;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 14px;
-  text-align: center;
-  padding: 0 3px;
-  pointer-events: none;
-  animation: badge-pulse 1.4s infinite;
-}
-@keyframes badge-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 </style>

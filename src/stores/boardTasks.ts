@@ -3,10 +3,9 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { TermStatus } from "@/lib/terminalStatus";
-import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
-import { useChatAgentsStore } from "@/stores/chatAgents";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
 
 export type BoardColumn = "backlog" | "todo" | "in_progress" | "for_review" | "done";
 
@@ -68,10 +67,10 @@ export function newTaskId(): string {
  * column, which only updates on explicit upsert/move.
  */
 export function liveStatusForTask(task: MissionTask): TermStatus {
-  if (task.chat_id != null) {
-    const chats = useClaudeChatsStore();
-    const s = chats.sessions.find((x) => x.id === task.chat_id);
-    if (s?.status) return s.status;
+  const tabs = useTerminalTabsStore();
+  for (const list of Object.values(tabs.tabsByWs)) {
+    const t = list.find((x) => x.taskId === task.id);
+    if (t) return t.status;
   }
   return (task.status as TermStatus) || "idle";
 }
@@ -162,20 +161,24 @@ export const useBoardTasksStore = defineStore("boardTasks", () => {
     return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "task";
   }
 
+  // Single-quote a string for embedding in a shell command line.
+  function shQuote(s: string): string {
+    return `'${s.replace(/'/g, `'\\''`)}'`;
+  }
+
   /**
-   * Backlog → Todo transition: create the worktree (if requested), spawn an
-   * embedded ACP chat session for the chosen agent, deliver description +
-   * attachments as the first prompt, then move the card to 'todo'. Board
-   * tasks are ACP-only — no terminal tab, no pty. Shared by TaskDetail.vue's
-   * "Start" button AND Terminal.vue's `take_spawn_requests` "board-move"
-   * handler (the frontend-pushed half of `burrow board-move <id> todo`), so a
-   * Manager-driven start behaves identically to a human clicking Start.
+   * Backlog → Todo transition: create the worktree (if requested), spawn a
+   * real `claude` CLI PTY tab (stamped with this task's id) and type the
+   * description + attachments as its first prompt, then move the card to
+   * 'todo'. Shared by TaskDetail.vue's "Start" button AND Terminal.vue's
+   * `take_spawn_requests` "board-move" handler (the frontend-pushed half of
+   * `burrow board-move <id> todo`), so a Manager-driven start behaves
+   * identically to a human clicking Start.
    */
   async function startTask(task: MissionTask): Promise<MissionTask> {
     const wsStore = useWorkspaceStore();
     const ui = useUIStore();
-    const chats = useClaudeChatsStore();
-    const chatAgents = useChatAgentsStore();
+    const tabsStore = useTerminalTabsStore();
 
     const repo = wsStore.workspaces.find((w) => w.id === task.repo_workspace_id);
     if (!repo) throw new Error("repo workspace not found");
@@ -192,25 +195,22 @@ export const useBoardTasksStore = defineStore("boardTasks", () => {
     }
 
     const attachments = await invoke<TaskAttachment[]>("list_task_attachments", { taskId: task.id });
-    const agent = chatAgents.byId(task.agent_kind || "claude-acp");
     const promptParts = [
       (task.description || "").trim(),
       attachments.length ? `Attached screenshots:\n${attachments.map((a) => `- ${a.file_path}`).join("\n")}` : "",
+      `This is Kanban board task ${task.id}. When your work is ready for review, call the burrow MCP tool ` +
+        `board_move({taskId: "${task.id}", column: "for_review"}) (or \`burrow board-move ${task.id} for_review\`) ` +
+        `so the card moves off the board. Do not move it to "done" — only a human does that.`,
     ].filter(Boolean);
     const prompt = promptParts.join("\n\n");
 
+    const modelFlag = task.model ? `--model ${task.model} ` : "";
+    const cmd = prompt ? `claude ${modelFlag}${shQuote(prompt)}` : `claude ${modelFlag}`.trim();
+
     const next: MissionTask = { ...task };
-    const session = chats.create(taskWorkspaceId, { agentKind: agent.id });
-    chats.sync(session.id, { title: task.title });
-    next.transport = agent.transport === "acp" ? "acp" : "stream-json";
-    next.chat_id = session.id;
-    next.pty_id = null;
-    // ACP delivery needs the chat mounted (TaskDetail.vue embeds one when open,
-    // same as ManagerBar) before sendMessage() can be called. If TaskDetail isn't
-    // open for this task right now, seed the same draft-key convention Terminal.vue
-    // uses for CLI-spawned chats — ClaudeChat loads it as the composer's initial
-    // text on mount, so the prompt isn't silently lost.
-    if (prompt) localStorage.setItem(`burrow.draft.chat.${session.id}`, prompt);
+    next.transport = "pty";
+    next.chat_id = null;
+    tabsStore.add(taskWorkspaceId, cmd, task.id);
 
     next.task_workspace_id = taskWorkspaceId;
     next.worktree_branch = worktreeBranch;

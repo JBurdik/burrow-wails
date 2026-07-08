@@ -53,12 +53,6 @@
         <!-- Config (Backlog only) -->
         <div v-if="local.board_column === 'backlog'" class="td-section td-config">
           <div class="td-field">
-            <label class="td-label">Agent</label>
-            <select v-model="local.agent_kind" class="td-select">
-              <option v-for="a in chatAgents.agents" :key="a.id" :value="a.id">{{ a.name }}</option>
-            </select>
-          </div>
-          <div class="td-field">
             <label class="td-label">Model</label>
             <select v-model="local.model" class="td-select">
               <option v-for="m in MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
@@ -74,7 +68,6 @@
           </div>
         </div>
         <div v-else class="td-section td-config td-config-readonly">
-          <span class="td-badge">{{ local.agent_kind }}</span>
           <span class="td-badge">{{ shortModel(local.model) }}</span>
           <span v-if="local.worktree_branch" class="td-badge td-badge-branch"><PhGitBranch :size="10" weight="bold" />{{ local.worktree_branch }}</span>
           <span v-else class="td-badge td-badge-branch"><PhGitBranch :size="10" weight="bold" />current branch</span>
@@ -83,23 +76,15 @@
         <p v-if="startError" class="td-error">{{ startError }}</p>
 
         <!-- Live view (post-spawn only) -->
-        <div v-if="local.board_column !== 'backlog' && chatId" class="td-section td-live">
+        <div v-if="local.board_column !== 'backlog' && livePtyId != null" class="td-section td-live">
           <div class="td-live-head">
             <label class="td-label">Live view</label>
           </div>
           <div class="td-chat-embed">
-            <ClaudeChat
-              :ref="setChatRef"
-              :chat-id="chatId"
-              :workspace-id="local.task_workspace_id!"
-              :cwd="taskCwd"
-              :agent-kind="local.agent_kind || 'claude-acp'"
-              :transport="chatAgents.byId(local.agent_kind || 'claude-acp').transport"
-              compact
-              :default-model="local.model || undefined"
-            />
+            <TaskLiveTerm :pty-id="livePtyId" />
           </div>
         </div>
+        <p v-else-if="local.board_column !== 'backlog'" class="td-live-pending">Waiting for terminal to spawn…</p>
 
         <!-- Actions -->
         <div class="td-actions">
@@ -126,21 +111,17 @@ import {
   PhX, PhImage, PhGitBranch, PhTree,
 } from "@phosphor-icons/vue";
 import { spinnerFrame } from "@/lib/spinner";
-import { useWorkspaceStore } from "@/stores/workspace";
-import { useClaudeChatsStore } from "@/stores/claudeChats";
-import { useChatAgentsStore } from "@/stores/chatAgents";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import {
   useBoardTasksStore, liveStatusForTask, BOARD_COLUMNS,
   type MissionTask, type BoardColumn,
 } from "@/stores/boardTasks";
-import ClaudeChat from "@/components/ClaudeChat.vue";
+import TaskLiveTerm from "@/components/TaskLiveTerm.vue";
 
 const props = defineProps<{ task: MissionTask; repoId: number }>();
 const emit = defineEmits<{ close: []; deleted: [] }>();
 
-const wsStore = useWorkspaceStore();
-const chats = useClaudeChatsStore();
-const chatAgents = useChatAgentsStore();
+const tabsStore = useTerminalTabsStore();
 const board = useBoardTasksStore();
 
 const MODELS = [
@@ -149,14 +130,17 @@ const MODELS = [
   { id: "claude-opus-4-8", label: "Opus 4.8" },
 ];
 
-const local = reactive<MissionTask>({ ...props.task, agent_kind: props.task.agent_kind || "claude-acp", model: props.task.model || "claude-sonnet-5" });
+const local = reactive<MissionTask>({ ...props.task, model: props.task.model || "claude-sonnet-5" });
 watch(() => props.task, (t) => Object.assign(local, t));
 
 const status = computed(() => liveStatusForTask(local as MissionTask));
 const colLabel = computed(() => BOARD_COLUMNS.find((c) => c.id === local.board_column)?.label ?? local.board_column);
-const taskWs = computed(() => wsStore.workspaces.find((w) => w.id === local.task_workspace_id));
-const taskCwd = computed(() => taskWs.value?.path ?? "");
-const chatId = computed(() => local.chat_id ?? undefined);
+// The tab spawned for this task, found by the taskId stamp on its leaf
+// (tabsStore.tabsByWs mirrors every mounted workspace's tabs).
+const livePtyId = computed(() => {
+  const list = tabsStore.tabsByWs[local.task_workspace_id ?? -1] ?? [];
+  return list.find((t) => t.taskId === local.id)?.id ?? null;
+});
 
 function shortModel(m?: string | null): string {
   if (!m) return "";
@@ -249,40 +233,12 @@ async function start() {
   try {
     const saved = await board.startTask({ ...local } as MissionTask);
     Object.assign(local, saved);
-    // ACP chat just got created — startTask() seeded the first-prompt draft
-    // under the same localStorage convention; delivered via sendMessage() once
-    // the embedded ClaudeChat mounts (watched below).
   } catch (e) {
     startError.value = `Failed to start: ${e}`;
   } finally {
     starting.value = false;
   }
 }
-
-const DRAFT_KEY = (chatId: number) => `burrow.draft.chat.${chatId}`;
-watch(chatId, async (id) => {
-  if (id == null) return;
-  const draft = localStorage.getItem(DRAFT_KEY(id));
-  if (!draft) return;
-  localStorage.removeItem(DRAFT_KEY(id));
-  await new Promise((r) => setTimeout(r, 50)); // let ClaudeChat mount
-  chatRef.value?.sendMessage(draft);
-});
-
-// ── Live view: chat ref + session id persistence ──
-const chatRef = ref<InstanceType<typeof ClaudeChat> | null>(null);
-function setChatRef(el: unknown) {
-  chatRef.value = (el as InstanceType<typeof ClaudeChat>) ?? null;
-}
-watch(
-  () => (local.chat_id != null ? chats.sessions.find((s) => s.id === local.chat_id)?.claudeSessionId : undefined),
-  (sid) => {
-    if (sid && sid !== local.session_id) {
-      local.session_id = sid;
-      board.upsert({ ...local } as MissionTask).catch(() => {});
-    }
-  },
-);
 
 async function moveTo(col: BoardColumn) {
   await board.move(local.id, col, Date.now());
@@ -303,7 +259,10 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
 <style scoped>
 .td-backdrop {
   position: fixed;
-  inset: 0;
+  top: var(--titlebar-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
@@ -450,6 +409,7 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
 .td-error { color: #f87171; font-size: 11.5px; margin: 0; }
 
 .td-live { border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08)); padding-top: 12px; }
+.td-live-pending { font-size: 11.5px; color: var(--text-muted, #64748b); margin: 0; }
 .td-live-head { display: flex; align-items: center; gap: 10px; }
 .td-chat-embed { height: 360px; border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; overflow: hidden; }
 .td-chat-embed :deep(.claude-chat) { background: transparent; }

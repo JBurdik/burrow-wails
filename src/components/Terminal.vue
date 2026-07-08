@@ -159,6 +159,7 @@
             :chat-id="pane.leaf.chatId!"
             :workspace-id="workspaceId"
             :cwd="pane.leaf.cwd ?? cwd"
+            :is-watching="isWatching(tab)"
           />
           <BrowserPane
             v-else-if="pane.leaf.leafType === 'browser'"

@@ -148,7 +148,10 @@ async function onDrop(col: BoardColumn, e: DragEvent) {
 <style scoped>
 .kb-page {
   position: fixed;
-  inset: 0;
+  top: var(--titlebar-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
