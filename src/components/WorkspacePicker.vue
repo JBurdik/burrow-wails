@@ -1,6 +1,6 @@
 <template>
   <div class="wsp" ref="rootEl">
-    <button class="wsp-trigger" :class="{ open }" @click.stop="open = !open">
+    <button class="wsp-trigger" :class="{ open }" @click.stop="toggle">
       <div class="wsp-icon-wrap">
         <img v-if="active && store.icons[active.id]" :src="store.icons[active.id]" class="wsp-custom-icon" />
         <PhGitBranch v-else-if="active?.parent_id" :size="14" class="wsp-icon wt" />
@@ -15,7 +15,10 @@
       <PhCaretDown :size="12" weight="bold" class="wsp-caret" />
     </button>
 
-    <div v-if="open" class="wsp-menu" @click.stop>
+    <!-- Teleported: .sidebar is overflow:hidden, which clipped the menu and let
+         clicks fall through to the tab list underneath. -->
+    <Teleport to="body">
+    <div v-if="open" class="wsp-menu" :style="menuStyle" @click.stop>
       <div v-if="store.topLevel.length === 0" class="wsp-empty">
         No workspaces.<br />Open a folder to start.
       </div>
@@ -82,6 +85,7 @@
         <PhFolderPlus :size="13" />Open folder…
       </button>
     </div>
+    </Teleport>
 
     <!-- Context menu -->
     <Teleport to="body">
@@ -138,6 +142,20 @@ const git = useGitStore();
 const open = ref(false);
 const rootEl = ref<HTMLElement>();
 const active = computed(() => store.active);
+
+// The menu is teleported to body, so it needs the trigger's viewport rect.
+const menuStyle = ref<Record<string, string>>({});
+function toggle() {
+  if (!open.value && rootEl.value) {
+    const r = rootEl.value.getBoundingClientRect();
+    menuStyle.value = {
+      left: `${r.left + 6}px`,
+      top: `${r.bottom - 4}px`,
+      width: `${r.width - 12}px`,
+    };
+  }
+  open.value = !open.value;
+}
 
 function select(ws: Workspace) {
   open.value = false;
@@ -304,9 +322,8 @@ onUnmounted(() => {
 
 /* ── Menu ──────────────────────────────────────────────────────── */
 .wsp-menu {
-  position: absolute;
-  left: 6px; right: 6px; top: calc(100% - 2px);
-  z-index: 60;
+  position: fixed;
+  z-index: 1000;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 8px;

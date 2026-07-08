@@ -1688,6 +1688,12 @@ fn arg_str(args: &serde_json::Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
+/// A numeric-or-string arg (pty ids arrive as either) normalized to its string form.
+fn arg_num_str(args: &serde_json::Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.to_string())))
+}
+
 /// Dispatch an MCP tool to the same Rust logic the `burrow` CLI actions use.
 /// `source` is the calling session's `BURROW_CWD` (routing key `ws`).
 pub(crate) fn mcp_run_tool(
@@ -1855,6 +1861,55 @@ pub(crate) fn mcp_run_tool(
             let argref: Vec<&str> = gh_args.iter().map(|s| s.as_str()).collect();
             let out = gh_in(&run_dir, &argref)?;
             Ok(json!({ "output": out }))
+        }
+        "git_status" | "git_log" | "git_diff" => {
+            let run_dir = arg_str(&args, "cwd").unwrap_or_else(|| source.to_string());
+            let git_args: Vec<String> = match name {
+                "git_status" => vec!["status".into()],
+                "git_log" => {
+                    let n = args.get("n").and_then(|v| v.as_u64()).unwrap_or(20);
+                    vec!["log".into(), "--oneline".into(), format!("-{n}")]
+                }
+                _ => {
+                    if args.get("staged").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        vec!["diff".into(), "--cached".into()]
+                    } else {
+                        vec!["diff".into()]
+                    }
+                }
+            };
+            let argref: Vec<&str> = git_args.iter().map(|s| s.as_str()).collect();
+            Ok(json!({ "output": git_in(&run_dir, &argref)? }))
+        }
+        "run" => {
+            let cmd = arg_str(&args, "cmd").ok_or("missing 'cmd'")?;
+            let run_dir = arg_str(&args, "cwd").unwrap_or_else(|| source.to_string());
+            let timeout = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(30);
+            Ok(json!({ "output": run_shell_capture(&run_dir, &cmd, timeout) }))
+        }
+        "tab_rename" => {
+            let tabid = arg_num_str(&args, "tabid").ok_or("missing 'tabid'")?;
+            let name_arg = arg_str(&args, "name").ok_or("missing 'name'")?;
+            mcp_write_request(app, &[
+                ("kind", "tab-rename"), ("ws", source), ("tabid", &tabid), ("name", &name_arg),
+            ])?;
+            Ok(json!({ "status": "requested" }))
+        }
+        "tab_close" => {
+            let tabid = arg_num_str(&args, "tabid").ok_or("missing 'tabid'")?;
+            let force = if args.get("force").and_then(|v| v.as_bool()).unwrap_or(false) { "1" } else { "" };
+            mcp_write_request(app, &[
+                ("kind", "tab-close"), ("ws", source), ("tabid", &tabid), ("force", force),
+            ])?;
+            Ok(json!({ "status": "requested" }))
+        }
+        "workspace_create" => {
+            let name_arg = arg_str(&args, "name").ok_or("missing 'name'")?;
+            let path = arg_str(&args, "path").ok_or("missing 'path'")?;
+            mcp_write_request(app, &[
+                ("kind", "workspace-create"), ("ws", source), ("name", &name_arg), ("path", &path),
+            ])?;
+            Ok(json!({ "status": "requested", "path": path }))
         }
         "board_list" => {
             let db = app.state::<DbState>();
