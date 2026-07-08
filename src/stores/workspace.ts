@@ -165,10 +165,12 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     if (o) o.name = name;
   }
 
-  async function open(ws: Workspace) {
-    await invoke("touch_workspace", { id: ws.id });
+  // Switch first, persist after: a failing/slow touch_workspace must never block
+  // the UI from switching workspace.
+  function open(ws: Workspace) {
     if (!opened.value.some((w) => w.id === ws.id)) opened.value.push(ws);
     active.value = ws;
+    invoke("touch_workspace", { id: ws.id }).catch(() => {});
   }
 
   // Mount a workspace's Terminal (so it reattaches sessions / syncs tabs) WITHOUT

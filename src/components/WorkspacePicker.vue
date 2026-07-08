@@ -7,8 +7,9 @@
         <PhFolder v-else :size="14" weight="fill" class="wsp-icon" />
       </div>
       <div class="wsp-info">
-        <div class="wsp-name">{{ active?.name ?? "No workspace" }}</div>
-        <div v-if="active" class="wsp-sub">{{ active.worktree_branch || shortPath(active.path) }}</div>
+        <!-- A worktree's `name` is usually the repo's, so lead with its branch. -->
+        <div class="wsp-name">{{ active ? (active.worktree_branch || active.name) : "No workspace" }}</div>
+        <div v-if="active" class="wsp-sub">{{ shortPath(active.path) }}</div>
       </div>
       <span v-if="otherTabs" class="wsp-count other" :title="`${otherTabs} tabs in other workspaces`">+{{ otherTabs }}</span>
       <span v-if="otherStatus" class="status-dot" :class="`status-${otherStatus}`" title="Activity in other workspaces">{{ otherStatus === 'running' ? spinnerFrame : '' }}</span>
