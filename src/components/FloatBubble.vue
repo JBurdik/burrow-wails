@@ -50,7 +50,9 @@ import { listen, emit, type UnlistenFn } from "@tauri-apps/api/event";
 import { PhArrowSquareOut, PhMinus, PhRobot, PhTerminal, PhX, PhSpinner, PhFolder } from "@phosphor-icons/vue";
 import { useUIStore } from "@/stores/ui";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { applyAgentEvent, type TermStatus, type StatusLeaf, type ReducerCtx } from "@/lib/terminalStatus";
+import { type TermStatus } from "@/lib/terminalStatus";
+import { createActor } from "xstate";
+import { agentStatusMachine } from "@/machines/agentStatus";
 import { playSound } from "@/lib/sounds";
 import "@xterm/xterm/css/xterm.css";
 
@@ -62,9 +64,26 @@ const hostEl = ref<HTMLElement>();
 const displayTitle = ref(props.initTitle || `PTY ${props.ptyId}`);
 const status = ref<TermStatus>("idle");
 const isAgentSession = ref(false);
-// Local leaf-like object fed to the shared reducer.
-const _leaf: StatusLeaf = { id: props.ptyId, status: "idle", busy: false, isAgent: false };
 const expanded = ref(false);
+
+// Same status machine as the main window's terminal leaves — a float is a separate
+// Tauri window (own JS context), so it runs its own actor fed by the same
+// `pty-hook-{id}` event. Floats are never "watching" (detached mirror), so a
+// finished turn settles to `review`, matching the main window's away-case.
+const statusActor = createActor(
+  agentStatusMachine.provide({
+    actions: {
+      playWaiting: () => playSound("waiting"),
+      onReview: () => playSound("done"),
+      // Floats fire no desktop notifications and no git refresh.
+      onDone: () => {},
+      onError: () => {},
+    },
+  }),
+  { input: { isAgent: true } },
+);
+statusActor.subscribe((snap) => { status.value = snap.value as TermStatus; });
+statusActor.start();
 
 // Project (workspace) icon — read reactively from the workspace store's
 // `icons` computed (SQLite-backed `icon` column, keyed by workspace id).
@@ -79,7 +98,6 @@ let unlistenSnap: UnlistenFn | null = null;
 let unlistenGrid: UnlistenFn | null = null;
 let unlistenHook: UnlistenFn | null = null;
 let resizeObserver: ResizeObserver | null = null;
-let doneTimer: ReturnType<typeof setTimeout> | null = null;
 let snapTimer: ReturnType<typeof setTimeout> | null = null;
 let termMounted = false;
 // Snapshot handshake state. While "loading" we buffer live pty bytes into
@@ -268,31 +286,12 @@ onMounted(async () => {
     },
   );
 
-  // Reducer context for the float: floats are always "not watching" (detached
-  // mirror) so done settles to review, matching main-window away-case semantics.
-  const bubbleCtx: ReducerCtx = {
-    watching: false,
-    setDoneTimer(_id: number) {
-      if (doneTimer) clearTimeout(doneTimer);
-      doneTimer = setTimeout(() => {
-        if (_leaf.status === "done") { _leaf.status = "idle"; status.value = "idle"; }
-      }, 4000);
-    },
-    clearDoneTimer(_id: number) {
-      if (doneTimer) { clearTimeout(doneTimer); doneTimer = null; }
-    },
-    playSound(kind) { playSound(kind); },
-    onSettled(_leaf) { /* floats don't fire desktop notifications or git refresh */ },
-  };
-
   unlistenHook = await listen<string>(`pty-hook-${props.ptyId}`, (event) => {
     const s = event.payload;
-    if (s === "running" || s === "waiting" || s === "permission" || s === "done") {
-      if (s === "running") isAgentSession.value = true;
-      _leaf.isAgent = true;
-      applyAgentEvent(_leaf, s as "running" | "waiting" | "permission" | "done", bubbleCtx);
-      status.value = _leaf.status;
-    }
+    if (s === "running") { isAgentSession.value = true; statusActor.send({ type: "START" }); }
+    else if (s === "waiting") statusActor.send({ type: "WAIT" });
+    else if (s === "permission") statusActor.send({ type: "PERMISSION_REQUEST" });
+    else if (s === "done") statusActor.send({ type: "STOP", watching: false });
   });
 
   // Corner-snapping: dragging fires move events continuously; 220ms after the
@@ -330,7 +329,7 @@ onBeforeUnmount(() => {
   unlistenHook?.();
   unlistenMoved?.();
   unlistenResized?.();
-  if (doneTimer) clearTimeout(doneTimer);
+  statusActor.stop();
   if (snapTimer) clearTimeout(snapTimer);
   if (moveTimer) clearTimeout(moveTimer);
   if (resizeWinTimer) clearTimeout(resizeWinTimer);

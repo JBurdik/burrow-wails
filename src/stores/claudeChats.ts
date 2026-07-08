@@ -63,7 +63,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   const actors = new Map<number, SessionActor>();
 
   function spawnActor(session: ClaudeSession): SessionActor {
-    const actor = createActor(agentStatusMachine).start();
+    const actor = createActor(agentStatusMachine, { input: {} }).start();
     actor.subscribe((snapshot) => {
       session.status = snapshot.value as TermStatus;
     });

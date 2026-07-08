@@ -26,7 +26,7 @@ cd src-tauri && cargo check
 cd src-tauri && cargo build
 ```
 
-No test suite exists yet.
+Tests: `pnpm test` (vitest, no DOM env). Currently covers only `src/machines/agentStatus.ts` — the status state machine. **Pin vitest to v2**: v3+ requires vite ≥6, and vite is held at 5 for Tauri.
 
 ## Architecture
 

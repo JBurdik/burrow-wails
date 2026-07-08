@@ -7,8 +7,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createActor } from "xstate";
 import { agentStatusMachine } from "./agentStatus";
 
-function actor() {
-  const a = createActor(agentStatusMachine);
+/** `isAgent: true` mimics a Claude/Codex leaf: hooks own status, poll is ignored. */
+function actor(isAgent = false) {
+  const a = createActor(agentStatusMachine, { input: { isAgent } });
   a.start();
   return a;
 }
@@ -145,11 +146,11 @@ describe("agentStatusMachine", () => {
       expect(a.getSnapshot().context.detail).toBe("rate_limit");
     });
 
-    it("error → RETRY → running, detail cleared", () => {
+    it("error → START → running, detail cleared", () => {
       const a = actor();
       a.send({ type: "START" });
       a.send({ type: "FAIL", detail: "overloaded" });
-      a.send({ type: "RETRY" });
+      a.send({ type: "START" });
       expect(a.getSnapshot().value).toBe("running");
       expect(a.getSnapshot().context.detail).toBeUndefined();
     });
@@ -205,5 +206,125 @@ describe("agentStatusMachine", () => {
       expect(a.getSnapshot().value).toBe("running");
       expect(a.getSnapshot().context.detail).toBeUndefined();
     });
+  });
+});
+
+// ── Poll channel (foreground process, 2 s) ────────────────────────────────────
+// These are the cases that used to live in terminalStatus.applyBusy/applyNeedsInput.
+
+describe("poll channel", () => {
+  describe("plain command (non-agent)", () => {
+    it("BUSY → running, NOT_BUSY while watching → done", () => {
+      const a = actor(false);
+      a.send({ type: "BUSY" });
+      expect(a.getSnapshot().value).toBe("running");
+      a.send({ type: "NOT_BUSY", watching: true });
+      expect(a.getSnapshot().value).toBe("done");
+    });
+
+    it("NOT_BUSY while away → review (persists)", () => {
+      const a = actor(false);
+      a.send({ type: "BUSY" });
+      a.send({ type: "NOT_BUSY", watching: false });
+      expect(a.getSnapshot().value).toBe("review");
+    });
+
+    it("NEEDS_INPUT → waiting, then resumes on needs:false", () => {
+      const a = actor(false);
+      a.send({ type: "BUSY" });
+      a.send({ type: "NEEDS_INPUT", needs: true });
+      expect(a.getSnapshot().value).toBe("waiting");
+      a.send({ type: "NEEDS_INPUT", needs: false });
+      expect(a.getSnapshot().value).toBe("running");
+    });
+
+    it("NEEDS_INPUT at an idle prompt is a no-op (not busy → no dot)", () => {
+      const a = actor(false);
+      a.send({ type: "NEEDS_INPUT", needs: true });
+      expect(a.getSnapshot().value).toBe("idle");
+    });
+
+    it("a waiting command that exits still settles", () => {
+      const a = actor(false);
+      a.send({ type: "BUSY" });
+      a.send({ type: "NEEDS_INPUT", needs: true });
+      a.send({ type: "NOT_BUSY", watching: false });
+      expect(a.getSnapshot().value).toBe("review");
+    });
+  });
+
+  describe("agent leaf — hooks are the sole authority", () => {
+    it("BUSY never fabricates running (the stuck-orange-dot bug)", () => {
+      const a = actor(true);
+      a.send({ type: "BUSY" });
+      expect(a.getSnapshot().value).toBe("idle");
+    });
+
+    it("NOT_BUSY cannot settle a live agent turn", () => {
+      const a = actor(true);
+      a.send({ type: "START" });
+      a.send({ type: "NOT_BUSY", watching: true });
+      expect(a.getSnapshot().value).toBe("running");
+    });
+
+    it("NEEDS_INPUT cannot drag a running agent into waiting", () => {
+      const a = actor(true);
+      a.send({ type: "START" });
+      a.send({ type: "NEEDS_INPUT", needs: true });
+      expect(a.getSnapshot().value).toBe("running");
+    });
+
+    it("SET_AGENT flips the guard mid-flight", () => {
+      const a = actor(false);
+      a.send({ type: "SET_AGENT", isAgent: true });
+      a.send({ type: "BUSY" });
+      expect(a.getSnapshot().value).toBe("idle");
+      a.send({ type: "SET_AGENT", isAgent: false });
+      a.send({ type: "BUSY" });
+      expect(a.getSnapshot().value).toBe("running");
+    });
+
+    it("INTERRUPT (Ctrl+C / dead-PTY watchdog) settles straight to idle", () => {
+      const a = actor(true);
+      a.send({ type: "START" });
+      a.send({ type: "INTERRUPT" });
+      expect(a.getSnapshot().value).toBe("idle");
+    });
+  });
+});
+
+// ── Side-effect actions ───────────────────────────────────────────────────────
+
+describe("injected actions", () => {
+  it("fires playWaiting once per entry into waiting, not on a repeated WAIT", () => {
+    const playWaiting = vi.fn();
+    const a = createActor(
+      agentStatusMachine.provide({ actions: { playWaiting } }),
+      { input: { isAgent: true } },
+    );
+    a.start();
+    a.send({ type: "START" });
+    a.send({ type: "WAIT" });
+    a.send({ type: "WAIT" });
+    expect(playWaiting).toHaveBeenCalledTimes(1);
+  });
+
+  it("done fires onDone; review fires onReview", () => {
+    const onDone = vi.fn();
+    const onReview = vi.fn();
+    const mk = () => {
+      const a = createActor(
+        agentStatusMachine.provide({ actions: { onDone, onReview } }),
+        { input: { isAgent: true } },
+      );
+      a.start();
+      a.send({ type: "START" });
+      return a;
+    };
+    mk().send({ type: "STOP", watching: true });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onReview).not.toHaveBeenCalled();
+    mk().send({ type: "STOP", watching: false });
+    expect(onReview).toHaveBeenCalledTimes(1);
   });
 });
