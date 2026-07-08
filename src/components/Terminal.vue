@@ -219,7 +219,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { createActor, type Actor } from "xstate";
-import { agentStatusMachine } from "@/machines/agentStatus";
+import { agentStatusMachine, isBusyStatus } from "@/machines/agentStatus";
 import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhArrowSquareOut, PhFileCode, PhGlobe, PhCaretDown, PhCaretRight } from "@phosphor-icons/vue";
 import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
@@ -239,14 +239,9 @@ import { notifyNtfy } from "@/lib/ntfy";
 import type { NtfyEvent } from "@/stores/ui";
 import {
   aggregateStatus,
-  applyBusy,
-  applyNeedsInput,
-  applyInterrupt,
-  markSeen as markLeafSeen,
   deriveTabTitle,
   isDefaultTitle,
   type TermStatus,
-  type ReducerCtx,
 } from "@/lib/terminalStatus";
 import { useAgentHistoryStore } from "@/stores/agentHistory";
 import AgentTimeline from "@/components/AgentTimeline.vue";
@@ -521,8 +516,6 @@ function tabDirty(tab: Tab): boolean {
   return getAllLeaves(tab.root).some((l) => l.leafType === "editor" && l.dirty);
 }
 
-const doneTimers = new Map<number, ReturnType<typeof setTimeout>>();
-
 // ── Per-leaf hook-server event listeners ─────────────────────────────────────
 // Keyed by ptyId. Registered when a leaf is created, cleaned up when closed.
 const leafUnlisteners = new Map<number, UnlistenFn[]>();
@@ -539,38 +532,46 @@ function findTabIdByLeafId(leafId: number): number | null {
   return null;
 }
 
+/** Locate a leaf and its owning tab. The status machine's actions need both at fire time. */
+function locateLeaf(leafId: number): { tab: Tab; leaf: Leaf } | null {
+  for (const tab of tabs.value) {
+    const leaf = findLeaf(tab.root, leafId);
+    if (leaf) return { tab, leaf };
+  }
+  return null;
+}
+
+/** A turn settled (done or review): toast + OS notification + ntfy + git refresh. */
+function onTurnSettled(leafId: number) {
+  const found = locateLeaf(leafId);
+  if (!found) return;
+  notifyDone(found.leaf.title, found.tab.id);
+  maybeNtfy("done", found.leaf.title);
+  if (gitStore.cwd === props.cwd) gitStore.refresh(true);
+}
+
 function registerLeafListeners(leafId: number) {
-  // XState actor — drives leaf.status for agent events.
-  const actor = createActor(agentStatusMachine);
+  // XState actor — the SOLE owner of leaf.status. Every channel (hooks, foreground
+  // poll, interrupt/watchdog) sends it events; nothing else writes leaf.status.
+  // Side effects are machine actions, so a transition and its sound/notification
+  // can never drift apart.
+  const actor = createActor(
+    agentStatusMachine.provide({
+      actions: {
+        playWaiting: () => playSound("waiting"),
+        onDone: () => onTurnSettled(leafId),
+        onReview: () => { playSound("done"); onTurnSettled(leafId); },
+        onError: () => maybeNtfy("error", locateLeaf(leafId)?.leaf.title ?? ""),
+      },
+    }),
+    { input: {} },
+  );
   actor.subscribe((snapshot) => {
-    for (const t of tabs.value) {
-      const leaf = findLeaf(t.root, leafId);
-      if (!leaf) continue;
-      const prev = leaf.status;
-      const next = snapshot.value as TermStatus;
-      leaf.status = next;
-      leaf.statusDetail = snapshot.context.detail;
-      leaf.busy = next === "running" || next === "waiting" || next === "permission";
-      if (prev !== next) {
-        if (next === "done") {
-          notifyDone(leaf.title, t.id);
-          maybeNtfy("done", leaf.title);
-          if (gitStore.cwd === props.cwd) gitStore.refresh(true);
-        } else if (next === "review") {
-          playSound("done");
-          notifyDone(leaf.title, t.id);
-          maybeNtfy("done", leaf.title);
-          if (gitStore.cwd === props.cwd) gitStore.refresh(true);
-        } else if (next === "waiting") {
-          playSound("waiting");
-        } else if (next === "permission") {
-          playSound("waiting");
-        } else if (next === "error") {
-          maybeNtfy("error", leaf.title);
-        }
-      }
-      break;
-    }
+    const leaf = locateLeaf(leafId)?.leaf;
+    if (!leaf) return;
+    leaf.status = snapshot.value as TermStatus;
+    leaf.statusDetail = snapshot.context.detail;
+    leaf.busy = isBusyStatus(leaf.status);
   });
   actor.start();
   leafActors.set(leafId, actor);
@@ -640,40 +641,6 @@ function unregisterLeafListeners(leafId: number) {
   if (actor) { actor.stop(); leafActors.delete(leafId); }
 }
 
-/** Build a ReducerCtx for a given tab (provides watching + side-effect hooks). */
-function makeCtx(tab: Tab): ReducerCtx {
-  return {
-    get watching() { return isWatching(tab); },
-    setDoneTimer(id: number) {
-      clearTimeout(doneTimers.get(id));
-      const t = setTimeout(() => {
-        // Find the leaf to reset it
-        for (const t2 of tabs.value) {
-          const l = findLeaf(t2.root, id);
-          if (l) { l.status = "idle"; break; }
-        }
-        doneTimers.delete(id);
-      }, 4000);
-      doneTimers.set(id, t);
-    },
-    clearDoneTimer(id: number) {
-      clearTimeout(doneTimers.get(id));
-      doneTimers.delete(id);
-    },
-    playSound(kind: "waiting" | "done") { playSound(kind); },
-    onSettled(statusLeaf) {
-      let title = "";
-      for (const t of tabs.value) {
-        const l = findLeaf(t.root, statusLeaf.id);
-        if (l) { title = l.title; break; }
-      }
-      notifyDone(title, tab.id);
-      maybeNtfy("done", title);
-      if (gitStore.cwd === props.cwd) gitStore.refresh(true);
-    },
-  };
-}
-
 function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; id?: number; taskId?: string }): Leaf {
   terminalCounter++;
   return {
@@ -714,12 +681,12 @@ function onLeafTitle(id: number, title: string) {
 // Whether this leaf is currently running an agent — driven by the foreground
 // poll (authoritative), independent of the title text.
 function onLeafAgent(id: number, isAgent: boolean) {
-  for (const tab of tabs.value) {
-    const leaf = findLeaf(tab.root, id);
-    if (!leaf) continue;
-    leaf.isAgent = isAgent;
-    break;
-  }
+  const leaf = locateLeaf(id)?.leaf;
+  if (!leaf) return;
+  leaf.isAgent = isAgent;
+  // The machine gates its poll channel on this: once a leaf is an agent, only
+  // hooks may drive its status.
+  leafActors.get(id)?.send({ type: "SET_AGENT", isAgent });
 }
 
 // OSC 7 CWD update: shell emits \e]7;file://host/path\a after each `cd`.
@@ -735,15 +702,14 @@ function onLeafCwd(id: number, cwd: string) {
 
 // busy comes from the foreground-process poll only — NOT from OSC titles
 // (the shell sets the title to the cwd, which must not count as "running").
-// applyBusy is a no-op for agent leaves: hooks are the sole status authority.
+// The machine's `notAgent` guard drops these for agent leaves: hooks are the
+// sole status authority there.
 function onLeafBusy(id: number, busy: boolean) {
-  for (const tab of tabs.value) {
-    const leaf = findLeaf(tab.root, id);
-    if (!leaf) continue;
-    const wasBusy = leaf.busy;
-    applyBusy(leaf, busy, wasBusy, makeCtx(tab));
-    break;
-  }
+  const found = locateLeaf(id);
+  if (!found) return;
+  leafActors.get(id)?.send(
+    busy ? { type: "BUSY" } : { type: "NOT_BUSY", watching: isWatching(found.tab) },
+  );
 }
 
 // True when the user is actively looking at this tab: its workspace is the
@@ -759,17 +725,9 @@ function isWatching(tab: Tab): boolean {
 
 // Mark every finished leaf in a tab as seen (user opened/returned to it).
 function markTabSeen(tab: Tab) {
-  const ctx = makeCtx(tab);
   for (const leaf of getAllLeaves(tab.root)) {
-    const actor = leafActors.get(leaf.id);
-    if (actor) {
-      const state = actor.getSnapshot().value;
-      if (state === "done" || state === "review" || state === "error") {
-        actor.send({ type: "MARK_SEEN" });
-      }
-    } else {
-      markLeafSeen(leaf, ctx);
-    }
+    // MARK_SEEN is only handled in done/review/error — a no-op elsewhere.
+    leafActors.get(leaf.id)?.send({ type: "MARK_SEEN" });
   }
 }
 
@@ -777,30 +735,21 @@ function markTabSeen(tab: Tab) {
 // XTerm. ONE semantic event → one clean transition via the XState actor, so a
 // trailing "waiting" can never clobber a fresh "done".
 function onAgentState(id: number, s: string, detail?: string) {
-  const actor = leafActors.get(id);
-  for (const tab of tabs.value) {
-    const leaf = findLeaf(tab.root, id);
-    if (!leaf) continue;
-    // Track turn count before sending (subscription updates leaf.status after send).
-    if (s === "running" && leaf.status !== "running") {
-      leaf.round = (leaf.round ?? 0) + 1;
-    }
-    historyStore.addEvent(leaf.id, s);
-    if (actor) {
-      if (s === "running") {
-        actor.send({ type: "START" });
-      } else if (s === "waiting") {
-        actor.send({ type: "WAIT" });
-      } else if (s === "permission") {
-        actor.send({ type: "PERMISSION_REQUEST" });
-      } else if (s === "done") {
-        actor.send({ type: "STOP", watching: isWatching(tab) });
-      } else if (s === "error") {
-        actor.send({ type: "FAIL", detail: detail || undefined });
-      }
-    }
-    break;
+  const found = locateLeaf(id);
+  if (!found) return;
+  const { tab, leaf } = found;
+  // Track turn count before sending (subscription updates leaf.status after send).
+  if (s === "running" && leaf.status !== "running") {
+    leaf.round = (leaf.round ?? 0) + 1;
   }
+  historyStore.addEvent(leaf.id, s);
+  const actor = leafActors.get(id);
+  if (!actor) return;
+  if (s === "running") actor.send({ type: "START" });
+  else if (s === "waiting") actor.send({ type: "WAIT" });
+  else if (s === "permission") actor.send({ type: "PERMISSION_REQUEST" });
+  else if (s === "done") actor.send({ type: "STOP", watching: isWatching(tab) });
+  else if (s === "error") actor.send({ type: "FAIL", detail: detail || undefined });
 }
 
 // SessionStart metadata (model + title) — NOT a status. Stash the model for an
@@ -856,27 +805,15 @@ async function notifyDone(leafTitle: string, tabId?: number) {
 // "done"/"review" badge, no sound). Only act on a live running/waiting leaf so a
 // stray ESC at an idle prompt is a harmless no-op.
 function onLeafInterrupt(id: number) {
-  const actor = leafActors.get(id);
-  if (actor) {
-    actor.send({ type: "INTERRUPT" });
-    return;
-  }
-  for (const tab of tabs.value) {
-    const leaf = findLeaf(tab.root, id);
-    if (!leaf) continue;
-    applyInterrupt(leaf, makeCtx(tab));
-    break;
-  }
+  // Only handled in running/waiting/permission — a stray ESC at an idle prompt
+  // is a no-op by construction.
+  leafActors.get(id)?.send({ type: "INTERRUPT" });
 }
 
+// Output-buffer heuristic from the poll (plain commands only — the machine's
+// `notAgent` guard drops it for agent leaves).
 function onLeafNeedsInput(id: number, needs: boolean) {
-  if (leafActors.has(id)) return; // actor owns status for agent leaves
-  for (const tab of tabs.value) {
-    const leaf = findLeaf(tab.root, id);
-    if (!leaf) continue;
-    applyNeedsInput(leaf, needs, makeCtx(tab));
-    break;
-  }
+  leafActors.get(id)?.send({ type: "NEEDS_INPUT", needs });
 }
 
 function tabStatus(tab: Tab): TermStatus {
@@ -1465,23 +1402,32 @@ watch(
   },
 );
 
-watch(
-  () => tabsStore.request,
-  (req) => {
-    if (!req || req.wsId !== props.workspaceId) return;
-    if (req.action === "activate" && req.tabId != null) activateTab(req.tabId);
-    else if (req.action === "add") addTab(req.cmd || undefined, { taskId: req.taskId });
-    else if (req.action === "close" && req.tabId != null) closeTab(req.tabId);
-    else if (req.action === "reorder" && req.fromIdx != null && req.toIdx != null) {
-      reorderTabs(req.fromIdx, req.toIdx);
-    }
-    else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId);
-    else if (req.action === "rename" && req.tabId != null && req.title != null) {
-      const tab = tabs.value.find((t) => t.id === req.tabId);
-      if (tab) getAllLeaves(tab.root).forEach((l) => { l.title = req.title!; });
-    }
-  },
-);
+// Requests arrive through a single shared slot. A workspace the sidebar just
+// switched to has no mounted Terminal yet (or is still restoring), so the watch
+// never fires for it — onMounted replays the pending request. The nonce guard
+// keeps that replay from re-running one this instance already handled.
+let handledNonce = 0;
+
+function applyTabRequest(req: typeof tabsStore.request) {
+  if (!req || req.wsId !== props.workspaceId || req.nonce === handledNonce) return;
+  // An activate for a tab that hasn't been restored yet stays unhandled, so the
+  // onMounted replay picks it up once the tab list exists.
+  if (req.action === "activate" && !tabs.value.some((t) => t.id === req.tabId)) return;
+  handledNonce = req.nonce;
+  if (req.action === "activate" && req.tabId != null) activateTab(req.tabId);
+  else if (req.action === "add") addTab(req.cmd || undefined, { taskId: req.taskId });
+  else if (req.action === "close" && req.tabId != null) closeTab(req.tabId);
+  else if (req.action === "reorder" && req.fromIdx != null && req.toIdx != null) {
+    reorderTabs(req.fromIdx, req.toIdx);
+  }
+  else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId);
+  else if (req.action === "rename" && req.tabId != null && req.title != null) {
+    const tab = tabs.value.find((t) => t.id === req.tabId);
+    if (tab) getAllLeaves(tab.root).forEach((l) => { l.title = req.title!; });
+  }
+}
+
+watch(() => tabsStore.request, applyTabRequest);
 
 onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
@@ -1557,6 +1503,9 @@ onMounted(async () => {
   } catch {}
 
   syncStore();
+  // Replay a request that landed while this Terminal was mounting/restoring —
+  // e.g. the sidebar clicking a tab of a workspace that wasn't open yet.
+  applyTabRequest(tabsStore.request);
 });
 
 // Handle a `burrow worktree` request: create a git worktree off this workspace's
