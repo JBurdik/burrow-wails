@@ -41,6 +41,12 @@
           ><span class="pr-dot" />#{{ git.prByWs[ws.id]!.number }}</span>
           <span v-if="aggStatus(ws.id)" class="status-dot" :class="`status-${aggStatus(ws.id)}`">{{ aggStatus(ws.id) === 'running' ? spinnerFrame : '' }}</span>
           <button class="wsp-btn" title="New worktree" @click.stop="newWorktree(ws)"><PhGitBranch :size="12" /></button>
+          <button
+            class="wsp-btn pin"
+            :class="{ on: isPinned(ws.id) }"
+            :title="isPinned(ws.id) ? 'Unpin from sidebar' : `Pin to sidebar (max ${MAX_PINNED})`"
+            @click.stop="togglePin(ws.id)"
+          ><PhPushPin :size="12" :weight="isPinned(ws.id) ? 'fill' : 'regular'" /></button>
         </div>
 
         <div
@@ -62,6 +68,12 @@
             :title="prTitle(git.prByWs[wt.id]!)"
           ><span class="pr-dot" />#{{ git.prByWs[wt.id]!.number }}</span>
           <span v-if="aggStatus(wt.id)" class="status-dot" :class="`status-${aggStatus(wt.id)}`">{{ aggStatus(wt.id) === 'running' ? spinnerFrame : '' }}</span>
+          <button
+            class="wsp-btn pin"
+            :class="{ on: isPinned(wt.id) }"
+            :title="isPinned(wt.id) ? 'Unpin from sidebar' : `Pin to sidebar (max ${MAX_PINNED})`"
+            @click.stop="togglePin(wt.id)"
+          ><PhPushPin :size="12" :weight="isPinned(wt.id) ? 'fill' : 'regular'" /></button>
         </div>
       </template>
 
@@ -99,9 +111,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import {
-  PhFolder, PhFolderPlus, PhGitBranch, PhCaretDown,
+  PhFolder, PhFolderPlus, PhGitBranch, PhCaretDown, PhPushPin,
   PhPencilSimple, PhImage, PhTrash, PhKanban,
 } from "@phosphor-icons/vue";
+import { isPinned, togglePin, MAX_PINNED } from "@/lib/pinnedWorkspaces";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
@@ -348,6 +361,9 @@ onUnmounted(() => {
 }
 .wsp-row:hover .wsp-btn { display: flex; }
 .wsp-btn:hover { color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent); }
+/* A pinned row keeps its pin visible — it's state, not an action. */
+.wsp-btn.pin.on { display: flex; color: var(--accent); }
+.wsp-btn.pin:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 
 .wsp-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 

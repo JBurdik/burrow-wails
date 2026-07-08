@@ -53,91 +53,94 @@
       </div>
     </div>
 
-    <!-- Tabs of the selected workspace -->
-    <div v-if="active" class="tabs-header">
-      <span class="tabs-label">Tabs</span>
-      <span v-if="(termTabs.tabsByWs[active.id] || []).length" class="tabs-count">{{ termTabs.tabsByWs[active.id].length }}</span>
-      <span v-if="unreadCount > 0" class="header-unread" :title="`${unreadCount} unread — ⌘⇧U to jump`">{{ unreadCount }}</span>
-      <div class="tabs-actions">
-        <button class="icon-btn" title="Board" @click="ui.openBoard(active.id)"><PhKanban :size="13" /></button>
-        <button class="icon-btn chat" title="New chat" @click="newChatSession(active.id)"><ClaudeIcon :size="13" /></button>
-        <button class="icon-btn" title="New terminal" @click="termTabs.add(active.id)"><PhPlus :size="13" /></button>
-      </div>
-    </div>
-
+    <!-- One section per visible workspace: the pinned ones plus the active one -->
     <div class="ws-list">
-      <TransitionGroup v-if="active" name="ws-move" tag="div" class="ws-terminals">
-        <div
-          v-for="(tab, tabIdx) in termTabs.tabsByWs[active.id] || []"
-          :key="tab.id"
-          class="ws-term"
-          :data-reorder-idx="tabIdx"
-          :data-reorder-group="String(active.id)"
-          :class="{
-            active: termTabs.activeByWs[active.id] === tab.id,
-            'drag-over': tabOverIdx === tabIdx && tabDragIdx !== tabIdx,
-            dragging: tabDragIdx === tabIdx,
-          }"
-          @click.stop="selectTab(active, tab.id)"
-          @dblclick.stop
-          @pointerdown="(e: PointerEvent) => tabDragDown(tabIdx, e, String(active!.id))"
-        >
-          <ClaudeIcon v-if="tab.isChat" :size="11" class="ws-term-icon claude-session-icon" />
-          <PhRobot v-else-if="tab.isAgent" :size="11" class="ws-term-icon agent" />
-          <PhTerminal v-else :size="11" class="ws-term-icon" />
-          <input
-            v-if="editingTab?.wsId === active.id && editingTab?.tabId === tab.id"
-            v-model="editingTabTitle"
-            class="ws-term-rename-input"
-            @blur="commitTabRename"
-            @keydown.enter.prevent="commitTabRename"
-            @keydown.esc.prevent="cancelTabRename"
-            @click.stop
-            @pointerdown.stop
-          />
-          <span
-            v-else
-            class="ws-term-label"
-            @dblclick.stop="startTabRename(active, tab)"
-          >{{ tab.title }}</span>
-          <span
-            v-if="(tab.leafCount ?? 1) > 1"
-            class="ws-term-split-count"
-            :title="`${tab.leafCount} panes`"
-          >{{ tab.leafCount }}</span>
-          <span
-            v-if="tab.isAgent && (tab.round ?? 0) > 1 && tab.status !== 'idle'"
-            class="ws-term-round"
-            :title="`${tab.round} messages sent to agent this session`"
-          >↺{{ tab.round }}</span>
-          <PhBell
-            v-if="tab.status === 'permission'"
-            :size="11"
-            weight="fill"
-            class="ws-term-permission-bell"
-            title="Permission required"
-          />
-          <span
-            v-if="tab.status && tab.status !== 'idle'"
-            class="status-dot"
-            :class="`status-${tab.status}`"
-          >{{ tab.status === 'running' ? spinnerFrame : '' }}</span>
-          <PhX
-            :size="9"
-            weight="bold"
-            class="ws-term-close"
-            title="Close"
-            data-no-drag
-            @click.stop="termTabs.close(active!.id, tab.id)"
-          />
+      <div v-for="ws in sections" :key="ws.id" class="ws-section">
+        <div class="tabs-header" :class="{ active: active?.id === ws.id }" @click="selectWs(ws)">
+          <PhPushPin v-if="isPinned(ws.id)" :size="10" weight="fill" class="tabs-pin" />
+          <PhGitBranch v-else-if="ws.parent_id" :size="11" class="tabs-pin wt" />
+          <span class="tabs-label">{{ ws.worktree_branch || ws.name }}</span>
+          <span v-if="tabCount(ws.id)" class="tabs-count">{{ tabCount(ws.id) }}</span>
+          <span v-if="sections.length === 1 && unreadCount > 0" class="header-unread" :title="`${unreadCount} unread — ⌘⇧U to jump`">{{ unreadCount }}</span>
+          <div class="tabs-actions">
+            <button class="icon-btn" title="Board" @click.stop="ui.openBoard(ws.id)"><PhKanban :size="13" /></button>
+            <button class="icon-btn chat" title="New chat" @click.stop="newChatSession(ws.id)"><ClaudeIcon :size="13" /></button>
+            <button class="icon-btn" title="New terminal" @click.stop="termTabs.add(ws.id)"><PhPlus :size="13" /></button>
+          </div>
         </div>
-      </TransitionGroup>
+
+        <TransitionGroup name="ws-move" tag="div" class="ws-terminals">
+          <div
+            v-for="(tab, tabIdx) in termTabs.tabsByWs[ws.id] || []"
+            :key="tab.id"
+            class="ws-term"
+            :data-reorder-idx="tabIdx"
+            :data-reorder-group="String(ws.id)"
+            :class="{
+              active: active?.id === ws.id && termTabs.activeByWs[ws.id] === tab.id,
+              'drag-over': tabDragGroup === String(ws.id) && tabOverIdx === tabIdx && tabDragIdx !== tabIdx,
+              dragging: tabDragGroup === String(ws.id) && tabDragIdx === tabIdx,
+            }"
+            @click.stop="selectTab(ws, tab.id)"
+            @dblclick.stop
+            @pointerdown="(e: PointerEvent) => tabDragDown(tabIdx, e, String(ws.id))"
+          >
+            <ClaudeIcon v-if="tab.isChat" :size="11" class="ws-term-icon claude-session-icon" />
+            <PhRobot v-else-if="tab.isAgent" :size="11" class="ws-term-icon agent" />
+            <PhTerminal v-else :size="11" class="ws-term-icon" />
+            <input
+              v-if="editingTab?.wsId === ws.id && editingTab?.tabId === tab.id"
+              v-model="editingTabTitle"
+              class="ws-term-rename-input"
+              @blur="commitTabRename"
+              @keydown.enter.prevent="commitTabRename"
+              @keydown.esc.prevent="cancelTabRename"
+              @click.stop
+              @pointerdown.stop
+            />
+            <span
+              v-else
+              class="ws-term-label"
+              @dblclick.stop="startTabRename(ws, tab)"
+            >{{ tab.title }}</span>
+            <span
+              v-if="(tab.leafCount ?? 1) > 1"
+              class="ws-term-split-count"
+              :title="`${tab.leafCount} panes`"
+            >{{ tab.leafCount }}</span>
+            <span
+              v-if="tab.isAgent && (tab.round ?? 0) > 1 && tab.status !== 'idle'"
+              class="ws-term-round"
+              :title="`${tab.round} messages sent to agent this session`"
+            >↺{{ tab.round }}</span>
+            <PhBell
+              v-if="tab.status === 'permission'"
+              :size="11"
+              weight="fill"
+              class="ws-term-permission-bell"
+              title="Permission required"
+            />
+            <span
+              v-if="tab.status && tab.status !== 'idle'"
+              class="status-dot"
+              :class="`status-${tab.status}`"
+            >{{ tab.status === 'running' ? spinnerFrame : '' }}</span>
+            <PhX
+              :size="9"
+              weight="bold"
+              class="ws-term-close"
+              title="Close"
+              data-no-drag
+              @click.stop="termTabs.close(ws.id, tab.id)"
+            />
+          </div>
+        </TransitionGroup>
+
+        <div v-if="!tabCount(ws.id)" class="ws-empty sm">No tabs. Click + to open one.</div>
+      </div>
 
       <div v-if="store.workspaces.length === 0" class="ws-empty">
         No workspaces.<br />Open a folder to start.
-      </div>
-      <div v-else-if="active && !(termTabs.tabsByWs[active.id] || []).length" class="ws-empty">
-        No tabs.<br />Click + to open one.
       </div>
     </div>
 
@@ -241,6 +244,8 @@ import {
   PhBell,
   PhPlus,
   PhKanban,
+  PhPushPin,
+  PhGitBranch,
   PhActivity,
   PhArrowRight,
   PhWarningCircle,
@@ -256,6 +261,7 @@ import { spinnerFrame } from "@/lib/spinner";
 import { usePointerReorder } from "@/composables/usePointerReorder";
 import { STATUS_PRIORITY, type TermStatus } from "@/lib/terminalStatus";
 import { useGitStore } from "@/stores/git";
+import { pinnedIds, isPinned } from "@/lib/pinnedWorkspaces";
 
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
@@ -263,6 +269,25 @@ const ui = useUIStore();
 const git = useGitStore();
 
 const active = computed(() => store.active);
+
+function tabCount(id: number): number {
+  return (termTabs.tabsByWs[id] || []).length;
+}
+
+// Workspaces that get their own tab section: every pinned one, in pin order,
+// plus the active one when it isn't pinned (so selecting from the dropdown
+// always shows its tabs without forcing a pin).
+const sections = computed<Workspace[]>(() => {
+  const byId = (id: number) => store.workspaces.find((w) => w.id === id);
+  const pinned = pinnedIds.value.map(byId).filter((w): w is Workspace => !!w);
+  const a = active.value;
+  return a && !pinned.some((w) => w.id === a.id) ? [...pinned, a] : pinned;
+});
+
+function selectWs(ws: Workspace) {
+  if (ui.mode !== "terminal") ui.setMode("terminal");
+  store.open(ws);
+}
 
 // Poll PR status for every workspace + worktree that has a path. gh runs out of
 // process and failures cache null, so this never blocks the UI. 60s cadence.
@@ -290,11 +315,16 @@ const unreadCount = computed(() => {
 // ── fleet view ────────────────────────────────────────────────────────────────
 interface FleetItem { wsId: number; wsName: string; tabId: number; tabTitle: string; status: TermStatus; }
 
+// statuses owned by the needs-attention strip; fleet skips them so a tab never
+// renders twice
+const ATTENTION_STATES = new Set<TermStatus>(["error", "permission", "waiting", "review"]);
+
 const fleetItems = computed<FleetItem[]>(() => {
   const items: FleetItem[] = [];
   for (const ws of store.workspaces) {
     for (const tab of termTabs.tabsByWs[ws.id] ?? []) {
-      if (tab.status !== "idle") {
+      // skip idle + anything the attention strip already shows (no dupes)
+      if (tab.status !== "idle" && !ATTENTION_STATES.has(tab.status)) {
         items.push({ wsId: ws.id, wsName: ws.name, tabId: tab.id, tabTitle: tab.title, status: tab.status });
       }
     }
@@ -311,8 +341,6 @@ function selectFleetItem(item: FleetItem) {
 // Tabs (across every workspace + worktree) whose status means the user should
 // look: error / permission / waiting / review. Pinned at the top, sorted by
 // STATUS_PRIORITY (most urgent first). Reactive to status changes via tabsByWs.
-const ATTENTION_STATES = new Set<TermStatus>(["error", "permission", "waiting", "review"]);
-
 const attentionItems = computed<FleetItem[]>(() => {
   const items: FleetItem[] = [];
   for (const ws of store.workspaces) {
@@ -384,6 +412,7 @@ function newChatSession(workspaceId: number) {
 const {
   dragIdx: tabDragIdx,
   overIdx: tabOverIdx,
+  dragGroup: tabDragGroup,
   down: tabDragDown,
 } = usePointerReorder((from, to, group) => {
   if (group != null) termTabs.reorder(Number(group), from, to);
@@ -529,21 +558,35 @@ async function confirmCreate() {
   overflow: hidden;
 }
 
-/* ── Tabs header ───────────────────────────────────────────────── */
+/* ── Workspace section ─────────────────────────────────────────── */
+.ws-section { margin-bottom: 4px; }
+
 .tabs-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px 4px 12px;
+  gap: 5px;
+  padding: 5px 8px 4px 10px;
+  margin: 0 4px;
+  border-radius: 5px;
+  cursor: pointer;
   flex-shrink: 0;
+  transition: background .12s;
 }
+.tabs-header:hover { background: var(--bg-hover); }
+.tabs-header.active .tabs-label { color: var(--text-primary); }
+
+.tabs-pin { color: var(--accent); flex-shrink: 0; }
+.tabs-pin.wt { color: #a78bfa; }
 
 .tabs-label {
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tabs-count {
@@ -556,7 +599,8 @@ async function confirmCreate() {
   line-height: 1.6;
 }
 
-.tabs-actions { margin-left: auto; display: flex; align-items: center; gap: 1px; }
+.tabs-actions { margin-left: auto; display: flex; align-items: center; gap: 1px; opacity: 0; transition: opacity .12s; }
+.tabs-header:hover .tabs-actions, .tabs-header.active .tabs-actions { opacity: 1; }
 
 .header-unread {
   font-size: 9px;
@@ -598,7 +642,9 @@ async function confirmCreate() {
 }
 
 .ws-terminals {
-  margin: 1px 6px 3px 8px;
+  margin: 1px 6px 3px 14px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  padding-left: 6px;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -718,6 +764,7 @@ async function confirmCreate() {
   border: 1px dashed color-mix(in srgb, var(--border) 60%, transparent);
   border-radius: 8px;
 }
+.ws-empty.sm { padding: 10px; margin: 2px 8px 4px 18px; font-size: 10.5px; border: none; opacity: 0.7; }
 
 /* ── Footer ────────────────────────────────────────────────────── */
 .sidebar-footer {
