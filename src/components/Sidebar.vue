@@ -371,17 +371,20 @@ async function listBranches(path: string): Promise<string[]> {
   return [];
 }
 
-// Mount every workspace so its Terminal restores sessions into tabsByWs — the
-// fleet/attention strips and the picker's status dots read from there, and the
-// sidebar no longer has a per-workspace expand step to trigger it lazily.
-// ponytail: mount-all. If a 20-repo setup gets slow, mount only the active repo
-// + its worktrees and drive the other dots off the hook server instead.
-function mountAll() {
-  for (const ws of store.workspaces) store.ensureOpen(ws);
+// Mount the workspaces that have a visible tab section (active + pinned) plus
+// their worktrees, so each Terminal restores its sessions into tabsByWs.
+// NOT every workspace: mounting them all had their Terminals race to adopt the
+// daemon's sessions, so a freshly-activated workspace showed another one's tabs.
+function mountSections() {
+  for (const ws of sections.value) {
+    store.ensureOpen(ws);
+    const parent = ws.parent_id ?? ws.id;
+    for (const wt of store.worktreesByParent[parent] || []) store.ensureOpen(wt);
+  }
 }
 
 onMounted(() => {
-  mountAll();
+  mountSections();
   // Defer the first PR sweep off the critical startup path. Firing gh for every
   // workspace synchronously here saturated the Tauri command workers and stalled
   // the real startup invokes (list_workspaces, session restore, create_pty) → the
@@ -398,7 +401,9 @@ onUnmounted(() => { if (prTimer) clearInterval(prTimer); });
 
 // Watch only the STRUCTURE of the workspace set (its id list), not every nested
 // property — a deep watch re-ran the mount sweep on any tab/PR mutation.
-watch(() => store.workspaces.map(ws => ws.id).join(","), () => { mountAll(); refreshAllPrs(); });
+watch(() => store.workspaces.map(ws => ws.id).join(","), () => { mountSections(); refreshAllPrs(); });
+// Pinning a workspace (or switching to one) gives it a section — mount it.
+watch(() => sections.value.map(ws => ws.id).join(","), mountSections);
 
 // ── Claude chat sessions ─────────────────────────────────────────────────────
 function newChatSession(workspaceId: number) {
