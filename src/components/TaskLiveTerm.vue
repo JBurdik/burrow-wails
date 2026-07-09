@@ -1,5 +1,7 @@
 <template>
-  <div class="tlt-root" ref="hostEl" />
+  <div class="tlt-viewport" ref="viewportEl">
+    <div class="tlt-inner" ref="hostEl" />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -21,23 +23,44 @@ import { useUIStore } from "@/stores/ui";
 const props = defineProps<{ ptyId: number }>();
 
 const ui = useUIStore();
+const viewportEl = ref<HTMLElement>();
 const hostEl = ref<HTMLElement>();
 let term: Terminal | null = null;
 let renderAddon: ITerminalAddon | null = null;
-let resizeObserver: ResizeObserver | null = null;
 let unlistenData: UnlistenFn | null = null;
 let unlistenSnap: UnlistenFn | null = null;
+let unlistenGrid: UnlistenFn | null = null;
 let snapTimer: ReturnType<typeof setTimeout> | null = null;
 let phase: "loading" | "live" = "loading";
 let liveQueue: Uint8Array[] = [];
 
-function fitFont() {
-  if (!term || !hostEl.value) return;
-  const w = hostEl.value.clientWidth;
-  const h = hostEl.value.clientHeight;
-  if (w < 10 || h < 10) return;
-  const fs = Math.max(7, Math.min(15, Math.floor(w / (term.cols * 0.6))));
-  if (term.options.fontSize !== fs) term.options.fontSize = fs;
+// The grid MUST match the source PTY's cols/rows — Claude Code's interactive
+// UI (status bar, box borders) uses absolute cursor positioning sized to its
+// real terminal, so a mismatched grid renders garbled (tried a self-sized
+// grid, then a CSS-scaled one — both made the text blurry/tiny for the same
+// reason a shrunk font does). Font stays fixed and crisp; a source wider than
+// this panel scrolls horizontally instead.
+const FONT_SIZE = 13;
+function applyGrid(cols: number, rows: number) {
+  if (!term || cols <= 0 || rows <= 0) return;
+  if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows);
+}
+
+// The grid matches the source exactly, so its rendered box is routinely
+// taller/wider than this panel — the extra is meant to be revealed by
+// scrolling .tlt-viewport (plain CSS overflow), not by xterm's own internal
+// scrollback (there isn't any real scrollback here, just one clipped screen).
+// But xterm.js's inner `.xterm-viewport` sits on top and calls
+// preventDefault() on EVERY wheel event for its own scrollback handling —
+// vertical included — so the browser's native scroll on our outer container
+// never fires. Intercept in the capture phase, before it reaches xterm, and
+// drive the outer container's scroll ourselves.
+function onWheel(e: WheelEvent) {
+  if (!viewportEl.value) return;
+  e.preventDefault();
+  e.stopPropagation();
+  viewportEl.value.scrollLeft += e.deltaX;
+  viewportEl.value.scrollTop += e.deltaY;
 }
 
 async function attach() {
@@ -45,7 +68,7 @@ async function attach() {
   term = new Terminal({
     theme: ui.activeTheme.xterm,
     fontFamily: ui.terminalFont,
-    fontSize: ui.terminalFontSize,
+    fontSize: FONT_SIZE,
     lineHeight: 1.4,
     cursorBlink: false,
     disableStdin: true,
@@ -56,10 +79,7 @@ async function attach() {
   term.loadAddon(new WebLinksAddon());
   term.open(hostEl.value);
   renderAddon = attachRenderer(term);
-  fitFont();
-
-  resizeObserver = new ResizeObserver(() => fitFont());
-  resizeObserver.observe(hostEl.value);
+  viewportEl.value?.addEventListener("wheel", onWheel, { capture: true, passive: false });
 
   unlistenData = await listen<number[]>(`pty-data-${props.ptyId}`, (event) => {
     const bytes = new Uint8Array(event.payload);
@@ -71,14 +91,18 @@ async function attach() {
     (event) => {
       if (phase !== "loading") return;
       if (snapTimer) { clearTimeout(snapTimer); snapTimer = null; }
-      const { data, cols, rows } = event.payload;
-      if (cols > 0 && rows > 0) term?.resize(cols, rows);
+      applyGrid(event.payload.cols, event.payload.rows);
       term?.reset();
-      term?.write(data);
+      term?.write(event.payload.data);
       while (liveQueue.length) term?.write(liveQueue.shift()!);
       phase = "live";
-      fitFont();
     },
+  );
+  // Source resized (its own tab reflowed) — follow so its next repaint lands
+  // on a grid that matches.
+  unlistenGrid = await listen<{ cols: number; rows: number }>(
+    `float-grid-${props.ptyId}`,
+    (event) => { if (phase === "live") applyGrid(event.payload.cols, event.payload.rows); },
   );
 
   phase = "loading";
@@ -92,12 +116,13 @@ async function attach() {
 }
 
 function detach() {
-  resizeObserver?.disconnect();
-  resizeObserver = null;
+  viewportEl.value?.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions);
   unlistenData?.();
   unlistenSnap?.();
+  unlistenGrid?.();
   unlistenData = null;
   unlistenSnap = null;
+  unlistenGrid = null;
   if (snapTimer) { clearTimeout(snapTimer); snapTimer = null; }
   renderAddon?.dispose();
   term?.dispose();
@@ -116,9 +141,16 @@ watch(() => props.ptyId, async () => {
 </script>
 
 <style scoped>
-.tlt-root {
+.tlt-viewport {
   width: 100%;
   height: 100%;
+  overflow: auto;
   padding: 4px 6px;
+}
+.tlt-inner {
+  /* xterm sizes this to its real cols*rows pixel dimensions — wider/taller
+     than the viewport is exactly what makes .tlt-viewport's scrollbars appear. */
+  width: fit-content;
+  height: fit-content;
 }
 </style>

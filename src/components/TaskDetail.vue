@@ -270,7 +270,7 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
   z-index: 950;
 }
 .td-panel {
-  width: 560px;
+  width: 720px;
   max-width: 92vw;
   max-height: 86vh;
   display: flex;
@@ -411,7 +411,7 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
 .td-live { border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08)); padding-top: 12px; }
 .td-live-pending { font-size: 11.5px; color: var(--text-muted, #64748b); margin: 0; }
 .td-live-head { display: flex; align-items: center; gap: 10px; }
-.td-chat-embed { height: 360px; border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; overflow: hidden; }
+.td-chat-embed { height: 440px; border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; overflow: hidden; }
 .td-chat-embed :deep(.claude-chat) { background: transparent; }
 
 .td-actions { display: flex; gap: 8px; padding-top: 4px; }

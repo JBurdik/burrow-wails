@@ -573,6 +573,10 @@ function registerLeafListeners(leafId: number) {
     leaf.status = snapshot.value as TermStatus;
     leaf.statusDetail = snapshot.context.detail;
     leaf.busy = isBusyStatus(leaf.status);
+    // Mirror to disk so `burrow list-tabs` / MCP `list_tabs` (pure Rust/DB
+    // reads, no frontend round-trip) can report whether the agent actually
+    // finished instead of just pty id + title.
+    invoke("set_tab_live_status", { ptyId: leafId, status: leaf.status }).catch(() => {});
   });
   actor.start();
   leafActors.set(leafId, actor);

@@ -803,7 +803,8 @@ burrow spawn --cwd /path/to/other/project claude \"...\"\n\
 Inspect and drive the app itself from the terminal — list workspaces/tabs, switch focus, open tabs.\n\
 ```\n\
 burrow list-workspaces             # print every workspace: <id>\\t<name>\\t<path>\n\
-burrow list-tabs                   # print this workspace's tabs: <pty-id>\\t<title>\n\
+burrow list-tabs                   # print this workspace's tabs: <pty-id>\\t<title>\\t<status>\n\
+                                    #   status: running/waiting/permission/done/review/error/idle — check it before assuming a tab hasn't finished\n\
 burrow list-tabs --ws 3            # tabs of workspace 3\n\
 burrow focus-workspace 3           # switch Burrow to (and open) workspace 3\n\
 burrow focus-tab 42                # activate the tab with pty id 42 (switches workspace if needed)\n\
@@ -1558,9 +1559,39 @@ fn resolve_repo_workspace_id(conn: &Connection, ws_path: &str) -> Option<i64> {
     .map(|(id, parent_id)| parent_id.unwrap_or(id))
 }
 
-/// A workspace's tabs as `<pty_id>\t<title>\n` lines. Shared by `burrow
-/// list-tabs` and the MCP `list_tabs` tool.
-fn query_tabs_tsv(conn: &Connection, ws_id: i64) -> String {
+/// Dir holding one file per pty id with its last-known live agent status
+/// (`running`/`waiting`/`permission`/`done`/`review`/`error`/`idle`), written by
+/// the frontend's status machine (`set_tab_live_status`). Lets `list_tabs` /
+/// `burrow list-tabs` — pure Rust/DB reads with no frontend round-trip — answer
+/// "did this agent finish?" instead of just returning pty id + title, which is
+/// why callers checking over MCP/CLI kept assuming a finished agent was still
+/// running: the status simply wasn't in that payload.
+fn tab_status_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let dir = burrow_session_dir(app)?.join("tab_status");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+#[tauri::command]
+fn set_tab_live_status(pty_id: i64, status: String, app: AppHandle) {
+    if let Some(dir) = tab_status_dir(&app) {
+        let _ = std::fs::write(dir.join(pty_id.to_string()), status);
+    }
+}
+
+fn read_tab_live_status(app: &AppHandle, pty_id: i64) -> String {
+    tab_status_dir(app)
+        .and_then(|d| std::fs::read_to_string(d.join(pty_id.to_string())).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "idle".to_string())
+}
+
+/// A workspace's tabs as `<pty_id>\t<title>\t<status>\n` lines. Shared by
+/// `burrow list-tabs` and the MCP `list_tabs` tool. `status` is the live
+/// agent status (see `tab_status_dir`) — `idle` if the tab never reported one
+/// (plain shell, or Burrow restarted since).
+fn query_tabs_tsv(app: &AppHandle, conn: &Connection, ws_id: i64) -> String {
     let mut s = String::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT pty_id, COALESCE(title, default_title, '') FROM terminal_tabs WHERE workspace_id = ?1 ORDER BY ord ASC",
@@ -1569,8 +1600,10 @@ fn query_tabs_tsv(conn: &Connection, ws_id: i64) -> String {
             Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, String>(1)?))
         }) {
             for row in rows.flatten() {
-                let pid = row.0.map(|v| v.to_string()).unwrap_or_default();
-                s.push_str(&format!("{}\t{}\n", pid, row.1));
+                let pid = row.0;
+                let pid_str = pid.map(|v| v.to_string()).unwrap_or_default();
+                let status = pid.map(|v| read_tab_live_status(app, v)).unwrap_or_else(|| "idle".to_string());
+                s.push_str(&format!("{}\t{}\t{}\n", pid_str, row.1, status));
             }
         }
     }
@@ -1783,12 +1816,16 @@ pub(crate) fn mcp_run_tool(
                     .query_row("SELECT id FROM workspaces WHERE path = ?1", rusqlite::params![source], |r| r.get(0))
                     .ok(),
             };
-            let text = id.map(|i| query_tabs_tsv(&conn, i)).unwrap_or_default();
+            let text = id.map(|i| query_tabs_tsv(app, &conn, i)).unwrap_or_default();
             let rows: Vec<serde_json::Value> = text
                 .lines()
                 .filter_map(|l| {
-                    let mut p = l.splitn(2, '\t');
-                    Some(json!({ "ptyId": p.next()?, "title": p.next().unwrap_or("") }))
+                    let mut p = l.splitn(3, '\t');
+                    Some(json!({
+                        "ptyId": p.next()?,
+                        "title": p.next().unwrap_or(""),
+                        "status": p.next().unwrap_or("idle"),
+                    }))
                 })
                 .collect();
             Ok(json!({ "tabs": rows }))
@@ -2166,7 +2203,7 @@ fn take_spawn_requests(cwd: String, app: AppHandle, db: State<DbState>) -> Vec<S
                                 |r| r.get::<_, i64>(0),
                             ).ok()
                         };
-                        target_id.map(|id| query_tabs_tsv(&conn, id)).unwrap_or_default()
+                        target_id.map(|id| query_tabs_tsv(&app, &conn, id)).unwrap_or_default()
                     };
                     write_control_result(&app, &token, &text);
                 }
@@ -6036,6 +6073,7 @@ pub fn run() {
             repair_agent_status,
             set_max_agents,
             set_burrow_mcp_max_depth,
+            set_tab_live_status,
             http_server::get_http_server_status,
             http_server::set_http_enabled,
             http_server::tailscale::get_tailscale_status,

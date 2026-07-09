@@ -79,11 +79,45 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v2.24.2 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v2.24.2</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">červenec 2026</span>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Live status u board tasků a kanban tabů</div>
+      <ul>
+        <li><strong>Board úkoly se spawnují jako reálné PTY taby</strong> — kanban úkoly teď dostanou skutečný terminal tab místo separátní cesty, takže mají stejný status dot a live embed jako ručně spawnutý agent.</li>
+        <li><strong>Titlebar overlap a leak chat statusu opraveny</strong> — drobné UI chyby okolo titulkového pruhu a stavu chatu, které vypluly z předchozího refaktoru status stroje.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label"><code>list_tabs</code>/<code>list-tabs</code> teď hlásí live status</div>
+      <ul>
+        <li><strong>Root cause: status žil jen v paměti frontendu</strong> — <code>leaf.status</code> nastavuje <code>agentStatusMachine</code> ve <code>Terminal.vue</code>, ale nikdy se nepersistoval. <code>burrow list-tabs</code> i MCP <code>list_tabs</code> jsou čistě Rust/DB reads (bez round-tripu na frontend), takže vracely jen <code>{ptyId,title}</code> — status v tom payloadu strukturálně chyběl. Proto si Manager i jiní agenti kontrolující tab přes MCP/CLI často mysleli, že agent ještě neskončil.</li>
+        <li><strong>Fix: status se zrcadlí na disk</strong> — při každém přechodu <code>agentStatusMachine</code> se zavolá nový příkaz <code>set_tab_live_status</code>, který zapíše status do <code>&lt;session&gt;/tab_status/&lt;ptyId&gt;</code>. <code>query_tabs_tsv</code> ho čte a přidává jako třetí sloupec; <code>list_tabs</code> teď vrací <code>{ptyId,title,status}</code> a <code>burrow list-tabs</code> tiskne <code>&lt;pty-id&gt;\t&lt;title&gt;\t&lt;status&gt;</code> (running/waiting/permission/done/review/error/idle).</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Zvětšený task detail panel</div>
+      <ul>
+        <li><strong><code>TaskDetail.vue</code> panel rozšířen</strong> (560px → 720px) a embed live chatu zvýšen (360px → 440px) — víc místa pro live terminál v detailu úkolu.</li>
+        <li><strong><code>TaskLiveTerm.vue</code> teď kopíruje přesnou mřížku zdrojového PTY</strong> místo dopočítávané velikosti fontu — Claude Code interaktivní UI (stavový řádek, rámečky) používá absolutní pozicování kurzoru vůči reálnému terminálu, takže neshodná mřížka renderovala rozmazaně/maličko. Panel teď škáluje přes CSS scroll (<code>.tlt-viewport</code>) místo interního scrollbacku xtermu; wheel eventy se zachytávají v capture fázi, protože xterm.js interní <code>.xterm-viewport</code> na ně volá <code>preventDefault()</code> a blokuje nativní scroll.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v2.24.1 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v2.24.1</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">červenec 2026</span>
     </div>
 
