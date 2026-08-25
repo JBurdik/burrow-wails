@@ -79,11 +79,45 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v2.24.3 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v2.24.3</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">srpen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Skutečné rozdělení karet</div>
+      <ul>
+        <li><strong>Aktivní kartu lze rozdělit doprava nebo dolů</strong> jako chat či terminál — fungují tak kombinace chat + chat, terminál + terminál i chat + terminál.</li>
+        <li><strong>Každá plocha zůstává živá</strong> — vlastní konverzace a běžící PTY se při rozdělení nezahazují.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Přehled a řízení agentů</div>
+      <ul>
+        <li><strong>Agent Inspector</strong> ukazuje stav, pracovní adresář, terminál a poslední aktivitu; z něj lze terminál otevřít, poslat follow-up nebo agenta bezpečně zastavit.</li>
+        <li><strong>Sidebar zvýrazňuje agenty vyžadující pozornost</strong>, dokončené nepřečtené úlohy i právě pracující agenty.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Burrow MCP pro práci s panely</div>
+      <ul>
+        <li><strong><code>read_pane</code></strong> přečte poslední scrollback PTY bez změny fokusu.</li>
+        <li><strong><code>wait_pane</code></strong> čeká na výstup odpovídající textu nebo do timeoutu; používá stejný daemon socket jako terminály.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v2.24.2 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v2.24.2</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">červenec 2026</span>
     </div>
 
