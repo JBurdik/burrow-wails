@@ -637,8 +637,7 @@
       </div>
 
       <!-- Status line below input — hidden when nothing to show -->
-      <div v-show="planLabel || fiveHourWindow" class="status-line" style="position:relative;z-index:1;">
-        <span v-if="planLabel" class="status-item status-plan">{{ planLabel }}</span>
+      <div v-show="fiveHourWindow" class="status-line" style="position:relative;z-index:1;">
         <span v-if="fiveHourWindow" class="status-item" :title="'5h usage window'">5h: {{ fiveHourWindow }}</span>
         <span class="status-spacer" />
         <span v-if="turnStats" class="status-item status-muted">
@@ -1584,20 +1583,6 @@ const diffPreview = computed(() => {
   };
 });
 const accountInfo = ref<AccountInfo | null>(null);
-
-// Parse plan label from organizationType / rateLimitTier
-const planLabel = computed(() => {
-  const ot = accountInfo.value?.organization_type ?? "";
-  const tier = accountInfo.value?.rate_limit_tier ?? "";
-  if (ot === "claude_max") {
-    // "default_claude_max_5x" → "Max 5×"
-    const m = tier.match(/(\d+)x$/i);
-    return m ? `Max ${m[1]}×` : "Max";
-  }
-  if (ot === "pro") return "Pro";
-  if (ot === "free") return "Free";
-  return ot;
-});
 
 // Parse 5h window from `claude status` plain text.
 // Expected line: "5h window: 23% (2h 14m remaining)" or similar.
@@ -3501,13 +3486,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 
 .status-muted { color: rgba(255,255,255,0.28); }
-.status-plan {
-  color: #f59e0b;
-  font-weight: 600;
-  background: rgba(245,158,11,0.12);
-  padding: 1px 5px;
-  border-radius: 3px;
-}
 .status-cost { color: #a78bfa; }
 .status-busy { color: #a78bfa; animation: blink 1s step-end infinite; }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }

@@ -7,27 +7,53 @@
       @new-worktree="openWtDialog"
     />
 
-    <!-- Needs Attention: tabs that need the user to look (error/permission/waiting/review) -->
-    <div v-if="attentionItems.length > 0" class="attention-strip">
+    <!-- Blocking attention: errors and input requests. -->
+    <div v-if="blockingItems.length > 0" class="attention-strip">
       <div class="attention-header">
         <PhWarningCircle :size="11" class="attention-header-icon" weight="fill" />
         <span>Needs Attention</span>
-        <span class="attention-count">{{ attentionItems.length }}</span>
+        <span class="attention-count">{{ blockingItems.length }}</span>
       </div>
-      <div
-        v-for="item in attentionItems"
+      <button
+        v-for="item in blockingItems"
         :key="`att-${item.wsId}-${item.tabId}`"
+        type="button"
         class="attention-row"
-        :class="`attention-${item.status}`"
+        :class="`attention-${item.attention}`"
+        :aria-label="`${item.tabTitle}, ${attentionLabel(item.attention)}, ${item.wsName}`"
         @click="selectFleetItem(item)"
       >
-        <span class="attention-dot status-dot" :class="`status-${item.status}`">{{ item.status === 'running' ? spinnerFrame : '' }}</span>
+        <span class="attention-dot status-dot" :class="`status-${item.status}`" aria-hidden="true">{{ item.status === 'running' ? spinnerFrame : '' }}</span>
         <div class="attention-info">
           <span class="attention-tab">{{ item.tabTitle }}</span>
-          <span class="attention-ws">{{ item.wsName }}</span>
+          <span class="attention-ws">{{ attentionLabel(item.attention) }} · {{ item.wsName }}</span>
         </div>
         <PhArrowRight :size="9" class="attention-arrow" />
+      </button>
+    </div>
+
+    <!-- Finished while away: distinct from blockers, persists until opened. -->
+    <div v-if="completionItems.length > 0" class="completion-strip">
+      <div class="completion-header">
+        <PhCheckCircle :size="11" class="completion-header-icon" weight="fill" />
+        <span>Done unread</span>
+        <span class="completion-count">{{ completionItems.length }}</span>
       </div>
+      <button
+        v-for="item in completionItems"
+        :key="`done-${item.wsId}-${item.tabId}`"
+        type="button"
+        class="completion-row"
+        :aria-label="`${item.tabTitle}, done unread, ${item.wsName}`"
+        @click="selectFleetItem(item)"
+      >
+        <span class="completion-dot status-dot" :class="`status-${item.status}`" aria-hidden="true" />
+        <div class="completion-info">
+          <span class="completion-tab">{{ item.tabTitle }}</span>
+          <span class="completion-ws">Done unread · {{ item.wsName }}</span>
+        </div>
+        <PhArrowRight :size="9" class="completion-arrow" />
+      </button>
     </div>
 
     <!-- Fleet strip: all non-idle agents across all workspaces -->
@@ -37,20 +63,22 @@
         <span>Agents</span>
         <span class="fleet-count">{{ fleetItems.length }}</span>
       </div>
-      <div
+      <button
         v-for="item in fleetItems"
         :key="`${item.wsId}-${item.tabId}`"
+        type="button"
         class="fleet-row"
-        :class="`fleet-${item.status}`"
+        :class="`fleet-${item.attention}`"
+        :aria-label="`${item.tabTitle}, working, ${item.wsName}`"
         @click="selectFleetItem(item)"
       >
-        <span class="fleet-dot status-dot" :class="`status-${item.status}`">{{ item.status === 'running' ? spinnerFrame : '' }}</span>
+        <span class="fleet-dot status-dot" :class="`status-${item.status}`" aria-hidden="true">{{ item.status === 'running' ? spinnerFrame : '' }}</span>
         <div class="fleet-info">
           <span class="fleet-tab">{{ item.tabTitle }}</span>
           <span class="fleet-ws">{{ item.wsName }}</span>
         </div>
         <PhArrowRight :size="9" class="fleet-arrow" />
-      </div>
+      </button>
     </div>
 
     <!-- One section per visible workspace: the pinned ones plus the active one -->
@@ -78,6 +106,7 @@
             :data-reorder-group="String(ws.id)"
             :class="{
               active: active?.id === ws.id && termTabs.activeByWs[ws.id] === tab.id,
+              [`agent-state-${attentionState(ws.id, tab.id, tab.status)}`]: tab.isAgent,
               'drag-over': tabDragGroup === String(ws.id) && tabOverIdx === tabIdx && tabDragIdx !== tabIdx,
               dragging: tabDragGroup === String(ws.id) && tabDragIdx === tabIdx,
             }"
@@ -124,6 +153,9 @@
               v-if="tab.status && tab.status !== 'idle'"
               class="status-dot"
               :class="`status-${tab.status}`"
+              :title="attentionLabel(attentionState(ws.id, tab.id, tab.status))"
+              :aria-label="attentionLabel(attentionState(ws.id, tab.id, tab.status))"
+              role="status"
             >{{ tab.status === 'running' ? spinnerFrame : '' }}</span>
             <PhX
               :size="9"
@@ -249,6 +281,7 @@ import {
   PhActivity,
   PhArrowRight,
   PhWarningCircle,
+  PhCheckCircle,
   PhChatCenteredText,
 } from "@phosphor-icons/vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -259,7 +292,12 @@ import { useUIStore } from "@/stores/ui";
 import WorkspacePicker from "@/components/WorkspacePicker.vue";
 import { spinnerFrame } from "@/lib/spinner";
 import { usePointerReorder } from "@/composables/usePointerReorder";
-import { STATUS_PRIORITY, type TermStatus } from "@/lib/terminalStatus";
+import {
+  ATTENTION_PRIORITY,
+  getAgentAttentionState,
+  type AgentAttentionState,
+  type TermStatus,
+} from "@/lib/terminalStatus";
 import { useGitStore } from "@/stores/git";
 import { pinnedIds, isPinned } from "@/lib/pinnedWorkspaces";
 
@@ -302,30 +340,46 @@ function refreshAllPrs() {
   );
 }
 
-// Count of tabs with "review" status across ALL workspaces (agent finished while
-// user wasn't watching). Drives the unread badge.
+// Count of completed agent turns not yet acknowledged. Drives the unread badge.
 const unreadCount = computed(() => {
   let n = 0;
-  for (const tabs of Object.values(termTabs.tabsByWs)) {
-    n += tabs.filter((t) => t.status === "review").length;
+  for (const [wsId, tabs] of Object.entries(termTabs.tabsByWs)) {
+    n += tabs.filter((tab) => attentionState(Number(wsId), tab.id, tab.status) === "done-unread").length;
   }
   return n;
 });
 
 // ── fleet view ────────────────────────────────────────────────────────────────
-interface FleetItem { wsId: number; wsName: string; tabId: number; tabTitle: string; status: TermStatus; }
+interface FleetItem {
+  wsId: number;
+  wsName: string;
+  tabId: number;
+  tabTitle: string;
+  status: TermStatus;
+  attention: AgentAttentionState;
+}
 
-// statuses owned by the needs-attention strip; fleet skips them so a tab never
-// renders twice
-const ATTENTION_STATES = new Set<TermStatus>(["error", "permission", "waiting", "review"]);
+function attentionState(wsId: number, tabId: number, status: TermStatus): AgentAttentionState {
+  return getAgentAttentionState(status, termTabs.isCompletionUnseen(wsId, tabId));
+}
+
+function attentionLabel(state: AgentAttentionState): string {
+  switch (state) {
+    case "error": return "Error";
+    case "needs-input": return "Needs input";
+    case "done-unread": return "Done unread";
+    case "working": return "Working";
+    default: return "Idle";
+  }
+}
 
 const fleetItems = computed<FleetItem[]>(() => {
   const items: FleetItem[] = [];
   for (const ws of store.workspaces) {
     for (const tab of termTabs.tabsByWs[ws.id] ?? []) {
-      // skip idle + anything the attention strip already shows (no dupes)
-      if (tab.status !== "idle" && !ATTENTION_STATES.has(tab.status)) {
-        items.push({ wsId: ws.id, wsName: ws.name, tabId: tab.id, tabTitle: tab.title, status: tab.status });
+      const attention = attentionState(ws.id, tab.id, tab.status);
+      if (attention === "working") {
+        items.push({ wsId: ws.id, wsName: ws.name, tabId: tab.id, tabTitle: tab.title, status: tab.status, attention });
       }
     }
   }
@@ -338,22 +392,24 @@ function selectFleetItem(item: FleetItem) {
 }
 
 // ── needs-attention strip ───────────────────────────────────────────────────
-// Tabs (across every workspace + worktree) whose status means the user should
-// look: error / permission / waiting / review. Pinned at the top, sorted by
-// STATUS_PRIORITY (most urgent first). Reactive to status changes via tabsByWs.
+// Tabs across every workspace/worktree that require action or acknowledgement.
 const attentionItems = computed<FleetItem[]>(() => {
   const items: FleetItem[] = [];
   for (const ws of store.workspaces) {
     for (const tab of termTabs.tabsByWs[ws.id] ?? []) {
-      if (ATTENTION_STATES.has(tab.status)) {
-        items.push({ wsId: ws.id, wsName: ws.name, tabId: tab.id, tabTitle: tab.title, status: tab.status });
+      const attention = attentionState(ws.id, tab.id, tab.status);
+      if (attention === "error" || attention === "needs-input" || attention === "done-unread") {
+        items.push({ wsId: ws.id, wsName: ws.name, tabId: tab.id, tabTitle: tab.title, status: tab.status, attention });
       }
     }
   }
   return items.sort(
-    (a, b) => STATUS_PRIORITY.indexOf(a.status) - STATUS_PRIORITY.indexOf(b.status),
+    (a, b) => ATTENTION_PRIORITY.indexOf(a.attention) - ATTENTION_PRIORITY.indexOf(b.attention),
   );
 });
+
+const blockingItems = computed(() => attentionItems.value.filter((item) => item.attention !== "done-unread"));
+const completionItems = computed(() => attentionItems.value.filter((item) => item.attention === "done-unread"));
 
 // ── branch helpers (worktree dialog) ─────────────────────────────────────────
 interface GitOutput { stdout: string; stderr: string; code: number; }
@@ -677,6 +733,21 @@ async function confirmCreate() {
   color: var(--text-primary);
 }
 
+/* Preserve the compact list while making each agent state scannable in-place. */
+.ws-term.agent-state-idle .ws-term-icon.agent { color: var(--text-muted); }
+.ws-term.agent-state-needs-input {
+  background: color-mix(in srgb, var(--status-permission) 9%, transparent);
+}
+.ws-term.agent-state-error {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+.ws-term.agent-state-done-unread {
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+.ws-term.agent-state-needs-input .ws-term-icon.agent { color: var(--status-permission); }
+.ws-term.agent-state-error .ws-term-icon.agent { color: var(--red); }
+.ws-term.agent-state-done-unread .ws-term-icon.agent { color: var(--green); }
+
 .ws-term-icon { color: var(--text-muted); flex-shrink: 0; }
 .ws-term-icon.agent { color: var(--accent); }
 .ws-term.active .ws-term-icon { color: var(--accent); }
@@ -944,11 +1015,17 @@ async function confirmCreate() {
 .fleet-row {
   display: flex;
   align-items: center;
+  width: 100%;
   gap: 7px;
   padding: 5px 8px;
-  cursor: pointer;
-  transition: background 0.1s;
+  background: transparent;
+  border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background 0.1s;
 }
 .fleet-row:last-child { border-bottom: none; }
 .fleet-row:hover { background: var(--bg-hover); }
@@ -1032,15 +1109,29 @@ async function confirmCreate() {
 .attention-row {
   display: flex;
   align-items: center;
+  width: 100%;
   gap: 7px;
   padding: 5px 8px;
-  cursor: pointer;
-  transition: background 0.1s;
+  background: transparent;
+  border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background 0.1s;
 }
 .attention-row:last-child { border-bottom: none; }
 .attention-row:hover { background: var(--bg-hover); }
 .attention-row:hover .attention-arrow { opacity: 0.6; }
+.attention-needs-input { background: color-mix(in srgb, var(--status-permission) 6%, transparent); }
+
+.fleet-row:focus-visible,
+.attention-row:focus-visible,
+.completion-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
 
 .attention-dot {
   flex-shrink: 0;
@@ -1080,4 +1171,77 @@ async function confirmCreate() {
   opacity: 0;
   transition: opacity 0.1s;
 }
+
+/* ── Done unread strip ─────────────────────────────────────────── */
+.completion-strip {
+  margin: 0 6px 6px;
+  border: 1px solid color-mix(in srgb, var(--green) 32%, var(--border));
+  border-radius: 7px;
+  background: var(--bg-base);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.completion-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.completion-header-icon { color: var(--green); flex-shrink: 0; }
+.completion-count {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.completion-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 7px;
+  padding: 5px 8px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background 0.1s;
+}
+.completion-row:last-child { border-bottom: none; }
+.completion-row:hover { background: var(--bg-hover); }
+.completion-row:hover .completion-arrow { opacity: 0.6; }
+.completion-dot { flex-shrink: 0; width: 14px; text-align: center; }
+.completion-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.completion-tab {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.completion-ws {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.completion-arrow { flex-shrink: 0; color: var(--text-muted); opacity: 0; transition: opacity 0.1s; }
 </style>

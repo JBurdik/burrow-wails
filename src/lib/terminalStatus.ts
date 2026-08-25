@@ -29,6 +29,33 @@ export const STATUS_PRIORITY: readonly TermStatus[] = [
 /** Semantic agent hook event forwarded from XTerm.vue → Terminal.vue → here. */
 export type AgentEvent = "running" | "waiting" | "permission" | "done" | "error";
 
+/**
+ * Sidebar-facing attention hierarchy. `review` is the durable machine state for
+ * a completion that happened while its tab was not being watched; name that
+ * outcome plainly in the UI without changing the terminal state machine.
+ */
+export type AgentAttentionState = "error" | "needs-input" | "done-unread" | "working" | "idle";
+
+export const ATTENTION_PRIORITY: readonly AgentAttentionState[] = [
+  "error",
+  "needs-input",
+  "done-unread",
+  "working",
+  "idle",
+] as const;
+
+/** Translate terminal-machine state into the compact sidebar hierarchy. */
+export function getAgentAttentionState(
+  status: TermStatus,
+  completionUnseen = status === "review",
+): AgentAttentionState {
+  if (status === "error") return "error";
+  if (status === "permission" || status === "waiting") return "needs-input";
+  if (status === "review" && completionUnseen) return "done-unread";
+  if (status === "running") return "working";
+  return "idle";
+}
+
 // ── Aggregation ───────────────────────────────────────────────────────────────
 
 /**

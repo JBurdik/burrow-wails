@@ -1729,6 +1729,19 @@ fn arg_num_str(args: &serde_json::Value, key: &str) -> Option<String> {
 
 /// Dispatch an MCP tool to the same Rust logic the `burrow` CLI actions use.
 /// `source` is the calling session's `BURROW_CWD` (routing key `ws`).
+fn mcp_read_pane(app: &AppHandle, pty_id: u32, lines: usize) -> Result<String, String> {
+    let daemon = app.state::<DaemonState>();
+    let client = daemon.client().ok_or("daemon not connected")?;
+    let response = client.cmd(json!({ "cmd": "SnapshotPty", "pty_id": pty_id }))?;
+    if response["ok"].as_bool() != Some(true) {
+        return Err(response["error"].as_str().unwrap_or("SnapshotPty failed").to_string());
+    }
+    let raw = response["data"].as_str().unwrap_or_default();
+    let bytes = general_purpose::STANDARD.decode(raw).map_err(|e| e.to_string())?;
+    let output = String::from_utf8_lossy(&bytes);
+    Ok(output.lines().rev().take(lines.clamp(1, 500)).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
+}
+
 pub(crate) fn mcp_run_tool(
     app: &AppHandle,
     name: &str,
@@ -1838,6 +1851,27 @@ pub(crate) fn mcp_run_tool(
             let text = arg_str(&args, "text").ok_or("missing 'text'")?;
             mcp_write_pty(app, tabid, text.as_bytes())?;
             Ok(json!({ "ok": true }))
+        }
+        "read_pane" => {
+            let tabid = arg_num_str(&args, "tabid").ok_or("missing 'tabid'")?.parse::<u32>().map_err(|_| "invalid 'tabid'")?;
+            let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(120) as usize;
+            Ok(json!({ "tabid": tabid, "output": mcp_read_pane(app, tabid, lines)? }))
+        }
+        "wait_pane" => {
+            let tabid = arg_num_str(&args, "tabid").ok_or("missing 'tabid'")?.parse::<u32>().map_err(|_| "invalid 'tabid'")?;
+            let needle = arg_str(&args, "match").unwrap_or_default();
+            let timeout = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(120).clamp(1, 600);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout);
+            loop {
+                let output = mcp_read_pane(app, tabid, 120)?;
+                if needle.is_empty() || output.contains(&needle) {
+                    return Ok(json!({ "tabid": tabid, "matched": needle.is_empty() || output.contains(&needle), "output": output }));
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Ok(json!({ "tabid": tabid, "matched": false, "timedOut": true, "output": output }));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
         }
         "wait_result" => {
             let token = arg_str(&args, "token").ok_or("missing 'token'")?;

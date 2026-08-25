@@ -40,10 +40,26 @@ type TabRequest = {
 export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   const tabsByWs = ref<Record<number, TabSummary[]>>({});
   const activeByWs = ref<Record<number, number>>({});
+  // A `review` status is terminal-owned and persists until Terminal receives
+  // MARK_SEEN. Keep the sidebar responsive while that hand-off completes.
+  const seenCompletionsByWs = ref<Record<number, Record<number, true>>>({});
   const request = ref<TabRequest | null>(null);
   let nonce = 0;
 
   function setTabs(wsId: number, tabs: TabSummary[]) {
+    const previous = new Map((tabsByWs.value[wsId] ?? []).map((tab) => [tab.id, tab.status]));
+    const seen = { ...(seenCompletionsByWs.value[wsId] ?? {}) };
+    const currentIds = new Set(tabs.map((tab) => tab.id));
+    for (const tab of tabs) {
+      // A fresh review transition is a new unseen completion, even if this tab
+      // had been seen after an earlier completion.
+      if (tab.status === "review" && previous.get(tab.id) !== "review") delete seen[tab.id];
+      if (tab.status !== "review") delete seen[tab.id];
+    }
+    for (const tabId of Object.keys(seen)) {
+      if (!currentIds.has(Number(tabId))) delete seen[Number(tabId)];
+    }
+    seenCompletionsByWs.value[wsId] = seen;
     tabsByWs.value[wsId] = tabs;
   }
   function setActive(wsId: number, tabId: number) {
@@ -52,9 +68,24 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   function clear(wsId: number) {
     delete tabsByWs.value[wsId];
     delete activeByWs.value[wsId];
+    delete seenCompletionsByWs.value[wsId];
+  }
+
+  function isCompletionUnseen(wsId: number, tabId: number): boolean {
+    return !seenCompletionsByWs.value[wsId]?.[tabId];
+  }
+
+  function markCompletionSeen(wsId: number, tabId: number) {
+    seenCompletionsByWs.value[wsId] = {
+      ...(seenCompletionsByWs.value[wsId] ?? {}),
+      [tabId]: true,
+    };
   }
 
   function activate(wsId: number, tabId: number) {
+    // Terminal also clears its durable review state. This makes the sidebar
+    // acknowledge the completion immediately, before the component round-trip.
+    markCompletionSeen(wsId, tabId);
     request.value = { wsId, action: "activate", tabId, nonce: ++nonce };
   }
   function add(wsId: number, cmd?: string, taskId?: string) {
@@ -73,5 +104,5 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     request.value = { wsId, action: "rename", tabId, title, nonce: ++nonce };
   }
 
-  return { tabsByWs, activeByWs, request, setTabs, setActive, clear, activate, add, close, reorder, openChat, rename };
+  return { tabsByWs, activeByWs, request, setTabs, setActive, clear, isCompletionUnseen, activate, add, close, reorder, openChat, rename };
 });

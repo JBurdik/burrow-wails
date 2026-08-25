@@ -8,7 +8,7 @@
         :class="{ active: activeSurface === 'chat' }"
         :aria-pressed="activeSurface === 'chat'"
         title="Show chat"
-        @click.stop="switchSurface('chat')"
+        @click.stop="focusSurface('chat')"
       >
         <PhChatCenteredText :size="13" />
         <span>Chat</span>
@@ -18,13 +18,22 @@
         :class="{ active: activeSurface === 'terminal' }"
         :aria-pressed="activeSurface === 'terminal'"
         title="Show terminal"
-        @click.stop="switchSurface('terminal')"
+        @click.stop="focusSurface('terminal')"
       >
         <PhTerminal :size="13" />
         <span>Terminal</span>
       </button>
       <span class="surface-switch-rule" />
       <span class="surface-switch-context">{{ activeSurface === 'chat' ? 'Conversation' : 'Workspace' }}</span>
+      <div class="split-menu-wrap">
+        <button class="workspace-layout-toggle" :aria-expanded="splitMenuOpen" title="Split the active tab" aria-label="Split the active tab" @click.stop="splitMenuOpen = !splitMenuOpen"><PhColumns :size="13" weight="bold" /></button>
+        <div v-if="splitMenuOpen" class="split-menu" @click.stop>
+          <button @click="splitFocused('terminal', 'h')">Terminal right</button>
+          <button @click="splitFocused('terminal', 'v')">Terminal below</button>
+          <button @click="splitFocused('chat', 'h')">Chat right</button>
+          <button @click="splitFocused('chat', 'v')">Chat below</button>
+        </div>
+      </div>
     </nav>
 
     <TransitionGroup v-if="tabs.length > 0" name="tab-move" tag="div" class="terminal-tabs">
@@ -56,6 +65,17 @@
           :title="tabStatus(tab) === 'error' ? tabStatusDetail(tab) : undefined"
         >{{ tabStatus(tab) === 'running' ? spinnerFrame : '' }}</span>
         <span class="tab-label" :class="{ 'tab-flash': getAllLeaves(tab.root).some(l => flashingLeafs.has(l.id)) }">{{ tabTitle(tab) }}</span>
+        <button
+          v-if="activeTabId === tab.id"
+          class="tab-inspector"
+          type="button"
+          title="Inspect active agent"
+          aria-label="Inspect active agent"
+          data-no-drag
+          @click.stop="inspectorOpen = !inspectorOpen"
+        >
+          <PhInfo :size="11" weight="bold" />
+        </button>
         <span v-if="tabStatusText(tab)" class="tab-status-text">{{ tabStatusText(tab) }}</span>
         <span
           v-if="tabProgress(tab) !== undefined"
@@ -108,32 +128,29 @@
       </div>
     </TransitionGroup>
 
-    <div
-      v-if="activeAgentLeafId !== null && historyStore.getTimeline(activeAgentLeafId).length > 0"
-      class="agent-timeline-strip"
-      :class="{ collapsed: timelineCollapsed }"
-    >
-      <div class="tl-strip-header" @click="timelineCollapsed = !timelineCollapsed">
-        <component :is="timelineCollapsed ? PhCaretRight : PhCaretDown" :size="9" weight="bold" />
-        <span>Timeline</span>
-        <span class="tl-strip-turns">{{ historyStore.getTimeline(activeAgentLeafId).length }}t</span>
-      </div>
-      <div v-if="!timelineCollapsed" class="tl-strip-body">
-        <AgentTimeline :pty-id="activeAgentLeafId" />
-      </div>
-    </div>
-
     <AgentPlanRail
       v-if="activeAgentLeafId !== null"
       :pty-id="activeAgentLeafId"
     />
 
-    <div v-if="tabs.length > 0" class="terminal-body">
+    <AgentInspector
+      v-if="inspectorAgent"
+      :agent="inspectorAgent"
+      :open="inspectorOpen"
+      class="terminal-agent-inspector"
+      @focus="focusInspectedAgent"
+      @follow-up="openFollowUpChat"
+      @stop="stopInspectedAgent"
+      @dismiss="inspectorOpen = false"
+    />
+
+    <div v-if="tabs.length > 0" class="terminal-body" :class="{ 'split-workspace': splitWorkspace }">
       <div
         v-for="tab in tabs"
         :key="tab.id"
         class="terminal-tab-content"
-        v-show="activeTabId === tab.id"
+        :class="{ 'surface-focused': activeTabId === tab.id }"
+        v-show="isTabVisible(tab)"
       >
         <div
           v-for="pane in paneLayout(tab)"
@@ -142,7 +159,7 @@
           :class="{ focused: focusedLeafId === pane.leaf.id && isTabSplit(tab) }"
           :style="rectStyle(pane.rect)"
           :data-leaf-id="pane.leaf.id"
-          @mousedown.capture="onLeafFocus(pane.leaf.id)"
+          @mousedown.capture="activateLeaf(pane.leaf.id)"
         >
           <template v-if="splitDragActive">
             <div class="drop-zone dz-left"   :class="{ 'dz-active': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'h' && hoveredZone?.side === 'first' }" />
@@ -253,7 +270,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { createActor, type Actor } from "xstate";
 import { agentStatusMachine, isBusyStatus } from "@/machines/agentStatus";
-import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhArrowSquareOut, PhFileCode, PhGlobe, PhCaretDown, PhCaretRight, PhChatCenteredText } from "@phosphor-icons/vue";
+import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhArrowSquareOut, PhFileCode, PhGlobe, PhChatCenteredText, PhInfo, PhColumns } from "@phosphor-icons/vue";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -276,8 +293,8 @@ import {
   type TermStatus,
 } from "@/lib/terminalStatus";
 import { useAgentHistoryStore } from "@/stores/agentHistory";
-import AgentTimeline from "@/components/AgentTimeline.vue";
 import AgentPlanRail from "@/components/AgentPlanRail.vue";
+import AgentInspector, { type AgentInspectorAgent } from "@/components/AgentInspector.vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -332,10 +349,23 @@ interface DaemonSession {
 const tabs = ref<Tab[]>([]);
 const activeTabId = ref(0);
 const focusedLeafId = ref(0);
+const splitWorkspace = ref(false);
+const splitMenuOpen = ref(false);
+const inspectorOpen = ref(false);
+const lastChatTabId = ref(0);
+const lastTerminalTabId = ref(0);
 const activeSurface = computed<"chat" | "terminal">(() => {
   const active = tabs.value.find((tab) => tab.id === activeTabId.value);
   return active && tabIsChat(active) ? "chat" : "terminal";
 });
+const splitChatTab = computed(() =>
+  tabs.value.find((tab) => tab.id === lastChatTabId.value && tabIsChat(tab))
+  ?? tabs.value.find(tabIsChat),
+);
+const splitTerminalTab = computed(() =>
+  tabs.value.find((tab) => tab.id === lastTerminalTabId.value && !tabIsChat(tab))
+  ?? tabs.value.find((tab) => !tabIsChat(tab)),
+);
 // Holds both XTerm and CodeEditor instances, keyed by leaf id. Both expose
 // focus(); editor leaves also expose save()/isDirty(), terminal leaves sendText().
 const xtermRefs = new Map<number, any>();
@@ -549,6 +579,11 @@ function tabIsBrowser(tab: Tab): boolean {
   return tab.root.type === "leaf" && tab.root.leafType === "browser";
 }
 
+function isTabVisible(tab: Tab): boolean {
+  if (!splitWorkspace.value) return activeTabId.value === tab.id;
+  return tab.id === splitChatTab.value?.id || tab.id === splitTerminalTab.value?.id;
+}
+
 function tabDirty(tab: Tab): boolean {
   return getAllLeaves(tab.root).some((l) => l.leafType === "editor" && l.dirty);
 }
@@ -700,11 +735,6 @@ function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: str
 }
 
 // ── events from split tree ──────────────────────────────────────────────────
-
-function onLeafFocus(id: number) {
-  focusedLeafId.value = id;
-  nextTick(() => xtermRefs.get(id)?.focus());
-}
 
 function onLeafTitle(id: number, title: string) {
   for (const tab of tabs.value) {
@@ -920,6 +950,44 @@ const activeTabLogs = computed(() => {
   return (tabLogs.value[tab.id] ?? []).slice(-5);
 });
 
+// Terminal stays the orchestration surface; the inspector is deliberately
+// presentational and receives a stable snapshot through typed props.
+const inspectorAgent = computed<AgentInspectorAgent | null>(() => {
+  const tab = tabs.value.find((candidate) => candidate.id === activeTabId.value);
+  if (!tab) return null;
+  const leaf = findLeaf(tab.root, focusedLeafId.value) ?? getAllLeaves(tab.root)[0];
+  const logs = activeTabLogs.value;
+  const latest = logs[logs.length - 1];
+  return {
+    title: tabTitle(tab),
+    status: tabStatus(tab),
+    cwd: leaf?.cwd ?? props.cwd,
+    recentActivity: leaf?.statusText ?? latest?.message ?? null,
+    recentActivityAt: latest ? new Date(latest.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null,
+    terminal: {
+      id: leaf?.id ?? tab.id,
+      label: leaf?.title,
+      ptyId: leaf?.id,
+      workspaceId: props.workspaceId,
+    },
+  };
+});
+
+function focusInspectedAgent() {
+  inspectorOpen.value = false;
+  focusActive();
+}
+
+function openFollowUpChat() {
+  inspectorOpen.value = false;
+  openClaudeChat();
+}
+
+function stopInspectedAgent() {
+  inspectorOpen.value = false;
+  closeTab(activeTabId.value);
+}
+
 // ── in-app close confirmation ───────────────────────────────────────────────
 
 const confirm = ref<{ name: string; reason: "running" | "unsaved"; resolve: (ok: boolean) => void } | null>(null);
@@ -1001,6 +1069,24 @@ function switchSurface(surface: "chat" | "terminal") {
   }
   if (surface === "chat") openClaudeChat();
   else addTab();
+}
+
+function focusSurface(surface: "chat" | "terminal") {
+  if (!splitWorkspace.value) {
+    switchSurface(surface);
+    return;
+  }
+  const tab = surface === "chat" ? splitChatTab.value : splitTerminalTab.value;
+  if (tab) activateTab(tab.id);
+}
+
+function activateLeaf(id: number) {
+  const tab = tabs.value.find((candidate) => findLeaf(candidate.root, id));
+  if (!tab) return;
+  activeTabId.value = tab.id;
+  focusedLeafId.value = id;
+  markTabSeen(tab);
+  nextTick(() => xtermRefs.get(id)?.focus());
 }
 
 function openBrowserTab(url?: string) {
@@ -1219,13 +1305,20 @@ function openFileInTab(path: string, name: string) {
   nextTick(() => xtermRefs.get(id)?.focus());
 }
 
-function splitFocused(direction: "h" | "v") {
+function makeChatLeaf(agentId?: string): Leaf {
+  const session = chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
+  const id = nextPtyId();
+  return { type: "leaf", id, title: session.title, defaultTitle: session.title, isAgent: false, busy: false, status: "idle", leafType: "chat", chatId: session.id, cwd: props.cwd };
+}
+
+function splitFocused(kind: "terminal" | "chat", direction: "h" | "v") {
   const tab = tabs.value.find((t) => t.id === activeTabId.value);
   if (!tab) return;
-  const newLeaf = makeLeaf();
+  const newLeaf = kind === "chat" ? makeChatLeaf() : makeLeaf();
   tab.root = insertSplit(tab.root, focusedLeafId.value, direction, newLeaf);
   focusedLeafId.value = newLeaf.id;
-  registerLeafListeners(newLeaf.id);
+  if (kind === "terminal") registerLeafListeners(newLeaf.id);
+  splitMenuOpen.value = false;
   nextTick(() => xtermRefs.get(newLeaf.id)?.focus());
 }
 
@@ -1374,7 +1467,7 @@ function onKeydown(e: KeyboardEvent) {
     closePane(focusedLeafId.value);
   } else if (k === "d") {
     e.preventDefault();
-    splitFocused(e.shiftKey ? "v" : "h");
+    splitFocused("terminal", e.shiftKey ? "v" : "h");
   }
 }
 
@@ -1440,6 +1533,13 @@ function syncStore() {
 }
 
 watch([tabs, activeTabId, focusedLeafId], syncStore, { deep: true });
+
+watch(activeTabId, (id) => {
+  const tab = tabs.value.find((candidate) => candidate.id === id);
+  if (!tab) return;
+  if (tabIsChat(tab)) lastChatTabId.value = id;
+  else lastTerminalTabId.value = id;
+});
 
 // Sync chat session status + title → leaf so the Sidebar dot, tab-bar dot,
 // and tab label stay live. Chat leaves have no PTY events, so both must flow from the store.
@@ -1763,9 +1863,7 @@ function repaintAll() {
   xtermRefs.forEach((x) => x?.repaint?.());
 }
 
-const timelineCollapsed = ref(false);
-
-// ID of the focused agent leaf — used to drive AgentTimeline display.
+// ID of the focused agent leaf — used to drive agent-specific controls.
 const activeAgentLeafId = computed((): number | null => {
   const tab = tabs.value.find((t) => t.id === activeTabId.value);
   if (!tab) return null;
@@ -1779,6 +1877,7 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
 
 <style scoped>
 .terminal-pane {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1822,6 +1921,51 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
 .surface-switch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .surface-switch-rule { width: 1px; height: 13px; margin: 0 5px; background: var(--border); }
 .surface-switch-context { color: var(--text-muted); font: 500 10px/1 var(--font-mono); }
+.workspace-layout-toggle {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 23px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 10px/1 var(--font-ui);
+  cursor: pointer;
+}
+.split-menu-wrap { position: relative; margin-left: auto; }
+.split-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  min-width: 148px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-panel);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
+}
+.split-menu button {
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: 11px var(--font-ui);
+  text-align: left;
+}
+.split-menu button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.workspace-layout-toggle:hover,
+.workspace-layout-toggle[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+  color: var(--text-primary);
+}
+.workspace-layout-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ── Tab bar ───────────────────────────────────────────────────── */
 .terminal-tabs {
@@ -1949,7 +2093,8 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
 
 /* ── Close / float buttons ─────────────────────────────────────── */
 .tab-close,
-.tab-float {
+.tab-float,
+.tab-inspector {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1962,45 +2107,17 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
   transition: opacity 0.1s, background 0.1s;
 }
 .tab:hover .tab-close,
-.tab:hover .tab-float { opacity: 0.45; }
+.tab:hover .tab-float,
+.tab:hover .tab-inspector { opacity: 0.45; }
 .tab-close:hover { opacity: 1 !important; background: rgba(239, 68, 68, 0.18); color: var(--red); }
 .tab-float:hover { opacity: 1 !important; background: rgba(255, 255, 255, 0.09); }
+.tab-inspector:hover { opacity: 1 !important; background: rgba(255, 255, 255, 0.09); color: var(--text-primary); }
 
-/* Agent turn timeline — shown below the tab/log strips for agent tabs */
-.agent-timeline-strip {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
-}
-
-.tl-strip-header {
-  height: 20px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  font-size: 10px;
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
-  border-bottom: 1px solid var(--border);
-  transition: background 0.1s;
-}
-.agent-timeline-strip.collapsed .tl-strip-header {
-  border-bottom: none;
-}
-.tl-strip-header:hover { background: var(--bg-hover); }
-.tl-strip-header span { font-family: var(--font-ui); }
-.tl-strip-turns {
-  margin-left: auto;
-  font-family: var(--font-mono) !important;
-  font-size: 9px;
-}
-
-.tl-strip-body {
-  height: 90px;
-  overflow-y: auto;
-  overflow-x: hidden;
+.terminal-agent-inspector {
+  position: absolute;
+  z-index: 30;
+  top: 76px;
+  right: 10px;
 }
 
 .terminal-body {
@@ -2017,6 +2134,27 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
   min-width: 0;
   min-height: 0;
   background: var(--border);
+}
+
+.split-workspace {
+  gap: 1px;
+  background: var(--border);
+}
+.split-workspace .terminal-tab-content {
+  flex: 1 1 50%;
+  min-width: 280px;
+}
+.split-workspace .terminal-tab-content.surface-focused {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+@media (max-width: 860px) {
+  .split-workspace {
+    flex-direction: column;
+  }
+  .split-workspace .terminal-tab-content {
+    min-height: 220px;
+  }
 }
 
 .pane {
