@@ -754,6 +754,19 @@ function markTabSeen(tab: Tab) {
         worktreePath: leaf.cwd ?? props.cwd,
       }).catch(() => {});
     }
+    // A board task runs in its own worktree by default. Capture its baseline
+    // before the agent starts work; non-board terminals intentionally remain
+    // un-attributed instead of falling back to the global Git diff.
+    if (leaf.taskId) {
+      invoke("begin_agent_turn", {
+        taskId: leaf.taskId,
+        ptyId: leaf.id,
+        worktreePath: leaf.cwd ?? props.cwd,
+      }).catch(() => {});
+    }
+  }
+  if ((s === "done" || s === "error") && leaf.taskId) {
+    invoke("complete_agent_turn", { ptyId: leaf.id, state: s }).catch(() => {});
   }
   if ((s === "done" || s === "error") && leaf.taskId) {
     invoke("complete_agent_turn", { ptyId: leaf.id, state: s }).catch(() => {});
