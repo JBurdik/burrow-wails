@@ -5,6 +5,12 @@
       <component :is="currentAgentIcon" :size="16" class="chat-header-icon" :style="{ color: currentAgent?.color }" />
       <span class="chat-header-title">{{ currentAgent?.name ?? 'Claude' }}</span>
       <span
+        class="chat-runtime"
+        :title="effectiveTransport === 'acp' ? 'Connected through the locally installed provider CLI (ACP)' : effectiveTransport === 'codex-app-server' ? 'Connected through the locally installed Codex app-server (JSON-RPC)' : 'Connected through the locally installed Claude CLI (stream-json)'"
+      >
+        <i class="chat-runtime-dot" /> {{ runtimeLabel }}
+      </span>
+      <span
         v-if="effectiveTransport === 'acp' && acpModelOption"
         class="chat-header-model"
         :title="`Model: ${acpModelLabel}${acpActiveModelId ? ' — ' + acpActiveModelId : ''}`"
@@ -68,7 +74,7 @@
             >
               <component :is="agentIconComp(a.icon)" :size="12" :style="{ color: a.color }" />
               {{ a.name }}
-              <span class="model-id-hint">{{ a.transport === 'acp' ? 'ACP' : 'native' }}</span>
+              <span class="model-id-hint">{{ transportLabel(a.transport) }}</span>
             </button>
             <button class="floating-menu-item floating-menu-config" @click="agentMenuOpen = false; agentConfigOpen = true">
               <PhGear :size="12" /> Configure agents…
@@ -214,10 +220,11 @@
 
     <div ref="scrollEl" class="chat-messages">
       <div v-if="messages.length === 0" class="chat-empty">
-        <div class="chat-empty-avatar">
+        <div class="chat-empty-avatar" aria-hidden="true">
           <component :is="currentAgentIcon" :size="28" :style="{ color: '#fff' }" />
         </div>
-        <span class="chat-empty-title">How can I help you?</span>
+        <span class="chat-empty-kicker">New conversation</span>
+        <span class="chat-empty-title">Start a focused conversation</span>
         <span class="chat-empty-sub">Working in {{ cwdDisplay }}</span>
       </div>
 
@@ -419,7 +426,7 @@
               <PhTextAa :size="13" />
             </button>
             <!-- Model switcher (native Claude only — ACP agents manage their own model) -->
-            <div v-if="effectiveTransport === 'stream-json'" class="model-dropdown">
+            <div v-if="effectiveTransport === 'claude-cli'" class="model-dropdown">
               <button ref="modelBtnEl" class="toolbar-btn toolbar-btn-label" @click="toggleModelMenu">
                 {{ selectedModelLabel }}
                 <PhCaretDown :size="9" weight="bold" class="btn-caret" />
@@ -444,8 +451,28 @@
                 </div>
               </Teleport>
             </div>
+            <!-- Claude Agent SDK effort is forwarded to the local Claude Code CLI. -->
+            <div v-if="effectiveTransport === 'claude-cli'" class="model-dropdown">
+              <button ref="effortBtnEl" class="toolbar-btn toolbar-btn-label" title="Claude reasoning effort" @click="toggleEffortMenu">
+                {{ selectedEffortLabel }}
+                <PhCaretDown :size="9" weight="bold" class="btn-caret" />
+              </button>
+              <Teleport to="body">
+                <div v-if="effortMenuOpen" ref="effortMenuEl" class="floating-menu" :style="{ top: effortMenuPos.top + 'px', left: effortMenuPos.left + 'px' }">
+                  <button
+                    v-for="effort in CLAUDE_EFFORTS"
+                    :key="effort.id"
+                    class="floating-menu-item"
+                    :class="{ 'floating-menu-item-active': selectedEffort === effort.id }"
+                    @click="selectEffort(effort.id)"
+                  >
+                    {{ effort.label }}
+                  </button>
+                </div>
+              </Teleport>
+            </div>
             <!-- Profile switcher (only shown when more than one profile exists) -->
-            <div v-if="effectiveTransport === 'stream-json' && profilesStore.profiles.length > 1" class="model-dropdown">
+            <div v-if="effectiveTransport === 'claude-cli' && profilesStore.profiles.length > 1" class="model-dropdown">
               <button
                 ref="profileBtnEl"
                 class="toolbar-btn toolbar-btn-label"
@@ -478,7 +505,7 @@
               </Teleport>
             </div>
             <!-- Permission mode switcher (native Claude only) -->
-            <div v-if="effectiveTransport === 'stream-json'" class="perm-mode-dropdown">
+            <div v-if="effectiveTransport === 'claude-cli'" class="perm-mode-dropdown">
               <button
                 ref="permBtnEl"
                 class="toolbar-btn"
@@ -650,12 +677,13 @@ import { PhArrowUp, PhArrowCounterClockwise, PhWrench, PhStop, PhShieldWarning, 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
+import { normalizeAcpRuntimeEvent, normalizeClaudeStreamEvent, type ProviderRuntimeEvent } from "@/lib/providerRuntime";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useProfilesStore, DEFAULT_PROFILE_ID } from "@/stores/profiles";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useScriptsStore } from "@/stores/scripts";
-import { useChatAgentsStore } from "@/stores/chatAgents";
+import { useChatAgentsStore, transportLabel, type ChatTransport } from "@/stores/chatAgents";
 import { agentIconComp } from "@/lib/agentIcons";
 import ChatAgentConfig from "@/components/ChatAgentConfig.vue";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -689,8 +717,8 @@ const props = defineProps<{
   modelKey?: string;
   // Initial model when nothing is stored under modelKey yet.
   defaultModel?: string;
-  // Wire transport: "stream-json" (Claude CLI, default) or "acp".
-  transport?: 'stream-json' | 'acp';
+  // Optional runtime override, otherwise the selected agent defines it.
+  transport?: ChatTransport;
   // Which agent to run — a chatAgents store id (default 'claude').
   agentKind?: string;
   // Whether this chat's tab is actually the one on screen (its workspace active,
@@ -713,9 +741,13 @@ const agentKind = ref<string>(
 // The resolved agent definition from the registry.
 const currentAgent = computed(() => chatAgents.byId(agentKind.value));
 const currentAgentIcon = computed(() => agentIconComp(currentAgent.value?.icon));
-// "acp" per the agent's transport (or the transport prop override); else "stream-json".
-const effectiveTransport = computed(() =>
-  props.transport === 'acp' || currentAgent.value?.transport === 'acp' ? 'acp' : 'stream-json'
+const effectiveTransport = computed<ChatTransport>(() =>
+  props.transport ?? currentAgent.value?.transport ?? 'claude-cli'
+);
+const usesRpcRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
+const isAcpRuntime = computed(() => effectiveTransport.value === 'acp');
+const runtimeLabel = computed(() =>
+  effectiveTransport.value === 'codex-app-server' ? 'Codex app-server' : effectiveTransport.value === 'acp' ? 'ACP adapter' : 'Claude CLI'
 );
 // Per-agent accent color.
 const agentAccentColor = computed(() =>
@@ -949,9 +981,9 @@ async function selectAgent(id: string) {
   agentMenuOpen.value = false;
   if (id === agentKind.value) return;
   // Stop OLD process before agentKind changes (effectiveTransport depends on it).
-  await invoke(effectiveTransport.value === 'acp' ? 'acp_stop' : 'claude_stop', { id: props.chatId }).catch(() => {});
+  await (usesRpcRuntime.value ? stopRpcRuntime() : invoke('claude_stop', { id: props.chatId })).catch(() => {});
   agentKind.value = id;
-  chats.sync(props.chatId, { agentKind: id, transport: currentAgent.value?.transport ?? 'stream-json' });
+  chats.sync(props.chatId, { agentKind: id, transport: currentAgent.value?.transport ?? 'claude-cli' });
   await clearChat();
 }
 
@@ -972,6 +1004,28 @@ function acpStartPayload(emitHistory = false) {
     // Resume the chat's prior ACP session (server-side history) when we have its id.
     resumeSessionId: sessionId.value || null,
   };
+}
+
+async function startRpcRuntime(emitHistory = false) {
+  await ensureAcpListeners();
+  if (effectiveTransport.value === "codex-app-server") {
+    const agent = currentAgent.value;
+    return invoke("codex_start", {
+      id: props.chatId,
+      cwd: props.cwd,
+      env: agent?.env ?? {},
+      resumeSessionId: sessionId.value || null,
+    });
+  }
+  return invoke("acp_start", acpStartPayload(emitHistory));
+}
+
+function stopRpcRuntime() {
+  return invoke(effectiveTransport.value === "codex-app-server" ? "codex_stop" : "acp_stop", { id: props.chatId });
+}
+
+function sendRpcRuntime(text: string, images?: string[]) {
+  return invoke<number>(effectiveTransport.value === "codex-app-server" ? "codex_send" : "acp_send", { id: props.chatId, text, images });
 }
 
 // Relative-to-cwd path for a shared selection's @-reference.
@@ -1077,6 +1131,46 @@ async function selectModel(id: ClaudeModelId) {
   await restartClaude();
 }
 const selectedModelLabel = computed(() => CLAUDE_MODELS.find((m) => m.id === selectedModel.value)?.label ?? selectedModel.value);
+
+const CLAUDE_EFFORTS = [
+  { id: "low", label: "Low effort" },
+  { id: "medium", label: "Medium effort" },
+  { id: "high", label: "High effort" },
+  { id: "xhigh", label: "Extra high" },
+  { id: "max", label: "Max effort" },
+] as const;
+type ClaudeEffort = typeof CLAUDE_EFFORTS[number]["id"];
+const EFFORT_CONFIG_KEY = props.modelKey ? `chatClaudeEffort:${props.modelKey}` : "chatClaudeEffort";
+function loadEffort(): ClaudeEffort {
+  const saved = getConfig<string | null>(EFFORT_CONFIG_KEY, null);
+  return CLAUDE_EFFORTS.some((option) => option.id === saved) ? saved as ClaudeEffort : "high";
+}
+const selectedEffort = ref<ClaudeEffort>(loadEffort());
+const selectedEffortLabel = computed(() => CLAUDE_EFFORTS.find((option) => option.id === selectedEffort.value)?.label ?? "High effort");
+const effortMenuOpen = ref(false);
+const effortBtnEl = ref<HTMLElement | null>(null);
+const effortMenuEl = ref<HTMLElement | null>(null);
+const effortMenuPos = ref({ top: 0, left: 0 });
+function toggleEffortMenu() {
+  if (!effortMenuOpen.value && effortBtnEl.value) {
+    const r = effortBtnEl.value.getBoundingClientRect();
+    effortMenuPos.value = { top: Math.round(r.top - CLAUDE_EFFORTS.length * 36 - 18), left: Math.round(r.left) };
+  }
+  effortMenuOpen.value = !effortMenuOpen.value;
+}
+function onEffortMenuOutside(e: MouseEvent) {
+  if (!effortMenuOpen.value) return;
+  const t = e.target as Node;
+  if (effortBtnEl.value?.contains(t) || effortMenuEl.value?.contains(t)) return;
+  effortMenuOpen.value = false;
+}
+async function selectEffort(effort: ClaudeEffort) {
+  effortMenuOpen.value = false;
+  if (effort === selectedEffort.value) return;
+  selectedEffort.value = effort;
+  setConfig(EFFORT_CONFIG_KEY, effort);
+  await restartClaude();
+}
 
 interface ChatMessage {
   id: number;
@@ -1558,6 +1652,36 @@ function syncStore() {
   });
 }
 
+// This is the shared renderer boundary: Claude's stream-json protocol and every
+// ACP adapter (including the locally logged-in Codex CLI) update the same feed.
+function applyRuntimeEvent(event: ProviderRuntimeEvent) {
+  switch (event.type) {
+    case "text.delta": {
+      const isAcp = event.messageId.startsWith("acp:");
+      const last = isAcp
+        ? messages.value.filter((m) => m.role === "assistant" && m.partial && m._acpMsgId === event.messageId).pop()
+        : messages.value[messages.value.length - 1];
+      if (last?.role === "assistant" && last.partial) last.text += event.text;
+      else messages.value.push({ id: nextMsgId++, role: "assistant", text: event.text, partial: true, ...(isAcp ? { _acpMsgId: event.messageId } : {}) });
+      scrollToBottom();
+      return;
+    }
+    case "tool.started":
+      messages.value.push({ id: nextMsgId++, role: "tool", text: event.name, toolInput: event.input ?? {}, toolUseId: event.toolCallId, toolExpanded: false, toolRawName: Boolean(event.input) });
+      scrollToBottom();
+      return;
+    case "tool.completed": {
+      const toolMsg = [...messages.value].reverse().find((m) => m.role === "tool" && m.toolUseId === event.toolCallId);
+      if (toolMsg) {
+        toolMsg.toolOutput = event.output ? event.output.slice(0, 2000) : "";
+        toolMsg.toolFailed = event.failed === true;
+      }
+      scrollToBottom();
+      return;
+    }
+  }
+}
+
 function onLine(line: string) {
   let event: Record<string, unknown>;
   try { event = JSON.parse(line) as Record<string, unknown>; }
@@ -1629,9 +1753,7 @@ function onLine(line: string) {
 
   if (type === "assistant") {
     const content = ((event.message as Record<string, unknown>)?.content ?? []) as Array<Record<string, unknown>>;
-    const textParts = content.filter((b) => b.type === "text").map((b) => b.text as string).join("");
     const thinkingParts = content.filter((b) => b.type === "thinking").map((b) => b.thinking as string).join("");
-    const toolBlocks = content.filter((b) => b.type === "tool_use");
 
     if (thinkingParts) {
       const last = messages.value[messages.value.length - 1];
@@ -1641,20 +1763,7 @@ function onLine(line: string) {
         messages.value.push({ id: nextMsgId++, role: "thinking", text: thinkingParts, partial: true });
       }
     }
-    if (textParts) {
-      const last = messages.value[messages.value.length - 1];
-      if (last?.role === "assistant" && last.partial) {
-        last.text += textParts;
-      } else {
-        messages.value.push({ id: nextMsgId++, role: "assistant", text: textParts, partial: true });
-      }
-    }
-    for (const tb of toolBlocks) {
-      const name = (tb.name as string) ?? "tool";
-      const toolInput = (tb.input ?? {}) as Record<string, unknown>;
-      const toolUseId = (tb.id as string) ?? undefined;
-      messages.value.push({ id: nextMsgId++, role: "tool", text: name, toolInput, toolUseId, toolExpanded: false, toolRawName: true });
-    }
+    for (const runtimeEvent of normalizeClaudeStreamEvent(event)) applyRuntimeEvent(runtimeEvent);
     scrollToBottom();
     return;
   }
@@ -1820,16 +1929,6 @@ function onAcpData(raw: string) {
   if (!event) return;
 
   switch (event.kind) {
-    case "text_chunk": {
-      const last = messages.value.filter((m) => m.role === "assistant" && m.partial && m._acpMsgId === event.messageId).pop();
-      if (last) {
-        last.text += event.text;
-      } else {
-        messages.value.push({ id: nextMsgId++, role: "assistant", text: event.text, partial: true, _acpMsgId: event.messageId });
-      }
-      scrollToBottom();
-      break;
-    }
     case "thinking_chunk": {
       const last = messages.value[messages.value.length - 1];
       if (last?.role === "thinking" && last.partial) {
@@ -1840,19 +1939,11 @@ function onAcpData(raw: string) {
       scrollToBottom();
       break;
     }
+    case "text_chunk":
     case "tool_call":
-      messages.value.push({ id: nextMsgId++, role: "tool", text: event.title, toolInput: {}, toolUseId: event.toolCallId, toolExpanded: false, toolRawName: false });
-      scrollToBottom();
+    case "tool_output":
+      for (const runtimeEvent of normalizeAcpRuntimeEvent(event)) applyRuntimeEvent(runtimeEvent);
       break;
-    case "tool_output": {
-      const toolMsg = [...messages.value].reverse().find((m) => m.role === "tool" && m.toolUseId === event.toolCallId);
-      if (toolMsg) {
-        toolMsg.toolOutput = event.output ? event.output.slice(0, 2000) : "";
-        toolMsg.toolFailed = !event.done;
-      }
-      scrollToBottom();
-      break;
-    }
   }
 }
 
@@ -1909,7 +2000,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   // While busy: queue the message instead of sending immediately. ACP adapters
   // support promptQueueing (the agent queues it itself), so send concurrently —
   // pressing Enter force-sends now instead of waiting for the turn to finish.
-  if (busy.value && !forcedText && effectiveTransport.value !== "acp") {
+  if (busy.value && !forcedText && !isAcpRuntime.value) {
     messageQueue.value.push(text);
     messages.value.push({ id: nextMsgId++, role: "queued", text });
     inputText.value = "";
@@ -1952,11 +2043,11 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   saveMessages(props.chatId, messages.value);
   syncStore();
   scrollToBottom();
-  if (effectiveTransport.value === "acp") {
+  if (usesRpcRuntime.value) {
     try {
       const images = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
       pendingImages.value = [];
-      acpPromptRpcId.value = await invoke<number>("acp_send", { id: props.chatId, text, images });
+      acpPromptRpcId.value = await sendRpcRuntime(text, images);
     } catch (e) {
       messages.value.push({ id: nextMsgId++, role: "assistant", text: `Error: ${e}` });
       busy.value = false;
@@ -2000,7 +2091,7 @@ function respondPermission(allow: boolean, opts?: { always?: boolean; updatedInp
   pendingPermission.value = null;
   pendingDiff.value = null;
   // ACP transport: reply to the agent's blocking request_permission.
-  if (effectiveTransport.value === "acp" && acpPermRpcId.value !== null) {
+  if (usesRpcRuntime.value && acpPermRpcId.value !== null) {
     // ACP optionIds are agent-defined — pick the matching one by kind from the
     // request's options (NOT a hardcoded string), else fall back to the first.
     const optsList = ((cr as unknown as { suggestions?: Array<{ optionId: string; kind: string }> }).suggestions ?? []);
@@ -2101,10 +2192,9 @@ async function selectPermMode(mode: PermMode) {
 // running/permission forever.
 async function restartClaude() {
   suppressNextDone.value = true; // restart — don't toast on the teardown `exit`
-  if (effectiveTransport.value === "acp") {
-    await ensureAcpListeners();
-    await invoke("acp_stop", { id: props.chatId }).catch(() => {});
-    await invoke("acp_start", acpStartPayload()).catch(() => {});
+  if (usesRpcRuntime.value) {
+    await stopRpcRuntime().catch(() => {});
+    await startRpcRuntime().catch(() => {});
     // Drop any in-flight permission gate — the rpc id is dead after restart.
     removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
     acpPermReq.value = null; acpPermRpcId.value = null;
@@ -2127,6 +2217,7 @@ async function restartClaude() {
     permissionMode: permMode.value,
     appendSystemPrompt: props.appendSystemPrompt || null,
     model: selectedModel.value,
+    effort: selectedEffort.value,
     configDir: selectedProfile.value?.configDir || null,
     profileCommand: selectedProfile.value?.command || null,
     profileArgs: selectedProfile.value?.args || null,
@@ -2150,8 +2241,8 @@ async function abortTurn() {
 }
 
 async function clearChat() {
-  const acp = effectiveTransport.value === "acp";
-  await invoke(acp ? "acp_stop" : "claude_stop", { id: props.chatId }).catch(() => {});
+  const rpc = usesRpcRuntime.value;
+  await (rpc ? stopRpcRuntime() : invoke("claude_stop", { id: props.chatId })).catch(() => {});
   messages.value = [];
   sessionId.value = "";
   busy.value = false;
@@ -2164,12 +2255,9 @@ async function clearChat() {
   clearMessageHistory(props.chatId);
   chats.sync(props.chatId, { claudeSessionId: "", busy: false, messageCount: 0, title: `Chat` });
   const projSettings = scriptsStore.settingsFor(props.cwd);
-  if (acp) {
-    await ensureAcpListeners();
-    const startErr = await invoke("acp_start", acpStartPayload()).catch((e: unknown) => e);
-    if (startErr) {
-      messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ACP adapter: ${startErr}` });
-    }
+  if (rpc) {
+    const startErr = await startRpcRuntime().catch((e: unknown) => e);
+    if (startErr) messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
     return;
   }
   await invoke("claude_start", {
@@ -2178,6 +2266,7 @@ async function clearChat() {
     permissionMode: permMode.value,
     appendSystemPrompt: props.appendSystemPrompt || null,
     model: selectedModel.value,
+    effort: selectedEffort.value,
     configDir: selectedProfile.value?.configDir || projSettings.claude_config_dir || null,
     profileCommand: selectedProfile.value?.command || null,
     profileArgs: selectedProfile.value?.args || null,
@@ -2454,12 +2543,14 @@ onMounted(async () => {
   messages.value = loadMessages(props.chatId);
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
+  selectedEffort.value = loadEffort();
   permMode.value = loadPermMode(props.chatId);
 
   chats.markSeen(props.chatId);
   window.addEventListener("keydown", onWindowKeydown);
   window.addEventListener("mousedown", onPermMenuOutside);
   window.addEventListener("mousedown", onModelMenuOutside);
+  window.addEventListener("mousedown", onEffortMenuOutside);
   window.addEventListener("mousedown", onProfileMenuOutside);
   window.addEventListener("mousedown", onAgentMenuOutside);
   window.addEventListener("mousedown", onAcpMenuOutside);
@@ -2469,13 +2560,10 @@ onMounted(async () => {
   if (props.compact) chats.addPermissionRule("Bash:burrow");
   const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
   if (stored) sessionId.value = stored;
-  if (effectiveTransport.value === "acp") {
-    await ensureAcpListeners();
+  if (usesRpcRuntime.value) {
     await scriptsStore.loadForPath(props.cwd);
-    const startErr = await invoke("acp_start", acpStartPayload()).catch((e: unknown) => e);
-    if (startErr) {
-      messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ACP adapter: ${startErr}` });
-    }
+    const startErr = await startRpcRuntime().catch((e: unknown) => e);
+    if (startErr) messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
     return;
   }
   await invoke("claude_start", {
@@ -2485,6 +2573,7 @@ onMounted(async () => {
     permissionMode: permMode.value,
     appendSystemPrompt: props.appendSystemPrompt || null,
     model: selectedModel.value,
+    effort: selectedEffort.value,
     configDir: selectedProfile.value?.configDir || null,
     profileCommand: selectedProfile.value?.command || null,
     profileArgs: selectedProfile.value?.args || null,
@@ -2513,6 +2602,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("mousedown", onPermMenuOutside);
   window.removeEventListener("mousedown", onModelMenuOutside);
+  window.removeEventListener("mousedown", onEffortMenuOutside);
   window.removeEventListener("mousedown", onProfileMenuOutside);
   window.removeEventListener("mousedown", onAgentMenuOutside);
   window.removeEventListener("mousedown", onAcpMenuOutside);
@@ -2572,7 +2662,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #0f0f11;
+  background: var(--chat-bg);
 }
 
 .diff-line { line-height: 1.5; }
@@ -2602,8 +2692,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .chat-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 7px;
+  padding: 7px 14px;
   border-bottom: 1px solid var(--chat-border);
   flex-shrink: 0;
   background: var(--chat-surface);
@@ -2612,10 +2702,31 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .chat-header-icon { color: #d97706; flex-shrink: 0; }
 
 .chat-header-title {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 650;
   color: var(--text-primary);
   letter-spacing: 0.02em;
+}
+
+.chat-runtime {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--green, #22c55e) 35%, transparent);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.chat-runtime-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--green, #22c55e);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--green, #22c55e) 75%, transparent);
 }
 
 .chat-header-cwd {
@@ -2873,7 +2984,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 0 8px;
+  padding: 24px 0 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2891,19 +3002,20 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   padding: 40px 24px;
 }
 .chat-empty-avatar {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--agent-accent, #7c3aed) 70%, #fff) 0%, var(--agent-accent, #7c3aed) 45%, color-mix(in srgb, var(--agent-accent, #7c3aed) 60%, #000) 100%);
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 72%, #16161a);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  margin-bottom: 10px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--agent-accent, #7c3aed) 18%, transparent), 0 8px 24px color-mix(in srgb, var(--agent-accent, #7c3aed) 30%, transparent);
+  margin-bottom: 8px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-accent, #7c3aed) 36%, transparent);
 }
+.chat-empty-kicker { color: var(--chat-muted); font: 600 9px/1 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
 .chat-empty-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--chat-text, rgba(255,255,255,0.88));
 }
@@ -3440,15 +3552,15 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 
 /* New-style input wrap */
 .chat-input-wrap {
-  padding: 10px 14px 6px;
+  padding: 10px 18px 8px;
   flex-shrink: 0;
-  background: #0f0f11;
+  background: var(--chat-bg);
 }
 
 .chat-input-box {
-  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 5%, #1a1a20);
+  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 4%, var(--chat-surface));
   border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 16px;
+  border-radius: 10px;
   overflow: hidden;
   transition: border-color .15s, box-shadow .15s;
 }
@@ -3468,7 +3580,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   font-size: 13px;
   line-height: 1.5;
   outline: none;
-  padding: 12px 14px 6px;
+  padding: 10px 12px 4px;
   resize: none;
   min-height: 40px;
   max-height: 160px;
@@ -3483,7 +3595,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px 10px;
+  padding: 5px 8px 8px;
   gap: 6px;
 }
 

@@ -36,7 +36,31 @@ export function parseAcpPermRequest(raw: unknown): {
   title: string; kind: string; rawInput: Record<string, unknown>
 } | null {
   const msg = raw as Record<string, unknown>
-  if (msg.method !== 'session/request_permission') return null
+  const method = msg.method as string
+  // Direct Codex app-server requests are translated into the same UI shape as
+  // ACP permissions. The option ids are intentionally protocol-specific: Rust
+  // maps them back to Codex's documented { decision } response.
+  if (["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval"].includes(method)) {
+    const p = (msg.params ?? {}) as Record<string, unknown>
+    const command = typeof p.command === "string" ? p.command : undefined
+    const title = method.includes("commandExecution") ? (command ? `Run: ${command}` : "Run command")
+      : method.includes("fileChange") ? "Apply file changes"
+      : "Grant additional permission"
+    return {
+      rpcId: msg.id as number,
+      sessionId: (p.threadId as string) ?? "",
+      toolCallId: (p.itemId as string) ?? String(msg.id),
+      options: [
+        { optionId: "codex:accept", name: "Allow once", kind: "allow_once" },
+        { optionId: "codex:acceptForSession", name: "Always allow", kind: "allow_always" },
+        { optionId: "codex:decline", name: "Deny", kind: "reject_once" },
+      ],
+      title,
+      kind: "codex-approval",
+      rawInput: { ...p, ...(command ? { command } : {}) },
+    }
+  }
+  if (method !== 'session/request_permission') return null
   const rpcId = msg.id as number
   const p = msg.params as Record<string, unknown>
   const toolCall = p?.toolCall as Record<string, unknown> | undefined

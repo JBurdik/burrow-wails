@@ -2,6 +2,31 @@
   <div class="terminal-pane" @click="focusActive">
     <AgentToolbar @launch="spawnAgent" @open-chat="openClaudeChat()" @open-browser="openBrowserTab()" />
 
+    <nav class="workspace-surface-switcher" aria-label="Workspace surface">
+      <button
+        class="surface-switch-btn"
+        :class="{ active: activeSurface === 'chat' }"
+        :aria-pressed="activeSurface === 'chat'"
+        title="Show chat"
+        @click.stop="switchSurface('chat')"
+      >
+        <PhChatCenteredText :size="13" />
+        <span>Chat</span>
+      </button>
+      <button
+        class="surface-switch-btn"
+        :class="{ active: activeSurface === 'terminal' }"
+        :aria-pressed="activeSurface === 'terminal'"
+        title="Show terminal"
+        @click.stop="switchSurface('terminal')"
+      >
+        <PhTerminal :size="13" />
+        <span>Terminal</span>
+      </button>
+      <span class="surface-switch-rule" />
+      <span class="surface-switch-context">{{ activeSurface === 'chat' ? 'Conversation' : 'Workspace' }}</span>
+    </nav>
+
     <TransitionGroup v-if="tabs.length > 0" name="tab-move" tag="div" class="terminal-tabs">
       <button
         v-for="(tab, tabIdx) in tabs"
@@ -19,7 +44,7 @@
         @pointerdown="(e: PointerEvent) => tabDragDown(tabIdx, e, 'tab')"
       >
         <PhFileCode v-if="tabIsEditor(tab)" :size="12" class="tab-term-icon" />
-        <ClaudeIcon v-else-if="tabIsChat(tab)" :size="12" class="tab-chat-icon" />
+        <PhChatCenteredText v-else-if="tabIsChat(tab)" :size="12" class="tab-chat-icon" />
         <PhGlobe v-else-if="tabIsBrowser(tab)" :size="12" class="tab-term-icon" />
         <PhRobot v-else-if="tabIsAgent(tab)" :size="12" class="tab-agent-icon" />
         <PhTerminal v-else :size="12" class="tab-term-icon" />
@@ -228,8 +253,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { createActor, type Actor } from "xstate";
 import { agentStatusMachine, isBusyStatus } from "@/machines/agentStatus";
-import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhArrowSquareOut, PhFileCode, PhGlobe, PhCaretDown, PhCaretRight } from "@phosphor-icons/vue";
-import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
+import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhArrowSquareOut, PhFileCode, PhGlobe, PhCaretDown, PhCaretRight, PhChatCenteredText } from "@phosphor-icons/vue";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -308,6 +332,10 @@ interface DaemonSession {
 const tabs = ref<Tab[]>([]);
 const activeTabId = ref(0);
 const focusedLeafId = ref(0);
+const activeSurface = computed<"chat" | "terminal">(() => {
+  const active = tabs.value.find((tab) => tab.id === activeTabId.value);
+  return active && tabIsChat(active) ? "chat" : "terminal";
+});
 // Holds both XTerm and CodeEditor instances, keyed by leaf id. Both expose
 // focus(); editor leaves also expose save()/isDirty(), terminal leaves sendText().
 const xtermRefs = new Map<number, any>();
@@ -962,6 +990,17 @@ function openClaudeChat(chatId?: number, agentId?: string, cwd?: string) {
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
   activateTab(tab.id);
+}
+
+function switchSurface(surface: "chat" | "terminal") {
+  if (activeSurface.value === surface) return;
+  const matchingTab = tabs.value.find((tab) => surface === "chat" ? tabIsChat(tab) : !tabIsChat(tab));
+  if (matchingTab) {
+    activateTab(matchingTab.id);
+    return;
+  }
+  if (surface === "chat") openClaudeChat();
+  else addTab();
 }
 
 function openBrowserTab(url?: string) {
@@ -1750,6 +1789,40 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
   min-width: 0;
 }
 
+.workspace-surface-switcher {
+  height: 33px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--bg-panel) 92%, var(--terminal-bg));
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.surface-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: transparent;
+  font: 600 10.5px/1 var(--font-ui);
+  cursor: pointer;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.surface-switch-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
+.surface-switch-btn.active {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-panel));
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+}
+.surface-switch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.surface-switch-rule { width: 1px; height: 13px; margin: 0 5px; background: var(--border); }
+.surface-switch-context { color: var(--text-muted); font: 500 10px/1 var(--font-mono); }
+
 /* ── Tab bar ───────────────────────────────────────────────────── */
 .terminal-tabs {
   display: flex;
@@ -1825,7 +1898,7 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
 /* ── Icons ─────────────────────────────────────────────────────── */
 .tab-agent-icon { color: var(--accent); flex-shrink: 0; }
 .tab-term-icon  { color: var(--text-muted); flex-shrink: 0; }
-.tab-chat-icon  { color: #d97706; flex-shrink: 0; }
+.tab-chat-icon  { color: var(--text-secondary); flex-shrink: 0; }
 .tab.active .tab-term-icon { color: var(--text-secondary); }
 
 /* ── Status text ───────────────────────────────────────────────── */

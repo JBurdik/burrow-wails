@@ -388,7 +388,7 @@
                 @change="ui.defaultChatAgent = ($event.target as HTMLSelectElement).value"
               >
                 <option v-for="a in chatAgents.agents" :key="a.id" :value="a.id">
-                  {{ a.name }} ({{ a.transport === 'acp' ? 'ACP' : 'native' }})
+                  {{ a.name }} ({{ transportLabel(a.transport) }})
                 </option>
               </select>
             </div>
@@ -1444,7 +1444,7 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useProfilesStore, DEFAULT_PROFILE_ID } from "@/stores/profiles";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, type NtfyEvent, type ToastPosition } from "@/stores/ui";
-import { useChatAgentsStore } from "@/stores/chatAgents";
+import { useChatAgentsStore, transportLabel } from "@/stores/chatAgents";
 import ChatAgentConfig from "@/components/ChatAgentConfig.vue";
 import { testNtfy } from "@/lib/ntfy";
 import { useUpdateStore } from "@/stores/update";

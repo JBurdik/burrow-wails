@@ -51,9 +51,9 @@
         <PhGlobe :size="13" />
         <span>Browser</span>
       </button>
-      <button class="claude-ui-btn" title="Open Claude chat" @click="$emit('open-chat')">
-        <ClaudeIcon :size="13" />
-        <span>Claude UI</span>
+      <button class="claude-ui-btn" title="Open a new conversation" @click="$emit('open-chat')">
+        <PhChatCenteredText :size="13" />
+        <span>Chat</span>
       </button>
     </div>
   </div>
@@ -67,7 +67,7 @@ import { useAgentsStore, type AgentIcon } from "@/stores/agents";
 import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { computed, ref, onBeforeUnmount } from "vue";
-import { PhCode, PhGitBranch, PhRobot, PhSparkle, PhTerminal, PhGlobe, PhPlayCircle, PhCaretDown } from "@phosphor-icons/vue";
+import { PhCode, PhGitBranch, PhRobot, PhSparkle, PhTerminal, PhGlobe, PhPlayCircle, PhCaretDown, PhChatCenteredText } from "@phosphor-icons/vue";
 
 const iconMap: Record<AgentIcon, unknown> = {
   sparkle: PhSparkle,

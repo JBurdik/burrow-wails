@@ -64,7 +64,7 @@
           <span v-if="sections.length === 1 && unreadCount > 0" class="header-unread" :title="`${unreadCount} unread — ⌘⇧U to jump`">{{ unreadCount }}</span>
           <div class="tabs-actions">
             <button class="icon-btn" title="Board" @click.stop="ui.openBoard(ws.id)"><PhKanban :size="13" /></button>
-            <button class="icon-btn chat" title="New chat" @click.stop="newChatSession(ws.id)"><ClaudeIcon :size="13" /></button>
+            <button class="icon-btn chat" title="New conversation" aria-label="New conversation" @click.stop="newChatSession(ws.id)"><PhChatCenteredText :size="13" /></button>
             <button class="icon-btn" title="New terminal" @click.stop="termTabs.add(ws.id)"><PhPlus :size="13" /></button>
           </div>
         </div>
@@ -85,7 +85,7 @@
             @dblclick.stop
             @pointerdown="(e: PointerEvent) => tabDragDown(tabIdx, e, String(ws.id))"
           >
-            <ClaudeIcon v-if="tab.isChat" :size="11" class="ws-term-icon claude-session-icon" />
+            <PhChatCenteredText v-if="tab.isChat" :size="11" class="ws-term-icon claude-session-icon" />
             <PhRobot v-else-if="tab.isAgent" :size="11" class="ws-term-icon agent" />
             <PhTerminal v-else :size="11" class="ws-term-icon" />
             <input
@@ -249,13 +249,13 @@ import {
   PhActivity,
   PhArrowRight,
   PhWarningCircle,
+  PhChatCenteredText,
 } from "@phosphor-icons/vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
-import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
 import WorkspacePicker from "@/components/WorkspacePicker.vue";
 import { spinnerFrame } from "@/lib/spinner";
 import { usePointerReorder } from "@/composables/usePointerReorder";

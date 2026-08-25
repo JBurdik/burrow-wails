@@ -3494,7 +3494,15 @@ struct AcpProc {
     child: std::process::Child,
     next_id: Arc<std::sync::atomic::AtomicU64>,
     session_id: String,
+    protocol: AcpProtocol,
+    // Codex app-server responds to turn/start immediately, then reports actual
+    // completion as a notification. Keep the UI's ACP-shaped prompt id here so
+    // the direct Codex bridge can finish the same rendered turn at that point.
+    pending_turn_id: Arc<std::sync::Mutex<Option<u64>>>,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AcpProtocol { Acp, CodexAppServer }
 
 #[derive(Default)]
 struct AcpState {
@@ -3516,6 +3524,7 @@ async fn claude_start(
     permission_mode: Option<String>,
     append_system_prompt: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
     config_dir: Option<String>,
     profile_command: Option<String>,
     profile_args: Option<String>,
@@ -3570,6 +3579,15 @@ async fn claude_start(
         args.push("--model".to_string());
         args.push(m.to_string());
     }
+    // Claude Agent SDK exposes this as `options.effort`. Forward the same
+    // supported values to the installed Claude Code runtime instead of making
+    // a second API-key based client. This keeps subscription/OAuth auth and
+    // the SDK's local runtime behaviour intact.
+    let allowed_efforts = ["low", "medium", "high", "xhigh", "max"];
+    if let Some(value) = effort.as_deref().filter(|value| allowed_efforts.contains(value)) {
+        args.push("--effort".to_string());
+        args.push(value.to_string());
+    }
 
     // Profile extra args (inserted before any positional args).
     if let Some(pa) = profile_args.as_deref().filter(|s| !s.trim().is_empty()) {
@@ -3606,7 +3624,10 @@ async fn claude_start(
         None => augmented_path(&cwd),
     };
     env_map.insert("PATH".to_string(), path);
-    env_map.insert("ANTHROPIC_API_KEY".to_string(), std::env::var("ANTHROPIC_API_KEY").unwrap_or_default());
+    // Prefer the user's authenticated Claude Code profile. Passing through a
+    // shell API key would silently turn this local Agent SDK-compatible flow
+    // into billed API-key usage.
+    env_map.insert("ANTHROPIC_API_KEY".to_string(), String::new());
 
     // Burrow env so `burrow` control/read commands work from this session's Bash.
     // Mirrors the PTY-spawn exports. Deliberately NO BURROW_PTY_ID — the chat is
@@ -3756,6 +3777,121 @@ fn acp_write(stdin: &Arc<std::sync::Mutex<std::process::ChildStdin>>, msg: &serd
     g.write_all(line.as_bytes()).and_then(|_| g.flush()).map_err(|e| e.to_string())
 }
 
+// Direct Codex app-server bridge. T3 Code uses this protocol rather than an ACP
+// shim; Burrow translates the small set of app-server events the existing chat
+// feed needs into its ACP-shaped event channel. Authentication stays entirely in
+// the user's local Codex CLI profile (no API key is read or injected here).
+async fn codex_app_server_start(
+    app: AppHandle,
+    state: State<'_, AcpState>,
+    id: u32,
+    cwd: String,
+    env: std::collections::HashMap<String, String>,
+    resume_thread_id: Option<String>,
+) -> Result<(), String> {
+    let bin = resolve_lsp_bin("codex", &cwd)
+        .ok_or_else(|| "codex binary not found (checked ~/.local/bin, homebrew, PATH)".to_string())?;
+    let mut extra_env = env;
+    for key in ["HOME", "USER", "TMPDIR", "LANG"] {
+        if let Ok(value) = std::env::var(key) { extra_env.entry(key.to_string()).or_insert(value); }
+    }
+    extra_env.insert("PATH".to_string(), augmented_path(&cwd));
+    let mut child = std::process::Command::new(&bin)
+        .args(["app-server"])
+        .current_dir(&cwd)
+        .envs(&extra_env)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to spawn codex app-server: {e}"))?;
+    let stdin = Arc::new(std::sync::Mutex::new(child.stdin.take().ok_or("codex app-server has no stdin")?));
+    let stdout = child.stdout.take().ok_or("codex app-server has no stdout")?;
+    let stderr = child.stderr.take().ok_or("codex app-server has no stderr")?;
+    std::thread::spawn(move || { use std::io::Read; let mut stream = stderr; let mut buf = [0u8; 4096]; while stream.read(&mut buf).unwrap_or(0) > 0 {} });
+
+    let stdin_hs = stdin.clone();
+    let cwd_hs = cwd.clone();
+    let resume_hs = resume_thread_id.filter(|thread_id| !thread_id.trim().is_empty());
+    let (reader, thread_id) = tauri::async_runtime::spawn_blocking(move || -> Result<(std::io::BufReader<std::process::ChildStdout>, String), String> {
+        use std::io::BufRead;
+        let mut reader = std::io::BufReader::new(stdout);
+        let read_response = |reader: &mut std::io::BufReader<std::process::ChildStdout>, want: u64| -> Result<serde_json::Value, String> {
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 { return Err("codex app-server closed during handshake".to_string()); }
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue; };
+                if value.get("id").and_then(|v| v.as_u64()) == Some(want) && value.get("method").is_none() { return Ok(value); }
+            }
+        };
+        acp_write(&stdin_hs, &serde_json::json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "clientInfo": { "name": "burrow", "version": "2.16.0" }, "capabilities": { "experimentalApi": true } } }))?;
+        let _ = read_response(&mut reader, 0)?;
+        let start_params = serde_json::json!({ "cwd": cwd_hs, "approvalPolicy": "on-request", "sandbox": "workspace-write" });
+        let response = if let Some(thread_id) = resume_hs {
+            acp_write(&stdin_hs, &serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "thread/resume", "params": { "threadId": thread_id, "cwd": start_params["cwd"], "approvalPolicy": "on-request", "sandbox": "workspace-write" } }))?;
+            let resume = read_response(&mut reader, 1)?;
+            if resume.get("error").is_none() { resume }
+            else {
+                acp_write(&stdin_hs, &serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "thread/start", "params": start_params }))?;
+                read_response(&mut reader, 2)?
+            }
+        } else {
+            acp_write(&stdin_hs, &serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "thread/start", "params": start_params }))?;
+            read_response(&mut reader, 1)?
+        };
+        let thread_id = response.pointer("/result/thread/id").and_then(|v| v.as_str()).ok_or("codex thread/start response missing thread id")?.to_string();
+        Ok((reader, thread_id))
+    }).await.map_err(|e| e.to_string())??;
+
+    let _ = app.emit_all(&format!("acp-data-{id}"), serde_json::json!({ "_burrow": "session", "sessionId": thread_id, "modes": null, "configOptions": [] }).to_string());
+    let app_reader = app.clone();
+    let pending_turn_id = Arc::new(std::sync::Mutex::new(None));
+    let pending_reader = pending_turn_id.clone();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut reader = reader;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 { break; }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue; };
+            let method = value.get("method").and_then(|v| v.as_str()).unwrap_or("");
+            match method {
+                "item/agentMessage/delta" => {
+                    let params = value.get("params").cloned().unwrap_or_default();
+                    let delta = params.get("delta").and_then(|v| v.as_str()).unwrap_or("");
+                    if !delta.is_empty() {
+                        let message_id = params.get("itemId").and_then(|v| v.as_str()).unwrap_or("codex-message");
+                        let event = serde_json::json!({ "method": "session/update", "params": { "update": { "sessionUpdate": "agent_message_chunk", "messageId": message_id, "content": { "text": delta } } } });
+                        let _ = app_reader.emit_all(&format!("acp-data-{id}"), event.to_string());
+                    }
+                }
+                "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
+                    let delta = value.pointer("/params/delta").and_then(|v| v.as_str()).unwrap_or("");
+                    if !delta.is_empty() {
+                        let event = serde_json::json!({ "method": "session/update", "params": { "update": { "sessionUpdate": "agent_thought_chunk", "content": { "text": delta } } } });
+                        let _ = app_reader.emit_all(&format!("acp-data-{id}"), event.to_string());
+                    }
+                }
+                "turn/completed" => {
+                    if let Some(rpc_id) = pending_reader.lock().ok().and_then(|mut id| id.take()) {
+                        let _ = app_reader.emit_all(&format!("acp-data-{id}"), serde_json::json!({ "id": rpc_id, "result": {} }).to_string());
+                    }
+                }
+                _ if value.get("id").is_some() && !method.is_empty() => {
+                    // Existing UI owns permission rendering; forward direct server
+                    // requests unchanged so a future Codex-specific permission
+                    // mapper can extend it without changing the transport again.
+                    let _ = app_reader.emit_all(&format!("acp-req-{id}"), value.to_string());
+                }
+                _ => {}
+            }
+        }
+        let _ = app_reader.emit_all(&format!("acp-data-{id}"), r#"{"_burrow":"exit"}"#);
+    });
+    state.procs.lock().unwrap().insert(id, AcpProc { stdin, child, next_id: Arc::new(std::sync::atomic::AtomicU64::new(3)), session_id: thread_id, protocol: AcpProtocol::CodexAppServer, pending_turn_id });
+    Ok(())
+}
+
 /// Load key=value pairs from a .env file (ignores comments and blank lines).
 /// Called from acp_start to merge project env vars without crate dependencies.
 fn load_dotenv_file(path: &std::path::Path) -> std::collections::HashMap<String, String> {
@@ -3808,6 +3944,9 @@ async fn acp_start(
     let emit_history = emit_history.unwrap_or(false);
 
     let kind = kind.unwrap_or_else(|| "custom".to_string());
+    if kind == "codex" && command == "codex" {
+        return codex_app_server_start(app, state, id, cwd, env, resume_session_id).await;
+    }
     // Start from the user-defined env, then layer special per-kind injection on top.
     let mut extra_env = env;
 
@@ -4081,8 +4220,29 @@ async fn acp_start(
         let _ = app2.emit_all(&format!("acp-data-{id}"), r#"{"_burrow":"exit"}"#);
     });
 
-    state.procs.lock().unwrap().insert(id, AcpProc { stdin, child, next_id, session_id });
+    state.procs.lock().unwrap().insert(id, AcpProc {
+        stdin,
+        child,
+        next_id,
+        session_id,
+        protocol: AcpProtocol::Acp,
+        pending_turn_id: Arc::new(std::sync::Mutex::new(None)),
+    });
     Ok(())
+}
+
+/// Starts Codex through its native app-server, not through an ACP adapter.
+#[tauri::command]
+async fn codex_start(
+    app: AppHandle,
+    state: State<'_, AcpState>,
+    id: u32,
+    cwd: String,
+    env: std::collections::HashMap<String, String>,
+    resume_session_id: Option<String>,
+) -> Result<(), String> {
+    if state.procs.lock().unwrap().contains_key(&id) { return Ok(()); }
+    codex_app_server_start(app, state, id, cwd, env, resume_session_id).await
 }
 
 /// Sends a prompt and returns the JSON-RPC id used, so the frontend can match the
@@ -4092,6 +4252,19 @@ fn acp_send(state: State<AcpState>, id: u32, text: String, images: Option<Vec<St
     let guard = state.procs.lock().unwrap();
     let proc = guard.get(&id).ok_or("acp adapter not running")?;
     let rpc_id = proc.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if proc.protocol == AcpProtocol::CodexAppServer {
+        let mut input = Vec::new();
+        if !text.is_empty() { input.push(serde_json::json!({ "type": "text", "text": text })); }
+        for uri in images.unwrap_or_default() {
+            input.push(serde_json::json!({ "type": "image", "url": uri }));
+        }
+        *proc.pending_turn_id.lock().unwrap() = Some(rpc_id);
+        acp_write(&proc.stdin, &serde_json::json!({
+            "jsonrpc": "2.0", "id": rpc_id, "method": "turn/start",
+            "params": { "threadId": proc.session_id, "input": input }
+        }))?;
+        return Ok(rpc_id);
+    }
     // ACP ContentBlock: images go as { type:"image", mimeType, data(base64) }.
     // The frontend sends data URIs ("data:image/png;base64,XXXX") — split them.
     let mut prompt: Vec<serde_json::Value> = Vec::new();
@@ -4112,6 +4285,12 @@ fn acp_send(state: State<AcpState>, id: u32, text: String, images: Option<Vec<St
         "params": { "sessionId": proc.session_id, "prompt": prompt }
     }))?;
     Ok(rpc_id)
+}
+
+/// Sends a turn to Codex's native JSON-RPC app-server.
+#[tauri::command]
+fn codex_send(state: State<AcpState>, id: u32, text: String, images: Option<Vec<String>>) -> Result<u64, String> {
+    acp_send(state, id, text, images)
 }
 
 /// Sets the session permission mode (session/set_mode). Returns the rpc id so the
@@ -4163,10 +4342,27 @@ fn acp_stop(state: State<AcpState>, id: u32) {
     }
 }
 
+/// Stops the native Codex app-server. It shares process ownership with ACP
+/// adapters internally, but keeps the public command surface protocol-honest.
+#[tauri::command]
+fn codex_stop(state: State<AcpState>, id: u32) {
+    acp_stop(state, id);
+}
+
 #[tauri::command]
 fn acp_respond_permission(state: State<AcpState>, id: u32, rpc_id: u64, option_id: String) -> Result<(), String> {
     let guard = state.procs.lock().unwrap();
     let proc = guard.get(&id).ok_or("acp adapter not running")?;
+    if proc.protocol == AcpProtocol::CodexAppServer {
+        let decision = match option_id.as_str() {
+            "codex:accept" => "accept",
+            "codex:acceptForSession" => "acceptForSession",
+            _ => "decline",
+        };
+        return acp_write(&proc.stdin, &serde_json::json!({
+            "jsonrpc": "2.0", "id": rpc_id, "result": { "decision": decision }
+        }));
+    }
     let outcome = if option_id.is_empty() {
         serde_json::json!({ "outcome": "cancelled" })
     } else {
@@ -6111,8 +6307,11 @@ pub fn run() {
             claude_abort,
             claude_respond_control,
             acp_start,
+            codex_start,
             acp_send,
+            codex_send,
             acp_stop,
+            codex_stop,
             acp_respond_permission,
             acp_set_mode,
             acp_set_config,

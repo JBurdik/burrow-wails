@@ -2,13 +2,20 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "../lib/config";
 
-// A chat agent backs a ClaudeChat session. "stream-json" agents use the native
-// claude_* commands; "acp" agents are spawned through acp_start with the
-// command/args/env below (any ACP-compatible CLI works).
+// A chat agent uses one of three honest runtime contracts: Claude's native
+// stream-json CLI, Codex's native JSON-RPC app-server, or a generic ACP adapter.
+export type ChatTransport = "claude-cli" | "codex-app-server" | "acp";
+
+export function transportLabel(transport: ChatTransport): string {
+  if (transport === "claude-cli") return "Claude CLI";
+  if (transport === "codex-app-server") return "Codex app-server";
+  return "ACP";
+}
+
 export interface ChatAgent {
   id: string;
   name: string;
-  transport: "stream-json" | "acp";
+  transport: ChatTransport;
   command: string; // adapter program: "npx", "gemini", "codex", "opencode", …
   args: string[]; // adapter args, e.g. ["@agentclientprotocol/claude-agent-acp"]
   env: Record<string, string>; // extra env vars passed to the adapter process
@@ -25,13 +32,13 @@ export interface ChatAgent {
 const CONFIG_KEY = "chatAgentPresets";
 const LEGACY_STORAGE_KEY = "agentic-ide.chatAgents";
 
-// Built-in agents. claude-acp/codex use the @agentclientprotocol npx adapters
-// (same org, subscription-safe); gemini/opencode have native ACP modes.
+// Built-in agents. Codex talks to its installed app-server directly, preserving
+// the user's `codex login` session just like T3 Code. The remaining adapters use
+// ACP where that is their native transport.
 export const BUILTIN_AGENTS: ChatAgent[] = [
-  { id: "claude", name: "Claude Code", transport: "stream-json", command: "claude", args: [], env: {}, kind: "claude", color: "#d97757", icon: "claude", shortcut: "", builtin: true },
-  { id: "claude-acp", name: "Claude (ACP)", transport: "acp", command: "npx", args: ["@agentclientprotocol/claude-agent-acp"], env: {}, kind: "claude", color: "#a855f7", icon: "claude", shortcut: "", builtin: true },
+  { id: "claude", name: "Claude Code", transport: "claude-cli", command: "claude", args: [], env: {}, kind: "claude", color: "#d97757", icon: "claude", shortcut: "", builtin: true },
   { id: "gemini", name: "Gemini", transport: "acp", command: "gemini", args: ["--acp"], env: {}, kind: "gemini", color: "#1a73e8", icon: "gemini", shortcut: "", builtin: true },
-  { id: "codex", name: "Codex", transport: "acp", command: "npx", args: ["@agentclientprotocol/codex-acp"], env: {}, kind: "codex", color: "#74aa9c", icon: "openai", shortcut: "", builtin: true },
+  { id: "codex", name: "Codex", transport: "codex-app-server", command: "codex", args: ["app-server"], env: {}, kind: "codex", color: "#74aa9c", icon: "openai", shortcut: "", builtin: true },
   { id: "opencode", name: "opencode", transport: "acp", command: "opencode", args: ["acp"], env: {}, kind: "custom", color: "#f59e0b", icon: "terminal", shortcut: "", builtin: true },
 ];
 
@@ -47,7 +54,31 @@ function normalize(parsed: unknown): ChatAgent[] {
   const saved = parsed as ChatAgent[];
   const byId = new Map(base.map((a) => [a.id, a]));
   for (const s of saved) {
-    byId.set(s.id, { ...byId.get(s.id), ...s, args: [...(s.args ?? [])], env: { ...(s.env ?? {}) }, shortcut: s.shortcut ?? byId.get(s.id)?.shortcut ?? "" } as ChatAgent);
+    // `claude-acp` used to be a bundled duplicate of Claude Code. Retire only
+    // that exact old seed; separately-created ACP agents stay available.
+    const isRetiredClaudeAcpSeed =
+      s.id === "claude-acp" &&
+      s.name === "Claude (ACP)" &&
+      s.transport === "acp" &&
+      s.command === "npx" &&
+      (s.args ?? []).some((arg) => arg.includes("@agentclientprotocol/claude-agent-acp"));
+    if (isRetiredClaudeAcpSeed) continue;
+
+    const merged = { ...byId.get(s.id), ...s, args: [...(s.args ?? [])], env: { ...(s.env ?? {}) }, shortcut: s.shortcut ?? byId.get(s.id)?.shortcut ?? "" } as ChatAgent;
+    // Persisted releases called both native runtimes generic transport names.
+    // Upgrade them in place so the UI and the actual protocol always agree.
+    if ((merged.transport as string) === "stream-json") merged.transport = "claude-cli";
+    if (merged.id === "codex" && merged.command === "codex" && merged.args.includes("app-server")) {
+      merged.transport = "codex-app-server";
+    }
+    // Migrate the previous npx bridge automatically. Explicit user changes to
+    // another command remain intact; only the old bundled preset is replaced.
+    if (merged.id === "codex" && merged.command === "npx" && merged.args.includes("@agentclientprotocol/codex-acp")) {
+      merged.command = "codex";
+      merged.args = ["app-server"];
+      merged.transport = "codex-app-server";
+    }
+    byId.set(s.id, merged);
   }
   return Array.from(byId.values());
 }

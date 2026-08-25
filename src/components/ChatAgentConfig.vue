@@ -18,7 +18,7 @@
           >
             <component :is="agentIconComp(a.icon)" :size="13" :style="{ color: a.color }" />
             <span>{{ a.name }}</span>
-            <span class="ac-list-badge">{{ a.transport === 'acp' ? 'ACP' : 'native' }}</span>
+            <span class="ac-list-badge">{{ transportLabel(a.transport) }}</span>
           </button>
           <button class="ac-add" @click="onAdd"><PhPlus :size="12" /> New agent</button>
         </aside>
@@ -70,8 +70,9 @@
           <label class="ac-field">
             <span>Transport</span>
             <select v-model="agent.transport">
+              <option value="claude-cli">Native Claude CLI (stream-json)</option>
+              <option value="codex-app-server">Native Codex app-server (JSON-RPC)</option>
               <option value="acp">ACP (any ACP CLI)</option>
-              <option value="stream-json">native (Claude stream-json)</option>
             </select>
           </label>
 
@@ -103,7 +104,11 @@
               </div>
             </div>
           </template>
-          <p v-else class="ac-hint">Native agents use the built-in Claude CLI transport — command/args/env are managed by Claude profiles, not here.</p>
+          <div v-else class="ac-native-runtime">
+            <span class="ac-native-label">{{ agent.transport === 'codex-app-server' ? 'Codex app-server' : 'Claude Code CLI' }}</span>
+            <code>{{ agent.transport === 'codex-app-server' ? 'codex app-server' : 'claude --input-format stream-json --output-format stream-json' }}</code>
+            <p class="ac-hint">{{ agent.transport === 'codex-app-server' ? 'Uses your local codex login and the native JSON-RPC app-server. No ACP adapter is involved.' : 'Uses your local claude login and Claude’s native newline-delimited stream-json protocol. No ACP adapter is involved.' }}</p>
+          </div>
 
           <div class="ac-actions">
             <button v-if="agent.builtin" class="ac-btn" @click="onReset">Reset to default</button>
@@ -123,7 +128,7 @@
           <span>.env file</span>
           <input :value="proj.env_file ?? ''" type="text" placeholder=".env" @change="setProj('env_file', ($event.target as HTMLInputElement).value)" />
         </label>
-        <p class="ac-hint">Saved to <code>.burrow/config.toml</code> — applied to ACP agents launched in this project.</p>
+        <p class="ac-hint">Saved to <code>.burrow/config.toml</code> and applied when a chat provider starts in this project.</p>
       </section>
     </div>
   </div>
@@ -132,7 +137,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { PhX, PhPlus } from "@phosphor-icons/vue";
-import { useChatAgentsStore } from "@/stores/chatAgents";
+import { useChatAgentsStore, transportLabel as transportLabelFor, type ChatTransport } from "@/stores/chatAgents";
 import { agentIconComp, AGENT_ICON_KEYS } from "@/lib/agentIcons";
 import { useScriptsStore, type ProjectSettings } from "@/stores/scripts";
 import { eventToShortcut } from "@/lib/shortcuts";
@@ -145,6 +150,7 @@ const scriptsStore = useScriptsStore();
 
 const selectedId = ref(chatAgents.agents[0]?.id ?? "claude");
 const agent = computed(() => chatAgents.agents.find((a) => a.id === selectedId.value));
+const transportLabel = (transport: ChatTransport) => transportLabelFor(transport);
 
 // Env editor rows mirror agent.env; committed back on edit.
 const envRows = ref<{ k: string; v: string }[]>([]);
@@ -228,6 +234,9 @@ function setProj(key: keyof ProjectSettings, val: string) {
 .ac-env-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; }
 .ac-env-row input { background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 8px; color: #fff; font-size: 11px; font-family: var(--font-mono); }
 .ac-hint { font-size: 11px; color: rgba(255,255,255,0.4); line-height: 1.5; margin: 0; }
+.ac-native-runtime { display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid rgba(255,255,255,0.1); border-radius: 7px; background: rgba(255,255,255,0.025); }
+.ac-native-label { color: rgba(255,255,255,0.74); font-size: 11px; font-weight: 600; }
+.ac-native-runtime code { width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.58); font: 10px var(--font-mono); white-space: nowrap; }
 .ac-actions { margin-top: auto; padding-top: 8px; }
 .ac-btn { padding: 6px 12px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; color: rgba(255,255,255,0.8); font-size: 12px; cursor: pointer; }
 .ac-btn:hover { background: rgba(255,255,255,0.1); }

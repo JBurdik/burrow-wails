@@ -5,7 +5,7 @@ import { createActor } from "xstate";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { agentStatusMachine } from "@/machines/agentStatus";
 import type { AgentStatusEvent } from "@/machines/agentStatus";
-import { useChatAgentsStore } from "@/stores/chatAgents";
+import { useChatAgentsStore, type ChatTransport } from "@/stores/chatAgents";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 export interface ClaudeSession {
@@ -25,8 +25,8 @@ export interface ClaudeSession {
   pinnedTitle?: boolean;
   // Which agent backs this chat — a chatAgents store id (default 'claude').
   agentKind?: string;
-  // Wire protocol: 'stream-json' (Claude CLI) or 'acp' (Agent Client Protocol).
-  transport?: 'stream-json' | 'acp';
+  // Native provider runtime or a generic Agent Client Protocol adapter.
+  transport?: ChatTransport;
 }
 
 const SESSIONS_KEY = "chatSessions";
@@ -123,8 +123,8 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   function create(workspaceId: number, opts?: { agentKind?: string }): ClaudeSession {
     const id = nextId++;
     const agentKind = opts?.agentKind ?? 'claude';
-    const transport: 'stream-json' | 'acp' =
-      useChatAgentsStore().byId(agentKind)?.transport ?? (agentKind === 'claude' ? 'stream-json' : 'acp');
+    const transport: ChatTransport =
+      useChatAgentsStore().byId(agentKind)?.transport ?? (agentKind === 'claude' ? 'claude-cli' : 'acp');
     const session: ClaudeSession = {
       id,
       workspaceId,
@@ -165,7 +165,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     if (!s) return;
     actors.get(id)?.stop();
     actors.delete(id);
-    await invoke(s.transport === "acp" ? "acp_stop" : "claude_stop", { id }).catch(() => {});
+    await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
     sessions.value = sessions.value.filter((x) => x.id !== id);
     // If removed was active, fall back to first remaining for that ws.
     if (activeByWs.value[s.workspaceId] === id) {
