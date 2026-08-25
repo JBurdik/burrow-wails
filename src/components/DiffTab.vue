@@ -6,7 +6,19 @@
       <button v-if="instances.length > 1" class="header-btn" @click="toggleAll">
         {{ allCollapsed ? "Expand all" : "Collapse all" }}
       </button>
+      <button class="header-btn" :disabled="!feedbackTargetPtyId" @click="showFeedback = !showFeedback">
+        {{ showFeedback ? "Close comment" : "Comment" }}
+      </button>
     </div>
+    <DiffFeedbackComposer
+      v-if="showFeedback"
+      :selection="selectedDiffText"
+      :target-available="!!feedbackTargetPtyId"
+      :sending="sendingFeedback"
+      :status="feedbackStatus"
+      @submit="sendFeedback"
+      @cancel="showFeedback = false"
+    />
     <div v-if="!diff" class="diff-empty">No changes</div>
     <div v-else-if="parseError" class="diff-empty">Could not parse diff</div>
     <div v-else ref="containerRef" class="diff-tab-body" />
@@ -21,6 +33,7 @@ import {
   parsePatchFiles,
 } from "@pierre/diffs";
 import { useUIStore } from "@/stores/ui";
+import DiffFeedbackComposer from "./DiffFeedbackComposer.vue";
 
 const ui = useUIStore();
 
@@ -28,12 +41,18 @@ const props = defineProps<{
   diffFile: string;
   diffStaged: boolean;
   diff: string;
+  feedbackTargetPtyId?: number;
+  sendFeedback?: (payload: { comment: string; selectedDiff: string }) => Promise<boolean>;
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
 const parseError = ref(false);
 const title = ref(props.diffFile);
 const allCollapsed = ref(false);
+const showFeedback = ref(false);
+const selectedDiffText = ref("");
+const sendingFeedback = ref(false);
+const feedbackStatus = ref(props.feedbackTargetPtyId ? "" : "This diff is not associated with an agent terminal.");
 
 const instances = ref<FileDiff[]>([]);
 
@@ -50,6 +69,30 @@ function cleanUp() {
   for (const inst of instances.value) inst.cleanUp();
   instances.value = [];
   if (containerRef.value) containerRef.value.textContent = "";
+}
+
+function captureDiffSelection() {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !containerRef.value) return;
+  const anchor = selection.anchorNode;
+  const focus = selection.focusNode;
+  if (!anchor || !focus || !containerRef.value.contains(anchor) || !containerRef.value.contains(focus)) return;
+  selectedDiffText.value = selection.toString().trim().slice(0, 4_000);
+}
+
+async function sendFeedback(comment: string) {
+  if (!props.feedbackTargetPtyId || !props.sendFeedback) return;
+  sendingFeedback.value = true;
+  feedbackStatus.value = "";
+  let success = false;
+  try {
+    success = await props.sendFeedback({ comment, selectedDiff: selectedDiffText.value });
+  } catch {
+    success = false;
+  }
+  sendingFeedback.value = false;
+  feedbackStatus.value = success ? "Feedback sent to the originating agent." : "Could not send feedback to the agent.";
+  if (success) showFeedback.value = false;
 }
 
 function render() {
@@ -98,11 +141,18 @@ function render() {
   }
 }
 
-onMounted(() => render());
+onMounted(() => {
+  render();
+  document.addEventListener("selectionchange", captureDiffSelection);
+});
 watch(() => props.diff, () => render());
 // Re-render with the new syntax theme when the app theme changes.
 watch(() => ui.activeTheme.shiki, () => render());
-onBeforeUnmount(() => cleanUp());
+onBeforeUnmount(() => {
+  document.removeEventListener("selectionchange", captureDiffSelection);
+  cleanUp();
+});
+
 </script>
 
 <style scoped>

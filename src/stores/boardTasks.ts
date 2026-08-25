@@ -55,6 +55,20 @@ export interface TaskAttachment {
   created_at: number;
 }
 
+export interface AgentTurnChange {
+  id: number;
+  taskId: string;
+  ptyId: number;
+  startedAt: number;
+  completedAt?: number | null;
+  state: string;
+  changesAvailable: boolean;
+  changeError?: string | null;
+  files: string[];
+  additions: number;
+  deletions: number;
+}
+
 /** New Backlog card id — same convention as other client-generated ids in this app. */
 export function newTaskId(): string {
   return `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -131,6 +145,14 @@ export const useBoardTasksStore = defineStore("boardTasks", () => {
   async function readAttachmentBase64(attachmentId: number): Promise<{ base64: string; mime: string }> {
     const [base64, mime] = await invoke<[string, string]>("read_task_attachment_base64", { attachmentId });
     return { base64, mime };
+  }
+
+  async function listTurnChanges(taskId: string): Promise<AgentTurnChange[]> {
+    return invoke<AgentTurnChange[]>("list_agent_turn_changes", { taskId });
+  }
+
+  async function getTurnDiff(turnId: number): Promise<string> {
+    return invoke<string>("get_agent_turn_diff", { turnId });
   }
 
   // Listens for `board-task-moved`, emitted by `move_board_task`/`delete_board_task`
@@ -230,6 +252,8 @@ export const useBoardTasksStore = defineStore("boardTasks", () => {
     addAttachment,
     removeAttachment,
     readAttachmentBase64,
+    listTurnChanges,
+    getTurnDiff,
     init,
     startTask,
     slugify,

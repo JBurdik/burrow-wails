@@ -97,6 +97,7 @@ export interface Leaf {
   diffFile?: string;
   diffStaged?: boolean;
   diff?: string;
+  diffOwnerPtyId?: number; // agent PTY that requested this diff, if any
   filePath?: string;  // set when leafType === "editor" (absolute path)
   dirty?: boolean;    // editor: unsaved changes
   chatId?: number;    // set when leafType === "chat"

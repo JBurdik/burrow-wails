@@ -98,6 +98,11 @@
       </div>
     </div>
 
+    <AgentPlanRail
+      v-if="activeAgentLeafId !== null"
+      :pty-id="activeAgentLeafId"
+    />
+
     <div v-if="tabs.length > 0" class="terminal-body">
       <div
         v-for="tab in tabs"
@@ -142,6 +147,8 @@
             :diff-file="pane.leaf.diffFile!"
             :diff-staged="pane.leaf.diffStaged ?? false"
             :diff="pane.leaf.diff || ''"
+            :feedback-target-pty-id="pane.leaf.diffOwnerPtyId"
+            :send-feedback="(payload) => sendDiffFeedback(pane.leaf.diffOwnerPtyId, payload)"
           />
           <CodeEditor
             v-else-if="pane.leaf.leafType === 'editor'"
@@ -246,6 +253,7 @@ import {
 } from "@/lib/terminalStatus";
 import { useAgentHistoryStore } from "@/stores/agentHistory";
 import AgentTimeline from "@/components/AgentTimeline.vue";
+import AgentPlanRail from "@/components/AgentPlanRail.vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -599,7 +607,7 @@ function registerLeafListeners(leafId: number) {
     }),
     listen<{ diff: string; title: string }>(`pty-open-diff-${leafId}`, (ev) => {
       const { diff, title } = ev.payload;
-      if (diff) openDiffInTab(title, false, diff);
+      if (diff) openDiffInTab(title, false, diff, leafId);
     }),
     listen<{ progress: number | null; label: string }>(`pty-progress-${leafId}`, (ev) => {
       for (const tab of tabs.value) {
@@ -736,6 +744,19 @@ function markTabSeen(tab: Tab) {
   }
 }
 
+    // A board task runs in its own worktree by default. Capture its baseline
+    // before the agent starts work; non-board terminals intentionally remain
+    // un-attributed instead of falling back to the global Git diff.
+    if (leaf.taskId) {
+      invoke("begin_agent_turn", {
+        taskId: leaf.taskId,
+        ptyId: leaf.id,
+        worktreePath: leaf.cwd ?? props.cwd,
+      }).catch(() => {});
+    }
+  }
+  if ((s === "done" || s === "error") && leaf.taskId) {
+    invoke("complete_agent_turn", { ptyId: leaf.id, state: s }).catch(() => {});
 // The agent's hook state (running | waiting | done), forwarded verbatim from
 // XTerm. ONE semantic event → one clean transition via the XState actor, so a
 // trailing "waiting" can never clobber a fresh "done".
@@ -1057,7 +1078,25 @@ function insertContext(absPath: string) {
   xterm?.sendText(ref);
 }
 
-function openDiffInTab(file: string, staged: boolean, diff: string) {
+function sendDiffFeedback(
+  ownerPtyId: number | undefined,
+  payload: { comment: string; selectedDiff: string },
+): Promise<boolean> {
+  if (ownerPtyId === undefined) return Promise.resolve(false);
+  const owner = locateLeaf(ownerPtyId)?.leaf;
+  if (!owner?.isAgent) return Promise.resolve(false);
+
+  const context = payload.selectedDiff
+    ? `\n\nSelected diff context:\n${payload.selectedDiff}`
+    : "";
+  const text = `[Review feedback]\n${payload.comment}${context}\n`;
+  return invoke("write_pty", {
+    id: ownerPtyId,
+    data: Array.from(new TextEncoder().encode(text)),
+  }).then(() => true).catch(() => false);
+}
+
+function openDiffInTab(file: string, staged: boolean, diff: string, ownerPtyId?: number) {
   terminalCounter++;
   const leaf: Leaf = {
     type: "leaf",
@@ -1071,6 +1110,7 @@ function openDiffInTab(file: string, staged: boolean, diff: string) {
     diffFile: file,
     diffStaged: staged,
     diff,
+    diffOwnerPtyId: ownerPtyId,
   };
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);

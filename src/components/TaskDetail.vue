@@ -86,6 +86,26 @@
         </div>
         <p v-else-if="local.board_column !== 'backlog'" class="td-live-pending">Waiting for terminal to spawn…</p>
 
+        <!-- Per-turn Git trees, never the workspace-wide working diff. -->
+        <div v-if="local.board_column !== 'backlog'" class="td-section td-turns">
+          <label class="td-label">Changes in turns</label>
+          <p v-if="turnsLoading" class="td-turn-hint">Loading changes…</p>
+          <p v-else-if="!turns.length" class="td-turn-hint">No completed turns yet.</p>
+          <div v-for="turn in turns" :key="turn.id" class="td-turn-row">
+            <div>
+              <strong>Turn {{ turn.id }}</strong>
+              <span v-if="turn.changesAvailable"> · {{ turn.files.length }} files · <b class="add">+{{ turn.additions }}</b> <b class="del">-{{ turn.deletions }}</b></span>
+              <span v-else> · changes unavailable</span>
+              <details v-if="turn.changesAvailable && turn.files.length">
+                <summary>Files</summary>
+                <div v-for="file in turn.files" :key="file" class="td-turn-file">{{ file }}</div>
+              </details>
+            </div>
+            <button v-if="turn.changesAvailable && turn.completedAt" class="td-btn" @click="openTurnDiff(turn.id)">Review</button>
+          </div>
+          <p v-if="turnError" class="td-error">{{ turnError }}</p>
+        </div>
+
         <!-- Actions -->
         <div class="td-actions">
           <button v-if="local.board_column === 'backlog'" class="td-btn td-btn-primary" :disabled="starting || !local.title.trim()" @click="start">
@@ -102,6 +122,10 @@
         </div>
       </div>
     </div>
+    <div v-if="turnDiff" class="td-diff-modal">
+      <div class="td-diff-head"><span>{{ turnDiff.title }}</span><button class="td-close" @click="turnDiff = null"><PhX :size="15" /></button></div>
+      <DiffTab diff-file="turn changes" :diff-staged="false" :diff="turnDiff.diff" />
+    </div>
   </div>
 </template>
 
@@ -114,9 +138,10 @@ import { spinnerFrame } from "@/lib/spinner";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import {
   useBoardTasksStore, liveStatusForTask, BOARD_COLUMNS,
-  type MissionTask, type BoardColumn,
+  type MissionTask, type BoardColumn, type AgentTurnChange,
 } from "@/stores/boardTasks";
 import TaskLiveTerm from "@/components/TaskLiveTerm.vue";
+import DiffTab from "@/components/DiffTab.vue";
 
 const props = defineProps<{ task: MissionTask; repoId: number }>();
 const emit = defineEmits<{ close: []; deleted: [] }>();
@@ -166,6 +191,24 @@ onMounted(async () => {
   await loadThumbs();
 });
 watch(attachments, loadThumbs);
+
+const turns = ref<AgentTurnChange[]>([]);
+const turnsLoading = ref(false);
+const turnError = ref("");
+const turnDiff = ref<{ title: string; diff: string } | null>(null);
+async function loadTurns() {
+  if (local.board_column === "backlog") return;
+  turnsLoading.value = true;
+  try { turns.value = await board.listTurnChanges(local.id); }
+  catch { turnError.value = "Could not load turn changes."; }
+  finally { turnsLoading.value = false; }
+}
+async function openTurnDiff(turnId: number) {
+  turnError.value = "";
+  try { turnDiff.value = { title: `Turn ${turnId} changes`, diff: await board.getTurnDiff(turnId) }; }
+  catch { turnError.value = "Turn diff is unavailable."; }
+}
+watch(() => local.board_column, loadTurns, { immediate: true });
 
 async function persistMeta() {
   if (local.board_column !== "backlog") return; // read-only editor once spawned
@@ -281,6 +324,14 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
+.td-turns { border-top: 1px solid var(--border, rgba(255,255,255,.08)); }
+.td-turn-hint { margin: 4px 0; color: var(--text-muted); font-size: 12px; }
+.td-turn-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 7px 0; font-size: 12px; border-bottom: 1px solid var(--border, rgba(255,255,255,.06)); }
+.td-turn-row details { margin-top: 4px; color: var(--text-muted); }
+.td-turn-file { font-family: var(--font-mono); font-size: 11px; padding-left: 8px; }
+.add { color: #55c48a; }.del { color: #ef7272; }
+.td-diff-modal { position: fixed; z-index: 960; inset: 8vh 8vw; display: flex; flex-direction: column; background: var(--bg-base); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.td-diff-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 12px; border-bottom: 1px solid var(--border); }
 .td-header {
   display: flex;
   align-items: center;

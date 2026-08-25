@@ -9,7 +9,7 @@ mod http_server;
 use base64::{engine::general_purpose, Engine};
 use daemon_client::DaemonClient;
 use emit::EmitExt;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -4496,6 +4496,7 @@ fn init_db(app: &AppHandle) -> Result<Connection, rusqlite::Error> {
     let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN session_id TEXT");
     let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN board_order REAL NOT NULL DEFAULT 0");
     let _ = conn.execute_batch("ALTER TABLE mission_tasks ADD COLUMN updated_at INTEGER");
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS agent_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, pty_id INTEGER NOT NULL, worktree_path TEXT NOT NULL, started_at INTEGER NOT NULL, completed_at INTEGER, state TEXT NOT NULL DEFAULT 'running', start_tree TEXT, end_tree TEXT, changes_available INTEGER NOT NULL DEFAULT 0, change_error TEXT, files_json TEXT NOT NULL DEFAULT '[]', additions INTEGER NOT NULL DEFAULT 0, deletions INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(task_id) REFERENCES mission_tasks(id) ON DELETE CASCADE); CREATE INDEX IF NOT EXISTS agent_turns_task_id ON agent_turns(task_id, id DESC); CREATE INDEX IF NOT EXISTS agent_turns_pty_id ON agent_turns(pty_id, id DESC);")?;
     let _ = conn.execute_batch("ALTER TABLE workspaces ADD COLUMN icon TEXT");
     let _ = conn.execute_batch("ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
     conn.execute_batch(
@@ -4961,6 +4962,56 @@ fn now_millis() -> i64 {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AgentTurnChange { id: i64, task_id: String, pty_id: i64, started_at: i64, completed_at: Option<i64>, state: String, changes_available: bool, change_error: Option<String>, files: Vec<String>, additions: i64, deletions: i64 }
+
+fn git_output(worktree: &str, args: &[&str], index: Option<&std::path::Path>) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("git"); cmd.arg("-C").arg(worktree).args(args);
+    if let Some(index) = index { cmd.env("GIT_INDEX_FILE", index); }
+    let out = cmd.output().map_err(|e| format!("git unavailable: {e}"))?;
+    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+fn capture_turn_tree(worktree: &str) -> Result<String, String> {
+    let index = std::env::temp_dir().join(format!("burrow-turn-index-{}-{}", std::process::id(), now_millis()));
+    let result = (|| { git_output(worktree, &["read-tree", "HEAD"], Some(&index))?; git_output(worktree, &["add", "-A"], Some(&index))?; git_output(worktree, &["write-tree"], Some(&index)) })();
+    let _ = std::fs::remove_file(&index); result
+}
+fn turn_summary(worktree: &str, start: &str, end: &str) -> Result<(Vec<String>, i64, i64), String> {
+    let files = git_output(worktree, &["diff", "--name-only", start, end], None)?.lines().filter(|s| !s.is_empty()).map(str::to_owned).collect();
+    let mut additions = 0; let mut deletions = 0;
+    for line in git_output(worktree, &["diff", "--numstat", start, end], None)?.lines() { let mut f = line.splitn(3, '\t'); additions += f.next().and_then(|n| n.parse::<i64>().ok()).unwrap_or(0); deletions += f.next().and_then(|n| n.parse::<i64>().ok()).unwrap_or(0); }
+    Ok((files, additions, deletions))
+}
+const AGENT_TURN_COLS: &str = "id, task_id, pty_id, started_at, completed_at, state, changes_available, change_error, files_json, additions, deletions";
+fn row_to_agent_turn(row: &rusqlite::Row) -> rusqlite::Result<AgentTurnChange> { let json: String = row.get(8)?; Ok(AgentTurnChange { id: row.get(0)?, task_id: row.get(1)?, pty_id: row.get(2)?, started_at: row.get(3)?, completed_at: row.get(4)?, state: row.get(5)?, changes_available: row.get::<_, i64>(6)? != 0, change_error: row.get(7)?, files: serde_json::from_str(&json).unwrap_or_default(), additions: row.get(9)?, deletions: row.get(10)? }) }
+#[tauri::command]
+fn begin_agent_turn(task_id: String, pty_id: i64, worktree_path: String, db: State<DbState>) -> Result<AgentTurnChange, String> {
+    let started_at = now_millis(); let checkpoint = capture_turn_tree(&worktree_path); let (tree, available, error) = match checkpoint { Ok(t) => (Some(t), 1, None), Err(e) => (None, 0, Some(e)) };
+    let conn = db.conn.lock().unwrap(); conn.execute("UPDATE agent_turns SET state='superseded', completed_at=?1 WHERE pty_id=?2 AND state='running'", rusqlite::params![started_at, pty_id]).map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO agent_turns (task_id, pty_id, worktree_path, started_at, state, start_tree, changes_available, change_error) VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?6, ?7)", rusqlite::params![task_id, pty_id, worktree_path, started_at, tree, available, error]).map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {AGENT_TURN_COLS} FROM agent_turns WHERE id=last_insert_rowid()"), [], row_to_agent_turn).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn complete_agent_turn(pty_id: i64, state: String, db: State<DbState>) -> Result<Option<AgentTurnChange>, String> {
+    let conn = db.conn.lock().unwrap(); let pending: Option<(i64, String, Option<String>, i64)> = conn.query_row("SELECT id, worktree_path, start_tree, changes_available FROM agent_turns WHERE pty_id=?1 AND state='running' ORDER BY id DESC LIMIT 1", rusqlite::params![pty_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional().map_err(|e| e.to_string())?; let Some((id, worktree, start, available)) = pending else { return Ok(None) };
+    let result = if available != 0 { capture_turn_tree(&worktree).and_then(|end| turn_summary(&worktree, start.as_deref().ok_or("start checkpoint unavailable")?, &end).map(|(f,a,d)| (Some(end), f,a,d))) } else { Err("start checkpoint unavailable".into()) };
+    let (end, files, adds, dels, ok, error) = match result { Ok((e,f,a,d)) => (e,f,a,d,1,None), Err(e) => (None,vec![],0,0,0,Some(e)) }; let completed = now_millis();
+    conn.execute("UPDATE agent_turns SET completed_at=?1,state=?2,end_tree=?3,changes_available=?4,change_error=?5,files_json=?6,additions=?7,deletions=?8 WHERE id=?9", rusqlite::params![completed,state,end,ok,error,serde_json::to_string(&files).unwrap_or_else(|_| "[]".into()),adds,dels,id]).map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {AGENT_TURN_COLS} FROM agent_turns WHERE id=?1"), rusqlite::params![id], row_to_agent_turn).optional().map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn list_agent_turn_changes(task_id: String, db: State<DbState>) -> Result<Vec<AgentTurnChange>, String> {
+    let conn = db.conn.lock().unwrap();
+    let mut stmt = conn.prepare(&format!("SELECT {AGENT_TURN_COLS} FROM agent_turns WHERE task_id=?1 ORDER BY id DESC")).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(rusqlite::params![task_id], row_to_agent_turn).map_err(|e| e.to_string())?
+        .filter_map(Result::ok).collect();
+    Ok(rows)
+}
+#[tauri::command]
+fn get_agent_turn_diff(turn_id: i64, db: State<DbState>) -> Result<String, String> { let conn = db.conn.lock().unwrap(); let row: Option<(String, Option<String>, Option<String>)> = conn.query_row("SELECT worktree_path,start_tree,end_tree FROM agent_turns WHERE id=?1", rusqlite::params![turn_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(|e| e.to_string())?; let Some((worktree,Some(start),Some(end))) = row else { return Err("turn changes unavailable".into()) }; git_output(&worktree, &["diff","--binary",&start,&end], None) }
 
 /// Board columns in the fixed pipeline order (docs/plans/mission-control-kanban.md §1.1/§7).
 const BOARD_COLUMNS: [&str; 5] = ["backlog", "todo", "in_progress", "for_review", "done"];
@@ -6115,6 +6166,10 @@ pub fn run() {
             list_task_attachments,
             delete_task_attachment,
             read_task_attachment_base64,
+            begin_agent_turn,
+            complete_agent_turn,
+            list_agent_turn_changes,
+            get_agent_turn_diff,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");
