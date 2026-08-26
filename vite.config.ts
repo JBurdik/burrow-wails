@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "path";
 
 const isMobileBuild = process.env.VITE_TARGET === "mobile";
 
 export default defineConfig(async () => ({
-  plugins: [vue()],
+  plugins: [vue(), tailwindcss()],
   // The mobile bundle is served both from the local root (`http://127.0.0.1:8420/`)
   // and through Tailscale Serve at `/burrow/`. Relative asset URLs work in both
   // places and do not accidentally load another app's `/assets` bundle.

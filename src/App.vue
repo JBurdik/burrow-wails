@@ -430,7 +430,46 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <style>
+@import "tailwindcss";
+@import "tw-animate-css";
 @import "@/styles/status-dots.css";
+
+/* Bridges the runtime theme system (themes.ts sets these on :root via JS —
+   switching a Burrow theme must re-skin Tailwind utility classes too, not
+   just the old hand-written CSS) into Tailwind's color tokens, so
+   `bg-panel`, `text-primary`, `border-border`, `bg-accent` etc. all work as
+   Tailwind utilities and stay in sync with the active theme. */
+@theme inline {
+  --color-base: var(--bg-base);
+  --color-panel: var(--bg-panel);
+  --color-hover: var(--bg-hover);
+  --color-selected: var(--bg-selected);
+  --color-border: var(--border);
+  --color-foreground: var(--text-primary);
+  --color-secondary-foreground: var(--text-secondary);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-dim: var(--accent-dim);
+  --color-success: var(--green);
+  --color-warning: var(--yellow);
+  --color-destructive: var(--red);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  /* shadcn-vue's default component set expects these token names too. */
+  --color-background: var(--bg-base);
+  --color-card: var(--bg-panel);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--bg-dropdown);
+  --color-popover-foreground: var(--text-primary);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--bg-base);
+  --color-secondary: var(--bg-hover);
+  --color-muted: var(--bg-hover);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+  --radius: 0.375rem;
+}
 
 * {
   box-sizing: border-box;
@@ -439,23 +478,25 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 :root {
-  --bg-base: #0d0d0d;
-  --terminal-bg: #0a0a0a;
-  --bg-panel: #111111;
-  --bg-dropdown: #111111;
-  --bg-hover: #1a1a1a;
-  --bg-selected: #1e3a5f;
-  --border: #2a2a2a;
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent: #3b82f6;
-  --accent-dim: #1d4ed8;
-  --green: #22c55e;
-  --yellow: #eab308;
-  --red: #ef4444;
-  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* T3 Code-inspired palette: deep purple-black, pink/magenta accent,
+     monospace throughout (matches the reference screenshots). */
+  --bg-base: #0e0c14;
+  --terminal-bg: #0a0810;
+  --bg-panel: #16131f;
+  --bg-dropdown: #1a1726;
+  --bg-hover: #201c2d;
+  --bg-selected: #2a2138;
+  --border: #262233;
+  --text-primary: #f0eef7;
+  --text-secondary: #a9a2c0;
+  --text-muted: #6f6885;
+  --accent: #ec4899;
+  --accent-dim: #be185d;
+  --green: #34d399;
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --font-mono: "JetBrains Mono", "0xProto Nerd Font", "Fira Code", "Cascadia Code", monospace;
+  --font-ui: "JetBrains Mono", "0xProto Nerd Font", "Fira Code", monospace;
   --sidebar-width: 220px;
   --right-panel-width: 300px;
   --titlebar-height: 36px;
