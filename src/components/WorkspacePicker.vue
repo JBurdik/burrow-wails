@@ -1,42 +1,46 @@
 <template>
-  <div class="wsp" ref="rootEl">
-    <button class="wsp-trigger" :class="{ open }" @click.stop="toggle">
-      <div class="wsp-icon-wrap">
-        <img v-if="active && store.icons[active.id]" :src="store.icons[active.id]" class="wsp-custom-icon" />
-        <PhGitBranch v-else-if="active?.parent_id" :size="14" class="wsp-icon wt" />
-        <PhFolder v-else :size="14" weight="fill" class="wsp-icon" />
+  <div class="relative shrink-0 p-1.5" ref="rootEl">
+    <button
+      class="flex w-full items-center gap-2 rounded-[7px] border border-border bg-base px-2 py-1.5 text-left transition-colors hover:bg-hover hover:border-accent/40"
+      :class="{ 'bg-hover border-accent/40': open }"
+      @click.stop="toggle"
+    >
+      <div class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent/14">
+        <img v-if="active && store.icons[active.id]" :src="store.icons[active.id]" class="h-full w-full object-cover" />
+        <PhGitBranch v-else-if="active?.parent_id" :size="14" class="text-purple-400" />
+        <PhFolder v-else :size="14" weight="fill" class="text-accent" />
       </div>
-      <div class="wsp-info">
+      <div class="min-w-0 flex-1">
         <!-- A worktree's `name` is usually the repo's, so lead with its branch. -->
-        <div class="wsp-name">{{ active ? (active.worktree_branch || active.name) : "No workspace" }}</div>
-        <div v-if="active" class="wsp-sub">{{ shortPath(active.path) }}</div>
+        <div class="truncate text-[12.5px] font-semibold tracking-[-0.01em] text-foreground">{{ active ? (active.worktree_branch || active.name) : "No workspace" }}</div>
+        <div v-if="active" class="truncate font-mono text-[9.5px] text-muted-foreground opacity-70">{{ shortPath(active.path) }}</div>
       </div>
-      <span v-if="otherTabs" class="wsp-count other" :title="`${otherTabs} tabs in other workspaces`">+{{ otherTabs }}</span>
+      <span v-if="otherTabs" class="shrink-0 rounded-full bg-white/7 px-1.5 py-px font-mono text-[9px] font-semibold leading-[1.5] text-muted-foreground" :title="`${otherTabs} tabs in other workspaces`">+{{ otherTabs }}</span>
       <span v-if="otherStatus" class="status-dot" :class="`status-${otherStatus}`" title="Activity in other workspaces">{{ otherStatus === 'running' ? spinnerFrame : '' }}</span>
-      <PhCaretDown :size="12" weight="bold" class="wsp-caret" />
+      <PhCaretDown :size="12" weight="bold" class="shrink-0 text-muted-foreground" />
     </button>
 
     <!-- Teleported: .sidebar is overflow:hidden, which clipped the menu and let
          clicks fall through to the tab list underneath. -->
     <Teleport to="body">
-    <div v-if="open" class="wsp-menu" :style="menuStyle" @click.stop>
-      <div v-if="store.topLevel.length === 0" class="wsp-empty">
+    <div v-if="open" class="fixed z-[1000] max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-panel p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]" :style="menuStyle" @click.stop>
+      <div v-if="store.topLevel.length === 0" class="p-5 px-3 text-center text-[11px] leading-relaxed text-muted-foreground">
         No workspaces.<br />Open a folder to start.
       </div>
 
       <template v-for="ws in store.topLevel" :key="ws.id">
         <div
-          class="wsp-row"
-          :class="{ active: active?.id === ws.id }"
+          class="group flex items-center gap-1.5 rounded-[5px] px-1.5 py-1 text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
+          :class="{ 'bg-accent/10 text-foreground': active?.id === ws.id }"
           @click="select(ws)"
           @contextmenu.prevent.stop="openCtx(ws, $event, 'ws')"
         >
-          <div class="wsp-icon-wrap sm">
-            <img v-if="store.icons[ws.id]" :src="store.icons[ws.id]" class="wsp-custom-icon" />
-            <PhFolder v-else :size="13" weight="fill" class="wsp-icon" />
+          <div class="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-white/10">
+            <img v-if="store.icons[ws.id]" :src="store.icons[ws.id]" class="h-full w-full object-cover" />
+            <PhFolder v-else :size="13" weight="fill" class="text-accent" />
           </div>
-          <span class="wsp-row-name">{{ ws.name }}</span>
-          <span v-if="tabCount(ws.id)" class="wsp-count" :title="`${tabCount(ws.id)} tabs`">{{ tabCount(ws.id) }}</span>
+          <span class="min-w-0 flex-1 truncate text-[11.5px] font-medium">{{ ws.name }}</span>
+          <span v-if="tabCount(ws.id)" class="wsp-count shrink-0 min-w-[15px] rounded-full bg-white/7 px-1.5 py-px text-center text-[9px] font-semibold leading-[1.5] text-muted-foreground" :class="{ '!text-accent !bg-accent/15': active?.id === ws.id }" :title="`${tabCount(ws.id)} tabs`">{{ tabCount(ws.id) }}</span>
           <span
             v-if="git.prByWs[ws.id]"
             class="pr-badge"
@@ -44,10 +48,10 @@
             :title="prTitle(git.prByWs[ws.id]!)"
           ><span class="pr-dot" />#{{ git.prByWs[ws.id]!.number }}</span>
           <span v-if="aggStatus(ws.id)" class="status-dot" :class="`status-${aggStatus(ws.id)}`">{{ aggStatus(ws.id) === 'running' ? spinnerFrame : '' }}</span>
-          <button class="wsp-btn" title="New worktree" @click.stop="newWorktree(ws)"><PhGitBranch :size="12" /></button>
+          <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:bg-purple-400/14 hover:text-purple-400 group-hover:flex" title="New worktree" @click.stop="newWorktree(ws)"><PhGitBranch :size="12" /></button>
           <button
-            class="wsp-btn pin"
-            :class="{ on: isPinned(ws.id) }"
+            class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/14 hover:text-accent group-hover:flex"
+            :class="{ '!flex text-accent': isPinned(ws.id) }"
             :title="isPinned(ws.id) ? 'Unpin from sidebar' : `Pin to sidebar (max ${MAX_PINNED})`"
             @click.stop="togglePin(ws.id)"
           ><PhPushPin :size="12" :weight="isPinned(ws.id) ? 'fill' : 'regular'" /></button>
@@ -56,15 +60,15 @@
         <div
           v-for="wt in store.worktreesByParent[ws.id] || []"
           :key="wt.id"
-          class="wsp-row wsp-wt"
-          :class="{ active: active?.id === wt.id }"
+          class="group ml-3.5 flex items-center gap-1.5 rounded-r-[5px] border-l border-purple-400/30 py-1 pl-2 pr-1.5 text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
+          :class="{ 'bg-accent/10 text-foreground': active?.id === wt.id }"
           :title="wt.path"
           @click="select(wt)"
           @contextmenu.prevent.stop="openCtx(wt, $event, 'wt')"
         >
-          <PhGitBranch :size="12" class="wsp-icon wt" />
-          <span class="wsp-row-name">{{ wt.worktree_branch || wt.name }}</span>
-          <span v-if="tabCount(wt.id)" class="wsp-count" :title="`${tabCount(wt.id)} tabs`">{{ tabCount(wt.id) }}</span>
+          <PhGitBranch :size="12" class="text-purple-400" />
+          <span class="min-w-0 flex-1 truncate text-[11.5px] font-medium">{{ wt.worktree_branch || wt.name }}</span>
+          <span v-if="tabCount(wt.id)" class="shrink-0 min-w-[15px] rounded-full bg-white/7 px-1.5 py-px text-center text-[9px] font-semibold leading-[1.5] text-muted-foreground" :class="{ '!text-accent !bg-accent/15': active?.id === wt.id }" :title="`${tabCount(wt.id)} tabs`">{{ tabCount(wt.id) }}</span>
           <span
             v-if="git.prByWs[wt.id]"
             class="pr-badge"
@@ -73,16 +77,16 @@
           ><span class="pr-dot" />#{{ git.prByWs[wt.id]!.number }}</span>
           <span v-if="aggStatus(wt.id)" class="status-dot" :class="`status-${aggStatus(wt.id)}`">{{ aggStatus(wt.id) === 'running' ? spinnerFrame : '' }}</span>
           <button
-            class="wsp-btn pin"
-            :class="{ on: isPinned(wt.id) }"
+            class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/14 hover:text-accent group-hover:flex"
+            :class="{ '!flex text-accent': isPinned(wt.id) }"
             :title="isPinned(wt.id) ? 'Unpin from sidebar' : `Pin to sidebar (max ${MAX_PINNED})`"
             @click.stop="togglePin(wt.id)"
           ><PhPushPin :size="12" :weight="isPinned(wt.id) ? 'fill' : 'regular'" /></button>
         </div>
       </template>
 
-      <div class="wsp-sep" />
-      <button class="wsp-action" @click="open = false; emit('pick-folder')">
+      <div class="my-1 mx-0.5 h-px bg-border" />
+      <button class="flex w-full items-center gap-2 rounded-[5px] border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="open = false; emit('pick-folder')">
         <PhFolderPlus :size="13" />Open folder…
       </button>
     </div>
@@ -92,21 +96,21 @@
     <Teleport to="body">
       <div
         v-if="ctx"
-        class="ctx-menu"
+        class="fixed z-[1000] flex min-w-[170px] flex-col gap-px rounded-[7px] border border-border bg-panel p-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
         :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
         @click.stop
         @contextmenu.prevent.stop
       >
         <template v-if="ctx.kind === 'ws'">
-          <button class="ctx-item" @click="run(() => emit('rename', ctxWs()!))"><PhPencilSimple :size="13" />Rename…</button>
-          <button class="ctx-item" @click="run(() => pickIcon(ctx!.id))"><PhImage :size="13" />Change icon…</button>
-          <button v-if="store.icons[ctx.id]" class="ctx-item" @click="run(() => store.clearIcon(ctx!.id))"><PhImage :size="13" />Reset icon</button>
-          <button class="ctx-item" @click="run(() => ui.openBoard(ctx!.id))"><PhKanban :size="13" />Board</button>
-          <div class="ctx-sep" />
-          <button class="ctx-item ctx-danger" @click="run(() => store.remove(ctx!.id))"><PhTrash :size="13" />Remove</button>
+          <button class="flex w-full items-center gap-2 rounded border-0 bg-transparent px-2.5 py-1.5 text-left font-sans text-xs text-secondary-foreground hover:bg-hover hover:text-foreground" @click="run(() => emit('rename', ctxWs()!))"><PhPencilSimple :size="13" />Rename…</button>
+          <button class="flex w-full items-center gap-2 rounded border-0 bg-transparent px-2.5 py-1.5 text-left font-sans text-xs text-secondary-foreground hover:bg-hover hover:text-foreground" @click="run(() => pickIcon(ctx!.id))"><PhImage :size="13" />Change icon…</button>
+          <button v-if="store.icons[ctx.id]" class="flex w-full items-center gap-2 rounded border-0 bg-transparent px-2.5 py-1.5 text-left font-sans text-xs text-secondary-foreground hover:bg-hover hover:text-foreground" @click="run(() => store.clearIcon(ctx!.id))"><PhImage :size="13" />Reset icon</button>
+          <button class="flex w-full items-center gap-2 rounded border-0 bg-transparent px-2.5 py-1.5 text-left font-sans text-xs text-secondary-foreground hover:bg-hover hover:text-foreground" @click="run(() => ui.openBoard(ctx!.id))"><PhKanban :size="13" />Board</button>
+          <div class="my-0.5 h-px bg-border" />
+          <button class="flex w-full items-center gap-2 rounded border-0 bg-transparent px-2.5 py-1.5 text-left font-sans text-xs text-secondary-foreground hover:bg-hover hover:text-destructive" @click="run(() => store.remove(ctx!.id))"><PhTrash :size="13" />Remove</button>
         </template>
         <template v-else>
-          <button class="ctx-item ctx-danger" @click="run(removeWorktree)"><PhTrash :size="13" />Remove worktree</button>
+          <button class="flex w-full items-center gap-2 rounded border-0 bg-transparent px-2.5 py-1.5 text-left font-sans text-xs text-secondary-foreground hover:bg-hover hover:text-destructive" @click="run(removeWorktree)"><PhTrash :size="13" />Remove worktree</button>
         </template>
       </div>
     </Teleport>
@@ -279,127 +283,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.wsp { position: relative; padding: 6px; flex-shrink: 0; }
-
-/* ── Trigger ───────────────────────────────────────────────────── */
-.wsp-trigger {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  cursor: pointer;
-  text-align: left;
-  transition: background .12s, border-color .12s;
-}
-.wsp-trigger:hover, .wsp-trigger.open { background: var(--bg-hover); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
-
-.wsp-icon-wrap {
-  width: 24px; height: 24px; flex-shrink: 0;
-  border-radius: 6px; overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-.wsp-icon-wrap.sm { width: 20px; height: 20px; border-radius: 5px; background: color-mix(in srgb, var(--text-muted) 10%, transparent); }
-.wsp-custom-icon { width: 100%; height: 100%; object-fit: cover; }
-.wsp-icon { color: var(--accent); }
-.wsp-icon.wt { color: #a78bfa; }
-
-.wsp-info { flex: 1; min-width: 0; }
-.wsp-name {
-  font-size: 12.5px; font-weight: 600; color: var(--text-primary);
-  letter-spacing: -0.01em;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.wsp-sub {
-  font-size: 9.5px; font-family: var(--font-mono); color: var(--text-muted);
-  opacity: 0.7; margin-top: 1px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.wsp-caret { color: var(--text-muted); flex-shrink: 0; }
-
-/* ── Menu ──────────────────────────────────────────────────────── */
-.wsp-menu {
-  position: fixed;
-  z-index: 1000;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-.wsp-row {
-  display: flex; align-items: center; gap: 7px;
-  padding: 5px 7px;
-  border-radius: 5px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  transition: background .1s, color .1s;
-}
-.wsp-row:hover { background: var(--bg-hover); color: var(--text-primary); }
-.wsp-row.active { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-primary); }
-
-.wsp-wt {
-  margin-left: 14px;
-  padding-left: 8px;
-  border-left: 1px solid color-mix(in srgb, #a78bfa 30%, transparent);
-  border-radius: 0 5px 5px 0;
-}
-
-.wsp-row-name {
-  flex: 1; min-width: 0;
-  font-size: 11.5px; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-.wsp-count {
-  flex-shrink: 0;
-  min-width: 15px;
-  padding: 1px 5px;
-  border-radius: 7px;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1.5;
-  text-align: center;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.07);
-}
-.wsp-row.active .wsp-count { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
-.wsp-count.other { font-family: var(--font-mono); }
-
-.wsp-btn {
-  background: none; border: none; padding: 3px; border-radius: 4px;
-  color: var(--text-muted); cursor: pointer; display: none; flex-shrink: 0;
-}
-.wsp-row:hover .wsp-btn { display: flex; }
-.wsp-btn:hover { color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent); }
-/* A pinned row keeps its pin visible — it's state, not an action. */
-.wsp-btn.pin.on { display: flex; color: var(--accent); }
-.wsp-btn.pin:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-
-.wsp-sep { height: 1px; background: var(--border); margin: 4px 2px; }
-
-.wsp-action {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  background: none; border: none; border-radius: 5px;
-  color: var(--text-secondary); cursor: pointer;
-  font-size: 11.5px; font-family: var(--font-ui);
-  text-align: left; padding: 6px 8px;
-}
-.wsp-action:hover { background: var(--bg-hover); color: var(--text-primary); }
-
-.wsp-empty {
-  font-size: 11px; color: var(--text-muted);
-  text-align: center; padding: 20px 12px; line-height: 1.6;
-}
-
-/* ── PR badge (mirrors Sidebar) ────────────────────────────────── */
+/* PR-state badge: many distinct semantic colors + a pulse animation for
+   fail/pending — kept as CSS classes rather than force-fit into Tailwind. */
 .pr-badge {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
   font-size: 9px; font-weight: 600; font-family: var(--font-mono); line-height: 1;
@@ -420,23 +305,4 @@ onUnmounted(() => {
 .pr-pending { color: #fbbf24; background: color-mix(in srgb, #fbbf24 14%, transparent); }
 .pr-pending .pr-dot { background: #fbbf24; animation: pr-pulse 1.6s ease-in-out infinite; }
 @keyframes pr-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
-
-/* ── Context menu ──────────────────────────────────────────────── */
-.ctx-menu {
-  position: fixed; z-index: 1000; min-width: 170px;
-  background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: 7px; padding: 4px;
-  display: flex; flex-direction: column; gap: 1px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-}
-.ctx-item {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  background: none; border: none; border-radius: 4px;
-  color: var(--text-secondary); cursor: pointer;
-  font-size: 12px; font-family: var(--font-ui);
-  text-align: left; padding: 6px 10px;
-}
-.ctx-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-.ctx-item.ctx-danger:hover { color: var(--red); }
-.ctx-sep { height: 1px; background: var(--border); margin: 3px 0; }
 </style>
