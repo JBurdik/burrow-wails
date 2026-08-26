@@ -2,25 +2,33 @@
   <!-- Collapsed: round launcher button, bottom-right -->
   <button
     v-if="!ui.floatChatOpen"
-    class="fc-launcher"
-    :class="{ 'fc-busy': busy, 'fc-attn': needsAttention }"
+    class="fc-launcher fixed bottom-[18px] right-[18px] z-[60] flex h-[46px] w-[46px] items-center justify-center rounded-full border border-border text-muted-foreground shadow-[0_6px_20px_rgba(0,0,0,0.35)] transition-[transform,box-shadow,border-color,color] duration-150 ease-out hover:-translate-y-0.5 hover:border-accent hover:shadow-[0_10px_26px_rgba(0,0,0,0.42)]"
+    :class="{ 'fc-busy': busy, 'border-accent': needsAttention }"
     :title="launcherTitle"
     @click="open"
   >
-    <PhSparkle :size="20" weight="fill" class="fc-launcher-icon" />
-    <span v-if="busy" class="fc-dot" />
-    <span v-if="needsAttention" class="fc-badge" :class="`fc-badge-${attentionKind}`" />
+    <PhSparkle :size="20" weight="fill" class="text-accent" />
+    <span v-if="busy" class="absolute right-[5px] top-[5px] h-[9px] w-[9px] rounded-full border-2 border-panel bg-green-400" />
+    <span
+      v-if="needsAttention"
+      class="fc-badge absolute left-1 top-1 h-3 w-3 rounded-full border-2 border-panel shadow-[0_0_0_1px_rgba(0,0,0,0.3)]"
+      :class="{
+        'bg-amber-500 fc-badge-permission': attentionKind === 'permission',
+        'bg-blue-500': attentionKind === 'waiting',
+        'bg-green-500': attentionKind === 'done',
+      }"
+    />
   </button>
 
   <!-- Expanded: compact chat card -->
-  <div v-else class="fc-card">
-    <div class="fc-head">
-      <PhSparkle :size="14" weight="fill" class="fc-head-icon" />
-      <span class="fc-head-title">Manager</span>
-      <span class="fc-head-sub" :title="rootCwd">{{ rootName }}</span>
+  <div v-else class="fc-card fixed bottom-[18px] right-[18px] z-[60] flex h-[540px] w-[460px] max-h-[calc(100vh-64px)] flex-col overflow-hidden rounded-[14px] border border-border shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
+    <div class="fc-solid flex shrink-0 items-center gap-1.5 border-b border-border px-2.5 py-2">
+      <PhSparkle :size="14" weight="fill" class="shrink-0 text-accent" />
+      <span class="text-xs font-semibold text-foreground">Manager</span>
+      <span class="flex-1 truncate text-[10px] text-muted-foreground" :title="rootCwd">{{ rootName }}</span>
       <button
-        class="fc-head-btn fc-wt-btn"
-        :class="{ 'fc-wt-on': worktreeMode }"
+        class="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
+        :class="{ 'bg-accent/14 text-accent hover:text-accent': worktreeMode }"
         :title="worktreeMode
           ? 'Spawn mode: worktree per agent (isolated) — click for active branch'
           : 'Spawn mode: active branch (shared) — click for worktree per agent'"
@@ -29,14 +37,14 @@
         <PhTree v-if="worktreeMode" :size="13" weight="bold" />
         <PhGitBranch v-else :size="13" weight="bold" />
       </button>
-      <button class="fc-head-btn" title="Reset session (clears history, starts fresh)" @click="resetSession">
+      <button class="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground" title="Reset session (clears history, starts fresh)" @click="resetSession">
         <PhArrowCounterClockwise :size="13" weight="bold" />
       </button>
-      <button class="fc-head-btn" title="Collapse" @click="ui.toggleFloatChat()">
+      <button class="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground" title="Collapse" @click="ui.toggleFloatChat()">
         <PhMinus :size="13" weight="bold" />
       </button>
     </div>
-    <div class="fc-body">
+    <div class="fc-solid fc-body min-h-0 flex-1">
       <ClaudeChat
         v-if="controlChatId !== null"
         :key="controlChatId"
@@ -240,59 +248,18 @@ const managerPrimer = computed(() => {
 </script>
 
 <style scoped>
-/* ── Collapsed launcher ── */
-.fc-launcher {
-  position: fixed;
-  bottom: 18px;
-  right: 18px;
-  z-index: 60;
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+/* Force a SOLID surface even under translucent themes (e.g. "stonks", whose
+   --bg-panel is rgba): composite the panel tint over an opaque --bg-base.
+   Tailwind's bg-* utilities can't express a two-layer gradient composite. */
+.fc-solid {
   background-color: var(--bg-base, #0d0d0d);
   background-image: linear-gradient(var(--bg-panel, #111111), var(--bg-panel, #111111));
   backdrop-filter: none;
-  color: var(--text-muted, #999);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.fc-launcher-icon { color: var(--accent, #7c5cff); }
-.fc-launcher:hover {
-  transform: translateY(-2px);
-  border-color: var(--accent, #7c5cff);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
-}
+.fc-launcher, .fc-card { background-color: var(--bg-base, #0d0d0d); background-image: linear-gradient(var(--bg-panel, #111111), var(--bg-panel, #111111)); backdrop-filter: none; }
+
 .fc-launcher.fc-busy { animation: fc-pulse 1.4s ease-in-out infinite; }
-.fc-dot {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #4ade80;
-  border: 2px solid var(--bg-panel, #1b1b22);
-}
-/* Attention badge — distinct from the busy dot: a colored ring at top-left. */
-.fc-badge {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid var(--bg-panel, #1b1b22);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
-}
-.fc-badge-permission { background: #f59e0b; animation: fc-badge-pulse 1.2s ease-in-out infinite; }
-.fc-badge-waiting { background: #3b82f6; }
-.fc-badge-done { background: #22c55e; }
-.fc-launcher.fc-attn { border-color: var(--accent, #7c5cff); }
+.fc-badge-permission { animation: fc-badge-pulse 1.2s ease-in-out infinite; }
 @keyframes fc-badge-pulse {
   0%, 100% { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3); }
   50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.35); }
@@ -302,69 +269,6 @@ const managerPrimer = computed(() => {
   50% { box-shadow: 0 6px 26px var(--accent, #7c5cff); }
 }
 
-/* ── Expanded card ── */
-.fc-card {
-  position: fixed;
-  bottom: 18px;
-  right: 18px;
-  z-index: 60;
-  width: 460px;
-  height: 540px;
-  max-height: calc(100vh - 64px);
-  display: flex;
-  flex-direction: column;
-  /* Force a SOLID card even under translucent themes (e.g. "stonks", whose
-     --bg-panel is rgba): composite the panel tint over an opaque --bg-base. */
-  background-color: var(--bg-base, #0d0d0d);
-  background-image: linear-gradient(var(--bg-panel, #111111), var(--bg-panel, #111111));
-  backdrop-filter: none;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-}
-.fc-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 10px;
-  background-color: var(--bg-base, #0d0d0d);
-  background-image: linear-gradient(var(--bg-panel, #111111), var(--bg-panel, #111111));
-  backdrop-filter: none;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  flex-shrink: 0;
-}
-.fc-head-icon { color: var(--accent, #7c5cff); flex-shrink: 0; }
-.fc-head-title { font-size: 12px; font-weight: 600; color: var(--text-primary, #eee); }
-.fc-head-sub {
-  font-size: 10px;
-  color: var(--text-muted, #888);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fc-head-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted, #999);
-  cursor: pointer;
-}
-.fc-head-btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); color: var(--text-primary, #eee); }
-.fc-wt-btn.fc-wt-on { color: var(--accent, #7c5cff); background: var(--bg-hover, rgba(124, 92, 255, 0.14)); }
-.fc-body {
-  flex: 1;
-  min-height: 0;
-  /* Opaque backing so a translucent-theme ClaudeChat can't show the panes behind. */
-  background-color: var(--bg-base, #0d0d0d);
-  background-image: linear-gradient(var(--bg-panel, #111111), var(--bg-panel, #111111));
-}
 /* Kill any per-theme translucency on the embedded chat so the card stays solid. */
 .fc-body :deep(.claude-chat) { background: transparent; backdrop-filter: none; }
 </style>
