@@ -17,7 +17,18 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@tauri-apps/api/core": ["src/lib/wailsCompat/core.ts"],
+      "@tauri-apps/api/event": ["src/lib/wailsCompat/event.ts"],
+      "@tauri-apps/api/webview": ["src/lib/wailsCompat/webview.ts"],
+      "@tauri-apps/api/webviewWindow": ["src/lib/wailsCompat/webviewWindow.ts"],
+      "@tauri-apps/api/window": ["src/lib/wailsCompat/window.ts"],
+      "@tauri-apps/api/app": ["src/lib/wailsCompat/app.ts"],
+      "@tauri-apps/plugin-dialog": ["src/lib/wailsCompat/dialog.ts"],
+      "@tauri-apps/plugin-notification": ["src/lib/wailsCompat/notification.ts"],
+      "@tauri-apps/plugin-shell": ["src/lib/wailsCompat/shell.ts"],
+      "@tauri-apps/plugin-updater": ["src/lib/wailsCompat/updater.ts"],
+      "@tauri-apps/plugin-process": ["src/lib/wailsCompat/process.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],

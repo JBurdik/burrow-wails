@@ -7,11 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "build:mobile": "vue-tsc --noEmit && VITE_TARGET=mobile vite build",
-    "remote:dev": "pnpm build:mobile && cargo run --manifest-path src-tauri/Cargo.toml --bin burrow-web -- --assets-dir dist-mobile",
     "preview": "vite preview",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
     "test": "vitest run"
   },
   "dependencies": {
@@ -30,14 +26,6 @@
     "@codemirror/view": "^6.43.0",
     "@phosphor-icons/vue": "^2.2.1",
     "@pierre/diffs": "^1.2.5",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2",
-    "@tauri-apps/plugin-fs": "^2",
-    "@tauri-apps/plugin-notification": "^2.3.3",
-    "@tauri-apps/plugin-os": "^2",
-    "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-shell": "^2",
-    "@tauri-apps/plugin-updater": "^2.10.1",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "0.14.0",
@@ -55,7 +43,6 @@
     "xstate": "^5.32.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
     "@types/dompurify": "^3.2.0",
     "@vitejs/plugin-vue": "^5.1.0",
     "typescript": "^5.5.0",

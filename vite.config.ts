@@ -26,6 +26,8 @@ export default defineConfig(async () => ({
       "@tauri-apps/plugin-shell": resolve(__dirname, "src/lib/wailsCompat/shell.ts"),
       "@tauri-apps/plugin-updater": resolve(__dirname, "src/lib/wailsCompat/updater.ts"),
       "@tauri-apps/plugin-process": resolve(__dirname, "src/lib/wailsCompat/process.ts"),
+      "@tauri-apps/api/window": resolve(__dirname, "src/lib/wailsCompat/window.ts"),
+      "@tauri-apps/api/app": resolve(__dirname, "src/lib/wailsCompat/app.ts"),
     },
   },
   build: {

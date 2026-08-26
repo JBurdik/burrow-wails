@@ -8,7 +8,11 @@ import * as App from "../../../burrow-wails/burrow/frontend/wailsjs/go/main/App"
 
 type Args = Record<string, any>;
 
-export async function invoke(cmd: string, args: Args = {}): Promise<any> {
+export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise<T> {
+  return dispatch(cmd, args) as Promise<T>;
+}
+
+async function dispatch(cmd: string, args: Args): Promise<any> {
   switch (cmd) {
     // PTY — id is the frontend's own numeric counter (props.ptyId), always
     // stringified for the Go/daemon side, which treats ids as opaque keys.

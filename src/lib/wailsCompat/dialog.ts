@@ -6,6 +6,7 @@ interface OpenOptions {
   directory?: boolean;
   multiple?: boolean;
   filters?: { name: string; extensions: string[] }[];
+  defaultPath?: string;
 }
 
 export async function open(opts: OpenOptions = {}): Promise<string | string[] | null> {
