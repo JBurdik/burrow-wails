@@ -1,21 +1,25 @@
 <template>
-  <div class="tc-card" :class="{ 'tc-dragging': dragging }" @click="emit('open')">
-    <div class="tc-head">
-      <span class="tc-status status-dot" :class="`status-${status}`">{{ status === 'running' ? spinnerFrame : '' }}</span>
-      <span class="tc-title">{{ task.title || 'Untitled task' }}</span>
+  <div
+    class="flex cursor-pointer flex-col gap-1.5 rounded-[9px] border border-border bg-panel p-2.5 transition-colors hover:border-accent hover:bg-hover"
+    :class="{ 'opacity-40': dragging }"
+    @click="emit('open')"
+  >
+    <div class="flex min-w-0 items-center gap-1.5">
+      <span class="status-dot shrink-0" :class="`status-${status}`">{{ status === 'running' ? spinnerFrame : '' }}</span>
+      <span class="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{{ task.title || 'Untitled task' }}</span>
     </div>
-    <p v-if="task.description" class="tc-desc">{{ truncatedDesc }}</p>
-    <div class="tc-thumbs" v-if="attachments.length">
-      <img v-for="a in attachments.slice(0, 4)" :key="a.id" :src="thumbs[a.id] ?? ''" class="tc-thumb" />
-      <span v-if="attachments.length > 4" class="tc-thumb-more">+{{ attachments.length - 4 }}</span>
+    <p v-if="task.description" class="m-0 line-clamp-3 text-[11px] leading-snug text-muted-foreground">{{ truncatedDesc }}</p>
+    <div class="flex items-center gap-1" v-if="attachments.length">
+      <img v-for="a in attachments.slice(0, 4)" :key="a.id" :src="thumbs[a.id] ?? ''" class="h-7 w-7 rounded border border-border object-cover" />
+      <span v-if="attachments.length > 4" class="text-[10px] text-muted-foreground">+{{ attachments.length - 4 }}</span>
     </div>
-    <div class="tc-badges">
-      <span v-if="task.agent_kind" class="tc-badge tc-badge-agent">{{ task.agent_kind }}</span>
-      <span v-if="task.model" class="tc-badge">{{ shortModel(task.model) }}</span>
-      <span v-if="task.worktree_branch" class="tc-badge tc-badge-branch" :title="task.worktree_branch">
+    <div class="flex flex-wrap gap-1">
+      <span v-if="task.agent_kind" class="inline-flex items-center gap-0.5 rounded-[5px] bg-purple-400/12 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-purple-400">{{ task.agent_kind }}</span>
+      <span v-if="task.model" class="inline-flex items-center gap-0.5 rounded-[5px] bg-white/6 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-secondary-foreground">{{ shortModel(task.model) }}</span>
+      <span v-if="task.worktree_branch" class="inline-flex items-center gap-0.5 rounded-[5px] bg-green-400/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-green-400" :title="task.worktree_branch">
         <PhGitBranch :size="10" weight="bold" />{{ shortBranch(task.worktree_branch) }}
       </span>
-      <span v-else-if="task.board_column !== 'backlog' && !task.use_worktree" class="tc-badge tc-badge-branch">
+      <span v-else-if="task.board_column !== 'backlog' && !task.use_worktree" class="inline-flex items-center gap-0.5 rounded-[5px] bg-green-400/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-green-400">
         <PhGitBranch :size="10" weight="bold" />current branch
       </span>
     </div>
@@ -67,98 +71,3 @@ async function loadThumbs() {
 }
 watch(() => props.attachments, loadThumbs, { immediate: true });
 </script>
-
-<style scoped>
-.tc-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 11px;
-  border-radius: 9px;
-  background: var(--bg-panel, #16161a);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.09));
-  cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
-}
-.tc-card:hover {
-  border-color: var(--accent, #3b82f6);
-  background: var(--bg-hover, rgba(255, 255, 255, 0.04));
-}
-.tc-dragging {
-  opacity: 0.4;
-}
-.tc-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-.tc-status {
-  flex-shrink: 0;
-}
-.tc-status.status-running {
-  font-size: 11px;
-}
-.tc-title {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-primary, #e2e8f0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.tc-desc {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-muted, #8b93a5);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.tc-thumbs {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-.tc-thumb {
-  width: 28px;
-  height: 28px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-}
-.tc-thumb-more {
-  font-size: 10px;
-  color: var(--text-muted, #64748b);
-}
-.tc-badges {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-.tc-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 9.5px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-secondary, #94a3b8);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-.tc-badge-agent {
-  color: #a78bfa;
-  background: rgba(167, 139, 250, 0.12);
-}
-.tc-badge-branch {
-  text-transform: none;
-  color: #4ade80;
-  background: rgba(74, 222, 128, 0.1);
-}
-</style>

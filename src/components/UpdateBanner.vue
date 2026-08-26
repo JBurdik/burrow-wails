@@ -1,25 +1,25 @@
 <template>
   <Transition name="update-pop">
-    <div v-if="show" class="update-card" :class="{ 'is-busy': u.downloading }">
-      <div class="update-icon">
+    <div v-if="show" class="fixed bottom-4 right-4 z-[9998] flex w-80 gap-2.5 rounded-xl border border-border bg-panel p-3.5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]">
+      <div class="mt-px shrink-0 text-accent" :class="{ 'text-secondary-foreground': u.downloading }">
         <PhArrowCircleUp v-if="!u.installed" :size="20" weight="fill" />
         <PhCheckCircle v-else :size="20" weight="fill" />
       </div>
 
-      <div class="update-body">
+      <div class="min-w-0 flex-1">
         <!-- installed → awaiting relaunch -->
         <template v-if="u.installed">
-          <div class="update-title">Update ready</div>
-          <div class="update-sub">Restart Burrow to finish updating to v{{ u.newVersion }}.</div>
+          <div class="text-[12.5px] font-semibold text-foreground">Update ready</div>
+          <div class="mt-0.5 text-[11.5px] text-secondary-foreground">Restart Burrow to finish updating to v{{ u.newVersion }}.</div>
         </template>
 
         <!-- downloading -->
         <template v-else-if="u.downloading">
-          <div class="update-title">Downloading v{{ u.newVersion }}…</div>
-          <div class="update-bar">
+          <div class="text-[12.5px] font-semibold text-foreground">Downloading v{{ u.newVersion }}…</div>
+          <div class="mt-2 h-1 overflow-hidden rounded-full bg-hover">
             <div
-              class="update-bar-fill"
-              :class="{ indeterminate: u.progress < 0 }"
+              class="h-full rounded-full bg-accent transition-[width] duration-150 ease-out"
+              :class="{ 'w-[35%] animate-[update-slide_1.1s_ease-in-out_infinite]': u.progress < 0 }"
               :style="u.progress >= 0 ? { width: Math.round(u.progress * 100) + '%' } : {}"
             />
           </div>
@@ -27,22 +27,22 @@
 
         <!-- available -->
         <template v-else>
-          <div class="update-title">Update available</div>
-          <div class="update-sub">
+          <div class="text-[12.5px] font-semibold text-foreground">Update available</div>
+          <div class="mt-0.5 text-[11.5px] text-secondary-foreground">
             v{{ u.newVersion }} is ready to install
-            <span class="update-cur">(you have v{{ u.currentVersion }})</span>
+            <span class="text-muted-foreground">(you have v{{ u.currentVersion }})</span>
           </div>
-          <div v-if="u.notes" class="update-notes">{{ u.notes }}</div>
+          <div v-if="u.notes" class="mt-1.5 max-h-16 overflow-y-auto whitespace-pre-wrap text-[11px] leading-snug text-muted-foreground">{{ u.notes }}</div>
         </template>
       </div>
 
-      <div class="update-actions">
+      <div class="flex shrink-0 flex-col gap-1.5 self-center">
         <template v-if="u.installed">
-          <button class="update-btn primary" @click="u.relaunch()">Restart</button>
+          <button class="whitespace-nowrap rounded-lg border border-transparent bg-accent px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110" @click="u.relaunch()">Restart</button>
         </template>
         <template v-else-if="!u.downloading">
-          <button class="update-btn primary" @click="u.downloadAndInstall()">Install</button>
-          <button class="update-btn ghost" @click="u.dismiss()">Later</button>
+          <button class="whitespace-nowrap rounded-lg border border-transparent bg-accent px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110" @click="u.downloadAndInstall()">Install</button>
+          <button class="whitespace-nowrap rounded-lg border border-border bg-transparent px-3 py-1 text-[11.5px] font-semibold text-secondary-foreground hover:bg-hover" @click="u.dismiss()">Later</button>
         </template>
       </div>
     </div>
@@ -60,93 +60,6 @@ const show = computed(() => u.bannerVisible || u.downloading || u.installed);
 </script>
 
 <style scoped>
-.update-card {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 9998;
-  width: 320px;
-  display: flex;
-  gap: 11px;
-  padding: 13px 14px;
-  border-radius: 12px;
-  background: var(--bg-panel, #111);
-  border: 1px solid var(--border, #2a2a2a);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
-}
-.update-icon {
-  color: var(--accent, #3b82f6);
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-.update-card.is-busy .update-icon { color: var(--text-secondary, #94a3b8); }
-.update-body { flex: 1; min-width: 0; }
-.update-title {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-primary, #e2e8f0);
-}
-.update-sub {
-  font-size: 11.5px;
-  color: var(--text-secondary, #94a3b8);
-  margin-top: 2px;
-}
-.update-cur { color: var(--text-muted, #64748b); }
-.update-notes {
-  font-size: 11px;
-  color: var(--text-muted, #64748b);
-  margin-top: 6px;
-  max-height: 64px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  line-height: 1.4;
-}
-.update-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex-shrink: 0;
-  align-self: center;
-}
-.update-btn {
-  font-size: 11.5px;
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 7px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.update-btn.primary {
-  background: var(--accent, #3b82f6);
-  color: #fff;
-}
-.update-btn.primary:hover { filter: brightness(1.08); }
-.update-btn.ghost {
-  background: transparent;
-  border-color: var(--border, #2a2a2a);
-  color: var(--text-secondary, #94a3b8);
-}
-.update-btn.ghost:hover { background: var(--bg-hover, #1a1a1a); }
-
-/* progress bar */
-.update-bar {
-  margin-top: 8px;
-  height: 4px;
-  border-radius: 3px;
-  background: var(--bg-hover, #1a1a1a);
-  overflow: hidden;
-}
-.update-bar-fill {
-  height: 100%;
-  background: var(--accent, #3b82f6);
-  border-radius: 3px;
-  transition: width 0.15s ease;
-}
-.update-bar-fill.indeterminate {
-  width: 35%;
-  animation: update-slide 1.1s ease-in-out infinite;
-}
 @keyframes update-slide {
   0% { margin-left: -35%; }
   100% { margin-left: 100%; }
