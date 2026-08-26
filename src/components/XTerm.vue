@@ -1,8 +1,8 @@
 <template>
-  <div class="xterm-host" ref="hostEl" />
+  <div ref="hostEl" class="xterm-host flex-1 overflow-hidden p-2" />
   <div
     v-if="ui.debugOverlay"
-    style="position:absolute;top:2px;left:2px;z-index:9999;background:rgba(0,0,0,.8);color:#0f0;font:10px/1.3 monospace;padding:3px 5px;border:1px solid #0f0;white-space:pre;pointer-events:none"
+    class="pointer-events-none absolute left-0.5 top-0.5 z-[9999] whitespace-pre border border-green-500 bg-black/80 px-[5px] py-[3px] font-mono text-[10px] leading-[1.3] text-green-500"
   >{{ dbg.text }}</div>
 </template>
 
@@ -894,12 +894,6 @@ defineExpose({
 </script>
 
 <style scoped>
-.xterm-host {
-  flex: 1;
-  overflow: hidden;
-  padding: 8px;
-}
-
 .xterm-host :deep(.xterm) { height: 100%; }
 .xterm-host :deep(.xterm-viewport) { background: transparent !important; }
 </style>
