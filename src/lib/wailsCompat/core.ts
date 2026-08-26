@@ -111,6 +111,42 @@ export async function invoke(cmd: string, args: Args = {}): Promise<any> {
     case "codex_stop":
       return App.CodexStop(args.id);
 
+    // LSP
+    case "lsp_start":
+      return App.LspStart(args.id, args.command, args.args ?? [], args.cwd ?? "");
+    case "lsp_send":
+      return App.LspSend(args.id, args.message);
+    case "lsp_stop":
+      return App.LspStop(args.id);
+
+    // Mission tasks / agent turns
+    case "list_mission_tasks":
+      return App.ListMissionTasks();
+    case "upsert_mission_task":
+      return App.UpsertMissionTask(args.task);
+    case "delete_mission_task":
+      return App.DeleteMissionTask(args.id);
+    case "begin_agent_turn":
+      return App.BeginAgentTurn(args.taskId ?? args.task_id, args.ptyId ?? args.pty_id, args.worktreePath ?? args.worktree_path ?? "");
+    case "complete_agent_turn":
+      return App.CompleteAgentTurn(args.ptyId ?? args.pty_id, args.state);
+    case "list_agent_turn_changes":
+      return App.ListAgentTurnChanges(args.taskId ?? args.task_id);
+
+    // Skills / MCP servers
+    case "list_skills":
+      return App.ListSkills();
+    case "set_skill_enabled":
+      return App.SetSkillEnabled(args.dir, !!args.enabled);
+    case "delete_skill":
+      return App.DeleteSkill(args.dir);
+    case "list_mcp_servers":
+      return App.ListMcpServers();
+    case "add_mcp_server":
+      return App.AddMcpServer(args.name, args.config);
+    case "remove_mcp_server":
+      return App.RemoveMcpServer(args.name);
+
     default:
       console.warn(`[wails-compat] invoke("${cmd}") has no Go binding yet`);
       throw new Error(`command not implemented in Go backend: ${cmd}`);

@@ -20,6 +20,7 @@ type App struct {
 
 	claudeAgents *agentproc.Manager
 	acpAgents    *agentproc.Manager
+	lspMgr       *lspManager
 
 	hookSrv      *HookServer
 	burrowBinDir string
