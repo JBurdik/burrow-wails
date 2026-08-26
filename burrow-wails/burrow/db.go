@@ -46,6 +46,43 @@ func migrate(db *sql.DB) error {
 			title TEXT,
 			initial_cmd TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS mission_tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id INTEGER,
+			pty_id TEXT,
+			title TEXT NOT NULL,
+			cwd TEXT,
+			model TEXT,
+			status TEXT,
+			turns INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS agent_turns (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+			pty_id TEXT,
+			worktree_path TEXT,
+			started_at TEXT NOT NULL DEFAULT (datetime('now')),
+			completed_at TEXT,
+			state TEXT NOT NULL DEFAULT 'running',
+			start_tree TEXT,
+			end_tree TEXT,
+			changes_available INTEGER,
+			change_error TEXT,
+			files_json TEXT NOT NULL DEFAULT '[]',
+			additions INTEGER,
+			deletions INTEGER
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_turns_task_id ON agent_turns(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_turns_pty_id ON agent_turns(pty_id)`,
+		`CREATE TABLE IF NOT EXISTS task_attachments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+			ord INTEGER NOT NULL DEFAULT 0,
+			mime_type TEXT,
+			file_path TEXT,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -64,6 +101,20 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE terminal_tabs ADD COLUMN cwd TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN default_title TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN session_id TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN handed_off INTEGER DEFAULT 0`,
+		`ALTER TABLE mission_tasks ADD COLUMN profile_id TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN repo_workspace_id INTEGER`,
+		`ALTER TABLE mission_tasks ADD COLUMN board_column TEXT DEFAULT 'backlog'`,
+		`ALTER TABLE mission_tasks ADD COLUMN description TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN agent_kind TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN transport TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN use_worktree INTEGER DEFAULT 1`,
+		`ALTER TABLE mission_tasks ADD COLUMN worktree_branch TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN task_workspace_id INTEGER`,
+		`ALTER TABLE mission_tasks ADD COLUMN chat_id TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN session_id TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN board_order REAL DEFAULT 0`,
+		`ALTER TABLE mission_tasks ADD COLUMN updated_at TEXT`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {

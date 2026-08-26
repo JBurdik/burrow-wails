@@ -49,9 +49,10 @@ func (m *Manager) Create(shell string, args []string, cwd string, env []string) 
 	if cwd != "" {
 		c.Dir = cwd
 	}
-	if len(env) > 0 {
-		c.Env = append(os.Environ(), env...)
-	}
+	// BURROW_PTY_ID lets the `burrow` CLI (and status hooks) inside this
+	// session address itself — set here since only the manager knows the
+	// id before the process actually starts.
+	c.Env = append(append(os.Environ(), env...), "BURROW_PTY_ID="+id)
 
 	f, err := pty.Start(c)
 	if err != nil {

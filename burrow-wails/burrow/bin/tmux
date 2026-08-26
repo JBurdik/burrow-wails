@@ -1,0 +1,157 @@
+#!/bin/sh
+# Burrow tmux shim — translates tmux commands → Burrow native operations.
+# Installed alongside `burrow` in <app-data>/bin/ and prepended to PATH in
+# every Burrow PTY. Enables CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS without real tmux.
+#
+# Supported mappings:
+#   new-window / split-window  → burrow spawn --tmux-win @N [cmd]
+#   send-keys -t @N keys       → POST /write to hook server (writes to PTY)
+#   has-session / new-session  → no-op (exit 0)
+#   list-* / select-* / set-* → minimal fake output or no-op
+#   -V                         → "tmux 3.3a"
+
+# Version check — before subcommand parsing
+case "$1" in
+  -V|--version) echo "tmux 3.3a"; exit 0 ;;
+esac
+
+# No subcommand → do nothing (bare `tmux` invocation)
+[ $# -eq 0 ] && exit 0
+
+sub="$1"; shift
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+_next_win_id() {
+  seq_file="${BURROW_HOME_DIR}/tmux_win_seq"
+  n=0
+  [ -f "$seq_file" ] && n=$(cat "$seq_file" 2>/dev/null || echo 0)
+  n=$((n + 1))
+  printf '%d' "$n" > "$seq_file"
+  printf '@%d' "$n"
+}
+
+_post_write() {
+  pty_id="$1"; data_json="$2"
+  file_port=""
+  [ -n "$BURROW_HOME_DIR" ] && [ -f "$BURROW_HOME_DIR/hook.port" ] && \
+    file_port=$(cat "$BURROW_HOME_DIR/hook.port" 2>/dev/null)
+  for port in "$BURROW_HOOK_PORT" "$file_port"; do
+    [ -n "$port" ] || continue
+    curl -sf -X POST "http://127.0.0.1:$port/write" \
+      -H 'Content-Type: application/json' \
+      -d "{\"ptyId\":$pty_id,\"data\":$data_json}" >/dev/null 2>&1 && break
+  done
+}
+
+# ── Subcommands ───────────────────────────────────────────────────────────────
+
+case "$sub" in
+
+  new-window|split-window)
+    name=""; cwd=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -n|-t|-e|-F|-Z) shift 2 ;;   # flags that take an arg we don't need
+        -c)             cwd="$2"; shift 2 ;;
+        --)             shift; break ;;
+        -*)             shift ;;      # boolean flags
+        *)              break ;;
+      esac
+    done
+    # $@ = command to run (may be empty → new shell)
+
+    win_id=$(_next_win_id)
+    mkdir -p "${BURROW_HOME_DIR}/tmux_wins"
+
+    if [ $# -gt 0 ]; then
+      burrow spawn --cwd "${cwd:-$PWD}" --tmux-win "$win_id" "$@"
+    else
+      burrow spawn --cwd "${cwd:-$PWD}" --tmux-win "$win_id" "${SHELL:-sh}"
+    fi
+
+    printf '%s\n' "$win_id"
+    exit 0
+    ;;
+
+  send-keys)
+    target=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -t) target="$2"; shift 2 ;;
+        --) shift; break ;;
+        -*) shift ;;
+        *)  break ;;
+      esac
+    done
+
+    # Collect key strings; treat Enter/C-m as a newline
+    keys=""
+    enter=0
+    for k in "$@"; do
+      case "$k" in
+        Enter|C-m|C-M) enter=1 ;;
+        BSpace)         keys="${keys}"$(printf '\x7f') ;;
+        Escape)         keys="${keys}"$(printf '\x1b') ;;
+        *)              keys="${keys}${k}" ;;
+      esac
+    done
+    [ "$enter" = "1" ] && keys="${keys}$(printf '\n')"
+
+    [ -n "$target" ] || exit 0
+    [ -n "$BURROW_HOME_DIR" ] || exit 0
+
+    pty_file="${BURROW_HOME_DIR}/tmux_wins/$target"
+    [ -f "$pty_file" ] || exit 0
+    pty_id=$(cat "$pty_file" 2>/dev/null)
+    [ -n "$pty_id" ] || exit 0
+
+    # JSON-encode the key string via python3 (already required for burrow sessions)
+    data_json=$(printf '%s' "$keys" | \
+      python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
+    [ -n "$data_json" ] || exit 0
+
+    _post_write "$pty_id" "$data_json"
+    exit 0
+    ;;
+
+  new-session)
+    # Agent teams creates a session for bookkeeping. We don't need real sessions.
+    exit 0
+    ;;
+
+  has-session)
+    exit 0
+    ;;
+
+  list-sessions)
+    # One fake session so scripts that check for an empty list don't abort.
+    echo "0: burrow (1 windows) [220x50] [created] (attached)"
+    exit 0
+    ;;
+
+  list-windows)
+    echo "0: shell* (1 panes) [220x50] @0 (active)"
+    exit 0
+    ;;
+
+  list-panes)
+    echo "%0: [220x50] [history 0/50000, 0 bytes] 0 (active)"
+    exit 0
+    ;;
+
+  select-pane|select-window|rename-window|rename-session| \
+  set-option|set-env|set-window-option|source-file| \
+  kill-session|kill-window|kill-pane|wait-for| \
+  bind-key|unbind-key|display-message|if-shell| \
+  move-window|swap-pane|respawn-pane|respawn-window| \
+  pipe-pane|run-shell|clock-mode|refresh-client)
+    exit 0
+    ;;
+
+  *)
+    # Permissive: unknown commands are silently ignored so agent scripts don't abort.
+    exit 0
+    ;;
+
+esac
