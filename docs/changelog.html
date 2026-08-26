@@ -79,11 +79,35 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.1.2 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.1.2</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">srpen 2026</span>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Ikona aplikace</div>
+      <ul>
+        <li><strong>Burrow má zase svou ikonu</strong> — přepis do Wails si nechal výchozí bílé „W“, protože se nikdy nevyměnil <code>build/appicon.png</code>. Nahrazeno původní ikonou ve všech velikostech až po 1024×1024.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Srozumitelná hláška při App Translocation</strong> — když se aplikace nakopíruje skriptem místo přetažení ve Finderu, zůstane na ní karanténní příznak a systém ji spouští z dočasné kopie, kam nelze zapisovat. Aktualizace na tom dřív skončila nesrozumitelnou chybou o přejmenování; nově se rovnou vypíše, co udělat.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.1.1 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.1.1</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">srpen 2026</span>
     </div>
 
