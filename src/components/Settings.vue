@@ -1,86 +1,92 @@
 <template>
-  <div class="settings-page">
+  <div class="fixed inset-0 z-[1000] flex flex-col overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]">
     <!-- Header -->
-    <div class="s-header">
-      <div class="s-head-title">
-        <PhGearSix :size="15" class="s-head-icon" />
-        <span class="s-title">Settings</span>
+    <div class="relative flex h-[52px] shrink-0 items-center justify-end border-b border-border bg-panel px-6">
+      <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-2.5">
+        <PhGearSix :size="15" class="text-muted-foreground" />
+        <span class="text-sm font-semibold text-foreground">Settings</span>
       </div>
-      <button class="s-close" title="Close (Esc)" @click="$emit('close')">
+      <button class="flex rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="$emit('close')">
         <PhX :size="15" />
       </button>
     </div>
 
-    <div class="s-body">
+    <div class="flex flex-1 overflow-hidden">
       <!-- Nav -->
-      <nav class="s-nav">
+      <nav class="flex w-[220px] shrink-0 flex-col gap-px border-r border-border bg-panel py-2.5">
         <template v-for="item in navItems" :key="item.id">
-          <div v-if="item.divider" class="nav-divider" />
+          <div v-if="item.divider" class="my-2 h-px bg-border" />
           <button
             v-else
-            class="nav-item"
-            :class="{ active: active === item.id }"
+            class="flex h-[34px] items-center gap-2.5 border-l-2 border-transparent px-4 text-left text-[13px] text-secondary-foreground hover:bg-hover"
+            :class="active === item.id && 'border-l-accent bg-hover text-foreground [&_.nav-icon]:text-accent'"
             @click="active = item.id!"
           >
-            <component :is="item.icon" :size="14" class="nav-icon" />
-            <span class="nav-label">{{ item.label }}</span>
+            <component :is="item.icon" :size="14" class="nav-icon shrink-0 text-muted-foreground" />
+            <span>{{ item.label }}</span>
           </button>
         </template>
       </nav>
 
       <!-- Content -->
-      <div class="s-content">
+      <div class="flex-1 overflow-y-auto bg-base px-10 py-8">
         <!-- Agents -->
-        <section v-if="active === 'agents'" class="section">
-          <div v-if="flagEditId || iconPickerId || showTemplatePicker" class="flag-backdrop" @click="flagEditId = null; iconPickerId = null; showTemplatePicker = false" />
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Agents</h2>
-              <span class="sec-sub">Quick-launch terminal commands</span>
+        <section v-if="active === 'agents'" class="flex flex-col gap-3.5">
+          <div v-if="flagEditId || iconPickerId || showTemplatePicker" class="fixed inset-0 z-20" @click="flagEditId = null; iconPickerId = null; showTemplatePicker = false" />
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Agents</h2>
+              <span class="text-xs text-muted-foreground">Quick-launch terminal commands</span>
             </div>
-            <div class="add-area">
-              <button class="add-btn" @click="store.add()">
+            <div class="ml-auto flex items-center gap-px">
+              <Button variant="outline" size="sm" class="rounded-r-none" @click="store.add()">
                 <PhPlus :size="11" /> Add Agent
-              </button>
-              <div class="template-wrap">
-                <button class="add-btn template-btn" title="Add from template" @click.stop="showTemplatePicker = !showTemplatePicker">
+              </Button>
+              <div class="relative">
+                <Button variant="outline" size="sm" class="rounded-l-none border-l-0 px-2" title="Add from template" @click.stop="showTemplatePicker = !showTemplatePicker">
                   <PhCaretDown :size="11" />
-                </button>
-                <div v-if="showTemplatePicker" class="template-pop" @click.stop>
-                  <div class="tp-head">Quick add from template</div>
-                  <button v-for="t in TEMPLATES" :key="t.id" class="tp-row" @click="addFromTemplate(t); showTemplatePicker = false">
-                    <span class="tp-icon" :style="{ background: t.color + '22', borderColor: t.color + '44' }">
+                </Button>
+                <div v-if="showTemplatePicker" class="absolute right-0 top-[calc(100%+6px)] z-30 grid w-[280px] gap-0.5 rounded-lg border border-border bg-base p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]" @click.stop>
+                  <div class="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">Quick add from template</div>
+                  <button
+                    v-for="t in TEMPLATES"
+                    :key="t.id"
+                    class="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-xs text-secondary-foreground hover:bg-hover hover:text-foreground"
+                    @click="addFromTemplate(t); showTemplatePicker = false"
+                  >
+                    <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded border" :style="{ background: t.color + '22', borderColor: t.color + '44' }">
                       <component :is="iconFor(t.icon)" :size="12" :style="{ color: t.color }" />
                     </span>
-                    <span class="tp-name">{{ t.name }}</span>
-                    <code class="tp-cmd">{{ t.command }}</code>
+                    <span class="flex-1 font-medium">{{ t.name }}</span>
+                    <code class="rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{{ t.command }}</code>
                   </button>
                 </div>
               </div>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="tbl">
-            <div class="tbl-head">
-              <span class="col col-grip" />
-              <span class="col col-agent">Agent</span>
-              <span class="col col-cmd">Command</span>
-              <span class="col col-args">Args / Flags</span>
-              <span class="col col-kbd">Shortcut</span>
-              <span class="col col-act" />
+          <div class="flex flex-col gap-2">
+            <div class="flex h-[26px] items-center px-4">
+              <span class="w-[22px] shrink-0" />
+              <span class="w-[200px] shrink-0 text-[11px] font-medium text-muted-foreground opacity-60">Agent</span>
+              <span class="w-[165px] shrink-0 text-[11px] font-medium text-muted-foreground opacity-60">Command</span>
+              <span class="flex-1 min-w-0 text-[11px] font-medium text-muted-foreground opacity-60">Args / Flags</span>
+              <span class="flex w-[84px] shrink-0 items-center justify-center gap-1 text-[11px] font-medium text-muted-foreground opacity-60">Shortcut</span>
+              <span class="flex w-[52px] shrink-0 justify-end" />
             </div>
 
             <div
               v-for="(a, i) in store.agents"
               :key="a.id"
-              class="row"
+              class="flex h-[50px] items-center gap-0 rounded-md border border-border bg-base px-4"
               :data-reorder-idx="i"
-              :class="{ dragging: dragIndex === i, 'drag-over': dragOverIndex === i && dragIndex !== i }"
+              :class="{ 'opacity-40': dragIndex === i, 'border-accent shadow-[inset_0_0_0_1px_var(--accent)]': dragOverIndex === i && dragIndex !== i }"
             >
               <!-- Drag handle -->
               <div
-                class="col-grip grip"
+                class="flex w-[22px] shrink-0 items-center justify-center text-muted-foreground/60 [touch-action:none] hover:text-muted-foreground active:cursor-grabbing"
+                style="cursor: grab;"
                 title="Drag to reorder"
                 @pointerdown="(e: PointerEvent) => onGripDown(i, e)"
               >
@@ -88,33 +94,33 @@
               </div>
 
               <!-- Agent -->
-              <div class="col-agent cell-agent">
+              <div class="flex w-[200px] shrink-0 items-center gap-2">
                 <!-- Color picker on the dot -->
-                <label class="dot-label" title="Pick color">
-                  <span class="dot" :style="{ background: a.color }" />
+                <label class="group relative flex shrink-0 cursor-pointer items-center" title="Pick color">
+                  <span class="h-[7px] w-[7px] shrink-0 rounded-full transition-transform duration-100 group-hover:scale-[1.3]" :style="{ background: a.color }" />
                   <input
                     type="color"
-                    class="color-input"
+                    class="absolute inset-0 h-full w-full cursor-pointer border-0 p-0 opacity-0"
                     :value="a.color"
                     @input="store.update(a.id, { color: val($event) })"
                   />
                 </label>
                 <!-- Icon picker popover -->
-                <div class="icon-wrap">
+                <div class="relative shrink-0">
                   <button
-                    class="icon-box"
+                    class="relative flex h-[26px] w-[26px] shrink-0 items-center justify-center overflow-hidden rounded-md border bg-transparent p-0 hover:brightness-125"
                     :style="{ background: a.color + '22', borderColor: a.color + '55' }"
                     title="Pick icon"
                     @click.stop="toggleIconPicker(a.id)"
                   >
                     <component :is="iconFor(a.icon)" :size="13" :style="{ color: a.color }" />
                   </button>
-                  <div v-if="iconPickerId === a.id" class="icon-pop" @click.stop>
+                  <div v-if="iconPickerId === a.id" class="absolute left-0 top-[calc(100%+6px)] z-[25] flex w-[168px] flex-wrap gap-1 rounded-lg border border-border bg-base p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]" @click.stop>
                     <button
                       v-for="ic in ICON_OPTIONS"
                       :key="ic.key"
-                      class="ip-btn"
-                      :class="{ active: a.icon === ic.key }"
+                      class="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-hover text-muted-foreground hover:bg-selected hover:text-foreground"
+                      :class="a.icon === ic.key && 'border-accent/40 bg-accent/15 text-accent'"
                       :title="ic.label"
                       @click="store.update(a.id, { icon: ic.key }); iconPickerId = null"
                     >
@@ -123,7 +129,7 @@
                   </div>
                 </div>
                 <input
-                  class="inp name-inp"
+                  class="min-w-0 w-full flex-1 border-0 bg-transparent text-[13px] font-medium text-foreground outline-none placeholder:text-muted-foreground/50"
                   :value="a.name"
                   placeholder="Agent name"
                   @input="store.update(a.id, { name: val($event) })"
@@ -131,10 +137,10 @@
               </div>
 
               <!-- Command -->
-              <div class="col-cmd">
-                <div class="pill">
+              <div class="w-[165px] shrink-0">
+                <div class="inline-flex max-w-[140px] items-center rounded border border-border bg-panel px-2 py-[3px]">
                   <input
-                    class="inp mono cmd-inp"
+                    class="min-w-0 w-full border-0 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/50"
                     :style="{ color: a.color }"
                     :value="a.command"
                     placeholder="command"
@@ -144,16 +150,16 @@
               </div>
 
               <!-- Args -->
-              <div class="col-args">
+              <div class="relative flex flex-1 min-w-0 items-center gap-1.5">
                 <input
-                  class="inp mono args-inp"
+                  class="min-w-0 w-full flex-1 border-0 bg-transparent font-mono text-[11px] text-muted-foreground outline-none placeholder:text-muted-foreground/50"
                   :value="a.args"
                   placeholder="--flags"
                   @input="store.update(a.id, { args: val($event) })"
                 />
                 <button
-                  class="flag-edit"
-                  :class="{ on: flagEditId === a.id }"
+                  class="flex shrink-0 rounded border border-border bg-transparent p-1 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground"
+                  :class="flagEditId === a.id && 'border-accent/40 bg-accent/10 text-accent'"
                   title="Edit flags"
                   @click="toggleFlagEditor(a.id)"
                 >
@@ -161,33 +167,36 @@
                 </button>
 
                 <!-- Flag editor popover -->
-                <div v-if="flagEditId === a.id" class="flag-pop" @click.stop>
-                  <div class="fp-head">
-                    <span class="fp-title">Flags</span>
-                    <span class="fp-sub">one per line</span>
-                    <button class="fp-close" @click="flagEditId = null">
+                <div v-if="flagEditId === a.id" class="absolute right-0 top-[calc(100%+6px)] z-[21] grid w-[280px] gap-2 rounded-lg border border-border bg-base p-2.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]" @click.stop>
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-xs font-semibold text-foreground">Flags</span>
+                    <span class="text-[10px] text-muted-foreground">one per line</span>
+                    <button class="ml-auto flex rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground" @click="flagEditId = null">
                       <PhX :size="12" />
                     </button>
                   </div>
                   <textarea
-                    class="fp-area mono"
+                    class="w-full resize-y rounded-md border border-border bg-panel px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
                     rows="6"
                     spellcheck="false"
                     placeholder="--flag&#10;--key value"
                     :value="flagDraft"
                     @input="onFlagInput(a.id, $event)"
                   />
-                  <div class="fp-foot">
-                    <code class="fp-preview">{{ store.commandLine(a) || "—" }}</code>
+                  <div class="flex">
+                    <code class="w-full truncate rounded border border-border bg-panel px-2 py-1 font-mono text-[10px] text-muted-foreground">{{ store.commandLine(a) || "—" }}</code>
                   </div>
                 </div>
               </div>
 
               <!-- Shortcut: click to record a key combo -->
-              <div class="col-kbd">
+              <div class="flex w-[84px] shrink-0 items-center justify-center gap-1">
                 <button
-                  class="kbd-rec"
-                  :class="{ recording: recordingId === a.id, set: !!a.shortcut }"
+                  class="inline-flex min-w-[44px] items-center justify-center rounded border border-border bg-hover px-1.5 py-1 font-sans text-[11px] text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground"
+                  :class="[
+                    a.shortcut && 'text-secondary-foreground',
+                    recordingId === a.id && 'border-accent/40 bg-accent/10 text-accent',
+                  ]"
                   :title="recordingId === a.id ? 'Press keys… (Esc to cancel)' : 'Click to set shortcut'"
                   @click="startRecording(a.id, $event)"
                   @keydown="onRecordKey(a.id, $event)"
@@ -197,7 +206,7 @@
                 </button>
                 <button
                   v-if="a.shortcut && recordingId !== a.id"
-                  class="kbd-clear"
+                  class="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground/50 hover:bg-destructive/12 hover:text-destructive"
                   title="Clear shortcut"
                   @click.stop="store.update(a.id, { shortcut: '' })"
                 >
@@ -206,210 +215,186 @@
               </div>
 
               <!-- Actions -->
-              <div class="col-act">
-                <button class="row-del" title="Remove agent" @click="store.remove(a.id)">
+              <div class="flex w-[52px] shrink-0 justify-end">
+                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove agent" @click="store.remove(a.id)">
                   <PhTrash :size="13" />
                 </button>
               </div>
             </div>
 
-            <div v-if="store.agents.length === 0" class="tbl-empty">
+            <div v-if="store.agents.length === 0" class="py-5 text-center text-xs text-muted-foreground/50">
               No agents. Click "Add Agent".
             </div>
           </div>
 
           <!-- Config directories: where Burrow installs its status hooks + agent docs -->
-          <div class="settings-group cfg-dirs">
-            <span class="group-label">Config directories</span>
-            <p class="cfg-hint">
-              Burrow installs its status hooks (<code>settings.json</code> / <code>hooks.json</code>)
-              and the <code>burrow</code> agent docs into these dirs. Add the dir an agent uses if
-              you point it elsewhere — e.g. a per-project <code>CLAUDE_CONFIG_DIR</code> or
-              <code>CODEX_HOME</code>. Defaults (<code>~/.claude</code>, <code>~/.codex</code>,
-              <code>~/.copilot</code>) plus any value set in Burrow's own environment at launch
+          <div class="mt-[22px] flex flex-col gap-3">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Config directories</span>
+            <p class="m-0 text-[11.5px] leading-relaxed text-muted-foreground">
+              Burrow installs its status hooks (<code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">settings.json</code> / <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">hooks.json</code>)
+              and the <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">burrow</code> agent docs into these dirs. Add the dir an agent uses if
+              you point it elsewhere — e.g. a per-project <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">CLAUDE_CONFIG_DIR</code> or
+              <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">CODEX_HOME</code>. Defaults (<code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">~/.claude</code>, <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">~/.codex</code>,
+              <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">~/.copilot</code>) plus any value set in Burrow's own environment at launch
               are seeded automatically.
             </p>
 
-            <div class="cfg-col">
-              <span class="cfg-col-label">Claude (<code>CLAUDE_CONFIG_DIR</code>)</span>
-              <div v-for="(_, i) in claudeDirs" :key="'c' + i" class="cfg-row">
-                <input v-model="claudeDirs[i]" class="select cfg-inp" placeholder="/path/to/.claude" spellcheck="false" />
-                <button class="row-del" title="Remove" @click="claudeDirs.splice(i, 1)">
+            <div class="flex flex-col gap-1.5">
+              <span class="text-[11px] text-muted-foreground">Claude (<code class="text-[10px] text-secondary-foreground">CLAUDE_CONFIG_DIR</code>)</span>
+              <div v-for="(_, i) in claudeDirs" :key="'c' + i" class="flex items-center gap-1.5">
+                <input v-model="claudeDirs[i]" class="h-8 min-w-[200px] flex-1 rounded-md border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="/path/to/.claude" spellcheck="false" />
+                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove" @click="claudeDirs.splice(i, 1)">
                   <PhTrash :size="13" />
                 </button>
               </div>
-              <button class="add-btn cfg-add" @click="claudeDirs.push('')">
+              <Button variant="outline" size="sm" class="self-start" @click="claudeDirs.push('')">
                 <PhPlus :size="11" /> Add Claude dir
-              </button>
+              </Button>
             </div>
 
-            <div class="cfg-col">
-              <span class="cfg-col-label">Codex (<code>CODEX_HOME</code>)</span>
-              <div v-for="(_, i) in codexDirs" :key="'x' + i" class="cfg-row">
-                <input v-model="codexDirs[i]" class="select cfg-inp" placeholder="/path/to/.codex" spellcheck="false" />
-                <button class="row-del" title="Remove" @click="codexDirs.splice(i, 1)">
+            <div class="flex flex-col gap-1.5">
+              <span class="text-[11px] text-muted-foreground">Codex (<code class="text-[10px] text-secondary-foreground">CODEX_HOME</code>)</span>
+              <div v-for="(_, i) in codexDirs" :key="'x' + i" class="flex items-center gap-1.5">
+                <input v-model="codexDirs[i]" class="h-8 min-w-[200px] flex-1 rounded-md border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="/path/to/.codex" spellcheck="false" />
+                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove" @click="codexDirs.splice(i, 1)">
                   <PhTrash :size="13" />
                 </button>
               </div>
-              <button class="add-btn cfg-add" @click="codexDirs.push('')">
+              <Button variant="outline" size="sm" class="self-start" @click="codexDirs.push('')">
                 <PhPlus :size="11" /> Add Codex dir
-              </button>
+              </Button>
             </div>
 
-            <div class="cfg-col">
-              <span class="cfg-col-label">Copilot (<code>COPILOT_HOME</code>)</span>
-              <div v-for="(_, i) in copilotDirs" :key="'p' + i" class="cfg-row">
-                <input v-model="copilotDirs[i]" class="select cfg-inp" placeholder="/path/to/.copilot" spellcheck="false" />
-                <button class="row-del" title="Remove" @click="copilotDirs.splice(i, 1)">
+            <div class="flex flex-col gap-1.5">
+              <span class="text-[11px] text-muted-foreground">Copilot (<code class="text-[10px] text-secondary-foreground">COPILOT_HOME</code>)</span>
+              <div v-for="(_, i) in copilotDirs" :key="'p' + i" class="flex items-center gap-1.5">
+                <input v-model="copilotDirs[i]" class="h-8 min-w-[200px] flex-1 rounded-md border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="/path/to/.copilot" spellcheck="false" />
+                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove" @click="copilotDirs.splice(i, 1)">
                   <PhTrash :size="13" />
                 </button>
               </div>
-              <button class="add-btn cfg-add" @click="copilotDirs.push('')">
+              <Button variant="outline" size="sm" class="self-start" @click="copilotDirs.push('')">
                 <PhPlus :size="11" /> Add Copilot dir
-              </button>
+              </Button>
             </div>
 
-            <div class="cfg-actions">
-              <button class="add-btn cfg-save" :disabled="cfgSaving" @click="saveConfigDirs">
-                <PhArrowCounterClockwise v-if="cfgSaving" :size="11" />
+            <div class="mt-1 flex items-center gap-3">
+              <Button size="sm" :disabled="cfgSaving" @click="saveConfigDirs">
+                <PhArrowCounterClockwise v-if="cfgSaving" :size="11" class="animate-spin" />
                 {{ cfgSaving ? "Installing…" : "Save & install hooks" }}
-              </button>
-              <span v-if="cfgStatus" class="cfg-status">{{ cfgStatus }}</span>
+              </Button>
+              <span v-if="cfgStatus" class="text-[11px] text-success">{{ cfgStatus }}</span>
             </div>
           </div>
 
-          <div class="settings-group">
-            <span class="group-label">Sub-agent delegation</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Max concurrent sub-agents</span>
-                <span class="field-desc">Soft per-workspace cap the <code>/burrow</code> skill respects when it spawns agents (1–20)</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Sub-agent delegation</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Max concurrent sub-agents</span>
+                <span class="text-[11px] text-muted-foreground">Soft per-workspace cap the <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> skill respects when it spawns agents (1–20)</span>
               </div>
-              <div class="size-ctl">
+              <div class="flex items-center gap-1.5">
                 <input
-                  class="select size-inp"
+                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   type="number"
                   min="1"
                   max="20"
                   :value="ui.maxAgents"
                   @input="ui.maxAgents = clampRange(val($event), 1, 20, 3)"
                 />
-                <span class="size-unit">agents</span>
+                <span class="text-xs text-muted-foreground/70">agents</span>
               </div>
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">MCP recursion depth</span>
-                <span class="field-desc">How deep MCP-spawned sub-agents may spawn further sub-agents before the depth cap refuses (1–10)</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">MCP recursion depth</span>
+                <span class="text-[11px] text-muted-foreground">How deep MCP-spawned sub-agents may spawn further sub-agents before the depth cap refuses (1–10)</span>
               </div>
-              <div class="size-ctl">
+              <div class="flex items-center gap-1.5">
                 <input
-                  class="select size-inp"
+                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   type="number"
                   min="1"
                   max="10"
                   :value="ui.mcpMaxDepth"
                   @input="ui.mcpMaxDepth = clampRange(val($event), 1, 10, 3)"
                 />
-                <span class="size-unit">levels</span>
+                <span class="text-xs text-muted-foreground/70">levels</span>
               </div>
             </div>
           </div>
 
-          <div class="settings-group">
-            <span class="group-label">Chat</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Default agent</span>
-                <span class="field-desc">Agent used when opening a new chat.</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Chat</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Default agent</span>
+                <span class="text-[11px] text-muted-foreground">Agent used when opening a new chat.</span>
               </div>
-              <select
-                class="select"
-                :value="ui.defaultChatAgent"
-                @change="ui.defaultChatAgent = ($event.target as HTMLSelectElement).value"
-              >
-                <option v-for="a in chatAgents.agents" :key="a.id" :value="a.id">
-                  {{ a.name }} ({{ transportLabel(a.transport) }})
-                </option>
-              </select>
+              <Select v-model="ui.defaultChatAgent" class="min-w-[200px]" :options="chatAgentOptions" />
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Spawn sub-agents as</span>
-                <span class="field-desc">How <code>burrow spawn</code> sub-agents open. Chat prefills the task in a new chat's input; Terminal keeps <code>burrow wait</code> result capture.</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Spawn sub-agents as</span>
+                <span class="text-[11px] text-muted-foreground">How <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow spawn</code> sub-agents open. Chat prefills the task in a new chat's input; Terminal keeps <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow wait</code> result capture.</span>
               </div>
-              <select
-                class="select"
-                :value="ui.spawnMode"
-                @change="ui.spawnMode = ($event.target as HTMLSelectElement).value as 'terminal' | 'chat'"
-              >
-                <option value="terminal">Terminal tab</option>
-                <option value="chat">Chat</option>
-              </select>
+              <Select v-model="ui.spawnMode" class="min-w-[200px]" :options="SPAWN_MODE_OPTIONS" />
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Chat agents</span>
-                <span class="field-desc">Add / edit ACP agents — command, args, environment variables, icon &amp; color.</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Chat agents</span>
+                <span class="text-[11px] text-muted-foreground">Add / edit ACP agents — command, args, environment variables, icon &amp; color.</span>
               </div>
-              <button class="btn" @click="agentConfigOpen = true">Configure agents…</button>
+              <Button variant="outline" size="sm" @click="agentConfigOpen = true">Configure agents…</Button>
             </div>
           </div>
           <ChatAgentConfig v-if="agentConfigOpen" @close="agentConfigOpen = false" />
 
-          <div class="settings-group">
-            <span class="group-label">Floating windows</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Snap corner</span>
-                <span class="field-desc">Which screen corner popped-out terminal bubbles snap to and stack at</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Floating windows</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Snap corner</span>
+                <span class="text-[11px] text-muted-foreground">Which screen corner popped-out terminal bubbles snap to and stack at</span>
               </div>
-              <select
-                class="select"
-                :value="ui.floatCorner"
-                @change="ui.floatCorner = ($event.target as HTMLSelectElement).value"
-              >
-                <option value="top-right">Top right</option>
-                <option value="top-left">Top left</option>
-                <option value="bottom-right">Bottom right</option>
-                <option value="bottom-left">Bottom left</option>
-              </select>
+              <Select v-model="ui.floatCorner" class="min-w-[200px]" :options="FLOAT_CORNER_OPTIONS" />
             </div>
           </div>
 
-          <div class="sec-foot">
-            <button class="reset-btn" @click="store.reset()">
+          <div class="mt-2 flex items-center gap-2.5">
+            <Button variant="outline" size="sm" @click="store.reset()">
               <PhArrowCounterClockwise :size="12" /> Reset to defaults
-            </button>
+            </Button>
           </div>
         </section>
 
         <!-- Remote access -->
-        <section v-else-if="active === 'remote'" class="section">
-          <div class="sec-head"><div class="sec-titles"><h2 class="sec-title">Remote access</h2><span class="sec-sub">Reach Burrow securely from another device</span></div></div>
-          <div class="sec-divider" />
-          <div class="settings-group remote-settings">
-            <span class="group-label">Burrow Remote</span>
-            <div class="field"><div class="field-info"><span class="field-name">Enable HTTP/WebSocket server</span><span class="field-desc">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><label class="toggle"><input type="checkbox" :checked="httpEnabled" @change="onToggleHttp(($event.target as HTMLInputElement).checked)" /><span class="toggle-track"><span class="toggle-thumb" /></span></label></div>
-            <div v-if="httpStatus?.enabled" class="field remote-credentials"><div class="field-info"><span class="field-name">Phone pairing code</span><span class="field-desc">Enter this six-digit code in Burrow Remote. The full token remains available for integrations.</span><code class="remote-token">{{ httpStatus.pairingCode }}</code></div><button class="btn" type="button" @click="copyToClipboard(httpStatus.pairingCode, 'pairing-code')">{{ copiedLabel === 'pairing-code' ? 'Copied' : 'Copy code' }}</button></div>
-            <div v-else class="field remote-note"><div class="field-info"><span class="field-name">Not enabled</span><span class="field-desc">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
-            <span class="group-label remote-tunnel-label">Private tunnel</span>
-            <div class="field"><div class="field-info"><span class="field-name">Tailscale tunnel</span><span class="field-desc"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code>/burrow</code> through your tailnet, never to the public internet. Existing services at <code>/</code> stay untouched.</template></span></div><label class="toggle" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))"><input type="checkbox" :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" @change="onToggleTailscale(($event.target as HTMLInputElement).checked)" /><span class="toggle-track"><span class="toggle-thumb" /></span></label></div>
-            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="field remote-url"><div class="field-info"><span class="field-name">Open Burrow Remote</span><code class="remote-token">{{ tailscaleStatus.serve_url }}</code><span class="field-desc">Open this address on your phone, then paste the token above.</span></div><button class="btn" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</button></div>
+        <section v-else-if="active === 'remote'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5"><div class="flex items-baseline gap-2.5"><h2 class="text-[15px] font-semibold text-foreground">Remote access</h2><span class="text-xs text-muted-foreground">Reach Burrow securely from another device</span></div></div>
+          <div class="h-px bg-border" />
+          <div class="flex max-w-[880px] flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Burrow Remote</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
+            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span class="text-[11px] text-muted-foreground">Enter this six-digit code in Burrow Remote. The full token remains available for integrations.</span><code class="mt-1.5 block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ httpStatus.pairingCode }}</code></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(httpStatus.pairingCode, 'pairing-code')">{{ copiedLabel === 'pairing-code' ? 'Copied' : 'Copy code' }}</Button></div>
+            <div v-else class="flex items-center gap-4 rounded-md border border-dashed border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Not enabled</span><span class="text-[11px] text-muted-foreground">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
+            <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Private tunnel</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
+            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ tailscaleStatus.serve_url }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then paste the token above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
           </div>
         </section>
 
         <!-- Scripts -->
-        <section v-else-if="active === 'scripts'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Scripts</h2>
-              <span class="sec-sub">Named, multi-step commands run sequentially in a new terminal tab</span>
+        <section v-else-if="active === 'scripts'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Scripts</h2>
+              <span class="text-xs text-muted-foreground">Named, multi-step commands run sequentially in a new terminal tab</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <p class="profile-help">
+          <p class="m-0 text-xs leading-relaxed text-muted-foreground">
             A script is an ordered list of steps. They run one after another —
             with <strong>&amp;&amp;</strong> so each step starts only if the previous
             <em>succeeded</em>, or with <strong>;</strong> (Continue on error) so every
@@ -418,134 +403,134 @@
           </p>
 
           <!-- Active repo scripts -->
-          <div class="settings-group">
-            <div class="scripts-group-head">
-              <span class="group-label">
+          <div class="flex flex-col gap-2.5">
+            <div class="mb-1.5 flex items-center gap-2.5">
+              <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
                 {{ activeWsId != null ? `This repo — ${activeWsName}` : "This repo" }}
               </span>
-              <button class="add-btn" :disabled="activeWsPath == null" @click="activeWsPath != null && scriptsStore.addScript(activeWsPath)">
+              <Button variant="outline" size="sm" class="ml-auto" :disabled="activeWsPath == null" @click="activeWsPath != null && scriptsStore.addScript(activeWsPath)">
                 <PhPlus :size="11" /> Add Script
-              </button>
+              </Button>
             </div>
-            <p v-if="activeWsPath == null" class="cfg-hint">Open a workspace to add repo-specific scripts.</p>
+            <p v-if="activeWsPath == null" class="m-0 text-[11.5px] leading-relaxed text-muted-foreground">Open a workspace to add repo-specific scripts.</p>
 
             <div
               v-for="s in (activeWsPath != null ? scriptsStore.scriptsFor(activeWsPath) : [])"
               :key="s.id"
-              class="script-card"
+              class="mb-2.5 rounded-lg border border-border bg-base/50 p-2.5"
             >
-              <div class="sc-head">
-                <label class="dot-label" title="Pick color">
-                  <span class="dot" :style="{ background: s.color || '#34d399' }" />
-                  <input type="color" class="color-input" :value="s.color || '#34d399'" @input="s.color = val($event)" />
+              <div class="flex items-center gap-2">
+                <label class="group relative flex shrink-0 cursor-pointer items-center" title="Pick color">
+                  <span class="h-[7px] w-[7px] shrink-0 rounded-full transition-transform duration-100 group-hover:scale-[1.3]" :style="{ background: s.color || '#34d399' }" />
+                  <input type="color" class="absolute inset-0 h-full w-full cursor-pointer border-0 p-0 opacity-0" :value="s.color || '#34d399'" @input="s.color = val($event)" />
                 </label>
-                <input class="inp sc-name" :value="s.name" placeholder="Script name" @input="s.name = val($event)" />
-                <label class="sc-toggle" title="Continue on error — chain steps with ; instead of &&">
-                  <input type="checkbox" :checked="s.continueOnError" @change="s.continueOnError = ($event.target as HTMLInputElement).checked" />
-                  <span class="toggle-track"><span class="toggle-thumb" /></span>
-                  <span class="sc-toggle-label">Continue on error</span>
+                <input class="min-w-0 w-[200px] flex-none border-0 bg-transparent text-[13px] font-medium text-foreground outline-none placeholder:text-muted-foreground/50" :value="s.name" placeholder="Script name" @input="s.name = val($event)" />
+                <label class="flex cursor-pointer items-center gap-1.5" title="Continue on error — chain steps with ; instead of &&">
+                  <Switch :checked="s.continueOnError" @update:checked="(v: boolean) => s.continueOnError = v" />
+                  <span class="whitespace-nowrap text-[11px] text-secondary-foreground">Continue on error</span>
                 </label>
-                <span class="spacer" />
-                <button class="row-del" title="Remove script" @click="activeWsPath != null && scriptsStore.removeScript(activeWsPath, s.id)">
+                <span class="flex-1" />
+                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove script" @click="activeWsPath != null && scriptsStore.removeScript(activeWsPath, s.id)">
                   <PhTrash :size="13" />
                 </button>
               </div>
-              <div class="sc-steps">
-                <div v-for="(_, i) in s.steps" :key="i" class="sc-step">
-                  <span class="sc-step-idx">{{ i + 1 }}</span>
-                  <input class="inp mono sc-step-inp" :value="s.steps[i]" placeholder="npm install" @input="setStep(s, i, val($event))" />
-                  <button class="sc-step-btn" title="Move up" :disabled="i === 0" @click="moveStep(s, i, i - 1)"><PhArrowUp :size="12" /></button>
-                  <button class="sc-step-btn" title="Move down" :disabled="i === s.steps.length - 1" @click="moveStep(s, i, i + 1)"><PhArrowDown :size="12" /></button>
-                  <button class="sc-step-btn del" title="Remove step" @click="removeStep(s, i)"><PhX :size="12" /></button>
+              <div class="mt-2.5 flex flex-col gap-[5px]">
+                <div v-for="(_, i) in s.steps" :key="i" class="flex items-center gap-1.5">
+                  <span class="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded bg-accent/12 text-[10px] text-muted-foreground">{{ i + 1 }}</span>
+                  <input class="min-w-0 w-full flex-1 border-0 bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50" :value="s.steps[i]" placeholder="npm install" @input="setStep(s, i, val($event))" />
+                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent/12 hover:text-foreground disabled:opacity-30" title="Move up" :disabled="i === 0" @click="moveStep(s, i, i - 1)"><PhArrowUp :size="12" /></button>
+                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent/12 hover:text-foreground disabled:opacity-30" title="Move down" :disabled="i === s.steps.length - 1" @click="moveStep(s, i, i + 1)"><PhArrowDown :size="12" /></button>
+                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-transparent text-muted-foreground transition-colors hover:bg-destructive/16 hover:text-destructive disabled:opacity-30" title="Remove step" @click="removeStep(s, i)"><PhX :size="12" /></button>
                 </div>
-                <button class="add-btn sc-add-step" @click="addStep(s)"><PhPlus :size="11" /> Add step</button>
+                <Button variant="outline" size="sm" class="mt-1 self-start" @click="addStep(s)"><PhPlus :size="11" /> Add step</Button>
               </div>
-              <div class="sc-preview"><span class="sc-preview-label">Runs:</span> <code>{{ scriptPreview(s) }}</code></div>
+              <div class="mt-2.5 flex items-baseline gap-1.5 overflow-hidden text-[11px] text-muted-foreground"><span class="shrink-0">Runs:</span> <code class="truncate font-mono text-secondary-foreground">{{ scriptPreview(s) }}</code></div>
             </div>
           </div>
 
         </section>
 
         <!-- Claude Profiles -->
-        <section v-else-if="active === 'profiles'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Claude Profiles</h2>
-              <span class="sec-sub">Launch Mission Control tasks with a different config dir, binary, or flags</span>
+        <section v-else-if="active === 'profiles'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Claude Profiles</h2>
+              <span class="text-xs text-muted-foreground">Launch Mission Control tasks with a different config dir, binary, or flags</span>
             </div>
-            <div class="add-area">
-              <button class="add-btn" @click="profilesStore.add()">
+            <div class="ml-auto flex items-center gap-2.5">
+              <Button variant="outline" size="sm" @click="profilesStore.add()">
                 <PhPlus :size="11" /> Add Profile
-              </button>
+              </Button>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <p class="profile-help">
-            A profile sets <code>CLAUDE_CONFIG_DIR</code> (a separate Claude account / settings / session
+          <p class="m-0 text-xs leading-relaxed text-muted-foreground">
+            A profile sets <code class="rounded bg-hover px-1 font-mono text-[11px] text-secondary-foreground">CLAUDE_CONFIG_DIR</code> (a separate Claude account / settings / session
             store), the binary to run, and extra flags. Pick one per task in Mission Control's composer.
           </p>
 
-          <div class="profiles-list">
-            <div v-for="p in profilesStore.profiles" :key="p.id" class="profile-card">
-              <div class="pc-head">
-                <PhUserGear :size="14" class="pc-ico" />
+          <div class="flex flex-col gap-3">
+            <div v-for="p in profilesStore.profiles" :key="p.id" class="rounded-[10px] border border-border bg-panel px-3.5 py-3">
+              <div class="flex items-center gap-2.5">
+                <PhUserGear :size="14" class="shrink-0 text-accent" />
                 <input
-                  class="inp pc-name"
+                  class="w-auto max-w-[220px] flex-none border-0 bg-transparent text-[13px] font-semibold text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-70"
                   :value="p.name"
                   placeholder="Profile name"
                   :disabled="p.id === DEFAULT_PROFILE_ID"
                   @input="profilesStore.update(p.id, { name: val($event) })"
                 />
-                <span v-if="p.id === DEFAULT_PROFILE_ID" class="pc-badge">built-in</span>
-                <span class="spacer" />
+                <Badge v-if="p.id === DEFAULT_PROFILE_ID" variant="secondary" class="text-[10px]">built-in</Badge>
+                <span class="flex-1" />
                 <button
                   v-if="p.id !== DEFAULT_PROFILE_ID"
-                  class="pc-del"
+                  class="rounded p-1 text-muted-foreground hover:bg-hover hover:text-destructive"
                   title="Delete profile"
                   @click="profilesStore.remove(p.id)"
                 ><PhTrash :size="13" /></button>
               </div>
-              <div class="pc-grid">
-                <label class="pc-field">
-                  <span>Command</span>
+              <div class="mt-3 grid grid-cols-2 gap-x-3.5 gap-y-2.5">
+                <label class="flex min-w-0 flex-col gap-1.5">
+                  <span class="text-[11px] text-secondary-foreground">Command</span>
                   <input
-                    class="inp mono"
+                    class="rounded-lg border border-border bg-base/40 px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
                     :value="p.command"
                     placeholder="claude"
                     @input="profilesStore.update(p.id, { command: val($event) })"
                   />
                 </label>
-                <label class="pc-field">
-                  <span>Extra flags</span>
+                <label class="flex min-w-0 flex-col gap-1.5">
+                  <span class="text-[11px] text-secondary-foreground">Extra flags</span>
                   <input
-                    class="inp mono"
+                    class="rounded-lg border border-border bg-base/40 px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
                     :value="p.args"
                     placeholder="--model haiku"
                     @input="profilesStore.update(p.id, { args: val($event) })"
                   />
                 </label>
-                <label class="pc-field pc-field-wide">
-                  <span>Config dir <em>(CLAUDE_CONFIG_DIR — blank = default)</em></span>
-                  <div class="pc-dir">
+                <label class="col-span-2 flex min-w-0 flex-col gap-1.5">
+                  <span class="text-[11px] text-secondary-foreground">Config dir <em class="not-italic text-muted-foreground">(CLAUDE_CONFIG_DIR — blank = default)</em></span>
+                  <div class="flex items-stretch gap-1.5">
                     <input
-                      class="inp mono"
+                      class="flex-1 rounded-lg border border-border bg-base/40 px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
                       :value="p.configDir"
                       placeholder="~/.claude-work"
                       @input="profilesStore.update(p.id, { configDir: val($event) })"
                     />
-                    <button class="pc-browse" title="Browse…" @click="pickProfileConfigDir(p.id)">
+                    <Button variant="outline" size="icon" title="Browse…" @click="pickProfileConfigDir(p.id)">
                       <PhFolderOpen :size="13" />
-                    </button>
+                    </Button>
                   </div>
                 </label>
-                <label class="pc-field pc-field-wide pc-org-row">
+                <label class="col-span-2 flex flex-row items-center gap-2">
                   <input
                     type="checkbox"
+                    class="h-3.5 w-3.5 shrink-0 cursor-pointer accent-accent"
                     :checked="p.orgAccount"
                     @change="profilesStore.update(p.id, { orgAccount: ($event.target as HTMLInputElement).checked })"
                   />
-                  <span>Org / team account <em>(skips OAuth usage API, reads local transcripts instead)</em></span>
+                  <span class="text-[11px] text-secondary-foreground">Org / team account <em class="not-italic text-muted-foreground">(skips OAuth usage API, reads local transcripts instead)</em></span>
                 </label>
               </div>
             </div>
@@ -553,24 +538,24 @@
         </section>
 
         <!-- General -->
-        <section v-else-if="active === 'general'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">General</h2>
-              <span class="sec-sub">Fonts &amp; appearance</span>
+        <section v-else-if="active === 'general'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">General</h2>
+              <span class="text-xs text-muted-foreground">Fonts &amp; appearance</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="settings-group">
-            <span class="group-label">Interface</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">UI font</span>
-                <span class="field-desc">Font used across the app interface</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">UI font</span>
+                <span class="text-[11px] text-muted-foreground">Font used across the app interface</span>
               </div>
               <select
-                class="select"
+                class="h-8 min-w-[200px] cursor-pointer rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                 :value="ui.uiFont"
                 :style="{ fontFamily: ui.uiFont }"
                 @change="ui.uiFont = val($event)"
@@ -580,52 +565,41 @@
                 </option>
               </select>
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">UI font size</span>
-                <span class="field-desc">Base interface text size (10–20)</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">UI font size</span>
+                <span class="text-[11px] text-muted-foreground">Base interface text size (10–20)</span>
               </div>
-              <div class="size-ctl">
+              <div class="flex items-center gap-1.5">
                 <input
-                  class="select size-inp"
+                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   type="number"
                   min="10"
                   max="20"
                   :value="ui.uiFontSize"
                   @input="ui.uiFontSize = clampRange(val($event), 10, 20, 13)"
                 />
-                <span class="size-unit">px</span>
+                <span class="text-xs text-muted-foreground/70">px</span>
               </div>
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">UI scale</span>
-                <span class="field-desc">Zoom the entire interface</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">UI scale</span>
+                <span class="text-[11px] text-muted-foreground">Zoom the entire interface</span>
               </div>
-              <select
-                class="select"
-                :value="String(ui.uiScale)"
-                @change="ui.uiScale = Number(val($event))"
-              >
-                <option value="0.8">80%</option>
-                <option value="0.9">90%</option>
-                <option value="1">100%</option>
-                <option value="1.1">110%</option>
-                <option value="1.25">125%</option>
-                <option value="1.5">150%</option>
-              </select>
+              <Select v-model="uiScaleModel" class="min-w-[200px]" :options="UI_SCALE_OPTIONS" />
             </div>
           </div>
 
-          <div class="settings-group">
-            <span class="group-label">Terminal</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Terminal font</span>
-                <span class="field-desc">Monospace font for terminal panes</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Terminal</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Terminal font</span>
+                <span class="text-[11px] text-muted-foreground">Monospace font for terminal panes</span>
               </div>
               <select
-                class="select"
+                class="h-8 min-w-[200px] cursor-pointer rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                 :value="ui.terminalFont"
                 :style="{ fontFamily: ui.terminalFont }"
                 @change="ui.terminalFont = val($event)"
@@ -635,109 +609,94 @@
                 </option>
               </select>
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Terminal font size</span>
-                <span class="field-desc">Size in pixels (8–24)</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Terminal font size</span>
+                <span class="text-[11px] text-muted-foreground">Size in pixels (8–24)</span>
               </div>
-              <div class="size-ctl">
+              <div class="flex items-center gap-1.5">
                 <input
-                  class="select size-inp"
+                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   type="number"
                   min="8"
                   max="24"
                   :value="ui.terminalFontSize"
                   @input="ui.terminalFontSize = clampRange(val($event), 8, 24, 13)"
                 />
-                <span class="size-unit">px</span>
+                <span class="text-xs text-muted-foreground/70">px</span>
               </div>
             </div>
-            <div class="term-preview" :style="{ fontFamily: ui.terminalFont, fontSize: ui.terminalFontSize + 'px' }">
-              <span class="tp-prompt">~/agentic-ide $</span> claude --resume
+            <div class="rounded-md border border-border bg-base px-3.5 py-3 leading-snug text-foreground/90" :style="{ fontFamily: ui.terminalFont, fontSize: ui.terminalFontSize + 'px' }">
+              <span class="text-success">~/agentic-ide $</span> claude --resume
             </div>
           </div>
 
-          <div class="settings-group">
-            <span class="group-label">Layout</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Swap panel sides</span>
-                <span class="field-desc">Move primary panel to the right</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Layout</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Swap panel sides</span>
+                <span class="text-[11px] text-muted-foreground">Move primary panel to the right</span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.swapPanels" @change="ui.swapPanels = ($event.target as HTMLInputElement).checked" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.swapPanels" @update:checked="(v: boolean) => ui.swapPanels = v" />
             </div>
           </div>
 
-          <div class="settings-group">
-            <span class="group-label">Developer</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Terminal debug overlay</span>
-                <span class="field-desc">Show per-terminal diagnostics (size, bytes, buffer)</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Developer</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Terminal debug overlay</span>
+                <span class="text-[11px] text-muted-foreground">Show per-terminal diagnostics (size, bytes, buffer)</span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.debugOverlay" @change="ui.debugOverlay = ($event.target as HTMLInputElement).checked" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.debugOverlay" @update:checked="(v: boolean) => ui.debugOverlay = v" />
             </div>
           </div>
 
-          <div class="sec-foot">
-            <button class="reset-btn" @click="ui.resetFonts()">
+          <div class="mt-2 flex items-center gap-2.5">
+            <Button variant="outline" size="sm" @click="ui.resetFonts()">
               <PhArrowCounterClockwise :size="12" /> Reset fonts
-            </button>
+            </Button>
           </div>
         </section>
 
         <!-- Notifications -->
-        <section v-else-if="active === 'notifications'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Notifications</h2>
-              <span class="sec-sub">Sounds for agent activity</span>
+        <section v-else-if="active === 'notifications'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Notifications</h2>
+              <span class="text-xs text-muted-foreground">Sounds for agent activity</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="settings-group">
-            <span class="group-label">Toasts</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Position</span>
-                <span class="field-desc">Where on-screen toast notifications appear</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Toasts</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Position</span>
+                <span class="text-[11px] text-muted-foreground">Where on-screen toast notifications appear</span>
               </div>
-              <select
-                class="select"
-                :value="ui.toastPosition"
-                @change="ui.toastPosition = ($event.target as HTMLSelectElement).value as ToastPosition"
-              >
-                <option v-for="p in TOAST_POSITIONS" :key="p.id" :value="p.id">{{ p.label }}</option>
-              </select>
+              <Select v-model="ui.toastPosition" class="min-w-[200px]" :options="toastPositionOptions" />
             </div>
           </div>
 
-          <div class="settings-group">
-            <span class="group-label">General</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Enable sounds</span>
-                <span class="field-desc">Master switch for all notification sounds</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">General</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Enable sounds</span>
+                <span class="text-[11px] text-muted-foreground">Master switch for all notification sounds</span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.soundEnabled" @change="ui.soundEnabled = ($event.target as HTMLInputElement).checked" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.soundEnabled" @update:checked="(v: boolean) => ui.soundEnabled = v" />
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Volume</span>
-                <span class="field-desc">Playback volume ({{ ui.soundVolume }}%)</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Volume</span>
+                <span class="text-[11px] text-muted-foreground">Playback volume ({{ ui.soundVolume }}%)</span>
               </div>
               <input
-                class="vol-range"
+                class="w-40 cursor-pointer accent-accent"
                 type="range"
                 min="0"
                 max="100"
@@ -747,268 +706,238 @@
             </div>
           </div>
 
-          <div class="settings-group">
-            <span class="group-label">Agent finished</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Play when an agent finishes while you're away</span>
-                <span class="field-desc">Fires on the "review" state (another tab/window)</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Agent finished</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Play when an agent finishes while you're away</span>
+                <span class="text-[11px] text-muted-foreground">Fires on the "review" state (another tab/window)</span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.soundDoneEnabled" @change="ui.soundDoneEnabled = ($event.target as HTMLInputElement).checked" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.soundDoneEnabled" @update:checked="(v: boolean) => ui.soundDoneEnabled = v" />
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Sound</span>
-                <span class="field-desc">Choose a built-in sound or a custom file</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Sound</span>
+                <span class="text-[11px] text-muted-foreground">Choose a built-in sound or a custom file</span>
               </div>
-              <div class="sound-ctl">
-                <select class="select" :value="ui.soundDoneId" @change="ui.soundDoneId = val($event)">
-                  <option v-for="s in soundsForKind('done')" :key="s.id" :value="s.id">{{ s.label }}</option>
-                  <option value="custom">Custom file…</option>
-                </select>
-                <button class="icon-btn" title="Test" @click="playSound('done', true)"><PhPlay :size="13" /></button>
+              <div class="flex items-center gap-1.5">
+                <Select v-model="ui.soundDoneId" class="min-w-[200px]" :options="soundDoneOptions" />
+                <button class="flex items-center justify-center rounded border border-border bg-transparent p-1.5 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground" title="Test" @click="playSound('done', true)"><PhPlay :size="13" /></button>
               </div>
             </div>
-            <div v-if="ui.soundDoneId === 'custom'" class="field">
-              <div class="field-info">
-                <span class="field-name">Custom file</span>
-                <span class="field-desc">{{ ui.soundDoneCustomPath ? soundFileName(ui.soundDoneCustomPath) : "No file selected" }}</span>
+            <div v-if="ui.soundDoneId === 'custom'" class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Custom file</span>
+                <span class="text-[11px] text-muted-foreground">{{ ui.soundDoneCustomPath ? soundFileName(ui.soundDoneCustomPath) : "No file selected" }}</span>
               </div>
-              <button class="reset-btn" @click="pickSound('done')"><PhFolderOpen :size="12" /> Choose…</button>
+              <Button variant="outline" size="sm" @click="pickSound('done')"><PhFolderOpen :size="12" /> Choose…</Button>
             </div>
           </div>
 
-          <div class="settings-group">
-            <span class="group-label">Needs input</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Play when an agent is waiting for your input</span>
-                <span class="field-desc">Fires on the "waiting" state</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Needs input</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Play when an agent is waiting for your input</span>
+                <span class="text-[11px] text-muted-foreground">Fires on the "waiting" state</span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.soundWaitingEnabled" @change="ui.soundWaitingEnabled = ($event.target as HTMLInputElement).checked" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.soundWaitingEnabled" @update:checked="(v: boolean) => ui.soundWaitingEnabled = v" />
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Sound</span>
-                <span class="field-desc">Choose a built-in sound or a custom file</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Sound</span>
+                <span class="text-[11px] text-muted-foreground">Choose a built-in sound or a custom file</span>
               </div>
-              <div class="sound-ctl">
-                <select class="select" :value="ui.soundWaitingId" @change="ui.soundWaitingId = val($event)">
-                  <option v-for="s in soundsForKind('waiting')" :key="s.id" :value="s.id">{{ s.label }}</option>
-                  <option value="custom">Custom file…</option>
-                </select>
-                <button class="icon-btn" title="Test" @click="playSound('waiting', true)"><PhPlay :size="13" /></button>
+              <div class="flex items-center gap-1.5">
+                <Select v-model="ui.soundWaitingId" class="min-w-[200px]" :options="soundWaitingOptions" />
+                <button class="flex items-center justify-center rounded border border-border bg-transparent p-1.5 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground" title="Test" @click="playSound('waiting', true)"><PhPlay :size="13" /></button>
               </div>
             </div>
-            <div v-if="ui.soundWaitingId === 'custom'" class="field">
-              <div class="field-info">
-                <span class="field-name">Custom file</span>
-                <span class="field-desc">{{ ui.soundWaitingCustomPath ? soundFileName(ui.soundWaitingCustomPath) : "No file selected" }}</span>
+            <div v-if="ui.soundWaitingId === 'custom'" class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Custom file</span>
+                <span class="text-[11px] text-muted-foreground">{{ ui.soundWaitingCustomPath ? soundFileName(ui.soundWaitingCustomPath) : "No file selected" }}</span>
               </div>
-              <button class="reset-btn" @click="pickSound('waiting')"><PhFolderOpen :size="12" /> Choose…</button>
+              <Button variant="outline" size="sm" @click="pickSound('waiting')"><PhFolderOpen :size="12" /> Choose…</Button>
             </div>
           </div>
         </section>
 
         <!-- Integrations -->
-        <section v-else-if="active === 'integrations'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Integrations</h2>
-              <span class="sec-sub">Send agent status to external services</span>
+        <section v-else-if="active === 'integrations'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Integrations</h2>
+              <span class="text-xs text-muted-foreground">Send agent status to external services</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="settings-group">
-            <span class="group-label">ntfy.sh — push notifications</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Enable ntfy</span>
-                <span class="field-desc">Push agent events to your phone/desktop via <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a></span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">ntfy.sh — push notifications</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Enable ntfy</span>
+                <span class="text-[11px] text-muted-foreground">Push agent events to your phone/desktop via <a class="text-accent hover:underline" href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a></span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.ntfyEnabled" @change="ui.ntfyEnabled = ($event.target as HTMLInputElement).checked" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.ntfyEnabled" @update:checked="(v: boolean) => ui.ntfyEnabled = v" />
             </div>
 
             <template v-if="ui.ntfyEnabled">
-              <div class="field">
-                <div class="field-info">
-                  <span class="field-name">Server</span>
-                  <span class="field-desc">Base URL of your ntfy server</span>
+              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+                <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                  <span class="text-[13px] font-medium text-foreground">Server</span>
+                  <span class="text-[11px] text-muted-foreground">Base URL of your ntfy server</span>
                 </div>
-                <input v-model="ui.ntfyServer" class="select cfg-inp" placeholder="https://ntfy.sh" spellcheck="false" />
+                <input v-model="ui.ntfyServer" class="h-8 min-w-[200px] rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="https://ntfy.sh" spellcheck="false" />
               </div>
-              <div class="field">
-                <div class="field-info">
-                  <span class="field-name">Topic</span>
-                  <span class="field-desc">Subscribe to this topic in the ntfy app to receive pushes</span>
+              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+                <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                  <span class="text-[13px] font-medium text-foreground">Topic</span>
+                  <span class="text-[11px] text-muted-foreground">Subscribe to this topic in the ntfy app to receive pushes</span>
                 </div>
-                <input v-model="ui.ntfyTopic" class="select cfg-inp" placeholder="my-burrow-agents" spellcheck="false" />
+                <input v-model="ui.ntfyTopic" class="h-8 min-w-[200px] rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="my-burrow-agents" spellcheck="false" />
               </div>
-              <div class="field">
-                <div class="field-info">
-                  <span class="field-name">Access token</span>
-                  <span class="field-desc">Optional — only for protected topics (Bearer token)</span>
+              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+                <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                  <span class="text-[13px] font-medium text-foreground">Access token</span>
+                  <span class="text-[11px] text-muted-foreground">Optional — only for protected topics (Bearer token)</span>
                 </div>
-                <input v-model="ui.ntfyToken" type="password" class="select cfg-inp" placeholder="tk_…" spellcheck="false" autocomplete="off" />
+                <input v-model="ui.ntfyToken" type="password" class="h-8 min-w-[200px] rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="tk_…" spellcheck="false" autocomplete="off" />
               </div>
             </template>
           </div>
 
-          <div v-if="ui.ntfyEnabled" class="settings-group">
-            <span class="group-label">Notify on</span>
-            <div v-for="ev in NTFY_EVENTS" :key="ev.id" class="field">
-              <div class="field-info">
-                <span class="field-name">{{ ev.label }}</span>
+          <div v-if="ui.ntfyEnabled" class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Notify on</span>
+            <div v-for="ev in NTFY_EVENTS" :key="ev.id" class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">{{ ev.label }}</span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.ntfyEvents.includes(ev.id)" @change="toggleNtfyEvent(ev.id, ($event.target as HTMLInputElement).checked)" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.ntfyEvents.includes(ev.id)" @update:checked="(v: boolean) => toggleNtfyEvent(ev.id, v)" />
             </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Only when away</span>
-                <span class="field-desc">Skip pushes while the Burrow window is focused</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Only when away</span>
+                <span class="text-[11px] text-muted-foreground">Skip pushes while the Burrow window is focused</span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.ntfyOnlyWhenAway" @change="ui.ntfyOnlyWhenAway = ($event.target as HTMLInputElement).checked" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.ntfyOnlyWhenAway" @update:checked="(v: boolean) => ui.ntfyOnlyWhenAway = v" />
             </div>
-            <div class="sec-foot">
-              <span v-if="ntfyTestMsg" class="ntfy-test-msg" :class="{ err: ntfyTestErr }">{{ ntfyTestMsg }}</span>
-              <button class="reset-btn" :disabled="!ui.ntfyTopic || ntfyTesting" @click="sendNtfyTest">
+            <div class="mt-2 flex items-center gap-2.5">
+              <span v-if="ntfyTestMsg" class="text-xs text-muted-foreground" :class="{ 'text-destructive': ntfyTestErr }">{{ ntfyTestMsg }}</span>
+              <Button variant="outline" size="sm" :disabled="!ui.ntfyTopic || ntfyTesting" @click="sendNtfyTest">
                 <PhPaperPlaneTilt :size="12" /> {{ ntfyTesting ? "Sending…" : "Send test" }}
-              </button>
+              </Button>
             </div>
           </div>
         </section>
 
         <!-- Plugins -->
-        <section v-else-if="active === 'plugins'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Plugins</h2>
-              <span class="sec-sub">Optional fun + experimental add-ons</span>
+        <section v-else-if="active === 'plugins'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Plugins</h2>
+              <span class="text-xs text-muted-foreground">Optional fun + experimental add-ons</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="settings-group">
-            <span class="group-label">🐾 Terminal Pets</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Enable pets</span>
-                <span class="field-desc">A mixed pixel zoo — cat, mole, slime, ghost, duck — roams the bottom of the window. One critter per active agent; it struts while the agent works, bounces when it needs input, hops when a turn finishes, and shakes red on error.</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">🐾 Terminal Pets</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Enable pets</span>
+                <span class="text-[11px] text-muted-foreground">A mixed pixel zoo — cat, mole, slime, ghost, duck — roams the bottom of the window. One critter per active agent; it struts while the agent works, bounces when it needs input, hops when a turn finishes, and shakes red on error.</span>
               </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="ui.petsEnabled" @change="ui.petsEnabled = ($event.target as HTMLInputElement).checked" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
+              <Switch :checked="ui.petsEnabled" @update:checked="(v: boolean) => ui.petsEnabled = v" />
             </div>
 
             <template v-if="ui.petsEnabled">
-              <div class="field">
-                <div class="field-info">
-                  <span class="field-name">Speech bubbles</span>
-                  <span class="field-desc">Pets squeak tiny status quips — “working…”, “need input!”, “done!”</span>
+              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+                <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                  <span class="text-[13px] font-medium text-foreground">Speech bubbles</span>
+                  <span class="text-[11px] text-muted-foreground">Pets squeak tiny status quips — “working…”, “need input!”, “done!”</span>
                 </div>
-                <label class="toggle">
-                  <input type="checkbox" :checked="ui.petsSpeech" @change="ui.petsSpeech = ($event.target as HTMLInputElement).checked" />
-                  <span class="toggle-track"><span class="toggle-thumb" /></span>
-                </label>
+                <Switch :checked="ui.petsSpeech" @update:checked="(v: boolean) => ui.petsSpeech = v" />
               </div>
-              <div class="field">
-                <div class="field-info">
-                  <span class="field-name">Leveling &amp; crowns</span>
-                  <span class="field-desc">Pets level up as their agent finishes turns and earn a ♛ crown once they hit veteran status.</span>
+              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+                <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                  <span class="text-[13px] font-medium text-foreground">Leveling &amp; crowns</span>
+                  <span class="text-[11px] text-muted-foreground">Pets level up as their agent finishes turns and earn a ♛ crown once they hit veteran status.</span>
                 </div>
-                <label class="toggle">
-                  <input type="checkbox" :checked="ui.petsLeveling" @change="ui.petsLeveling = ($event.target as HTMLInputElement).checked" />
-                  <span class="toggle-track"><span class="toggle-thumb" /></span>
-                </label>
+                <Switch :checked="ui.petsLeveling" @update:checked="(v: boolean) => ui.petsLeveling = v" />
               </div>
-              <div class="sec-foot">
-                <span class="sec-sub">Tip: click a pet to give it a poke.</span>
+              <div class="mt-2 flex items-center gap-2.5">
+                <span class="text-xs text-muted-foreground">Tip: click a pet to give it a poke.</span>
               </div>
             </template>
           </div>
         </section>
 
         <!-- Keybindings -->
-        <section v-else-if="active === 'keybindings'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Keyboard Shortcuts</h2>
-              <span class="sec-sub">Read-only reference — all app shortcuts</span>
+        <section v-else-if="active === 'keybindings'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Keyboard Shortcuts</h2>
+              <span class="text-xs text-muted-foreground">Read-only reference — all app shortcuts</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div v-for="group in SHORTCUT_GROUPS" :key="group.label" class="settings-group">
-            <span class="group-label">{{ group.label }}</span>
-            <div v-for="s in group.shortcuts" :key="s.keys" class="kb-row">
-              <span class="kb-desc">{{ s.desc }}</span>
-              <span class="kb-keys">
-                <kbd v-for="k in s.keys.split(' ')" :key="k" class="kb-key">{{ k }}</kbd>
+          <div v-for="group in SHORTCUT_GROUPS" :key="group.label" class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{{ group.label }}</span>
+            <div v-for="s in group.shortcuts" :key="s.keys" class="flex items-center justify-between gap-3 border-b border-border/40 py-1.5 last:border-b-0">
+              <span class="text-xs text-muted-foreground">{{ s.desc }}</span>
+              <span class="flex shrink-0 items-center gap-[3px]">
+                <kbd v-for="k in s.keys.split(' ')" :key="k" class="inline-flex items-center justify-center rounded border border-border bg-hover px-1.5 py-0.5 font-mono text-[11px] leading-snug text-secondary-foreground">{{ k }}</kbd>
               </span>
             </div>
           </div>
         </section>
 
         <!-- Workspaces -->
-        <section v-else-if="active === 'workspaces'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Workspaces</h2>
-              <span class="sec-sub">Customize project icons</span>
+        <section v-else-if="active === 'workspaces'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Workspaces</h2>
+              <span class="text-xs text-muted-foreground">Customize project icons</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="settings-group">
-            <span class="group-label">Worktrees directory</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Where new git worktrees are created</span>
-                <span class="field-desc">Worktrees land at &lt;dir&gt;/&lt;repo&gt;/&lt;branch&gt;</span>
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Worktrees directory</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Where new git worktrees are created</span>
+                <span class="text-[11px] text-muted-foreground">Worktrees land at &lt;dir&gt;/&lt;repo&gt;/&lt;branch&gt;</span>
               </div>
-              <div class="wt-dir-ctl">
+              <div class="flex items-center gap-1.5">
                 <input
-                  class="select wt-dir-input"
+                  class="h-8 min-w-[240px] rounded-md border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   :value="ui.worktreesDir"
                   @input="ui.worktreesDir = ($event.target as HTMLInputElement).value"
                   spellcheck="false"
                 />
-                <button class="reset-btn" @click="pickWorktreesDir"><PhFolderOpen :size="12" /> Browse…</button>
+                <Button variant="outline" size="sm" @click="pickWorktreesDir"><PhFolderOpen :size="12" /> Browse…</Button>
               </div>
             </div>
           </div>
 
-          <div class="ws-list">
-            <div v-for="w in wsStore.workspaces" :key="w.id" class="ws-row">
-              <button class="ws-icon-btn" title="Change icon" @click="pickWsIcon(w.id)">
-                <img v-if="wsStore.icons[w.id]" :src="wsStore.icons[w.id]" class="ws-icon-img" />
-                <PhFolder v-else :size="18" weight="fill" class="ws-icon-fb" />
-                <span class="ws-icon-edit"><PhPencilSimple :size="10" /></span>
+          <div class="flex flex-col gap-1.5">
+            <div v-for="w in wsStore.workspaces" :key="w.id" class="flex items-center gap-3 rounded-lg border border-border bg-hover px-2.5 py-2">
+              <button class="group relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-base hover:border-accent/40" title="Change icon" @click="pickWsIcon(w.id)">
+                <img v-if="wsStore.icons[w.id]" :src="wsStore.icons[w.id]" class="h-full w-full object-cover" />
+                <PhFolder v-else :size="18" weight="fill" class="text-[#60a5fa]" />
+                <span class="absolute -bottom-px -right-px hidden h-3.5 w-3.5 items-center justify-center rounded-[4px_0_6px_0] bg-accent text-white group-hover:flex"><PhPencilSimple :size="10" /></span>
               </button>
-              <div class="ws-meta">
-                <span class="ws-name">{{ w.name }}</span>
-                <span class="ws-path">{{ w.path }}</span>
+              <div class="flex min-w-0 flex-1 flex-col">
+                <span class="text-[13px] font-medium text-foreground">{{ w.name }}</span>
+                <span class="truncate text-[11px] text-muted-foreground">{{ w.path }}</span>
               </div>
               <button
                 v-if="wsStore.icons[w.id]"
-                class="ws-clear"
+                class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border border-border bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
                 title="Reset to default icon"
                 @click="wsStore.clearIcon(w.id)"
               >
@@ -1016,93 +945,93 @@
               </button>
             </div>
 
-            <div v-if="wsStore.workspaces.length === 0" class="tbl-empty">
+            <div v-if="wsStore.workspaces.length === 0" class="py-5 text-center text-xs text-muted-foreground/50">
               No workspaces yet. Open a folder first.
             </div>
           </div>
         </section>
 
         <!-- Appearance -->
-        <section v-else-if="active === 'appearance'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Appearance</h2>
-              <span class="sec-sub">Color theme</span>
+        <section v-else-if="active === 'appearance'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Appearance</h2>
+              <span class="text-xs text-muted-foreground">Color theme</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="settings-group">
-            <span class="group-label">Theme</span>
-            <div class="theme-grid">
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Theme</span>
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
               <button
                 v-for="t in THEMES"
                 :key="t.key"
-                class="theme-card"
-                :class="{ selected: ui.theme === t.key }"
+                class="flex flex-col gap-2 rounded-lg border border-border bg-base p-2 text-left transition-[border-color,box-shadow] duration-[120ms] hover:border-muted-foreground"
+                :class="ui.theme === t.key && 'border-accent shadow-[0_0_0_1px_var(--accent)]'"
                 @click="ui.setTheme(t.key)"
               >
                 <div
-                  class="theme-swatch"
+                  class="relative h-16 overflow-hidden rounded-md border"
                   :style="{ background: t.vars['bg-base'], borderColor: t.vars.border }"
                 >
-                  <div class="sw-panel" :style="{ background: t.vars['bg-panel'] }">
-                    <span class="sw-line" :style="{ background: t.vars['text-primary'] }" />
-                    <span class="sw-line short" :style="{ background: t.vars['text-secondary'] }" />
+                  <div class="absolute left-2 top-2 flex h-[calc(100%-16px)] w-[46%] flex-col gap-[5px] rounded p-[7px]" :style="{ background: t.vars['bg-panel'] }">
+                    <span class="h-1 w-4/5 rounded-sm opacity-90" :style="{ background: t.vars['text-primary'] }" />
+                    <span class="h-1 w-1/2 rounded-sm opacity-60" :style="{ background: t.vars['text-secondary'] }" />
                   </div>
-                  <div class="sw-dots">
-                    <span :style="{ background: t.vars.accent }" />
-                    <span :style="{ background: t.vars.green }" />
-                    <span :style="{ background: t.vars.yellow }" />
-                    <span :style="{ background: t.vars.red }" />
+                  <div class="absolute bottom-[9px] right-[9px] flex gap-[5px]">
+                    <span class="h-[9px] w-[9px] rounded-full" :style="{ background: t.vars.accent }" />
+                    <span class="h-[9px] w-[9px] rounded-full" :style="{ background: t.vars.green }" />
+                    <span class="h-[9px] w-[9px] rounded-full" :style="{ background: t.vars.yellow }" />
+                    <span class="h-[9px] w-[9px] rounded-full" :style="{ background: t.vars.red }" />
                   </div>
                 </div>
-                <div class="theme-card-foot">
-                  <span class="theme-name">{{ t.label }}</span>
-                  <PhCheck v-if="ui.theme === t.key" :size="13" class="theme-check" />
+                <div class="flex items-center justify-between px-0.5">
+                  <span class="text-xs text-foreground">{{ t.label }}</span>
+                  <PhCheck v-if="ui.theme === t.key" :size="13" class="text-accent" />
                 </div>
               </button>
             </div>
           </div>
 
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
           <!-- Background image -->
-          <div class="settings-group bg-group">
-            <span class="group-label">Background</span>
+          <div class="flex max-w-[560px] flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Background</span>
 
             <!-- Image picker card -->
-            <div class="bg-card">
+            <div class="flex items-center gap-3.5 rounded-[10px] border border-border bg-hover p-3">
               <div
-                class="bg-thumb"
-                :class="{ 'is-empty': !ui.bgImageUrl }"
+                class="group relative flex h-[74px] w-[116px] shrink-0 cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border border-border bg-base bg-cover bg-center transition-colors duration-[120ms] hover:border-accent"
+                :class="{ 'border-dashed text-muted-foreground': !ui.bgImageUrl }"
                 :style="ui.bgImageUrl ? { backgroundImage: `url('${ui.bgImageUrl}')` } : {}"
                 @click="pickBgImage"
               >
                 <template v-if="!ui.bgImageUrl">
                   <PhImage :size="22" weight="thin" />
-                  <span class="bg-thumb-hint">Click to choose</span>
+                  <span class="text-[10px] text-muted-foreground">Click to choose</span>
                 </template>
-                <div v-else class="bg-thumb-overlay"><PhPencilSimple :size="16" weight="bold" /></div>
+                <div v-else class="absolute inset-0 flex items-center justify-center bg-black/45 text-white opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100"><PhPencilSimple :size="16" weight="bold" /></div>
               </div>
-              <div class="bg-card-body">
-                <span class="bg-card-name">{{ ui.bgImagePath ? bgFileName(ui.bgImagePath) : "No background image" }}</span>
-                <span class="bg-card-sub">{{ ui.bgImagePath ? "Shown behind the workspace" : "PNG, JPG or WebP" }}</span>
-                <div class="bg-card-btns">
-                  <button class="bg-btn bg-btn-primary" @click="pickBgImage">
+              <div class="flex min-w-0 flex-1 flex-col gap-0.75">
+                <span class="truncate text-[13px] font-semibold text-foreground">{{ ui.bgImagePath ? bgFileName(ui.bgImagePath) : "No background image" }}</span>
+                <span class="text-[11px] text-muted-foreground">{{ ui.bgImagePath ? "Shown behind the workspace" : "PNG, JPG or WebP" }}</span>
+                <div class="mt-2 flex gap-1.5">
+                  <button class="rounded-md border border-border bg-base px-3 py-1.25 text-xs text-foreground transition-colors hover:border-accent hover:text-accent" @click="pickBgImage">
                     {{ ui.bgImagePath ? "Replace…" : "Choose image…" }}
                   </button>
-                  <button v-if="ui.bgImagePath" class="bg-btn bg-btn-clear" @click="ui.clearBgImage()">Remove</button>
+                  <button v-if="ui.bgImagePath" class="rounded-md border border-border bg-base px-3 py-1.25 text-xs text-foreground transition-colors hover:border-destructive hover:text-destructive" @click="ui.clearBgImage()">Remove</button>
                 </div>
               </div>
             </div>
 
             <template v-if="ui.bgImagePath">
               <!-- Opacity -->
-              <div class="bg-control">
-                <div class="bg-control-head">
-                  <span class="bg-control-name">Opacity</span>
-                  <span class="bg-control-val">{{ Math.round(ui.bgOpacity * 100) }}%</span>
+              <div class="flex flex-col gap-2 rounded-[10px] border border-border bg-hover px-3.5 py-3">
+                <div class="flex items-baseline justify-between gap-2.5">
+                  <span class="text-xs font-semibold text-foreground">Opacity</span>
+                  <span class="text-xs font-semibold tabular-nums text-accent">{{ Math.round(ui.bgOpacity * 100) }}%</span>
                 </div>
                 <input
                   type="range"
@@ -1110,30 +1039,30 @@
                   max="1"
                   step="0.01"
                   :value="ui.bgOpacity"
-                  class="bg-slider"
+                  class="h-1 w-full cursor-pointer accent-accent"
                   @input="ui.bgOpacity = parseFloat(($event.target as HTMLInputElement).value)"
                 />
               </div>
 
               <!-- Backdrop blur -->
-              <div class="bg-control bg-blur-block">
-                <div class="bg-control-head">
-                  <span class="bg-control-name">Backdrop blur</span>
-                  <span class="bg-control-sub">Frosted-glass over the image</span>
+              <div class="flex flex-col gap-2 rounded-[10px] border border-border bg-hover px-3.5 py-3">
+                <div class="flex items-baseline justify-between gap-2.5">
+                  <span class="text-xs font-semibold text-foreground">Backdrop blur</span>
+                  <span class="text-[11px] text-muted-foreground">Frosted-glass over the image</span>
                 </div>
-                <div class="blur-grid">
-                  <div v-for="b in blurControls" :key="b.key" class="blur-row">
-                    <span class="blur-name">{{ b.label }}</span>
+                <div class="mt-0.5 flex flex-col gap-2.5">
+                  <div v-for="b in blurControls" :key="b.key" class="grid grid-cols-[170px_1fr_42px] items-center gap-3">
+                    <span class="text-xs text-secondary-foreground">{{ b.label }}</span>
                     <input
                       type="range"
                       min="0"
                       max="40"
                       step="1"
                       :value="(ui as any)[b.key]"
-                      class="bg-slider"
+                      class="h-1 w-full cursor-pointer accent-accent"
                       @input="(ui as any)[b.key] = parseInt(($event.target as HTMLInputElement).value)"
                     />
-                    <span class="blur-val">{{ (ui as any)[b.key] }}px</span>
+                    <span class="text-right text-[11px] tabular-nums text-accent">{{ (ui as any)[b.key] }}px</span>
                   </div>
                 </div>
               </div>
@@ -1142,225 +1071,226 @@
         </section>
 
         <!-- About / Updates -->
-        <section v-else-if="active === 'about'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">About</h2>
-              <span class="sec-sub">Version &amp; updates</span>
+        <section v-else-if="active === 'about'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">About</h2>
+              <span class="text-xs text-muted-foreground">Version &amp; updates</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="settings-group">
-            <div class="about-id">
-              <div class="about-logo"><PhTerminalWindow :size="26" weight="duotone" /></div>
+          <div class="flex flex-col gap-2.5">
+            <div class="flex items-center gap-3.5">
+              <div class="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-hover text-accent"><PhTerminalWindow :size="26" weight="duotone" /></div>
               <div>
-                <div class="about-name">Burrow</div>
-                <div class="about-ver">Version {{ appVersion || "…" }}</div>
+                <div class="text-[15px] font-semibold text-foreground">Burrow</div>
+                <div class="mt-0.5 text-xs text-secondary-foreground">Version {{ appVersion || "…" }}</div>
               </div>
             </div>
 
-            <div class="update-box">
-              <div class="update-box-row">
-                <div class="update-box-text">
+            <div class="mt-4 rounded-lg border border-border bg-panel px-4 py-3.5">
+              <div class="flex items-center justify-between gap-4">
+                <div class="flex min-w-0 flex-col gap-0.75">
                   <template v-if="update.installed">
-                    <span class="upd-strong">Update installed</span>
-                    <span class="upd-dim">Restart to finish updating to v{{ update.newVersion }}.</span>
+                    <span class="text-[12.5px] font-semibold text-foreground">Update installed</span>
+                    <span class="text-[11.5px] text-secondary-foreground">Restart to finish updating to v{{ update.newVersion }}.</span>
                   </template>
                   <template v-else-if="update.downloading">
-                    <span class="upd-strong">Downloading v{{ update.newVersion }}…</span>
-                    <span class="upd-dim">{{ update.progress >= 0 ? Math.round(update.progress * 100) + "%" : "…" }}</span>
+                    <span class="text-[12.5px] font-semibold text-foreground">Downloading v{{ update.newVersion }}…</span>
+                    <span class="text-[11.5px] text-secondary-foreground">{{ update.progress >= 0 ? Math.round(update.progress * 100) + "%" : "…" }}</span>
                   </template>
                   <template v-else-if="update.available">
-                    <span class="upd-strong">Update available — v{{ update.newVersion }}</span>
-                    <span class="upd-dim">You have v{{ update.currentVersion }}.</span>
+                    <span class="text-[12.5px] font-semibold text-foreground">Update available — v{{ update.newVersion }}</span>
+                    <span class="text-[11.5px] text-secondary-foreground">You have v{{ update.currentVersion }}.</span>
                   </template>
                   <template v-else>
-                    <span class="upd-strong">You're up to date</span>
-                    <span class="upd-dim">Last checked {{ lastCheckedLabel }}.</span>
+                    <span class="text-[12.5px] font-semibold text-foreground">You're up to date</span>
+                    <span class="text-[11.5px] text-secondary-foreground">Last checked {{ lastCheckedLabel }}.</span>
                   </template>
                 </div>
 
-                <div class="update-box-actions">
-                  <button v-if="update.installed" class="reset-btn primary" @click="update.relaunch()">
+                <div class="shrink-0">
+                  <Button v-if="update.installed" size="sm" @click="update.relaunch()">
                     <PhArrowClockwise :size="12" /> Restart now
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     v-else-if="update.available && !update.downloading"
-                    class="reset-btn primary"
+                    size="sm"
                     @click="update.downloadAndInstall()"
                   >
                     <PhDownloadSimple :size="12" /> Install v{{ update.newVersion }}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     v-else-if="!update.downloading"
-                    class="reset-btn"
+                    variant="outline"
+                    size="sm"
                     :disabled="update.checking"
                     @click="update.check()"
                   >
-                    <PhArrowClockwise :size="12" :class="{ spin: update.checking }" />
+                    <PhArrowClockwise :size="12" :class="{ 'animate-spin': update.checking }" />
                     {{ update.checking ? "Checking…" : "Check for updates" }}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
-              <div v-if="update.notes && update.available && !update.installed" class="update-box-notes">
+              <div v-if="update.notes && update.available && !update.installed" class="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap border-t border-border pt-3 text-[11.5px] leading-snug text-secondary-foreground">
                 {{ update.notes }}
               </div>
-              <div v-if="update.error && !update.checking" class="update-box-err">
+              <div v-if="update.error && !update.checking" class="mt-2.5 break-words text-[11px] text-destructive">
                 Update check failed: {{ update.error }}
               </div>
             </div>
 
-            <div class="update-box">
-              <div class="update-box-row">
-                <div class="update-box-text">
-                  <span class="upd-strong">Agent status hooks</span>
-                  <span class="upd-dim">
+            <div class="mt-4 rounded-lg border border-border bg-panel px-4 py-3.5">
+              <div class="flex items-center justify-between gap-4">
+                <div class="flex min-w-0 flex-col gap-0.75">
+                  <span class="text-[12.5px] font-semibold text-foreground">Agent status hooks</span>
+                  <span class="text-[11.5px] text-secondary-foreground">
                     Fix agent status dots if they get stuck or stop updating —
                     re-points revived sessions at the live server and reinstalls
                     the global hooks.
                   </span>
                 </div>
-                <div class="update-box-actions">
-                  <button class="reset-btn" :disabled="repairing" @click="repairAgentStatus">
-                    <PhArrowClockwise :size="12" :class="{ spin: repairing }" />
+                <div class="shrink-0">
+                  <Button variant="outline" size="sm" :disabled="repairing" @click="repairAgentStatus">
+                    <PhArrowClockwise :size="12" :class="{ 'animate-spin': repairing }" />
                     {{ repairing ? "Repairing…" : "Fix agent status" }}
-                  </button>
+                  </Button>
                 </div>
               </div>
-              <div v-if="repairMsg" class="update-box-notes">{{ repairMsg }}</div>
+              <div v-if="repairMsg" class="mt-3 border-t border-border pt-3 text-[11.5px] leading-snug text-secondary-foreground">{{ repairMsg }}</div>
             </div>
           </div>
         </section>
 
         <!-- Skills -->
-        <section v-else-if="active === 'skills'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Skills</h2>
-              <span class="sec-sub">Agent skills installed in <code>~/.claude/skills</code></span>
+        <section v-else-if="active === 'skills'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Skills</h2>
+              <span class="text-xs text-muted-foreground">Agent skills installed in <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">~/.claude/skills</code></span>
             </div>
-            <button class="add-btn" :disabled="skillsLoading" @click="loadSkills">
-              <PhArrowClockwise :size="11" :class="{ spin: skillsLoading }" /> Refresh
-            </button>
+            <Button variant="outline" size="sm" class="ml-auto" :disabled="skillsLoading" @click="loadSkills">
+              <PhArrowClockwise :size="11" :class="{ 'animate-spin': skillsLoading }" /> Refresh
+            </Button>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="ext-list">
-            <div v-for="s in skills" :key="s.dir" class="ext-row" :class="{ off: !s.enabled }">
-              <div class="ext-icon"><PhSparkle :size="15" /></div>
-              <div class="ext-main">
-                <div class="ext-name">{{ s.name }}</div>
-                <div class="ext-desc">{{ s.description || "No description" }}</div>
+          <div class="flex flex-col gap-2">
+            <div v-for="s in skills" :key="s.dir" class="flex items-start gap-3 rounded-lg border border-border bg-panel px-3.5 py-3" :class="{ 'opacity-55': !s.enabled }">
+              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-hover text-secondary-foreground"><PhSparkle :size="15" /></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-[13px] font-semibold text-foreground">{{ s.name }}</div>
+                <div class="mt-0.75 text-[11.5px] leading-snug text-secondary-foreground">{{ s.description || "No description" }}</div>
               </div>
-              <div class="ext-actions">
+              <div class="flex shrink-0 items-center gap-1">
                 <button
-                  class="icon-act"
+                  class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground"
                   :title="s.enabled ? 'Disable skill' : 'Enable skill'"
                   @click="toggleSkill(s)"
                 >
                   <component :is="s.enabled ? PhToggleRight : PhToggleLeft" :size="20"
-                    :style="{ color: s.enabled ? 'var(--green)' : 'var(--text-secondary)' }" />
+                    :class="s.enabled ? 'text-success' : 'text-secondary-foreground'" />
                 </button>
-                <button class="icon-act" title="Reveal in Finder" @click="revealSkill(s)">
+                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground" title="Reveal in Finder" @click="revealSkill(s)">
                   <PhArrowSquareOut :size="14" />
                 </button>
-                <button class="icon-act danger" title="Delete skill" @click="deleteSkill(s)">
+                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-destructive" title="Delete skill" @click="deleteSkill(s)">
                   <PhTrash :size="14" />
                 </button>
               </div>
             </div>
-            <div v-if="!skillsLoading && skills.length === 0" class="tbl-empty">
+            <div v-if="!skillsLoading && skills.length === 0" class="py-5 text-center text-xs text-muted-foreground/50">
               No skills found. Install one via Claude Code or the skill marketplace.
             </div>
           </div>
         </section>
 
         <!-- MCP Servers -->
-        <section v-else-if="active === 'mcp'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">MCP Servers</h2>
-              <span class="sec-sub">Model Context Protocol servers in <code>~/.claude.json</code></span>
+        <section v-else-if="active === 'mcp'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">MCP Servers</h2>
+              <span class="text-xs text-muted-foreground">Model Context Protocol servers in <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">~/.claude.json</code></span>
             </div>
-            <button class="add-btn" @click="startAddMcp">
+            <Button variant="outline" size="sm" class="ml-auto" @click="startAddMcp">
               <PhPlus :size="11" /> Add Server
-            </button>
+            </Button>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
           <!-- Add / edit form -->
-          <div v-if="mcpFormOpen" class="mcp-form">
-            <div class="mcp-form-head">
-              <span class="group-label">{{ mcpEditName ? "Edit" : "New" }} MCP server</span>
-              <button class="fp-close" @click="mcpFormOpen = false"><PhX :size="12" /></button>
+          <div v-if="mcpFormOpen" class="mb-3.5 flex flex-col gap-2 rounded-lg border border-border bg-panel px-3.5 py-3">
+            <div class="flex items-center">
+              <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{{ mcpEditName ? "Edit" : "New" }} MCP server</span>
+              <button class="ml-auto flex rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground" @click="mcpFormOpen = false"><PhX :size="12" /></button>
             </div>
             <input
-              class="inp mcp-name"
+              class="max-w-[280px] rounded-md border border-border bg-base/40 px-2.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
               v-model="mcpName"
               :disabled="!!mcpEditName"
               placeholder="server-name"
               spellcheck="false"
             />
             <textarea
-              class="fp-area mono mcp-config"
+              class="box-border w-full resize-y rounded-md border border-border bg-panel px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
               v-model="mcpConfig"
               rows="7"
               spellcheck="false"
               placeholder='{ "command": "npx", "args": ["-y", "@some/mcp-server"] }'
             />
-            <div class="mcp-form-foot">
-              <span v-if="mcpError" class="mcp-err">{{ mcpError }}</span>
-              <span class="s-spacer" />
-              <button class="reset-btn" @click="mcpFormOpen = false">Cancel</button>
-              <button class="reset-btn primary" :disabled="mcpSaving" @click="saveMcp">
+            <div class="flex items-center gap-2">
+              <span v-if="mcpError" class="text-[11px] text-destructive">{{ mcpError }}</span>
+              <span class="flex-1" />
+              <Button variant="outline" size="sm" @click="mcpFormOpen = false">Cancel</Button>
+              <Button size="sm" :disabled="mcpSaving" @click="saveMcp">
                 {{ mcpSaving ? "Saving…" : "Save" }}
-              </button>
+              </Button>
             </div>
           </div>
 
-          <div class="ext-list">
-            <div v-for="m in mcpServers" :key="m.name" class="ext-row">
-              <div class="ext-icon"><PhPlugsConnected :size="15" /></div>
-              <div class="ext-main">
-                <div class="ext-name">{{ m.name }}</div>
-                <pre class="ext-config mono">{{ m.config }}</pre>
+          <div class="flex flex-col gap-2">
+            <div v-for="m in mcpServers" :key="m.name" class="flex items-start gap-3 rounded-lg border border-border bg-panel px-3.5 py-3">
+              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-hover text-secondary-foreground"><PhPlugsConnected :size="15" /></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-[13px] font-semibold text-foreground">{{ m.name }}</div>
+                <pre class="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-base px-2.5 py-2 font-mono text-[11px] leading-snug text-secondary-foreground">{{ m.config }}</pre>
               </div>
-              <div class="ext-actions">
-                <button class="icon-act" title="Edit" @click="editMcp(m)">
+              <div class="flex shrink-0 items-center gap-1">
+                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground" title="Edit" @click="editMcp(m)">
                   <PhPencilSimple :size="14" />
                 </button>
-                <button class="icon-act danger" title="Remove server" @click="removeMcp(m)">
+                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-destructive" title="Remove server" @click="removeMcp(m)">
                   <PhTrash :size="14" />
                 </button>
               </div>
             </div>
-            <div v-if="mcpServers.length === 0 && !mcpFormOpen" class="tbl-empty">
+            <div v-if="mcpServers.length === 0 && !mcpFormOpen" class="py-5 text-center text-xs text-muted-foreground/50">
               No MCP servers configured. Add one to give every Claude session new tools.
             </div>
           </div>
         </section>
 
         <!-- Extensions (browser — planned) -->
-        <section v-else-if="active === 'extensions'" class="section">
-          <div class="sec-head">
-            <div class="sec-titles">
-              <h2 class="sec-title">Extensions</h2>
-              <span class="sec-sub">Browser &amp; editor integrations</span>
+        <section v-else-if="active === 'extensions'" class="flex flex-col gap-3.5">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-baseline gap-2.5">
+              <h2 class="text-[15px] font-semibold text-foreground">Extensions</h2>
+              <span class="text-xs text-muted-foreground">Browser &amp; editor integrations</span>
             </div>
           </div>
-          <div class="sec-divider" />
+          <div class="h-px bg-border" />
 
-          <div class="ext-list">
-            <div class="ext-row planned">
-              <div class="ext-icon"><PhBrowser :size="15" /></div>
-              <div class="ext-main">
-                <div class="ext-name">
+          <div class="flex flex-col gap-2">
+            <div class="flex items-start gap-3 rounded-lg border border-dashed border-border bg-panel px-3.5 py-3">
+              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-hover text-secondary-foreground"><PhBrowser :size="15" /></div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 text-[13px] font-semibold text-foreground">
                   Browser extension
-                  <span class="planned-badge">Planned</span>
+                  <Badge variant="warning" class="rounded-full text-[9.5px] font-bold uppercase tracking-[0.04em]">Planned</Badge>
                 </div>
-                <div class="ext-desc">
+                <div class="mt-0.75 text-[11.5px] leading-snug text-secondary-foreground">
                   Drive a real browser tab from inside Burrow — let agents open pages,
                   fill forms, and read the DOM without leaving the IDE.
                 </div>
@@ -1370,7 +1300,7 @@
         </section>
 
         <!-- Other panels (placeholder) -->
-        <section v-else class="section placeholder">
+        <section v-else class="flex h-full flex-col items-center justify-center gap-3 text-[13px] text-muted-foreground/40">
           <component :is="activeIcon" :size="22" />
           <span>{{ activeLabel }} settings coming soon</span>
         </section>
@@ -1395,11 +1325,15 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
 import OpenAIIcon from "@/components/icons/OpenAIIcon.vue";
 import GitHubCopilotIcon from "@/components/icons/GitHubCopilotIcon.vue";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Select } from "@/components/ui/select";
 import { useAgentsStore, type AgentIcon } from "@/stores/agents";
 import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useProfilesStore, DEFAULT_PROFILE_ID } from "@/stores/profiles";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, type NtfyEvent, type ToastPosition } from "@/stores/ui";
+import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, type NtfyEvent } from "@/stores/ui";
 import { useChatAgentsStore, transportLabel } from "@/stores/chatAgents";
 import ChatAgentConfig from "@/components/ChatAgentConfig.vue";
 import { testNtfy } from "@/lib/ntfy";
@@ -1425,6 +1359,42 @@ const ui = useUIStore();
 const chatAgents = useChatAgentsStore();
 const agentConfigOpen = ref(false);
 const update = useUpdateStore();
+
+// ── Select option lists ──
+const chatAgentOptions = computed(() =>
+  chatAgents.agents.map((a) => ({ value: a.id, label: `${a.name} (${transportLabel(a.transport)})` })),
+);
+const SPAWN_MODE_OPTIONS = [
+  { value: "terminal", label: "Terminal tab" },
+  { value: "chat", label: "Chat" },
+];
+const FLOAT_CORNER_OPTIONS = [
+  { value: "top-right", label: "Top right" },
+  { value: "top-left", label: "Top left" },
+  { value: "bottom-right", label: "Bottom right" },
+  { value: "bottom-left", label: "Bottom left" },
+];
+const UI_SCALE_OPTIONS = [
+  { value: "0.8", label: "80%" },
+  { value: "0.9", label: "90%" },
+  { value: "1", label: "100%" },
+  { value: "1.1", label: "110%" },
+  { value: "1.25", label: "125%" },
+  { value: "1.5", label: "150%" },
+];
+const uiScaleModel = computed({
+  get: () => String(ui.uiScale),
+  set: (v: string) => { ui.uiScale = Number(v); },
+});
+const toastPositionOptions = computed(() => TOAST_POSITIONS.map((p) => ({ value: p.id, label: p.label })));
+const soundDoneOptions = computed(() => [
+  ...soundsForKind("done").map((s) => ({ value: s.id, label: s.label })),
+  { value: "custom", label: "Custom file…" },
+]);
+const soundWaitingOptions = computed(() => [
+  ...soundsForKind("waiting").map((s) => ({ value: s.id, label: s.label })),
+  { value: "custom", label: "Custom file…" },
+]);
 
 // ── Scripts ──
 // The active repo's scripts are scoped to the active workspace.
@@ -1990,1163 +1960,3 @@ const SHORTCUT_GROUPS = [
   },
 ];
 </script>
-
-<style scoped>
-.settings-page {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg-base);
-  backdrop-filter: var(--blur-overlay, none);
-  -webkit-backdrop-filter: var(--blur-overlay, none);
-  z-index: 1000;
-}
-
-/* Header */
-.s-header {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  height: 52px;
-  padding: 0 24px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.s-head-title {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.s-head-icon { color: var(--text-muted); }
-.s-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.s-spacer { flex: 1; }
-.s-close {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  padding: 4px;
-  border-radius: 4px;
-}
-.s-close:hover { color: var(--text-primary); background: var(--bg-hover); }
-
-.s-body { display: flex; flex: 1; overflow: hidden; }
-
-/* Nav */
-.s-nav {
-  width: 220px;
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
-  padding: 10px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex-shrink: 0;
-}
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 34px;
-  padding: 0 16px;
-  background: none;
-  border: none;
-  border-left: 2px solid transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 13px;
-  text-align: left;
-}
-.nav-icon { color: var(--text-muted); flex-shrink: 0; }
-.nav-item:hover { background: var(--bg-hover); }
-.nav-item.active {
-  background: var(--bg-hover);
-  border-left-color: var(--accent);
-  color: var(--text-primary);
-}
-.nav-item.active .nav-icon { color: var(--accent); }
-.nav-divider { height: 1px; background: var(--border); margin: 8px 0; }
-
-/* Content */
-.s-content { flex: 1; overflow-y: auto; padding: 32px 40px; background: var(--bg-base); }
-
-.section { display: flex; flex-direction: column; gap: 14px; }
-
-.sec-head { display: flex; align-items: center; gap: 10px; }
-.sec-titles { display: flex; align-items: baseline; gap: 10px; }
-.sec-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
-.sec-sub { font-size: 12px; color: var(--text-muted); }
-.sec-head .add-btn { margin-left: auto; }
-
-.add-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: #161616;
-  border: 1px solid #2a2a2a;
-  border-radius: 5px;
-  color: #999;
-  cursor: pointer;
-  font-size: 12px;
-  padding: 5px 12px;
-}
-.add-btn:hover { color: #e2e2e2; border-color: #444; }
-
-.sec-divider { height: 1px; background: var(--border); }
-
-/* Table */
-.tbl { display: flex; flex-direction: column; gap: 8px; }
-.tbl-head {
-  display: flex;
-  align-items: center;
-  height: 26px;
-  padding: 0 16px;
-}
-.col { font-size: 11px; font-weight: 500; color: #3a3a3a; }
-.col-grip { width: 22px; flex-shrink: 0; display: flex; justify-content: center; }
-.col-agent { width: 200px; flex-shrink: 0; }
-.col-cmd { width: 165px; flex-shrink: 0; }
-.col-args { flex: 1; min-width: 0; }
-.col-kbd { width: 84px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 4px; }
-.col-act { width: 52px; flex-shrink: 0; display: flex; justify-content: flex-end; }
-
-.row {
-  display: flex;
-  align-items: center;
-  height: 50px;
-  padding: 0 16px;
-  background: #0f0f0f;
-  border: 1px solid #1e1e1e;
-  border-radius: 6px;
-}
-
-.row.dragging { opacity: 0.4; }
-.row.drag-over { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-
-.grip {
-  color: #3a3a3a;
-  cursor: grab;
-  align-items: center;
-  touch-action: none;
-}
-.grip:hover { color: #888; }
-.grip:active { cursor: grabbing; }
-
-.cell-agent { display: flex; align-items: center; gap: 8px; }
-.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-
-.icon-box {
-  position: relative;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  border: 1px solid;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  cursor: pointer;
-  overflow: hidden;
-}
-.color-input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  border: none;
-  padding: 0;
-}
-
-.inp {
-  background: none;
-  border: none;
-  outline: none;
-  color: #e2e2e2;
-  font-size: 13px;
-  font-family: var(--font-ui);
-  width: 100%;
-  min-width: 0;
-}
-.inp::placeholder { color: #3a3a3a; }
-.inp.mono { font-family: var(--font-mono); font-size: 12px; }
-
-/* Claude Profiles */
-.profile-help { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 0; }
-.profile-help code { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
-.profiles-list { display: flex; flex-direction: column; gap: 12px; }
-.profile-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--bg-panel); }
-.pc-head { display: flex; align-items: center; gap: 9px; }
-.pc-ico { color: var(--accent); flex: none; }
-.pc-name { font-weight: 600; flex: 0 1 auto; width: auto; max-width: 220px; }
-.pc-name:disabled { opacity: 0.7; }
-.pc-badge { font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; }
-.pc-del { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 5px; }
-.pc-del:hover { color: #f87171; background: var(--bg-hover); }
-.pc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 12px; }
-.pc-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.pc-field > span { font-size: 11px; color: var(--text-secondary); }
-.pc-field > span em { color: var(--text-muted); font-style: normal; }
-.pc-field-wide { grid-column: 1 / -1; }
-.pc-field .inp { border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; background: var(--bg-input, #00000022); }
-.pc-field .inp:focus { border-color: var(--accent); }
-.pc-dir { display: flex; gap: 6px; align-items: stretch; }
-.pc-dir .inp { flex: 1; }
-.pc-browse { flex: none; display: flex; align-items: center; justify-content: center; width: 34px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-hover); color: var(--text-secondary); cursor: pointer; }
-.pc-browse:hover { border-color: var(--accent); color: var(--text-primary); }
-.pc-org-row { flex-direction: row !important; align-items: center; gap: 8px; }
-.pc-org-row input[type="checkbox"] { width: 14px; height: 14px; flex: none; accent-color: var(--accent); cursor: pointer; }
-.pc-org-row > span { font-size: 11px; color: var(--text-secondary); }
-.pc-org-row > span em { color: var(--text-muted); font-style: normal; }
-
-.name-inp { font-weight: 500; }
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  background: #161616;
-  border: 1px solid #252525;
-  border-radius: 4px;
-  padding: 3px 8px;
-  max-width: 140px;
-}
-.cmd-inp { font-size: 12px; }
-
-.col-args { position: relative; display: flex; align-items: center; gap: 6px; }
-.args-inp { color: #555; font-size: 11px; }
-
-.flag-edit {
-  background: none;
-  border: 1px solid #252525;
-  border-radius: 4px;
-  color: #555;
-  cursor: pointer;
-  display: flex;
-  padding: 4px;
-  flex-shrink: 0;
-}
-.flag-edit:hover { color: #999; border-color: #3a3a3a; }
-.flag-edit.on { color: #f472b6; border-color: rgba(236,72,153,0.33); background: rgba(236,72,153,0.08); }
-
-.flag-backdrop { position: fixed; inset: 0; z-index: 20; }
-
-.flag-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 21;
-  width: 280px;
-  background: #131313;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.fp-head { display: flex; align-items: baseline; gap: 8px; }
-.fp-title { font-size: 12px; font-weight: 600; color: #e2e2e2; }
-.fp-sub { font-size: 10px; color: #555; }
-.fp-close {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: #555;
-  cursor: pointer;
-  display: flex;
-  padding: 2px;
-  border-radius: 3px;
-}
-.fp-close:hover { color: #e2e2e2; background: var(--bg-hover); }
-.fp-area {
-  background: #0c0c0c;
-  border: 1px solid #252525;
-  border-radius: 5px;
-  color: #e2e2e2;
-  font-size: 12px;
-  line-height: 1.6;
-  outline: none;
-  padding: 8px 10px;
-  resize: vertical;
-  width: 100%;
-}
-.fp-area:focus { border-color: var(--accent); }
-.fp-area::placeholder { color: #3a3a3a; }
-.fp-foot { display: flex; }
-.fp-preview {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: #666;
-  background: #0c0c0c;
-  border: 1px solid #1e1e1e;
-  border-radius: 4px;
-  padding: 5px 8px;
-  width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.kbd-rec {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #141414;
-  border: 1px solid #252525;
-  border-radius: 4px;
-  padding: 4px 7px;
-  min-width: 44px;
-  color: #777;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  cursor: pointer;
-}
-.kbd-rec:hover { color: #aaa; border-color: #3a3a3a; }
-.kbd-rec.set { color: #cbd5e1; }
-.kbd-rec.recording {
-  color: #f472b6;
-  border-color: rgba(236,72,153,0.4);
-  background: rgba(236,72,153,0.08);
-}
-.kbd-clear {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: #444;
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-.kbd-clear:hover { color: var(--red); background: rgba(239,68,68,0.12); }
-
-.row-del {
-  background: none;
-  border: none;
-  color: #3a2020;
-  cursor: pointer;
-  display: flex;
-  padding: 5px;
-  border-radius: 4px;
-}
-.row-del:hover { color: var(--red); background: rgba(239, 68, 68, 0.12); }
-
-.tbl-empty { font-size: 12px; color: #444; padding: 20px; text-align: center; }
-
-.sec-foot { margin-top: 8px; display: flex; align-items: center; gap: 10px; }
-.ntfy-test-msg { font-size: 12px; color: var(--text-muted, #888); }
-.ntfy-test-msg.err { color: var(--danger, #e5534b); }
-.reset-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: 1px solid #1e1e1e;
-  border-radius: 5px;
-  color: #555;
-  cursor: pointer;
-  font-size: 11px;
-  padding: 5px 10px;
-}
-.reset-btn:hover { color: #888; border-color: #333; }
-
-/* Config directories */
-.cfg-dirs { margin-top: 22px; gap: 12px; }
-.cfg-hint {
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: #777;
-}
-.cfg-hint code {
-  font-size: 10.5px;
-  background: #161616;
-  border: 1px solid #262626;
-  border-radius: 3px;
-  padding: 0 4px;
-  color: #aaa;
-}
-.cfg-col { display: flex; flex-direction: column; gap: 6px; }
-.cfg-col-label { font-size: 11px; color: #888; }
-.cfg-col-label code { font-size: 10px; color: #999; }
-.cfg-row { display: flex; align-items: center; gap: 6px; }
-.cfg-inp { flex: 1; font-family: var(--font-mono, monospace); font-size: 12px; }
-.cfg-add { align-self: flex-start; }
-.cfg-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
-.cfg-save:disabled { opacity: 0.6; cursor: default; }
-.cfg-status { font-size: 11px; color: #6ee7b7; }
-
-/* General panel */
-.settings-group { display: flex; flex-direction: column; gap: 10px; }
-.group-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.field {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.field-info { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
-.field-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
-.field-desc { font-size: 11px; color: var(--text-muted); }
-.copy-btn {
-  font-size: 10px;
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border-color, #444);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.copy-btn:hover { color: var(--text-primary); }
-.remote-settings { max-width: 880px; }
-.remote-tunnel-label { margin-top: 12px; }
-.remote-credentials, .remote-url { align-items: flex-start; }
-.remote-token { display: block; max-width: 620px; margin-top: 6px; overflow-wrap: anywhere; color: var(--text-secondary); font-size: 11px; }
-.remote-note { border-style: dashed; }
-
-.select {
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-primary);
-  font-size: 12px;
-  padding: 6px 10px;
-  outline: none;
-  cursor: pointer;
-  min-width: 200px;
-}
-.select:hover { border-color: var(--text-muted); }
-.select:focus { border-color: var(--accent); }
-
-.size-ctl { display: flex; align-items: center; gap: 6px; }
-.sound-ctl { display: flex; align-items: center; gap: 6px; }
-.wt-dir-ctl { display: flex; align-items: center; gap: 6px; }
-.wt-dir-input { min-width: 240px; font-family: var(--font-mono, monospace); }
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: 1px solid #1e1e1e;
-  border-radius: 5px;
-  color: #777;
-  cursor: pointer;
-  padding: 5px 7px;
-}
-.icon-btn:hover { color: #aaa; border-color: #333; }
-.vol-range { width: 160px; accent-color: var(--accent, #d97757); cursor: pointer; }
-.size-inp { min-width: 0; width: 64px; cursor: text; text-align: center; }
-.size-unit { font-size: 12px; color: #555; }
-
-.term-preview {
-  background: #0a0a0a;
-  border: 1px solid #1e1e1e;
-  border-radius: 6px;
-  padding: 12px 14px;
-  color: #e2e8f0;
-  line-height: 1.4;
-}
-.tp-prompt { color: #22c55e; }
-
-/* Appearance — theme picker */
-.theme-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
-}
-.theme-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.12s, box-shadow 0.12s;
-}
-.theme-card:hover { border-color: var(--text-muted); }
-.theme-card.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.theme-swatch {
-  position: relative;
-  height: 64px;
-  border: 1px solid;
-  border-radius: 6px;
-  overflow: hidden;
-}
-.sw-panel {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  width: 46%;
-  height: calc(100% - 16px);
-  border-radius: 4px;
-  padding: 7px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.sw-line {
-  height: 4px;
-  width: 80%;
-  border-radius: 2px;
-  opacity: 0.9;
-}
-.sw-line.short { width: 50%; opacity: 0.6; }
-.sw-dots {
-  position: absolute;
-  bottom: 9px;
-  right: 9px;
-  display: flex;
-  gap: 5px;
-}
-.sw-dots span {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-}
-.theme-card-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 2px;
-}
-.theme-name {
-  font-size: 12px;
-  color: var(--text-primary);
-}
-.theme-check { color: var(--accent); }
-
-/* Background image picker */
-/* Background settings */
-.bg-group { max-width: 560px; }
-
-.bg-card {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-elevated, #141414);
-}
-.bg-thumb {
-  position: relative;
-  width: 116px;
-  height: 74px;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background-color: #0a0a0a;
-  background-size: cover;
-  background-position: center;
-  flex-shrink: 0;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  overflow: hidden;
-  transition: border-color 0.12s ease;
-}
-.bg-thumb:hover { border-color: var(--accent); }
-.bg-thumb.is-empty { color: var(--text-muted); border-style: dashed; }
-.bg-thumb-hint { font-size: 10px; color: var(--text-muted); }
-.bg-thumb-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.bg-thumb:hover .bg-thumb-overlay { opacity: 1; }
-
-.bg-card-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.bg-card-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bg-card-sub { font-size: 11px; color: var(--text-muted); }
-.bg-card-btns { display: flex; gap: 6px; margin-top: 8px; }
-.bg-btn {
-  padding: 5px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: #161616;
-  color: var(--text-primary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
-}
-.bg-btn:hover { border-color: var(--accent); color: var(--accent); }
-.bg-btn-primary {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  color: var(--accent);
-}
-.bg-btn-primary:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
-.bg-btn-clear:hover { border-color: var(--red); color: var(--red); }
-
-.bg-control {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-elevated, #141414);
-}
-.bg-control-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-.bg-control-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-.bg-control-sub { font-size: 11px; color: var(--text-muted); }
-.bg-control-val {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-
-.bg-slider {
-  width: 100%;
-  height: 4px;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.blur-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 2px;
-}
-.blur-row {
-  display: grid;
-  grid-template-columns: 170px 1fr 42px;
-  align-items: center;
-  gap: 12px;
-}
-.blur-name { font-size: 12px; color: var(--text-secondary); }
-.blur-val {
-  font-size: 11px;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.placeholder {
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #333;
-  font-size: 13px;
-  gap: 12px;
-}
-
-.kb-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 0;
-  border-bottom: 1px solid #141414;
-  gap: 12px;
-}
-.kb-row:last-child { border-bottom: none; }
-.kb-desc { font-size: 12px; color: #94a3b8; }
-.kb-keys { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
-.kb-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
-  color: #cbd5e1;
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.toggle { display: flex; align-items: center; cursor: pointer; flex-shrink: 0; }
-.toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
-.toggle-track {
-  width: 36px;
-  height: 20px;
-  background: #252525;
-  border: 1px solid #333;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  padding: 2px;
-  transition: background 0.15s, border-color 0.15s;
-}
-.toggle input:checked ~ .toggle-track {
-  background: #ec4899;
-  border-color: #ec4899;
-}
-.toggle-thumb {
-  width: 14px;
-  height: 14px;
-  background: #555;
-  border-radius: 50%;
-  transition: transform 0.15s, background 0.15s;
-}
-.toggle input:checked ~ .toggle-track .toggle-thumb {
-  transform: translateX(16px);
-  background: #fff;
-}
-
-/* Add area with template picker */
-.add-area {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 1px;
-}
-.add-area .add-btn { border-radius: 5px 0 0 5px; border-right: none; }
-.template-btn { border-radius: 0 5px 5px 0 !important; padding: 5px 8px !important; }
-.template-wrap { position: relative; }
-.template-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 30;
-  width: 280px;
-  background: #131313;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0,0,0,.5);
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.tp-head {
-  font-size: 10px;
-  font-weight: 600;
-  color: #555;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  padding: 4px 8px 6px;
-}
-.tp-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  border-radius: 5px;
-  background: none;
-  border: none;
-  color: #ccc;
-  cursor: pointer;
-  font-size: 12px;
-  font-family: var(--font-ui);
-  text-align: left;
-  width: 100%;
-}
-.tp-row:hover { background: #1e1e1e; color: #e2e2e2; }
-.tp-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 5px;
-  border: 1px solid;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.tp-name { flex: 1; font-weight: 500; }
-.tp-cmd {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: #555;
-  background: #0c0c0c;
-  border: 1px solid #1e1e1e;
-  border-radius: 3px;
-  padding: 2px 5px;
-}
-
-/* Dot as color picker */
-.dot-label {
-  position: relative;
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.dot-label .color-input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  border: none;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-}
-.dot-label:hover .dot { transform: scale(1.3); }
-.dot { transition: transform 0.1s; }
-
-/* Icon picker */
-.icon-wrap { position: relative; flex-shrink: 0; }
-.icon-box {
-  position: relative;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  border: 1px solid;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background: none;
-  padding: 0;
-}
-.icon-box:hover { filter: brightness(1.2); }
-.icon-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 25;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 8px;
-  background: #131313;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0,0,0,.5);
-  width: 168px;
-}
-.ip-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  background: #1a1a1a;
-  border: 1px solid #252525;
-  color: #888;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.ip-btn:hover { background: #252525; color: #e2e2e2; }
-.ip-btn.active { background: rgba(236,72,153,0.13); border-color: rgba(236,72,153,0.4); color: #f472b6; }
-
-/* Workspaces list */
-.ws-list { display: flex; flex-direction: column; gap: 6px; }
-.ws-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: 8px;
-  background: var(--bg-elev, #1a1a1a);
-}
-.ws-icon-btn {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
-  border-radius: 8px;
-  border: 1px solid var(--border, #2a2a2a);
-  background: #202020;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-  overflow: hidden;
-}
-.ws-icon-btn:hover { border-color: rgba(236,72,153,0.4); }
-.ws-icon-img { width: 100%; height: 100%; object-fit: cover; }
-.ws-icon-fb { color: #60a5fa; }
-.ws-icon-edit {
-  position: absolute;
-  bottom: -1px;
-  right: -1px;
-  width: 14px;
-  height: 14px;
-  border-radius: 4px 0 6px 0;
-  background: #ec4899;
-  color: #fff;
-  display: none;
-  align-items: center;
-  justify-content: center;
-}
-.ws-icon-btn:hover .ws-icon-edit { display: flex; }
-.ws-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.ws-name { font-size: 13px; color: #e2e2e2; font-weight: 500; }
-.ws-path {
-  font-size: 11px;
-  color: #777;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ws-clear {
-  flex-shrink: 0;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  border: 1px solid var(--border, #2a2a2a);
-  background: none;
-  color: #888;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.ws-clear:hover { color: #e2e2e2; background: #252525; }
-
-/* About / Updates */
-.about-id { display: flex; align-items: center; gap: 14px; }
-.about-logo {
-  width: 48px;
-  height: 48px;
-  border-radius: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  color: var(--accent);
-}
-.about-name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
-.about-ver { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
-
-.update-box {
-  margin-top: 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  padding: 14px 16px;
-}
-.update-box-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.update-box-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.upd-strong { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
-.upd-dim { font-size: 11.5px; color: var(--text-secondary); }
-.update-box-actions { flex-shrink: 0; }
-.reset-btn.primary {
-  background: var(--accent);
-  border-color: transparent;
-  color: #fff;
-}
-.reset-btn.primary:hover { filter: brightness(1.08); color: #fff; border-color: transparent; }
-.reset-btn:disabled { opacity: 0.6; cursor: default; }
-.update-box-notes {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  max-height: 160px;
-  overflow-y: auto;
-}
-.update-box-err {
-  margin-top: 10px;
-  font-size: 11px;
-  color: var(--red);
-  word-break: break-word;
-}
-.spin { animation: upd-spin 0.9s linear infinite; }
-@keyframes upd-spin { to { transform: rotate(360deg); } }
-
-/* ── Skills / MCP / Extensions lists ───────────────────────────────────────── */
-.ext-list { display: flex; flex-direction: column; gap: 8px; }
-.ext-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.ext-row.off { opacity: 0.55; }
-.ext-row.planned { border-style: dashed; }
-.ext-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  flex: none;
-  border-radius: 7px;
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-}
-.ext-main { flex: 1; min-width: 0; }
-.ext-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.ext-desc { margin-top: 3px; font-size: 11.5px; line-height: 1.45; color: var(--text-secondary); }
-.ext-config {
-  margin: 6px 0 0;
-  padding: 8px 10px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 160px;
-  overflow: auto;
-}
-.ext-actions { display: flex; align-items: center; gap: 4px; flex: none; }
-.icon-act {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.icon-act:hover { background: var(--bg-hover); color: var(--text-primary); }
-.icon-act.danger:hover { color: var(--red); }
-.planned-badge {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 999px;
-  color: var(--yellow);
-  background: color-mix(in srgb, var(--yellow) 16%, transparent);
-}
-
-/* MCP add/edit form */
-.mcp-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  margin-bottom: 14px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.mcp-form-head { display: flex; align-items: center; }
-.mcp-form-head .group-label { margin: 0; }
-.mcp-form-head .fp-close { margin-left: auto; }
-.mcp-name { max-width: 280px; }
-.mcp-config { width: 100%; box-sizing: border-box; }
-.mcp-form-foot { display: flex; align-items: center; gap: 8px; }
-.mcp-err { font-size: 11px; color: var(--red); }
-
-/* ── Scripts ── */
-.scripts-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.scripts-group-head .group-label { margin: 0; }
-.scripts-group-head .add-btn { margin-left: auto; }
-
-.script-card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-base) 50%, transparent);
-  padding: 10px 12px;
-  margin-bottom: 10px;
-}
-.sc-head { display: flex; align-items: center; gap: 8px; }
-.sc-name { flex: 0 1 200px; font-weight: 500; }
-.sc-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-.sc-toggle input { display: none; }
-.sc-toggle-label { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
-
-.sc-steps { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
-.sc-step { display: flex; align-items: center; gap: 6px; }
-.sc-step-idx {
-  width: 18px; height: 18px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 10px; color: var(--text-muted);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-radius: 4px;
-}
-.sc-step-inp { flex: 1; }
-.sc-step-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; flex-shrink: 0;
-  border: 1px solid var(--border); border-radius: 5px;
-  background: transparent; color: var(--text-muted); cursor: pointer;
-  transition: background .12s, color .12s;
-}
-.sc-step-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text-primary); }
-.sc-step-btn:disabled { opacity: 0.3; cursor: default; }
-.sc-step-btn.del:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
-.sc-add-step { margin-top: 4px; align-self: flex-start; }
-
-.sc-preview {
-  margin-top: 10px;
-  font-size: 11px;
-  color: var(--text-muted);
-  display: flex; align-items: baseline; gap: 6px;
-  overflow: hidden;
-}
-.sc-preview-label { flex-shrink: 0; }
-.sc-preview code {
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-</style>
