@@ -1,59 +1,59 @@
 <template>
-  <div class="agent-config-overlay" @mousedown.self="$emit('close')">
-    <div class="agent-config">
-      <header class="ac-header">
-        <h2>Chat agents</h2>
-        <button class="ac-x" @click="$emit('close')"><PhX :size="16" /></button>
+  <div class="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-[2px]" @mousedown.self="$emit('close')">
+    <div class="max-h-[86vh] w-[720px] max-w-[92vw] overflow-auto rounded-[14px] border border-border bg-panel text-foreground/85 shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+      <header class="flex items-center justify-between border-b border-border px-4.5 py-3.5">
+        <h2 class="m-0 text-[15px] font-semibold">Chat agents</h2>
+        <button class="rounded-md p-1 text-muted-foreground hover:bg-hover hover:text-foreground" @click="$emit('close')"><PhX :size="16" /></button>
       </header>
 
-      <div class="ac-body">
+      <div class="flex">
         <!-- Agent list -->
-        <aside class="ac-list">
+        <aside class="flex w-[200px] shrink-0 flex-col gap-0.5 border-r border-border p-2.5">
           <button
             v-for="a in chatAgents.agents"
             :key="a.id"
-            class="ac-list-item"
-            :class="{ active: a.id === selectedId }"
+            class="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs text-foreground/75 hover:bg-hover"
+            :class="{ 'bg-accent/18 text-foreground': a.id === selectedId }"
             @click="selectedId = a.id"
           >
             <component :is="agentIconComp(a.icon)" :size="13" :style="{ color: a.color }" />
-            <span>{{ a.name }}</span>
-            <span class="ac-list-badge">{{ transportLabel(a.transport) }}</span>
+            <span class="flex-1 truncate">{{ a.name }}</span>
+            <span class="font-mono text-[8px] text-muted-foreground/70">{{ transportLabel(a.transport) }}</span>
           </button>
-          <button class="ac-add" @click="onAdd"><PhPlus :size="12" /> New agent</button>
+          <button class="mt-1.5 flex items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-white/4 px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-white/8" @click="onAdd"><PhPlus :size="12" /> New agent</button>
         </aside>
 
         <!-- Editor -->
-        <section v-if="agent" class="ac-editor">
-          <label class="ac-field">
+        <section v-if="agent" class="flex min-w-0 flex-1 flex-col gap-3 px-4.5 py-4">
+          <label class="flex flex-col gap-1 text-[11px] text-muted-foreground">
             <span>Name</span>
-            <input v-model="agent.name" type="text" />
+            <input v-model="agent.name" type="text" class="rounded-lg border border-border bg-base px-2.5 py-1.5 font-sans text-xs text-foreground focus:border-accent/60 focus:outline-none" />
           </label>
 
-          <div class="ac-field">
+          <div class="flex flex-col gap-1 text-[11px] text-muted-foreground">
             <span>Icon &amp; color</span>
-            <div class="ac-icon-row">
+            <div class="flex flex-wrap items-center gap-1.5">
               <button
                 v-for="key in AGENT_ICON_KEYS"
                 :key="key"
-                class="ac-icon-btn"
-                :class="{ active: agent.icon === key }"
+                class="inline-flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-border bg-base hover:bg-white/6"
+                :class="{ 'border-current bg-white/6': agent.icon === key }"
                 :style="{ color: agent.color }"
                 :title="key"
                 @click="agent.icon = key"
               >
                 <component :is="agentIconComp(key)" :size="16" />
               </button>
-              <input v-model="agent.color" type="color" class="ac-color" title="Accent color" />
+              <input v-model="agent.color" type="color" class="ml-1 h-[30px] w-[34px] cursor-pointer rounded-lg border border-border bg-base p-0.5" title="Accent color" />
             </div>
           </div>
 
-          <div class="ac-field">
+          <div class="flex flex-col gap-1 text-[11px] text-muted-foreground">
             <span>Launch shortcut</span>
-            <div class="ac-shortcut-row">
+            <div class="flex items-center gap-1.5">
               <button
-                class="ac-kbd-rec"
-                :class="{ recording: recordingId === agent.id }"
+                class="inline-flex min-w-[60px] items-center justify-center rounded-lg border border-border bg-base px-2.5 py-1.5 font-sans text-[11px] text-muted-foreground hover:border-border hover:text-secondary-foreground"
+                :class="{ 'border-accent/40 bg-accent/8 text-pink-400': recordingId === agent.id }"
                 :title="recordingId === agent.id ? 'Press keys… (Esc to cancel)' : 'Click to set shortcut — always opens a new chat'"
                 @click="startRecording(agent.id, $event)"
                 @keydown="onRecordKey(agent.id, $event)"
@@ -61,15 +61,15 @@
               >
                 {{ recordingId === agent.id ? "Press…" : (agent.shortcut || "—") }}
               </button>
-              <button v-if="agent.shortcut && recordingId !== agent.id" class="ac-kbd-clear" title="Clear shortcut" @click.stop="agent.shortcut = ''">
+              <button v-if="agent.shortcut && recordingId !== agent.id" class="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground/60 hover:bg-destructive/12 hover:text-destructive" title="Clear shortcut" @click.stop="agent.shortcut = ''">
                 <PhX :size="11" />
               </button>
             </div>
           </div>
 
-          <label class="ac-field">
+          <label class="flex flex-col gap-1 text-[11px] text-muted-foreground">
             <span>Transport</span>
-            <select v-model="agent.transport">
+            <select v-model="agent.transport" class="rounded-lg border border-border bg-base px-2.5 py-1.5 font-sans text-xs text-foreground focus:border-accent/60 focus:outline-none">
               <option value="claude-cli">Native Claude CLI (stream-json)</option>
               <option value="codex-app-server">Native Codex app-server (JSON-RPC)</option>
               <option value="acp">ACP (any ACP CLI)</option>
@@ -77,17 +77,17 @@
           </label>
 
           <template v-if="agent.transport === 'acp'">
-            <label class="ac-field">
+            <label class="flex flex-col gap-1 text-[11px] text-muted-foreground">
               <span>Command</span>
-              <input v-model="agent.command" type="text" placeholder="npx | gemini | codex | opencode" />
+              <input v-model="agent.command" type="text" placeholder="npx | gemini | codex | opencode" class="rounded-lg border border-border bg-base px-2.5 py-1.5 font-sans text-xs text-foreground focus:border-accent/60 focus:outline-none" />
             </label>
-            <label class="ac-field">
+            <label class="flex flex-col gap-1 text-[11px] text-muted-foreground">
               <span>Args</span>
-              <input :value="agent.args.join(' ')" type="text" placeholder="@scope/pkg --flag" @input="setArgs(($event.target as HTMLInputElement).value)" />
+              <input :value="agent.args.join(' ')" type="text" placeholder="@scope/pkg --flag" class="rounded-lg border border-border bg-base px-2.5 py-1.5 font-sans text-xs text-foreground focus:border-accent/60 focus:outline-none" @input="setArgs(($event.target as HTMLInputElement).value)" />
             </label>
-            <label class="ac-field">
+            <label class="flex flex-col gap-1 text-[11px] text-muted-foreground">
               <span>Kind</span>
-              <select v-model="agent.kind">
+              <select v-model="agent.kind" class="rounded-lg border border-border bg-base px-2.5 py-1.5 font-sans text-xs text-foreground focus:border-accent/60 focus:outline-none">
                 <option value="custom">custom (no special env)</option>
                 <option value="claude">claude (CLAUDE_CODE_EXECUTABLE, OAuth)</option>
                 <option value="gemini">gemini</option>
@@ -95,40 +95,43 @@
               </select>
             </label>
 
-            <div class="ac-env">
-              <div class="ac-env-head"><span>Environment variables</span><button class="ac-env-add" @click="addEnv"><PhPlus :size="11" /> add</button></div>
-              <div v-for="(row, i) in envRows" :key="i" class="ac-env-row">
-                <input v-model="row.k" type="text" placeholder="KEY" @input="commitEnv" />
-                <input v-model="row.v" type="text" placeholder="value" @input="commitEnv" />
-                <button class="ac-env-del" @click="removeEnv(i)"><PhX :size="11" /></button>
+            <div class="flex flex-col gap-1.5">
+              <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>Environment variables</span>
+                <button class="inline-flex items-center gap-0.5 rounded p-1 text-muted-foreground hover:bg-white/8 hover:text-foreground" @click="addEnv"><PhPlus :size="11" /> add</button>
+              </div>
+              <div v-for="(row, i) in envRows" :key="i" class="grid grid-cols-[1fr_1.4fr_auto] gap-1.5">
+                <input v-model="row.k" type="text" placeholder="KEY" class="rounded-md border border-border bg-base px-2 py-1 font-mono text-[11px] text-foreground" @input="commitEnv" />
+                <input v-model="row.v" type="text" placeholder="value" class="rounded-md border border-border bg-base px-2 py-1 font-mono text-[11px] text-foreground" @input="commitEnv" />
+                <button class="inline-flex items-center gap-0.5 rounded p-1 text-muted-foreground hover:bg-white/8 hover:text-foreground" @click="removeEnv(i)"><PhX :size="11" /></button>
               </div>
             </div>
           </template>
-          <div v-else class="ac-native-runtime">
-            <span class="ac-native-label">{{ agent.transport === 'codex-app-server' ? 'Codex app-server' : 'Claude Code CLI' }}</span>
-            <code>{{ agent.transport === 'codex-app-server' ? 'codex app-server' : 'claude --input-format stream-json --output-format stream-json' }}</code>
-            <p class="ac-hint">{{ agent.transport === 'codex-app-server' ? 'Uses your local codex login and the native JSON-RPC app-server. No ACP adapter is involved.' : 'Uses your local claude login and Claude’s native newline-delimited stream-json protocol. No ACP adapter is involved.' }}</p>
+          <div v-else class="flex flex-col gap-1.5 rounded-lg border border-border bg-white/[0.025] p-2.5">
+            <span class="text-[11px] font-semibold text-foreground/75">{{ agent.transport === 'codex-app-server' ? 'Codex app-server' : 'Claude Code CLI' }}</span>
+            <code class="w-fit max-w-full truncate font-mono text-[10px] text-muted-foreground">{{ agent.transport === 'codex-app-server' ? 'codex app-server' : 'claude --input-format stream-json --output-format stream-json' }}</code>
+            <p class="m-0 text-[11px] leading-relaxed text-muted-foreground/70">{{ agent.transport === 'codex-app-server' ? 'Uses your local codex login and the native JSON-RPC app-server. No ACP adapter is involved.' : 'Uses your local claude login and Claude’s native newline-delimited stream-json protocol. No ACP adapter is involved.' }}</p>
           </div>
 
-          <div class="ac-actions">
-            <button v-if="agent.builtin" class="ac-btn" @click="onReset">Reset to default</button>
-            <button v-else class="ac-btn ac-btn-danger" @click="onDelete">Delete</button>
+          <div class="mt-auto pt-2">
+            <button v-if="agent.builtin" class="rounded-lg border border-border bg-white/6 px-3 py-1.5 text-xs text-foreground/80 hover:bg-white/10" @click="onReset">Reset to default</button>
+            <button v-else class="rounded-lg border border-destructive/30 bg-white/6 px-3 py-1.5 text-xs text-red-400 hover:bg-destructive/12" @click="onDelete">Delete</button>
           </div>
         </section>
       </div>
 
       <!-- Per-project overrides (only when opened from a project chat) -->
-      <section v-if="cwd" class="ac-project">
-        <h3>This project <code class="ac-path">{{ cwdShort }}</code></h3>
-        <label class="ac-field">
+      <section v-if="cwd" class="flex flex-col gap-2.5 border-t border-border px-4.5 py-3.5">
+        <h3 class="m-0 flex items-center gap-2 text-xs font-semibold text-foreground/70">This project <code class="font-mono text-[10px] text-muted-foreground">{{ cwdShort }}</code></h3>
+        <label class="flex flex-col gap-1 text-[11px] text-muted-foreground">
           <span>CLAUDE_CONFIG_DIR</span>
-          <input :value="proj.claude_config_dir ?? ''" type="text" placeholder="(default)" @change="setProj('claude_config_dir', ($event.target as HTMLInputElement).value)" />
+          <input :value="proj.claude_config_dir ?? ''" type="text" placeholder="(default)" class="rounded-lg border border-border bg-base px-2.5 py-1.5 font-sans text-xs text-foreground focus:border-accent/60 focus:outline-none" @change="setProj('claude_config_dir', ($event.target as HTMLInputElement).value)" />
         </label>
-        <label class="ac-field">
+        <label class="flex flex-col gap-1 text-[11px] text-muted-foreground">
           <span>.env file</span>
-          <input :value="proj.env_file ?? ''" type="text" placeholder=".env" @change="setProj('env_file', ($event.target as HTMLInputElement).value)" />
+          <input :value="proj.env_file ?? ''" type="text" placeholder=".env" class="rounded-lg border border-border bg-base px-2.5 py-1.5 font-sans text-xs text-foreground focus:border-accent/60 focus:outline-none" @change="setProj('env_file', ($event.target as HTMLInputElement).value)" />
         </label>
-        <p class="ac-hint">Saved to <code>.burrow/config.toml</code> and applied when a chat provider starts in this project.</p>
+        <p class="m-0 text-[11px] leading-relaxed text-muted-foreground/70">Saved to <code>.burrow/config.toml</code> and applied when a chat provider starts in this project.</p>
       </section>
     </div>
   </div>
@@ -195,54 +198,3 @@ function setProj(key: keyof ProjectSettings, val: string) {
   scriptsStore.updateSettings(props.cwd, { [key]: val.trim() || undefined });
 }
 </script>
-
-<style scoped>
-.agent-config-overlay { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); }
-.agent-config { width: 720px; max-width: 92vw; max-height: 86vh; overflow: auto; background: #16161d; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); color: rgba(255,255,255,0.85); }
-.ac-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-.ac-header h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.ac-x { background: none; border: none; color: rgba(255,255,255,0.5); cursor: pointer; padding: 4px; border-radius: 6px; }
-.ac-x:hover { color: #fff; background: rgba(255,255,255,0.08); }
-.ac-body { display: flex; gap: 0; }
-.ac-list { width: 200px; flex-shrink: 0; padding: 10px; border-right: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 3px; }
-.ac-list-item { display: flex; align-items: center; gap: 7px; padding: 7px 9px; background: none; border: none; border-radius: 7px; color: rgba(255,255,255,0.75); font-size: 12px; cursor: pointer; text-align: left; }
-.ac-list-item span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ac-list-item:hover { background: rgba(255,255,255,0.05); }
-.ac-list-item.active { background: rgba(124,58,237,0.18); color: #fff; }
-.ac-list-badge { font-size: 8px; font-family: var(--font-mono); color: rgba(255,255,255,0.35); }
-.ac-add { margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 7px; background: rgba(255,255,255,0.04); border: 1px dashed rgba(255,255,255,0.15); border-radius: 7px; color: rgba(255,255,255,0.6); font-size: 11px; cursor: pointer; }
-.ac-add:hover { background: rgba(255,255,255,0.08); }
-.ac-editor { flex: 1; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.ac-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: rgba(255,255,255,0.55); }
-.ac-field input, .ac-field select { background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; padding: 7px 9px; color: #fff; font-size: 12px; font-family: inherit; }
-.ac-field input:focus, .ac-field select:focus { outline: none; border-color: rgba(124,58,237,0.6); }
-.ac-icon-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.ac-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; cursor: pointer; }
-.ac-icon-btn:hover { background: rgba(255,255,255,0.06); }
-.ac-icon-btn.active { border-color: currentColor; background: rgba(255,255,255,0.06); }
-.ac-shortcut-row { display: flex; align-items: center; gap: 5px; }
-.ac-kbd-rec { display: inline-flex; align-items: center; justify-content: center; background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; padding: 6px 10px; min-width: 60px; color: #777; font-family: var(--font-ui); font-size: 11px; cursor: pointer; }
-.ac-kbd-rec:hover { color: #aaa; border-color: rgba(255,255,255,0.25); }
-.ac-kbd-rec.recording { color: #f472b6; border-color: rgba(236,72,153,0.4); background: rgba(236,72,153,0.08); }
-.ac-kbd-clear { display: flex; align-items: center; justify-content: center; background: none; border: none; color: #444; cursor: pointer; padding: 2px; border-radius: 3px; flex-shrink: 0; }
-.ac-kbd-clear:hover { color: #ef4444; background: rgba(239,68,68,0.12); }
-.ac-color { width: 34px; height: 30px; padding: 2px; background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; cursor: pointer; margin-left: 4px; }
-.ac-env { display: flex; flex-direction: column; gap: 5px; }
-.ac-env-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.55); }
-.ac-env-add, .ac-env-del { display: inline-flex; align-items: center; gap: 3px; background: none; border: none; color: rgba(255,255,255,0.5); cursor: pointer; font-size: 11px; padding: 3px; border-radius: 5px; }
-.ac-env-add:hover, .ac-env-del:hover { color: #fff; background: rgba(255,255,255,0.08); }
-.ac-env-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; }
-.ac-env-row input { background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 8px; color: #fff; font-size: 11px; font-family: var(--font-mono); }
-.ac-hint { font-size: 11px; color: rgba(255,255,255,0.4); line-height: 1.5; margin: 0; }
-.ac-native-runtime { display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid rgba(255,255,255,0.1); border-radius: 7px; background: rgba(255,255,255,0.025); }
-.ac-native-label { color: rgba(255,255,255,0.74); font-size: 11px; font-weight: 600; }
-.ac-native-runtime code { width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.58); font: 10px var(--font-mono); white-space: nowrap; }
-.ac-actions { margin-top: auto; padding-top: 8px; }
-.ac-btn { padding: 6px 12px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; color: rgba(255,255,255,0.8); font-size: 12px; cursor: pointer; }
-.ac-btn:hover { background: rgba(255,255,255,0.1); }
-.ac-btn-danger { color: #f87171; border-color: rgba(248,113,113,0.3); }
-.ac-btn-danger:hover { background: rgba(248,113,113,0.12); }
-.ac-project { padding: 14px 18px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 10px; }
-.ac-project h3 { margin: 0; font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.7); display: flex; align-items: center; gap: 8px; }
-.ac-path { font-size: 10px; font-family: var(--font-mono); color: rgba(255,255,255,0.4); }
-</style>
