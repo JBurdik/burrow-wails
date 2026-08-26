@@ -1,11 +1,11 @@
 <template>
-  <div class="terminal-pane" @click="focusActive">
+  <div class="terminal-pane relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--terminal-bg)] [-webkit-backdrop-filter:var(--blur-terminal,none)] [backdrop-filter:var(--blur-terminal,none)]" @click="focusActive">
     <AgentToolbar @launch="spawnAgent" @open-chat="openClaudeChat()" @open-browser="openBrowserTab()" />
 
-    <nav class="workspace-surface-switcher" aria-label="Workspace surface">
+    <nav class="flex h-[33px] shrink-0 items-center gap-0.5 border-b border-border bg-[color-mix(in_srgb,var(--bg-panel)_92%,var(--terminal-bg))] px-2.5" aria-label="Workspace surface">
       <button
-        class="surface-switch-btn"
-        :class="{ active: activeSurface === 'chat' }"
+        class="inline-flex h-6 items-center gap-[5px] rounded-[5px] border border-transparent bg-transparent px-2 font-sans text-[10.5px] font-semibold leading-none text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+        :class="activeSurface === 'chat' && '!border-[color-mix(in_srgb,var(--accent)_24%,var(--border))] !bg-[color-mix(in_srgb,var(--accent)_11%,var(--bg-panel))] !text-foreground'"
         :aria-pressed="activeSurface === 'chat'"
         title="Show chat"
         @click.stop="focusSurface('chat')"
@@ -14,8 +14,8 @@
         <span>Chat</span>
       </button>
       <button
-        class="surface-switch-btn"
-        :class="{ active: activeSurface === 'terminal' }"
+        class="inline-flex h-6 items-center gap-[5px] rounded-[5px] border border-transparent bg-transparent px-2 font-sans text-[10.5px] font-semibold leading-none text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+        :class="activeSurface === 'terminal' && '!border-[color-mix(in_srgb,var(--accent)_24%,var(--border))] !bg-[color-mix(in_srgb,var(--accent)_11%,var(--bg-panel))] !text-foreground'"
         :aria-pressed="activeSurface === 'terminal'"
         title="Show terminal"
         @click.stop="focusSurface('terminal')"
@@ -23,26 +23,32 @@
         <PhTerminal :size="13" />
         <span>Terminal</span>
       </button>
-      <span class="surface-switch-rule" />
-      <span class="surface-switch-context">{{ activeSurface === 'chat' ? 'Conversation' : 'Workspace' }}</span>
-      <div class="split-menu-wrap">
-        <button class="workspace-layout-toggle" :aria-expanded="splitMenuOpen" title="Split the active tab" aria-label="Split the active tab" @click.stop="splitMenuOpen = !splitMenuOpen"><PhColumns :size="13" weight="bold" /></button>
-        <div v-if="splitMenuOpen" class="split-menu" @click.stop>
-          <button @click="splitFocused('terminal', 'h')">Terminal right</button>
-          <button @click="splitFocused('terminal', 'v')">Terminal below</button>
-          <button @click="splitFocused('chat', 'h')">Chat right</button>
-          <button @click="splitFocused('chat', 'v')">Chat below</button>
+      <span class="mx-[5px] h-[13px] w-px bg-border" />
+      <span class="font-mono text-[10px] font-medium leading-none text-muted-foreground">{{ activeSurface === 'chat' ? 'Conversation' : 'Workspace' }}</span>
+      <div class="relative ml-auto">
+        <button
+          class="grid h-[23px] w-[25px] place-items-center rounded border border-border bg-transparent p-0 font-sans text-[10px] font-semibold leading-none text-secondary-foreground transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--border))] hover:bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg-panel))] hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+          :aria-expanded="splitMenuOpen"
+          title="Split the active tab"
+          aria-label="Split the active tab"
+          @click.stop="splitMenuOpen = !splitMenuOpen"
+        ><PhColumns :size="13" weight="bold" /></button>
+        <div v-if="splitMenuOpen" class="absolute right-0 top-[calc(100%+6px)] z-40 grid min-w-[148px] gap-px rounded-[7px] border border-border bg-panel p-1 shadow-[0_12px_28px_rgba(0,0,0,0.36)]" @click.stop>
+          <button class="rounded border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="splitFocused('terminal', 'h')">Terminal right</button>
+          <button class="rounded border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="splitFocused('terminal', 'v')">Terminal below</button>
+          <button class="rounded border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="splitFocused('chat', 'h')">Chat right</button>
+          <button class="rounded border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="splitFocused('chat', 'v')">Chat below</button>
         </div>
       </div>
     </nav>
 
-    <TransitionGroup v-if="tabs.length > 0" name="tab-move" tag="div" class="terminal-tabs">
+    <TransitionGroup v-if="tabs.length > 0" name="tab-move" tag="div" class="terminal-tabs flex shrink-0 items-center gap-px overflow-x-auto border-b border-border bg-panel px-1.5">
       <button
         v-for="(tab, tabIdx) in tabs"
         :key="tab.id"
-        class="tab"
+        class="tab group relative flex max-w-[200px] shrink-0 touch-none items-center gap-[5px] whitespace-nowrap border-0 border-b-2 border-transparent bg-transparent py-[5px] pl-2 pr-[9px] font-sans text-[11.5px] text-muted-foreground transition-colors hover:bg-[color-mix(in_srgb,var(--border)_35%,transparent)] hover:text-secondary-foreground"
         :class="{
-          active: activeTabId === tab.id,
+          '!border-accent !bg-[color-mix(in_srgb,var(--accent)_7%,transparent)] !text-foreground': activeTabId === tab.id,
           'drag-over': tabOverIdx === tabIdx && tabDragIdx !== tabIdx,
           dragging: tabDragIdx === tabIdx,
         }"
@@ -52,22 +58,22 @@
         @click.stop="activateTab(tab.id)"
         @pointerdown="(e: PointerEvent) => tabDragDown(tabIdx, e, 'tab')"
       >
-        <PhFileCode v-if="tabIsEditor(tab)" :size="12" class="tab-term-icon" />
-        <PhChatCenteredText v-else-if="tabIsChat(tab)" :size="12" class="tab-chat-icon" />
-        <PhGlobe v-else-if="tabIsBrowser(tab)" :size="12" class="tab-term-icon" />
-        <PhRobot v-else-if="tabIsAgent(tab)" :size="12" class="tab-agent-icon" />
-        <PhTerminal v-else :size="12" class="tab-term-icon" />
-        <span v-if="tabIsEditor(tab) && tabDirty(tab)" class="dirty-dot" />
+        <PhFileCode v-if="tabIsEditor(tab)" :size="12" class="shrink-0 text-muted-foreground" :class="{ '!text-secondary-foreground': activeTabId === tab.id }" />
+        <PhChatCenteredText v-else-if="tabIsChat(tab)" :size="12" class="shrink-0 text-secondary-foreground" />
+        <PhGlobe v-else-if="tabIsBrowser(tab)" :size="12" class="shrink-0 text-muted-foreground" :class="{ '!text-secondary-foreground': activeTabId === tab.id }" />
+        <PhRobot v-else-if="tabIsAgent(tab)" :size="12" class="shrink-0 text-accent" />
+        <PhTerminal v-else :size="12" class="shrink-0 text-muted-foreground" :class="{ '!text-secondary-foreground': activeTabId === tab.id }" />
+        <span v-if="tabIsEditor(tab) && tabDirty(tab)" class="dirty-dot h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground" />
         <span
           v-else-if="tabStatus(tab) !== 'idle'"
           class="status-dot"
           :class="`status-${tabStatus(tab)}`"
           :title="tabStatus(tab) === 'error' ? tabStatusDetail(tab) : undefined"
         >{{ tabStatus(tab) === 'running' ? spinnerFrame : '' }}</span>
-        <span class="tab-label" :class="{ 'tab-flash': getAllLeaves(tab.root).some(l => flashingLeafs.has(l.id)) }">{{ tabTitle(tab) }}</span>
+        <span class="tab-label max-w-[140px] overflow-hidden text-ellipsis" :class="{ 'tab-flash': getAllLeaves(tab.root).some(l => flashingLeafs.has(l.id)) }">{{ tabTitle(tab) }}</span>
         <button
           v-if="activeTabId === tab.id"
-          class="tab-inspector"
+          class="tab-inspector flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-[3px] opacity-0 transition-opacity group-hover:opacity-45 hover:!opacity-100 hover:!bg-white/[0.09] hover:!text-foreground"
           type="button"
           title="Inspect active agent"
           aria-label="Inspect active agent"
@@ -76,28 +82,28 @@
         >
           <PhInfo :size="11" weight="bold" />
         </button>
-        <span v-if="tabStatusText(tab)" class="tab-status-text">{{ tabStatusText(tab) }}</span>
+        <span v-if="tabStatusText(tab)" class="max-w-[80px] shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground opacity-65">{{ tabStatusText(tab) }}</span>
         <span
           v-if="tabProgress(tab) !== undefined"
-          class="tab-progress-bar"
+          class="inline-flex h-[3px] w-9 shrink-0 items-center overflow-hidden rounded-sm bg-white/10"
           :title="tabProgressLabel(tab)"
         >
-          <span class="tab-progress-fill" :style="{ width: `${(tabProgress(tab)! * 100).toFixed(0)}%` }" />
+          <span class="h-full min-w-[2px] rounded-sm bg-accent transition-[width] duration-300 ease-out" :style="{ width: `${(tabProgress(tab)! * 100).toFixed(0)}%` }" />
         </span>
         <span
           v-if="tabLeafCount(tab) > 1"
-          class="tab-split-count"
+          class="inline-flex h-[13px] min-w-[13px] shrink-0 items-center justify-center rounded-md bg-white/[0.08] px-1 text-[9px] font-semibold leading-none text-muted-foreground"
           :title="`${tabLeafCount(tab)} panes`"
         >{{ tabLeafCount(tab) }}</span>
         <PhX
           :size="10"
           weight="bold"
-          class="tab-close"
+          class="tab-close flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-[3px] opacity-0 transition-opacity group-hover:opacity-45 hover:!opacity-100 hover:!bg-destructive/[0.18] hover:!text-destructive"
           data-no-drag
           @click.stop="closeTab(tab.id)"
         />
       </button>
-      <button key="__add" class="tab tab-add" @click="addTab()" title="New terminal">
+      <button key="__add" class="tab tab-add max-w-none shrink-0 border-0 bg-transparent py-[5px] px-[7px] text-muted-foreground opacity-50 transition-opacity hover:bg-hover hover:text-secondary-foreground hover:opacity-100" @click="addTab()" title="New terminal">
         <PhPlus :size="12" />
       </button>
 
@@ -108,16 +114,18 @@
       v-if="activeTabLogs.length"
       name="log-fade"
       tag="div"
-      class="log-strip"
+      class="log-strip flex max-h-20 shrink-0 flex-col gap-px overflow-hidden border-b border-border bg-[color-mix(in_srgb,var(--bg-panel)_95%,var(--accent)_5%)] px-2.5 py-0.5"
     >
       <div
         v-for="entry in activeTabLogs"
         :key="entry.ts"
-        class="log-entry"
-        :class="`log-${entry.level}`"
+        class="flex items-baseline gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[10px] leading-[1.5] text-secondary-foreground"
       >
-        <span class="log-level">{{ entry.level }}</span>
-        <span class="log-msg">{{ entry.message }}</span>
+        <span
+          class="shrink-0 text-[9px] font-semibold uppercase tracking-[0.04em] opacity-60"
+          :class="{ 'text-accent': entry.level === 'info', 'text-warning': entry.level === 'warn', 'text-destructive': entry.level === 'error' }"
+        >{{ entry.level }}</span>
+        <span class="overflow-hidden text-ellipsis">{{ entry.message }}</span>
       </div>
     </TransitionGroup>
 
@@ -130,50 +138,57 @@
       v-if="inspectorAgent"
       :agent="inspectorAgent"
       :open="inspectorOpen"
-      class="terminal-agent-inspector"
+      class="absolute right-2.5 top-[76px] z-30"
       @focus="focusInspectedAgent"
       @follow-up="openFollowUpChat"
       @stop="stopInspectedAgent"
       @dismiss="inspectorOpen = false"
     />
 
-    <div v-if="tabs.length > 0" class="terminal-body" :class="{ 'split-workspace': splitWorkspace }">
+    <div
+      v-if="tabs.length > 0"
+      class="terminal-body relative flex flex-1 overflow-hidden"
+      :class="{ 'split-workspace gap-px bg-border max-[860px]:flex-col': splitWorkspace }"
+    >
       <div
         v-for="tab in tabs"
         :key="tab.id"
-        class="terminal-tab-content"
-        :class="{ 'surface-focused': activeTabId === tab.id }"
+        class="terminal-tab-content relative min-h-0 min-w-0 flex-1 overflow-hidden bg-border"
+        :class="{
+          'flex-[1_1_50%] min-w-[280px] max-[860px]:min-h-[220px]': splitWorkspace,
+          'surface-focused shadow-[inset_0_2px_0_var(--accent)]': splitWorkspace && activeTabId === tab.id,
+        }"
         v-show="isTabVisible(tab)"
       >
         <div
           v-for="pane in paneLayout(tab)"
           :key="pane.leaf.id"
-          class="pane"
+          class="pane absolute flex flex-col overflow-hidden bg-[var(--terminal-bg)]"
           :class="{ focused: focusedLeafId === pane.leaf.id && isTabSplit(tab) }"
           :style="rectStyle(pane.rect)"
           :data-leaf-id="pane.leaf.id"
           @mousedown.capture="activateLeaf(pane.leaf.id)"
         >
           <template v-if="splitDragActive">
-            <div class="drop-zone dz-left"   :class="{ 'dz-active': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'h' && hoveredZone?.side === 'first' }" />
-            <div class="drop-zone dz-right"  :class="{ 'dz-active': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'h' && hoveredZone?.side === 'second' }" />
-            <div class="drop-zone dz-top"    :class="{ 'dz-active': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'v' && hoveredZone?.side === 'first' }" />
-            <div class="drop-zone dz-bottom" :class="{ 'dz-active': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'v' && hoveredZone?.side === 'second' }" />
+            <div class="drop-zone absolute left-0 top-0 z-20 h-full w-1/4 pointer-events-none transition-[background,opacity] duration-[120ms]" :class="{ 'dz-active bg-[color-mix(in_srgb,var(--accent)_28%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'h' && hoveredZone?.side === 'first' }" />
+            <div class="drop-zone absolute right-0 top-0 z-20 h-full w-1/4 pointer-events-none transition-[background,opacity] duration-[120ms]" :class="{ 'dz-active bg-[color-mix(in_srgb,var(--accent)_28%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'h' && hoveredZone?.side === 'second' }" />
+            <div class="drop-zone absolute left-0 top-0 z-20 h-1/4 w-full pointer-events-none transition-[background,opacity] duration-[120ms]" :class="{ 'dz-active bg-[color-mix(in_srgb,var(--accent)_28%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'v' && hoveredZone?.side === 'first' }" />
+            <div class="drop-zone absolute bottom-0 left-0 z-20 h-1/4 w-full pointer-events-none transition-[background,opacity] duration-[120ms]" :class="{ 'dz-active bg-[color-mix(in_srgb,var(--accent)_28%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'v' && hoveredZone?.side === 'second' }" />
           </template>
-          <div v-if="isTabSplit(tab)" class="pane-titlebar" @mousedown.stop>
-            <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="10" class="pane-title-icon" />
-            <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="10" class="pane-title-icon" />
-            <PhRobot v-else-if="pane.leaf.isAgent" :size="10" class="pane-title-icon agent" />
-            <PhTerminal v-else :size="10" class="pane-title-icon" />
-            <span v-if="pane.leaf.leafType === 'editor' && pane.leaf.dirty" class="dirty-dot" />
+          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[26px] shrink-0 items-center gap-[5px] border-b border-[#1e1e1e] bg-[#111111] px-2 text-[11px] text-secondary-foreground" @mousedown.stop>
+            <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="10" class="shrink-0 text-muted-foreground" />
+            <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="10" class="shrink-0 text-muted-foreground" />
+            <PhRobot v-else-if="pane.leaf.isAgent" :size="10" class="shrink-0 text-accent" />
+            <PhTerminal v-else :size="10" class="shrink-0 text-muted-foreground" />
+            <span v-if="pane.leaf.leafType === 'editor' && pane.leaf.dirty" class="dirty-dot h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground" />
             <span
               v-else-if="pane.leaf.status !== 'idle'"
               class="status-dot"
               :class="`status-${pane.leaf.status}`"
               :title="pane.leaf.status === 'error' ? pane.leaf.statusDetail : undefined"
             >{{ pane.leaf.status === 'running' ? spinnerFrame : '' }}</span>
-            <span class="pane-title-text">{{ pane.leaf.title }}</span>
-            <button class="pane-title-close" @click.stop="closePane(pane.leaf.id)" title="Close pane">
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px]">{{ pane.leaf.title }}</span>
+            <button class="flex shrink-0 items-center rounded-[3px] p-0.5 text-muted-foreground opacity-40 transition-opacity group-hover:opacity-80 hover:!opacity-100 hover:!text-destructive hover:!bg-destructive/[0.15]" @click.stop="closePane(pane.leaf.id)" title="Close pane">
               <PhX :size="9" weight="bold" />
             </button>
           </div>
@@ -229,30 +244,30 @@
         <div
           v-for="(div, i) in paneDividers(tab)"
           :key="`div-${i}`"
-          class="pane-divider"
+          class="pane-divider absolute z-[5] bg-transparent transition-[background,opacity] duration-150 hover:bg-accent hover:opacity-40"
           :style="dividerStyle(div)"
           @mousedown.stop.prevent="startDividerDrag($event, div)"
         />
       </div>
     </div>
-    <div v-else class="terminal-welcome">
-      <PhTerminalWindow :size="40" weight="thin" class="welcome-icon" />
-      <p class="welcome-title">No terminals open</p>
-      <p class="welcome-sub">Launch an agent above or open a new terminal</p>
-      <button class="welcome-btn" @click="addTab()">
+    <div v-else class="terminal-welcome flex flex-1 flex-col items-center justify-center gap-3 bg-[var(--terminal-bg)] text-secondary-foreground">
+      <PhTerminalWindow :size="40" weight="thin" class="text-muted-foreground" />
+      <p class="text-sm font-medium text-foreground">No terminals open</p>
+      <p class="text-xs text-muted-foreground">Launch an agent above or open a new terminal</p>
+      <button class="mt-2 flex items-center gap-1.5 rounded-md border-0 bg-accent px-4 py-[7px] text-xs font-semibold text-white hover:bg-[var(--accent-dim)]" @click="addTab()">
         <PhPlus :size="13" /> New Terminal
       </button>
     </div>
 
-    <div v-if="confirm" class="confirm-overlay" @mousedown.self="answerClose(false)">
-      <div class="confirm-modal">
-        <div class="confirm-title">{{ confirm.reason === 'unsaved' ? 'Unsaved changes' : 'Close terminal' }}</div>
-        <div class="confirm-body">
+    <div v-if="confirm" class="confirm-overlay fixed inset-0 z-[9000] flex items-center justify-center bg-black/60" @mousedown.self="answerClose(false)">
+      <div class="w-[360px] rounded-xl border border-[#2a2a2a] bg-[#111111] p-5 shadow-[0_24px_64px_rgba(0,0,0,0.6),0_1px_0_rgba(255,255,255,0.08)]">
+        <div class="mb-2 text-sm font-semibold text-foreground">{{ confirm.reason === 'unsaved' ? 'Unsaved changes' : 'Close terminal' }}</div>
+        <div class="mb-[18px] text-xs leading-[1.5] text-secondary-foreground">
           "{{ confirm.name }}" {{ confirm.reason === 'unsaved' ? 'has unsaved changes' : 'has a running process' }}. Close anyway?
         </div>
-        <div class="confirm-actions">
-          <button class="confirm-btn" @click="answerClose(false)">Cancel</button>
-          <button class="confirm-btn danger" @click="answerClose(true)">Close <span class="confirm-kbd">⌘↵</span></button>
+        <div class="flex justify-end gap-2">
+          <button class="rounded-md border border-border bg-hover px-3.5 py-1.5 font-sans text-xs text-foreground hover:bg-[#222222]" @click="answerClose(false)">Cancel</button>
+          <button class="rounded-md border border-destructive/40 bg-destructive/[0.15] px-3.5 py-1.5 font-sans text-xs text-[#f87171] hover:bg-destructive/25" @click="answerClose(true)">Close <span class="ml-1.5 text-[11px] opacity-60">⌘↵</span></button>
         </div>
       </div>
     </div>
@@ -1856,148 +1871,7 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
 </script>
 
 <style scoped>
-.terminal-pane {
-  position: relative;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: var(--terminal-bg);
-  backdrop-filter: var(--blur-terminal, none);
-  -webkit-backdrop-filter: var(--blur-terminal, none);
-  overflow: hidden;
-  min-width: 0;
-}
-
-.workspace-surface-switcher {
-  height: 33px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 10px;
-  background: color-mix(in srgb, var(--bg-panel) 92%, var(--terminal-bg));
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.surface-switch-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  color: var(--text-muted);
-  background: transparent;
-  font: 600 10.5px/1 var(--font-ui);
-  cursor: pointer;
-  transition: color .12s, background .12s, border-color .12s;
-}
-.surface-switch-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
-.surface-switch-btn.active {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--accent) 11%, var(--bg-panel));
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
-}
-.surface-switch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.surface-switch-rule { width: 1px; height: 13px; margin: 0 5px; background: var(--border); }
-.surface-switch-context { color: var(--text-muted); font: 500 10px/1 var(--font-mono); }
-.workspace-layout-toggle {
-  display: grid;
-  place-items: center;
-  width: 25px;
-  height: 23px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
-  font: 600 10px/1 var(--font-ui);
-  cursor: pointer;
-}
-.split-menu-wrap { position: relative; margin-left: auto; }
-.split-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 40;
-  display: grid;
-  min-width: 148px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg-panel);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
-}
-.split-menu button {
-  border: 0;
-  border-radius: 4px;
-  padding: 6px 8px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font: 11px var(--font-ui);
-  text-align: left;
-}
-.split-menu button:hover { background: var(--bg-hover); color: var(--text-primary); }
-.workspace-layout-toggle:hover,
-.workspace-layout-toggle[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
-  color: var(--text-primary);
-}
-.workspace-layout-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-/* ── Tab bar ───────────────────────────────────────────────────── */
-.terminal-tabs {
-  display: flex;
-  align-items: center;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  padding: 0 6px;
-  flex-shrink: 0;
-  overflow-x: auto;
-  gap: 1px;
-}
-
-.tab {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11.5px;
-  font-family: var(--font-ui);
-  padding: 5px 9px 5px 8px;
-  white-space: nowrap;
-  transition: color .1s, background .1s;
-  max-width: 200px;
-  flex-shrink: 0;
-  position: relative;
-  touch-action: none;
-}
-.tab:hover {
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--border) 35%, transparent);
-}
-.tab.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-}
-
-/* ── Add / Claude-chat buttons ─────────────────────────────────── */
-.tab-add {
-  color: var(--text-muted);
-  max-width: none;
-  opacity: 0.5;
-  padding: 5px 7px;
-}
-.tab-add:hover { color: var(--text-secondary); opacity: 1; background: var(--bg-hover); }
-
-/* ── Drag feedback ─────────────────────────────────────────────── */
+/* ── Tab drag feedback: pseudo-element indicator, kept as plain CSS ──────── */
 .tab.dragging { opacity: 0.4; }
 .tab.drag-over { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .tab.drag-over::before {
@@ -2010,34 +1884,15 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
   border-radius: 2px;
   background: var(--accent);
 }
+
+/* ── TransitionGroup FLIP move + fade phase classes ───────────────────── */
 .tab-move-move { transition: transform .22s cubic-bezier(.2, .8, .2, 1); }
+.log-fade-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.log-fade-enter-from  { opacity: 0; transform: translateY(-4px); }
+.log-fade-leave-active { transition: opacity 0.15s ease; position: absolute; }
+.log-fade-leave-to    { opacity: 0; }
 
-/* ── Tab label ─────────────────────────────────────────────────── */
-.tab-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 140px;
-}
-
-/* ── Icons ─────────────────────────────────────────────────────── */
-.tab-agent-icon { color: var(--accent); flex-shrink: 0; }
-.tab-term-icon  { color: var(--text-muted); flex-shrink: 0; }
-.tab-chat-icon  { color: var(--text-secondary); flex-shrink: 0; }
-.tab.active .tab-term-icon { color: var(--text-secondary); }
-
-/* ── Status text ───────────────────────────────────────────────── */
-.tab-status-text {
-  font-size: 10px;
-  color: var(--text-muted);
-  opacity: 0.65;
-  flex-shrink: 0;
-  max-width: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ── Flash animation ───────────────────────────────────────────── */
+/* ── Tab-label flash keyframe (flags a leaf that just wrote output) ──────── */
 @keyframes tab-flash-anim {
   0%   { color: var(--accent); }
   50%  { color: var(--accent); opacity: 0.4; }
@@ -2045,128 +1900,7 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
 }
 .tab-flash { animation: tab-flash-anim 0.6s ease-out; }
 
-/* ── Split-pane count badge ────────────────────────────────────── */
-.tab-split-count {
-  flex-shrink: 0;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-muted);
-}
-
-/* ── Dirty dot ─────────────────────────────────────────────────── */
-.dirty-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--text-muted);
-}
-
-/* ── Close / float buttons ─────────────────────────────────────── */
-.tab-close,
-.tab-float,
-.tab-inspector {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.1s, background 0.1s;
-}
-.tab:hover .tab-close,
-.tab:hover .tab-float,
-.tab:hover .tab-inspector { opacity: 0.45; }
-.tab-close:hover { opacity: 1 !important; background: rgba(239, 68, 68, 0.18); color: var(--red); }
-.tab-float:hover { opacity: 1 !important; background: rgba(255, 255, 255, 0.09); }
-.tab-inspector:hover { opacity: 1 !important; background: rgba(255, 255, 255, 0.09); color: var(--text-primary); }
-
-.terminal-agent-inspector {
-  position: absolute;
-  z-index: 30;
-  top: 76px;
-  right: 10px;
-}
-
-.terminal-body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-  position: relative;
-}
-
-.terminal-tab-content {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-  min-width: 0;
-  min-height: 0;
-  background: var(--border);
-}
-
-.split-workspace {
-  gap: 1px;
-  background: var(--border);
-}
-.split-workspace .terminal-tab-content {
-  flex: 1 1 50%;
-  min-width: 280px;
-}
-.split-workspace .terminal-tab-content.surface-focused {
-  box-shadow: inset 0 2px 0 var(--accent);
-}
-
-@media (max-width: 860px) {
-  .split-workspace {
-    flex-direction: column;
-  }
-  .split-workspace .terminal-tab-content {
-    min-height: 220px;
-  }
-}
-
-.pane {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--terminal-bg);
-}
-
-.pane-divider {
-  position: absolute;
-  z-index: 5;
-  background: transparent;
-}
-.pane-divider:hover { background: var(--accent); opacity: 0.4; }
-
-.drop-zone {
-  position: absolute;
-  z-index: 20;
-  pointer-events: none;
-  transition: background 0.12s, opacity 0.12s;
-}
-.dz-left   { left: 0;   top: 0; width: 25%; height: 100%; }
-.dz-right  { right: 0;  top: 0; width: 25%; height: 100%; }
-.dz-top    { left: 0;   top: 0; width: 100%; height: 25%; }
-.dz-bottom { left: 0; bottom: 0; width: 100%; height: 25%; }
-.drop-zone.dz-active {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
-
+/* ── Focused-pane ring: pseudo-element overlay so it never affects layout ── */
 .pane.focused::after {
   content: "";
   position: absolute;
@@ -2176,191 +1910,4 @@ defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, inser
   opacity: 0.35;
   z-index: 1;
 }
-
-.confirm-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9000;
-}
-
-.confirm-modal {
-  width: 360px;
-  background: #111111;
-  border: 1px solid #2a2a2a;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.confirm-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 8px;
-}
-
-.confirm-body {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  margin-bottom: 18px;
-}
-
-.confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.confirm-btn {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  padding: 6px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  cursor: pointer;
-}
-.confirm-btn:hover { background: #222222; }
-
-.confirm-btn.danger {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #f87171;
-}
-.confirm-btn.danger:hover { background: rgba(239, 68, 68, 0.25); }
-.confirm-kbd {
-  margin-left: 6px;
-  opacity: 0.6;
-  font-size: 11px;
-}
-
-.terminal-welcome {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: var(--text-secondary);
-  background: var(--terminal-bg);
-}
-.welcome-icon { color: var(--text-muted); }
-.welcome-title { font-size: 14px; font-weight: 500; color: var(--text-primary); }
-.welcome-sub { font-size: 12px; color: var(--text-muted); }
-.welcome-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  padding: 7px 16px;
-  background: var(--accent);
-  border: none;
-  border-radius: 5px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.welcome-btn:hover { background: var(--accent-dim); }
-
-.pane-titlebar {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 8px;
-  background: #111111;
-  border-bottom: 1px solid #1e1e1e;
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-.pane-title-icon { color: var(--text-muted); flex-shrink: 0; }
-.pane-title-icon.agent { color: var(--accent); }
-.pane-title-text {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-}
-.pane-title-close {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  padding: 2px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  opacity: 0.4;
-}
-.pane-titlebar:hover .pane-title-close { opacity: 0.8; }
-.pane-title-close:hover { opacity: 1 !important; color: var(--red); background: rgba(239,68,68,0.15); }
-
-/* Progress bar inside a tab button */
-.tab-progress-bar {
-  display: inline-flex;
-  align-items: center;
-  width: 36px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255,255,255,0.1);
-  flex-shrink: 0;
-  overflow: hidden;
-}
-.tab-progress-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: var(--accent);
-  transition: width 0.3s ease;
-  min-width: 2px;
-}
-
-/* Log strip below the tab bar */
-.log-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  background: color-mix(in srgb, var(--bg-panel) 95%, var(--accent) 5%);
-  border-bottom: 1px solid var(--border);
-  padding: 2px 10px;
-  flex-shrink: 0;
-  max-height: 80px;
-  overflow: hidden;
-}
-.log-entry {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 10px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.log-level {
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.6;
-  flex-shrink: 0;
-}
-.log-entry.log-info .log-level  { color: var(--accent); }
-.log-entry.log-warn .log-level  { color: var(--yellow); }
-.log-entry.log-error .log-level { color: var(--red); }
-.log-msg { overflow: hidden; text-overflow: ellipsis; }
-.log-fade-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
-.log-fade-enter-from  { opacity: 0; transform: translateY(-4px); }
-.log-fade-leave-active { transition: opacity 0.15s ease; position: absolute; }
-.log-fade-leave-to    { opacity: 0; }
 </style>
