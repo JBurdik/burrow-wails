@@ -223,7 +223,7 @@ function setProj(key: keyof ProjectSettings, val: string) {
 .ac-shortcut-row { display: flex; align-items: center; gap: 5px; }
 .ac-kbd-rec { display: inline-flex; align-items: center; justify-content: center; background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; padding: 6px 10px; min-width: 60px; color: #777; font-family: var(--font-ui); font-size: 11px; cursor: pointer; }
 .ac-kbd-rec:hover { color: #aaa; border-color: rgba(255,255,255,0.25); }
-.ac-kbd-rec.recording { color: #a78bfa; border-color: #7c3aed66; background: #7c3aed14; }
+.ac-kbd-rec.recording { color: #f472b6; border-color: rgba(236,72,153,0.4); background: rgba(236,72,153,0.08); }
 .ac-kbd-clear { display: flex; align-items: center; justify-content: center; background: none; border: none; color: #444; cursor: pointer; padding: 2px; border-radius: 3px; flex-shrink: 0; }
 .ac-kbd-clear:hover { color: #ef4444; background: rgba(239,68,68,0.12); }
 .ac-color { width: 34px; height: 30px; padding: 2px; background: #0e0e13; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; cursor: pointer; margin-left: 4px; }

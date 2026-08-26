@@ -2233,7 +2233,7 @@ const SHORTCUT_GROUPS = [
   flex-shrink: 0;
 }
 .flag-edit:hover { color: #999; border-color: #3a3a3a; }
-.flag-edit.on { color: #a78bfa; border-color: #7c3aed55; background: #7c3aed14; }
+.flag-edit.on { color: #f472b6; border-color: rgba(236,72,153,0.33); background: rgba(236,72,153,0.08); }
 
 .flag-backdrop { position: fixed; inset: 0; z-index: 20; }
 
@@ -2312,9 +2312,9 @@ const SHORTCUT_GROUPS = [
 .kbd-rec:hover { color: #aaa; border-color: #3a3a3a; }
 .kbd-rec.set { color: #cbd5e1; }
 .kbd-rec.recording {
-  color: #a78bfa;
-  border-color: #7c3aed66;
-  background: #7c3aed14;
+  color: #f472b6;
+  border-color: rgba(236,72,153,0.4);
+  background: rgba(236,72,153,0.08);
 }
 .kbd-clear {
   display: flex;
@@ -2724,8 +2724,8 @@ const SHORTCUT_GROUPS = [
   transition: background 0.15s, border-color 0.15s;
 }
 .toggle input:checked ~ .toggle-track {
-  background: #7c3aed;
-  border-color: #7c3aed;
+  background: #ec4899;
+  border-color: #ec4899;
 }
 .toggle-thumb {
   width: 14px;
@@ -2874,7 +2874,7 @@ const SHORTCUT_GROUPS = [
   justify-content: center;
 }
 .ip-btn:hover { background: #252525; color: #e2e2e2; }
-.ip-btn.active { background: #7c3aed22; border-color: #7c3aed66; color: #a78bfa; }
+.ip-btn.active { background: rgba(236,72,153,0.13); border-color: rgba(236,72,153,0.4); color: #f472b6; }
 
 /* Workspaces list */
 .ws-list { display: flex; flex-direction: column; gap: 6px; }
@@ -2902,7 +2902,7 @@ const SHORTCUT_GROUPS = [
   padding: 0;
   overflow: hidden;
 }
-.ws-icon-btn:hover { border-color: #7c3aed66; }
+.ws-icon-btn:hover { border-color: rgba(236,72,153,0.4); }
 .ws-icon-img { width: 100%; height: 100%; object-fit: cover; }
 .ws-icon-fb { color: #60a5fa; }
 .ws-icon-edit {
@@ -2912,7 +2912,7 @@ const SHORTCUT_GROUPS = [
   width: 14px;
   height: 14px;
   border-radius: 4px 0 6px 0;
-  background: #7c3aed;
+  background: #ec4899;
   color: #fff;
   display: none;
   align-items: center;

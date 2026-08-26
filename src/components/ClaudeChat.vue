@@ -2655,7 +2655,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   --chat-bg: var(--bg-base, #0f0f11);
   --chat-surface: var(--bg-panel, #18181c);
   --chat-border: var(--border, rgba(255,255,255,0.08));
-  --chat-accent: var(--accent, #7c3aed);
+  --chat-accent: var(--accent, #ec4899);
   --chat-accent-dim: var(--accent-dim, #6d28d9);
   --chat-text: var(--text-primary, rgba(255,255,255,0.88));
   --chat-muted: var(--text-muted, rgba(255,255,255,0.42));
@@ -2783,7 +2783,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .perm-mode-btn { width: auto !important; gap: 4px; padding: 0 7px; }
 .perm-mode-label { font-size: 10px; font-weight: 600; }
 .perm-mode-caret { opacity: .6; margin-left: -1px; }
-.btn-active { color: #a78bfa !important; background: rgba(124,58,237,0.15) !important; }
+.btn-active { color: #f472b6 !important; background: rgba(124,58,237,0.15) !important; }
 
 /* Permission-mode dropdown */
 .perm-mode-dropdown { position: relative; display: flex; }
@@ -2817,7 +2817,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   transition: color .12s, background .12s;
 }
 .perm-mode-item:hover { background: rgba(255,255,255,0.06); }
-.perm-mode-item-active { color: #a78bfa; background: rgba(124,58,237,0.12); }
+.perm-mode-item-active { color: #f472b6; background: rgba(124,58,237,0.12); }
 .perm-mode-item-danger { color: #ef4444; }
 .perm-mode-item-danger:hover { background: rgba(239,68,68,0.12); }
 .perm-mode-item-danger.perm-mode-item-active { color: #ef4444; background: rgba(239,68,68,0.12); }
@@ -3013,13 +3013,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   width: 44px;
   height: 44px;
   border-radius: 11px;
-  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 72%, #16161a);
+  background: color-mix(in srgb, var(--agent-accent, #ec4899) 72%, #16161a);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   margin-bottom: 8px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-accent, #7c3aed) 36%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-accent, #ec4899) 36%, transparent);
 }
 .chat-empty-kicker { color: var(--chat-muted); font: 600 9px/1 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
 .chat-empty-title {
@@ -3063,14 +3063,14 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--agent-accent, #7c3aed) 80%, #fff) 0%, var(--agent-accent, #7c3aed) 60%, color-mix(in srgb, var(--agent-accent, #7c3aed) 55%, #000) 100%);
+  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--agent-accent, #ec4899) 80%, #fff) 0%, var(--agent-accent, #ec4899) 60%, color-mix(in srgb, var(--agent-accent, #ec4899) 55%, #000) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   flex-shrink: 0;
   margin-top: 2px;
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--agent-accent, #7c3aed) 28%, transparent);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--agent-accent, #ec4899) 28%, transparent);
 }
 .agent-avatar-sm {
   width: 22px;
@@ -3124,7 +3124,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   display: inline-block;
   width: 2px;
   height: 13px;
-  background: var(--agent-accent, var(--chat-accent, #7c3aed));
+  background: var(--agent-accent, var(--chat-accent, #ec4899));
   vertical-align: middle;
   margin-left: 2px;
   animation: blink 1s step-end infinite;
@@ -3166,8 +3166,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   align-items: center;
   gap: 6px;
   padding: 3px 9px 3px 6px;
-  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 7%, transparent);
-  border: 1px solid color-mix(in srgb, var(--agent-accent, #7c3aed) 18%, transparent);
+  background: color-mix(in srgb, var(--agent-accent, #ec4899) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--agent-accent, #ec4899) 18%, transparent);
   border-radius: 8px;
   font-size: 11px;
   color: var(--text-secondary, rgba(255,255,255,0.55));
@@ -3178,26 +3178,26 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   transition: background .1s, color .1s, border-color .1s;
 }
 .tool-row:hover {
-  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 13%, transparent);
+  background: color-mix(in srgb, var(--agent-accent, #ec4899) 13%, transparent);
   color: var(--text-primary);
 }
-.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, #7c3aed) 32%, transparent); }
+.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 32%, transparent); }
 .tool-row-failed {
   background: color-mix(in srgb, var(--red, #ef4444) 8%, transparent);
   border-color: color-mix(in srgb, var(--red, #ef4444) 30%, transparent);
 }
 .tool-caret {
   flex-shrink: 0;
-  color: var(--agent-accent, #7c3aed);
+  color: var(--agent-accent, #ec4899);
   transition: transform .15s;
 }
 .tool-caret-open { transform: rotate(90deg); }
-.tool-icon { color: var(--agent-accent, #7c3aed); flex-shrink: 0; }
+.tool-icon { color: var(--agent-accent, #ec4899); flex-shrink: 0; }
 .tool-row-failed .tool-icon { color: var(--red, #ef4444); }
 .tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-name-mono { font-family: var(--font-mono); }
 .tool-status-icon { flex-shrink: 0; }
-.tool-spin { animation: tool-spin 0.9s linear infinite; color: var(--agent-accent, #7c3aed); }
+.tool-spin { animation: tool-spin 0.9s linear infinite; color: var(--agent-accent, #ec4899); }
 .tool-status-failed { color: var(--red, #ef4444); }
 @keyframes tool-spin { to { transform: rotate(360deg); } }
 .tool-output-preview {
@@ -3509,8 +3509,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 
 .status-muted { color: rgba(255,255,255,0.28); }
-.status-cost { color: #a78bfa; }
-.status-busy { color: #a78bfa; animation: blink 1s step-end infinite; }
+.status-cost { color: #f472b6; }
+.status-busy { color: #f472b6; animation: blink 1s step-end infinite; }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 .status-queued { color: rgba(255,255,255,0.3); font-family: var(--font-mono); }
 
@@ -3538,7 +3538,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
-  color: #a78bfa;
+  color: #f472b6;
   flex-shrink: 0;
   min-width: 100px;
 }
@@ -3559,17 +3559,17 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 
 .chat-input-box {
-  background: color-mix(in srgb, var(--agent-accent, #7c3aed) 4%, var(--chat-surface));
+  background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 10px;
   overflow: hidden;
   transition: border-color .15s, box-shadow .15s;
 }
 .chat-input-box:focus-within {
-  border-color: color-mix(in srgb, var(--agent-accent, #7c3aed) 55%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, #7c3aed) 15%, transparent);
+  border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, #ec4899) 15%, transparent);
 }
-.input-queued { border-color: color-mix(in srgb, var(--agent-accent, #7c3aed) 40%, transparent) !important; }
+.input-queued { border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 40%, transparent) !important; }
 
 .chat-input {
   display: block;
@@ -3675,7 +3675,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   gap: 6px;
 }
 .floating-menu-item:hover { background: rgba(255,255,255,0.06); }
-.floating-menu-item-active { color: #a78bfa; background: rgba(124,58,237,0.12); }
+.floating-menu-item-active { color: #f472b6; background: rgba(124,58,237,0.12); }
 
 .model-id-hint {
   font-size: 9px;
@@ -3701,7 +3701,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 
 /* Send button */
 .send-btn {
-  background: var(--agent-accent, #7c3aed);
+  background: var(--agent-accent, #ec4899);
   border: none;
   border-radius: 50%;
   color: #fff;
@@ -3713,9 +3713,9 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   height: 30px;
   flex-shrink: 0;
   transition: background .12s, opacity .12s, box-shadow .12s, transform .12s;
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--agent-accent, #7c3aed) 40%, transparent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--agent-accent, #ec4899) 40%, transparent);
 }
-.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--agent-accent, #7c3aed) 80%, #000); transform: translateY(-1px); }
+.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--agent-accent, #ec4899) 80%, #000); transform: translateY(-1px); }
 .send-btn:disabled { opacity: 0.35; cursor: default; }
 .send-btn-abort { background: #dc2626; }
 .send-btn-abort:hover:not(:disabled) { background: #b91c1c; }
@@ -3782,7 +3782,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .md-body :deep(h1) { font-size: 16px; }
 .md-body :deep(h2) { font-size: 14px; }
 .md-body :deep(h3) { font-size: 13px; }
-.md-body :deep(a) { color: #a78bfa; text-decoration: underline; }
+.md-body :deep(a) { color: #f472b6; text-decoration: underline; }
 .md-body :deep(hr) { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0; }
 .md-body :deep(table) { border-collapse: collapse; font-size: 12px; margin: 8px 0; }
 .md-body :deep(th), .md-body :deep(td) { border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; }
