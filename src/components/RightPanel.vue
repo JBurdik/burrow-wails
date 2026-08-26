@@ -213,6 +213,8 @@
         </template>
       </div>
     </div>
+
+    <PullRequestsPanel v-else-if="activeTab === 'pull-requests'" :cwd="props.cwd" />
   </aside>
 </template>
 
@@ -230,6 +232,7 @@ import FileTreeNode from "./FileTreeNode.vue";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
+import PullRequestsPanel from "./PullRequestsPanel.vue";
 
 const props = withDefaults(defineProps<{ cwd: string; isGit?: boolean }>(), { isGit: true });
 const git = useGitStore();
@@ -261,6 +264,7 @@ async function openCommitDiff(c: GitCommit) {
 const tabs = computed(() => {
   const all = [
     { id: "git",      label: "Git",      icon: PhGitBranch },
+    { id: "pull-requests", label: "PRs", icon: PhGitBranch },
     { id: "explorer", label: "Explorer", icon: PhFiles },
   ];
   return props.isGit ? all : all.filter((t) => t.id !== "git");
