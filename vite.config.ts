@@ -13,6 +13,19 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),
+      // Go+Wails backend rewrite (rewrite/go-wails branch): route the
+      // @tauri-apps/api imports Vue components still use to compat shims
+      // backed by the Wails-generated Go bindings, instead of touching
+      // every call-site across src/. See src/lib/wailsCompat/.
+      "@tauri-apps/api/core": resolve(__dirname, "src/lib/wailsCompat/core.ts"),
+      "@tauri-apps/api/event": resolve(__dirname, "src/lib/wailsCompat/event.ts"),
+      "@tauri-apps/api/webview": resolve(__dirname, "src/lib/wailsCompat/webview.ts"),
+      "@tauri-apps/api/webviewWindow": resolve(__dirname, "src/lib/wailsCompat/webviewWindow.ts"),
+      "@tauri-apps/plugin-dialog": resolve(__dirname, "src/lib/wailsCompat/dialog.ts"),
+      "@tauri-apps/plugin-notification": resolve(__dirname, "src/lib/wailsCompat/notification.ts"),
+      "@tauri-apps/plugin-shell": resolve(__dirname, "src/lib/wailsCompat/shell.ts"),
+      "@tauri-apps/plugin-updater": resolve(__dirname, "src/lib/wailsCompat/updater.ts"),
+      "@tauri-apps/plugin-process": resolve(__dirname, "src/lib/wailsCompat/process.ts"),
     },
   },
   build: {
