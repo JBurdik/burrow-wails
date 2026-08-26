@@ -52,6 +52,18 @@ export namespace main {
 	        this.updatedAt = source["updatedAt"];
 	    }
 	}
+	export class ClaudeAccountInfo {
+	    email?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClaudeAccountInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.email = source["email"];
+	    }
+	}
 	export class ClaudeSessionInfo {
 	    sessionId: string;
 	    path: string;
@@ -66,6 +78,18 @@ export namespace main {
 	        this.sessionId = source["sessionId"];
 	        this.path = source["path"];
 	        this.modTime = source["modTime"];
+	    }
+	}
+	export class ClaudeUsage {
+	    available: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClaudeUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
 	    }
 	}
 	export class ConfigDirs {
@@ -224,14 +248,14 @@ export namespace main {
 	}
 	export class TerminalTab {
 	    id: number;
-	    workspaceId: number;
+	    workspace_id: number;
 	    ord: number;
 	    title?: string;
-	    initialCmd?: string;
-	    ptyId?: string;
+	    initial_cmd?: string;
+	    pty_id?: string;
 	    cwd?: string;
-	    defaultTitle?: string;
-	    sessionId?: string;
+	    default_title?: string;
+	    session_id?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TerminalTab(source);
@@ -240,27 +264,27 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
-	        this.workspaceId = source["workspaceId"];
+	        this.workspace_id = source["workspace_id"];
 	        this.ord = source["ord"];
 	        this.title = source["title"];
-	        this.initialCmd = source["initialCmd"];
-	        this.ptyId = source["ptyId"];
+	        this.initial_cmd = source["initial_cmd"];
+	        this.pty_id = source["pty_id"];
 	        this.cwd = source["cwd"];
-	        this.defaultTitle = source["defaultTitle"];
-	        this.sessionId = source["sessionId"];
+	        this.default_title = source["default_title"];
+	        this.session_id = source["session_id"];
 	    }
 	}
 	export class Workspace {
 	    id: number;
 	    name: string;
 	    path: string;
-	    createdAt: string;
-	    lastOpened?: string;
-	    parentId?: number;
-	    worktreeBranch?: string;
-	    isGit: boolean;
+	    created_at: number;
+	    last_opened?: number;
+	    parent_id?: number;
+	    worktree_branch?: string;
+	    is_git: boolean;
 	    icon?: string;
-	    sortOrder: number;
+	    sort_order: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Workspace(source);
@@ -271,13 +295,13 @@ export namespace main {
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.path = source["path"];
-	        this.createdAt = source["createdAt"];
-	        this.lastOpened = source["lastOpened"];
-	        this.parentId = source["parentId"];
-	        this.worktreeBranch = source["worktreeBranch"];
-	        this.isGit = source["isGit"];
+	        this.created_at = source["created_at"];
+	        this.last_opened = source["last_opened"];
+	        this.parent_id = source["parent_id"];
+	        this.worktree_branch = source["worktree_branch"];
+	        this.is_git = source["is_git"];
 	        this.icon = source["icon"];
-	        this.sortOrder = source["sortOrder"];
+	        this.sort_order = source["sort_order"];
 	    }
 	}
 

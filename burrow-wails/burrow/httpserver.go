@@ -73,11 +73,11 @@ func (s *HTTPServer) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 type rpcRequest struct {
-	Shell string   `json:"shell"`
-	Args  []string `json:"args"`
-	Cwd   string   `json:"cwd"`
-	ID    string   `json:"id"`
-	Data  string   `json:"data"`
+	Cwd  string `json:"cwd"`
+	ID   string `json:"id"`
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+	Data []int  `json:"data"`
 }
 
 // handleRPC exposes a handful of App methods as POST /rpc/<method>.
@@ -97,8 +97,8 @@ func (s *HTTPServer) handleRPC(w http.ResponseWriter, r *http.Request) {
 	method := r.URL.Path[len("/rpc/"):]
 	switch method {
 	case "create-pty":
-		id, err := s.app.CreatePty(req.Shell, req.Args, req.Cwd, nil)
-		writeJSON(w, map[string]any{"id": id}, err)
+		err := s.app.CreatePty(req.ID, req.Cwd, req.Cols, req.Rows)
+		writeJSON(w, map[string]any{"id": req.ID}, err)
 	case "write-pty":
 		err := s.app.WritePty(req.ID, req.Data)
 		writeJSON(w, map[string]any{"ok": err == nil}, err)

@@ -18,6 +18,10 @@ export function BeginAgentTurn(arg1:string,arg2:string,arg3:string):Promise<numb
 
 export function ClaudeAbort(arg1:string):Promise<void>;
 
+export function ClaudeGetAccount(arg1:string):Promise<main.ClaudeAccountInfo>;
+
+export function ClaudePlanUsage(arg1:string,arg2:boolean):Promise<main.ClaudeUsage>;
+
 export function ClaudeRespondControl(arg1:string,arg2:string,arg3:Record<string, any>):Promise<void>;
 
 export function ClaudeSend(arg1:string,arg2:string):Promise<void>;
@@ -25,6 +29,12 @@ export function ClaudeSend(arg1:string,arg2:string):Promise<void>;
 export function ClaudeStart(arg1:string,arg2:Array<string>):Promise<string>;
 
 export function ClaudeStop(arg1:string):Promise<void>;
+
+export function ClaudeUsage5h(arg1:string):Promise<main.ClaudeUsage>;
+
+export function CleanDaemon():Promise<number>;
+
+export function CloseFloatWindow(arg1:string):Promise<void>;
 
 export function CodexSend(arg1:string,arg2:string):Promise<void>;
 
@@ -34,11 +44,13 @@ export function CodexStop(arg1:string):Promise<void>;
 
 export function CompleteAgentTurn(arg1:string,arg2:string):Promise<void>;
 
-export function CreatePty(arg1:string,arg2:Array<string>,arg3:string,arg4:Array<string>):Promise<string>;
+export function CreatePty(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
 export function CreateWorkspace(arg1:string,arg2:string):Promise<main.Workspace>;
 
 export function CreateWorktree(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<main.Workspace>;
+
+export function DaemonStats():Promise<Record<string, any>>;
 
 export function DeleteBoardTask(arg1:string):Promise<void>;
 
@@ -50,6 +62,8 @@ export function DeleteTaskAttachment(arg1:number):Promise<void>;
 
 export function DeleteWorkspace(arg1:number):Promise<void>;
 
+export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function GetAppVersion():Promise<string>;
 
 export function GetConfigDirs():Promise<main.ConfigDirs>;
@@ -57,6 +71,8 @@ export function GetConfigDirs():Promise<main.ConfigDirs>;
 export function GetHookServerPort():Promise<number>;
 
 export function IsPidAlive(arg1:number):Promise<boolean>;
+
+export function KillOrphanSessions(arg1:Array<string>):Promise<number>;
 
 export function KillPty(arg1:string):Promise<void>;
 
@@ -88,6 +104,12 @@ export function LspStop(arg1:string):Promise<void>;
 
 export function MoveBoardTask(arg1:string,arg2:string,arg3:number):Promise<void>;
 
+export function NotifyFloatGrid(arg1:string,arg2:number,arg3:number):Promise<void>;
+
+export function OpenFloatWindow(arg1:string):Promise<void>;
+
+export function OpenGitPanelWindow():Promise<void>;
+
 export function OpenPathIn(arg1:string,arg2:string):Promise<void>;
 
 export function PickDirectory():Promise<string>;
@@ -100,6 +122,8 @@ export function ReadClaudeActivity(arg1:string,arg2:string):Promise<string>;
 
 export function ReadClaudeTranscript(arg1:string,arg2:string):Promise<Array<string>>;
 
+export function ReadConfig():Promise<string>;
+
 export function ReadDirShallow(arg1:string):Promise<Array<main.DirEntry>>;
 
 export function ReadFileBase64(arg1:string):Promise<string>;
@@ -108,13 +132,27 @@ export function ReadTaskAttachmentBase64(arg1:number):Promise<string>;
 
 export function ReadTextFile(arg1:string):Promise<string>;
 
+export function RegisterTmuxWin(arg1:string,arg2:string):Promise<void>;
+
+export function RemoteCreateChat(arg1:string):Promise<Record<string, any>>;
+
+export function RemoteListChats():Promise<Array<Record<string, any>>>;
+
+export function RemoteSyncChat(arg1:Record<string, any>):Promise<void>;
+
 export function RemoveMcpServer(arg1:string):Promise<void>;
 
 export function RemoveWorktree(arg1:number,arg2:boolean):Promise<void>;
 
 export function RenameWorkspace(arg1:number,arg2:string):Promise<void>;
 
+export function RepairAgentStatus():Promise<number>;
+
+export function RequestFloatSnapshot(arg1:string):Promise<void>;
+
 export function ResizePty(arg1:string,arg2:number,arg3:number):Promise<void>;
+
+export function RestartDaemon():Promise<void>;
 
 export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
@@ -124,9 +162,13 @@ export function SaveTempImage(arg1:string,arg2:string):Promise<string>;
 
 export function SaveTerminalTabs(arg1:number,arg2:Array<main.TerminalTab>):Promise<void>;
 
+export function SendFloatSnapshot(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
+
 export function SetBurrowMcpMaxDepth(arg1:number):Promise<void>;
 
 export function SetConfigDirs(arg1:string,arg2:string,arg3:string):Promise<main.ConfigDirs>;
+
+export function SetFloatCorner(arg1:string,arg2:string):Promise<void>;
 
 export function SetHttpEnabled(arg1:boolean):Promise<void>;
 
@@ -142,6 +184,10 @@ export function SetWorkspaceIcon(arg1:number,arg2:string):Promise<void>;
 
 export function SetWorkspaceOrder(arg1:Array<number>):Promise<void>;
 
+export function SnapFloatWindow(arg1:string):Promise<void>;
+
+export function SyncFloatSize(arg1:string):Promise<void>;
+
 export function SystemStats():Promise<main.SystemStats>;
 
 export function TakeSpawnRequests(arg1:string):Promise<Array<main.SpawnRequest>>;
@@ -152,7 +198,9 @@ export function UpsertBoardTask(arg1:main.BoardTask):Promise<void>;
 
 export function UpsertMissionTask(arg1:main.MissionTask):Promise<void>;
 
-export function WritePty(arg1:string,arg2:string):Promise<void>;
+export function WriteConfig(arg1:string):Promise<void>;
+
+export function WritePty(arg1:string,arg2:Array<number>):Promise<void>;
 
 export function WriteTaskAttachment(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.TaskAttachment>;
 

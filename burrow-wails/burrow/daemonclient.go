@@ -147,15 +147,14 @@ func (d *DaemonClient) call(req daemonproto.Request) (*daemonproto.Response, err
 	}
 }
 
-func (d *DaemonClient) CreatePty(shell string, args []string, cwd string, env []string) (string, error) {
-	resp, err := d.call(daemonproto.Request{Kind: "spawn", Shell: shell, Args: args, Cwd: cwd, Env: env})
-	if err != nil {
-		return "", err
-	}
-	return resp.ID, nil
+// CreatePty spawns a PTY under the caller-supplied id (the frontend owns
+// its own pty-id counter; the backend never generates or picks one).
+func (d *DaemonClient) CreatePty(id, cwd string, cols, rows uint16, env []string) error {
+	_, err := d.call(daemonproto.Request{Kind: "spawn", ID: id, Cwd: cwd, Cols: cols, Rows: rows, Env: env})
+	return err
 }
 
-func (d *DaemonClient) Write(id, data string) error {
+func (d *DaemonClient) Write(id string, data []int) error {
 	_, err := d.call(daemonproto.Request{Kind: "write", ID: id, Data: data})
 	return err
 }

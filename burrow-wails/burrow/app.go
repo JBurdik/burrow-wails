@@ -111,20 +111,23 @@ func appDataDir() (string, error) {
 }
 
 // --- PTY bindings (proxy to burrow-daemon) ---
+// Signature matches src-tauri's create_pty(id, cwd, cols, rows, ...) exactly
+// — the frontend (XTerm.vue) owns its own numeric pty-id counter and always
+// passes it in; the backend never generates one.
 
-func (a *App) CreatePty(shell string, args []string, cwd string, env []string) (string, error) {
-	env = append(env,
-		"PATH="+a.burrowBinDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"BURROW_SESSION_DIR="+a.sessionDir,
-		"BURROW_CWD="+cwd,
-	)
+func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
+	env := []string{
+		"PATH=" + a.burrowBinDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"BURROW_SESSION_DIR=" + a.sessionDir,
+		"BURROW_CWD=" + cwd,
+	}
 	if a.hookSrv != nil {
 		env = append(env, fmt.Sprintf("BURROW_HOOK_PORT=%d", a.hookSrv.port))
 	}
-	return a.daemon.CreatePty(shell, args, cwd, env)
+	return a.daemon.CreatePty(id, cwd, cols, rows, env)
 }
 
-func (a *App) WritePty(id string, data string) error {
+func (a *App) WritePty(id string, data []int) error {
 	return a.daemon.Write(id, data)
 }
 

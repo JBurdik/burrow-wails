@@ -34,6 +34,14 @@ export function ClaudeAbort(arg1) {
   return window['go']['main']['App']['ClaudeAbort'](arg1);
 }
 
+export function ClaudeGetAccount(arg1) {
+  return window['go']['main']['App']['ClaudeGetAccount'](arg1);
+}
+
+export function ClaudePlanUsage(arg1, arg2) {
+  return window['go']['main']['App']['ClaudePlanUsage'](arg1, arg2);
+}
+
 export function ClaudeRespondControl(arg1, arg2, arg3) {
   return window['go']['main']['App']['ClaudeRespondControl'](arg1, arg2, arg3);
 }
@@ -48,6 +56,18 @@ export function ClaudeStart(arg1, arg2) {
 
 export function ClaudeStop(arg1) {
   return window['go']['main']['App']['ClaudeStop'](arg1);
+}
+
+export function ClaudeUsage5h(arg1) {
+  return window['go']['main']['App']['ClaudeUsage5h'](arg1);
+}
+
+export function CleanDaemon() {
+  return window['go']['main']['App']['CleanDaemon']();
+}
+
+export function CloseFloatWindow(arg1) {
+  return window['go']['main']['App']['CloseFloatWindow'](arg1);
 }
 
 export function CodexSend(arg1, arg2) {
@@ -78,6 +98,10 @@ export function CreateWorktree(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['CreateWorktree'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function DaemonStats() {
+  return window['go']['main']['App']['DaemonStats']();
+}
+
 export function DeleteBoardTask(arg1) {
   return window['go']['main']['App']['DeleteBoardTask'](arg1);
 }
@@ -98,6 +122,10 @@ export function DeleteWorkspace(arg1) {
   return window['go']['main']['App']['DeleteWorkspace'](arg1);
 }
 
+export function FormatSource(arg1, arg2, arg3) {
+  return window['go']['main']['App']['FormatSource'](arg1, arg2, arg3);
+}
+
 export function GetAppVersion() {
   return window['go']['main']['App']['GetAppVersion']();
 }
@@ -112,6 +140,10 @@ export function GetHookServerPort() {
 
 export function IsPidAlive(arg1) {
   return window['go']['main']['App']['IsPidAlive'](arg1);
+}
+
+export function KillOrphanSessions(arg1) {
+  return window['go']['main']['App']['KillOrphanSessions'](arg1);
 }
 
 export function KillPty(arg1) {
@@ -174,6 +206,18 @@ export function MoveBoardTask(arg1, arg2, arg3) {
   return window['go']['main']['App']['MoveBoardTask'](arg1, arg2, arg3);
 }
 
+export function NotifyFloatGrid(arg1, arg2, arg3) {
+  return window['go']['main']['App']['NotifyFloatGrid'](arg1, arg2, arg3);
+}
+
+export function OpenFloatWindow(arg1) {
+  return window['go']['main']['App']['OpenFloatWindow'](arg1);
+}
+
+export function OpenGitPanelWindow() {
+  return window['go']['main']['App']['OpenGitPanelWindow']();
+}
+
 export function OpenPathIn(arg1, arg2) {
   return window['go']['main']['App']['OpenPathIn'](arg1, arg2);
 }
@@ -198,6 +242,10 @@ export function ReadClaudeTranscript(arg1, arg2) {
   return window['go']['main']['App']['ReadClaudeTranscript'](arg1, arg2);
 }
 
+export function ReadConfig() {
+  return window['go']['main']['App']['ReadConfig']();
+}
+
 export function ReadDirShallow(arg1) {
   return window['go']['main']['App']['ReadDirShallow'](arg1);
 }
@@ -214,6 +262,22 @@ export function ReadTextFile(arg1) {
   return window['go']['main']['App']['ReadTextFile'](arg1);
 }
 
+export function RegisterTmuxWin(arg1, arg2) {
+  return window['go']['main']['App']['RegisterTmuxWin'](arg1, arg2);
+}
+
+export function RemoteCreateChat(arg1) {
+  return window['go']['main']['App']['RemoteCreateChat'](arg1);
+}
+
+export function RemoteListChats() {
+  return window['go']['main']['App']['RemoteListChats']();
+}
+
+export function RemoteSyncChat(arg1) {
+  return window['go']['main']['App']['RemoteSyncChat'](arg1);
+}
+
 export function RemoveMcpServer(arg1) {
   return window['go']['main']['App']['RemoveMcpServer'](arg1);
 }
@@ -226,8 +290,20 @@ export function RenameWorkspace(arg1, arg2) {
   return window['go']['main']['App']['RenameWorkspace'](arg1, arg2);
 }
 
+export function RepairAgentStatus() {
+  return window['go']['main']['App']['RepairAgentStatus']();
+}
+
+export function RequestFloatSnapshot(arg1) {
+  return window['go']['main']['App']['RequestFloatSnapshot'](arg1);
+}
+
 export function ResizePty(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizePty'](arg1, arg2, arg3);
+}
+
+export function RestartDaemon() {
+  return window['go']['main']['App']['RestartDaemon']();
 }
 
 export function RunGh(arg1, arg2) {
@@ -246,12 +322,20 @@ export function SaveTerminalTabs(arg1, arg2) {
   return window['go']['main']['App']['SaveTerminalTabs'](arg1, arg2);
 }
 
+export function SendFloatSnapshot(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SendFloatSnapshot'](arg1, arg2, arg3, arg4);
+}
+
 export function SetBurrowMcpMaxDepth(arg1) {
   return window['go']['main']['App']['SetBurrowMcpMaxDepth'](arg1);
 }
 
 export function SetConfigDirs(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetConfigDirs'](arg1, arg2, arg3);
+}
+
+export function SetFloatCorner(arg1, arg2) {
+  return window['go']['main']['App']['SetFloatCorner'](arg1, arg2);
 }
 
 export function SetHttpEnabled(arg1) {
@@ -282,6 +366,14 @@ export function SetWorkspaceOrder(arg1) {
   return window['go']['main']['App']['SetWorkspaceOrder'](arg1);
 }
 
+export function SnapFloatWindow(arg1) {
+  return window['go']['main']['App']['SnapFloatWindow'](arg1);
+}
+
+export function SyncFloatSize(arg1) {
+  return window['go']['main']['App']['SyncFloatSize'](arg1);
+}
+
 export function SystemStats() {
   return window['go']['main']['App']['SystemStats']();
 }
@@ -300,6 +392,10 @@ export function UpsertBoardTask(arg1) {
 
 export function UpsertMissionTask(arg1) {
   return window['go']['main']['App']['UpsertMissionTask'](arg1);
+}
+
+export function WriteConfig(arg1) {
+  return window['go']['main']['App']['WriteConfig'](arg1);
 }
 
 export function WritePty(arg1, arg2) {

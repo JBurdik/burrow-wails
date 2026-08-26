@@ -36,8 +36,8 @@ func migrate(db *sql.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
 			path TEXT NOT NULL UNIQUE,
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
-			last_opened TEXT
+			created_at INTEGER NOT NULL,
+			last_opened INTEGER
 		)`,
 		`CREATE TABLE IF NOT EXISTS terminal_tabs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,

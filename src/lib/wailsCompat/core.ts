@@ -10,15 +10,16 @@ type Args = Record<string, any>;
 
 export async function invoke(cmd: string, args: Args = {}): Promise<any> {
   switch (cmd) {
-    // PTY
+    // PTY — id is the frontend's own numeric counter (props.ptyId), always
+    // stringified for the Go/daemon side, which treats ids as opaque keys.
     case "create_pty":
-      return App.CreatePty(args.shell, args.args ?? [], args.cwd ?? "", args.env ?? []);
+      return App.CreatePty(String(args.id), args.cwd ?? "", args.cols, args.rows);
     case "write_pty":
-      return App.WritePty(args.id, args.data);
+      return App.WritePty(String(args.id), args.data);
     case "resize_pty":
-      return App.ResizePty(args.id, args.cols, args.rows);
+      return App.ResizePty(String(args.id), args.cols, args.rows);
     case "kill_pty":
-      return App.KillPty(args.id);
+      return App.KillPty(String(args.id));
     case "list_pty_sessions":
       return App.ListPtySessions();
 
@@ -190,6 +191,64 @@ export async function invoke(cmd: string, args: Args = {}): Promise<any> {
       return App.SetMaxAgents(args.n ?? args.max);
     case "set_burrow_mcp_max_depth":
       return App.SetBurrowMcpMaxDepth(args.n ?? args.depth);
+
+    // App config file
+    case "read_config":
+      return App.ReadConfig();
+    case "write_config":
+      return App.WriteConfig(args.content);
+
+    // Float windows (no-op: Wails is single-window, see plan phase 7)
+    case "open_float_window":
+      return App.OpenFloatWindow(args.ptyId ?? args.pty_id);
+    case "close_float_window":
+      return App.CloseFloatWindow(args.ptyId ?? args.pty_id);
+    case "set_float_corner":
+      return App.SetFloatCorner(args.ptyId ?? args.pty_id, args.corner);
+    case "snap_float_window":
+      return App.SnapFloatWindow(args.ptyId ?? args.pty_id);
+    case "sync_float_size":
+      return App.SyncFloatSize(args.ptyId ?? args.pty_id);
+    case "request_float_snapshot":
+      return App.RequestFloatSnapshot(args.ptyId ?? args.pty_id);
+    case "send_float_snapshot":
+      return App.SendFloatSnapshot(args.ptyId ?? args.pty_id, args.data, args.cols, args.rows);
+    case "notify_float_grid":
+      return App.NotifyFloatGrid(args.ptyId ?? args.pty_id, args.cols, args.rows);
+    case "open_git_panel_window":
+      return App.OpenGitPanelWindow();
+    case "register_tmux_win":
+      return App.RegisterTmuxWin(args.winId ?? args.win_id, args.ptyId ?? args.pty_id);
+
+    // Claude account/usage (stubbed — "unavailable" until reverse-engineered)
+    case "claude_get_account":
+      return App.ClaudeGetAccount(args.cwd);
+    case "claude_plan_usage":
+      return App.ClaudePlanUsage(args.configDir ?? args.config_dir, !!args.force);
+    case "claude_usage_5h":
+      return App.ClaudeUsage5h(args.configDir ?? args.config_dir);
+
+    // Remote chat sync (stubbed — no transport yet)
+    case "remote_sync_chat":
+      return App.RemoteSyncChat(args.chat);
+    case "remote_list_chats":
+      return App.RemoteListChats();
+    case "remote_create_chat":
+      return App.RemoteCreateChat(args.cwd);
+
+    // Daemon admin (stubbed)
+    case "daemon_stats":
+      return App.DaemonStats();
+    case "clean_daemon":
+      return App.CleanDaemon();
+    case "kill_orphan_sessions":
+      return App.KillOrphanSessions(args.keepIds ?? args.keep_ids ?? []);
+    case "restart_daemon":
+      return App.RestartDaemon();
+    case "repair_agent_status":
+      return App.RepairAgentStatus();
+    case "format_source":
+      return App.FormatSource(args.path, args.content, args.cwd);
 
     default:
       console.warn(`[wails-compat] invoke("${cmd}") has no Go binding yet`);

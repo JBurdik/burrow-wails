@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/creack/pty"
-	"github.com/google/uuid"
 )
 
 // Events is how the manager reports PTY activity to its host (the app
@@ -40,23 +39,35 @@ func NewManager(events Events) *Manager {
 
 func errUnknown(id string) error { return fmt.Errorf("unknown pty id: %s", id) }
 
-// Create spawns shell(args...) in cwd with extra env and starts streaming
-// its output via Events.OnData. Returns the new session id.
-func (m *Manager) Create(shell string, args []string, cwd string, env []string) (string, error) {
-	id := uuid.NewString()
+func defaultShell() string {
+	if sh := os.Getenv("SHELL"); sh != "" {
+		return sh
+	}
+	return "/bin/zsh"
+}
 
-	c := exec.Command(shell, args...)
+// Create spawns the user's shell in cwd at the given size, with extra env,
+// and starts streaming its output via Events.OnData. id is caller-supplied
+// (the frontend owns its own pty-id counter, matching src-tauri's
+// create_pty(id: u32, cwd, cols, rows, ...) — the backend never generates
+// the id or picks the shell from JS args).
+func (m *Manager) Create(id, cwd string, cols, rows uint16, env []string) error {
+	c := exec.Command(defaultShell(), "-l")
 	if cwd != "" {
 		c.Dir = cwd
 	}
 	// BURROW_PTY_ID lets the `burrow` CLI (and status hooks) inside this
-	// session address itself — set here since only the manager knows the
-	// id before the process actually starts.
-	c.Env = append(append(os.Environ(), env...), "BURROW_PTY_ID="+id)
+	// session address itself.
+	baseEnv := append(os.Environ(),
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
+		"TERM_PROGRAM=Burrow",
+	)
+	c.Env = append(append(baseEnv, env...), "BURROW_PTY_ID="+id)
 
-	f, err := pty.Start(c)
+	f, err := pty.StartWithSize(c, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	sess := &session{id: id, cmd: c, file: f}
@@ -66,7 +77,7 @@ func (m *Manager) Create(shell string, args []string, cwd string, env []string) 
 
 	go m.pump(sess)
 
-	return id, nil
+	return nil
 }
 
 func (m *Manager) pump(sess *session) {

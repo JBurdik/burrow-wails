@@ -1,7 +1,9 @@
 // Package daemonproto defines the newline-delimited JSON protocol spoken
-// over the burrow-daemon Unix socket, mirroring the Rust backend's
-// daemon_client.rs wire format in spirit (spawn/write/resize/kill/list +
-// streamed pty-data/pty-exit frames), but reimplemented for Go.
+// over the burrow-daemon Unix socket. PTY byte payloads travel as JSON
+// number arrays (not strings/base64) end-to-end — matching what the
+// frontend's write_pty/pty-data-{id} contract expects (arbitrary binary
+// PTY output, not necessarily valid UTF-8) and avoiding any lossy
+// re-encoding between the daemon and the app process.
 package daemonproto
 
 // Request is a client -> daemon message. Kind selects which fields matter.
@@ -9,11 +11,9 @@ type Request struct {
 	ReqID string   `json:"reqId"`
 	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list"
 	ID    string   `json:"id,omitempty"`
-	Shell string   `json:"shell,omitempty"`
-	Args  []string `json:"args,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`
 	Env   []string `json:"env,omitempty"`
-	Data  string   `json:"data,omitempty"`
+	Data  []int    `json:"data,omitempty"`
 	Cols  uint16   `json:"cols,omitempty"`
 	Rows  uint16   `json:"rows,omitempty"`
 }
@@ -23,15 +23,14 @@ type Response struct {
 	ReqID string   `json:"reqId"`
 	OK    bool     `json:"ok"`
 	Error string   `json:"error,omitempty"`
-	ID    string   `json:"id,omitempty"`   // for "spawn"
-	IDs   []string `json:"ids,omitempty"`  // for "list"
+	IDs   []string `json:"ids,omitempty"` // for "list"
 }
 
 // Frame is an unsolicited daemon -> client push: PTY output or exit.
 type Frame struct {
 	Event string `json:"event"` // "pty-data" | "pty-exit"
 	ID    string `json:"id"`
-	Data  string `json:"data,omitempty"`
+	Data  []int  `json:"data,omitempty"`
 }
 
 // Envelope wraps either a Response or a Frame on the wire so a single
@@ -40,4 +39,22 @@ type Envelope struct {
 	Type     string    `json:"type"` // "response" | "frame"
 	Response *Response `json:"response,omitempty"`
 	Frame    *Frame    `json:"frame,omitempty"`
+}
+
+// BytesToInts/IntsToBytes convert between raw PTY bytes and the wire's
+// JSON-safe []int representation.
+func BytesToInts(b []byte) []int {
+	out := make([]int, len(b))
+	for i, v := range b {
+		out[i] = int(v)
+	}
+	return out
+}
+
+func IntsToBytes(ints []int) []byte {
+	out := make([]byte, len(ints))
+	for i, v := range ints {
+		out[i] = byte(v)
+	}
+	return out
 }

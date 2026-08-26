@@ -1,18 +1,26 @@
 package main
 
-// Workspace mirrors the `workspaces` table / Rust struct in lib.rs.
+import "time"
+
+// Workspace mirrors the `workspaces` table AND the frontend's Workspace
+// interface (src/stores/workspace.ts) — field names must stay snake_case,
+// and created_at/last_opened must stay epoch-millisecond numbers, to match
+// what the Rust backend (serde, default snake_case, now_millis()) always
+// sent. SQLite stores them as INTEGER millis, not TEXT datetimes.
 type Workspace struct {
 	ID             int64   `json:"id"`
 	Name           string  `json:"name"`
 	Path           string  `json:"path"`
-	CreatedAt      string  `json:"createdAt"`
-	LastOpened     *string `json:"lastOpened,omitempty"`
-	ParentID       *int64  `json:"parentId,omitempty"`
-	WorktreeBranch *string `json:"worktreeBranch,omitempty"`
-	IsGit          bool    `json:"isGit"`
+	CreatedAt      int64   `json:"created_at"`
+	LastOpened     *int64  `json:"last_opened,omitempty"`
+	ParentID       *int64  `json:"parent_id,omitempty"`
+	WorktreeBranch *string `json:"worktree_branch,omitempty"`
+	IsGit          bool    `json:"is_git"`
 	Icon           *string `json:"icon,omitempty"`
-	SortOrder      float64 `json:"sortOrder"`
+	SortOrder      float64 `json:"sort_order"`
 }
+
+func nowMillis() int64 { return time.Now().UnixMilli() }
 
 const workspaceCols = "id, name, path, created_at, last_opened, parent_id, worktree_branch, is_git, icon, sort_order"
 
@@ -45,7 +53,7 @@ func (a *App) ListWorkspaces() ([]Workspace, error) {
 }
 
 func (a *App) CreateWorkspace(name, path string) (Workspace, error) {
-	res, err := a.db.Exec(`INSERT INTO workspaces (name, path) VALUES (?, ?)`, name, path)
+	res, err := a.db.Exec(`INSERT INTO workspaces (name, path, created_at) VALUES (?, ?, ?)`, name, path, nowMillis())
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -68,7 +76,7 @@ func (a *App) RenameWorkspace(id int64, name string) error {
 }
 
 func (a *App) TouchWorkspace(id int64) error {
-	_, err := a.db.Exec(`UPDATE workspaces SET last_opened = datetime('now') WHERE id = ?`, id)
+	_, err := a.db.Exec(`UPDATE workspaces SET last_opened = ? WHERE id = ?`, nowMillis(), id)
 	return err
 }
 
@@ -93,16 +101,18 @@ func (a *App) SetWorkspaceOrder(ids []int64) error {
 
 // --- terminal tabs ---
 
+// TerminalTab mirrors src/components/Terminal.vue's PersistedTab interface
+// — snake_case, matching the Rust backend's serde defaults.
 type TerminalTab struct {
-	ID            int64   `json:"id"`
-	WorkspaceID   int64   `json:"workspaceId"`
-	Ord           int     `json:"ord"`
-	Title         *string `json:"title,omitempty"`
-	InitialCmd    *string `json:"initialCmd,omitempty"`
-	PtyID         *string `json:"ptyId,omitempty"`
-	Cwd           *string `json:"cwd,omitempty"`
-	DefaultTitle  *string `json:"defaultTitle,omitempty"`
-	SessionID     *string `json:"sessionId,omitempty"`
+	ID           int64   `json:"id"`
+	WorkspaceID  int64   `json:"workspace_id"`
+	Ord          int     `json:"ord"`
+	Title        *string `json:"title"`
+	InitialCmd   *string `json:"initial_cmd"`
+	PtyID        *string `json:"pty_id"`
+	Cwd          *string `json:"cwd"`
+	DefaultTitle *string `json:"default_title"`
+	SessionID    *string `json:"session_id"`
 }
 
 func (a *App) ListTerminalTabs(workspaceID int64) ([]TerminalTab, error) {

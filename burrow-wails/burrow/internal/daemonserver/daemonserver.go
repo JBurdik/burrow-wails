@@ -43,7 +43,7 @@ func New(socketPath string) *Server {
 
 // OnData / OnExit implement ptycore.Events, broadcasting to every client.
 func (s *Server) OnData(id string, data []byte) {
-	s.broadcast(daemonproto.Envelope{Type: "frame", Frame: &daemonproto.Frame{Event: "pty-data", ID: id, Data: string(data)}})
+	s.broadcast(daemonproto.Envelope{Type: "frame", Frame: &daemonproto.Frame{Event: "pty-data", ID: id, Data: daemonproto.BytesToInts(data)}})
 }
 
 func (s *Server) OnExit(id string) {
@@ -105,9 +105,9 @@ func (s *Server) handle(req daemonproto.Request) *daemonproto.Response {
 
 	switch req.Kind {
 	case "spawn":
-		resp.ID, err = s.mgr.Create(req.Shell, req.Args, req.Cwd, req.Env)
+		err = s.mgr.Create(req.ID, req.Cwd, req.Cols, req.Rows, req.Env)
 	case "write":
-		err = s.mgr.Write(req.ID, []byte(req.Data))
+		err = s.mgr.Write(req.ID, daemonproto.IntsToBytes(req.Data))
 	case "resize":
 		err = s.mgr.Resize(req.ID, req.Cols, req.Rows)
 	case "kill":
