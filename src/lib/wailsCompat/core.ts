@@ -254,6 +254,14 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "format_source":
       return App.FormatSource(args.path, args.content, args.cwd);
 
+    // Remote HTTP server / Tailscale
+    case "get_http_server_status":
+      return App.GetHttpServerStatus();
+    case "get_tailscale_status":
+      return App.GetTailscaleStatus();
+    case "set_tailscale_serve":
+      return App.SetTailscaleServe(!!args.enabled, args.port);
+
     default:
       console.warn(`[wails-compat] invoke("${cmd}") has no Go binding yet`);
       throw new Error(`command not implemented in Go backend: ${cmd}`);

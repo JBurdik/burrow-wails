@@ -30,6 +30,10 @@ export function BeginAgentTurn(arg1, arg2, arg3) {
   return window['go']['main']['App']['BeginAgentTurn'](arg1, arg2, arg3);
 }
 
+export function CheckUpdate() {
+  return window['go']['main']['App']['CheckUpdate']();
+}
+
 export function ClaudeAbort(arg1) {
   return window['go']['main']['App']['ClaudeAbort'](arg1);
 }
@@ -136,6 +140,14 @@ export function GetConfigDirs() {
 
 export function GetHookServerPort() {
   return window['go']['main']['App']['GetHookServerPort']();
+}
+
+export function GetHttpServerStatus() {
+  return window['go']['main']['App']['GetHttpServerStatus']();
+}
+
+export function GetTailscaleStatus() {
+  return window['go']['main']['App']['GetTailscaleStatus']();
 }
 
 export function IsPidAlive(arg1) {
@@ -358,6 +370,10 @@ export function SetTabLiveStatus(arg1, arg2) {
   return window['go']['main']['App']['SetTabLiveStatus'](arg1, arg2);
 }
 
+export function SetTailscaleServe(arg1, arg2) {
+  return window['go']['main']['App']['SetTailscaleServe'](arg1, arg2);
+}
+
 export function SetWorkspaceIcon(arg1, arg2) {
   return window['go']['main']['App']['SetWorkspaceIcon'](arg1, arg2);
 }
@@ -376,6 +392,14 @@ export function SyncFloatSize(arg1) {
 
 export function SystemStats() {
   return window['go']['main']['App']['SystemStats']();
+}
+
+export function TailscaleServe(arg1) {
+  return window['go']['main']['App']['TailscaleServe'](arg1);
+}
+
+export function TailscaleServeStop() {
+  return window['go']['main']['App']['TailscaleServeStop']();
 }
 
 export function TakeSpawnRequests(arg1) {

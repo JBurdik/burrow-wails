@@ -1,9 +1,14 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -11,11 +16,15 @@ import (
 
 // HTTPServer is a minimal port of src-tauri's http_server/ (axum + WS) —
 // lets a browser reach the same App methods and event stream as the native
-// window. Auth/Tailscale integration from the Rust version isn't ported yet
-// (see plan phase 6/7); this covers the WS event fan-out + a small JSON-RPC
-// surface for PTY control, enough for `burrow-web`-style remote use.
+// window. Covers the WS event fan-out, a small JSON-RPC surface for PTY
+// control, and bearer-token auth (a random token generated per app-data
+// dir, matching the shape of the Rust version's auth.rs without porting
+// its exact session-cookie mechanics). Tailscale integration is a thin
+// `tailscale serve` shell-out (see TailscaleServe below), not a full port
+// of tailscale.rs's embedded-tsnet approach.
 type HTTPServer struct {
-	app *App
+	app   *App
+	token string
 
 	mu      sync.Mutex
 	clients map[*websocket.Conn]struct{}
@@ -26,7 +35,37 @@ var upgrader = websocket.Upgrader{
 }
 
 func NewHTTPServer(app *App) *HTTPServer {
-	return &HTTPServer{app: app, clients: make(map[*websocket.Conn]struct{})}
+	return &HTTPServer{app: app, clients: make(map[*websocket.Conn]struct{}), token: loadOrCreateHTTPToken()}
+}
+
+// loadOrCreateHTTPToken persists a random bearer token in the app data dir
+// so remote clients (and this app's own future sessions) can authenticate
+// consistently across restarts.
+func loadOrCreateHTTPToken() string {
+	dataDir, err := appDataDir()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(dataDir, "http.token")
+	if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+		return string(b)
+	}
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
+	token := hex.EncodeToString(buf)
+	_ = os.WriteFile(path, []byte(token), 0o600)
+	return token
+}
+
+func (s *HTTPServer) authorized(r *http.Request) bool {
+	if s.token == "" {
+		return false // token generation/persistence failed — fail closed
+	}
+	got := r.Header.Get("Authorization")
+	want := "Bearer " + s.token
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func (s *HTTPServer) Broadcast(eventName string, payload any) {
@@ -50,6 +89,12 @@ func (s *HTTPServer) ListenAndServe(addr string) error {
 }
 
 func (s *HTTPServer) handleWS(w http.ResponseWriter, r *http.Request) {
+	// Browsers can't set custom headers on the WS handshake, so the token
+	// travels as a query param here instead of Authorization.
+	if s.token != "" && subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(s.token)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -84,6 +129,10 @@ type rpcRequest struct {
 // Deliberately small: /rpc/create-pty, /rpc/write-pty. Extend as the
 // browser client needs more (see dispatch.rs for the full Rust surface).
 func (s *HTTPServer) handleRPC(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

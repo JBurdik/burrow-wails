@@ -120,6 +120,26 @@ export namespace main {
 	        this.success = source["success"];
 	    }
 	}
+	export class HttpServerStatus {
+	    enabled: boolean;
+	    port: number;
+	    tokenPath: string;
+	    token: string;
+	    pairingCode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HttpServerStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.port = source["port"];
+	        this.tokenPath = source["tokenPath"];
+	        this.token = source["token"];
+	        this.pairingCode = source["pairingCode"];
+	    }
+	}
 	export class MissionTask {
 	    id: string;
 	    workspace_id?: number;
@@ -236,6 +256,26 @@ export namespace main {
 	        this.numGoroutine = source["numGoroutine"];
 	    }
 	}
+	export class TailscaleStatus {
+	    installed: boolean;
+	    logged_in: boolean;
+	    dns_name?: string;
+	    serving: boolean;
+	    serve_url?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TailscaleStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.logged_in = source["logged_in"];
+	        this.dns_name = source["dns_name"];
+	        this.serving = source["serving"];
+	        this.serve_url = source["serve_url"];
+	    }
+	}
 	export class TaskAttachment {
 	    id: number;
 	    task_id: string;
@@ -284,6 +324,24 @@ export namespace main {
 	        this.cwd = source["cwd"];
 	        this.default_title = source["default_title"];
 	        this.session_id = source["session_id"];
+	    }
+	}
+	export class UpdateInfo {
+	    available: boolean;
+	    version: string;
+	    current_version: string;
+	    notes: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.version = source["version"];
+	        this.current_version = source["current_version"];
+	        this.notes = source["notes"];
 	    }
 	}
 	export class Workspace {

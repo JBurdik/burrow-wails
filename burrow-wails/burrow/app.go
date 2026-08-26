@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"burrow/internal/agentproc"
 )
@@ -34,6 +35,8 @@ type App struct {
 	burrowMcpMaxDepth int
 }
 
+const httpServerPort = 37892
+
 // SetHttpEnabled starts/stops the remote HTTP+WS server (browser/remote
 // access), matching the frontend's `set_http_enabled` invoke call.
 func (a *App) SetHttpEnabled(enabled bool) error {
@@ -43,13 +46,39 @@ func (a *App) SetHttpEnabled(enabled bool) error {
 	if enabled {
 		a.httpSrv = NewHTTPServer(a)
 		go func() {
-			if err := a.httpSrv.ListenAndServe("127.0.0.1:37892"); err != nil {
+			if err := a.httpSrv.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", httpServerPort)); err != nil {
 				log.Printf("http server: %v", err)
 			}
 		}()
 	}
 	a.httpSrvRunning = enabled
 	return nil
+}
+
+// HttpServerStatus mirrors Settings.vue's local httpStatus shape exactly
+// (camelCase — that's what the original Rust command actually returned).
+type HttpServerStatus struct {
+	Enabled     bool   `json:"enabled"`
+	Port        int    `json:"port"`
+	TokenPath   string `json:"tokenPath"`
+	Token       string `json:"token"`
+	PairingCode string `json:"pairingCode"`
+}
+
+func (a *App) GetHttpServerStatus() HttpServerStatus {
+	dataDir, _ := appDataDir()
+	s := HttpServerStatus{
+		Enabled:   a.httpSrvRunning,
+		Port:      httpServerPort,
+		TokenPath: filepath.Join(dataDir, "http.token"),
+	}
+	if a.httpSrv != nil {
+		s.Token = a.httpSrv.token
+		if len(s.Token) >= 6 {
+			s.PairingCode = strings.ToUpper(s.Token[:6])
+		}
+	}
+	return s
 }
 
 func NewApp() *App {

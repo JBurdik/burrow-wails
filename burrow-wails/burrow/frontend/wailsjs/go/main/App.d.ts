@@ -16,6 +16,8 @@ export function AddMcpServer(arg1:string,arg2:Record<string, any>):Promise<void>
 
 export function BeginAgentTurn(arg1:string,arg2:number,arg3:string):Promise<number>;
 
+export function CheckUpdate():Promise<main.UpdateInfo>;
+
 export function ClaudeAbort(arg1:string):Promise<void>;
 
 export function ClaudeGetAccount(arg1:string):Promise<main.ClaudeAccountInfo>;
@@ -69,6 +71,10 @@ export function GetAppVersion():Promise<string>;
 export function GetConfigDirs():Promise<main.ConfigDirs>;
 
 export function GetHookServerPort():Promise<number>;
+
+export function GetHttpServerStatus():Promise<main.HttpServerStatus>;
+
+export function GetTailscaleStatus():Promise<main.TailscaleStatus>;
 
 export function IsPidAlive(arg1:number):Promise<boolean>;
 
@@ -180,6 +186,8 @@ export function SetSleepInhibit(arg1:boolean):Promise<void>;
 
 export function SetTabLiveStatus(arg1:string,arg2:string):Promise<void>;
 
+export function SetTailscaleServe(arg1:boolean,arg2:number):Promise<main.TailscaleStatus>;
+
 export function SetWorkspaceIcon(arg1:number,arg2:string):Promise<void>;
 
 export function SetWorkspaceOrder(arg1:Array<number>):Promise<void>;
@@ -189,6 +197,10 @@ export function SnapFloatWindow(arg1:string):Promise<void>;
 export function SyncFloatSize(arg1:string):Promise<void>;
 
 export function SystemStats():Promise<main.SystemStats>;
+
+export function TailscaleServe(arg1:number):Promise<string>;
+
+export function TailscaleServeStop():Promise<void>;
 
 export function TakeSpawnRequests(arg1:string):Promise<Array<main.SpawnRequest>>;
 
