@@ -1,12 +1,12 @@
 <template>
-  <div class="diff-tab">
-    <div class="diff-tab-header">
-      <span class="diff-tab-title">{{ title }}</span>
-      <span class="diff-tab-mode">{{ diffStaged ? "staged" : "unstaged" }}</span>
-      <button v-if="instances.length > 1" class="header-btn" @click="toggleAll">
+  <div class="flex h-full w-full flex-col overflow-hidden bg-base">
+    <div class="flex shrink-0 items-center gap-1.5 border-b border-border bg-hover px-3 py-1.5 text-[11px]">
+      <span class="flex-1 truncate font-mono text-foreground">{{ title }}</span>
+      <span class="shrink-0 text-muted-foreground">{{ diffStaged ? "staged" : "unstaged" }}</span>
+      <button v-if="instances.length > 1" class="shrink-0 rounded border border-border bg-transparent px-1.5 py-0.5 text-[10px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="toggleAll">
         {{ allCollapsed ? "Expand all" : "Collapse all" }}
       </button>
-      <button class="header-btn" :disabled="!feedbackTargetPtyId" @click="showFeedback = !showFeedback">
+      <button class="shrink-0 rounded border border-border bg-transparent px-1.5 py-0.5 text-[10px] text-secondary-foreground hover:bg-hover hover:text-foreground" :disabled="!feedbackTargetPtyId" @click="showFeedback = !showFeedback">
         {{ showFeedback ? "Close comment" : "Comment" }}
       </button>
     </div>
@@ -19,9 +19,9 @@
       @submit="sendFeedback"
       @cancel="showFeedback = false"
     />
-    <div v-if="!diff" class="diff-empty">No changes</div>
-    <div v-else-if="parseError" class="diff-empty">Could not parse diff</div>
-    <div v-else ref="containerRef" class="diff-tab-body" />
+    <div v-if="!diff" class="flex flex-1 items-center justify-center text-xs text-muted-foreground">No changes</div>
+    <div v-else-if="parseError" class="flex flex-1 items-center justify-center text-xs text-muted-foreground">Could not parse diff</div>
+    <div v-else ref="containerRef" class="min-h-0 flex-1 overflow-auto" />
   </div>
 </template>
 
@@ -154,66 +154,3 @@ onBeforeUnmount(() => {
 });
 
 </script>
-
-<style scoped>
-.diff-tab {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  width: 100%;
-  height: 100%;
-  background: var(--bg-base);
-}
-
-.diff-tab-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: var(--bg-hover);
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-}
-
-.diff-tab-title {
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
-.diff-tab-mode {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.header-btn {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 10px;
-  padding: 2px 7px;
-  flex-shrink: 0;
-}
-.header-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-
-.diff-tab-body {
-  flex: 1;
-  overflow: auto;
-  min-height: 0;
-}
-
-.diff-empty {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-</style>
