@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > Everything below describing `src-tauri/`, Tauri commands, and the Rust event/plugin
 > machinery documents the **old** backend (still accurate on `main`) — treat it as an
 > architectural reference for *what the Go backend needs to replicate*, not as current
-> code on this branch. The actual Go backend lives in `burrow-wails/burrow/`; see its
+> code on this branch. The actual Go backend lives in `src-wails/`; see its
 > command surface across `*.go` files there (one file per subsystem: `workspace.go`,
 > `board.go`, `agents.go`, `lsp.go`, etc.) and `src/lib/wailsCompat/` for how the
 > unmodified `src/` Vue frontend is wired to it. Progress/remaining-gaps status:
@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Burrow** — a desktop app (macOS-first) that wraps real PTYs in a multi-workspace IDE shell, designed to run AI coding agents (Claude Code, Aider, Codex, etc.) side-by-side in terminal tabs. The product name is **Burrow**; the repo/package name is `agentic-ide`.
 
-Stack: Vue 3 + Pinia + xterm.js frontend, Go/Wails v2 backend (`burrow-wails/burrow/`), SQLite for persistence.
+Stack: Vue 3 + Pinia + xterm.js frontend, Go/Wails v2 backend (`src-wails/`), SQLite for persistence.
 
 ## Commands
 

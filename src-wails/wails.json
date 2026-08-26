@@ -2,9 +2,9 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "burrow",
   "outputfilename": "burrow",
-  "frontenddir": "../..",
+  "frontenddir": "..",
   "frontend:install": "pnpm install",
-  "frontend:build": "bash /Users/jirkab/code/agentic-ide-go-wails/burrow-wails/burrow/build-frontend.sh",
+  "frontend:build": "bash /Users/jirkab/code/agentic-ide-go-wails/src-wails/build-frontend.sh",
   "frontend:dev:watcher": "pnpm dev",
   "frontend:dev:serverUrl": "auto",
   "author": {

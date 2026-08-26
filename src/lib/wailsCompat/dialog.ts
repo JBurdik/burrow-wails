@@ -1,6 +1,6 @@
 // Shim for "@tauri-apps/plugin-dialog"'s open(), backed by Wails' native
 // dialog runtime calls (PickDirectory/PickFile/PickFiles in dialog.go).
-import * as App from "../../../burrow-wails/burrow/frontend/wailsjs/go/main/App";
+import * as App from "../../../src-wails/frontend/wailsjs/go/main/App";
 
 interface OpenOptions {
   directory?: boolean;

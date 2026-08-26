@@ -2,7 +2,7 @@
 # Wails invokes frontend:build without shell interpretation (no && chaining),
 # so the build + copy-into-frontend/dist steps live here instead.
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 pnpm build
-rm -rf burrow-wails/burrow/frontend/dist
-cp -R dist burrow-wails/burrow/frontend/dist
+rm -rf src-wails/frontend/dist
+cp -R dist src-wails/frontend/dist

@@ -2,7 +2,7 @@
 // runtime event bus (EventsOn/EventsOff). Tauri's payload shape is
 // {event, payload}; Wails just hands the raw payload to the callback, so
 // we wrap it back into the shape call-sites already expect.
-import { EventsOn, EventsOff } from "../../../burrow-wails/burrow/frontend/wailsjs/runtime/runtime";
+import { EventsOn, EventsOff } from "../../../src-wails/frontend/wailsjs/runtime/runtime";
 
 export type UnlistenFn = () => void;
 

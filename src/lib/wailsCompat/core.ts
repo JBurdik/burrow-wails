@@ -1,10 +1,10 @@
 // Shim for "@tauri-apps/api/core"'s invoke(), backed by the Wails-generated
-// Go bindings (burrow-wails/burrow/frontend/wailsjs/go/main/App). Vue
+// Go bindings (src-wails/frontend/wailsjs/go/main/App). Vue
 // call-sites pass a Tauri-style snake_case command name + named-args
 // object; this dispatches to the corresponding Go method with positional
 // args. Only commands implemented on the Go side so far are mapped — see
 // docs/plans for the remaining src-tauri/src/lib.rs command surface.
-import * as App from "../../../burrow-wails/burrow/frontend/wailsjs/go/main/App";
+import * as App from "../../../src-wails/frontend/wailsjs/go/main/App";
 
 type Args = Record<string, any>;
 

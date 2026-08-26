@@ -2,7 +2,7 @@
 // actually used: setTitle() (real, via Wails runtime) and onMoved() (stub,
 // float-bubble corner-snapping is part of the float-window redesign that
 // hasn't happened yet — see plan phase 7 / stubs.go).
-import { WindowSetTitle } from "../../../burrow-wails/burrow/frontend/wailsjs/runtime/runtime";
+import { WindowSetTitle } from "../../../src-wails/frontend/wailsjs/runtime/runtime";
 
 export function getCurrentWindow() {
   return {

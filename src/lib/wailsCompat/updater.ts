@@ -3,7 +3,7 @@
 // used, via Go's CheckUpdate). downloadAndInstall isn't ported — no Go
 // equivalent yet of the ed25519-signed artifact download/replace/relaunch
 // flow (see plan phase 7); it rejects clearly instead of pretending to work.
-import * as App from "../../../burrow-wails/burrow/frontend/wailsjs/go/main/App";
+import * as App from "../../../src-wails/frontend/wailsjs/go/main/App";
 
 interface UpdateHandle {
   version: string;
