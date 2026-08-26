@@ -109,7 +109,7 @@ type TerminalTab struct {
 	Ord          int     `json:"ord"`
 	Title        *string `json:"title"`
 	InitialCmd   *string `json:"initial_cmd"`
-	PtyID        *string `json:"pty_id"`
+	PtyID        *int64  `json:"pty_id"`
 	Cwd          *string `json:"cwd"`
 	DefaultTitle *string `json:"default_title"`
 	SessionID    *string `json:"session_id"`

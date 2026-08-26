@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,10 +28,54 @@ func encodeProjectDir(cwd string) string {
 	return r.Replace(cwd)
 }
 
+// ClaudeSessionInfo mirrors ClaudeChat.vue's local ClaudeSessionInfo
+// interface (session_id, first_message, updated_at — an ISO string).
 type ClaudeSessionInfo struct {
-	SessionID string `json:"sessionId"`
-	Path      string `json:"path"`
-	ModTime   string `json:"modTime"`
+	SessionID    string `json:"session_id"`
+	FirstMessage string `json:"first_message"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+// jsonlFirstUserText scans a session file for the first user-turn text, for
+// the session picker's preview line. Best-effort: returns "" on any shape
+// mismatch rather than failing the whole list.
+func jsonlFirstUserText(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		var entry struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role    string `json:"role"`
+				Content any    `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(sc.Bytes(), &entry); err != nil {
+			continue
+		}
+		if entry.Type != "user" && entry.Message.Role != "user" {
+			continue
+		}
+		switch c := entry.Message.Content.(type) {
+		case string:
+			return c
+		case []any:
+			for _, block := range c {
+				if m, ok := block.(map[string]any); ok {
+					if text, ok := m["text"].(string); ok && text != "" {
+						return text
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (a *App) ListClaudeSessions(cwd string) ([]ClaudeSessionInfo, error) {
@@ -56,13 +101,14 @@ func (a *App) ListClaudeSessions(cwd string) ([]ClaudeSessionInfo, error) {
 		if err != nil {
 			continue
 		}
+		path := filepath.Join(dir, e.Name())
 		out = append(out, ClaudeSessionInfo{
-			SessionID: strings.TrimSuffix(e.Name(), ".jsonl"),
-			Path:      filepath.Join(dir, e.Name()),
-			ModTime:   info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
+			SessionID:    strings.TrimSuffix(e.Name(), ".jsonl"),
+			FirstMessage: jsonlFirstUserText(path),
+			UpdatedAt:    info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ModTime > out[j].ModTime })
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt > out[j].UpdatedAt })
 	return out, nil
 }
 

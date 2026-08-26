@@ -97,7 +97,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE workspaces ADD COLUMN is_git INTEGER DEFAULT 0`,
 		`ALTER TABLE workspaces ADD COLUMN icon TEXT`,
 		`ALTER TABLE workspaces ADD COLUMN sort_order REAL DEFAULT 0`,
-		`ALTER TABLE terminal_tabs ADD COLUMN pty_id TEXT`,
+		`ALTER TABLE terminal_tabs ADD COLUMN pty_id INTEGER`,
 		`ALTER TABLE terminal_tabs ADD COLUMN cwd TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN default_title TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN session_id TEXT`,

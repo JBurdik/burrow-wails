@@ -45,9 +45,9 @@ export namespace main {
 	    }
 	}
 	export class ClaudeSessionInfo {
-	    sessionId: string;
-	    path: string;
-	    modTime: string;
+	    session_id: string;
+	    first_message: string;
+	    updated_at: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ClaudeSessionInfo(source);
@@ -55,9 +55,9 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.sessionId = source["sessionId"];
-	        this.path = source["path"];
-	        this.modTime = source["modTime"];
+	        this.session_id = source["session_id"];
+	        this.first_message = source["first_message"];
+	        this.updated_at = source["updated_at"];
 	    }
 	}
 	export class ClaudeUsage {
@@ -238,10 +238,11 @@ export namespace main {
 	}
 	export class TaskAttachment {
 	    id: number;
-	    taskId: string;
+	    task_id: string;
 	    ord: number;
-	    mimeType: string;
-	    filePath: string;
+	    mime_type: string;
+	    file_path: string;
+	    created_at: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new TaskAttachment(source);
@@ -250,10 +251,11 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
-	        this.taskId = source["taskId"];
+	        this.task_id = source["task_id"];
 	        this.ord = source["ord"];
-	        this.mimeType = source["mimeType"];
-	        this.filePath = source["filePath"];
+	        this.mime_type = source["mime_type"];
+	        this.file_path = source["file_path"];
+	        this.created_at = source["created_at"];
 	    }
 	}
 	export class TerminalTab {
@@ -262,7 +264,7 @@ export namespace main {
 	    ord: number;
 	    title?: string;
 	    initial_cmd?: string;
-	    pty_id?: string;
+	    pty_id?: number;
 	    cwd?: string;
 	    default_title?: string;
 	    session_id?: string;
