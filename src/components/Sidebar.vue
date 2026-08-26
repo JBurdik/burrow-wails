@@ -1,5 +1,5 @@
 <template>
-  <aside class="sidebar">
+  <aside class="flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-panel [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
     <!-- Workspace selector (repos + their worktrees) -->
     <WorkspacePicker
       @pick-folder="pickFolder"
@@ -8,119 +8,118 @@
     />
 
     <!-- Blocking attention: errors and input requests. -->
-    <div v-if="blockingItems.length > 0" class="attention-strip">
-      <div class="attention-header">
-        <PhWarningCircle :size="11" class="attention-header-icon" weight="fill" />
+    <div v-if="blockingItems.length > 0" class="mx-1.5 mb-1.5 shrink-0 overflow-hidden rounded-[7px] border border-[color-mix(in_srgb,var(--red)_35%,var(--border))] bg-base">
+      <div class="flex items-center gap-1.5 border-b border-border px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+        <PhWarningCircle :size="11" class="shrink-0 text-destructive" weight="fill" />
         <span>Needs Attention</span>
-        <span class="attention-count">{{ blockingItems.length }}</span>
+        <span class="ml-auto rounded-lg bg-destructive/[0.15] px-1.5 py-px text-[9px] font-bold leading-[1.6] text-destructive">{{ blockingItems.length }}</span>
       </div>
       <button
         v-for="item in blockingItems"
         :key="`att-${item.wsId}-${item.tabId}`"
         type="button"
-        class="attention-row"
-        :class="`attention-${item.attention}`"
+        class="group flex w-full items-center gap-[7px] border-0 border-b border-border/40 bg-transparent px-2 py-[5px] text-left font-inherit text-inherit transition-colors last:border-b-0 hover:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:-outline-offset-2"
+        :class="item.attention === 'needs-input' && 'bg-[color-mix(in_srgb,var(--status-permission)_6%,transparent)]'"
         :aria-label="`${item.tabTitle}, ${attentionLabel(item.attention)}, ${item.wsName}`"
         @click="selectFleetItem(item)"
       >
-        <span class="attention-dot status-dot" :class="`status-${item.status}`" aria-hidden="true">{{ item.status === 'running' ? spinnerFrame : '' }}</span>
-        <div class="attention-info">
-          <span class="attention-tab">{{ item.tabTitle }}</span>
-          <span class="attention-ws">{{ attentionLabel(item.attention) }} · {{ item.wsName }}</span>
+        <span class="status-dot w-3.5 shrink-0 text-center" :class="`status-${item.status}`" aria-hidden="true">{{ item.status === 'running' ? spinnerFrame : '' }}</span>
+        <div class="flex min-w-0 flex-1 flex-col gap-px">
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] font-medium text-foreground">{{ item.tabTitle }}</span>
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9.5px] text-muted-foreground">{{ attentionLabel(item.attention) }} · {{ item.wsName }}</span>
         </div>
-        <PhArrowRight :size="9" class="attention-arrow" />
+        <PhArrowRight :size="9" class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60" />
       </button>
     </div>
 
     <!-- Finished while away: distinct from blockers, persists until opened. -->
-    <div v-if="completionItems.length > 0" class="completion-strip">
-      <div class="completion-header">
-        <PhCheckCircle :size="11" class="completion-header-icon" weight="fill" />
+    <div v-if="completionItems.length > 0" class="mx-1.5 mb-1.5 shrink-0 overflow-hidden rounded-[7px] border border-[color-mix(in_srgb,var(--green)_32%,var(--border))] bg-base">
+      <div class="flex items-center gap-1.5 border-b border-border px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+        <PhCheckCircle :size="11" class="shrink-0 text-success" weight="fill" />
         <span>Done unread</span>
-        <span class="completion-count">{{ completionItems.length }}</span>
+        <span class="ml-auto rounded-lg bg-success/[0.15] px-1.5 py-px text-[9px] font-bold leading-[1.6] text-success">{{ completionItems.length }}</span>
       </div>
       <button
         v-for="item in completionItems"
         :key="`done-${item.wsId}-${item.tabId}`"
         type="button"
-        class="completion-row"
+        class="group flex w-full items-center gap-[7px] border-0 border-b border-border/40 bg-transparent px-2 py-[5px] text-left font-inherit text-inherit transition-colors last:border-b-0 hover:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:-outline-offset-2"
         :aria-label="`${item.tabTitle}, done unread, ${item.wsName}`"
         @click="selectFleetItem(item)"
       >
-        <span class="completion-dot status-dot" :class="`status-${item.status}`" aria-hidden="true" />
-        <div class="completion-info">
-          <span class="completion-tab">{{ item.tabTitle }}</span>
-          <span class="completion-ws">Done unread · {{ item.wsName }}</span>
+        <span class="status-dot w-3.5 shrink-0 text-center" :class="`status-${item.status}`" aria-hidden="true" />
+        <div class="flex min-w-0 flex-1 flex-col gap-px">
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] font-medium text-foreground">{{ item.tabTitle }}</span>
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9.5px] text-muted-foreground">Done unread · {{ item.wsName }}</span>
         </div>
-        <PhArrowRight :size="9" class="completion-arrow" />
+        <PhArrowRight :size="9" class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60" />
       </button>
     </div>
 
     <!-- Fleet strip: all non-idle agents across all workspaces -->
-    <div v-if="fleetItems.length > 0" class="fleet-strip">
-      <div class="fleet-header">
-        <PhActivity :size="10" class="fleet-header-icon" />
+    <div v-if="fleetItems.length > 0" class="mx-1.5 mb-1.5 shrink-0 overflow-hidden rounded-[7px] border border-border bg-base">
+      <div class="flex items-center gap-1.5 border-b border-border px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+        <PhActivity :size="10" class="shrink-0 text-accent" />
         <span>Agents</span>
-        <span class="fleet-count">{{ fleetItems.length }}</span>
+        <span class="ml-auto rounded-lg bg-accent/[0.15] px-1.5 py-px text-[9px] font-bold leading-[1.6] text-accent">{{ fleetItems.length }}</span>
       </div>
       <button
         v-for="item in fleetItems"
         :key="`${item.wsId}-${item.tabId}`"
         type="button"
-        class="fleet-row"
-        :class="`fleet-${item.attention}`"
+        class="group flex w-full items-center gap-[7px] border-0 border-b border-border/40 bg-transparent px-2 py-[5px] text-left font-inherit text-inherit transition-colors last:border-b-0 hover:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:-outline-offset-2"
         :aria-label="`${item.tabTitle}, working, ${item.wsName}`"
         @click="selectFleetItem(item)"
       >
-        <span class="fleet-dot status-dot" :class="`status-${item.status}`" aria-hidden="true">{{ item.status === 'running' ? spinnerFrame : '' }}</span>
-        <div class="fleet-info">
-          <span class="fleet-tab">{{ item.tabTitle }}</span>
-          <span class="fleet-ws">{{ item.wsName }}</span>
+        <span class="status-dot w-3.5 shrink-0 text-center" :class="`status-${item.status}`" aria-hidden="true">{{ item.status === 'running' ? spinnerFrame : '' }}</span>
+        <div class="flex min-w-0 flex-1 flex-col gap-px">
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] font-medium text-foreground">{{ item.tabTitle }}</span>
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9.5px] text-muted-foreground">{{ item.wsName }}</span>
         </div>
-        <PhArrowRight :size="9" class="fleet-arrow" />
+        <PhArrowRight :size="9" class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60" />
       </button>
     </div>
 
     <!-- One section per visible workspace: the pinned ones plus the active one -->
-    <div class="ws-list">
-      <div v-for="ws in sections" :key="ws.id" class="ws-section">
-        <div class="tabs-header" :class="{ active: active?.id === ws.id }" @click="selectWs(ws)">
-          <PhPushPin v-if="isPinned(ws.id)" :size="10" weight="fill" class="tabs-pin" />
-          <PhGitBranch v-else-if="ws.parent_id" :size="11" class="tabs-pin wt" />
-          <span class="tabs-label">{{ ws.worktree_branch || ws.name }}</span>
-          <span v-if="tabCount(ws.id)" class="tabs-count">{{ tabCount(ws.id) }}</span>
-          <span v-if="sections.length === 1 && unreadCount > 0" class="header-unread" :title="`${unreadCount} unread — ⌘⇧U to jump`">{{ unreadCount }}</span>
-          <div class="tabs-actions">
-            <button class="icon-btn" title="Board" @click.stop="ui.openBoard(ws.id)"><PhKanban :size="13" /></button>
-            <button class="icon-btn chat" title="New conversation" aria-label="New conversation" @click.stop="newChatSession(ws.id)"><PhChatCenteredText :size="13" /></button>
-            <button class="icon-btn" title="New terminal" @click.stop="termTabs.add(ws.id)"><PhPlus :size="13" /></button>
+    <div class="flex-1 overflow-y-auto py-0.5 pb-1.5">
+      <div v-for="ws in sections" :key="ws.id" class="mb-1">
+        <div class="tabs-header group/header mx-1 flex cursor-pointer items-center gap-[5px] rounded-md py-[5px] pb-1 pl-2.5 pr-2 transition-colors hover:bg-hover" :class="active?.id === ws.id && 'active'" @click="selectWs(ws)">
+          <PhPushPin v-if="isPinned(ws.id)" :size="10" weight="fill" class="shrink-0 text-accent" />
+          <PhGitBranch v-else-if="ws.parent_id" :size="11" class="shrink-0 text-[#a78bfa]" />
+          <span class="tabs-label overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">{{ ws.worktree_branch || ws.name }}</span>
+          <span v-if="tabCount(ws.id)" class="rounded-lg bg-hover px-1.5 py-px text-[9px] font-semibold leading-[1.6] text-muted-foreground">{{ tabCount(ws.id) }}</span>
+          <span v-if="sections.length === 1 && unreadCount > 0" class="header-unread rounded-lg bg-success px-1.5 py-px text-[9px] font-bold leading-[1.6] text-white" :title="`${unreadCount} unread — ⌘⇧U to jump`">{{ unreadCount }}</span>
+          <div class="ml-auto flex items-center gap-px opacity-0 transition-opacity group-hover/header:opacity-100" :class="active?.id === ws.id && '!opacity-100'">
+            <button class="flex items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground active:scale-90" title="Board" @click.stop="ui.openBoard(ws.id)"><PhKanban :size="13" /></button>
+            <button class="flex items-center rounded-md p-1 text-[#d97706] transition-colors hover:bg-[#d97706]/[0.14] active:scale-90" title="New conversation" aria-label="New conversation" @click.stop="newChatSession(ws.id)"><PhChatCenteredText :size="13" /></button>
+            <button class="flex items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground active:scale-90" title="New terminal" @click.stop="termTabs.add(ws.id)"><PhPlus :size="13" /></button>
           </div>
         </div>
 
-        <TransitionGroup name="ws-move" tag="div" class="ws-terminals">
+        <TransitionGroup name="ws-move" tag="div" class="ws-terminals ml-3.5 mb-[3px] mr-1.5 mt-px flex flex-col gap-px border-l border-border/55 pl-1.5">
           <div
             v-for="(tab, tabIdx) in termTabs.tabsByWs[ws.id] || []"
             :key="tab.id"
-            class="ws-term"
+            class="ws-term group relative flex touch-none items-center gap-1.5 rounded-md px-[7px] py-[5px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
             :data-reorder-idx="tabIdx"
             :data-reorder-group="String(ws.id)"
             :class="{
               active: active?.id === ws.id && termTabs.activeByWs[ws.id] === tab.id,
               [`agent-state-${attentionState(ws.id, tab.id, tab.status)}`]: tab.isAgent,
-              'drag-over': tabDragGroup === String(ws.id) && tabOverIdx === tabIdx && tabDragIdx !== tabIdx,
-              dragging: tabDragGroup === String(ws.id) && tabDragIdx === tabIdx,
+              'drag-over outline outline-1 outline-accent -outline-offset-1 bg-hover': tabDragGroup === String(ws.id) && tabOverIdx === tabIdx && tabDragIdx !== tabIdx,
+              'dragging opacity-40': tabDragGroup === String(ws.id) && tabDragIdx === tabIdx,
             }"
             @click.stop="selectTab(ws, tab.id)"
             @dblclick.stop
             @pointerdown="(e: PointerEvent) => tabDragDown(tabIdx, e, String(ws.id))"
           >
-            <PhChatCenteredText v-if="tab.isChat" :size="11" class="ws-term-icon claude-session-icon" />
-            <PhRobot v-else-if="tab.isAgent" :size="11" class="ws-term-icon agent" />
-            <PhTerminal v-else :size="11" class="ws-term-icon" />
+            <PhChatCenteredText v-if="tab.isChat" :size="11" class="claude-session-icon shrink-0 text-[#d97706]" :class="active?.id === ws.id && termTabs.activeByWs[ws.id] === tab.id && '!text-accent'" />
+            <PhRobot v-else-if="tab.isAgent" :size="11" class="ws-term-icon-agent shrink-0 text-accent" :class="active?.id === ws.id && termTabs.activeByWs[ws.id] === tab.id && '!text-accent'" />
+            <PhTerminal v-else :size="11" class="shrink-0 text-muted-foreground" :class="active?.id === ws.id && termTabs.activeByWs[ws.id] === tab.id && '!text-accent'" />
             <input
               v-if="editingTab?.wsId === ws.id && editingTab?.tabId === tab.id"
               v-model="editingTabTitle"
-              class="ws-term-rename-input"
+              class="ws-term-rename-input m-0 w-full min-w-0 flex-1 border-0 border-b border-accent bg-transparent p-0 text-[11.5px] font-medium text-inherit outline-none"
               @blur="commitTabRename"
               @keydown.enter.prevent="commitTabRename"
               @keydown.esc.prevent="cancelTabRename"
@@ -129,24 +128,24 @@
             />
             <span
               v-else
-              class="ws-term-label"
+              class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] font-medium"
               @dblclick.stop="startTabRename(ws, tab)"
             >{{ tab.title }}</span>
             <span
               v-if="(tab.leafCount ?? 1) > 1"
-              class="ws-term-split-count"
+              class="inline-flex h-[13px] min-w-[13px] shrink-0 items-center justify-center rounded-md bg-white/[0.08] px-1 text-[9px] font-semibold leading-none text-muted-foreground"
               :title="`${tab.leafCount} panes`"
             >{{ tab.leafCount }}</span>
             <span
               v-if="tab.isAgent && (tab.round ?? 0) > 1 && tab.status !== 'idle'"
-              class="ws-term-round"
+              class="min-w-[10px] shrink-0 text-right text-[9px] font-semibold text-muted-foreground opacity-70"
               :title="`${tab.round} messages sent to agent this session`"
             >↺{{ tab.round }}</span>
             <PhBell
               v-if="tab.status === 'permission'"
               :size="11"
               weight="fill"
-              class="ws-term-permission-bell"
+              class="shrink-0 text-[#f59e0b] opacity-90"
               title="Permission required"
             />
             <span
@@ -160,7 +159,7 @@
             <PhX
               :size="9"
               weight="bold"
-              class="ws-term-close"
+              class="ws-term-close shrink-0 rounded-sm p-px text-muted-foreground opacity-0 transition-opacity group-hover:opacity-50 hover:!opacity-100 hover:!text-destructive"
               title="Close"
               data-no-drag
               @click.stop="termTabs.close(ws.id, tab.id)"
@@ -168,16 +167,16 @@
           </div>
         </TransitionGroup>
 
-        <div v-if="!tabCount(ws.id)" class="ws-empty sm">No tabs. Click + to open one.</div>
+        <div v-if="!tabCount(ws.id)" class="mx-2 mb-1 ml-[18px] rounded-lg p-2.5 text-center text-[10.5px] leading-[1.7] text-muted-foreground opacity-70">No tabs. Click + to open one.</div>
       </div>
 
-      <div v-if="store.workspaces.length === 0" class="ws-empty">
+      <div v-if="store.workspaces.length === 0" class="m-2 rounded-lg border border-dashed border-border/60 p-[30px_20px] text-center text-[11.5px] leading-[1.7] text-muted-foreground">
         No workspaces.<br />Open a folder to start.
       </div>
     </div>
 
-    <div class="sidebar-footer">
-      <button class="footer-btn" @click="pickFolder">
+    <div class="shrink-0 border-t border-border px-2 py-1.5">
+      <button class="flex w-full items-center justify-center gap-1.5 rounded-md border border-border/65 bg-transparent px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-secondary-foreground active:scale-[0.985]" @click="pickFolder">
         <PhFolderOpen :size="13" />
         Open Folder…
       </button>
@@ -187,52 +186,52 @@
   <!-- Dialogs teleported to body to escape backdrop-filter stacking context -->
   <Teleport to="body">
     <!-- Rename dialog -->
-    <div class="dialog-overlay" v-if="renameId !== null" @click.self="renameId = null">
-      <div class="dialog">
-        <h3>Rename workspace</h3>
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="renameId !== null" @click.self="renameId = null">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+        <h3 class="text-sm font-semibold text-foreground">Rename workspace</h3>
         <input
           v-model="renameName"
-          class="dialog-input"
+          class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
           placeholder="Workspace name"
           @keydown.enter="confirmRename"
           @keydown.esc="renameId = null"
           ref="renameInputEl"
         />
-        <div class="dialog-actions">
-          <button class="btn-secondary" @click="renameId = null">Cancel</button>
-          <button class="btn-primary" @click="confirmRename" :disabled="!renameName.trim()">Rename</button>
+        <div class="flex justify-end gap-2">
+          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="renameId = null">Cancel</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmRename" :disabled="!renameName.trim()">Rename</button>
         </div>
       </div>
     </div>
 
     <!-- Name dialog -->
-    <div class="dialog-overlay" v-if="pendingPath" @click.self="pendingPath = ''">
-      <div class="dialog">
-        <h3>Name this workspace</h3>
-        <p class="dialog-path">{{ pendingPath }}</p>
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="pendingPath" @click.self="pendingPath = ''">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+        <h3 class="text-sm font-semibold text-foreground">Name this workspace</h3>
+        <p class="overflow-hidden text-ellipsis whitespace-nowrap rounded border border-border bg-base px-2 py-1.5 font-mono text-[11px] text-secondary-foreground">{{ pendingPath }}</p>
         <input
           v-model="pendingName"
-          class="dialog-input"
+          class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
           placeholder="Workspace name"
           @keydown.enter="confirmCreate"
           @keydown.esc="pendingPath = ''"
           ref="nameInputEl"
         />
-        <div class="dialog-actions">
-          <button class="btn-secondary" @click="pendingPath = ''">Cancel</button>
-          <button class="btn-primary" @click="confirmCreate" :disabled="!pendingName.trim()">Create</button>
+        <div class="flex justify-end gap-2">
+          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="pendingPath = ''">Cancel</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmCreate" :disabled="!pendingName.trim()">Create</button>
         </div>
       </div>
     </div>
 
     <!-- New worktree dialog -->
-    <div class="dialog-overlay" v-if="wtParent" @click.self="closeWtDialog">
-      <div class="dialog">
-        <h3>New worktree — {{ wtParent?.name }}</h3>
-        <label class="wt-label">Branch</label>
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="wtParent" @click.self="closeWtDialog">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+        <h3 class="text-sm font-semibold text-foreground">New worktree — {{ wtParent?.name }}</h3>
+        <label class="-mb-1.5 text-[11px] font-semibold text-secondary-foreground">Branch</label>
         <input
           v-model="wtBranch"
-          class="dialog-input"
+          class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
           placeholder="feature/my-branch"
           list="wt-base-branches"
           spellcheck="false"
@@ -240,10 +239,10 @@
           @keydown.esc="closeWtDialog"
           ref="wtBranchEl"
         />
-        <label class="wt-label">Base branch <span class="wt-hint">(only for a new branch)</span></label>
+        <label class="-mb-1.5 text-[11px] font-semibold text-secondary-foreground">Base branch <span class="font-normal text-muted-foreground">(only for a new branch)</span></label>
         <input
           v-model="wtBase"
-          class="dialog-input"
+          class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
           placeholder="defaults to current HEAD"
           list="wt-base-branches"
           spellcheck="false"
@@ -253,11 +252,11 @@
         <datalist id="wt-base-branches">
           <option v-for="b in wtBaseList" :key="b" :value="b" />
         </datalist>
-        <p class="dialog-path">{{ wtTargetPath }}</p>
-        <p v-if="wtError" class="wt-error">{{ wtError }}</p>
-        <div class="dialog-actions">
-          <button class="btn-secondary" @click="closeWtDialog">Cancel</button>
-          <button class="btn-primary" @click="confirmWorktree" :disabled="!wtBranch.trim() || wtBusy">
+        <p class="overflow-hidden text-ellipsis whitespace-nowrap rounded border border-border bg-base px-2 py-1.5 font-mono text-[11px] text-secondary-foreground">{{ wtTargetPath }}</p>
+        <p v-if="wtError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ wtError }}</p>
+        <div class="flex justify-end gap-2">
+          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="closeWtDialog">Cancel</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmWorktree" :disabled="!wtBranch.trim() || wtBusy">
             {{ wtBusy ? "Creating…" : "Create" }}
           </button>
         </div>
@@ -605,136 +604,21 @@ async function confirmCreate() {
 </script>
 
 <style scoped>
-/* ── Sidebar shell ─────────────────────────────────────────────── */
-.sidebar {
-  width: var(--sidebar-width, 220px);
-  flex: 0 0 var(--sidebar-width, 220px);
-  background: var(--bg-panel);
-  backdrop-filter: var(--blur-panels, none);
-  -webkit-backdrop-filter: var(--blur-panels, none);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-
-/* ── Workspace section ─────────────────────────────────────────── */
-.ws-section { margin-bottom: 4px; }
-
-.tabs-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 8px 4px 10px;
-  margin: 0 4px;
-  border-radius: 5px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background .12s;
-}
-.tabs-header:hover { background: var(--bg-hover); }
 .tabs-header.active .tabs-label { color: var(--text-primary); }
 
-.tabs-pin { color: var(--accent); flex-shrink: 0; }
-.tabs-pin.wt { color: #a78bfa; }
-
-.tabs-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tabs-count {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: var(--bg-hover);
-  border-radius: 8px;
-  padding: 1px 6px;
-  line-height: 1.6;
-}
-
-.tabs-actions { margin-left: auto; display: flex; align-items: center; gap: 1px; opacity: 0; transition: opacity .12s; }
-.tabs-header:hover .tabs-actions, .tabs-header.active .tabs-actions { opacity: 1; }
-
-.header-unread {
-  font-size: 9px;
-  font-weight: 700;
-  color: #fff;
-  background: var(--green);
-  border-radius: 8px;
-  padding: 1px 6px;
-  line-height: 1.6;
-  animation: pulse-unread 2s ease-in-out infinite;
-}
+.header-unread { animation: pulse-unread 2s ease-in-out infinite; }
 @keyframes pulse-unread {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.55; }
 }
 
-/* ── Icon buttons ──────────────────────────────────────────────── */
-.icon-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  border-radius: 5px;
-  transition: color .12s, background .12s;
-}
-.icon-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-.icon-btn:active { transform: scale(0.9); }
-.icon-btn.chat { color: #d97706; }
-.icon-btn.chat:hover { background: color-mix(in srgb, #d97706 14%, transparent); }
-
-/* ── Tab list ──────────────────────────────────────────────────── */
-.ws-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 2px 0 6px;
-}
-
-.ws-terminals {
-  margin: 1px 6px 3px 14px;
-  border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-  padding-left: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.claude-session-icon { color: #d97706; }
-.ws-term.active .claude-session-icon { color: var(--accent); }
-
-/* ── Terminal tab row ──────────────────────────────────────────── */
-.ws-term {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 7px;
-  border-radius: 5px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  position: relative;
-  transition: background .12s, color .12s;
-  touch-action: none;
-}
-.ws-term:hover { background: var(--bg-hover); color: var(--text-primary); }
 .ws-term.active {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--text-primary);
 }
 
 /* Preserve the compact list while making each agent state scannable in-place. */
-.ws-term.agent-state-idle .ws-term-icon.agent { color: var(--text-muted); }
+.ws-term.agent-state-idle .ws-term-icon-agent { color: var(--text-muted); }
 .ws-term.agent-state-needs-input {
   background: color-mix(in srgb, var(--status-permission) 9%, transparent);
 }
@@ -744,504 +628,10 @@ async function confirmCreate() {
 .ws-term.agent-state-done-unread {
   background: color-mix(in srgb, var(--green) 8%, transparent);
 }
-.ws-term.agent-state-needs-input .ws-term-icon.agent { color: var(--status-permission); }
-.ws-term.agent-state-error .ws-term-icon.agent { color: var(--red); }
-.ws-term.agent-state-done-unread .ws-term-icon.agent { color: var(--green); }
-
-.ws-term-icon { color: var(--text-muted); flex-shrink: 0; }
-.ws-term-icon.agent { color: var(--accent); }
-.ws-term.active .ws-term-icon { color: var(--accent); }
-
-.ws-term-label {
-  flex: 1;
-  min-width: 0;
-  font-size: 11.5px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ws-term-rename-input {
-  flex: 1;
-  min-width: 0;
-  font-size: 11.5px;
-  font-weight: 500;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--accent, #4ade80);
-  outline: none;
-  color: inherit;
-  padding: 0;
-  margin: 0;
-  width: 100%;
-}
-
-.ws-term-split-count {
-  flex-shrink: 0;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-muted);
-}
-
-.ws-term-round {
-  flex-shrink: 0;
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-muted);
-  opacity: 0.7;
-  min-width: 10px;
-  text-align: right;
-}
-
-.ws-term-permission-bell {
-  flex-shrink: 0;
-  color: #f59e0b;
-  opacity: 0.9;
-}
-
-/* Status dot styles in status-dots.css — no local overrides needed. */
-
-.ws-term-close {
-  opacity: 0;
-  color: var(--text-muted);
-  flex-shrink: 0;
-  border-radius: 3px;
-  padding: 1px;
-  transition: opacity .1s, color .1s;
-}
-.ws-term:hover .ws-term-close { opacity: 0.5; }
-.ws-term-close:hover { opacity: 1 !important; color: var(--red); }
-
-/* ── Drag states ───────────────────────────────────────────────── */
-.ws-term.drag-over { background: var(--bg-hover); outline: 1px solid var(--accent); outline-offset: -1px; }
-.ws-term.dragging { opacity: 0.4; }
+.ws-term.agent-state-needs-input .ws-term-icon-agent { color: var(--status-permission); }
+.ws-term.agent-state-error .ws-term-icon-agent { color: var(--red); }
+.ws-term.agent-state-done-unread .ws-term-icon-agent { color: var(--green); }
 
 /* ── FLIP reorder animation ────────────────────────────────────── */
 .ws-move-move { transition: transform .22s cubic-bezier(.2, .8, .2, 1); }
-
-/* ── Empty state ───────────────────────────────────────────────── */
-.ws-empty {
-  font-size: 11.5px;
-  color: var(--text-muted);
-  text-align: center;
-  padding: 30px 20px;
-  line-height: 1.7;
-  margin: 8px;
-  border: 1px dashed color-mix(in srgb, var(--border) 60%, transparent);
-  border-radius: 8px;
-}
-.ws-empty.sm { padding: 10px; margin: 2px 8px 4px 18px; font-size: 10.5px; border: none; opacity: 0.7; }
-
-/* ── Footer ────────────────────────────────────────────────────── */
-.sidebar-footer {
-  border-top: 1px solid var(--border);
-  padding: 6px 8px;
-  flex-shrink: 0;
-}
-
-.footer-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  background: none;
-  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
-  border-radius: 6px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 6px 10px;
-  transition: color .12s, border-color .12s, background .12s;
-}
-.footer-btn:hover {
-  color: var(--text-secondary);
-  border-color: var(--border);
-  background: var(--bg-hover);
-}
-.footer-btn:active { transform: scale(0.985); }
-
-/* ── Dialog overlay ────────────────────────────────────────────── */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.dialog {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 24px;
-  width: 400px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.dialog h3 {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.dialog-path {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-  padding: 6px 8px;
-  background: var(--bg-base);
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dialog-input {
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-primary);
-  font-size: 13px;
-  outline: none;
-  padding: 7px 10px;
-  width: 100%;
-}
-.dialog-input:focus { border-color: var(--accent); }
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.btn-primary {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: var(--accent);
-  border: none;
-  border-radius: 5px;
-  color: #fff;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
-}
-.btn-primary:hover:not(:disabled) { background: var(--accent-dim); }
-.btn-primary:disabled { opacity: 0.5; cursor: default; }
-
-.btn-secondary {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 6px 14px;
-}
-.btn-secondary:hover { color: var(--text-primary); border-color: #444; }
-
-/* ── Worktree dialog ───────────────────────────────────────────── */
-.wt-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: -6px;
-}
-.wt-hint { font-weight: 400; color: var(--text-muted); }
-.wt-error {
-  font-size: 11px;
-  color: var(--red);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* ── Fleet strip ───────────────────────────────────────────────── */
-.fleet-strip {
-  margin: 0 6px 6px;
-  border-radius: 7px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.fleet-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 8px 4px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
-}
-
-.fleet-header-icon { color: var(--accent); flex-shrink: 0; }
-
-.fleet-count {
-  margin-left: auto;
-  font-size: 9px;
-  font-weight: 700;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
-  border-radius: 8px;
-  padding: 1px 6px;
-  line-height: 1.6;
-}
-
-.fleet-row {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  gap: 7px;
-  padding: 5px 8px;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-  transition: background 0.1s;
-}
-.fleet-row:last-child { border-bottom: none; }
-.fleet-row:hover { background: var(--bg-hover); }
-.fleet-row:hover .fleet-arrow { opacity: 0.6; }
-
-.fleet-dot {
-  flex-shrink: 0;
-  width: 14px;
-  text-align: center;
-}
-
-.fleet-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.fleet-tab {
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fleet-ws {
-  font-size: 9.5px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-}
-
-.fleet-arrow {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-
-/* ── Needs Attention strip ─────────────────────────────────────── */
-.attention-strip {
-  margin: 0 6px 6px;
-  border-radius: 7px;
-  background: var(--bg-base);
-  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.attention-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 8px 4px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
-}
-
-.attention-header-icon { color: var(--red); flex-shrink: 0; }
-
-.attention-count {
-  margin-left: auto;
-  font-size: 9px;
-  font-weight: 700;
-  background: color-mix(in srgb, var(--red) 15%, transparent);
-  color: var(--red);
-  border-radius: 8px;
-  padding: 1px 6px;
-  line-height: 1.6;
-}
-
-.attention-row {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  gap: 7px;
-  padding: 5px 8px;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-  transition: background 0.1s;
-}
-.attention-row:last-child { border-bottom: none; }
-.attention-row:hover { background: var(--bg-hover); }
-.attention-row:hover .attention-arrow { opacity: 0.6; }
-.attention-needs-input { background: color-mix(in srgb, var(--status-permission) 6%, transparent); }
-
-.fleet-row:focus-visible,
-.attention-row:focus-visible,
-.completion-row:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.attention-dot {
-  flex-shrink: 0;
-  width: 14px;
-  text-align: center;
-}
-
-.attention-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.attention-tab {
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.attention-ws {
-  font-size: 9.5px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-}
-
-.attention-arrow {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-
-/* ── Done unread strip ─────────────────────────────────────────── */
-.completion-strip {
-  margin: 0 6px 6px;
-  border: 1px solid color-mix(in srgb, var(--green) 32%, var(--border));
-  border-radius: 7px;
-  background: var(--bg-base);
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.completion-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 8px 4px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
-.completion-header-icon { color: var(--green); flex-shrink: 0; }
-.completion-count {
-  margin-left: auto;
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--green) 15%, transparent);
-  color: var(--green);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1.6;
-}
-
-.completion-row {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  gap: 7px;
-  padding: 5px 8px;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-  transition: background 0.1s;
-}
-.completion-row:last-child { border-bottom: none; }
-.completion-row:hover { background: var(--bg-hover); }
-.completion-row:hover .completion-arrow { opacity: 0.6; }
-.completion-dot { flex-shrink: 0; width: 14px; text-align: center; }
-.completion-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.completion-tab {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 11.5px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.completion-ws {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.completion-arrow { flex-shrink: 0; color: var(--text-muted); opacity: 0; transition: opacity 0.1s; }
 </style>
