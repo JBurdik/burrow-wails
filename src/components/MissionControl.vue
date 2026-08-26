@@ -12,42 +12,42 @@
   history; live attach only works while the daemon PTY is still alive.
 -->
 <template>
-  <div class="mc" :class="{ blank: !activeWs }">
+  <div class="grid h-full w-full min-h-0 bg-base font-sans text-sm text-foreground" :class="activeWs ? 'grid-cols-[300px_1fr]' : 'flex items-center justify-center'">
    <template v-if="activeWs">
     <!-- ── Left rail: task list grouped by project (cwd) ───────────────── -->
-    <aside class="rail">
-      <header class="rail-head">
-        <PhCrosshair :size="17" weight="bold" class="brand-mark" />
-        <h1>Mission Control</h1>
+    <aside class="flex flex-col overflow-y-auto border-r border-border bg-panel [-webkit-backdrop-filter:var(--blur-content,none)] [backdrop-filter:var(--blur-content,none)]">
+      <header class="flex items-center gap-[9px] px-4 pb-2.5 pt-4">
+        <PhCrosshair :size="17" weight="bold" class="shrink-0 text-accent" />
+        <h1 class="m-0 flex-1 text-sm font-semibold tracking-[0.01em]">Mission Control</h1>
       </header>
 
       <!-- Scope = the active workspace. Dropdown switches it (also reflected in the sidebar). New tasks target it. -->
-      <div class="dd ws-dd">
-        <button type="button" class="ws-scope dd-btn" :class="{ open: wsMenuOpen }" @click="wsMenuOpen = !wsMenuOpen">
-          <img v-if="wsIcon(activeWs.id)" class="ws-ico-img" :src="wsIcon(activeWs.id)" alt="" />
-          <PhGitBranch v-else-if="activeWs.parent_id" :size="15" class="ws-ico" />
-          <PhFolder v-else :size="15" weight="fill" class="ws-ico" />
-          <span class="ws-meta">
-            <span class="ws-name">{{ activeWs.name }}</span>
-            <span class="ws-path">{{ shortCwd(activeWs.path) }}</span>
+      <div class="dd relative mx-3 mb-2.5">
+        <button type="button" class="flex w-full items-center gap-2.5 rounded-[10px] border border-border bg-[var(--terminal-bg)] px-[11px] py-[9px] text-left font-inherit text-sm text-foreground transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--border))]" :class="{ '!border-accent': wsMenuOpen }" @click="wsMenuOpen = !wsMenuOpen">
+          <img v-if="wsIcon(activeWs.id)" class="h-5 w-5 shrink-0 rounded-[5px] object-cover" :src="wsIcon(activeWs.id)" alt="" />
+          <PhGitBranch v-else-if="activeWs.parent_id" :size="15" class="shrink-0 text-secondary-foreground" />
+          <PhFolder v-else :size="15" weight="fill" class="shrink-0 text-secondary-foreground" />
+          <span class="flex min-w-0 flex-1 flex-col gap-px">
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-semibold">{{ activeWs.name }}</span>
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground">{{ shortCwd(activeWs.path) }}</span>
           </span>
-          <PhCaretDown :size="13" class="dd-chev" :class="{ open: wsMenuOpen }" />
+          <PhCaretDown :size="13" class="ml-auto shrink-0 text-muted-foreground transition-transform duration-200" :class="{ 'rotate-180': wsMenuOpen }" />
         </button>
-        <div v-if="wsMenuOpen" class="dd-backdrop" @click="wsMenuOpen = false" />
-        <ul v-if="wsMenuOpen" class="dd-menu ws-menu">
+        <div v-if="wsMenuOpen" class="fixed inset-0 z-[100]" @click="wsMenuOpen = false" />
+        <ul v-if="wsMenuOpen" class="absolute left-0 right-0 top-[calc(100%+5px)] z-[101] m-0 max-h-[260px] list-none overflow-y-auto rounded-[9px] border border-border bg-panel p-[5px] shadow-[0_14px_34px_-10px_#000d]">
           <li
             v-for="w in wsStore.topLevel"
             :key="w.id"
-            class="dd-opt"
-            :class="{ sel: w.id === activeWs.id }"
+            class="flex cursor-pointer items-center justify-between gap-2 rounded-md px-[9px] py-[7px] text-sm text-secondary-foreground hover:bg-hover hover:text-foreground"
+            :class="{ 'text-accent [&_svg]:text-accent': w.id === activeWs.id }"
             @click="pickWorkspace(w)"
           >
-            <span class="dd-opt-main ws-opt">
-              <img v-if="wsIcon(w.id)" class="ws-ico-img sm" :src="wsIcon(w.id)" alt="" />
-              <PhFolder v-else :size="14" weight="fill" class="ws-ico" />
-              <span class="ws-opt-meta">
-                <span class="ws-opt-name">{{ w.name }}</span>
-                <code class="dd-opt-sub">{{ shortCwd(w.path) }}</code>
+            <span class="flex min-w-0 flex-row items-center gap-[9px]">
+              <img v-if="wsIcon(w.id)" class="h-[18px] w-[18px] shrink-0 rounded-[5px] object-cover" :src="wsIcon(w.id)" alt="" />
+              <PhFolder v-else :size="14" weight="fill" class="shrink-0 text-secondary-foreground" />
+              <span class="flex min-w-0 flex-col gap-px">
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ w.name }}</span>
+                <code class="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground">{{ shortCwd(w.path) }}</code>
               </span>
             </span>
             <PhCheck v-if="w.id === activeWs.id" :size="13" weight="bold" />
@@ -55,50 +55,50 @@
         </ul>
       </div>
 
-      <button class="btn primary new-btn" @click="openComposer"><PhPlus :size="14" weight="bold" /> New task</button>
+      <button class="mx-3 mb-3 flex items-center justify-center gap-[7px] rounded-lg border border-accent bg-accent px-3 py-[9px] text-[13px] font-semibold text-white hover:bg-accent-dim" @click="openComposer"><PhPlus :size="14" weight="bold" /> New task</button>
 
-      <div class="rail-summary">
-        <span class="chip" :class="{ on: countBy('running') }"><em class="dot running" />{{ countBy('running') }}<small>running</small></span>
-        <span class="chip" :class="{ on: countBy('waiting') }"><em class="dot waiting" />{{ countBy('waiting') }}<small>waiting</small></span>
-        <span class="chip" :class="{ on: countBy('permission') }"><em class="dot permission" />{{ countBy('permission') }}<small>permission</small></span>
-        <span class="chip" :class="{ on: countBy('error') }"><em class="dot error" />{{ countBy('error') }}<small>error</small></span>
-        <span class="chip" :class="{ on: countBy('review') }"><em class="dot review" />{{ countBy('review') }}<small>review</small></span>
-        <span class="chip" :class="{ on: countBy('done') }"><em class="dot done" />{{ countBy('done') }}<small>done</small></span>
-        <span class="spacer" />
-        <button class="btn ghost xs" v-if="tasks.some(t => !t.alive)" @click="clearDead">clear finished</button>
+      <div class="flex flex-wrap items-center gap-1.5 border-b border-border px-3.5 pb-3 text-xs text-secondary-foreground">
+        <span class="inline-flex items-center gap-[5px] rounded-full border border-border bg-[var(--terminal-bg)] px-2 py-[3px] text-[11px] tabular-nums opacity-55" :class="{ 'opacity-100': countBy('running') }"><em class="dot running" />{{ countBy('running') }}<small class="text-[10px] text-muted-foreground">running</small></span>
+        <span class="inline-flex items-center gap-[5px] rounded-full border border-border bg-[var(--terminal-bg)] px-2 py-[3px] text-[11px] tabular-nums opacity-55" :class="{ 'opacity-100': countBy('waiting') }"><em class="dot waiting" />{{ countBy('waiting') }}<small class="text-[10px] text-muted-foreground">waiting</small></span>
+        <span class="inline-flex items-center gap-[5px] rounded-full border border-border bg-[var(--terminal-bg)] px-2 py-[3px] text-[11px] tabular-nums opacity-55" :class="{ 'opacity-100': countBy('permission') }"><em class="dot permission" />{{ countBy('permission') }}<small class="text-[10px] text-muted-foreground">permission</small></span>
+        <span class="inline-flex items-center gap-[5px] rounded-full border border-border bg-[var(--terminal-bg)] px-2 py-[3px] text-[11px] tabular-nums opacity-55" :class="{ 'opacity-100': countBy('error') }"><em class="dot error" />{{ countBy('error') }}<small class="text-[10px] text-muted-foreground">error</small></span>
+        <span class="inline-flex items-center gap-[5px] rounded-full border border-border bg-[var(--terminal-bg)] px-2 py-[3px] text-[11px] tabular-nums opacity-55" :class="{ 'opacity-100': countBy('review') }"><em class="dot review" />{{ countBy('review') }}<small class="text-[10px] text-muted-foreground">review</small></span>
+        <span class="inline-flex items-center gap-[5px] rounded-full border border-border bg-[var(--terminal-bg)] px-2 py-[3px] text-[11px] tabular-nums opacity-55" :class="{ 'opacity-100': countBy('done') }"><em class="dot done" />{{ countBy('done') }}<small class="text-[10px] text-muted-foreground">done</small></span>
+        <span class="flex-1" />
+        <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-transparent px-1.5 py-0.5 text-[10px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" v-if="tasks.some(t => !t.alive)" @click="clearDead">clear finished</button>
       </div>
 
-      <section class="queue" v-if="queue.length">
-        <h2>Queue · {{ queue.length }}</h2>
-        <ul>
-          <li v-for="(q, i) in queue" :key="q.qid">
-            <span class="qnum">{{ i + 1 }}</span>
-            <span class="qtext">{{ q.prompt }}</span>
-            <button class="x" title="remove" @click="queue.splice(i, 1)"><PhX :size="11" /></button>
+      <section class="px-4 pb-4 pt-2" v-if="queue.length">
+        <h2 class="m-0 text-[11px] uppercase tracking-[0.04em] text-secondary-foreground">Queue · {{ queue.length }}</h2>
+        <ul class="m-0 mt-2 flex list-none flex-col gap-1.5 p-0">
+          <li v-for="(q, i) in queue" :key="q.qid" class="flex items-center gap-2 rounded-lg border border-border bg-[var(--terminal-bg)] px-2 py-1.5">
+            <span class="w-3.5 text-[10px] text-muted-foreground">{{ i + 1 }}</span>
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs">{{ q.prompt }}</span>
+            <button class="border-none bg-none text-muted-foreground" title="remove" @click="queue.splice(i, 1)"><PhX :size="11" /></button>
           </li>
         </ul>
       </section>
 
-      <div v-if="!tasks.length" class="rail-empty">
+      <div v-if="!tasks.length" class="px-4 py-[30px] text-center text-xs leading-[1.7] text-muted-foreground">
         No tasks yet.<br />Hit <strong>＋ New</strong> to spawn one.
       </div>
 
       <!-- Projects = tasks grouped by working dir -->
-      <nav class="tasklist">
-        <div v-for="proj in projects" :key="proj.key" class="proj">
-          <div class="proj-head">{{ proj.label }}</div>
-          <ul>
+      <nav class="flex-1 overflow-y-auto py-2">
+        <div v-for="proj in projects" :key="proj.key" class="mb-1.5">
+          <div class="px-3.5 pb-1 pt-1.5 font-mono text-[10px] uppercase tracking-[0.05em] text-muted-foreground">{{ proj.label }}</div>
+          <ul class="m-0 list-none p-0">
             <li
               v-for="t in proj.tasks"
               :key="t.id"
-              class="task-row"
-              :class="{ active: t.id === selectedId }"
+              class="flex cursor-pointer items-center gap-2 border-l-2 border-l-transparent px-3.5 py-2 hover:bg-hover"
+              :class="{ 'border-l-accent bg-selected': t.id === selectedId }"
               @click="selectTask(t)"
             >
               <em class="dot" :class="t.status" />
-              <span class="row-title">{{ t.title }}</span>
-              <PhArrowSquareOut v-if="t.handedOff" class="row-handoff" :size="12" weight="bold" title="handed off to a terminal tab" />
-              <span class="row-meta">{{ statusLabel(t) }}</span>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px]">{{ t.title }}</span>
+              <PhArrowSquareOut v-if="t.handedOff" class="shrink-0 text-accent" :size="12" weight="bold" title="handed off to a terminal tab" />
+              <span class="whitespace-nowrap text-[10px] text-muted-foreground">{{ statusLabel(t) }}</span>
             </li>
           </ul>
         </div>
@@ -106,27 +106,27 @@
     </aside>
 
     <!-- ── Center: selected-task conversation + continue bar ───────────── -->
-    <main class="detail">
+    <main class="flex h-full min-h-0 flex-col overflow-hidden">
       <template v-if="selected">
-        <header class="detail-head">
+        <header class="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
           <em class="dot" :class="selected.status" :title="selected.status" />
-          <h2>{{ selected.title }}</h2>
-          <span class="model" v-if="selected.model && selected.model !== 'default'">{{ selected.model }}</span>
-          <span class="cwd-hint">{{ shortCwd(selected.cwd) }}</span>
-          <span class="status-text">· {{ statusLabel(selected) }}</span>
-          <span class="handoff-badge" v-if="selected.handedOff" title="this task's live session was handed off to a terminal tab"><PhArrowSquareOut :size="11" weight="bold" /> in tab</span>
-          <span class="spacer" />
-          <button class="btn tiny" :class="{ on: ui.missionShowActivity }" @click="ui.missionShowActivity = !ui.missionShowActivity" :title="ui.missionShowActivity ? 'hide thinking + tool activity in the feed' : 'show thinking + tool activity in the feed'"><PhWrench :size="12" /> Activity</button>
-          <button class="btn tiny" @click="openTranscript(selected)" title="view the full session transcript"><PhArticle :size="12" /> Transcript</button>
-          <button class="btn tiny" @click="openTerminal(selected)" :disabled="!selected.alive || selected.handedOff" title="attach live terminal"><PhTerminal :size="12" /> Terminal</button>
-          <button v-if="selected.handedOff" class="btn tiny" @click="focusHandoff(selected)" title="jump to the terminal tab running this task"><PhArrowSquareOut :size="12" /> Focus tab</button>
-          <button v-else class="btn tiny" @click="handoffToTab(selected)" :disabled="!selected.alive" title="hand this live session off to a real terminal tab (keeps tracking here)"><PhArrowRight :size="12" /> Hand off</button>
-          <button class="btn tiny danger" @click="deleteTask(selected)" title="kill + remove"><PhTrash :size="12" /> Delete</button>
+          <h2 class="m-0 max-w-[40vw] overflow-hidden text-ellipsis whitespace-nowrap text-[15px] font-semibold">{{ selected.title }}</h2>
+          <span class="rounded-[5px] bg-accent/[0.18] px-1.5 py-0.5 text-[10px] text-accent" v-if="selected.model && selected.model !== 'default'">{{ selected.model }}</span>
+          <span class="font-mono text-[11px] text-muted-foreground">{{ shortCwd(selected.cwd) }}</span>
+          <span class="text-xs text-muted-foreground">· {{ statusLabel(selected) }}</span>
+          <span class="inline-flex items-center gap-1 rounded-[5px] bg-accent/[0.14] px-[7px] py-0.5 text-[10px] font-semibold text-accent" v-if="selected.handedOff" title="this task's live session was handed off to a terminal tab"><PhArrowSquareOut :size="11" weight="bold" /> in tab</span>
+          <span class="flex-1" />
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" :class="{ '!text-accent !border-[color-mix(in_srgb,var(--accent)_50%,transparent)]': ui.missionShowActivity }" @click="ui.missionShowActivity = !ui.missionShowActivity" :title="ui.missionShowActivity ? 'hide thinking + tool activity in the feed' : 'show thinking + tool activity in the feed'"><PhWrench :size="12" /> Activity</button>
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="openTranscript(selected)" title="view the full session transcript"><PhArticle :size="12" /> Transcript</button>
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))] disabled:cursor-not-allowed disabled:opacity-40" @click="openTerminal(selected)" :disabled="!selected.alive || selected.handedOff" title="attach live terminal"><PhTerminal :size="12" /> Terminal</button>
+          <button v-if="selected.handedOff" class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="focusHandoff(selected)" title="jump to the terminal tab running this task"><PhArrowSquareOut :size="12" /> Focus tab</button>
+          <button v-else class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))] disabled:cursor-not-allowed disabled:opacity-40" @click="handoffToTab(selected)" :disabled="!selected.alive" title="hand this live session off to a real terminal tab (keeps tracking here)"><PhArrowRight :size="12" /> Hand off</button>
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,var(--red)_30%,var(--border))] bg-hover px-2 py-1 text-[11px] text-destructive hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="deleteTask(selected)" title="kill + remove"><PhTrash :size="12" /> Delete</button>
         </header>
 
-        <div class="convo-full" ref="convoEl">
-          <div v-for="(turn, i) in visibleTurns" :key="i" class="turn" :class="[turn.role, turn.kind || 'text']">
-            <span class="role">
+        <div class="flex flex-1 flex-col gap-4 overflow-y-auto p-5" ref="convoEl">
+          <div v-for="(turn, i) in visibleTurns" :key="i" class="turn flex gap-2.5 text-[13px] leading-[1.55]" :class="[turn.role, turn.kind || 'text']">
+            <span class="flex w-[18px] shrink-0 justify-center pt-0.5 text-muted-foreground">
               <PhBrain v-if="turn.kind === 'thinking'" :size="13" />
               <PhWrench v-else-if="turn.kind === 'tool_use'" :size="13" />
               <PhArrowBendDownRight v-else-if="turn.kind === 'tool_result'" :size="13" />
@@ -134,45 +134,46 @@
               <PhRobot v-else :size="14" />
             </span>
             <!-- thinking: muted italic stream -->
-            <div v-if="turn.kind === 'thinking'" class="ttext thinking">{{ turn.text }}</div>
+            <div v-if="turn.kind === 'thinking'" class="ttext thinking flex-1 whitespace-pre-wrap font-sans italic text-muted-foreground opacity-75">{{ turn.text }}</div>
             <!-- tool call: name + collapsible input -->
-            <details v-else-if="turn.kind === 'tool_use'" class="ttext tool-entry">
-              <summary><PhWrench :size="11" /> <span class="tool-name">{{ turn.tool || 'tool' }}</span></summary>
-              <pre v-if="turn.text">{{ turn.text }}</pre>
+            <details v-else-if="turn.kind === 'tool_use'" class="tool-entry flex-1 rounded-lg border border-[color-mix(in_srgb,var(--border)_70%,transparent)] bg-[color-mix(in_srgb,var(--bg-hover)_45%,transparent)] px-2.5 py-1.5 font-mono text-[11px]">
+              <summary class="flex select-none list-none items-center gap-[5px] text-secondary-foreground [&::-webkit-details-marker]:hidden"><PhWrench :size="11" /> <span class="font-semibold text-accent">{{ turn.tool || 'tool' }}</span></summary>
+              <pre v-if="turn.text" class="mt-1.5 max-h-[220px] overflow-auto whitespace-pre-wrap break-words text-muted-foreground">{{ turn.text }}</pre>
             </details>
             <!-- tool result: collapsible, error-tinted on failure -->
-            <details v-else-if="turn.kind === 'tool_result'" class="ttext tool-entry result" :class="{ err: turn.isError }">
-              <summary>{{ turn.isError ? 'result · error' : 'result' }}</summary>
-              <pre>{{ turn.text }}</pre>
+            <details v-else-if="turn.kind === 'tool_result'" class="tool-entry result flex-1 rounded-lg border border-[color-mix(in_srgb,var(--border)_70%,transparent)] bg-[color-mix(in_srgb,var(--bg-hover)_45%,transparent)] px-2.5 py-1.5 font-mono text-[11px]" :class="{ 'border-[color-mix(in_srgb,var(--red)_50%,transparent)]': turn.isError }">
+              <summary class="select-none list-none text-muted-foreground [&::-webkit-details-marker]:hidden" :class="{ '!text-destructive': turn.isError }">{{ turn.isError ? 'result · error' : 'result' }}</summary>
+              <pre class="mt-1.5 max-h-[220px] overflow-auto whitespace-pre-wrap break-words text-muted-foreground">{{ turn.text }}</pre>
             </details>
-            <div v-else-if="turn.role === 'user'" class="ttext">{{ turn.text }}</div>
+            <div v-else-if="turn.role === 'user'" class="ttext flex-1 whitespace-pre-wrap rounded-lg border border-border bg-[color-mix(in_srgb,var(--bg-hover)_70%,transparent)] px-3 py-2 font-mono text-foreground [backdrop-filter:blur(12px)] [-webkit-backdrop-filter:blur(12px)]">{{ turn.text }}</div>
             <!-- eslint-disable-next-line vue/no-v-html -->
-            <div v-else class="ttext md-body" v-html="renderMd(turn.text)"></div>
+            <div v-else class="ttext md-body flex-1 whitespace-normal rounded-lg border border-[color-mix(in_srgb,var(--border)_80%,transparent)] bg-[color-mix(in_srgb,var(--terminal-bg)_55%,transparent)] px-3 py-2.5 leading-[1.6] text-secondary-foreground [backdrop-filter:blur(12px)] [-webkit-backdrop-filter:blur(12px)]" v-html="renderMd(turn.text)"></div>
           </div>
-          <div v-if="selected.status === 'running'" class="working"><PhRobot :size="13" /> working…</div>
-          <div v-if="visibleTurns.length === 1 && selected.status !== 'running'" class="no-result">no result captured yet</div>
+          <div v-if="selected.status === 'running'" class="flex animate-[pulse_1.4s_infinite] items-center gap-1.5 pl-7 text-xs text-warning"><PhRobot :size="13" /> working…</div>
+          <div v-if="visibleTurns.length === 1 && selected.status !== 'running'" class="pl-7 text-xs italic text-muted-foreground">no result captured yet</div>
         </div>
 
         <!-- Handed off → a terminal tab owns input; lock the bar to avoid two writers. -->
-        <div class="continue-bar handed" v-if="selected.handedOff">
+        <div class="flex flex-row items-center gap-2 border-t border-border bg-panel px-5 pb-4 pt-3 text-xs text-accent" v-if="selected.handedOff">
           <PhArrowSquareOut :size="13" />
           <span>Handed off to a terminal tab — input lives there now.</span>
-          <span class="spacer" />
-          <button class="btn primary" @click="focusHandoff(selected)"><PhArrowSquareOut :size="13" /> Focus tab</button>
+          <span class="flex-1" />
+          <button class="flex items-center justify-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-2 text-[13px] font-semibold text-white hover:bg-accent-dim" @click="focusHandoff(selected)"><PhArrowSquareOut :size="13" /> Focus tab</button>
         </div>
         <!-- Persistent continue bar (tank's "send & continue") -->
-        <div class="continue-bar" v-else-if="selected.alive"
+        <div class="flex flex-col gap-2 border-t border-border bg-panel px-5 pb-4 pt-3" v-else-if="selected.alive"
              @drop.prevent="onFollowupDrop($event, selected)" @dragover.prevent>
           <!-- pasted/dropped image thumbnails -->
-          <div v-if="selected.followupImages?.length" class="fu-thumbs">
-            <div v-for="(p, i) in selected.followupImages" :key="`fu-${i}`" class="img-thumb" :title="p.split('/').pop()">
-              <img v-if="imagePreviews[p]" :src="imagePreviews[p]" :alt="p.split('/').pop()" />
-              <span v-else class="img-thumb-fallback"><PhImage :size="18" /></span>
-              <button class="thumb-x" @click="removeFollowupImage(selected, i)" title="Remove"><PhX :size="11" weight="bold" /></button>
+          <div v-if="selected.followupImages?.length" class="flex flex-wrap gap-2">
+            <div v-for="(p, i) in selected.followupImages" :key="`fu-${i}`" class="img-thumb group relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-lg border border-border bg-hover" :title="p.split('/').pop()">
+              <img v-if="imagePreviews[p]" class="block h-full w-full object-cover" :src="imagePreviews[p]" :alt="p.split('/').pop()" />
+              <span v-else class="flex h-full w-full items-center justify-center text-muted-foreground"><PhImage :size="18" /></span>
+              <button class="absolute right-0.5 top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border-none bg-black/[0.67] text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/[0.83]" @click="removeFollowupImage(selected, i)" title="Remove"><PhX :size="11" weight="bold" /></button>
             </div>
           </div>
-          <div class="fu-input" :class="{ disabled: selected.status === 'running' }">
+          <div class="fu-input relative flex rounded-xl border border-border bg-[var(--terminal-bg)] transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_18%,transparent)]" :class="{ 'opacity-60': selected.status === 'running' }">
             <textarea
+              class="min-h-[52px] max-h-[200px] flex-1 resize-none rounded-xl border-none bg-transparent px-[13px] py-[11px] pr-[56px] font-mono text-[13px] leading-[1.45] text-foreground outline-none disabled:cursor-not-allowed"
               v-model="selected.followup"
               rows="2"
               placeholder="Continue the conversation — paste or drop images · Enter to send · Shift+Enter for newline"
@@ -180,16 +181,16 @@
               @paste="onFollowupPaste($event, selected)"
               @keydown.enter.exact.prevent="sendFollowup(selected)"
             ></textarea>
-            <div class="fu-actions">
+            <div class="absolute bottom-2 right-2 flex gap-1.5">
               <button
                 v-if="selected.status === 'running'"
-                class="fu-btn stop"
+                class="flex h-8 w-8 items-center justify-center rounded-[9px] border-none bg-[color-mix(in_srgb,#ef4444_22%,var(--bg-hover))] text-[#ef4444] transition-[transform,background,opacity] duration-100 hover:bg-[#ef4444] hover:text-white active:scale-[0.92]"
                 @click="stopGeneration(selected)"
                 title="Interrupt the current turn (Esc)"
               ><PhStop :size="13" weight="fill" /></button>
               <button
                 v-else
-                class="fu-btn send"
+                class="flex h-8 w-8 items-center justify-center rounded-[9px] border-none bg-accent text-white transition-[transform,background,opacity] duration-100 hover:brightness-110 active:scale-[0.92] disabled:cursor-default disabled:bg-hover disabled:text-muted-foreground"
                 :disabled="!selected.followup.trim() && !selected.followupImages?.length"
                 @click="sendFollowup(selected)"
                 title="Send & continue"
@@ -197,49 +198,49 @@
             </div>
           </div>
         </div>
-        <div class="continue-bar dead" v-else-if="!selected.alive">
+        <div class="flex flex-row items-center gap-2 border-t border-border bg-panel px-5 pb-4 pt-3 text-xs text-muted-foreground" v-else-if="!selected.alive">
           <span>PTY finished — this task is read-only.</span>
-          <span class="spacer" />
-          <button class="btn primary" @click="resumeTask(selected)" title="respawn claude --resume and continue"><PhArrowClockwise :size="13" /> Resume</button>
+          <span class="flex-1" />
+          <button class="flex items-center justify-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-2 text-[13px] font-semibold text-white hover:bg-accent-dim" @click="resumeTask(selected)" title="respawn claude --resume and continue"><PhArrowClockwise :size="13" /> Resume</button>
         </div>
       </template>
 
-      <div v-else class="empty-detail">
-        <div class="empty-inner">
-          <h2>No task selected</h2>
-          <p>Pick a task on the left, or hit <strong>＋ New task</strong> to spawn one.</p>
+      <div v-else class="flex h-full items-center justify-center">
+        <div class="text-center text-muted-foreground">
+          <h2 class="mb-1.5 text-base text-secondary-foreground">No task selected</h2>
+          <p class="text-[13px]">Pick a task on the left, or hit <strong>＋ New task</strong> to spawn one.</p>
         </div>
       </div>
     </main>
    </template>
 
     <!-- ── Blank state: no active workspace → nothing to scope a task to ──── -->
-    <div v-else class="mc-blank">
-      <div class="blank-inner">
-        <PhCrosshair :size="34" weight="duotone" class="blank-mark" />
-        <h2>Pick a workspace</h2>
-        <p>Mission Control runs Claude tasks against a workspace. Select one in the sidebar on the left to spawn and track agent tasks here.</p>
-        <span class="blank-hint"><PhArrowLeft :size="13" /> choose a workspace to begin</span>
+    <div v-else class="flex w-full items-center justify-center p-10">
+      <div class="flex max-w-[380px] flex-col items-center gap-2.5 text-center">
+        <PhCrosshair :size="34" weight="duotone" class="mb-1 text-accent opacity-90" />
+        <h2 class="m-0 text-lg font-semibold text-foreground">Pick a workspace</h2>
+        <p class="m-0 text-[13px] leading-[1.6] text-secondary-foreground">Mission Control runs Claude tasks against a workspace. Select one in the sidebar on the left to spawn and track agent tasks here.</p>
+        <span class="mt-1.5 inline-flex items-center gap-1.5 font-mono text-[11px] text-accent"><PhArrowLeft :size="13" /> choose a workspace to begin</span>
       </div>
     </div>
 
     <!-- ── New-task composer (modal) ───────────────────────────────────── -->
-    <div v-if="composerOpen" class="composer-modal" @click.self="composerOpen = false">
-      <div class="composer-box" @drop.prevent="onComposerDrop" @dragover.prevent>
-        <header class="cm-head">
-          <PhCrosshair :size="14" weight="bold" class="cm-brand" />
-          <span>New task</span>
-          <span class="spacer" />
-          <button class="btn tiny icon-btn" @click="composerOpen = false"><PhX :size="12" /></button>
+    <div v-if="composerOpen" class="fixed inset-0 z-[90] flex items-center justify-center bg-black/[0.73]" @click.self="composerOpen = false">
+      <div class="flex w-[520px] max-w-[92vw] flex-col gap-3 rounded-[14px] border border-border bg-panel p-[18px] [-webkit-backdrop-filter:var(--blur-overlay,none)] [backdrop-filter:var(--blur-overlay,none)]" @drop.prevent="onComposerDrop" @dragover.prevent>
+        <header class="flex items-center gap-2 text-sm font-semibold">
+          <PhCrosshair :size="14" weight="bold" class="shrink-0 text-accent" />
+          <span class="flex-1">New task</span>
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover p-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="composerOpen = false"><PhX :size="12" /></button>
         </header>
 
-        <div class="fld prompt-fld">
-          <div class="prompt-label-row">
-            <span>Prompt</span>
-            <span class="prompt-hint">Type <kbd>@</kbd> to reference a file · <kbd>⌘↵</kbd> to run</span>
+        <div class="relative flex flex-col gap-1">
+          <div class="mb-1 flex items-baseline justify-between">
+            <span class="text-[11px] uppercase tracking-[0.04em] text-secondary-foreground">Prompt</span>
+            <span class="text-[10px] text-muted-foreground">Type <kbd class="rounded-[3px] border border-border bg-hover px-1 py-px font-mono text-[10px] text-secondary-foreground">@</kbd> to reference a file · <kbd class="rounded-[3px] border border-border bg-hover px-1 py-px font-mono text-[10px] text-secondary-foreground">⌘↵</kbd> to run</span>
           </div>
-          <div class="prompt-wrap">
+          <div class="relative">
             <textarea
+              class="box-border w-full resize-y rounded-lg border border-border bg-[var(--terminal-bg)] px-2.5 py-2 font-mono text-[13px] text-foreground focus:border-accent focus:outline-none"
               ref="promptTextarea"
               v-model="draft.prompt"
               rows="5"
@@ -250,13 +251,13 @@
               @keydown.escape="showFilePicker = false"
             ></textarea>
             <!-- @-trigger file picker dropdown -->
-            <div v-if="showFilePicker" class="at-picker">
-              <div class="at-header"><PhMagnifyingGlass :size="11" /> <span>{{ fileSearchQuery || "files in workspace" }}</span></div>
-              <ul>
-                <li v-for="p in fileSearchResults" :key="p" @click="selectFileFromPicker(p)" class="at-opt">
+            <div v-if="showFilePicker" class="absolute left-0 right-0 top-[calc(100%+4px)] z-[200] overflow-hidden rounded-[9px] border border-border bg-panel shadow-[0_12px_32px_-8px_#000c]">
+              <div class="flex items-center gap-1.5 border-b border-border px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground"><PhMagnifyingGlass :size="11" /> <span>{{ fileSearchQuery || "files in workspace" }}</span></div>
+              <ul class="m-0 list-none p-1">
+                <li v-for="p in fileSearchResults" :key="p" @click="selectFileFromPicker(p)" class="flex cursor-pointer items-center gap-2 rounded-md px-[9px] py-[7px] text-xs hover:bg-hover">
                   <PhFile :size="12" />
-                  <span class="at-name">{{ fileBasename(p) }}</span>
-                  <span class="at-path">{{ shortCwd(p) }}</span>
+                  <span class="whitespace-nowrap font-medium text-foreground">{{ fileBasename(p) }}</span>
+                  <span class="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground">{{ shortCwd(p) }}</span>
                 </li>
               </ul>
             </div>
@@ -264,44 +265,44 @@
         </div>
 
         <!-- Image attachments: thumbnail previews -->
-        <div v-if="draft.images.length" class="img-thumbs">
-          <div v-for="(p, i) in draft.images" :key="`img-${i}`" class="img-thumb" :title="p.split('/').pop()">
-            <img v-if="imagePreviews[p]" :src="imagePreviews[p]" :alt="p.split('/').pop()" />
-            <span v-else class="img-thumb-fallback"><PhImage :size="18" /></span>
-            <button class="thumb-x" @click="removeImage(i)" title="Remove"><PhX :size="11" weight="bold" /></button>
+        <div v-if="draft.images.length" class="flex flex-wrap gap-2">
+          <div v-for="(p, i) in draft.images" :key="`img-${i}`" class="img-thumb group relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-lg border border-border bg-hover" :title="p.split('/').pop()">
+            <img v-if="imagePreviews[p]" class="block h-full w-full object-cover" :src="imagePreviews[p]" :alt="p.split('/').pop()" />
+            <span v-else class="flex h-full w-full items-center justify-center text-muted-foreground"><PhImage :size="18" /></span>
+            <button class="absolute right-0.5 top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border-none bg-black/[0.67] text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/[0.83]" @click="removeImage(i)" title="Remove"><PhX :size="11" weight="bold" /></button>
           </div>
         </div>
 
         <!-- Tagged context files -->
-        <div v-if="draft.files.length" class="img-chips">
-          <span v-for="(p, i) in draft.files" :key="`file-${i}`" class="img-chip file-chip">
+        <div v-if="draft.files.length" class="flex flex-wrap gap-1.5">
+          <span v-for="(p, i) in draft.files" :key="`file-${i}`" class="inline-flex items-center gap-1.5 rounded-md border border-[color-mix(in_srgb,var(--accent)_25%,var(--border))] bg-hover px-2 py-[3px] text-[11px] text-[color-mix(in_srgb,var(--accent)_90%,var(--text-secondary))] [&_svg]:text-accent">
             <PhFile :size="12" /> {{ fileBasename(p) }}
-            <button class="x" @click="removeFile(i)"><PhX :size="10" /></button>
+            <button class="border-none bg-none p-0 text-muted-foreground" @click="removeFile(i)"><PhX :size="10" /></button>
           </span>
         </div>
 
         <!-- Attach buttons -->
-        <div class="attach-row">
-          <button class="btn ghost xs attach-btn" @click="pickFiles" type="button" title="Attach context files (sent as @path references)">
+        <div class="flex items-center gap-2.5">
+          <button class="inline-flex items-center gap-[5px] rounded-lg border border-border bg-transparent px-1.5 py-0.5 text-[10px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="pickFiles" type="button" title="Attach context files (sent as @path references)">
             <PhPaperclip :size="13" /> Attach files
           </button>
-          <span class="attach-hint">or drop images · type <kbd>@</kbd> for inline ref</span>
+          <span class="text-[10.5px] text-muted-foreground">or drop images · type <kbd class="rounded-[3px] border border-border bg-hover px-1 py-px font-mono text-[10px] text-secondary-foreground">@</kbd> for inline ref</span>
         </div>
 
-        <div class="fld">
-          <span>Model</span>
-          <div class="dd">
-            <button type="button" class="dd-btn" :class="{ open: modelMenuOpen }" @click="modelMenuOpen = !modelMenuOpen">
-              <span class="dd-val">{{ modelLabel }}</span>
-              <PhCaretDown :size="12" class="dd-chev" :class="{ open: modelMenuOpen }" />
+        <div class="flex flex-col gap-1">
+          <span class="text-[11px] uppercase tracking-[0.04em] text-secondary-foreground">Model</span>
+          <div class="dd relative">
+            <button type="button" class="flex w-full items-center gap-2 rounded-lg border border-border bg-[var(--terminal-bg)] px-2.5 py-2 text-left font-inherit text-[13px] text-foreground transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--border))]" :class="{ '!border-accent': modelMenuOpen }" @click="modelMenuOpen = !modelMenuOpen">
+              <span class="flex flex-1 items-center gap-1.5 text-left">{{ modelLabel }}</span>
+              <PhCaretDown :size="12" class="text-muted-foreground transition-transform duration-200" :class="{ 'rotate-180': modelMenuOpen }" />
             </button>
-            <div v-if="modelMenuOpen" class="dd-backdrop" @click="modelMenuOpen = false" />
-            <ul v-if="modelMenuOpen" class="dd-menu">
+            <div v-if="modelMenuOpen" class="fixed inset-0 z-[100]" @click="modelMenuOpen = false" />
+            <ul v-if="modelMenuOpen" class="absolute left-0 right-0 top-[calc(100%+5px)] z-[101] m-0 max-h-[260px] list-none overflow-y-auto rounded-[9px] border border-border bg-panel p-[5px] shadow-[0_14px_34px_-10px_#000d]">
               <li
                 v-for="m in MODELS"
                 :key="m.value"
-                class="dd-opt"
-                :class="{ sel: m.value === draft.model }"
+                class="flex cursor-pointer items-center justify-between gap-2 rounded-md px-[9px] py-2 text-[13px] text-secondary-foreground hover:bg-hover hover:text-foreground"
+                :class="{ 'text-accent [&_svg]:text-accent': m.value === draft.model }"
                 @click="draft.model = m.value; modelMenuOpen = false"
               >
                 <span>{{ m.label }}</span>
@@ -310,122 +311,122 @@
             </ul>
           </div>
         </div>
-        <div class="fld">
-          <span>Profile</span>
-          <div class="dd">
-            <button type="button" class="dd-btn" :class="{ open: profileMenuOpen }" @click="profileMenuOpen = !profileMenuOpen">
-              <span class="dd-val"><PhUserGear :size="12" class="dd-ico" /> {{ profileLabel }}</span>
-              <PhCaretDown :size="12" class="dd-chev" :class="{ open: profileMenuOpen }" />
+        <div class="flex flex-col gap-1">
+          <span class="text-[11px] uppercase tracking-[0.04em] text-secondary-foreground">Profile</span>
+          <div class="dd relative">
+            <button type="button" class="flex w-full items-center gap-2 rounded-lg border border-border bg-[var(--terminal-bg)] px-2.5 py-2 text-left font-inherit text-[13px] text-foreground transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--border))]" :class="{ '!border-accent': profileMenuOpen }" @click="profileMenuOpen = !profileMenuOpen">
+              <span class="flex flex-1 items-center gap-1.5 text-left"><PhUserGear :size="12" class="shrink-0 text-muted-foreground" /> {{ profileLabel }}</span>
+              <PhCaretDown :size="12" class="text-muted-foreground transition-transform duration-200" :class="{ 'rotate-180': profileMenuOpen }" />
             </button>
-            <div v-if="profileMenuOpen" class="dd-backdrop" @click="profileMenuOpen = false" />
-            <ul v-if="profileMenuOpen" class="dd-menu">
+            <div v-if="profileMenuOpen" class="fixed inset-0 z-[100]" @click="profileMenuOpen = false" />
+            <ul v-if="profileMenuOpen" class="absolute left-0 right-0 top-[calc(100%+5px)] z-[101] m-0 max-h-[260px] list-none overflow-y-auto rounded-[9px] border border-border bg-panel p-[5px] shadow-[0_14px_34px_-10px_#000d]">
               <li
                 v-for="p in profilesStore.profiles"
                 :key="p.id"
-                class="dd-opt"
-                :class="{ sel: p.id === draft.profileId }"
+                class="flex cursor-pointer items-center justify-between gap-2 rounded-md px-[9px] py-2 text-[13px] text-secondary-foreground hover:bg-hover hover:text-foreground"
+                :class="{ 'text-accent [&_svg]:text-accent': p.id === draft.profileId }"
                 @click="draft.profileId = p.id; profileMenuOpen = false"
               >
-                <span class="dd-opt-main">
+                <span class="flex min-w-0 flex-col gap-0.5">
                   <span>{{ p.name }}</span>
-                  <code v-if="p.configDir" class="dd-opt-sub">{{ p.configDir }}</code>
+                  <code v-if="p.configDir" class="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground">{{ p.configDir }}</code>
                 </span>
                 <PhCheck v-if="p.id === draft.profileId" :size="13" weight="bold" />
               </li>
             </ul>
           </div>
         </div>
-        <p class="cwd-line">
-          <PhFolder :size="12" weight="fill" class="dir-ico" /> {{ activeWs?.name }}
-          <span class="cwd-path">{{ shortCwd(draft.cwd) }}</span>
+        <p class="-mt-1 flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11.5px] text-secondary-foreground">
+          <PhFolder :size="12" weight="fill" class="shrink-0 text-accent" /> {{ activeWs?.name }}
+          <span class="overflow-hidden text-ellipsis font-mono text-[10.5px] text-muted-foreground">{{ shortCwd(draft.cwd) }}</span>
         </p>
 
         <!-- Feature 5 — isolate in a git worktree -->
-        <label class="iso">
+        <label class="flex cursor-pointer items-start gap-2 text-xs text-secondary-foreground">
           <input type="checkbox" v-model="draft.isolate" />
-          <span>Isolate in a git worktree <em>(off the active repo — parallel-safe)</em></span>
+          <span>Isolate in a git worktree <em class="font-normal not-italic text-muted-foreground">(off the active repo — parallel-safe)</em></span>
         </label>
-        <div v-if="draft.isolate" class="branch-row">
+        <div v-if="draft.isolate" class="ml-6 flex items-center gap-1.5 text-xs text-muted-foreground">
           <PhGitBranch :size="13" />
-          <span class="branch-prefix">mission/</span>
-          <input v-model="draft.branch" class="branch-input" type="text" placeholder="m-a1b2c3 (auto)" spellcheck="false" />
+          <span class="font-mono opacity-70">mission/</span>
+          <input v-model="draft.branch" class="min-w-0 flex-1 rounded-md border border-border bg-[var(--terminal-bg)] px-1.5 py-1 font-mono text-xs text-foreground focus:border-[color-mix(in_srgb,var(--accent,#6ab)_60%,var(--border))] focus:outline-none" type="text" placeholder="m-a1b2c3 (auto)" spellcheck="false" />
         </div>
-        <div v-if="worktreeError" class="wt-err">{{ worktreeError }}</div>
+        <div v-if="worktreeError" class="text-xs text-destructive">{{ worktreeError }}</div>
 
         <!-- Skip permission prompts — claude runs unattended (no interactive gate) -->
-        <label class="iso danger-toggle">
+        <label class="flex cursor-pointer items-start gap-2 text-xs text-secondary-foreground">
           <input type="checkbox" v-model="draft.skipPerms" />
-          <span><PhWarning :size="13" class="warn-ico" /> Skip permissions <em>(<code>--dangerously-skip-permissions</code> — no approval prompts; claude can run any tool)</em></span>
+          <span><PhWarning :size="13" class="align-[-2px] text-warning" /> Skip permissions <em class="font-normal not-italic text-[color-mix(in_srgb,var(--red)_70%,var(--text-muted))]">(<code>--dangerously-skip-permissions</code> — no approval prompts; claude can run any tool)</em></span>
         </label>
 
-        <div class="composer-actions">
-          <button class="btn primary" :disabled="!canRun" @click="runDraft">Run now</button>
-          <button class="btn" :disabled="!canRun" @click="enqueueDraft">Add to queue</button>
-          <span class="spacer" />
-          <label class="conc"><span>concurrent</span><input v-model.number="maxConcurrent" type="number" min="1" max="6" /></label>
+        <div class="flex items-center gap-2">
+          <button class="flex items-center justify-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-2 text-[13px] font-semibold text-white hover:bg-accent-dim disabled:cursor-not-allowed disabled:opacity-40" :disabled="!canRun" @click="runDraft">Run now</button>
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-3 py-2 text-[13px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))] disabled:cursor-not-allowed disabled:opacity-40" :disabled="!canRun" @click="enqueueDraft">Add to queue</button>
+          <span class="flex-1" />
+          <label class="flex items-center gap-2 text-[11px] text-secondary-foreground"><span>concurrent</span><input class="w-[52px] rounded-md border border-border bg-[var(--terminal-bg)] px-1.5 py-1 text-foreground" v-model.number="maxConcurrent" type="number" min="1" max="6" /></label>
         </div>
       </div>
     </div>
 
     <!-- ── Terminal modal (attach-on-demand) ───────────────────────────── -->
-    <div v-if="termTaskId" class="term-modal" @click.self="closeTerminal">
-      <div class="term-box">
-        <header class="term-head">
+    <div v-if="termTaskId" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/[0.63]" @click.self="closeTerminal">
+      <div class="flex h-[min(680px,78vh)] w-[min(1000px,80vw)] flex-col overflow-hidden rounded-xl border border-border bg-[var(--terminal-bg)] shadow-[0_24px_64px_-16px_#000c] [-webkit-backdrop-filter:var(--blur-overlay,none)] [backdrop-filter:var(--blur-overlay,none)]">
+        <header class="flex items-center gap-2 border-b border-border bg-panel px-3 py-2 text-[13px]">
           <em class="dot" :class="termTaskStatus" />
           <span>{{ termTaskTitle }}</span>
-          <span class="spacer" />
-          <button class="btn tiny" @click="sendCtrlC">^C</button>
-          <button class="btn tiny" @click="closeTerminal">close</button>
+          <span class="flex-1" />
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="sendCtrlC">^C</button>
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="closeTerminal">close</button>
         </header>
-        <div ref="termHost" class="term-host"></div>
+        <div ref="termHost" class="min-h-0 flex-1 overflow-hidden p-2"></div>
       </div>
     </div>
 
     <!-- ── Full-transcript dialog ───────────────────────────────────────── -->
-    <div v-if="transcriptOpen" class="tr-modal" @click.self="closeTranscript">
-      <div class="tr-box">
-        <header class="tr-head">
-          <PhArticle :size="15" weight="bold" class="tr-brand" />
-          <span class="tr-title">{{ transcriptTitle }}</span>
-          <span class="tr-count" v-if="transcriptEntries.length">{{ transcriptEntries.length }} entries</span>
-          <span class="spacer" />
-          <button class="btn tiny" @click="reloadTranscript" title="reload from disk"><PhArrowClockwise :size="12" /></button>
-          <button class="btn tiny" @click="closeTranscript">close</button>
+    <div v-if="transcriptOpen" class="fixed inset-0 z-[110] flex items-center justify-center bg-black/[0.73]" @click.self="closeTranscript">
+      <div class="flex h-[min(760px,86vh)] w-[min(860px,90vw)] flex-col overflow-hidden rounded-[14px] border border-border bg-panel shadow-[0_24px_64px_-16px_#000c] [-webkit-backdrop-filter:var(--blur-overlay,none)] [backdrop-filter:var(--blur-overlay,none)]">
+        <header class="flex items-center gap-2 border-b border-border px-3.5 py-2.5 text-[13px] font-semibold">
+          <PhArticle :size="15" weight="bold" class="shrink-0 text-accent" />
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ transcriptTitle }}</span>
+          <span class="text-[11px] font-normal text-muted-foreground" v-if="transcriptEntries.length">{{ transcriptEntries.length }} entries</span>
+          <span class="flex-1" />
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="reloadTranscript" title="reload from disk"><PhArrowClockwise :size="12" /></button>
+          <button class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-hover px-2 py-1 text-[11px] text-foreground hover:bg-[color-mix(in_srgb,var(--text-primary)_8%,var(--bg-hover))]" @click="closeTranscript">close</button>
         </header>
-        <div class="tr-body" ref="trBodyEl">
-          <div v-if="transcriptLoading" class="tr-state"><PhArrowClockwise :size="14" class="spin" /> loading transcript…</div>
-          <div v-else-if="!transcriptEntries.length" class="tr-state">No transcript found on disk yet.</div>
+        <div class="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-3.5" ref="trBodyEl">
+          <div v-if="transcriptLoading" class="flex items-center justify-center gap-2 py-8 text-center text-[13px] text-muted-foreground"><PhArrowClockwise :size="14" class="spin" /> loading transcript…</div>
+          <div v-else-if="!transcriptEntries.length" class="flex items-center justify-center gap-2 py-8 text-center text-[13px] text-muted-foreground">No transcript found on disk yet.</div>
           <template v-else>
-            <div v-for="(e, i) in transcriptEntries" :key="i" class="tr-entry" :class="[e.role, e.kind, { err: e.isError }]">
+            <div v-for="(e, i) in transcriptEntries" :key="i" class="tr-entry grid grid-cols-[20px_1fr] items-start gap-2" :class="[e.role, e.kind, { err: e.isError }]">
               <!-- text / thinking → bubble -->
               <template v-if="e.kind === 'text' || e.kind === 'thinking'">
-                <div class="tr-gutter">
+                <div class="tr-gutter flex justify-center pt-0.5 text-muted-foreground">
                   <PhCaretRight v-if="e.role === 'user'" :size="13" weight="bold" />
                   <PhBrain v-else-if="e.kind === 'thinking'" :size="14" />
                   <PhRobot v-else :size="14" />
                 </div>
-                <div class="tr-content">
-                  <div class="tr-role">{{ e.kind === 'thinking' ? 'thinking' : e.role }}</div>
-                  <div v-if="e.kind === 'thinking'" class="tr-text think">{{ e.text }}</div>
+                <div class="min-w-0">
+                  <div class="mb-[3px] text-[10px] uppercase tracking-[.05em] text-muted-foreground">{{ e.kind === 'thinking' ? 'thinking' : e.role }}</div>
+                  <div v-if="e.kind === 'thinking'" class="whitespace-pre-wrap text-[13px] italic leading-[1.55] text-secondary-foreground opacity-85">{{ e.text }}</div>
                   <!-- eslint-disable-next-line vue/no-v-html -->
-                  <div v-else-if="e.role === 'assistant'" class="tr-text md-body" v-html="renderMd(e.text)"></div>
-                  <div v-else class="tr-text">{{ e.text }}</div>
+                  <div v-else-if="e.role === 'assistant'" class="tr-text md-body whitespace-pre-wrap break-words text-[13px] leading-[1.55] text-foreground" v-html="renderMd(e.text)"></div>
+                  <div v-else class="whitespace-pre-wrap break-words rounded-lg border border-border bg-hover px-2.5 py-2 text-[13px] leading-[1.55] text-foreground">{{ e.text }}</div>
                 </div>
               </template>
               <!-- tool call → collapsible -->
               <template v-else-if="e.kind === 'tool_use'">
-                <div class="tr-gutter"><PhWrench :size="13" /></div>
-                <details class="tr-tool">
-                  <summary><span class="tr-tool-name">{{ e.tool }}</span><span class="tr-tool-hint">tool call</span></summary>
-                  <pre class="tr-pre">{{ e.text }}</pre>
+                <div class="flex justify-center pt-0.5 text-muted-foreground"><PhWrench :size="13" /></div>
+                <details class="tr-tool overflow-hidden rounded-lg border border-border bg-[var(--bg-base,var(--bg-panel))]">
+                  <summary class="flex list-none select-none items-baseline gap-2 px-2.5 py-1.5 text-xs [&::-webkit-details-marker]:hidden hover:bg-hover"><span class="shrink-0 font-mono font-semibold text-accent">{{ e.tool }}</span><span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">tool call</span></summary>
+                  <pre class="tr-pre m-0 max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words border-t border-border px-2.5 py-2 font-mono text-[11.5px] leading-[1.5] text-secondary-foreground">{{ e.text }}</pre>
                 </details>
               </template>
               <!-- tool result → collapsible -->
               <template v-else-if="e.kind === 'tool_result'">
-                <div class="tr-gutter"><PhArrowBendDownRight :size="13" /></div>
-                <details class="tr-tool result" :class="{ err: e.isError }">
-                  <summary><span class="tr-tool-name">{{ e.isError ? 'error' : 'result' }}</span><span class="tr-tool-hint">{{ trFirstLine(e.text) }}</span></summary>
-                  <pre class="tr-pre">{{ e.text }}</pre>
+                <div class="flex justify-center pt-0.5 text-muted-foreground"><PhArrowBendDownRight :size="13" /></div>
+                <details class="tr-tool result overflow-hidden rounded-lg border border-border bg-[var(--bg-base,var(--bg-panel))]" :class="{ err: e.isError }">
+                  <summary class="flex list-none select-none items-baseline gap-2 px-2.5 py-1.5 text-xs [&::-webkit-details-marker]:hidden hover:bg-hover"><span class="shrink-0 font-mono font-semibold text-secondary-foreground" :class="{ '!text-destructive': e.isError }">{{ e.isError ? 'error' : 'result' }}</span><span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ trFirstLine(e.text) }}</span></summary>
+                  <pre class="tr-pre m-0 max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words border-t border-border px-2.5 py-2 font-mono text-[11.5px] leading-[1.5] text-secondary-foreground" :class="{ '!text-destructive': e.isError }">{{ e.text }}</pre>
                 </details>
               </template>
             </div>
@@ -1776,170 +1777,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.mc {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  height: 100%;
-  width: 100%;
-  min-height: 0;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-size: 14px;
-}
-
-/* ── Rail ── */
-.rail {
-  border-right: 1px solid var(--border);
-  background: var(--bg-panel);
-  backdrop-filter: var(--blur-content, none);
-  -webkit-backdrop-filter: var(--blur-content, none);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-.rail-head { padding: 16px 16px 10px; display: flex; align-items: center; gap: 9px; }
-.rail-head .brand-mark { color: var(--accent); flex-shrink: 0; }
-.rail-head h1 { font-size: 14px; margin: 0; font-weight: 650; letter-spacing: 0.01em; flex: 1; }
-
-/* ── Workspace scope: dropdown to switch the active workspace ── */
-.ws-dd { margin: 0 12px 10px; }
-.ws-scope {
-  width: 100%; display: flex; align-items: center; gap: 10px;
-  border-radius: 10px; padding: 9px 11px; text-align: left;
-}
-.ws-scope .dd-chev { margin-left: auto; flex-shrink: 0; }
-.ws-menu .dd-opt { padding: 7px 9px; }
-.ws-opt { flex-direction: row; align-items: center; gap: 9px; }
-.ws-opt-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.ws-opt-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-ico-img.sm { width: 18px; height: 18px; }
-.ws-ico { flex-shrink: 0; color: var(--text-secondary); }
-.ws-ico-img { width: 20px; height: 20px; border-radius: 5px; object-fit: cover; flex-shrink: 0; }
-.ws-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.ws-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-path { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.new-btn { margin: 0 12px 12px; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; font-size: 13px; }
-
-/* ── Blank state: no active workspace ── */
-.mc.blank { display: flex; align-items: center; justify-content: center; }
-.mc-blank { display: flex; align-items: center; justify-content: center; width: 100%; padding: 40px; }
-.blank-inner { max-width: 380px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.blank-mark { color: var(--accent); opacity: 0.9; margin-bottom: 4px; }
-.blank-inner h2 { font-size: 18px; font-weight: 650; margin: 0; color: var(--text-primary); }
-.blank-inner p { font-size: 13px; line-height: 1.6; color: var(--text-secondary); margin: 0; }
-.blank-hint { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--accent); font-family: var(--font-mono); }
-
-.rail-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px 12px; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
-.chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; background: var(--terminal-bg); border: 1px solid var(--border); font-size: 11px; font-variant-numeric: tabular-nums; opacity: 0.55; }
-.chip.on { opacity: 1; }
-.chip small { color: var(--text-muted); font-size: 10px; }
-.btn.xs { padding: 2px 6px; font-size: 10px; }
-.rail-empty { padding: 30px 16px; text-align: center; font-size: 12px; color: var(--text-muted); line-height: 1.7; }
-
-/* ── Task list (projects → tasks) ── */
-.tasklist { flex: 1; overflow-y: auto; padding: 8px 0; }
-.proj { margin-bottom: 6px; }
-.proj-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 6px 14px 4px; font-family: var(--font-mono); }
-.proj ul { list-style: none; margin: 0; padding: 0; }
-.task-row { display: flex; align-items: center; gap: 8px; padding: 8px 14px; cursor: pointer; border-left: 2px solid transparent; }
-.task-row:hover { background: var(--bg-hover); }
-.task-row.active { background: var(--bg-selected); border-left-color: var(--accent); }
-.row-title { flex: 1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row-meta { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
-
-.cwd-line { margin: -4px 0 0; font-size: 11.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
-.cwd-line .dir-ico { color: var(--accent); flex-shrink: 0; }
-.cwd-line .cwd-path { color: var(--text-muted); font-family: var(--font-mono); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; }
-.warn-ico { color: var(--yellow); vertical-align: -2px; }
-.fld { display: flex; flex-direction: column; gap: 4px; }
-.fld > span { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
-.fld textarea, .fld input, .fld select {
-  background: var(--terminal-bg); border: 1px solid var(--border); border-radius: 8px;
-  color: var(--text-primary); padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical;
-}
-.fld textarea { font-family: var(--font-mono); }
-.fld input:focus, .fld textarea:focus, .fld select:focus { outline: none; border-color: var(--accent); }
-
-/* ── Custom dropdown (matches the app, native <select> can't be themed) ── */
-.dd { position: relative; }
-.dd-btn {
-  width: 100%; display: flex; align-items: center; gap: 8px;
-  background: var(--terminal-bg); border: 1px solid var(--border); border-radius: 8px;
-  color: var(--text-primary); padding: 8px 10px; font-size: 13px; font-family: inherit; cursor: pointer;
-  transition: border-color 0.16s cubic-bezier(0.22,1,0.36,1);
-}
-.dd-btn:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
-.dd-btn.open { border-color: var(--accent); }
-.dd-val { flex: 1; text-align: left; display: inline-flex; align-items: center; gap: 6px; }
-.dd-ico { color: var(--text-muted); flex: none; }
-.dd-opt-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.dd-opt-sub { font-size: 10px; color: var(--text-muted); font-family: var(--mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dd-chev { color: var(--text-muted); transition: transform 0.2s cubic-bezier(0.22,1,0.36,1); }
-.dd-chev.open { transform: rotate(180deg); }
-.dd-backdrop { position: fixed; inset: 0; z-index: 100; }
-.dd-menu {
-  position: absolute; z-index: 101; left: 0; right: 0; top: calc(100% + 5px);
-  list-style: none; margin: 0; padding: 5px; max-height: 260px; overflow-y: auto;
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 9px;
-  box-shadow: 0 14px 34px -10px #000d;
-}
-.dd-opt {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 8px 9px; border-radius: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer;
-}
-.dd-opt:hover { background: var(--bg-hover); color: var(--text-primary); }
-.dd-opt.sel { color: var(--accent); }
-.dd-opt.sel svg { color: var(--accent); }
-
-.composer-actions { display: flex; gap: 8px; }
-.conc { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); }
-.conc input { width: 52px; background: var(--terminal-bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); padding: 4px 6px; }
-
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  background: var(--bg-hover); border: 1px solid var(--border); color: var(--text-primary);
-  border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; font-family: inherit;
-}
-.btn svg { flex-shrink: 0; }
-.btn:hover { background: color-mix(in srgb, var(--text-primary) 8%, var(--bg-hover)); }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-.btn.primary:hover { background: var(--accent-dim); }
-.btn.ghost { background: transparent; }
-.btn.tiny { padding: 4px 8px; font-size: 11px; }
-.btn.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 30%, var(--border)); }
-
-.queue { padding: 8px 16px 16px; }
-.queue h2 { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
-.queue ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.queue li { display: flex; align-items: center; gap: 8px; background: var(--terminal-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
-.qnum { font-size: 10px; color: var(--text-muted); width: 14px; }
-.qtext { flex: 1; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.queue .x { background: none; border: none; color: var(--text-muted); cursor: pointer; }
-
-/* ── Detail (selected task) ── */
-.detail { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
-.detail-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
-.detail-head h2 { margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
-.detail-head .status-text { font-size: 12px; color: var(--text-muted); }
-.handoff-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 5px; padding: 2px 7px; }
-.row-handoff { color: var(--accent); flex-shrink: 0; }
-.continue-bar.handed { flex-direction: row; align-items: center; gap: 8px; color: var(--accent); font-size: 12px; }
-.cwd-hint { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
-.model { font-size: 10px; background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 5px; padding: 2px 6px; color: var(--accent); }
-.spacer { flex: 1; }
-
-.convo-full { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-.turn { display: flex; gap: 10px; font-size: 13px; line-height: 1.55; }
-.turn .role { flex-shrink: 0; width: 18px; display: flex; justify-content: center; padding-top: 2px; color: var(--text-muted); }
-.turn .ttext { white-space: pre-wrap; }
-.turn.user .ttext { color: var(--text-primary); font-family: var(--font-mono); background: color-mix(in srgb, var(--bg-hover) 70%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; flex: 1; }
-.turn.assistant .ttext { color: var(--text-secondary); background: color-mix(in srgb, var(--terminal-bg) 55%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid color-mix(in srgb, var(--border) 80%, transparent); border-radius: 8px; padding: 10px 12px; flex: 1; }
-
-/* Markdown body inside assistant turns */
-.md-body { white-space: normal; line-height: 1.6; }
+/* Markdown body inside assistant turns and transcript entries: content is injected via
+   v-html, so scoped attribute-selectors can't reach it — :deep() is required here. */
 .md-body :deep(p) { margin: 0 0 8px; }
 .md-body :deep(p:last-child) { margin-bottom: 0; }
 .md-body :deep(ul), .md-body :deep(ol) { margin: 4px 0 8px; padding-left: 20px; }
@@ -1958,95 +1797,10 @@ onBeforeUnmount(() => {
 .md-body :deep(th), .md-body :deep(td) { border: 1px solid var(--border); padding: 4px 8px; }
 .md-body :deep(th) { background: var(--bg-panel); font-weight: 600; }
 .md-body :deep(strong) { color: var(--text-primary); font-weight: 700; }
-.working { color: var(--yellow); font-size: 12px; padding-left: 28px; display: flex; align-items: center; gap: 6px; animation: pulse 1.4s infinite; }
-.no-result { color: var(--text-muted); font-size: 12px; font-style: italic; padding-left: 28px; }
-/* Live activity entries (thinking + tool calls) in the detail feed. Specificity is
-   bumped (.turn .ttext.X) so these beat the .turn.user/.assistant .ttext bubbles —
-   tool_result rides a role="user" message, so it'd otherwise get the user bubble. */
-.turn.thinking .role { color: var(--text-muted); }
-.turn .ttext.thinking { flex: 1; font-style: italic; opacity: 0.75; color: var(--text-muted); white-space: pre-wrap; background: none; border: none; border-radius: 0; padding: 0; font-family: inherit; }
-.turn .ttext.tool-entry { flex: 1; font-family: var(--font-mono); font-size: 11px; background: color-mix(in srgb, var(--bg-hover) 45%, transparent); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: 8px; padding: 6px 10px; white-space: normal; }
-.tool-entry summary { cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; user-select: none; list-style: none; }
-.tool-entry summary::-webkit-details-marker { display: none; }
-.tool-entry .tool-name { color: var(--accent); font-weight: 600; }
-.tool-entry pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; color: var(--text-muted); font-family: var(--font-mono); }
-.tool-entry.result summary { color: var(--text-muted); }
-.tool-entry.result.err { border-color: color-mix(in srgb, var(--red) 50%, transparent); }
-.tool-entry.result.err summary { color: var(--red); }
-.btn.tiny.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 
-/* ── Continue bar (send & continue) ── */
-.continue-bar { border-top: 1px solid var(--border); padding: 12px 20px 16px; display: flex; flex-direction: column; gap: 8px; background: var(--bg-panel); }
-.fu-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
-
-/* Input shell with the action buttons living inside the textarea's bottom-right. */
-.fu-input {
-  position: relative; display: flex; border: 1px solid var(--border); border-radius: 12px;
-  background: var(--terminal-bg); transition: border-color 0.14s, box-shadow 0.14s;
-}
-.fu-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
-.fu-input.disabled { opacity: 0.6; }
-.fu-input textarea {
-  flex: 1; background: transparent; border: none; border-radius: 12px;
-  color: var(--text-primary); padding: 11px 56px 11px 13px; font-size: 13px; font-family: var(--font-mono);
-  resize: none; min-height: 52px; max-height: 200px; line-height: 1.45;
-}
-.fu-input textarea:focus { outline: none; }
-.fu-input textarea:disabled { cursor: not-allowed; }
-.fu-actions { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
-.fu-btn {
-  display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
-  border: none; border-radius: 9px; cursor: pointer; transition: transform 0.1s, background 0.14s, opacity 0.14s;
-}
-.fu-btn:active { transform: scale(0.92); }
-.fu-btn.send { background: var(--accent); color: #fff; }
-.fu-btn.send:hover:not(:disabled) { filter: brightness(1.1); }
-.fu-btn.send:disabled { background: var(--bg-hover); color: var(--text-muted); cursor: default; }
-.fu-btn.stop { background: color-mix(in srgb, #ef4444 22%, var(--bg-hover)); color: #ef4444; }
-.fu-btn.stop:hover { background: #ef4444; color: #fff; }
-.continue-bar.dead { color: var(--text-muted); font-size: 12px; flex-direction: row; align-items: center; }
-
-.empty-detail { display: flex; align-items: center; justify-content: center; height: 100%; }
-.empty-inner { text-align: center; color: var(--text-muted); }
-.empty-inner h2 { font-size: 16px; margin-bottom: 6px; color: var(--text-secondary); }
-.empty-inner p { font-size: 13px; }
-
-/* ── Composer modal ── */
-.composer-modal { position: fixed; inset: 0; background: #000b; display: flex; align-items: center; justify-content: center; z-index: 90; }
-.composer-box { width: 520px; max-width: 92vw; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px; backdrop-filter: var(--blur-overlay, none); -webkit-backdrop-filter: var(--blur-overlay, none); }
-.cm-head { display: flex; align-items: center; font-size: 14px; font-weight: 600; }
-.cm-head span { flex: 1; }
-.composer-actions { display: flex; gap: 8px; align-items: center; }
-
-/* image attachments + worktree toggle */
-.img-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
-.img-thumb {
-  position: relative; width: 60px; height: 60px; border-radius: 8px; overflow: hidden;
-  border: 1px solid var(--border); background: var(--bg-hover); flex: none;
-}
-.img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.img-thumb-fallback { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--text-muted); }
-.thumb-x {
-  position: absolute; top: 2px; right: 2px; display: flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border: none; border-radius: 5px; cursor: pointer;
-  background: #000a; color: #fff; opacity: 0; transition: opacity 0.12s;
-}
-.img-thumb:hover .thumb-x { opacity: 1; }
-.thumb-x:hover { background: #000d; }
-.img-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.img-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: var(--bg-hover); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; color: var(--text-secondary); }
-.img-chip .x { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; }
-.iso { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
-.iso em { color: var(--text-muted); font-style: normal; }
-.iso code { font-size: 11px; }
-.danger-toggle em { color: color-mix(in srgb, var(--red) 70%, var(--text-muted)); }
-.wt-err { font-size: 12px; color: var(--red); }
-.branch-row { display: flex; align-items: center; gap: 6px; margin-left: 24px; color: var(--text-muted); font-size: 12px; }
-.branch-prefix { font-family: var(--font-mono); opacity: 0.7; }
-.branch-input { flex: 1; min-width: 0; background: var(--terminal-bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; padding: 4px 6px; }
-.branch-input:focus { outline: none; border-color: color-mix(in srgb, var(--accent, #6ab) 60%, var(--border)); }
-
-/* ── Status dots ── */
+/* ── Status dots: shared "dot" pattern with a pulse animation for the active states,
+   keyed off status keyword classes toggled from the model — kept as CSS since the
+   color + shadow + conditional animation per state reads cleaner as a class. ── */
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--text-muted); flex-shrink: 0; }
 .dot.running { background: var(--yellow); box-shadow: 0 0 8px color-mix(in srgb, var(--yellow) 53%, transparent); animation: pulse 1.4s infinite; }
 .dot.waiting { background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 53%, transparent); }
@@ -2058,78 +1812,6 @@ onBeforeUnmount(() => {
 .dot.error { background: var(--red); box-shadow: 0 0 8px color-mix(in srgb, var(--red) 60%, transparent); animation: pulse 1.4s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-/* ── Terminal modal ── */
-.term-modal { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 100; }
-.term-box { width: min(1000px, 80vw); height: min(680px, 78vh); background: var(--terminal-bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 64px -16px #000c; display: flex; flex-direction: column; overflow: hidden; backdrop-filter: var(--blur-overlay, none); -webkit-backdrop-filter: var(--blur-overlay, none); }
-.term-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 13px; }
-.term-host { flex: 1; min-height: 0; padding: 8px; overflow: hidden; }
-
-/* ── Full-transcript dialog ── */
-.tr-modal { position: fixed; inset: 0; background: #000b; display: flex; align-items: center; justify-content: center; z-index: 110; }
-.tr-box { width: min(860px, 90vw); height: min(760px, 86vh); background: var(--bg-panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 64px -16px #000c; display: flex; flex-direction: column; overflow: hidden; backdrop-filter: var(--blur-overlay, none); -webkit-backdrop-filter: var(--blur-overlay, none); }
-.tr-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; }
-.tr-brand { color: var(--accent); flex-shrink: 0; }
-.tr-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tr-count { font-size: 11px; font-weight: 400; color: var(--text-muted); }
-.tr-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
-.tr-state { color: var(--text-muted); font-size: 13px; text-align: center; padding: 32px 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .spin { animation: tr-spin 1s linear infinite; }
 @keyframes tr-spin { to { transform: rotate(360deg); } }
-
-.tr-entry { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; }
-.tr-gutter { color: var(--text-muted); display: flex; justify-content: center; padding-top: 2px; }
-.tr-entry.user .tr-gutter { color: var(--accent); }
-.tr-entry.thinking .tr-gutter { color: var(--text-muted); opacity: .7; }
-.tr-content { min-width: 0; }
-.tr-role { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 3px; }
-.tr-text { font-size: 13px; line-height: 1.55; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; }
-.tr-text.think { font-style: italic; color: var(--text-secondary); opacity: .85; white-space: pre-wrap; }
-.tr-entry.user .tr-text { background: var(--bg-hover); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
-
-/* tool call / result — collapsible */
-.tr-tool { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-base, var(--bg-panel)); overflow: hidden; }
-.tr-tool summary { cursor: pointer; list-style: none; padding: 6px 10px; display: flex; align-items: baseline; gap: 8px; font-size: 12px; user-select: none; }
-.tr-tool summary::-webkit-details-marker { display: none; }
-.tr-tool summary:hover { background: var(--bg-hover); }
-.tr-tool-name { font-family: var(--font-mono); font-weight: 600; color: var(--accent); flex-shrink: 0; }
-.tr-tool.result .tr-tool-name { color: var(--text-secondary); }
-.tr-tool.err .tr-tool-name { color: var(--err, #e5484d); }
-.tr-tool-hint { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tr-pre { margin: 0; padding: 8px 10px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; }
-.tr-entry.err .tr-pre { color: var(--err, #e5484d); }
-
-/* ── Composer improvements ── */
-.cm-head { display: flex; align-items: center; font-size: 14px; font-weight: 600; gap: 8px; }
-.cm-brand { color: var(--accent); flex-shrink: 0; }
-.icon-btn { padding: 4px 6px; }
-
-.prompt-fld { position: relative; }
-.prompt-label-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
-.prompt-hint { font-size: 10px; color: var(--text-muted); }
-.prompt-hint kbd { font-family: var(--font-mono); background: var(--bg-hover); border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px; font-size: 10px; color: var(--text-secondary); }
-.prompt-wrap { position: relative; }
-.prompt-wrap textarea { width: 100%; box-sizing: border-box; }
-
-/* @-trigger inline file picker */
-.at-picker {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 200;
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 9px;
-  box-shadow: 0 12px 32px -8px #000c; overflow: hidden;
-}
-.at-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 10px; color: var(--text-muted); border-bottom: 1px solid var(--border); font-family: var(--font-mono); }
-.at-picker ul { list-style: none; margin: 0; padding: 4px; }
-.at-opt { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-.at-opt:hover { background: var(--bg-hover); }
-.at-name { font-weight: 500; color: var(--text-primary); white-space: nowrap; }
-.at-path { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* file chip variant */
-.file-chip { color: color-mix(in srgb, var(--accent) 90%, var(--text-secondary)); border-color: color-mix(in srgb, var(--accent) 25%, var(--border)); }
-.file-chip svg { color: var(--accent); }
-
-/* attach row */
-.attach-row { display: flex; align-items: center; gap: 10px; }
-.attach-btn { display: flex; align-items: center; gap: 5px; }
-.attach-hint { font-size: 10.5px; color: var(--text-muted); }
-.attach-hint kbd { font-family: var(--font-mono); background: var(--bg-hover); border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px; font-size: 10px; color: var(--text-secondary); }
 </style>
