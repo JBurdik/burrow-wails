@@ -30,6 +30,8 @@ type TabRequest = {
   fromIdx?: number;
   toIdx?: number;
   title?: string;
+  /** Sent as the first message right after the chat tab opens (action: "openChat"). */
+  initialPrompt?: string;
   /** Optional command to run in a newly-added tab (action: "add"). */
   cmd?: string;
   /** Optional Kanban board task id to stamp onto the newly-added tab's leaf (action: "add"). */
@@ -97,8 +99,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   function reorder(wsId: number, fromIdx: number, toIdx: number) {
     request.value = { wsId, action: "reorder", fromIdx, toIdx, nonce: ++nonce };
   }
-  function openChat(wsId: number, chatId?: number, agentId?: string) {
-    request.value = { wsId, action: "openChat", chatId, agentId, nonce: ++nonce };
+  function openChat(wsId: number, chatId?: number, agentId?: string, initialPrompt?: string) {
+    request.value = { wsId, action: "openChat", chatId, agentId, initialPrompt, nonce: ++nonce };
   }
   function rename(wsId: number, tabId: number, title: string) {
     request.value = { wsId, action: "rename", tabId, title, nonce: ++nonce };

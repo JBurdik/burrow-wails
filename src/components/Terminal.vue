@@ -1037,7 +1037,7 @@ function activateTab(id: number) {
   nextTick(() => xtermRefs.get(leaf.id)?.focus());
 }
 
-function openClaudeChat(chatId?: number, agentId?: string, cwd?: string) {
+function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string) {
   let session: import("@/stores/claudeChats").ClaudeSession;
   if (chatId != null) {
     session = chatsStore.sessions.find((s) => s.id === chatId) ?? chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
@@ -1066,6 +1066,7 @@ function openClaudeChat(chatId?: number, agentId?: string, cwd?: string) {
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
   activateTab(tab.id);
+  if (initialPrompt) nextTick(() => xtermRefs.get(id)?.sendMessage(initialPrompt));
 }
 
 function switchSurface(surface: "chat" | "terminal") {
@@ -1612,7 +1613,7 @@ function applyTabRequest(req: typeof tabsStore.request) {
   else if (req.action === "reorder" && req.fromIdx != null && req.toIdx != null) {
     reorderTabs(req.fromIdx, req.toIdx);
   }
-  else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId);
+  else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId, undefined, req.initialPrompt);
   else if (req.action === "rename" && req.tabId != null && req.title != null) {
     const tab = tabs.value.find((t) => t.id === req.tabId);
     if (tab) getAllLeaves(tab.root).forEach((l) => { l.title = req.title!; });

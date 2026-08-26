@@ -21,10 +21,7 @@
              returning replayed the daemon ring-buffer into a fresh fit → scrambled
              buffer. Keeping them mounted avoids the detach/reattach entirely. -->
         <div v-show="ui.mode === 'terminal'" class="terminal-host">
-          <div v-show="!ws.active" class="no-workspace">
-            <PhFolderOpen :size="32" weight="thin" />
-            <span>Select a workspace</span>
-          </div>
+          <WelcomeScreen v-show="showWelcome" @open-folder="openNewWorkspace" />
           <Terminal
             v-for="w in ws.opened"
             v-show="ws.active && w.id === ws.active.id"
@@ -96,7 +93,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, provide, watch, nextTick } from "vue";
-import { PhFolderOpen, PhX } from "@phosphor-icons/vue";
+import { PhX } from "@phosphor-icons/vue";
 import TitleBar from "@/components/TitleBar.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import ActivityBar from "@/components/ActivityBar.vue";
@@ -113,6 +110,7 @@ import UpdateBanner from "@/components/UpdateBanner.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
 import ManagerBar from "@/components/ManagerBar.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
+import WelcomeScreen from "@/components/WelcomeScreen.vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useGitStore } from "@/stores/git";
@@ -138,6 +136,11 @@ const { diagramContent } = useDiagram();
 const agents = useAgentsStore();
 const update = useUpdateStore();
 const tabsStore = useTerminalTabsStore();
+
+// No active workspace, or the active one has no tabs open yet.
+const showWelcome = computed(() =>
+  !ws.active || (tabsStore.tabsByWs[ws.active.id]?.length ?? 0) === 0,
+);
 
 const panelStyles = computed(() => ({
   '--sidebar-width': ui.sidebarWidth + 'px',
@@ -593,17 +596,6 @@ body {
 .panels-swapped .ide-main { order: 3; }
 .panels-swapped .panel-resize-right { order: 2; }
 .panels-swapped .panel-right { order: 1; }
-
-.no-workspace {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
 
 /* Cheatsheet overlay */
 .cheatsheet-backdrop {
