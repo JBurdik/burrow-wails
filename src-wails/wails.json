@@ -12,7 +12,7 @@
   "info": {
     "companyName": "Burrow",
     "productName": "Burrow",
-    "productVersion": "0.1.1",
+    "productVersion": "0.1.2",
     "copyright": "© 2026 Jiří Burdych",
     "comments": "Multi-workspace IDE shell for AI coding agents"
   }
