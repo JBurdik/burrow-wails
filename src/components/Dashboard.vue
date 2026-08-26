@@ -13,105 +13,109 @@
   `run_git` Tauri command directly (the git store only tracks the active cwd).
 -->
 <template>
-  <div class="dash">
-    <header class="dash-head">
-      <PhSquaresFour :size="20" weight="bold" class="brand-mark" />
-      <h1>Dashboard</h1>
-      <span class="spacer" />
-      <button class="btn ghost xs" @click="refreshGit" :disabled="gitBusy">
-        <PhArrowsClockwise :size="13" :class="{ spin: gitBusy }" /> refresh
+  <div class="flex h-full flex-col overflow-hidden bg-base text-foreground">
+    <header class="flex shrink-0 items-center gap-2.5 border-b border-border px-5 py-3.5">
+      <PhSquaresFour :size="20" weight="bold" class="text-accent" />
+      <h1 class="m-0 text-base font-[650]">Dashboard</h1>
+      <span class="flex-1" />
+      <button
+        class="inline-flex items-center gap-1.5 rounded-md border border-border bg-transparent px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+        @click="refreshGit"
+        :disabled="gitBusy"
+      >
+        <PhArrowsClockwise :size="13" :class="{ 'animate-spin': gitBusy }" /> refresh
       </button>
     </header>
 
-    <div class="dash-grid">
+    <div class="grid flex-1 auto-rows-min grid-cols-2 gap-4 overflow-y-auto p-5">
       <!-- ── Agent activity ──────────────────────────────────────────── -->
-      <section class="card activity">
-        <h2>Agent activity</h2>
-        <div class="summary">
-          <span class="chip" :class="{ on: counts.running }"><em class="dot running" />{{ counts.running }}<small>running</small></span>
-          <span class="chip" :class="{ on: counts.permission }"><em class="dot permission" />{{ counts.permission }}<small>permission</small></span>
-          <span class="chip" :class="{ on: counts.waiting }"><em class="dot waiting" />{{ counts.waiting }}<small>waiting</small></span>
-          <span class="chip" :class="{ on: counts.error }"><em class="dot error" />{{ counts.error }}<small>error</small></span>
-          <span class="chip" :class="{ on: counts.review }"><em class="dot review" />{{ counts.review }}<small>review</small></span>
-          <span class="chip" :class="{ on: counts.done }"><em class="dot done" />{{ counts.done }}<small>done</small></span>
+      <section class="rounded-xl border border-border bg-panel p-4 [backdrop-filter:var(--blur-content,none)]">
+        <h2 class="m-0 mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">Agent activity</h2>
+        <div class="mb-3 flex flex-wrap gap-2">
+          <span class="dot-chip inline-flex items-center gap-1.5 rounded-lg bg-hover px-2.5 py-1 text-[13px] font-semibold opacity-55" :class="{ 'opacity-100': counts.running }"><em class="dot running" />{{ counts.running }}<small class="font-medium text-[11px] text-muted-foreground">running</small></span>
+          <span class="dot-chip inline-flex items-center gap-1.5 rounded-lg bg-hover px-2.5 py-1 text-[13px] font-semibold opacity-55" :class="{ 'opacity-100': counts.permission }"><em class="dot permission" />{{ counts.permission }}<small class="font-medium text-[11px] text-muted-foreground">permission</small></span>
+          <span class="dot-chip inline-flex items-center gap-1.5 rounded-lg bg-hover px-2.5 py-1 text-[13px] font-semibold opacity-55" :class="{ 'opacity-100': counts.waiting }"><em class="dot waiting" />{{ counts.waiting }}<small class="font-medium text-[11px] text-muted-foreground">waiting</small></span>
+          <span class="dot-chip inline-flex items-center gap-1.5 rounded-lg bg-hover px-2.5 py-1 text-[13px] font-semibold opacity-55" :class="{ 'opacity-100': counts.error }"><em class="dot error" />{{ counts.error }}<small class="font-medium text-[11px] text-muted-foreground">error</small></span>
+          <span class="dot-chip inline-flex items-center gap-1.5 rounded-lg bg-hover px-2.5 py-1 text-[13px] font-semibold opacity-55" :class="{ 'opacity-100': counts.review }"><em class="dot review" />{{ counts.review }}<small class="font-medium text-[11px] text-muted-foreground">review</small></span>
+          <span class="dot-chip inline-flex items-center gap-1.5 rounded-lg bg-hover px-2.5 py-1 text-[13px] font-semibold opacity-55" :class="{ 'opacity-100': counts.done }"><em class="dot done" />{{ counts.done }}<small class="font-medium text-[11px] text-muted-foreground">done</small></span>
         </div>
 
-        <div v-if="attention.length" class="attn-list">
+        <div v-if="attention.length" class="flex flex-col gap-1">
           <button
             v-for="a in attention"
             :key="a.wsId + ':' + a.tabId"
-            class="attn-row"
+            class="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-foreground hover:bg-hover"
             @click="goToTab(a)"
           >
             <em class="dot" :class="a.status" />
-            <span class="attn-title">{{ a.title }}</span>
-            <span class="attn-ws">{{ a.wsName }}</span>
+            <span class="flex-1 truncate text-[13px]">{{ a.title }}</span>
+            <span class="text-[11px] text-muted-foreground">{{ a.wsName }}</span>
           </button>
         </div>
-        <p v-else class="empty">No agents need attention.</p>
+        <p v-else class="m-0 mt-1 text-[13px] text-muted-foreground">No agents need attention.</p>
       </section>
 
       <!-- ── Quick actions ───────────────────────────────────────────── -->
-      <section class="card actions">
-        <h2>Quick actions</h2>
-        <div class="action-grid">
-          <button class="action" :disabled="!ws.active" @click="newTerminal">
+      <section class="rounded-xl border border-border bg-panel p-4 [backdrop-filter:var(--blur-content,none)]">
+        <h2 class="m-0 mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">Quick actions</h2>
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2">
+          <button class="flex flex-col items-center gap-1.5 rounded-[10px] border border-transparent bg-hover px-2 py-3.5 text-xs font-[550] text-foreground transition-colors hover:border-accent hover:text-accent disabled:cursor-default disabled:opacity-40" :disabled="!ws.active" @click="newTerminal">
             <PhTerminal :size="18" /><span>New terminal</span>
           </button>
-          <button class="action" :disabled="!ws.active" @click="newChat">
+          <button class="flex flex-col items-center gap-1.5 rounded-[10px] border border-transparent bg-hover px-2 py-3.5 text-xs font-[550] text-foreground transition-colors hover:border-accent hover:text-accent disabled:cursor-default disabled:opacity-40" :disabled="!ws.active" @click="newChat">
             <ClaudeIcon :size="18" /><span>New chat</span>
           </button>
-          <button class="action" @click="$emit('new-workspace')">
+          <button class="flex flex-col items-center gap-1.5 rounded-[10px] border border-transparent bg-hover px-2 py-3.5 text-xs font-[550] text-foreground transition-colors hover:border-accent hover:text-accent" @click="$emit('new-workspace')">
             <PhFolderPlus :size="18" /><span>New workspace</span>
           </button>
-          <button class="action" @click="ui.setMode('mission')">
+          <button class="flex flex-col items-center gap-1.5 rounded-[10px] border border-transparent bg-hover px-2 py-3.5 text-xs font-[550] text-foreground transition-colors hover:border-accent hover:text-accent" @click="ui.setMode('mission')">
             <PhRocketLaunch :size="18" /><span>Mission Control</span>
           </button>
-          <button class="action" @click="ui.openSettings()">
+          <button class="flex flex-col items-center gap-1.5 rounded-[10px] border border-transparent bg-hover px-2 py-3.5 text-xs font-[550] text-foreground transition-colors hover:border-accent hover:text-accent" @click="ui.openSettings()">
             <PhGear :size="18" /><span>Settings</span>
           </button>
         </div>
       </section>
 
       <!-- ── Workspaces ──────────────────────────────────────────────── -->
-      <section class="card workspaces">
-        <h2>Workspaces <small>{{ ws.topLevel.length }}</small></h2>
-        <div v-if="!ws.topLevel.length" class="empty">No workspaces yet.</div>
-        <div class="ws-grid">
+      <section class="col-span-full rounded-xl border border-border bg-panel p-4 [backdrop-filter:var(--blur-content,none)]">
+        <h2 class="m-0 mb-3 text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">Workspaces <small class="font-medium text-muted-foreground opacity-60">{{ ws.topLevel.length }}</small></h2>
+        <div v-if="!ws.topLevel.length" class="mt-1 text-[13px] text-muted-foreground">No workspaces yet.</div>
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5">
           <button
             v-for="w in ws.topLevel"
             :key="w.id"
-            class="ws-card"
-            :class="{ active: ws.active?.id === w.id }"
+            class="flex flex-col gap-1.5 rounded-[10px] border border-border bg-hover px-3.5 py-3 text-left text-foreground transition-colors hover:border-accent"
+            :class="{ 'border-accent shadow-[0_0_0_1px_var(--accent)_inset]': ws.active?.id === w.id }"
             @click="openWs(w)"
           >
-            <div class="ws-card-head">
-              <img v-if="ws.icons[w.id]" class="ws-ico-img" :src="ws.icons[w.id]" alt="" />
-              <PhFolder v-else :size="16" weight="fill" class="ws-ico" />
-              <span class="ws-name">{{ w.name }}</span>
+            <div class="flex items-center gap-2">
+              <img v-if="ws.icons[w.id]" class="h-4 w-4 shrink-0 rounded object-cover" :src="ws.icons[w.id]" alt="" />
+              <PhFolder v-else :size="16" weight="fill" class="shrink-0 text-muted-foreground" />
+              <span class="flex-1 truncate text-[13px] font-semibold">{{ w.name }}</span>
               <em v-if="wsAgg(w.id) !== 'idle'" class="dot" :class="wsAgg(w.id)" :title="wsAgg(w.id)" />
             </div>
-            <div class="ws-meta">
-              <span class="ws-branch" v-if="gitByWs[w.id]?.branch">
+            <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span class="inline-flex items-center gap-0.5" v-if="gitByWs[w.id]?.branch">
                 <PhGitBranch :size="12" />{{ gitByWs[w.id].branch }}
               </span>
-              <span class="ws-dirty" v-if="gitByWs[w.id]?.dirty" :title="gitByWs[w.id].dirty + ' changed files'">
+              <span class="font-semibold text-warning" v-if="gitByWs[w.id]?.dirty" :title="gitByWs[w.id].dirty + ' changed files'">
                 ●{{ gitByWs[w.id].dirty }}
               </span>
-              <span class="ws-sync" v-if="gitByWs[w.id]?.ahead">↑{{ gitByWs[w.id].ahead }}</span>
-              <span class="ws-sync" v-if="gitByWs[w.id]?.behind">↓{{ gitByWs[w.id].behind }}</span>
+              <span class="text-accent" v-if="gitByWs[w.id]?.ahead">↑{{ gitByWs[w.id].ahead }}</span>
+              <span class="text-accent" v-if="gitByWs[w.id]?.behind">↓{{ gitByWs[w.id].behind }}</span>
             </div>
-            <div class="ws-path">{{ shortCwd(w.path) }}</div>
+            <div class="truncate text-[11px] text-muted-foreground opacity-70">{{ shortCwd(w.path) }}</div>
             <!-- worktrees nested under the repo -->
-            <ul v-if="(ws.worktreesByParent[w.id] || []).length" class="wt-list" @click.stop>
+            <ul v-if="(ws.worktreesByParent[w.id] || []).length" class="m-0 flex list-none flex-col gap-0.5 border-t border-border pt-1.5" @click.stop>
               <li
                 v-for="wt in ws.worktreesByParent[w.id]"
                 :key="wt.id"
-                class="wt-row"
+                class="flex items-center gap-1.5 rounded-[5px] px-1 py-0.5 text-[11px] text-muted-foreground hover:bg-panel hover:text-foreground"
                 @click="openWs(wt)"
               >
                 <PhGitBranch :size="11" />
-                <span class="wt-name">{{ wt.worktree_branch || wt.name }}</span>
+                <span class="flex-1 truncate">{{ wt.worktree_branch || wt.name }}</span>
                 <em v-if="wsAgg(wt.id) !== 'idle'" class="dot" :class="wsAgg(wt.id)" />
               </li>
             </ul>
@@ -270,119 +274,8 @@ watch(() => ws.workspaces.length, () => refreshGit());
 </script>
 
 <style scoped>
-.dash {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  overflow: hidden;
-}
-
-.dash-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.dash-head h1 { font-size: 16px; font-weight: 650; margin: 0; }
-.brand-mark { color: var(--accent); }
-.spacer { flex: 1; }
-
-.dash-grid {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  align-content: start;
-}
-.workspaces { grid-column: 1 / -1; }
-
-.card {
-  background: var(--bg-panel);
-  backdrop-filter: var(--blur-content, none);
-  -webkit-backdrop-filter: var(--blur-content, none);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-}
-.card h2 {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  color: var(--text-muted);
-  margin: 0 0 12px;
-}
-.card h2 small { color: var(--text-muted); opacity: .6; font-weight: 500; }
-
-/* Activity summary */
-.summary { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 10px; border-radius: 8px;
-  background: var(--bg-hover); font-size: 13px; font-weight: 600;
-  opacity: .55;
-}
-.chip.on { opacity: 1; }
-.chip small { color: var(--text-muted); font-weight: 500; font-size: 11px; }
-
-.attn-list { display: flex; flex-direction: column; gap: 4px; }
-.attn-row {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; text-align: left;
-  background: none; border: none; cursor: pointer;
-  padding: 7px 8px; border-radius: 7px; color: var(--text-primary);
-}
-.attn-row:hover { background: var(--bg-hover); }
-.attn-title { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attn-ws { font-size: 11px; color: var(--text-muted); }
-
-.empty { font-size: 13px; color: var(--text-muted); margin: 4px 0 0; }
-
-/* Quick actions */
-.action-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
-.action {
-  display: flex; flex-direction: column; align-items: center; gap: 7px;
-  padding: 14px 8px; border-radius: 10px;
-  background: var(--bg-hover); border: 1px solid transparent;
-  color: var(--text-primary); cursor: pointer; font-size: 12px; font-weight: 550;
-  transition: border-color .12s, color .12s;
-}
-.action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.action:disabled { opacity: .4; cursor: default; }
-
-/* Workspaces grid */
-.ws-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
-.ws-card {
-  display: flex; flex-direction: column; gap: 6px;
-  text-align: left; padding: 12px 14px; border-radius: 10px;
-  background: var(--bg-hover); border: 1px solid var(--border);
-  color: var(--text-primary); cursor: pointer;
-  transition: border-color .12s;
-}
-.ws-card:hover { border-color: var(--accent); }
-.ws-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.ws-card-head { display: flex; align-items: center; gap: 8px; }
-.ws-ico { color: var(--text-muted); flex-shrink: 0; }
-.ws-ico-img { width: 16px; height: 16px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
-.ws-name { font-size: 13px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted); }
-.ws-branch { display: inline-flex; align-items: center; gap: 3px; }
-.ws-dirty { color: var(--yellow); font-weight: 600; }
-.ws-sync { color: var(--accent); }
-.ws-path { font-size: 11px; color: var(--text-muted); opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.wt-list { list-style: none; margin: 4px 0 0; padding: 6px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
-.wt-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); padding: 3px 4px; border-radius: 5px; }
-.wt-row:hover { background: var(--bg-panel); color: var(--text-primary); }
-.wt-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* Status dots (same palette as MissionControl / Sidebar) */
+/* Status dots: dynamic color + glow (box-shadow color-mix) + pulse animation
+   per status — kept as CSS classes rather than force-fit into Tailwind. */
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--text-muted); flex-shrink: 0; }
 .dot.running { background: var(--yellow); box-shadow: 0 0 8px color-mix(in srgb, var(--yellow) 53%, transparent); animation: pulse 1.4s infinite; }
 .dot.waiting { background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 53%, transparent); }
@@ -391,12 +284,5 @@ watch(() => ws.workspaces.length, () => refreshGit());
 .dot.done { background: var(--green); box-shadow: 0 0 8px color-mix(in srgb, var(--green) 53%, transparent); }
 .dot.error { background: var(--red); box-shadow: 0 0 8px color-mix(in srgb, var(--red) 60%, transparent); animation: pulse 1.4s infinite; }
 
-.btn.ghost { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.btn.ghost:hover { color: var(--text-primary); }
-.btn.xs { font-size: 11px; padding: 4px 9px; }
-.btn:disabled { opacity: .5; cursor: default; }
-.spin { animation: spin 1s linear infinite; }
-
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
-@keyframes spin { to { transform: rotate(360deg); } }
 </style>
