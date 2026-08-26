@@ -6,6 +6,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 //go:embed all:frontend/dist
@@ -27,6 +28,12 @@ func main() {
 		OnStartup:        app.startup,
 		Bind: []interface{}{
 			app,
+		},
+		// Custom titlebar chrome — closest Wails equivalent to Tauri's
+		// titleBarStyle:"Overlay" + hiddenTitle (tauri-plugin-decorum in the
+		// Rust app). No direct equivalent for its window-vibrancy blur yet.
+		Mac: &mac.Options{
+			TitleBar: mac.TitleBarHiddenInset(),
 		},
 	})
 
