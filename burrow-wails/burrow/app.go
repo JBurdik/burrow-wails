@@ -11,13 +11,13 @@ import (
 // App is the Wails-bound struct exposing methods to the frontend, replacing
 // the #[tauri::command] surface in src-tauri/src/lib.rs.
 type App struct {
-	ctx context.Context
-	db  *sql.DB
-	pty *PtyManager
+	ctx    context.Context
+	db     *sql.DB
+	daemon *DaemonClient
 }
 
 func NewApp() *App {
-	return &App{pty: NewPtyManager()}
+	return &App{}
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -34,6 +34,11 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.db = db
+
+	a.daemon = NewDaemonClient(ctx, filepath.Join(dataDir, "daemon.sock"))
+	if err := a.daemon.Ensure(); err != nil {
+		log.Printf("daemon: %v", err)
+	}
 }
 
 func appDataDir() (string, error) {
@@ -44,24 +49,24 @@ func appDataDir() (string, error) {
 	return filepath.Join(base, "Library", "Application Support", "burrow-wails"), nil
 }
 
-// --- PTY bindings ---
+// --- PTY bindings (proxy to burrow-daemon) ---
 
 func (a *App) CreatePty(shell string, args []string, cwd string, env []string) (string, error) {
-	return a.pty.CreatePty(a.ctx, shell, args, cwd, env)
+	return a.daemon.CreatePty(shell, args, cwd, env)
 }
 
 func (a *App) WritePty(id string, data string) error {
-	return a.pty.Write(id, data)
+	return a.daemon.Write(id, data)
 }
 
 func (a *App) ResizePty(id string, cols, rows uint16) error {
-	return a.pty.Resize(id, cols, rows)
+	return a.daemon.Resize(id, cols, rows)
 }
 
 func (a *App) KillPty(id string) error {
-	return a.pty.Kill(id)
+	return a.daemon.Kill(id)
 }
 
-func (a *App) ListPtySessions() []string {
-	return a.pty.List()
+func (a *App) ListPtySessions() ([]string, error) {
+	return a.daemon.List()
 }
