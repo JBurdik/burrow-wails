@@ -317,65 +317,6 @@
           </div>
 
           <div class="settings-group">
-            <span class="group-label">Remote access (HTTP/WS)</span>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Enable HTTP/WebSocket server</span>
-                <span class="field-desc">Loopback-only, token-authed transport for the dispatch router. Use <code>tailscale serve</code> to reach it remotely — never exposes 0.0.0.0. Takes effect on next app restart.</span>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" :checked="httpEnabled" @change="onToggleHttp(($event.target as HTMLInputElement).checked)" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
-            </div>
-            <div v-if="httpStatus" class="field">
-              <div class="field-info">
-                <span class="field-name">Status</span>
-                <span class="field-desc">
-                  <template v-if="httpStatus.enabled">
-                    Port <code>{{ httpStatus.port }}</code> — restart to bind.<br />
-                    Token: <code>{{ httpStatus.token }}</code>
-                    <button class="copy-btn" type="button" @click="copyToClipboard(httpStatus.token, 'token')">
-                      {{ copiedLabel === 'token' ? 'Copied' : 'Copy' }}
-                    </button>
-                  </template>
-                  <template v-else>Disabled</template>
-                </span>
-              </div>
-            </div>
-            <div class="field">
-              <div class="field-info">
-                <span class="field-name">Tailscale tunnel</span>
-                <span class="field-desc">
-                  <template v-if="!tailscaleStatus?.installed">Install the Tailscale app to enable remote tunneling.</template>
-                  <template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable remote tunneling.</template>
-                  <template v-else-if="!httpEnabled">Enable the HTTP/WS server above first.</template>
-                  <template v-else>Proxies the loopback server onto your tailnet via <code>tailscale serve</code> (never public internet).</template>
-                  <template v-if="tailscaleStatus?.serving">
-                    <br />URL: <code>{{ tailscaleStatus.serve_url }}</code>
-                    <button class="copy-btn" type="button" @click="copyToClipboard(tailscaleStatus.serve_url ?? '', 'url')">
-                      {{ copiedLabel === 'url' ? 'Copied' : 'Copy' }}
-                    </button>
-                    <br />Open this on your phone, paste the token above.
-                  </template>
-                </span>
-              </div>
-              <label
-                class="toggle"
-                :title="!httpEnabled ? 'Enable the HTTP/WS server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))"
-              >
-                <input
-                  type="checkbox"
-                  :checked="tailscaleStatus?.serving ?? false"
-                  :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in"
-                  @change="onToggleTailscale(($event.target as HTMLInputElement).checked)"
-                />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-              </label>
-            </div>
-          </div>
-
-          <div class="settings-group">
             <span class="group-label">Chat</span>
             <div class="field">
               <div class="field-info">
@@ -440,6 +381,21 @@
             <button class="reset-btn" @click="store.reset()">
               <PhArrowCounterClockwise :size="12" /> Reset to defaults
             </button>
+          </div>
+        </section>
+
+        <!-- Remote access -->
+        <section v-else-if="active === 'remote'" class="section">
+          <div class="sec-head"><div class="sec-titles"><h2 class="sec-title">Remote access</h2><span class="sec-sub">Reach Burrow securely from another device</span></div></div>
+          <div class="sec-divider" />
+          <div class="settings-group remote-settings">
+            <span class="group-label">Burrow Remote</span>
+            <div class="field"><div class="field-info"><span class="field-name">Enable HTTP/WebSocket server</span><span class="field-desc">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><label class="toggle"><input type="checkbox" :checked="httpEnabled" @change="onToggleHttp(($event.target as HTMLInputElement).checked)" /><span class="toggle-track"><span class="toggle-thumb" /></span></label></div>
+            <div v-if="httpStatus?.enabled" class="field remote-credentials"><div class="field-info"><span class="field-name">Phone pairing code</span><span class="field-desc">Enter this six-digit code in Burrow Remote. The full token remains available for integrations.</span><code class="remote-token">{{ httpStatus.pairingCode }}</code></div><button class="btn" type="button" @click="copyToClipboard(httpStatus.pairingCode, 'pairing-code')">{{ copiedLabel === 'pairing-code' ? 'Copied' : 'Copy code' }}</button></div>
+            <div v-else class="field remote-note"><div class="field-info"><span class="field-name">Not enabled</span><span class="field-desc">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
+            <span class="group-label remote-tunnel-label">Private tunnel</span>
+            <div class="field"><div class="field-info"><span class="field-name">Tailscale tunnel</span><span class="field-desc"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code>/burrow</code> through your tailnet, never to the public internet. Existing services at <code>/</code> stay untouched.</template></span></div><label class="toggle" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))"><input type="checkbox" :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" @change="onToggleTailscale(($event.target as HTMLInputElement).checked)" /><span class="toggle-track"><span class="toggle-thumb" /></span></label></div>
+            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="field remote-url"><div class="field-info"><span class="field-name">Open Burrow Remote</span><code class="remote-token">{{ tailscaleStatus.serve_url }}</code><span class="field-desc">Open this address on your phone, then paste the token above.</span></div><button class="btn" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</button></div>
           </div>
         </section>
 
@@ -1892,6 +1848,7 @@ const navItems: NavItem[] = [
   { id: "skills", label: "Skills", icon: PhSparkle },
   { id: "mcp", label: "MCP Servers", icon: PhPlugsConnected },
   { divider: true },
+  { id: "remote", label: "Remote access", icon: PhTerminalWindow },
   { id: "appearance", label: "Appearance", icon: PhPalette },
   { id: "notifications", label: "Notifications", icon: PhBell },
   { id: "integrations", label: "Integrations", icon: PhPlugsConnected },
@@ -1937,10 +1894,10 @@ function clampRange(v: string, min: number, max: number, fallback: number): numb
 // (server::maybe_start runs once at Tauri setup), so this just writes the
 // pref file and reflects the pending state back.
 const httpEnabled = ref(false);
-const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string; token: string } | null>(null);
+const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string; token: string; pairingCode: string } | null>(null);
 async function refreshHttpStatus() {
   try {
-    const s = await invoke<{ enabled: boolean; port: number; tokenPath: string; token: string }>("get_http_server_status");
+    const s = await invoke<{ enabled: boolean; port: number; tokenPath: string; token: string; pairingCode: string }>("get_http_server_status");
     httpStatus.value = s;
     httpEnabled.value = s.enabled;
   } catch { /* browser-only dev — no Tauri backend */ }
@@ -2461,6 +2418,11 @@ const SHORTCUT_GROUPS = [
   cursor: pointer;
 }
 .copy-btn:hover { color: var(--text-primary); }
+.remote-settings { max-width: 880px; }
+.remote-tunnel-label { margin-top: 12px; }
+.remote-credentials, .remote-url { align-items: flex-start; }
+.remote-token { display: block; max-width: 620px; margin-top: 6px; overflow-wrap: anywhere; color: var(--text-secondary); font-size: 11px; }
+.remote-note { border-style: dashed; }
 
 .select {
   background: var(--bg-hover);

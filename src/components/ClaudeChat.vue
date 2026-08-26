@@ -1635,6 +1635,28 @@ function syncStore() {
     busy: busy.value,
     messageCount: messages.value.filter((m) => m.role !== "tool").length,
   });
+  publishRemoteChat();
+}
+
+// Remote deliberately consumes the identical normalized conversation feed as
+// this component. The Rust mirror is discovery + reconnect history only;
+// incremental updates still travel directly over claude-data / acp-data.
+function publishRemoteChat() {
+  const session = chats.sessions.find((item) => item.id === props.chatId);
+  if (!session) return;
+  invoke("remote_sync_chat", {
+    chat: {
+      id: props.chatId,
+      workspaceId: props.workspaceId,
+      title: session.title,
+      busy: busy.value,
+      status: session.status ?? null,
+      agentKind: session.agentKind ?? null,
+      transport: session.transport ?? "claude-cli",
+      claudeSessionId: sessionId.value,
+      messages: messages.value.filter((message) => !message.partial).slice(-200),
+    },
+  }).catch(() => {});
 }
 
 // This is the shared renderer boundary: Claude's stream-json protocol and every
@@ -2545,6 +2567,7 @@ onMounted(async () => {
   if (props.compact) chats.addPermissionRule("Bash:burrow");
   const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
   if (stored) sessionId.value = stored;
+  publishRemoteChat();
   if (usesRpcRuntime.value) {
     await scriptsStore.loadForPath(props.cwd);
     const startErr = await startRpcRuntime().catch((e: unknown) => e);

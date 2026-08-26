@@ -3543,6 +3543,81 @@ struct AcpState {
     procs: std::sync::Mutex<std::collections::HashMap<u32, AcpProc>>,
 }
 
+/// The desktop chat list lives in the webview config store. Keep a small
+/// in-memory mirror in Rust so authenticated Remote clients can discover and
+/// attach to the same already-running conversations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteChat {
+    id: u32,
+    workspace_id: i64,
+    title: String,
+    busy: bool,
+    status: Option<String>,
+    agent_kind: Option<String>,
+    transport: String,
+    claude_session_id: String,
+    messages: Vec<serde_json::Value>,
+}
+
+#[derive(Default)]
+pub struct RemoteChatState {
+    chats: Mutex<std::collections::HashMap<u32, RemoteChat>>,
+    next_id: std::sync::atomic::AtomicU32,
+}
+
+#[tauri::command]
+fn remote_sync_chat(app: AppHandle, state: State<RemoteChatState>, chat: RemoteChat) {
+    state.chats.lock().unwrap().insert(chat.id, chat.clone());
+    let _ = app.emit_all("remote-chats", serde_json::json!({ "kind": "upsert", "chat": chat }).to_string());
+}
+
+#[tauri::command]
+fn remote_list_chats(state: State<RemoteChatState>) -> Vec<RemoteChat> {
+    let mut chats: Vec<_> = state.chats.lock().unwrap().values().cloned().collect();
+    chats.sort_by_key(|chat| chat.id);
+    chats
+}
+
+/// Start a new first-class chat from Remote. IDs occupy a separate high range
+/// so they cannot collide with the desktop's persisted tab counter.
+#[tauri::command]
+async fn remote_create_chat(
+    app: AppHandle,
+    remote: State<'_, RemoteChatState>,
+    claude: State<'_, ClaudeState>,
+    acp: State<'_, AcpState>,
+    db: State<'_, DbState>,
+    workspace_id: i64,
+    agent_kind: String,
+) -> Result<RemoteChat, String> {
+    let workspace = list_workspaces(db)?
+        .into_iter()
+        .find(|workspace| workspace.id == workspace_id)
+        .ok_or("workspace not found")?;
+    let id = 100_000 + remote.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let is_codex = agent_kind == "codex";
+    let chat = RemoteChat {
+        id,
+        workspace_id,
+        title: if is_codex { "New Codex chat".into() } else { "New Claude chat".into() },
+        busy: false,
+        status: Some("idle".into()),
+        agent_kind: Some(if is_codex { "codex".into() } else { "claude".into() }),
+        transport: if is_codex { "codex-app-server".into() } else { "claude-cli".into() },
+        claude_session_id: String::new(),
+        messages: vec![],
+    };
+    if is_codex {
+        codex_start(app.clone(), acp, id, workspace.path, std::collections::HashMap::new(), None).await?;
+    } else {
+        claude_start(app.clone(), claude, id, workspace.path, None, Some("default".into()), None, None, None, None, None, None).await?;
+    }
+    remote.chats.lock().unwrap().insert(id, chat.clone());
+    let _ = app.emit_all("remote-chats", serde_json::json!({ "kind": "upsert", "chat": chat }).to_string());
+    Ok(chat)
+}
+
 // `async` is load-bearing: Tauri runs sync commands on the MAIN thread, so the
 // blocking work here (binary probing, writing the burrow bin, and especially the
 // `claude` fork/exec) would freeze the webview — the beachball when opening a
@@ -4248,7 +4323,10 @@ async fn acp_start(
                 .map(|v| v.get("method").is_some() && v.get("id").is_some())
                 .unwrap_or(false);
             let topic = if is_request { format!("acp-req-{id}") } else { format!("acp-data-{id}") };
-            let _ = app2.emit(&topic, t.to_string());
+            // A remote client is another first-class chat surface. Fan every
+            // JSON-RPC notification/request out through the WebSocket bridge,
+            // not only the desktop Tauri webview.
+            let _ = app2.emit_all(&topic, t.to_string());
         }
         acp_dbg(&dbg_reader, "reader <eof>");
         let _ = app2.emit_all(&format!("acp-data-{id}"), r#"{"_burrow":"exit"}"#);
@@ -6270,6 +6348,7 @@ pub fn run() {
             app.manage(LspState::default());
             app.manage(ClaudeState::default());
             app.manage(AcpState::default());
+            app.manage(RemoteChatState::default());
             app.manage(AccountInfoCache::default());
 
             start_hook_server(app.handle().clone());
@@ -6340,6 +6419,9 @@ pub fn run() {
             claude_stop,
             claude_abort,
             claude_respond_control,
+            remote_sync_chat,
+            remote_list_chats,
+            remote_create_chat,
             acp_start,
             codex_start,
             acp_send,

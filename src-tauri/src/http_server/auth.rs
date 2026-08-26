@@ -61,6 +61,24 @@ pub fn validate_token(candidate: &str, expected: &str) -> bool {
     constant_time_eq(candidate.as_bytes(), expected.as_bytes())
 }
 
+/// A short pairing code for a phone already inside the user's tailnet. The
+/// original bearer token remains supported for automation and direct clients.
+/// This intentionally is convenience authentication, not a replacement for a
+/// publicly exposed password — the HTTP server itself remains loopback-only.
+pub fn pairing_code(token: &str) -> String {
+    let mut hash: u32 = 2_166_136_261;
+    for byte in token.bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    format!("{:06}", hash % 1_000_000)
+}
+
+pub fn validate_credential(candidate: &str, expected: &str) -> bool {
+    validate_token(candidate, expected)
+        || constant_time_eq(candidate.trim().as_bytes(), pairing_code(expected).as_bytes())
+}
+
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     let mut difference = left.len() ^ right.len();
     for index in 0..left.len().max(right.len()) {

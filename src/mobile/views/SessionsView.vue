@@ -1,6 +1,7 @@
 <template>
   <header class="m-nav">
-    <span class="m-nav-title">Burrow</span>
+    <button class="m-nav-back" type="button" @click="store.showDashboard()">‹ Přehled</button>
+    <span class="m-nav-title">Terminály</span>
     <button class="m-btn-ghost" style="padding:4px 8px;font-size:12px" :disabled="store.loading" @click="store.loadSessions()">
       {{ store.loading ? '…' : '↺' }}
     </button>
@@ -50,6 +51,12 @@
       </ul>
     </div>
   </div>
+
+  <nav class="sessions-nav" aria-label="Hlavní navigace">
+    <button type="button" @click="store.showDashboard()"><span aria-hidden="true">⊞</span>Přehled</button>
+    <button type="button" @click="store.showChats()"><span aria-hidden="true">✦</span>Chaty</button>
+    <button class="sessions-nav--active" type="button" aria-current="page"><span aria-hidden="true">›_</span>Terminály</button>
+  </nav>
 </template>
 
 <script setup lang="ts">
@@ -143,4 +150,8 @@ onMounted(() => {
   font-size: 18px;
   flex-shrink: 0;
 }
+.sessions-nav { position: fixed; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(3, 1fr); padding: 9px 10px calc(9px + var(--safe-bottom)); border-top: 1px solid var(--border); background: var(--bg-panel); }
+.sessions-nav button { min-height: 48px; display: grid; place-items: center; gap: 3px; border: 0; background: transparent; color: var(--text-muted); font-size: 10px; }
+.sessions-nav span { font: 700 22px/.9 var(--font-mono); }
+.sessions-nav--active { color: var(--accent) !important; }
 </style>

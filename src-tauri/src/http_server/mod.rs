@@ -71,6 +71,7 @@ pub fn get_http_server_status(app: AppHandle) -> serde_json::Value {
         "port": port(&app),
         "tokenPath": token_path,
         "token": token,
+        "pairingCode": auth::pairing_code(&token),
     })
 }
 

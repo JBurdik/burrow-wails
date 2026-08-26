@@ -25,7 +25,28 @@ export interface WorkspaceGroup {
   tabs: Tab[];
 }
 
-export type View = "connect" | "sessions" | "terminal";
+export interface RemoteMessage {
+  id: number;
+  role: "user" | "assistant" | "tool" | "thinking" | "permission" | "system-info" | "queued";
+  text: string;
+  partial?: boolean;
+  toolInput?: Record<string, unknown>;
+  toolOutput?: string;
+}
+
+export interface RemoteChat {
+  id: number;
+  workspaceId: number;
+  title: string;
+  busy: boolean;
+  status?: TabStatus | null;
+  agentKind?: string | null;
+  transport: "claude-cli" | "codex-app-server" | "acp";
+  claudeSessionId: string;
+  messages: RemoteMessage[];
+}
+
+export type View = "connect" | "dashboard" | "chats" | "chat" | "sessions" | "terminal";
 
 export const useRemoteStore = defineStore("remote", () => {
   const baseUrl = ref("");
@@ -46,6 +67,8 @@ export const useRemoteStore = defineStore("remote", () => {
   const loading = ref(false);
   const listError = ref("");
   const activeTab = ref<Tab | null>(null);
+  const chats = ref<RemoteChat[]>([]);
+  const activeChat = ref<RemoteChat | null>(null);
 
   let client: BurrowWsClient | null = null;
   const doneTimers = new Map<number, number>();
@@ -82,7 +105,7 @@ export const useRemoteStore = defineStore("remote", () => {
       await c.connect(normalized, tok);
       c.onClose = () => {
         connected.value = false;
-        if (view.value === "terminal") view.value = "sessions";
+        if (view.value === "terminal") view.value = "dashboard";
       };
       client = c;
       connected.value = true;
@@ -90,8 +113,8 @@ export const useRemoteStore = defineStore("remote", () => {
       token.value = tok;
       setConfig(URL_CONFIG_KEY, normalized);
       setConfig(TOKEN_CONFIG_KEY, tok);
-      view.value = "sessions";
-      await loadSessions();
+      view.value = "dashboard";
+      await Promise.all([loadSessions(), loadChats()]);
     } catch (e: any) {
       connectError.value = e?.message ?? "Connection failed";
       connected.value = false;
@@ -107,6 +130,8 @@ export const useRemoteStore = defineStore("remote", () => {
     connected.value = false;
     workspaces.value = [];
     statuses.clear();
+    chats.value = [];
+    activeChat.value = null;
     view.value = "connect";
   }
 
@@ -142,17 +167,134 @@ export const useRemoteStore = defineStore("remote", () => {
     }
   }
 
+  function chatFor(id: number) {
+    return chats.value.find((chat) => chat.id === id);
+  }
+
+  function appendRemoteText(chat: RemoteChat, role: "assistant" | "thinking", text: string, partial = true) {
+    if (!text) return;
+    const last = chat.messages[chat.messages.length - 1];
+    if (last?.role === role && last.partial) last.text += text;
+    else chat.messages.push({ id: Date.now() + chat.messages.length, role, text, partial });
+  }
+
+  function handleClaudeData(chat: RemoteChat, raw: unknown) {
+    const event = typeof raw === "string" ? safeJson(raw) : raw;
+    if (!event || typeof event !== "object") return;
+    const data = event as Record<string, any>;
+    if (data.type === "assistant") {
+      for (const block of data.message?.content ?? []) {
+        if (block.type === "text") appendRemoteText(chat, "assistant", block.text ?? "");
+        if (block.type === "thinking") appendRemoteText(chat, "thinking", block.thinking ?? "");
+        if (block.type === "tool_use") chat.messages.push({ id: Date.now() + chat.messages.length, role: "tool", text: block.name ?? "Tool", toolInput: block.input ?? {} });
+      }
+    }
+    if (data.type === "result" || data.type === "exit") {
+      chat.busy = false;
+      chat.messages.forEach((message) => { message.partial = false; });
+    }
+  }
+
+  function handleAcpData(chat: RemoteChat, raw: unknown) {
+    const event = typeof raw === "string" ? safeJson(raw) : raw;
+    if (!event || typeof event !== "object") return;
+    const data = event as Record<string, any>;
+    if (data._burrow === "session" && typeof data.sessionId === "string") chat.claudeSessionId = data.sessionId;
+    if (data._burrow === "exit" || ("id" in data && !("method" in data))) {
+      chat.busy = false;
+      chat.messages.forEach((message) => { message.partial = false; });
+    }
+    const update = data.params?.update;
+    if (data.method !== "session/update" || !update) return;
+    const text = update.content?.text ?? "";
+    if (update.sessionUpdate === "agent_message_chunk") appendRemoteText(chat, "assistant", text);
+    if (update.sessionUpdate === "agent_thought_chunk") appendRemoteText(chat, "thinking", text);
+  }
+
+  function safeJson(raw: string): unknown {
+    try { return JSON.parse(raw); } catch { return null; }
+  }
+
+  function watchChat(chat: RemoteChat) {
+    client?.subscribe(`claude-data-${chat.id}`, (payload) => handleClaudeData(chat, payload));
+    client?.subscribe(`acp-data-${chat.id}`, (payload) => handleAcpData(chat, payload));
+  }
+
+  async function loadChats() {
+    if (!client) return;
+    try {
+      const next = await client.call("remote_list_chats") as RemoteChat[];
+      chats.value = next.map((chat) => ({ ...chat, messages: Array.isArray(chat.messages) ? chat.messages : [] }));
+      for (const chat of chats.value) watchChat(chat);
+      client.subscribe("remote-chats", (payload) => {
+        const change = typeof payload === "string" ? safeJson(payload) : payload;
+        const incoming = (change as any)?.chat as RemoteChat | undefined;
+        if (!incoming) return;
+        const existing = chatFor(incoming.id);
+        if (existing) Object.assign(existing, incoming);
+        else { chats.value.push(incoming); watchChat(incoming); }
+      });
+    } catch (e: any) {
+      listError.value = e?.message ?? "Failed to load chats";
+    }
+  }
+
+  function openChat(chat: RemoteChat) {
+    activeChat.value = chat;
+    view.value = "chat";
+  }
+
+  function closeChat() {
+    activeChat.value = null;
+    view.value = "dashboard";
+  }
+
+  async function sendChat(text: string) {
+    const chat = activeChat.value;
+    if (!client || !chat || !text.trim() || chat.busy) return;
+    chat.messages.push({ id: Date.now(), role: "user", text: text.trim() });
+    chat.busy = true;
+    try {
+      if (chat.transport === "claude-cli") {
+        await client.call("claude_send", { id: chat.id, text: text.trim(), sessionId: chat.claudeSessionId || null });
+      } else {
+        await client.call("acp_send", { id: chat.id, text: text.trim() });
+      }
+    } catch (e: any) {
+      chat.busy = false;
+      chat.messages.push({ id: Date.now() + 1, role: "assistant", text: `Chyba odeslání: ${e?.message ?? e}` });
+    }
+  }
+
+  async function createChat(workspaceId: number, agentKind: "codex" | "claude") {
+    if (!client) throw new Error("not connected");
+    const chat = await client.call("remote_create_chat", { workspaceId, agentKind }) as RemoteChat;
+    chats.value.push(chat);
+    watchChat(chat);
+    openChat(chat);
+  }
+
   function openTerminal(tab: Tab) {
     activeTab.value = tab;
     view.value = "terminal";
   }
+
+  function showDashboard() {
+    view.value = "dashboard";
+  }
+
+  function showSessions() {
+    view.value = "sessions";
+  }
+
+  function showChats() { view.value = "chats"; }
 
   function closeTerminal() {
     if (activeTab.value) {
       client?.unsubscribe(`pty-data-${activeTab.value.ptyId}`);
     }
     activeTab.value = null;
-    view.value = "sessions";
+    view.value = "dashboard";
   }
 
   function getClient(): BurrowWsClient {
@@ -163,7 +305,8 @@ export const useRemoteStore = defineStore("remote", () => {
   return {
     baseUrl, token, connected, connecting, connectError,
     view, workspaces, loading, listError, activeTab,
-    connect, disconnect, loadSessions, openTerminal, closeTerminal,
+    chats, activeChat,
+    connect, disconnect, loadSessions, loadChats, openTerminal, closeTerminal, showDashboard, showSessions, showChats, openChat, closeChat, sendChat, createChat,
     statusFor, getClient,
   };
 });

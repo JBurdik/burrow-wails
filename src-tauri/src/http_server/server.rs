@@ -85,7 +85,13 @@ fn build_router(state: ServerState) -> Router {
             log::info!("HTTP transport: serving mobile UI from {}", dir.display());
             let index = dir.join("mobile.html");
             let serve_dir = ServeDir::new(&dir).fallback(ServeFile::new(index));
-            router.fallback_service(serve_dir)
+            // Tailscale Serve exposes this same UI at `/burrow/` so it can
+            // coexist with another app at `/`. Mount it locally too: this
+            // makes asset requests work whether Tailscale keeps or strips the
+            // configured path before proxying to us.
+            router
+                .nest_service("/burrow", serve_dir.clone())
+                .fallback_service(serve_dir)
         }
         _ => {
             log::warn!("HTTP transport: dist-mobile/ not found, mobile UI not served (run `pnpm build:mobile`)");
@@ -129,11 +135,11 @@ async fn ws_upgrade(
     let authorized = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .map(|v| auth::validate_token(v, &state.token))
+        .map(|v| auth::validate_credential(v, &state.token))
         .unwrap_or(false)
         || params
             .get("token")
-            .map(|t| auth::validate_token(t, &state.token))
+            .map(|t| auth::validate_credential(t, &state.token))
             .unwrap_or(false);
 
     if !authorized {

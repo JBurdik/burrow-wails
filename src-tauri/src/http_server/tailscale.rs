@@ -4,6 +4,11 @@
 use serde::Serialize;
 use std::process::Command;
 
+/// Keep Burrow separate from any application already served from the device's
+/// Tailscale root URL (for example t3code). Tailscale Serve combines handlers
+/// by path, so this is safe to add and remove independently.
+const BURROW_SERVE_PATH: &str = "/burrow";
+
 #[derive(Debug, Serialize)]
 pub struct TailscaleStatus {
     pub installed: bool,
@@ -39,22 +44,29 @@ fn dns_name() -> Option<(bool, Option<String>)> {
     Some((logged_in, dns))
 }
 
-fn serving_state() -> bool {
+fn serving_url() -> Option<String> {
     let out = match Command::new("tailscale")
         .args(["serve", "status", "--json"])
         .output()
     {
         Ok(o) if o.status.success() => o,
-        _ => return false,
+        _ => return None,
     };
     let v: serde_json::Value = match serde_json::from_slice(&out.stdout) {
         Ok(v) => v,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     v.get("Web")
         .and_then(|w| w.as_object())
-        .map(|m| !m.is_empty())
-        .unwrap_or(false)
+        .and_then(|servers| {
+            servers.iter().find_map(|(host, server)| {
+                let has_burrow_handler = server
+                    .get("Handlers")
+                    .and_then(|handlers| handlers.as_object())
+                    .is_some_and(|handlers| handlers.contains_key(BURROW_SERVE_PATH));
+                has_burrow_handler.then(|| format!("https://{host}{BURROW_SERVE_PATH}/"))
+            })
+        })
 }
 
 pub fn tailscale_status() -> TailscaleStatus {
@@ -69,12 +81,8 @@ pub fn tailscale_status() -> TailscaleStatus {
         };
     }
     let (logged_in, dns_name) = dns_name().unwrap_or((false, None));
-    let serving = logged_in && serving_state();
-    let serve_url = if serving {
-        dns_name.as_ref().map(|d| format!("https://{d}/"))
-    } else {
-        None
-    };
+    let serve_url = logged_in.then(serving_url).flatten();
+    let serving = serve_url.is_some();
     TailscaleStatus {
         installed,
         logged_in,
@@ -86,7 +94,13 @@ pub fn tailscale_status() -> TailscaleStatus {
 
 pub fn enable_serve(port: u16) -> Result<(), String> {
     let out = Command::new("tailscale")
-        .args(["serve", "--bg", &port.to_string()])
+        .args([
+            "serve",
+            "--bg",
+            "--https=443",
+            "--set-path=/burrow",
+            &port.to_string(),
+        ])
         .output()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
@@ -97,7 +111,7 @@ pub fn enable_serve(port: u16) -> Result<(), String> {
 
 pub fn disable_serve() -> Result<(), String> {
     let out = Command::new("tailscale")
-        .args(["serve", "--https=443", "off"])
+        .args(["serve", "--https=443", "--set-path=/burrow", "off"])
         .output()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {

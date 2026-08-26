@@ -6,26 +6,16 @@
     </div>
 
     <form class="pair-form" @submit.prevent="tryConnect">
-      <label class="pair-label">Burrow address</label>
-      <input
-        v-model="urlInput"
-        class="m-input"
-        type="url"
-        placeholder="http://100.x.x.x:8420"
-        autocomplete="url"
-        autocorrect="off"
-        autocapitalize="none"
-        spellcheck="false"
-        required
-      />
-
-      <label class="pair-label">Bearer token</label>
+      <p class="pair-target">{{ urlInput }}</p>
+      <label class="pair-label">Párovací kód</label>
       <input
         v-model="tokenInput"
         class="m-input"
-        type="text"
-        placeholder="paste from Settings"
-        autocomplete="off"
+        type="tel"
+        inputmode="numeric"
+        maxlength="6"
+        placeholder="000000"
+        autocomplete="one-time-code"
         autocorrect="off"
         autocapitalize="none"
         spellcheck="false"
@@ -42,8 +32,7 @@
     </form>
 
     <p class="pair-hint">
-      Enable the HTTP toggle in Settings on the desktop app, then paste the
-      Tailscale/host URL and the bearer token shown there.
+      Na desktopu v Nastavení → Remote access zkopíruj šestimístný párovací kód.
     </p>
   </div>
 </template>
@@ -54,7 +43,11 @@ import { useRemoteStore } from '../store';
 
 const store = useRemoteStore();
 
-const urlInput   = ref(store.baseUrl || '');
+function currentRemoteUrl() {
+  const path = window.location.pathname.replace(/\/(?:mobile\.html)?$/, '') || '/';
+  return `${window.location.origin}${path === '/' ? '' : path}`;
+}
+const urlInput   = ref(store.baseUrl || currentRemoteUrl());
 const tokenInput = ref(store.token || '');
 const busy = ref(false);
 const err  = ref('');
@@ -125,6 +118,15 @@ async function tryConnect() {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.pair-target {
+  margin: 0 0 8px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 11px/1.4 var(--font-mono);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pair-label {

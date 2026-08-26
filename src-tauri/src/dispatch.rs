@@ -244,6 +244,27 @@ pub async fn dispatch_command(
             crate::claude_respond_control(app.state::<crate::ClaudeState>(), id, request_id, response)?;
             Ok(Value::Null)
         }
+        "remote_sync_chat" => {
+            let chat: crate::RemoteChat = from_field(&args, "chat")?;
+            crate::remote_sync_chat(app.clone(), app.state::<crate::RemoteChatState>(), chat);
+            Ok(Value::Null)
+        }
+        "remote_list_chats" => {
+            to_value(crate::remote_list_chats(app.state::<crate::RemoteChatState>()))
+        }
+        "remote_create_chat" => {
+            let workspace_id: i64 = field(&args, "workspaceId", "workspace_id")?;
+            let agent_kind: String = field(&args, "agentKind", "agent_kind")?;
+            to_value(crate::remote_create_chat(
+                app.clone(),
+                app.state::<crate::RemoteChatState>(),
+                app.state::<crate::ClaudeState>(),
+                app.state::<crate::AcpState>(),
+                app.state::<crate::DbState>(),
+                workspace_id,
+                agent_kind,
+            ).await?)
+        }
         "acp_send" => {
             let id: u32 = from_field(&args, "id")?;
             let text: String = from_field(&args, "text")?;
