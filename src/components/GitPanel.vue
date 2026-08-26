@@ -1,96 +1,96 @@
 <template>
-  <div class="git-panel">
+  <div class="flex h-full flex-col overflow-hidden bg-base text-xs">
 
     <!-- Top bar: title + workspace selector + actions -->
-    <div class="gp-topbar">
-      <span class="gp-title">Git</span>
+    <div class="flex h-[38px] shrink-0 items-center gap-1.5 border-b border-border bg-panel px-3">
+      <span class="shrink-0 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground opacity-70">Git</span>
 
       <!-- Workspace selector -->
-      <div class="ws-select-wrap">
-        <PhFolder :size="11" class="ws-select-icon" />
-        <select v-model="selectedWsId" class="ws-select">
+      <div class="relative flex h-6 items-center gap-1 rounded border border-border bg-[color-mix(in_srgb,var(--border)_25%,var(--bg-panel))] py-0 pl-[7px] pr-1.5">
+        <PhFolder :size="11" class="shrink-0 text-muted-foreground" />
+        <select v-model="selectedWsId" class="cursor-pointer appearance-none border-0 bg-transparent py-0 pr-3.5 font-sans text-[11px] text-secondary-foreground outline-none focus:text-foreground">
           <option v-for="w in wsStore.topLevel" :key="w.id" :value="w.id">
             {{ w.name }}
           </option>
         </select>
-        <PhCaretDown :size="9" class="ws-select-caret" />
+        <PhCaretDown :size="9" class="pointer-events-none absolute right-[5px] text-muted-foreground" />
       </div>
 
       <!-- Branch chip -->
       <button
-        class="branch-chip"
-        :class="{ open: showBranchDropdown }"
+        class="branch-chip flex h-6 max-w-[220px] items-center gap-1 rounded border border-border bg-transparent px-[7px] py-[3px] font-mono text-[11px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40"
+        :class="showBranchDropdown && 'bg-hover text-foreground'"
         @click="toggleBranchDropdown"
         :title="`Branch: ${git.branch}`"
         :disabled="!!git.error"
       >
-        <PhGitBranch :size="11" />
-        <span class="branch-name">{{ git.branch || "—" }}</span>
-        <span v-if="git.ahead > 0" class="branch-ahead">↑{{ git.ahead }}</span>
-        <span v-if="git.behind > 0" class="branch-behind">↓{{ git.behind }}</span>
-        <PhCaretDown :size="8" class="branch-caret" />
+        <PhGitBranch :size="11" class="shrink-0 text-yellow-400" style="color:var(--yellow)" />
+        <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ git.branch || "—" }}</span>
+        <span v-if="git.ahead > 0" class="shrink-0 text-[10px] text-success">↑{{ git.ahead }}</span>
+        <span v-if="git.behind > 0" class="shrink-0 text-[10px] text-warning">↓{{ git.behind }}</span>
+        <PhCaretDown :size="8" class="shrink-0 text-muted-foreground transition-transform" :class="showBranchDropdown && 'rotate-180'" />
       </button>
 
-      <div class="gp-spacer" />
+      <div class="flex-1" />
 
       <!-- Network actions -->
-      <button class="gp-action-btn" :disabled="git.fetching || git.loading" @click="git.fetch()" title="Fetch">
-        <PhArrowsClockwise :size="13" :class="{ spin: git.fetching }" />
+      <button class="flex h-6 items-center gap-1 whitespace-nowrap rounded border border-border bg-transparent px-2 font-sans text-[11px] font-medium text-muted-foreground transition-colors hover:border-accent/35 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-30" :disabled="git.fetching || git.loading" @click="git.fetch()" title="Fetch">
+        <PhArrowsClockwise :size="13" :class="git.fetching && 'animate-spin'" />
         Fetch
       </button>
       <button
         v-if="!git.error && git.hasUpstream && git.behind > 0"
-        class="gp-action-btn"
+        class="flex h-6 items-center gap-1 whitespace-nowrap rounded border border-border bg-transparent px-2 font-sans text-[11px] font-medium text-muted-foreground transition-colors hover:border-accent/35 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-30"
         :disabled="git.pulling || git.pushing"
         @click="git.pull()"
         title="Pull (ff-only)"
       >
-        <PhArrowDown :size="13" :class="{ spin: git.pulling }" />
-        Pull <span class="gp-count-badge">{{ git.behind }}</span>
+        <PhArrowDown :size="13" :class="git.pulling && 'animate-spin'" />
+        Pull <span class="rounded-lg bg-accent/20 px-1 text-[9px] font-semibold text-accent">{{ git.behind }}</span>
       </button>
       <button
         v-if="!git.error"
-        class="gp-action-btn"
+        class="flex h-6 items-center gap-1 whitespace-nowrap rounded border border-border bg-transparent px-2 font-sans text-[11px] font-medium text-muted-foreground transition-colors hover:border-accent/35 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-30"
         :disabled="git.pushing || git.loading || (git.hasUpstream && git.ahead === 0)"
         @click="git.push()"
         :title="git.hasUpstream ? 'Push' : 'Publish branch'"
       >
-        <PhArrowUp :size="13" :class="{ spin: git.pushing }" />
+        <PhArrowUp :size="13" :class="git.pushing && 'animate-spin'" />
         {{ git.hasUpstream ? "Push" : "Publish" }}
-        <span v-if="git.ahead > 0" class="gp-count-badge">{{ git.ahead }}</span>
+        <span v-if="git.ahead > 0" class="rounded-lg bg-accent/20 px-1 text-[9px] font-semibold text-accent">{{ git.ahead }}</span>
       </button>
-      <button class="gp-icon-btn" :disabled="git.loading" @click="git.refresh()" title="Refresh">
-        <PhArrowClockwise :size="14" :class="{ spin: git.loading }" />
+      <button class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-30" :disabled="git.loading" @click="git.refresh()" title="Refresh">
+        <PhArrowClockwise :size="14" :class="git.loading && 'animate-spin'" />
       </button>
-      <button v-if="!isPopout" class="gp-icon-btn" @click="popout()" title="Pop out to window">
+      <button v-if="!isPopout" class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-30" @click="popout()" title="Pop out to window">
         <PhArrowSquareOut :size="14" />
       </button>
     </div>
 
     <!-- Branch dropdown -->
     <template v-if="showBranchDropdown">
-      <div class="branch-overlay" @click="showBranchDropdown = false" />
-      <div class="branch-dropdown">
+      <div class="fixed inset-0 z-[99]" @click="showBranchDropdown = false" />
+      <div class="absolute left-[240px] top-[42px] z-[100] max-h-[260px] min-w-[220px] overflow-y-auto rounded-[5px] border border-border bg-panel py-[3px] shadow-[0_6px_20px_rgba(0,0,0,0.35)]">
         <div
           v-for="b in git.branches"
           :key="b"
-          class="bd-item"
-          :class="{ current: b === git.branch }"
+          class="flex cursor-pointer items-center gap-[7px] px-3 py-[5px] font-mono text-xs text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
+          :class="b === git.branch && 'text-foreground'"
           @click="selectBranch(b)"
         >
-          <PhCheck v-if="b === git.branch" :size="10" class="bd-check-icon" />
-          <span v-else class="bd-check-icon" />
+          <PhCheck v-if="b === git.branch" :size="10" class="w-3 shrink-0 text-success" />
+          <span v-else class="w-3 shrink-0 text-success" />
           {{ b }}
         </div>
-        <div class="bd-sep" />
-        <div v-if="!newBranchMode" class="bd-new" @click.stop="startNewBranch">
+        <div class="my-[3px] h-px bg-border" />
+        <div v-if="!newBranchMode" class="flex cursor-pointer items-center gap-[7px] px-3 py-[5px] text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click.stop="startNewBranch">
           <PhPlus :size="10" /> New branch…
         </div>
-        <div v-else class="bd-new-input">
+        <div v-else class="px-2.5 py-[5px]">
           <input
             ref="newBranchInputRef"
             v-model="newBranchName"
-            class="bd-input"
+            class="box-border w-full rounded-[3px] border border-border bg-[color-mix(in_srgb,var(--border)_20%,var(--bg-panel))] px-[7px] py-1 font-mono text-xs text-foreground outline-none focus:border-accent/50"
             placeholder="branch-name"
             @keydown.enter.prevent="confirmNewBranch"
             @keydown.esc="newBranchMode = false"
@@ -100,51 +100,51 @@
     </template>
 
     <!-- Push/pull progress bar -->
-    <div v-if="git.pushing || git.pulling" class="gp-progress">
-      <div class="gp-progress-bar" />
-      <span class="gp-progress-label">{{ git.pushing ? "Pushing…" : "Pulling…" }}</span>
+    <div v-if="git.pushing || git.pulling" class="flex shrink-0 items-center gap-2.5 border-b border-border px-3 py-1">
+      <div class="gp-progress-bar relative h-0.5 flex-1 overflow-hidden rounded-sm bg-border" />
+      <span class="text-[11px] text-muted-foreground">{{ git.pushing ? "Pushing…" : "Pulling…" }}</span>
     </div>
 
     <!-- No repo error -->
-    <div v-if="git.error" class="gp-no-repo">
+    <div v-if="git.error" class="flex flex-1 items-center justify-center gap-2.5 text-[13px] text-muted-foreground">
       <PhWarning :size="20" />
       <span>Not a git repository</span>
-      <button class="gp-init-btn" :disabled="git.loading" @click="git.gitInit()">
+      <button class="flex items-center gap-[5px] rounded-[5px] border border-border bg-hover px-3 py-[5px] text-xs text-foreground hover:border-warning hover:bg-warning hover:text-black" :disabled="git.loading" @click="git.gitInit()">
         <PhGitBranch :size="12" /> Git Init
       </button>
     </div>
 
     <!-- Main two-column layout -->
-    <div v-else class="gp-body">
+    <div v-else class="flex flex-1 overflow-hidden">
 
       <!-- LEFT: file lists + commit -->
-      <div class="gp-left">
+      <div class="flex w-[280px] shrink-0 grow-0 basis-[280px] flex-col overflow-hidden border-r border-border">
 
         <!-- COMMIT FILES MODE -->
         <template v-if="selectedCommit">
-          <div class="gp-commit-browse-header">
-            <button class="gp-icon-btn" @click="clearSelectedCommit" title="Back to changes">
+          <div class="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-border bg-[color-mix(in_srgb,var(--border)_18%,var(--bg-panel))] py-1.5 pl-1.5 pr-2">
+            <button class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="clearSelectedCommit" title="Back to changes">
               <PhArrowLeft :size="12" />
             </button>
-            <span class="gp-log-hash" style="flex-shrink:0">{{ selectedCommit.shortHash }}</span>
-            <span class="gp-commit-browse-subject" :title="selectedCommit.subject">{{ selectedCommit.subject }}</span>
-            <span v-if="commitFiles.length" class="gp-badge" style="flex-shrink:0">{{ commitFiles.length }}</span>
+            <span class="shrink-0 font-mono text-[10px] text-warning">{{ selectedCommit.shortHash }}</span>
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-secondary-foreground" :title="selectedCommit.subject">{{ selectedCommit.subject }}</span>
+            <span v-if="commitFiles.length" class="shrink-0 rounded-lg bg-accent/[0.14] px-[5px] text-[10px] font-medium text-accent">{{ commitFiles.length }}</span>
           </div>
-          <div class="gp-scroll">
-            <div v-if="commitFilesLoading" class="gp-empty" style="padding-top:12px">Loading…</div>
-            <div v-else-if="!commitFiles.length" class="gp-empty" style="padding-top:12px">No files changed</div>
+          <div class="flex-1 overflow-y-auto py-2">
+            <div v-if="commitFilesLoading" class="pt-3 px-3 text-[11px] text-muted-foreground opacity-55">Loading…</div>
+            <div v-else-if="!commitFiles.length" class="pt-3 px-3 text-[11px] text-muted-foreground opacity-55">No files changed</div>
             <div
               v-for="f in commitFiles"
               :key="f.path"
-              class="gp-file"
-              :class="{ active: commitDiff?.filePath === f.path }"
+              class="group flex cursor-pointer items-center gap-1.5 px-3 py-[3px] transition-colors hover:bg-hover"
+              :class="commitDiff?.filePath === f.path && 'bg-accent/[0.09]'"
               @click="openCommitFileDiff(f)"
             >
-              <span class="gp-status" :class="commitFileStatusClass(f.status)">{{ f.status }}</span>
-              <span class="gp-file-path" :title="f.path">{{ f.path }}</span>
-              <span class="gp-cf-stat">
-                <span v-if="f.added" class="gp-cf-add">+{{ f.added }}</span>
-                <span v-if="f.deleted" class="gp-cf-del">-{{ f.deleted }}</span>
+              <span class="w-3 shrink-0 text-center font-mono text-[10px] font-bold" :class="commitFileStatusClass(f.status)">{{ f.status }}</span>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :class="commitDiff?.filePath === f.path && '!text-foreground'" :title="f.path">{{ f.path }}</span>
+              <span class="flex shrink-0 gap-[3px] font-mono text-[10px]">
+                <span v-if="f.added" class="text-success">+{{ f.added }}</span>
+                <span v-if="f.deleted" class="text-destructive">-{{ f.deleted }}</span>
               </span>
             </div>
           </div>
@@ -152,81 +152,81 @@
 
         <!-- NORMAL MODE: staged + changes + commit area -->
         <template v-else>
-          <div class="gp-scroll">
+          <div class="flex-1 overflow-y-auto py-2">
 
             <!-- STAGED -->
-            <div class="gp-section-row">
-              <span class="gp-section-label">Staged <span v-if="git.staged.length" class="gp-badge">{{ git.staged.length }}</span></span>
-              <button v-if="git.staged.length" class="gp-sec-btn" @click="git.unstageAll()">−All</button>
+            <div class="flex items-center justify-between px-3 py-[3px]">
+              <span class="flex items-center gap-[5px] text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground opacity-70">Staged <span v-if="git.staged.length" class="rounded-lg bg-accent/[0.14] px-[5px] text-[10px] font-medium normal-case tracking-normal text-accent">{{ git.staged.length }}</span></span>
+              <button v-if="git.staged.length" class="rounded-sm border border-border bg-transparent px-1.5 py-px text-[10px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="git.unstageAll()">−All</button>
             </div>
-            <div v-if="git.staged.length === 0" class="gp-empty">Nothing staged</div>
+            <div v-if="git.staged.length === 0" class="px-3 pb-[5px] pt-0.5 text-[11px] text-muted-foreground opacity-55">Nothing staged</div>
             <div
               v-for="f in git.staged"
               :key="'s:' + f.path"
-              class="gp-file"
-              :class="{ active: activeDiff?.path === f.path && activeDiff?.staged }"
+              class="group flex cursor-pointer items-center gap-1.5 px-3 py-[3px] transition-colors hover:bg-hover"
+              :class="activeDiff?.path === f.path && activeDiff?.staged && 'bg-accent/[0.09]'"
               @click="toggleDiff(f.path, true)"
             >
-              <span class="gp-status staged">{{ f.x }}</span>
-              <span class="gp-file-path" :title="f.path">{{ f.path }}</span>
-              <button class="gp-file-btn" @click.stop="git.unstageFile(f.path)" title="Unstage">−</button>
+              <span class="w-3 shrink-0 text-center font-mono text-[10px] font-bold text-success">{{ f.x }}</span>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :class="activeDiff?.path === f.path && activeDiff?.staged && '!text-foreground'" :title="f.path">{{ f.path }}</span>
+              <button class="hidden shrink-0 rounded-sm border-0 bg-transparent p-0 px-[3px] text-[13px] leading-none text-muted-foreground transition-colors hover:text-foreground group-hover:block" @click.stop="git.unstageFile(f.path)" title="Unstage">−</button>
             </div>
 
             <!-- CHANGES -->
-            <div class="gp-section-row" style="margin-top: 10px">
-              <span class="gp-section-label">Changes <span v-if="changesCount" class="gp-badge">{{ changesCount }}</span></span>
-              <button v-if="changesCount" class="gp-sec-btn" @click="git.stageAll()">+All</button>
+            <div class="mt-2.5 flex items-center justify-between px-3 py-[3px]">
+              <span class="flex items-center gap-[5px] text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground opacity-70">Changes <span v-if="changesCount" class="rounded-lg bg-accent/[0.14] px-[5px] text-[10px] font-medium normal-case tracking-normal text-accent">{{ changesCount }}</span></span>
+              <button v-if="changesCount" class="rounded-sm border border-border bg-transparent px-1.5 py-px text-[10px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="git.stageAll()">+All</button>
             </div>
-            <div v-if="!changesCount" class="gp-empty">Working tree clean</div>
+            <div v-if="!changesCount" class="px-3 pb-[5px] pt-0.5 text-[11px] text-muted-foreground opacity-55">Working tree clean</div>
             <div
               v-for="f in git.unstaged"
               :key="'u:' + f.path"
-              class="gp-file"
-              :class="{ active: activeDiff?.path === f.path && !activeDiff?.staged }"
+              class="group flex cursor-pointer items-center gap-1.5 px-3 py-[3px] transition-colors hover:bg-hover"
+              :class="activeDiff?.path === f.path && !activeDiff?.staged && 'bg-accent/[0.09]'"
               @click="toggleDiff(f.path, false)"
             >
-              <span class="gp-status modified">{{ f.y }}</span>
-              <span class="gp-file-path" :title="f.path">{{ f.path }}</span>
-              <div class="gp-file-btns">
-                <button class="gp-file-btn stage" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
-                <button class="gp-file-btn discard" @click.stop="git.discardFile(f.path)" title="Discard">✕</button>
+              <span class="w-3 shrink-0 text-center font-mono text-[10px] font-bold text-warning">{{ f.y }}</span>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :class="activeDiff?.path === f.path && !activeDiff?.staged && '!text-foreground'" :title="f.path">{{ f.path }}</span>
+              <div class="hidden items-center gap-0.5 group-hover:flex">
+                <button class="rounded-sm border-0 bg-transparent p-0 px-[3px] text-[13px] leading-none text-muted-foreground transition-colors hover:text-success" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
+                <button class="rounded-sm border-0 bg-transparent p-0 px-[3px] text-[13px] leading-none text-muted-foreground transition-colors hover:text-destructive" @click.stop="git.discardFile(f.path)" title="Discard">✕</button>
               </div>
             </div>
             <div
               v-for="f in git.untracked"
               :key="'t:' + f.path"
-              class="gp-file"
+              class="group flex cursor-pointer items-center gap-1.5 px-3 py-[3px] transition-colors hover:bg-hover"
             >
-              <span class="gp-status untracked">?</span>
-              <span class="gp-file-path" :title="f.path">{{ f.path }}</span>
-              <div class="gp-file-btns">
-                <button class="gp-file-btn stage" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
+              <span class="w-3 shrink-0 text-center font-mono text-[10px] font-bold text-muted-foreground">?</span>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+              <div class="hidden items-center gap-0.5 group-hover:flex">
+                <button class="rounded-sm border-0 bg-transparent p-0 px-[3px] text-[13px] leading-none text-muted-foreground transition-colors hover:text-success" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
               </div>
             </div>
           </div>
 
           <!-- Commit area (pinned to bottom of left column) -->
-          <div class="gp-commit">
+          <div class="flex shrink-0 flex-col gap-1.5 border-t border-border bg-panel px-3 py-[9px]">
             <textarea
               v-model="git.commitMsg"
-              class="gp-commit-input"
+              class="gp-commit-input box-border w-full resize-none rounded border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 font-sans text-xs leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/55"
               placeholder="Commit message…"
               rows="3"
               @keydown.ctrl.enter="git.commit()"
               @keydown.meta.enter="git.commit()"
             />
-            <div class="gp-type-chips">
+            <div class="flex flex-wrap gap-[3px]">
               <button
                 v-for="t in COMMIT_TYPES"
                 :key="t"
-                class="gp-chip"
-                :class="{ active: activeType === t }"
+                class="rounded-[3px] border border-border bg-transparent px-[5px] py-0.5 font-mono text-[9.5px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
+                :class="activeType === t && '!border-accent/45 !bg-accent/[0.14] !text-accent'"
                 @click="applyType(t)"
               >{{ t }}</button>
             </div>
-            <div class="gp-commit-btns">
+            <div class="flex gap-1.5">
               <button
-                class="gp-commit-btn"
+                class="flex flex-1 items-center justify-center gap-1 rounded border border-border bg-hover px-2 py-[5px] font-sans text-[11px] font-medium text-secondary-foreground transition-colors hover:bg-[color-mix(in_srgb,var(--border)_60%,var(--bg-hover))] hover:text-foreground disabled:cursor-default disabled:opacity-30"
                 :disabled="!git.commitMsg.trim() || git.staged.length === 0"
                 @click="git.commit()"
                 title="⌘↵"
@@ -234,7 +234,7 @@
                 <PhGitCommit :size="12" /> Commit
               </button>
               <button
-                class="gp-commit-btn primary"
+                class="flex flex-1 items-center justify-center gap-1 rounded border border-transparent bg-accent/80 px-2 py-[5px] font-sans text-[11px] font-medium text-white transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-30"
                 :disabled="!git.commitMsg.trim() || git.staged.length === 0 || git.pushing"
                 @click="commitAndPush()"
               >
@@ -246,64 +246,66 @@
       </div>
 
       <!-- RIGHT: diff + history -->
-      <div class="gp-right">
+      <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
 
         <!-- Diff view: file diff -->
-        <div v-if="git.diffFile" class="gp-diff">
-          <div class="gp-diff-header">
-            <span class="gp-diff-title">{{ git.diffFile }}</span>
-            <span class="gp-diff-mode">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
-            <button class="gp-icon-btn" @click="git.clearDiff(); activeDiff = null" title="Close diff"><PhX :size="11" /></button>
+        <div v-if="git.diffFile" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="flex shrink-0 items-center gap-2 border-b border-border bg-[color-mix(in_srgb,var(--border)_18%,var(--bg-panel))] px-3 py-1.5">
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground">{{ git.diffFile }}</span>
+            <span class="shrink-0 text-[10px] text-muted-foreground">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
+            <button class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="git.clearDiff(); activeDiff = null" title="Close diff"><PhX :size="11" /></button>
           </div>
-          <pre class="gp-diff-view"><span
+          <pre class="m-0 flex-1 overflow-auto whitespace-pre px-0 py-1.5 font-mono text-[11px] leading-[1.6]"><span
             v-for="(line, idx) in git.diff.split('\n')"
             :key="idx"
+            class="block px-3"
             :class="diffLineClass(line)"
           >{{ line }}
 </span></pre>
         </div>
 
         <!-- Diff view: commit diff -->
-        <div v-else-if="commitDiff" class="gp-diff">
-          <div class="gp-diff-header">
-            <span class="gp-diff-title">{{ commitDiff.subject }}</span>
-            <button class="gp-icon-btn" @click="commitDiff = null" title="Close diff"><PhX :size="11" /></button>
+        <div v-else-if="commitDiff" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="flex shrink-0 items-center gap-2 border-b border-border bg-[color-mix(in_srgb,var(--border)_18%,var(--bg-panel))] px-3 py-1.5">
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground">{{ commitDiff.subject }}</span>
+            <button class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="commitDiff = null" title="Close diff"><PhX :size="11" /></button>
           </div>
-          <pre class="gp-diff-view"><span
+          <pre class="m-0 flex-1 overflow-auto whitespace-pre px-0 py-1.5 font-mono text-[11px] leading-[1.6]"><span
             v-for="(line, idx) in commitDiff.text.split('\n')"
             :key="idx"
+            class="block px-3"
             :class="diffLineClass(line)"
           >{{ line }}
 </span></pre>
         </div>
 
-        <div v-else class="gp-diff-empty">
+        <div v-else class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground opacity-50">
           <PhArrowLeft :size="16" />
           Click a file to view diff
         </div>
 
         <!-- History -->
-        <div class="gp-history">
-          <div class="gp-history-header" @click="showHistory = !showHistory">
-            <PhCaretRight :size="10" :class="{ open: showHistory }" />
-            <span class="gp-section-label">History</span>
-            <span v-if="git.ahead > 0" class="gp-badge" style="margin-left: 4px">{{ git.ahead }} unpushed</span>
+        <div class="flex max-h-[220px] shrink-0 flex-col border-t border-border bg-panel">
+          <div class="flex shrink-0 cursor-pointer select-none items-center gap-[5px] px-3 py-[5px]" @click="showHistory = !showHistory">
+            <PhCaretRight :size="10" class="text-muted-foreground transition-transform" :class="showHistory && 'rotate-90'" />
+            <span class="flex items-center gap-[5px] text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground opacity-70">History</span>
+            <span v-if="git.ahead > 0" class="ml-1 rounded-lg bg-accent/[0.14] px-[5px] text-[10px] font-medium normal-case tracking-normal text-accent">{{ git.ahead }} unpushed</span>
           </div>
-          <div v-if="showHistory" class="gp-history-list">
-            <div v-if="git.log.length === 0" class="gp-empty" style="padding: 6px 12px">No commits</div>
+          <div v-if="showHistory" class="flex-1 overflow-y-auto">
+            <div v-if="git.log.length === 0" class="px-3 py-1.5 text-[11px] text-muted-foreground opacity-55">No commits</div>
             <div
               v-for="(c, i) in git.log"
               :key="c.hash"
-              class="gp-log-row"
-              :class="{ unpushed: i < git.ahead, active: selectedCommit?.hash === c.hash }"
+              class="flex cursor-pointer items-center gap-2 px-3 py-[3px] transition-colors hover:bg-hover"
+              :class="[i < git.ahead && 'bg-accent/[0.05] hover:bg-accent/10', selectedCommit?.hash === c.hash && '!bg-accent/[0.09]']"
               :title="c.subject + '\n' + c.author + (i < git.ahead ? '\n↑ Not pushed' : '')"
               @click="openCommitDiff(c)"
             >
-              <span class="gp-log-hash">{{ c.shortHash }}</span>
-              <span v-if="i < git.ahead" class="gp-log-up">↑</span>
-              <span class="gp-log-subject">{{ c.subject }}</span>
-              <span class="gp-log-author">{{ c.author }}</span>
-              <span class="gp-log-time">{{ c.relTime }}</span>
+              <span class="shrink-0 font-mono text-[10px] text-warning" :class="i < git.ahead && '!text-accent'">{{ c.shortHash }}</span>
+              <span v-if="i < git.ahead" class="shrink-0 text-[9px] font-bold text-accent">↑</span>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-secondary-foreground transition-colors hover:text-foreground">{{ c.subject }}</span>
+              <span class="max-w-[100px] shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">{{ c.author }}</span>
+              <span class="shrink-0 text-[10px] text-muted-foreground">{{ c.relTime }}</span>
             </div>
           </div>
         </div>
@@ -523,225 +525,6 @@ body {
 </style>
 
 <style scoped>
-.git-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-  background: var(--bg-base);
-  font-size: 12px;
-}
-
-/* Top bar */
-.gp-topbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  height: 38px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  background: var(--bg-panel);
-}
-
-.gp-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  opacity: 0.7;
-  flex-shrink: 0;
-}
-
-/* Workspace selector */
-.ws-select-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-  background: color-mix(in srgb, var(--border) 25%, var(--bg-panel));
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0 6px 0 7px;
-  height: 24px;
-  gap: 4px;
-}
-.ws-select-icon { color: var(--text-muted); flex-shrink: 0; }
-.ws-select {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  outline: none;
-  cursor: pointer;
-  padding: 0;
-  padding-right: 14px;
-  appearance: none;
-  -webkit-appearance: none;
-}
-.ws-select:focus { color: var(--text-primary); }
-.ws-select-caret {
-  position: absolute;
-  right: 5px;
-  color: var(--text-muted);
-  pointer-events: none;
-}
-
-/* Branch chip */
-.branch-chip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  padding: 3px 7px;
-  height: 24px;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
-  max-width: 220px;
-}
-.branch-chip:hover:not(:disabled),
-.branch-chip.open { background: var(--bg-hover); color: var(--text-primary); }
-.branch-chip:disabled { opacity: 0.4; cursor: default; }
-.branch-chip :deep(svg:first-child) { color: var(--yellow); flex-shrink: 0; }
-.branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.branch-ahead { color: var(--green); font-size: 10px; flex-shrink: 0; }
-.branch-behind { color: var(--yellow); font-size: 10px; flex-shrink: 0; }
-.branch-caret { color: var(--text-muted); flex-shrink: 0; transition: transform 0.12s; }
-.branch-chip.open .branch-caret { transform: rotate(180deg); }
-
-.gp-spacer { flex: 1; }
-
-/* Action buttons */
-.gp-action-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 500;
-  padding: 3px 8px;
-  height: 24px;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-  white-space: nowrap;
-}
-.gp-action-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-}
-.gp-action-btn:disabled { opacity: 0.3; cursor: default; }
-
-.gp-count-badge {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  border-radius: 8px;
-  color: var(--accent);
-  font-size: 9px;
-  font-weight: 600;
-  padding: 0 4px;
-}
-
-.gp-icon-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  transition: color 0.1s, background 0.1s;
-}
-.gp-icon-btn:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); }
-.gp-icon-btn:disabled { opacity: 0.3; cursor: default; }
-
-@keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin 0.9s linear infinite; }
-
-/* Branch dropdown */
-.branch-overlay { position: fixed; inset: 0; z-index: 99; }
-.branch-dropdown {
-  position: absolute;
-  top: 42px;
-  left: 240px;
-  min-width: 220px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
-  z-index: 100;
-  padding: 3px 0;
-  max-height: 260px;
-  overflow-y: auto;
-}
-.bd-item {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 12px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background 0.08s;
-}
-.bd-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-.bd-item.current { color: var(--text-primary); }
-.bd-check-icon { width: 12px; flex-shrink: 0; color: var(--green); }
-.bd-sep { height: 1px; background: var(--border); margin: 3px 0; }
-.bd-new {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.08s, color 0.08s;
-}
-.bd-new:hover { background: var(--bg-hover); color: var(--text-primary); }
-.bd-new-input { padding: 5px 10px; }
-.bd-input {
-  width: 100%;
-  background: color-mix(in srgb, var(--border) 20%, var(--bg-panel));
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  outline: none;
-  padding: 4px 7px;
-  box-sizing: border-box;
-}
-.bd-input:focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
-
-/* Progress */
-.gp-progress {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.gp-progress-bar {
-  position: relative;
-  flex: 1;
-  height: 2px;
-  background: var(--border);
-  overflow: hidden;
-  border-radius: 2px;
-}
 .gp-progress-bar::after {
   content: "";
   position: absolute;
@@ -752,411 +535,16 @@ body {
   animation: progress-slide 1.1s ease-in-out infinite;
 }
 @keyframes progress-slide { to { left: 100%; } }
-.gp-progress-label { font-size: 11px; color: var(--text-muted); }
 
-/* No repo */
-.gp-no-repo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  flex: 1;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-.gp-init-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: 5px;
-  border: 1px solid var(--border);
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  font-size: 12px;
-  cursor: pointer;
-}
-.gp-init-btn:hover { background: var(--yellow); color: #000; border-color: var(--yellow); }
-
-/* Two-column body */
-.gp-body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-/* LEFT column */
-.gp-left {
-  width: 280px;
-  flex: 0 0 280px;
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.gp-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 0;
-}
-
-/* Section headers */
-.gp-section-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 3px 12px;
-}
-.gp-section-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  opacity: 0.7;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.gp-badge {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-  border-radius: 8px;
-  padding: 0 5px;
-}
-.gp-sec-btn {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-}
-.gp-sec-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-
-.gp-empty {
-  font-size: 11px;
-  color: var(--text-muted);
-  opacity: 0.55;
-  padding: 2px 12px 5px;
-}
-
-/* File rows */
-.gp-file {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 12px;
-  cursor: pointer;
-  transition: background 0.08s;
-  border-radius: 0;
-}
-.gp-file:hover { background: var(--bg-hover); }
-.gp-file.active { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-
-.gp-status {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  width: 12px;
-  flex-shrink: 0;
-  text-align: center;
-}
-.gp-status.staged   { color: var(--green); }
-.gp-status.modified { color: var(--yellow); }
-.gp-status.untracked { color: var(--text-muted); }
-
-.gp-file-path {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  transition: color 0.08s;
-}
-.gp-file:hover .gp-file-path,
-.gp-file.active .gp-file-path { color: var(--text-primary); }
-
-.gp-file-btns {
-  display: none;
-  align-items: center;
-  gap: 2px;
-}
-.gp-file:hover .gp-file-btns { display: flex; }
-
-.gp-file-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1;
-  padding: 0 3px;
-  flex-shrink: 0;
-  display: none;
-  border-radius: 2px;
-  transition: color 0.08s;
-}
-.gp-file:hover .gp-file-btn { display: block; }
-.gp-file-btn.stage:hover { color: var(--green); }
-.gp-file-btn.discard:hover { color: var(--red); }
-
-/* Commit area */
-.gp-commit {
-  border-top: 1px solid var(--border);
-  padding: 9px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex-shrink: 0;
-  background: var(--bg-panel);
-}
-.gp-commit-input {
-  background: color-mix(in srgb, var(--border) 15%, var(--bg-panel));
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  line-height: 1.5;
-  outline: none;
-  padding: 6px 8px;
-  resize: none;
-  width: 100%;
-  box-sizing: border-box;
-  transition: border-color 0.1s;
-}
-.gp-commit-input::placeholder { color: var(--text-muted); opacity: 0.6; }
-.gp-commit-input:focus { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .gp-commit-input::-webkit-scrollbar { display: none; }
 
-.gp-type-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-.gp-chip {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  padding: 2px 5px;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-}
-.gp-chip:hover {
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-}
-.gp-chip.active {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  color: var(--accent);
-}
+.diff-add  { background: color-mix(in srgb, var(--green) 6%, transparent); color: var(--green); }
+.diff-del  { background: color-mix(in srgb, var(--red) 6%, transparent); color: var(--red); }
+.diff-hunk { color: var(--accent); opacity: 0.7; }
+.diff-ctx  { color: var(--text-secondary); opacity: 0.6; }
 
-.gp-commit-btns {
-  display: flex;
-  gap: 6px;
-}
-.gp-commit-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 500;
-  font-family: var(--font-ui);
-  padding: 5px 8px;
-  transition: background 0.1s, color 0.1s;
-}
-.gp-commit-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--border) 60%, var(--bg-hover));
-  color: var(--text-primary);
-}
-.gp-commit-btn.primary {
-  background: color-mix(in srgb, var(--accent) 80%, transparent);
-  border-color: transparent;
-  color: #fff;
-}
-.gp-commit-btn.primary:hover:not(:disabled) { background: var(--accent); }
-.gp-commit-btn:disabled { opacity: 0.3; cursor: default; }
-
-/* RIGHT column */
-.gp-right {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
-}
-
-.gp-diff {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
-}
-.gp-diff-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: color-mix(in srgb, var(--border) 18%, var(--bg-panel));
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.gp-diff-title {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-.gp-diff-mode { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
-.gp-diff-view {
-  flex: 1;
-  overflow: auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.6;
-  white-space: pre;
-  margin: 0;
-  padding: 6px 0;
-}
-.diff-add  { color: var(--green); display: block; padding: 0 12px; background: color-mix(in srgb, var(--green) 6%, transparent); }
-.diff-del  { color: var(--red); display: block; padding: 0 12px; background: color-mix(in srgb, var(--red) 6%, transparent); }
-.diff-hunk { color: var(--accent); display: block; padding: 0 12px; opacity: 0.7; }
-.diff-ctx  { color: var(--text-secondary); display: block; padding: 0 12px; opacity: 0.6; }
-
-.gp-diff-empty {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--text-muted);
-  font-size: 12px;
-  opacity: 0.5;
-}
-
-/* History */
-.gp-history {
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-  max-height: 220px;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-panel);
-}
-.gp-history-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  cursor: pointer;
-  user-select: none;
-  flex-shrink: 0;
-}
-.gp-history-header :deep(svg) { transition: transform 0.12s; color: var(--text-muted); }
-.gp-history-header .open { transform: rotate(90deg); }
-.gp-history-list { overflow-y: auto; flex: 1; }
-
-.gp-log-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 12px;
-  cursor: pointer;
-  transition: background 0.08s;
-}
-.gp-log-row:hover { background: var(--bg-hover); }
-.gp-log-row.unpushed { background: color-mix(in srgb, var(--accent) 5%, transparent); }
-.gp-log-row.unpushed:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.gp-log-row.active { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-
-.gp-log-hash {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--yellow);
-  flex-shrink: 0;
-  min-width: 52px;
-}
-.gp-log-row.unpushed .gp-log-hash { color: var(--accent); }
-.gp-log-up { font-size: 9px; font-weight: 700; color: var(--accent); flex-shrink: 0; }
-.gp-log-subject {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--text-secondary);
-  transition: color 0.08s;
-}
-.gp-log-row:hover .gp-log-subject { color: var(--text-primary); }
-.gp-log-author {
-  font-size: 10px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gp-log-time { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
-
-/* Commit file browse mode */
-.gp-commit-browse-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px 6px 6px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--border) 18%, var(--bg-panel));
-  flex-shrink: 0;
-  min-width: 0;
-}
-.gp-commit-browse-subject {
-  flex: 1;
-  font-size: 11px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Status letters for commit file list */
-.gp-status.cf-added    { color: var(--green); }
-.gp-status.cf-deleted  { color: var(--red); }
-.gp-status.cf-renamed  { color: var(--accent); }
-.gp-status.cf-modified { color: var(--yellow); }
-
-/* +/- stat badges in commit file list */
-.gp-cf-stat {
-  display: flex;
-  gap: 3px;
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
-.gp-cf-add { color: var(--green); }
-.gp-cf-del { color: var(--red); }
+.cf-added    { color: var(--green); }
+.cf-deleted  { color: var(--red); }
+.cf-renamed  { color: var(--accent); }
+.cf-modified { color: var(--yellow); }
 </style>
