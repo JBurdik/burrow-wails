@@ -1,24 +1,24 @@
 <template>
   <div>
     <div
-      class="tree-row"
-      :class="{ selected: store.selectedId === node.id }"
+      class="group mx-1 flex h-[22px] cursor-pointer items-center gap-1.5 whitespace-nowrap rounded text-xs text-foreground hover:bg-hover"
+      :class="{ 'bg-selected': store.selectedId === node.id }"
       :style="{ paddingLeft: `${8 + depth * 12}px` }"
       @click="handleClick"
     >
-      <PhSpinner    v-if="node.loading" class="row-arrow spin" :size="10" />
-      <PhCaretRight v-else-if="node.type === 'folder' && !node.expanded" class="row-arrow" :size="10" weight="bold" />
-      <PhCaretDown  v-else-if="node.type === 'folder' && node.expanded" class="row-arrow" :size="10" weight="bold" />
-      <span v-else class="row-arrow placeholder" />
+      <PhSpinner    v-if="node.loading" class="w-2.5 shrink-0 animate-spin text-secondary-foreground" :size="10" />
+      <PhCaretRight v-else-if="node.type === 'folder' && !node.expanded" class="w-2.5 shrink-0 text-secondary-foreground" :size="10" weight="bold" />
+      <PhCaretDown  v-else-if="node.type === 'folder' && node.expanded" class="w-2.5 shrink-0 text-secondary-foreground" :size="10" weight="bold" />
+      <span v-else class="w-2.5 shrink-0 opacity-0" />
 
-      <PhFolderOpen v-if="node.type === 'folder' && node.expanded" class="row-icon folder" :size="14" weight="fill" />
-      <PhFolder     v-else-if="node.type === 'folder'"             class="row-icon folder" :size="14" weight="fill" />
-      <component    v-else :is="fileIconComponent(node.name)"      class="row-icon file"   :size="14" weight="regular" />
+      <PhFolderOpen v-if="node.type === 'folder' && node.expanded" class="shrink-0 text-blue-400" :size="14" weight="fill" />
+      <PhFolder     v-else-if="node.type === 'folder'"             class="shrink-0 text-blue-400" :size="14" weight="fill" />
+      <component    v-else :is="fileIconComponent(node.name)"      class="shrink-0 text-secondary-foreground" :size="14" weight="regular" />
 
-      <span class="row-name">{{ node.name }}</span>
+      <span class="flex-1 truncate text-xs">{{ node.name }}</span>
 
       <button
-        class="ctx-btn"
+        class="mr-1 hidden shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-accent group-hover:flex"
         title="Add to agent context (@path)"
         @click.stop="addToContext"
       >
@@ -68,58 +68,3 @@ function fileIconComponent(name: string) {
   return PhFile;
 }
 </script>
-
-<style scoped>
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  font-size: 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  white-space: nowrap;
-  border-radius: 3px;
-  margin: 0 4px;
-}
-.tree-row:hover   { background: var(--bg-hover); }
-.tree-row.selected { background: var(--bg-selected); }
-
-.row-arrow {
-  width: 10px;
-  flex-shrink: 0;
-  color: var(--text-secondary);
-}
-.row-arrow.placeholder { opacity: 0; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.row-arrow.spin { animation: spin 1s linear infinite; }
-
-.row-icon {
-  flex-shrink: 0;
-}
-.row-icon.folder { color: #60a5fa; }
-.row-icon.file   { color: var(--text-secondary); }
-
-.row-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  font-size: 12px;
-}
-
-.ctx-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 2px 4px;
-  margin-right: 4px;
-  border-radius: 3px;
-}
-.tree-row:hover .ctx-btn { display: flex; }
-.ctx-btn:hover { color: var(--accent); background: var(--bg-hover); }
-</style>
