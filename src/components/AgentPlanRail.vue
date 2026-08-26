@@ -40,63 +40,56 @@ watch(() => props.ptyId, syncDraft, { immediate: true });
 </script>
 
 <template>
-  <section class="plan-rail" :class="{ collapsed }" aria-label="Agent plan">
-    <button class="plan-header" @click="collapsed = !collapsed">
+  <section class="shrink-0 border-b border-border bg-panel" aria-label="Agent plan">
+    <button class="flex h-6 w-full items-center gap-1.5 border-0 bg-transparent px-2 text-left font-sans text-[10px] text-muted-foreground hover:bg-hover" @click="collapsed = !collapsed">
       <component :is="collapsed ? PhCaretRight : PhCaretDown" :size="10" weight="bold" />
       <PhListChecks :size="13" weight="bold" />
       <span>Plan</span>
-      <span v-if="agentTitle" class="plan-agent">{{ agentTitle }}</span>
-      <span class="plan-progress">{{ progressLabel }}</span>
+      <span v-if="agentTitle" class="max-w-[180px] truncate text-muted-foreground/70">{{ agentTitle }}</span>
+      <span class="ml-auto font-mono text-[9px]">{{ progressLabel }}</span>
     </button>
 
-    <div v-if="!collapsed" class="plan-content">
-      <p v-if="!steps.length" class="plan-empty">Add a step-by-step plan for this agent. It stays attached to this terminal.</p>
-      <div v-else class="plan-steps">
-        <div v-for="step in steps" :key="step.id" class="plan-step" :class="`is-${step.status}`">
-          <PhCheck v-if="step.status === 'completed'" :size="13" weight="bold" class="step-check" />
-          <span v-else class="step-dot" />
-          <input :value="step.text" class="step-text" @change="updateText(step.id, $event)" />
-          <select :value="step.status" class="step-status" :aria-label="`Status for ${step.text}`" @change="updateStatus(step.id, $event)">
+    <div v-if="!collapsed" class="max-h-[220px] overflow-auto px-2 pb-2 pt-1">
+      <p v-if="!steps.length" class="mb-2 mt-0.5 text-[10px] leading-snug text-muted-foreground">Add a step-by-step plan for this agent. It stays attached to this terminal.</p>
+      <div v-else class="grid gap-1">
+        <div v-for="step in steps" :key="step.id" class="flex min-w-0 items-center gap-1.5 py-0.5">
+          <PhCheck v-if="step.status === 'completed'" :size="13" weight="bold" class="shrink-0 basis-[13px] text-accent" />
+          <span
+            v-else
+            class="mx-0.5 h-1.5 w-1.5 shrink-0 basis-[13px] rounded-full bg-muted-foreground"
+            :class="step.status === 'in_progress' && 'bg-accent shadow-[0_0_0_2px_rgba(236,72,153,0.2)]'"
+          />
+          <input
+            :value="step.text"
+            class="min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-0.5 font-sans text-[11px] text-foreground focus:border-b-accent focus:outline-none"
+            :class="step.status === 'completed' && 'text-muted-foreground line-through'"
+            @change="updateText(step.id, $event)"
+          />
+          <select
+            :value="step.status"
+            class="w-[70px] rounded border border-border bg-base font-sans text-[9px] text-muted-foreground"
+            :aria-label="`Status for ${step.text}`"
+            @change="updateStatus(step.id, $event)"
+          >
             <option value="pending">Pending</option>
             <option value="in_progress">Active</option>
             <option value="completed">Done</option>
           </select>
-          <button class="step-remove" title="Remove step" @click="store.removeStep(ptyId, step.id)"><PhTrash :size="12" /></button>
+          <button class="grid place-items-center rounded border-0 bg-transparent p-0.5 text-muted-foreground opacity-50 hover:bg-destructive/12 hover:text-destructive hover:opacity-100" title="Remove step" @click="store.removeStep(ptyId, step.id)">
+            <PhTrash :size="12" />
+          </button>
         </div>
       </div>
 
-      <details class="plan-editor">
-        <summary>Edit plan as lines</summary>
-        <textarea v-model="draft" rows="4" placeholder="One step per line" @blur="saveDraft" />
-        <button class="plan-save" @click="saveDraft">Save plan</button>
+      <details class="mt-1.5 text-[10px] text-muted-foreground">
+        <summary class="cursor-pointer">Edit plan as lines</summary>
+        <textarea v-model="draft" rows="4" placeholder="One step per line" class="mt-1 box-border w-full resize-y rounded border border-border bg-terminal-bg p-1 font-mono text-[10px] text-foreground" @blur="saveDraft" />
+        <button class="mt-0.5 rounded border-0 bg-hover px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-accent" @click="saveDraft">Save plan</button>
       </details>
-      <div class="plan-actions">
-        <button class="plan-add" @click="addStep"><PhPlus :size="12" weight="bold" /> Add step</button>
-        <button v-if="steps.length" class="plan-clear" @click="store.clear(ptyId); syncDraft()">Clear plan</button>
+      <div class="mt-1.5 flex justify-between">
+        <button class="inline-flex items-center gap-0.5 rounded border-0 bg-hover px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-accent" @click="addStep"><PhPlus :size="12" weight="bold" /> Add step</button>
+        <button v-if="steps.length" class="rounded border-0 bg-transparent px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/12" @click="store.clear(ptyId); syncDraft()">Clear plan</button>
       </div>
     </div>
   </section>
 </template>
-
-<style scoped>
-.plan-rail { flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
-.plan-header { width: 100%; height: 24px; padding: 0 8px; display: flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--text-muted); font: 10px var(--font-ui); cursor: pointer; text-align: left; }
-.plan-header:hover { background: var(--bg-hover); }
-.plan-agent { overflow: hidden; max-width: 180px; color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; }
-.plan-progress { margin-left: auto; font: 9px var(--font-mono); }
-.plan-content { max-height: 220px; overflow: auto; padding: 5px 8px 7px; }
-.plan-empty { margin: 2px 0 7px; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
-.plan-steps { display: grid; gap: 3px; }
-.plan-step { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 0; }
-.step-dot, .step-check { flex: 0 0 13px; color: var(--accent); }
-.step-dot { width: 7px; height: 7px; margin: 0 3px; border-radius: 50%; background: var(--text-muted); }
-.is-in_progress .step-dot { background: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent); }
-.step-text { min-width: 0; flex: 1; border: 0; border-bottom: 1px solid transparent; padding: 2px 0; background: transparent; color: var(--text); font: 11px var(--font-ui); }
-.step-text:focus { outline: 0; border-bottom-color: var(--accent); }
-.is-completed .step-text { color: var(--text-muted); text-decoration: line-through; }
-.step-status { width: 70px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-base); color: var(--text-muted); font: 9px var(--font-ui); }
-.step-remove, .plan-clear, .plan-add, .plan-save { border: 0; border-radius: 3px; background: transparent; color: var(--text-muted); font: 10px var(--font-ui); cursor: pointer; }
-.step-remove { display: grid; place-items: center; padding: 2px; opacity: .5; }.step-remove:hover, .plan-clear:hover { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); opacity: 1; }
-.plan-editor { margin-top: 6px; color: var(--text-muted); font-size: 10px; }.plan-editor summary { cursor: pointer; }.plan-editor textarea { box-sizing: border-box; width: 100%; margin-top: 4px; resize: vertical; border: 1px solid var(--border); border-radius: 3px; padding: 4px; background: var(--terminal-bg); color: var(--text); font: 10px var(--font-mono); }.plan-save { margin-top: 3px; padding: 3px 5px; background: var(--bg-hover); }
-.plan-actions { display: flex; justify-content: space-between; margin-top: 5px; }.plan-add { display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; background: var(--bg-hover); }.plan-add:hover, .plan-save:hover { color: var(--accent); }
-</style>

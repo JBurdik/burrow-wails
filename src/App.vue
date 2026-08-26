@@ -441,6 +441,7 @@ function onKeydown(e: KeyboardEvent) {
    Tailwind utilities and stay in sync with the active theme. */
 @theme inline {
   --color-base: var(--bg-base);
+  --color-terminal-bg: var(--terminal-bg);
   --color-panel: var(--bg-panel);
   --color-hover: var(--bg-hover);
   --color-selected: var(--bg-selected);
