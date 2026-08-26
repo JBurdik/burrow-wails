@@ -1,23 +1,23 @@
 <template>
-  <div class="ar-wrap" ref="wrapRef">
+  <div class="relative flex" ref="wrapRef">
     <button
-      class="ar-btn"
-      :class="{ active: isRunning }"
+      class="flex items-center gap-1 rounded px-1 py-0.5 font-sans text-[10px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+      :class="{ 'text-accent hover:text-accent': isRunning }"
       :title="isRunning ? `Auto-refresh every ${currentInterval}s (right-click to change)` : 'Auto-refresh off (right-click to change)'"
       @click="toggle()"
       @contextmenu.prevent="menuOpen = !menuOpen"
     >
-      <PhArrowClockwise :size="13" :class="{ spin: isRunning && nextRefreshIn <= 1 }" />
-      <span class="ar-label">{{ isRunning ? `${nextRefreshIn}s` : "Off" }}</span>
+      <PhArrowClockwise :size="13" :class="{ 'animate-spin': isRunning && nextRefreshIn <= 1 }" />
+      <span class="min-w-[20px] text-left">{{ isRunning ? `${nextRefreshIn}s` : "Off" }}</span>
     </button>
 
     <Transition name="ar-menu">
-      <div v-if="menuOpen" class="ar-menu">
+      <div v-if="menuOpen" class="absolute right-0 top-[calc(100%+4px)] z-[200] flex min-w-[56px] flex-col gap-px rounded-md border border-border bg-panel p-1 shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
         <button
           v-for="n in AUTO_REFRESH_INTERVALS"
           :key="n"
-          class="ar-menu-item"
-          :class="{ selected: currentInterval === n }"
+          class="rounded px-2 py-0.5 text-left font-sans text-[11px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
+          :class="{ 'font-semibold text-accent hover:text-accent': currentInterval === n }"
           @click="pick(n)"
         >
           {{ n === 0 ? "Off" : `${n}s` }}
@@ -59,64 +59,6 @@ onBeforeUnmount(() => document.removeEventListener("mousedown", onOutsideClick))
 </script>
 
 <style scoped>
-.ar-wrap {
-  position: relative;
-  display: flex;
-}
-
-.ar-btn {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 3px 4px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-family: var(--font-ui);
-  transition: color 0.1s, background 0.1s;
-}
-.ar-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-.ar-btn.active { color: var(--accent); }
-
-.ar-label { min-width: 20px; text-align: left; }
-
-@keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin 0.6s linear infinite; }
-
-.ar-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 3px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  z-index: 200;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-  min-width: 56px;
-}
-
-.ar-menu-item {
-  background: none;
-  border: none;
-  border-radius: 3px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 11px;
-  font-family: var(--font-ui);
-  padding: 3px 8px;
-  text-align: left;
-  transition: background 0.08s, color 0.08s;
-}
-.ar-menu-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-.ar-menu-item.selected { color: var(--accent); font-weight: 600; }
-
 .ar-menu-enter-active, .ar-menu-leave-active { transition: opacity 0.1s, transform 0.1s; }
 .ar-menu-enter-from, .ar-menu-leave-to { opacity: 0; transform: translateY(-4px); }
 </style>
