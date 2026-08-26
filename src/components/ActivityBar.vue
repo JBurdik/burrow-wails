@@ -1,32 +1,34 @@
 <template>
-  <nav class="activity-bar">
+  <nav
+    class="flex w-11 shrink-0 flex-col items-center gap-0.5 border-r border-border bg-panel py-2 [backdrop-filter:var(--blur-panels,none)]"
+  >
     <button
-      class="ab-btn"
-      :class="{ active: ui.mode === 'dashboard' }"
+      class="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+      :class="{ 'bg-accent/12 text-accent hover:bg-accent/12 hover:text-accent': ui.mode === 'dashboard' }"
       title="Dashboard"
       @click="ui.toggleDashboard()"
     >
       <PhSquaresFour :size="18" />
     </button>
-    <div class="ab-sep" />
+    <Separator class="my-1 w-[22px]" />
     <button
-      class="ab-btn"
+      class="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
       title="New terminal (⌘T)"
       @click="newTerminal()"
     >
       <PhTerminal :size="18" />
     </button>
     <button
-      class="ab-btn"
-      :class="{ active: ui.mode === 'git' }"
+      class="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+      :class="{ 'bg-accent/12 text-accent hover:bg-accent/12 hover:text-accent': ui.mode === 'git' }"
       title="Git panel"
       @click="ui.toggleGitPanel()"
     >
       <PhGitBranch :size="18" />
     </button>
     <button
-      class="ab-btn"
-      :class="{ active: ui.boardRepoId === ws.active?.id }"
+      class="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+      :class="{ 'bg-accent/12 text-accent hover:bg-accent/12 hover:text-accent': ui.boardRepoId === ws.active?.id }"
       title="Kanban board"
       :disabled="!ws.active"
       @click="ws.active && ui.openBoard(ws.active.id)"
@@ -38,6 +40,7 @@
 
 <script setup lang="ts">
 import { PhTerminal, PhGitBranch, PhKanban, PhSquaresFour } from "@phosphor-icons/vue";
+import { Separator } from "@/components/ui/separator";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
@@ -53,46 +56,3 @@ function newTerminal() {
   if (ws.active) termTabs.add(ws.active.id);
 }
 </script>
-
-<style scoped>
-.activity-bar {
-  width: 44px;
-  flex: 0 0 44px;
-  flex-shrink: 0;
-  background: var(--bg-panel);
-  backdrop-filter: var(--blur-panels, none);
-  -webkit-backdrop-filter: var(--blur-panels, none);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 0;
-  gap: 2px;
-}
-
-.ab-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  transition: color .12s, background .12s;
-  position: relative;
-}
-.ab-sep {
-  width: 22px;
-  height: 1px;
-  background: var(--border);
-  margin: 4px 0;
-}
-.ab-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-.ab-btn.active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-</style>
