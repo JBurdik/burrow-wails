@@ -147,6 +147,32 @@ export async function invoke(cmd: string, args: Args = {}): Promise<any> {
     case "remove_mcp_server":
       return App.RemoveMcpServer(args.name);
 
+    // Claude session reading
+    case "list_claude_sessions":
+      return App.ListClaudeSessions(args.cwd);
+    case "read_claude_transcript":
+      return App.ReadClaudeTranscript(args.cwd, args.sessionId ?? args.session_id);
+    case "read_claude_activity":
+      return App.ReadClaudeActivity(args.cwd, args.sessionId ?? args.session_id);
+
+    // Control/permission responses
+    case "claude_respond_control":
+      return App.ClaudeRespondControl(args.id, args.requestId ?? args.request_id, args.response);
+    case "acp_respond_permission":
+      return App.AcpRespondPermission(args.id, args.rpcId ?? args.rpc_id, args.optionId ?? args.option_id);
+    case "acp_respond_user_input":
+      return App.AcpRespondUserInput(args.id, args.rpcId ?? args.rpc_id, args.text);
+
+    // Task attachments
+    case "write_task_attachment":
+      return App.WriteTaskAttachment(args.taskId ?? args.task_id, args.mimeType ?? args.mime_type, args.data, args.ext);
+    case "list_task_attachments":
+      return App.ListTaskAttachments(args.taskId ?? args.task_id);
+    case "delete_task_attachment":
+      return App.DeleteTaskAttachment(args.id);
+    case "read_task_attachment_base64":
+      return App.ReadTaskAttachmentBase64(args.id);
+
     default:
       console.warn(`[wails-compat] invoke("${cmd}") has no Go binding yet`);
       throw new Error(`command not implemented in Go backend: ${cmd}`);
