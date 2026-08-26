@@ -1,75 +1,87 @@
 <template>
-  <div class="wc-overlay" @click.self="$emit('close')">
-    <div class="wc-modal" @keydown.esc.stop="$emit('close')">
+  <div class="fixed inset-0 z-[800] flex items-center justify-center bg-black/55" @click.self="$emit('close')">
+    <div class="flex max-h-[80vh] w-[640px] flex-col overflow-hidden rounded-[10px] border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.6)]" @keydown.esc.stop="$emit('close')">
       <!-- Header -->
-      <div class="wc-header">
-        <span class="wc-title">{{ workspaceName }} — Project Config</span>
-        <button class="wc-close" title="Close (Esc)" @click="$emit('close')">
+      <div class="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+        <span class="text-[13px] font-semibold text-foreground">{{ workspaceName }} — Project Config</span>
+        <button class="flex rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="$emit('close')">
           <PhX :size="14" />
         </button>
       </div>
 
       <!-- Tabs -->
-      <div class="wc-tabs">
-        <button class="wc-tab" :class="{ active: tab === 'prompt' }" @click="tab = 'prompt'">Manager Prompt</button>
-        <button class="wc-tab" :class="{ active: tab === 'scripts' }" @click="tab = 'scripts'">Scripts</button>
+      <div class="flex shrink-0 border-b border-border px-4">
+        <button
+          class="-mb-px border-b-2 border-transparent px-3 pb-2 pt-2.5 text-xs text-muted-foreground hover:text-foreground"
+          :class="{ 'border-b-accent text-foreground': tab === 'prompt' }"
+          @click="tab = 'prompt'"
+        >Manager Prompt</button>
+        <button
+          class="-mb-px border-b-2 border-transparent px-3 pb-2 pt-2.5 text-xs text-muted-foreground hover:text-foreground"
+          :class="{ 'border-b-accent text-foreground': tab === 'scripts' }"
+          @click="tab = 'scripts'"
+        >Scripts</button>
       </div>
 
       <!-- Tab: Manager Prompt -->
-      <div v-if="tab === 'prompt'" class="wc-body">
-        <p class="wc-hint">
-          Saved to <code>{{ workspacePath }}/.burrow/manager.md</code>. This is the full Manager system prompt for this project — edit or extend it as needed.
+      <div v-if="tab === 'prompt'" class="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <p class="m-0 text-[11px] text-muted-foreground">
+          Saved to <code class="font-mono text-secondary-foreground">{{ workspacePath }}/.burrow/manager.md</code>. This is the full Manager system prompt for this project — edit or extend it as needed.
         </p>
         <textarea
           v-model="promptContent"
-          class="wc-textarea"
+          class="min-h-[280px] flex-1 resize-y rounded-md border border-border bg-base p-2.5 font-mono text-xs leading-relaxed text-foreground outline-none focus:border-accent"
           placeholder="# Project-specific manager instructions&#10;&#10;Describe the project, conventions, team norms, or anything the Manager should know..."
           spellcheck="false"
         />
-        <div class="wc-footer">
-          <span v-if="saveState === 'ok'" class="save-msg ok">Saved</span>
-          <span v-else-if="saveState === 'err'" class="save-msg err">Save failed</span>
-          <button class="wc-btn primary" :disabled="saving" @click="savePrompt">
-            {{ saving ? 'Saving…' : 'Save' }}
-          </button>
+        <div class="flex shrink-0 items-center justify-end gap-2.5">
+          <span v-if="saveState === 'ok'" class="text-xs text-success">Saved</span>
+          <span v-else-if="saveState === 'err'" class="text-xs text-destructive">Save failed</span>
+          <button
+            class="flex items-center gap-1.5 rounded-[5px] border border-accent bg-accent px-3.5 py-1.5 text-xs text-white hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="saving"
+            @click="savePrompt"
+          >{{ saving ? 'Saving…' : 'Save' }}</button>
         </div>
       </div>
 
       <!-- Tab: Scripts -->
-      <div v-else class="wc-body scripts-body">
-        <div class="script-list">
-            <div v-for="s in scripts" :key="s.id" class="script-card">
-              <div class="sc-top">
-                <span class="sc-dot" :style="{ background: s.color || '#60a5fa' }" />
-                <input
-                  class="sc-name"
-                  :value="s.name"
-                  @change="patch(s.id, { name: ($event.target as HTMLInputElement).value })"
-                />
-                <button class="sc-del" title="Delete script" @click="scriptsStore.removeScript(workspacePath, s.id)">
-                  <PhTrash :size="13" />
-                </button>
-              </div>
-              <textarea
-                class="sc-steps"
-                :value="s.steps.join('\n')"
-                placeholder="One shell command per line"
-                rows="3"
-                @change="patch(s.id, { steps: splitSteps(($event.target as HTMLTextAreaElement).value) })"
+      <div v-else class="flex flex-1 flex-col gap-2.5 overflow-y-auto p-4">
+        <div class="flex flex-col gap-2.5">
+          <div v-for="s in scripts" :key="s.id" class="flex flex-col gap-2 rounded-[7px] border border-border bg-base p-2.5">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ background: s.color || '#60a5fa' }" />
+              <input
+                class="flex-1 border-0 border-b border-transparent bg-transparent py-px text-[13px] font-medium text-foreground outline-none focus:border-b-accent"
+                :value="s.name"
+                @change="patch(s.id, { name: ($event.target as HTMLInputElement).value })"
               />
-              <label class="sc-toggle">
-                <input
-                  type="checkbox"
-                  :checked="s.continueOnError"
-                  @change="patch(s.id, { continueOnError: ($event.target as HTMLInputElement).checked })"
-                />
-                <span>Continue on error</span>
-              </label>
+              <button class="flex rounded p-0.5 text-muted-foreground hover:text-destructive" title="Delete script" @click="scriptsStore.removeScript(workspacePath, s.id)">
+                <PhTrash :size="13" />
+              </button>
             </div>
+            <textarea
+              class="box-border w-full resize-y rounded-md border border-border bg-panel p-1.5 font-mono text-[11px] leading-relaxed text-foreground outline-none focus:border-accent"
+              :value="s.steps.join('\n')"
+              placeholder="One shell command per line"
+              rows="3"
+              @change="patch(s.id, { steps: splitSteps(($event.target as HTMLTextAreaElement).value) })"
+            />
+            <label class="flex cursor-pointer select-none items-center gap-1.5 text-[11px] text-muted-foreground">
+              <input
+                type="checkbox"
+                class="cursor-pointer accent-accent"
+                :checked="s.continueOnError"
+                @change="patch(s.id, { continueOnError: ($event.target as HTMLInputElement).checked })"
+              />
+              <span>Continue on error</span>
+            </label>
           </div>
-          <button class="wc-btn add-btn" @click="scriptsStore.addScript(workspacePath)">
-            <PhPlus :size="13" /> Add script
-          </button>
+        </div>
+        <button
+          class="mt-1 flex items-center gap-1.5 self-start rounded-[5px] border border-border bg-hover px-3.5 py-1.5 text-xs text-foreground hover:border-accent hover:bg-panel"
+          @click="scriptsStore.addScript(workspacePath)"
+        ><PhPlus :size="13" /> Add script</button>
       </div>
     </div>
   </div>
@@ -155,225 +167,3 @@ onUnmounted(() => {
   if (saveTimer) clearTimeout(saveTimer)
 })
 </script>
-
-<style scoped>
-.wc-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 800;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.wc-modal {
-  width: 640px;
-  max-height: 80vh;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
-}
-
-/* Header */
-.wc-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  height: 48px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.wc-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.wc-close {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  padding: 4px;
-  border-radius: 4px;
-}
-.wc-close:hover { color: var(--text-primary); background: var(--bg-hover); }
-
-/* Tabs */
-.wc-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-  padding: 0 16px;
-  flex-shrink: 0;
-}
-.wc-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 10px 12px 8px;
-  margin-bottom: -1px;
-}
-.wc-tab:hover { color: var(--text-primary); }
-.wc-tab.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent);
-}
-
-/* Body */
-.wc-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.wc-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin: 0;
-}
-.wc-hint code {
-  font-family: monospace;
-  color: var(--text-secondary);
-}
-.err-hint { color: var(--red, #f87171); }
-
-.wc-textarea {
-  flex: 1;
-  min-height: 280px;
-  resize: vertical;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-primary);
-  font-family: monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  padding: 10px 12px;
-  outline: none;
-}
-.wc-textarea:focus { border-color: var(--accent); }
-
-/* Footer */
-.wc-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-shrink: 0;
-}
-.save-msg { font-size: 12px; }
-.save-msg.ok { color: var(--green, #34d399); }
-.save-msg.err { color: var(--red, #f87171); }
-
-.wc-btn {
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-primary);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 5px 14px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.wc-btn:hover { background: var(--bg-panel); border-color: var(--accent); }
-.wc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.wc-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.wc-btn.primary:hover { opacity: 0.85; }
-
-/* Scripts */
-.scripts-body { gap: 10px; }
-
-.script-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.script-card {
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.sc-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sc-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.sc-name {
-  flex: 1;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid transparent;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 500;
-  outline: none;
-  padding: 1px 0;
-}
-.sc-name:focus { border-bottom-color: var(--accent); }
-
-.sc-del {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  padding: 2px;
-  border-radius: 3px;
-}
-.sc-del:hover { color: var(--red, #f87171); }
-
-.sc-steps {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-primary);
-  font-family: monospace;
-  font-size: 11px;
-  line-height: 1.6;
-  outline: none;
-  padding: 6px 8px;
-  resize: vertical;
-  width: 100%;
-  box-sizing: border-box;
-}
-.sc-steps:focus { border-color: var(--accent); }
-
-.sc-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
-}
-.sc-toggle input { cursor: pointer; accent-color: var(--accent); }
-
-.add-btn { align-self: flex-start; margin-top: 4px; }
-</style>
