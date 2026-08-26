@@ -19,18 +19,30 @@ func dialogFilters(filterName string, filterExts []string) []runtime.FileFilter 
 	return []runtime.FileFilter{{DisplayName: filterName, Pattern: pattern}}
 }
 
+// trimQuotes strips literal surrounding double-quote characters that
+// macOS's NSOpenPanel-backed dialog can embed in the returned path.
+func trimQuotes(s string) string {
+	return strings.Trim(s, "\"")
+}
+
 func (a *App) PickDirectory() (string, error) {
-	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{})
+	path, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{})
+	return trimQuotes(path), err
 }
 
 func (a *App) PickFile(filterName string, filterExts []string) (string, error) {
-	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Filters: dialogFilters(filterName, filterExts),
 	})
+	return trimQuotes(path), err
 }
 
 func (a *App) PickFiles(filterName string, filterExts []string) ([]string, error) {
-	return runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+	paths, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
 		Filters: dialogFilters(filterName, filterExts),
 	})
+	for i, p := range paths {
+		paths[i] = trimQuotes(p)
+	}
+	return paths, err
 }

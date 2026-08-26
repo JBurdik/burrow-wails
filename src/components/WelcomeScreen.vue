@@ -1,34 +1,79 @@
 <template>
   <div class="welcome">
     <template v-if="target">
+      <DropdownMenuRoot>
+        <DropdownMenuTrigger as-child>
+          <button class="welcome-crumb" type="button">
+            <PhFolder :size="11" weight="fill" />
+            {{ target.name }}
+            <PhCaretDown :size="9" weight="bold" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" class="max-h-[300px] min-w-[200px] overflow-y-auto hide-scrollbar">
+          <DropdownMenuItem
+            v-for="repo in store.topLevel"
+            :key="repo.id"
+            class="text-[11.5px]"
+            :class="{ 'text-foreground bg-accent/10': repo.id === target.id }"
+            @select="pick(repo)"
+          >{{ repo.name }}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenuRoot>
+
       <h1 class="welcome-title">What should we build in <span class="welcome-ws">{{ target.worktree_branch || target.name }}</span>?</h1>
       <div class="welcome-compose">
         <textarea
           ref="inputEl"
           v-model="text"
-          class="welcome-input"
+          class="welcome-input composer-input"
           placeholder="Ask for changes, send follow-ups, or attach images"
           rows="3"
           @keydown.enter.exact.prevent="submit"
         />
         <div class="welcome-toolbar">
-          <button class="welcome-target" type="button" @click.stop="pickerOpen = !pickerOpen">
-            <PhFolder :size="12" weight="fill" />
-            {{ target.name }}
-            <PhCaretDown :size="10" weight="bold" />
-          </button>
+          <div class="welcome-pillbar">
+            <ModelPicker :agent-id="selectedAgentId" :model-id="selectedModel" :cwd="target.path" @select="onModelSelect" />
+            <template v-if="isClaude">
+              <DropdownMenuRoot>
+                <DropdownMenuTrigger as-child>
+                  <button class="welcome-pill" type="button">
+                    {{ selectedEffortLabel }}
+                    <PhCaretDown :size="9" weight="bold" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="top" class="min-w-[170px]">
+                  <DropdownMenuItem
+                    v-for="e in CLAUDE_EFFORTS"
+                    :key="e.id"
+                    class="text-[11.5px]"
+                    :class="{ 'text-foreground bg-accent/10': e.id === selectedEffort }"
+                    @select="pickEffort(e.id)"
+                  >{{ e.label }}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenuRoot>
+              <DropdownMenuRoot>
+                <DropdownMenuTrigger as-child>
+                  <button class="welcome-pill" type="button">
+                    <PhShieldCheck :size="12" weight="bold" />
+                    {{ permMeta.label }}
+                    <PhCaretDown :size="9" weight="bold" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="top" class="min-w-[170px]">
+                  <DropdownMenuItem
+                    v-for="m in PERM_MODES"
+                    :key="m"
+                    class="text-[11.5px]"
+                    :class="{ 'text-foreground bg-accent/10': m === selectedPermMode }"
+                    @select="pickPermMode(m)"
+                  >{{ PERM_META[m].label }}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenuRoot>
+            </template>
+          </div>
           <button class="welcome-send" type="button" :disabled="!text.trim()" @click="submit">
             <PhArrowUp :size="14" weight="bold" />
           </button>
-        </div>
-        <div v-if="pickerOpen" class="welcome-picker" @click.stop>
-          <button
-            v-for="repo in store.topLevel"
-            :key="repo.id"
-            class="welcome-picker-row"
-            :class="{ active: repo.id === target.id }"
-            @click="pick(repo)"
-          >{{ repo.name }}</button>
         </div>
       </div>
     </template>
@@ -42,20 +87,85 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted } from "vue";
-import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp } from "@phosphor-icons/vue";
+import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
+import { useChatAgentsStore } from "@/stores/chatAgents";
+import { getConfig, setConfig } from "@/lib/config";
+import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { modelsFor } from "@/lib/chatModels";
+import ModelPicker from "@/components/ModelPicker.vue";
 
 const emit = defineEmits<{ (e: "open-folder"): void }>();
 
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const ui = useUIStore();
+const chatAgents = useChatAgentsStore();
 
 const text = ref("");
-const pickerOpen = ref(false);
 const inputEl = ref<HTMLTextAreaElement>();
+
+// Which agent (Claude/Codex/Gemini/…) launches the chat, like T3 Code's model
+// switcher — starts on the user's configured default, overridable per-send.
+const selectedAgentId = ref(ui.defaultChatAgent);
+const selectedAgent = computed(() => chatAgents.byId(selectedAgentId.value));
+const isClaude = computed(() => selectedAgent.value.kind === "claude");
+
+// One popover picks provider + model together (see ModelPicker.vue). Effort and
+// permission mode stay native-Claude only — ACP agents own those themselves.
+// Config keys match ClaudeChat.vue's global defaults, so the chat we create
+// picks the choice straight up.
+const selectedModel = ref(getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id));
+function onModelSelect(agentId: string, modelId: string) {
+  selectedAgentId.value = agentId;
+  selectedModel.value = modelId;
+  if (!modelId) return;
+  if (chatAgents.byId(agentId).kind === "claude") {
+    setConfig("chatLastUsedModel", modelId);
+  } else {
+    // ACP / Codex models can only be applied once the session exists, so the
+    // new chat picks this up when its selectors arrive (ClaudeChat.vue).
+    setConfig("chatAcpLastModel", { ...getConfig<Record<string, string>>("chatAcpLastModel", {}), [agentId]: modelId });
+  }
+}
+
+const CLAUDE_EFFORTS = [
+  { id: "low", label: "Low effort" },
+  { id: "medium", label: "Medium effort" },
+  { id: "high", label: "High effort" },
+  { id: "xhigh", label: "Extra high" },
+  { id: "max", label: "Max effort" },
+] as const;
+const selectedEffort = ref(getConfig<string>("chatClaudeEffort", "high"));
+const selectedEffortLabel = computed(() => CLAUDE_EFFORTS.find((e) => e.id === selectedEffort.value)?.label ?? "High effort");
+function pickEffort(id: string) { selectedEffort.value = id; setConfig("chatClaudeEffort", id); }
+
+type PermMode = "default" | "auto" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions";
+const PERM_MODES: PermMode[] = ["default", "auto", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
+const PERM_META: Record<PermMode, { label: string }> = {
+  default: { label: "Ask" },
+  auto: { label: "Auto" },
+  acceptEdits: { label: "Accept Edits" },
+  plan: { label: "Plan Mode" },
+  dontAsk: { label: "Don't Ask" },
+  bypassPermissions: { label: "Bypass" },
+};
+interface ChatPermissionModeConfig { byChat: Record<string, string>; last?: string; dangerousByChat: Record<string, boolean> }
+const selectedPermMode = ref<PermMode>((() => {
+  const last = getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }).last;
+  return (PERM_MODES as string[]).includes(last ?? "") ? (last as PermMode) : "default";
+})());
+const permMeta = computed(() => PERM_META[selectedPermMode.value]);
+function pickPermMode(mode: PermMode) {
+  selectedPermMode.value = mode;
+  // ClaudeChat.vue's loadPermMode() falls back to this "last used" value for
+  // any chat id it hasn't seen before — the chat we're about to create included.
+  const cfg = { ...getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }) };
+  cfg.last = mode;
+  setConfig("chatPermissionMode", cfg);
+}
 
 // Active workspace, else the most recently opened one, unless the user picked
 // a different one from the dropdown.
@@ -63,7 +173,7 @@ const override = ref<Workspace | null>(null);
 const target = computed<Workspace | null>(
   () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
 );
-function pick(repo: Workspace) { override.value = repo; pickerOpen.value = false; }
+function pick(repo: Workspace) { override.value = repo; }
 
 onMounted(() => nextTick(() => inputEl.value?.focus()));
 
@@ -74,7 +184,7 @@ function submit() {
   if (ui.mode !== "terminal") ui.setMode("terminal");
   const wasOpen = store.opened.some((w) => w.id === t.id);
   store.open(t);
-  const open = () => termTabs.openChat(t.id, undefined, undefined, prompt);
+  const open = () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt);
   wasOpen ? open() : nextTick(open); // freshly-mounted Terminal needs a tick to attach its request watcher
   text.value = "";
 }
@@ -87,10 +197,27 @@ function submit() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: 10px;
   color: var(--text-secondary);
   padding: 24px;
+  position: relative;
 }
+
+.welcome-crumb {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 5px;
+  margin-bottom: 6px;
+}
+.welcome-crumb:hover { color: var(--text-secondary); background: var(--bg-hover); }
 
 .welcome-title {
   font-size: 20px;
@@ -98,6 +225,7 @@ function submit() {
   color: var(--text-primary);
   text-align: center;
   max-width: 560px;
+  margin-bottom: 6px;
 }
 .welcome-ws { color: var(--accent); }
 
@@ -111,7 +239,7 @@ function submit() {
   padding: 10px 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .welcome-input {
@@ -129,24 +257,37 @@ function submit() {
 .welcome-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
 }
 
-.welcome-target {
+/* Borderless ghost pills that wrap instead of scrolling — no frame, no scrollbar. */
+.welcome-pillbar {
   display: flex;
   align-items: center;
-  gap: 5px;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.welcome-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
   background: none;
   border: none;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 11px;
-  padding: 3px 4px;
-  border-radius: 5px;
+  font-weight: 500;
+  padding: 5px 7px;
+  border-radius: 6px;
 }
-.welcome-target:hover { color: var(--text-secondary); background: var(--bg-hover); }
+.welcome-pill:hover { color: var(--text-primary); background: var(--bg-hover); }
 
 .welcome-send {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -160,33 +301,6 @@ function submit() {
 }
 .welcome-send:hover:not(:disabled) { background: var(--accent-dim); }
 .welcome-send:disabled { opacity: 0.4; cursor: default; }
-
-.welcome-picker {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  min-width: 200px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
-  z-index: 10;
-}
-.welcome-picker-row {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 11.5px;
-  padding: 6px 8px;
-  border-radius: 5px;
-}
-.welcome-picker-row:hover { background: var(--bg-hover); color: var(--text-primary); }
-.welcome-picker-row.active { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-primary); }
 
 .welcome-open-btn {
   background: var(--accent);

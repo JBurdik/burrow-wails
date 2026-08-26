@@ -92,29 +92,61 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "take_spawn_requests":
       return App.TakeSpawnRequests(args.cwd);
 
-    // Claude Code
+    // Claude Code — `id` is the frontend's chat id; the Go side emits
+    // `claude-data-<id>` under exactly that name, so it must round-trip.
     case "claude_start":
-      return App.ClaudeStart(args.cwd, args.args ?? []);
+      return App.ClaudeStart(
+        String(args.id),
+        args.cwd ?? "",
+        args.resumeSessionId ?? args.resume_session_id ?? "",
+        args.permissionMode ?? args.permission_mode ?? "",
+        args.appendSystemPrompt ?? args.append_system_prompt ?? "",
+        args.model ?? "",
+        args.effort ?? "",
+        args.configDir ?? args.config_dir ?? "",
+        args.profileCommand ?? args.profile_command ?? "",
+        args.profileArgs ?? args.profile_args ?? "",
+      );
     case "claude_send":
-      return App.ClaudeSend(args.id, args.text);
+      return App.ClaudeSend(String(args.id), args.text ?? "", args.sessionId ?? args.session_id ?? "", args.images ?? []);
     case "claude_stop":
-      return App.ClaudeStop(args.id);
+      return App.ClaudeStop(String(args.id));
     case "claude_abort":
-      return App.ClaudeAbort(args.id);
+      return App.ClaudeAbort(String(args.id));
 
-    // ACP / Codex
+    // ACP / Codex — the Go bridge owns the JSON-RPC handshake and emits
+    // `acp-data-<id>` / `acp-req-<id>` under the frontend's chat id.
     case "acp_start":
-      return App.AcpStart(args.command, args.cwd, args.args ?? []);
+      return App.AcpStart({
+        id: String(args.id),
+        cwd: args.cwd ?? "",
+        command: args.command ?? "",
+        args: args.args ?? [],
+        env: args.env ?? {},
+        kind: args.kind ?? "custom",
+        configDir: args.configDir ?? args.config_dir ?? "",
+        envFile: args.envFile ?? args.env_file ?? "",
+        resumeSessionId: args.resumeSessionId ?? args.resume_session_id ?? "",
+        emitHistory: !!(args.emitHistory ?? args.emit_history),
+      } as any);
     case "codex_start":
-      return App.CodexStart(args.cwd, args.args ?? []);
+      return App.CodexStart(String(args.id), args.cwd ?? "", args.env ?? {}, args.resumeSessionId ?? args.resume_session_id ?? "");
     case "acp_send":
-      return App.AcpSend(args.id, args.text);
+      return App.AcpSend(String(args.id), args.text ?? "", args.images ?? []);
     case "codex_send":
-      return App.CodexSend(args.id, args.text);
+      return App.CodexSend(String(args.id), args.text ?? "", args.images ?? []);
+    case "acp_set_mode":
+      return App.AcpSetMode(String(args.id), args.modeId ?? args.mode_id ?? "");
+    case "acp_set_config":
+      return App.AcpSetConfig(String(args.id), args.configId ?? args.config_id ?? "", args.value ?? "");
+    case "acp_list_sessions":
+      return App.AcpListSessions(String(args.id), args.cwd ?? "");
     case "acp_stop":
-      return App.AcpStop(args.id);
+      return App.AcpStop(String(args.id));
     case "codex_stop":
-      return App.CodexStop(args.id);
+      return App.CodexStop(String(args.id));
+    case "codex_list_models":
+      return App.CodexListModels(args.cwd ?? "");
 
     // LSP
     case "lsp_start":
@@ -162,11 +194,11 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
 
     // Control/permission responses
     case "claude_respond_control":
-      return App.ClaudeRespondControl(args.id, args.requestId ?? args.request_id, args.response);
+      return App.ClaudeRespondControl(String(args.id), args.requestId ?? args.request_id, args.response);
     case "acp_respond_permission":
-      return App.AcpRespondPermission(args.id, args.rpcId ?? args.rpc_id, args.optionId ?? args.option_id);
+      return App.AcpRespondPermission(String(args.id), args.rpcId ?? args.rpc_id, args.optionId ?? args.option_id);
     case "acp_respond_user_input":
-      return App.AcpRespondUserInput(args.id, args.rpcId ?? args.rpc_id, args.text);
+      return App.AcpRespondUserInput(String(args.id), args.rpcId ?? args.rpc_id, args.text);
 
     // Task attachments
     case "write_task_attachment":

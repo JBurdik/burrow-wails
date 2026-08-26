@@ -1,90 +1,6 @@
 <template>
   <div class="claude-chat flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }">
     <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
-    <div class="flex flex-shrink-0 items-center gap-[7px] border-b border-border bg-panel px-3.5 py-[7px]">
-      <component :is="currentAgentIcon" :size="16" class="flex-shrink-0" :style="{ color: currentAgent?.color ?? '#d97706' }" />
-      <span class="text-[11px] font-semibold tracking-[0.02em] text-foreground">{{ currentAgent?.name ?? 'Claude' }}</span>
-      <span
-        class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.02em] text-muted-foreground"
-        style="border-color: color-mix(in srgb, var(--success, #22c55e) 35%, transparent);"
-        :title="effectiveTransport === 'acp' ? 'Connected through the locally installed provider CLI (ACP)' : effectiveTransport === 'codex-app-server' ? 'Connected through the locally installed Codex app-server (JSON-RPC)' : 'Connected through the locally installed Claude CLI (stream-json)'"
-      >
-        <i class="chat-runtime-dot h-[5px] w-[5px] rounded-full bg-success" style="box-shadow: 0 0 7px color-mix(in srgb, var(--success, #22c55e) 75%, transparent);" /> {{ runtimeLabel }}
-      </span>
-      <span
-        v-if="effectiveTransport === 'acp' && acpModelOption"
-        class="inline-flex flex-shrink-0 items-baseline gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-secondary-foreground"
-        style="background: color-mix(in srgb, var(--agent-accent, #a855f7) 16%, transparent); border-color: color-mix(in srgb, var(--agent-accent, #a855f7) 30%, transparent);"
-        :title="`Model: ${acpModelLabel}${acpActiveModelId ? ' — ' + acpActiveModelId : ''}`"
-      >
-        {{ acpModelLabel }}<span v-if="acpActiveModelId && acpActiveModelId !== acpModelLabel" class="font-mono text-[9px] font-medium text-muted-foreground">{{ acpActiveModelId }}</span>
-      </span>
-      <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground" :title="cwd">{{ cwdDisplay }}</span>
-      <button class="chat-header-btn relative flex items-center rounded-[5px] p-1 text-white/45 transition-colors hover:bg-white/[0.07] hover:text-white/85" title="New conversation" @click="clearChat">
-        <PhArrowCounterClockwise :size="13" />
-      </button>
-      <div v-if="effectiveTransport === 'acp' && sessionId" class="agent-dropdown relative inline-flex">
-        <button ref="acpHistoryBtnEl" class="chat-header-btn relative flex items-center rounded-[5px] p-1 text-white/45 transition-colors hover:bg-white/[0.07] hover:text-white/85" title="Resume a past session" @click="openAcpHistory">
-          <PhClockCounterClockwise :size="13" />
-        </button>
-        <Teleport to="body">
-          <div v-if="acpHistoryOpen" ref="acpHistoryMenuEl" class="floating-menu acp-history-menu" :style="{ top: acpHistoryPos.top + 'px', left: acpHistoryPos.left + 'px' }">
-            <div class="px-2.5 pb-1.5 pt-1 text-[10px] uppercase tracking-[0.04em] text-white/35">{{ currentAgent?.name }} sessions</div>
-            <div v-if="!acpSessions.length" class="p-2.5 text-center text-[11px] text-white/40">No past sessions</div>
-            <button
-              v-for="s in acpSessions"
-              :key="s.sessionId"
-              class="floating-menu-item flex-col items-start gap-0.5"
-              :class="{ 'floating-menu-item-active': s.sessionId === sessionId }"
-              :title="s.sessionId"
-              @click="resumeAcpSession(s.sessionId)"
-            >
-              <div class="flex max-w-full items-center gap-1.5">
-                <component :is="currentAgentIcon" :size="12" :style="{ color: currentAgent?.color }" />
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ s.title || s.sessionId.slice(0, 8) }}</span>
-              </div>
-              <span v-if="s.updatedAt" class="model-id-hint ml-[18px]">{{ new Date(s.updatedAt).toLocaleString() }}</span>
-            </button>
-          </div>
-        </Teleport>
-      </div>
-      <button
-        v-if="effectiveTransport === 'acp'"
-        class="cursor-pointer border-none bg-transparent px-1 py-0.5 text-sm opacity-60 hover:opacity-100"
-        title="Browse past sessions"
-        @click="openSessionBrowser"
-      >⏱</button>
-      <div class="agent-dropdown relative inline-flex">
-        <button ref="agentBtnEl" class="chat-header-btn relative inline-flex w-auto items-center gap-1 rounded-[5px] px-1.5 py-1 text-white/45 transition-colors hover:bg-white/[0.07] hover:text-white/85" :title="`Agent: ${currentAgent?.name}`" @click="toggleAgentMenu">
-          <component :is="currentAgentIcon" :size="13" :style="{ color: currentAgent?.color }" />
-          <span class="max-w-[110px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium">{{ currentAgent?.name }}</span>
-          <PhCaretDown :size="8" weight="bold" />
-        </button>
-        <Teleport to="body">
-          <div
-            v-if="agentMenuOpen"
-            ref="agentMenuEl"
-            class="floating-menu"
-            :style="{ top: agentMenuPos.top + 'px', left: agentMenuPos.left + 'px' }"
-          >
-            <button
-              v-for="a in chatAgents.agents"
-              :key="a.id"
-              class="floating-menu-item"
-              :class="{ 'floating-menu-item-active': agentKind === a.id }"
-              @click="selectAgent(a.id)"
-            >
-              <component :is="agentIconComp(a.icon)" :size="12" :style="{ color: a.color }" />
-              {{ a.name }}
-              <span class="model-id-hint">{{ transportLabel(a.transport) }}</span>
-            </button>
-            <button class="floating-menu-item mt-0.5 justify-start gap-1.5 rounded-t-none border-t border-white/[0.08] text-white/55" @click="agentMenuOpen = false; agentConfigOpen = true">
-              <PhGear :size="12" /> Configure agents…
-            </button>
-          </div>
-        </Teleport>
-      </div>
-    </div>
     <ChatAgentConfig v-if="agentConfigOpen" :cwd="cwd" @close="agentConfigOpen = false" />
 
     <!-- Permission prompt (Bash / generic tool) -->
@@ -415,7 +331,7 @@
         <textarea
           ref="inputEl"
           v-model="inputText"
-          class="chat-input box-border block max-h-40 min-h-10 w-full resize-none overflow-y-auto border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-white/88 outline-none placeholder:text-white/30"
+          class="chat-input composer-input box-border block max-h-40 min-h-10 w-full resize-none border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-white/88 outline-none placeholder:text-white/30"
           :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
           rows="1"
           @keydown="onKeydown"
@@ -434,32 +350,51 @@
             >
               <PhTextAa :size="13" />
             </button>
-            <!-- Model switcher (native Claude only — ACP agents manage their own model) -->
-            <div v-if="effectiveTransport === 'claude-cli'" class="model-dropdown">
-              <button ref="modelBtnEl" class="toolbar-btn toolbar-btn-label" @click="toggleModelMenu">
-                {{ selectedModelLabel }}
-                <PhCaretDown :size="9" weight="bold" class="btn-caret" />
-              </button>
-              <Teleport to="body">
-                <div
-                  v-if="modelMenuOpen"
-                  ref="modelMenuEl"
-                  class="floating-menu"
-                  :style="{ top: modelMenuPos.top + 'px', left: modelMenuPos.left + 'px' }"
-                >
-                  <button
-                    v-for="m in CLAUDE_MODELS"
-                    :key="m.id"
-                    class="floating-menu-item"
-                    :class="{ 'floating-menu-item-active': selectedModel === m.id }"
-                    @click="selectModel(m.id)"
-                  >
-                    {{ m.label }}
-                    <span class="model-id-hint">{{ m.id }}</span>
-                  </button>
-                </div>
-              </Teleport>
-            </div>
+            <!-- Agent + model in one popover (the old header bar is gone) -->
+            <ModelPicker
+              :agent-id="agentKind"
+              :model-id="effectiveTransport === 'claude-cli' ? selectedModel : acpActiveModelId"
+              :models="liveModels.length ? liveModels : undefined"
+              :cwd="cwd"
+              @select="onPickModel"
+            />
+            <button class="toolbar-btn" title="New conversation" @click="clearChat">
+              <PhArrowCounterClockwise :size="13" />
+            </button>
+            <button class="toolbar-btn" title="Configure agents…" @click="agentConfigOpen = true">
+              <PhGear :size="13" />
+            </button>
+            <div v-if="isAcpRuntime && sessionId" class="agent-dropdown relative inline-flex">
+              <button ref="acpHistoryBtnEl" class="toolbar-btn" title="Resume a past session" @click="openAcpHistory">
+          <PhClockCounterClockwise :size="13" />
+        </button>
+        <Teleport to="body">
+          <div v-if="acpHistoryOpen" ref="acpHistoryMenuEl" class="floating-menu acp-history-menu" :style="{ top: acpHistoryPos.top + 'px', left: acpHistoryPos.left + 'px' }">
+            <div class="px-2.5 pb-1.5 pt-1 text-[10px] uppercase tracking-[0.04em] text-white/35">{{ currentAgent?.name }} sessions</div>
+            <div v-if="!acpSessions.length" class="p-2.5 text-center text-[11px] text-white/40">No past sessions</div>
+            <button
+              v-for="s in acpSessions"
+              :key="s.sessionId"
+              class="floating-menu-item flex-col items-start gap-0.5"
+              :class="{ 'floating-menu-item-active': s.sessionId === sessionId }"
+              :title="s.sessionId"
+              @click="resumeAcpSession(s.sessionId)"
+            >
+              <div class="flex max-w-full items-center gap-1.5">
+                <component :is="currentAgentIcon" :size="12" :style="{ color: currentAgent?.color }" />
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ s.title || s.sessionId.slice(0, 8) }}</span>
+              </div>
+              <span v-if="s.updatedAt" class="model-id-hint ml-[18px]">{{ new Date(s.updatedAt).toLocaleString() }}</span>
+            </button>
+          </div>
+        </Teleport>
+      </div>
+            <button
+              v-if="isAcpRuntime"
+              class="toolbar-btn"
+              title="Browse past sessions"
+              @click="openSessionBrowser"
+            ><PhClock :size="13" /></button>
             <!-- Claude Agent SDK effort is forwarded to the local Claude Code CLI. -->
             <div v-if="effectiveTransport === 'claude-cli'" class="model-dropdown">
               <button ref="effortBtnEl" class="toolbar-btn toolbar-btn-label" title="Claude reasoning effort" @click="toggleEffortMenu">
@@ -550,31 +485,7 @@
             </div>
 
             <!-- ACP model switcher (driven by the adapter's configOptions) -->
-            <div v-if="effectiveTransport === 'acp' && acpModelOption" class="model-dropdown">
-              <button ref="acpModelBtnEl" class="toolbar-btn toolbar-btn-label" :title="acpActiveModelId" @click="openAcpMenu('model')">
-                {{ acpModelLabel }}
-                <span v-if="acpActiveModelId && acpActiveModelId !== acpModelLabel" class="model-id-hint">{{ acpActiveModelId }}</span>
-                <PhCaretDown :size="9" weight="bold" class="btn-caret" />
-              </button>
-              <Teleport to="body">
-                <div v-if="acpModelMenuOpen" ref="acpModelMenuEl" class="floating-menu" :style="{ top: acpModelMenuPos.top + 'px', left: acpModelMenuPos.left + 'px' }">
-                  <button
-                    v-for="c in acpModelOption.options"
-                    :key="c.value"
-                    class="floating-menu-item"
-                    :class="{ 'floating-menu-item-active': acpModelOption.currentValue === c.value }"
-                    :title="c.description || c.value"
-                    @click="acpSelectModel(c.value)"
-                  >
-                    {{ c.name }}
-                    <span v-if="c.value" class="model-id-hint">{{ c.value }}</span>
-                  </button>
-                </div>
-              </Teleport>
-            </div>
-
-            <!-- ACP effort switcher (driven by the adapter's configOptions) -->
-            <div v-if="effectiveTransport === 'acp' && acpEffortOption" class="model-dropdown">
+            <div v-if="isAcpRuntime && acpEffortOption" class="model-dropdown">
               <button ref="acpEffortBtnEl" class="toolbar-btn toolbar-btn-label" @click="openAcpMenu('effort')">
                 {{ acpEffortLabel }}
                 <PhCaretDown :size="9" weight="bold" class="btn-caret" />
@@ -596,7 +507,7 @@
             </div>
 
             <!-- ACP permission-mode switcher (driven by the adapter's session modes) -->
-            <div v-if="effectiveTransport === 'acp' && acpModes" class="perm-mode-dropdown">
+            <div v-if="isAcpRuntime && acpModes" class="perm-mode-dropdown">
               <button ref="acpModeBtnEl" class="toolbar-btn" :title="`Permission mode: ${acpModeLabel}`" @click="openAcpMenu('mode')">
                 <PhShieldCheck :size="13" weight="bold" />
                 <span class="perm-mode-label">{{ acpModeLabel }}</span>
@@ -691,9 +602,11 @@ import { useProfilesStore, DEFAULT_PROFILE_ID } from "@/stores/profiles";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useScriptsStore } from "@/stores/scripts";
-import { useChatAgentsStore, transportLabel, type ChatTransport } from "@/stores/chatAgents";
+import { useChatAgentsStore, type ChatTransport } from "@/stores/chatAgents";
 import { agentIconComp } from "@/lib/agentIcons";
 import ChatAgentConfig from "@/components/ChatAgentConfig.vue";
+import ModelPicker from "@/components/ModelPicker.vue";
+import { modelsFor, learnModels, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -734,7 +647,12 @@ const props = defineProps<{
   // helper. Callers that don't track tab-level visibility (float chat, Manager bar)
   // omit it and fall back to plain window focus.
   isWatching?: boolean;
+  // First message to send automatically once this chat's runtime is up (used by
+  // the welcome-screen composer, which creates the chat and its prompt at once).
+  initialPrompt?: string;
 }>();
+
+const emit = defineEmits<{ (e: "prompt-sent"): void }>();
 
 const chats = useClaudeChatsStore();
 const notifStore = useNotificationsStore();
@@ -753,7 +671,9 @@ const effectiveTransport = computed<ChatTransport>(() =>
   props.transport ?? currentAgent.value?.transport ?? 'claude-cli'
 );
 const usesRpcRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
-const isAcpRuntime = computed(() => effectiveTransport.value === 'acp');
+// Codex's app-server bridge reports the same modes/configOptions shape, so
+// everything ACP-flavoured (effort, mode, history) applies to it too.
+const isAcpRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
 const runtimeLabel = computed(() =>
   effectiveTransport.value === 'codex-app-server' ? 'Codex app-server' : effectiveTransport.value === 'acp' ? 'ACP adapter' : 'Claude CLI'
 );
@@ -865,7 +785,6 @@ function setAcpSetting(cid: number, field: keyof AcpChatSettings, value: string)
 const acpModelOption = computed(() => acpConfigOptions.value.find((o) => o.id === "model"));
 const acpEffortOption = computed(() => acpConfigOptions.value.find((o) => o.id === "effort"));
 const acpModeLabel = computed(() => acpModes.value?.availableModes.find((m) => m.id === acpModes.value?.currentModeId)?.name ?? "Mode");
-const acpModelLabel = computed(() => { const o = acpModelOption.value; return o?.options.find((c) => c.value === o.currentValue)?.name ?? "Model"; });
 const acpActiveModelId = computed(() => acpModelOption.value?.currentValue ?? "");
 const acpEffortLabel = computed(() => { const o = acpEffortOption.value; return o?.options.find((c) => c.value === o.currentValue)?.name ?? "Effort"; });
 
@@ -967,26 +886,9 @@ async function resumeAcpSession(sid: string) {
 }
 
 // Agent switcher dropdown.
-const agentMenuOpen = ref(false);
-const agentBtnEl = ref<HTMLElement | null>(null);
-const agentMenuEl = ref<HTMLElement | null>(null);
-const agentMenuPos = ref({ top: 0, left: 0 });
 const agentConfigOpen = ref(false);
-function toggleAgentMenu() {
-  if (!agentMenuOpen.value && agentBtnEl.value) {
-    const r = agentBtnEl.value.getBoundingClientRect();
-    agentMenuPos.value = { top: Math.round(r.bottom + 6), left: Math.round(r.left) };
-  }
-  agentMenuOpen.value = !agentMenuOpen.value;
-}
-function onAgentMenuOutside(e: MouseEvent) {
-  if (!agentMenuOpen.value) return;
-  const t = e.target as Node;
-  if (agentBtnEl.value?.contains(t) || agentMenuEl.value?.contains(t)) return;
-  agentMenuOpen.value = false;
-}
+
 async function selectAgent(id: string) {
-  agentMenuOpen.value = false;
   if (id === agentKind.value) return;
   // Stop OLD process before agentKind changes (effectiveTransport depends on it).
   await (usesRpcRuntime.value ? stopRpcRuntime() : invoke('claude_stop', { id: props.chatId })).catch(() => {});
@@ -1091,13 +993,27 @@ async function selectProfile(id: string) {
   await restartClaude();
 }
 
-// Model switcher
-const CLAUDE_MODELS = [
-  { id: "claude-sonnet-5", label: "Sonnet 5" },
-  { id: "claude-opus-4-8", label: "Opus 4.8" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-] as const;
-type ClaudeModelId = typeof CLAUDE_MODELS[number]["id"];
+// One popover drives both provider and model. Switching provider restarts the
+// chat under the new agent (selectAgent); a same-provider pick just swaps model.
+// Models this agent reported at runtime; empty for the native Claude CLI, which
+// has a static catalog.
+const liveModels = computed<ModelEntry[]>(() =>
+  (acpModelOption.value?.options ?? []).map((o) => ({ id: o.value, label: o.name || o.value })),
+);
+
+function onPickModel(agentId: string, modelId: string) {
+  if (agentId !== agentKind.value) {
+    if (modelId && agentId === "claude") selectModel(modelId);
+    selectAgent(agentId);
+    return;
+  }
+  if (effectiveTransport.value === "claude-cli") selectModel(modelId);
+  else if (modelId) acpSelectModel(modelId);
+}
+
+// Model switcher — ids come from the shared catalog (src/lib/chatModels.ts).
+const CLAUDE_MODELS = modelsFor("claude");
+type ClaudeModelId = string;
 // Legacy localStorage key (kept only for the one-time migration below).
 const MODEL_KEY = props.modelKey ?? "burrow.claude.model";
 // Config key: dedicated per-modelKey key (mirrors the old dedicated-localStorage-key
@@ -1110,35 +1026,15 @@ function loadModel(): ClaudeModelId {
   if (props.defaultModel && CLAUDE_MODELS.some((m) => m.id === props.defaultModel)) {
     return props.defaultModel as ClaudeModelId;
   }
-  return "claude-sonnet-5";
+  return CLAUDE_MODELS[0].id;
 }
 const selectedModel = ref<ClaudeModelId>(loadModel());
-const modelMenuOpen = ref(false);
-const modelBtnEl = ref<HTMLElement | null>(null);
-const modelMenuEl = ref<HTMLElement | null>(null);
-const modelMenuPos = ref({ top: 0, left: 0 });
-function toggleModelMenu() {
-  if (!modelMenuOpen.value && modelBtnEl.value) {
-    const r = modelBtnEl.value.getBoundingClientRect();
-    const menuH = CLAUDE_MODELS.length * 36 + 12;
-    modelMenuPos.value = { top: Math.round(r.top - menuH - 6), left: Math.round(r.left) };
-  }
-  modelMenuOpen.value = !modelMenuOpen.value;
-}
-function onModelMenuOutside(e: MouseEvent) {
-  if (!modelMenuOpen.value) return;
-  const t = e.target as Node;
-  if (modelBtnEl.value?.contains(t) || modelMenuEl.value?.contains(t)) return;
-  modelMenuOpen.value = false;
-}
 async function selectModel(id: ClaudeModelId) {
-  modelMenuOpen.value = false;
   if (id === selectedModel.value) return;
   selectedModel.value = id;
   setConfig(MODEL_CONFIG_KEY, id);
   await restartClaude();
 }
-const selectedModelLabel = computed(() => CLAUDE_MODELS.find((m) => m.id === selectedModel.value)?.label ?? selectedModel.value);
 
 const CLAUDE_EFFORTS = [
   { id: "low", label: "Low effort" },
@@ -1856,6 +1752,7 @@ function onAcpData(raw: string) {
     if (sid) { sessionId.value = sid; chats.sync(props.chatId, { claudeSessionId: sid }); }
     acpModes.value = (msg.modes as AcpModes) ?? null;
     acpConfigOptions.value = (msg.configOptions as AcpConfigOption[]) ?? [];
+    learnModels(agentKind.value, liveModels.value);
     // Finalize any messages rendered from a session/load replay (no turn-done fires
     // for a load) and persist the restored history.
     if (messages.value.some((m) => m.partial)) {
@@ -1865,7 +1762,8 @@ function onAcpData(raw: string) {
     }
     // Re-apply the chat's persisted model / permission mode (selectors reset to the
     // adapter default on each (re)start, so restore the user's choice).
-    const savedModel = getAcpSetting(props.chatId, "model");
+    const savedModel = getAcpSetting(props.chatId, "model")
+      ?? getConfig<Record<string, string>>("chatAcpLastModel", {})[agentKind.value];
     if (savedModel && acpModelOption.value && acpModelOption.value.currentValue !== savedModel) {
       acpSelectModel(savedModel);
     }
@@ -2007,6 +1905,22 @@ function acpRespond(optionId: string, optName: string, kind: string) {
   acpPermRpcId.value = null;
   chats.sendStatusEvent(props.chatId, { type: "RESUME" });
   syncStore();
+}
+
+// The welcome-screen composer creates a chat and its first prompt together. The
+// send has to wait for the runtime: claude_start is awaited, but an ACP adapter
+// only has a session after its handshake lands on acp-data.
+// ponytail: 20 s cap, no retry — if the adapter is that slow the prompt stays in
+// the feed as a plain user message and the user can resend.
+async function sendInitialPrompt(prompt: string) {
+  emit("prompt-sent");
+  if (usesRpcRuntime.value && !sessionId.value) {
+    await new Promise<void>((resolve) => {
+      const stop = watch(sessionId, (v) => { if (v) { stop(); resolve(); } });
+      setTimeout(() => { stop(); resolve(); }, 20_000);
+    });
+  }
+  await sendMessage(prompt);
 }
 
 async function sendMessage(forcedText?: string, extraImages?: string[]) {
@@ -2565,10 +2479,8 @@ onMounted(async () => {
   chats.markSeen(props.chatId);
   window.addEventListener("keydown", onWindowKeydown);
   window.addEventListener("mousedown", onPermMenuOutside);
-  window.addEventListener("mousedown", onModelMenuOutside);
   window.addEventListener("mousedown", onEffortMenuOutside);
   window.addEventListener("mousedown", onProfileMenuOutside);
-  window.addEventListener("mousedown", onAgentMenuOutside);
   window.addEventListener("mousedown", onAcpMenuOutside);
   // Float (compact) control chat: pre-allow `burrow` Bash commands so routine
   // control calls (focus/list/new-tab/spawn) don't prompt every time. User can
@@ -2581,8 +2493,10 @@ onMounted(async () => {
     await scriptsStore.loadForPath(props.cwd);
     const startErr = await startRpcRuntime().catch((e: unknown) => e);
     if (startErr) messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
+    else if (props.initialPrompt) sendInitialPrompt(props.initialPrompt);
     return;
   }
+  let startErr: unknown = null;
   await invoke("claude_start", {
     id: props.chatId,
     cwd: props.cwd,
@@ -2594,8 +2508,14 @@ onMounted(async () => {
     configDir: selectedProfile.value?.configDir || null,
     profileCommand: selectedProfile.value?.command || null,
     profileArgs: selectedProfile.value?.args || null,
-  }).catch(() => {});
+  }).catch((e: unknown) => {
+    // A swallowed failure here (missing `claude` binary, bad profile) used to
+    // look like a chat that simply never answers.
+    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to start Claude CLI: ${e}` });
+    return e;
+  }).then((e) => { startErr = e; });
   unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
+  if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt);
 
   // Load account info (plan, 5h window) — non-blocking.
   invoke<AccountInfo>("claude_get_account", { cwd: props.cwd })
@@ -2618,10 +2538,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("mousedown", onPermMenuOutside);
-  window.removeEventListener("mousedown", onModelMenuOutside);
   window.removeEventListener("mousedown", onEffortMenuOutside);
   window.removeEventListener("mousedown", onProfileMenuOutside);
-  window.removeEventListener("mousedown", onAgentMenuOutside);
   window.removeEventListener("mousedown", onAcpMenuOutside);
   unlisten?.();
   acpDataUL?.();

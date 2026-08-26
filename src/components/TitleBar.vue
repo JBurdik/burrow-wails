@@ -52,67 +52,6 @@
       </div>
     </div>
 
-    <!-- Claude plan-usage strip — real utilization %, same data claude.ai shows.
-         One bar per limit window (5h session, weekly, weekly-Sonnet). -->
-    <!-- Profile selector: always visible when multiple profiles exist -->
-    <div v-if="profilesStore.profiles.length > 1" class="relative mr-1 flex shrink-0 [-webkit-app-region:no-drag]" data-tauri-drag-region>
-      <button
-        class="flex items-center gap-[3px] rounded border-0 bg-transparent px-1 py-px font-sans text-[9px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
-        :class="usageProfileId !== DEFAULT_PROFILE_ID && '!text-accent'"
-        :title="`Showing usage for: ${usageProfile?.name ?? 'Default'}`"
-        @click.stop="usageProfileMenuOpen = !usageProfileMenuOpen"
-      >
-        <PhUserGear :size="10" />
-        <span class="max-w-[60px] overflow-hidden text-ellipsis whitespace-nowrap">{{ usageProfile?.name ?? 'Default' }}</span>
-        <PhCaretDown :size="7" weight="bold" />
-      </button>
-      <div v-if="usageProfileMenuOpen" class="tb-menu left-0 top-[calc(100%+4px)] min-w-[140px]" @click.stop>
-        <button
-          v-for="p in profilesStore.profiles"
-          :key="p.id"
-          class="tb-menu-item"
-          :class="usageProfileId === p.id && '!text-accent'"
-          @click="selectUsageProfile(p.id)"
-        >
-          <PhUserGear :size="12" />
-          {{ p.name }}
-        </button>
-      </div>
-    </div>
-    <div
-      v-if="usageBars.length || usageError"
-      class="ml-1 flex shrink-0 items-center gap-2.5 rounded-md border border-border bg-hover px-2.5 py-[3px] [-webkit-app-region:no-drag]"
-      :class="usageError && 'opacity-50'"
-      :title="usageError ? `usage unavailable: ${usageError}` : 'claude plan usage'"
-      data-tauri-drag-region
-    >
-      <ClaudeIcon :size="11" class="shrink-0 text-amber-600" style="color:#d97706" />
-      <span
-        v-for="b in usageBars"
-        :key="b.key"
-        class="usage-bar inline-flex items-center gap-[5px] font-mono text-[10px] text-secondary-foreground"
-        :class="[usageSeverity(b.pct) && `usage-bar-${usageSeverity(b.pct)}`, b.credit ? 'usage-bar-credit' : '']"
-        :title="usageBarTitle(b)"
-      >
-        <span class="ub-label uppercase tracking-[0.5px] text-muted-foreground">{{ b.label }}</span>
-        <template v-if="!b.local">
-          <span class="ub-track inline-block h-1 w-11 overflow-hidden rounded-[3px] border border-border bg-white/[0.08]"><span class="ub-fill block h-full w-0 bg-success transition-[width,background] duration-[400ms,200ms]" :style="{ width: Math.min(b.pct, 100) + '%' }" /></span>
-          <span v-if="!b.credit" class="min-w-[26px] text-right [font-variant-numeric:tabular-nums]">{{ b.pct }}%</span>
-        </template>
-      </span>
-    </div>
-    <!-- Stale-login hint: token expired, we don't refresh (Claude CLI does on
-         launch). Tells the user to run claude in this profile to get live %. -->
-    <div
-      v-if="usageStale"
-      class="ml-1.5 inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded bg-hover px-1.5 py-px font-sans text-[9px] text-muted-foreground"
-      :title="`${usageProfile?.name ?? 'Profile'} logged out — run ${usageProfile?.command || 'claude'} to refresh usage`"
-      data-tauri-drag-region
-    >
-      <PhSignOut :size="11" />
-      <span>run <code class="font-mono text-secondary-foreground">{{ usageProfile?.command || 'claude' }}</code></span>
-    </div>
-
     <div class="flex flex-1 items-center justify-center gap-1.5" data-tauri-drag-region>
       <button v-if="workspaceName" class="flex items-center rounded px-[5px] py-[3px] text-secondary-foreground [-webkit-app-region:no-drag] hover:bg-hover hover:text-foreground" @click="$emit('back')" title="Switch workspace">
         <PhHouse :size="13" />
@@ -263,13 +202,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhHouse, PhGitBranch, PhSidebarSimple, PhFolderOpen, PhGear, PhCaretDown, PhFolderNotchOpen, PhCode, PhLightning, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhPlus, PhSkull, PhUserGear, PhSignOut, PhCopy } from "@phosphor-icons/vue";
+import { PhHouse, PhGitBranch, PhSidebarSimple, PhFolderOpen, PhGear, PhCaretDown, PhFolderNotchOpen, PhCode, PhLightning, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhPlus, PhSkull, PhCopy } from "@phosphor-icons/vue";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useProfilesStore, DEFAULT_PROFILE_ID } from "@/stores/profiles";
 import { useGitStore } from "@/stores/git";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
-import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?: string; rightPanelVisible?: boolean }>();
@@ -353,186 +290,6 @@ function navigateToNotif(workspaceId?: number, tabId?: number) {
     if (tabId != null) termTabs.activate(workspaceId, tabId);
   }
   notifOpen.value = false;
-}
-
-// ── Claude plan-usage strip ──────────────────────────────────────────────────
-// Real utilization % from the OAuth usage endpoint (Rust `claude_plan_usage`),
-// the same numbers claude.ai's UI shows. Polled every 60s; Rust caches 60s.
-// Fallback for org/team accounts (rate_limits_available=false) or missing creds:
-// read local JSONL transcripts via `claude_usage_5h`, show raw token count.
-type UsageWindow = { utilization: number; resets_at?: string };
-type ExtraUsage = { is_enabled: boolean; monthly_limit?: number; used_credits?: number; utilization?: number };
-type PlanUsage = Record<string, UsageWindow | undefined> & { extra_usage?: ExtraUsage };
-type UsageBar = { key: string; label: string; pct: number; resets?: string; local?: boolean; credit?: boolean };
-
-// ── Usage profile selector ──────────────────────────────────────────────────
-const profilesStore = useProfilesStore();
-const USAGE_PROFILE_LEGACY_KEY = "burrow.titlebar.usageProfileId";
-const USAGE_PROFILE_CONFIG_KEY = "titlebarUsageProfileId";
-const usageProfileId = ref<string>(DEFAULT_PROFILE_ID);
-configReady.then(() => {
-  migrateFromLocalStorage(USAGE_PROFILE_LEGACY_KEY, USAGE_PROFILE_CONFIG_KEY);
-  usageProfileId.value = getConfig<string>(USAGE_PROFILE_CONFIG_KEY, DEFAULT_PROFILE_ID);
-});
-const usageProfile = computed(() => profilesStore.get(usageProfileId.value));
-const usageProfileMenuOpen = ref(false);
-function selectUsageProfile(id: string) {
-  usageProfileId.value = id;
-  setConfig(USAGE_PROFILE_CONFIG_KEY, id);
-  usageProfileMenuOpen.value = false;
-  refreshUsage();
-}
-
-const planUsage = ref<PlanUsage | null>(null);
-const localUsage = ref<{ outputTokens: number; turnCount: number } | null>(null);
-const usageError = ref<string | null>(null);
-// Token exists but expired: profile is "logged out". We don't refresh (Claude CLI
-// does on launch), so hint the user to run claude rather than show a stale/empty bar.
-const usageStale = ref(false);
-let usageTimer: number | undefined;
-
-// Errors that mean the OAuth usage API won't work for this account type —
-// fall back to local transcript scan instead of showing an error.
-const LOCAL_FALLBACK_ERRORS = new Set(["token_expired", "no_credentials", "permission_error"]);
-
-async function refreshUsage(force = false) {
-  const profile = usageProfile.value;
-  const cd = profile?.configDir;
-  const args: Record<string, unknown> = {};
-  if (cd) args.configDir = cd;
-  if (force) args.force = true;
-  const prevError = usageError.value;
-
-  // Org/team accounts can't use the OAuth usage API — go straight to local JSONL scan.
-  if (profile?.orgAccount) {
-    planUsage.value = null;
-    usageError.value = null;
-    usageStale.value = false;
-    try {
-      const local = await invoke<{ outputTokens: number; turnCount: number }>(
-        "claude_usage_5h",
-        cd ? { configDir: cd } : {},
-      );
-      localUsage.value = local;
-    } catch (e) {
-      usageError.value = "invoke_failed";
-      if (prevError !== "invoke_failed") {
-        notifStore.push({ type: "error", title: "Claude usage unavailable", body: String(e) });
-      }
-    }
-    return;
-  }
-
-  try {
-    const j = await invoke<{ ok: boolean; usage?: PlanUsage; error?: string; message?: string }>("claude_plan_usage", args);
-    if (j?.ok && j.usage) {
-      planUsage.value = j.usage;
-      localUsage.value = null;
-      usageError.value = null;
-      usageStale.value = false;
-    } else {
-      const err = j?.error || "unknown";
-      if (LOCAL_FALLBACK_ERRORS.has(err)) {
-        // Missing/expired credentials — read local transcripts instead. An expired
-        // token (token_expired) also flags the profile as stale so the UI hints.
-        planUsage.value = null;
-        usageError.value = null;
-        usageStale.value = err === "token_expired";
-        const local = await invoke<{ outputTokens: number; turnCount: number }>(
-          "claude_usage_5h",
-          cd ? { configDir: cd } : {},
-        );
-        localUsage.value = local;
-      } else {
-        localUsage.value = null;
-        usageStale.value = false;
-        usageError.value = err;
-        if (err !== prevError) {
-          const pname = profile?.name ?? "Default";
-          const body = j?.message ?? err;
-          notifStore.push({ type: "error", title: "Claude usage unavailable", body: `${body} (${pname})` });
-        }
-      }
-    }
-  } catch (e) {
-    usageError.value = "invoke_failed";
-    usageStale.value = false;
-    if (prevError !== "invoke_failed") {
-      notifStore.push({ type: "error", title: "Claude usage unavailable", body: String(e) });
-    }
-  }
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-  return String(n);
-}
-
-// One bar per limit window. Model-specific weekly bars only appear once used —
-// they read 0% on plans that don't split per-model, so showing them is noise.
-// For local fallback: single synthetic bar showing token count (no % available).
-// Extra usage: pay-per-use credit meter shown when is_enabled=true.
-const usageBars = computed<UsageBar[]>(() => {
-  if (localUsage.value) {
-    const { outputTokens, turnCount } = localUsage.value;
-    if (outputTokens === 0 && turnCount === 0) return [];
-    return [{ key: "local_5h", label: fmtTokens(outputTokens), pct: 0, local: true }];
-  }
-  const u = planUsage.value;
-  if (!u) return [];
-  const out: UsageBar[] = [];
-  const add = (key: string, label: string, hideZero = false) => {
-    const w = u[key] as UsageWindow | undefined;
-    if (!w || w.utilization === null) return;
-    const pct = Math.round(w.utilization || 0);
-    if (hideZero && pct <= 0) return;
-    out.push({ key, label, pct, resets: w.resets_at });
-  };
-  add("five_hour", "5h");
-  add("seven_day", "wk");
-  add("seven_day_sonnet", "son", true);
-  add("seven_day_opus", "opus", true);
-  add("seven_day_oauth_apps", "apps", true);
-  // Pay-per-use credit meter
-  const ex = u.extra_usage as ExtraUsage | undefined;
-  if (ex?.is_enabled && ex.monthly_limit && ex.used_credits !== undefined) {
-    const pct = Math.round(ex.utilization || 0);
-    out.push({ key: "extra_usage", label: `$${ex.used_credits.toFixed(2)}`, pct, credit: true });
-  }
-  return out;
-});
-
-function usageSeverity(pct: number): string {
-  if (pct >= 85) return "crit";
-  if (pct >= 60) return "warn";
-  return "";
-}
-
-function relTimeFuture(iso?: string): string {
-  if (!iso) return "";
-  let s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
-  if (s <= 0) return "now";
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60), mm = m % 60;
-  if (h < 24) return mm ? `${h}h ${mm}m` : `${h}h`;
-  const d = Math.floor(h / 24), hh = h % 24;
-  return hh ? `${d}d ${hh}h` : `${d}d`;
-}
-
-function usageBarTitle(b: UsageBar): string {
-  if (b.local) {
-    const lu = localUsage.value;
-    return `5h output tokens (local): ${fmtTokens(lu?.outputTokens ?? 0)} across ${lu?.turnCount ?? 0} turns\nUsage API unavailable for this account — reading local transcripts`;
-  }
-  if (b.credit) {
-    const ex = (planUsage.value as any)?.extra_usage as ExtraUsage | undefined;
-    return `Pay-per-use: $${ex?.used_credits?.toFixed(2) ?? "?"} of $${ex?.monthly_limit?.toFixed(2) ?? "?"}/mo used (${b.pct}%)`;
-  }
-  const reset = b.resets ? ` · resets in ${relTimeFuture(b.resets)}` : "";
-  return `${b.label}: ${b.pct}% used${reset}`;
 }
 
 function toggleNotif() {
@@ -659,18 +416,14 @@ function onDocClick() {
   menuOpen.value = false;
   notifOpen.value = false;
   branchPickerOpen.value = false;
-  usageProfileMenuOpen.value = false;
   if (statsOpen.value) { statsOpen.value = false; clearInterval(statsTimer); }
 }
 onMounted(() => {
   window.addEventListener("click", onDocClick);
-  refreshUsage();
-  usageTimer = window.setInterval(refreshUsage, 60_000);
 });
 onBeforeUnmount(() => {
   window.removeEventListener("click", onDocClick);
   clearInterval(statsTimer);
-  clearInterval(usageTimer);
 });
 
 const isDev = import.meta.env.DEV;
@@ -727,18 +480,4 @@ const isDev = import.meta.env.DEV;
 .tb-menu-item:disabled { opacity: 0.4; cursor: default; }
 .tb-menu-item:disabled:hover { background: none; color: var(--text-secondary); }
 .tb-menu-item-danger:hover { background: rgba(220, 60, 60, 0.15); color: #ff7676; }
-
-.usage-bar-warn { color: var(--yellow); }
-.usage-bar-warn .ub-label { color: var(--yellow); }
-.usage-bar-warn .ub-fill { background: var(--yellow); }
-
-.usage-bar-crit { color: var(--red); animation: usage-pulse 1.6s ease-in-out infinite; }
-.usage-bar-crit .ub-label { color: var(--red); }
-.usage-bar-crit .ub-fill { background: var(--red); }
-.usage-bar-crit .ub-track { border-color: var(--red); background: rgba(248,81,73,0.18); }
-@keyframes usage-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-@media (prefers-reduced-motion: reduce) { .usage-bar-crit { animation: none; } }
-/* Credit bar: dollar label in amber, track uses amber fill */
-.usage-bar-credit .ub-label { color: #f59e0b; font-style: normal; }
-.usage-bar-credit .ub-fill { background: #f59e0b; }
 </style>

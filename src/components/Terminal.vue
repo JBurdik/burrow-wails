@@ -217,6 +217,8 @@
             :workspace-id="workspaceId"
             :cwd="pane.leaf.cwd ?? cwd"
             :is-watching="isWatching(tab)"
+            :initial-prompt="pane.leaf.initialPrompt"
+            @prompt-sent="pane.leaf.initialPrompt = undefined"
           />
           <BrowserPane
             v-else-if="pane.leaf.leafType === 'browser'"
@@ -1066,7 +1068,9 @@ function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initial
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
   activateTab(tab.id);
-  if (initialPrompt) nextTick(() => xtermRefs.get(id)?.sendMessage(initialPrompt));
+  // ClaudeChat sends this itself once its runtime is up (a chat leaf has no
+  // xtermRefs entry, and its CLI/ACP session isn't ready on the next tick).
+  if (initialPrompt) leaf.initialPrompt = initialPrompt;
 }
 
 function switchSurface(surface: "chat" | "terminal") {

@@ -1,6 +1,9 @@
 package main
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Permission/control-request responses. Both Claude Code and ACP agents
 // read their control responses off the same stdin they read turns from,
@@ -17,29 +20,44 @@ func (a *App) ClaudeRespondControl(id, requestID string, response map[string]any
 	if err != nil {
 		return err
 	}
-	return a.ClaudeSend(id, string(payload))
+	return a.claudeWrite(id, string(payload))
 }
 
+// AcpRespondPermission answers a session/request_permission (ACP) or an
+// approval request (Codex app-server, which takes a plain decision string).
 func (a *App) AcpRespondPermission(id string, rpcID int64, optionID string) error {
-	payload, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      rpcID,
-		"result":  map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": optionID}},
-	})
-	if err != nil {
-		return err
+	sess, ok := a.acpReg().get(id)
+	if !ok {
+		return fmt.Errorf("acp adapter not running")
 	}
-	return a.AcpSend(id, string(payload))
+	if sess.proto == protoCodexAppServer {
+		decision := "decline"
+		switch optionID {
+		case "codex:accept":
+			decision = "accept"
+		case "codex:acceptForSession":
+			decision = "acceptForSession"
+		}
+		return sess.write(map[string]any{
+			"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"decision": decision},
+		})
+	}
+	outcome := map[string]any{"outcome": "cancelled"}
+	if optionID != "" {
+		outcome = map[string]any{"outcome": "selected", "optionId": optionID}
+	}
+	return sess.write(map[string]any{
+		"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"outcome": outcome},
+	})
 }
 
+// AcpRespondUserInput answers a tool's request for free-text user input.
 func (a *App) AcpRespondUserInput(id string, rpcID int64, text string) error {
-	payload, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      rpcID,
-		"result":  map[string]any{"content": text},
-	})
-	if err != nil {
-		return err
+	sess, ok := a.acpReg().get(id)
+	if !ok {
+		return fmt.Errorf("acp adapter not running")
 	}
-	return a.AcpSend(id, string(payload))
+	return sess.write(map[string]any{
+		"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"content": text},
+	})
 }

@@ -86,6 +86,24 @@ func (m *Manager) Send(id string, data string) error {
 	return err
 }
 
+// Alive reports whether a session is currently running under this id.
+func (m *Manager) Alive(id string) bool {
+	_, ok := m.get(id)
+	return ok
+}
+
+// Signal forwards a signal (SIGINT for a graceful turn abort) to the process.
+func (m *Manager) Signal(id string, sig os.Signal) error {
+	sess, ok := m.get(id)
+	if !ok {
+		return fmt.Errorf("unknown agent session: %s", id)
+	}
+	if sess.cmd.Process == nil {
+		return fmt.Errorf("agent session has no process: %s", id)
+	}
+	return sess.cmd.Process.Signal(sig)
+}
+
 func (m *Manager) Stop(id string) error {
 	sess, ok := m.get(id)
 	if !ok {

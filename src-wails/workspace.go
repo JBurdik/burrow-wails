@@ -41,7 +41,7 @@ func (a *App) ListWorkspaces() ([]Workspace, error) {
 	}
 	defer rows.Close()
 
-	var out []Workspace
+	out := []Workspace{}
 	for rows.Next() {
 		w, err := scanWorkspace(rows)
 		if err != nil {

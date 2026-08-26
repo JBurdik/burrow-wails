@@ -101,6 +101,7 @@ export interface Leaf {
   filePath?: string;  // set when leafType === "editor" (absolute path)
   dirty?: boolean;    // editor: unsaved changes
   chatId?: number;    // set when leafType === "chat"
+  initialPrompt?: string; // chat: first message to auto-send once its runtime is up
 }
 
 export interface SplitNode {

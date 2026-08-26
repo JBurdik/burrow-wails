@@ -24,7 +24,7 @@
           <WelcomeScreen v-show="showWelcome" @open-folder="openNewWorkspace" />
           <Terminal
             v-for="w in ws.opened"
-            v-show="ws.active && w.id === ws.active.id"
+            v-show="ws.active && w.id === ws.active.id && !showWelcome"
             :key="w.id"
             :workspace-id="w.id"
             :cwd="w.path"
@@ -436,6 +436,7 @@ function onKeydown(e: KeyboardEvent) {
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@/styles/status-dots.css";
+@import "@/styles/composer.css";
 
 /* Bridges the runtime theme system (themes.ts sets these on :root via JS —
    switching a Burrow theme must re-skin Tailwind utility classes too, not

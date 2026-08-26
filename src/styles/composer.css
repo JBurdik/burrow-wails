@@ -1,0 +1,39 @@
+/* Shared composer input rules — the welcome-screen compose box and the chat
+   composer are separate components, so their textarea behaviour lives here
+   instead of drifting apart in two scoped <style> blocks.
+
+   NOTE: this file is @import-ed from App.vue's style block on purpose. Rules
+   written directly into App.vue's `@layer base { … }` are silently DROPPED by
+   Tailwind v4's pipeline (only Tailwind's own preflight base layer reaches the
+   bundle — verified by grepping dist/assets/App-*.css), whereas @import-ed
+   plain CSS like this lands intact. */
+
+/* A textarea soft-wraps, so it must never scroll sideways. WebKit renders a
+   textarea's *placeholder* on a single unwrapped line, which overflows a narrow
+   composer and — with macOS "Show scroll bars: Always" — draws a permanent grey
+   bar across the input. */
+textarea {
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  scrollbar-width: none;
+}
+textarea::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Vertical growth still scrolls once the composer hits its max height; the bar
+   is just invisible. */
+.composer-input {
+  overflow-y: auto;
+}
+
+/* Dropdown panels: keep them scrollable, drop the grey bar (macOS "Show scroll
+   bars: Always" would otherwise draw one inside every menu). */
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

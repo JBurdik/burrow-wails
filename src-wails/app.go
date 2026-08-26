@@ -20,7 +20,7 @@ type App struct {
 	daemon *DaemonClient
 
 	claudeAgents *agentproc.Manager
-	acpAgents    *agentproc.Manager
+	acpSessions  *acpRegistry
 	lspMgr       *lspManager
 
 	hookSrv      *HookServer
