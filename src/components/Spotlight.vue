@@ -1,15 +1,15 @@
 <template>
   <Teleport to="body">
     <Transition name="spotlight">
-      <div v-if="isOpen" class="s-overlay" @mousedown.self="close">
-        <div class="s-modal">
-          <div class="s-bar">
-            <PhTerminal :size="18" color="#7C3AED" />
+      <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[165px]" @mousedown.self="close">
+        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-xl border border-[#2a2a2a] bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.6),0_1px_0_rgba(255,255,255,0.08)] [backdrop-filter:var(--blur-overlay,none)]">
+          <div class="flex h-14 shrink-0 items-center gap-3 border-b border-[#1e1e1e] px-4">
+            <PhTerminal :size="18" color="#ec4899" />
             <input
               ref="inputRef"
               v-model="query"
               placeholder="run claude --"
-              class="s-input"
+              class="flex-1 border-0 bg-transparent font-sans text-[15px] text-[#e2e2e2] outline-none placeholder:text-[#444] [caret-color:#ec4899]"
               spellcheck="false"
               autocomplete="off"
               @keydown.esc.prevent="close"
@@ -17,49 +17,49 @@
               @keydown.up.prevent="move(-1)"
               @keydown.down.prevent="move(1)"
             />
-            <div class="s-esc">esc</div>
+            <div class="shrink-0 rounded border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-0.5 text-[11px] text-[#555]">esc</div>
           </div>
 
-          <div class="s-results">
+          <div class="s-results flex-1 overflow-y-auto py-1.5">
             <template v-for="(section, si) in sections" :key="section.key">
               <template v-if="section.items.length">
-                <div class="s-section-label">{{ section.label }}</div>
+                <div class="flex h-[26px] items-center px-4 font-sans text-[10px] font-semibold tracking-[0.05em] text-[#3a3a3a]">{{ section.label }}</div>
                 <div
                   v-for="item in section.items"
                   :key="item.id"
-                  class="s-row"
+                  class="mx-1 flex h-[46px] cursor-pointer items-center gap-3 rounded-md px-3 transition-colors duration-75"
                   :style="{ background: selectedId === item.id ? item.iconBg : 'transparent' }"
                   @mouseenter="selectedId = item.id"
                   @click="runItem(item)"
                 >
-                  <div class="s-icon-wrap" :style="{ background: item.iconBg, borderColor: item.iconBorder }">
+                  <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] border border-transparent" :style="{ background: item.iconBg, borderColor: item.iconBorder }">
                     <component :is="item.icon" :size="14" :color="item.iconColor" />
                   </div>
-                  <div class="s-info">
-                    <span class="s-title" :style="{ color: item.dim ? '#999' : '#e8e8e8' }">{{ item.title }}</span>
-                    <span v-if="item.desc" class="s-desc">{{ item.desc }}</span>
+                  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span class="truncate font-sans text-[13px] font-medium" :style="{ color: item.dim ? '#999' : '#e8e8e8' }">{{ item.title }}</span>
+                    <span v-if="item.desc" class="truncate font-mono text-[11px] text-[#383838]">{{ item.desc }}</span>
                   </div>
                   <div
                     v-if="item.shortcut"
-                    class="s-key"
+                    class="shrink-0 rounded border border-[#222] bg-[#161616] px-2 py-0.5 font-sans text-[11px] text-[#444] transition-all duration-75"
                     :style="selectedId === item.id && !item.dim
                       ? { background: item.iconBg, borderColor: item.iconBorder, color: item.iconColor }
                       : {}"
                   >{{ item.shortcut }}</div>
                 </div>
-                <div v-if="si < sections.length - 1" class="s-divider" />
+                <div v-if="si < sections.length - 1" class="my-1 h-px bg-[#1a1a1a]" />
               </template>
             </template>
           </div>
 
-          <div class="s-footer">
-            <div class="s-hint"><span class="s-key-sm">↑↓</span><span>navigate</span></div>
-            <div class="s-hint"><span class="s-key-sm">↵</span><span>run</span></div>
-            <div class="s-hint"><span class="s-key-sm">⌘↵</span><span>new tab</span></div>
-            <div class="s-hint"><span class="s-key-sm">⇥</span><span>complete</span></div>
-            <div style="flex:1" />
-            <div class="s-branding">
-              <PhSparkle :size="11" color="#7C3AED" />
+          <div class="flex h-9 shrink-0 items-center gap-4 border-t border-[#1e1e1e] bg-[#0d0d0d] px-4">
+            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↑↓</span><span>navigate</span></div>
+            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↵</span><span>run</span></div>
+            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">⌘↵</span><span>new tab</span></div>
+            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">⇥</span><span>complete</span></div>
+            <div class="flex-1" />
+            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]">
+              <PhSparkle :size="11" color="#ec4899" />
               <span>Claude Code</span>
             </div>
           </div>
@@ -182,7 +182,7 @@ const sections = computed(() => {
       action: () => { wsStore.open(w); close(); },
     })),
     ...([
-      { id: "cmd-manager", title: "Toggle Manager", icon: PhSparkle as Component, color: "#7C3AED", shortcut: "⌘J", action: () => { emit("toggleManager"); close(); } },
+      { id: "cmd-manager", title: "Toggle Manager", icon: PhSparkle as Component, color: "#ec4899", shortcut: "⌘J", action: () => { emit("toggleManager"); close(); } },
       { id: "cmd-settings", title: "Settings → Agents", icon: PhGear as Component, color: "#555555", shortcut: undefined, action: () => { emit("openSettings"); close(); } },
       { id: "cmd-newterm", title: "New Terminal", icon: PhTerminal as Component, color: "#34d399", shortcut: "⌃`", action: () => { emit("newTerminal"); close(); } },
       { id: "cmd-browser", title: "Open Browser Tab", icon: PhGlobe as Component, color: "#60a5fa", shortcut: undefined, action: () => { emit("openBrowser"); close(); } },
@@ -271,192 +271,12 @@ defineExpose({ show, close });
 </script>
 
 <style scoped>
-.s-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  justify-content: center;
-  padding-top: 165px;
-  z-index: 9000;
-}
-
-.s-modal {
-  width: 680px;
-  max-height: 600px;
-  background: var(--bg-panel);
-  border: 1px solid #2a2a2a;
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.08);
-  align-self: flex-start;
-  backdrop-filter: var(--blur-overlay, none);
-  -webkit-backdrop-filter: var(--blur-overlay, none);
-}
-
-.s-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 56px;
-  padding: 0 16px;
-  border-bottom: 1px solid #1e1e1e;
-  flex-shrink: 0;
-}
-
-.s-input {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  color: #e2e2e2;
-  font-family: var(--font-ui);
-  font-size: 15px;
-  caret-color: #7C3AED;
-}
-
-.s-input::placeholder { color: #444; }
-
-.s-esc {
-  font-size: 11px;
-  color: #555555;
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
-  border-radius: 4px;
-  padding: 3px 8px;
-  flex-shrink: 0;
-}
-
-.s-results {
-  overflow-y: auto;
-  padding: 6px 0;
-  flex: 1;
-}
-
+/* Custom scrollbar (::-webkit-scrollbar has no Tailwind utility) and the
+   Vue <Transition> phase classes stay as real CSS. */
 .s-results::-webkit-scrollbar { width: 4px; }
 .s-results::-webkit-scrollbar-track { background: transparent; }
 .s-results::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 
-.s-section-label {
-  height: 26px;
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #3a3a3a;
-  font-family: var(--font-ui);
-  letter-spacing: 0.05em;
-}
-
-.s-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 46px;
-  padding: 0 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.08s;
-  margin: 0 4px;
-}
-
-.s-icon-wrap {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
-  border: 1px solid transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.s-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.s-title {
-  font-size: 13px;
-  font-weight: 500;
-  font-family: var(--font-ui);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.s-desc {
-  font-size: 11px;
-  color: #383838;
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.s-key {
-  font-size: 11px;
-  color: #444444;
-  background: #161616;
-  border: 1px solid #222222;
-  border-radius: 4px;
-  padding: 3px 8px;
-  flex-shrink: 0;
-  font-family: var(--font-ui);
-  transition: all 0.08s;
-}
-
-.s-divider {
-  height: 1px;
-  background: #1a1a1a;
-  margin: 4px 0;
-}
-
-.s-footer {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 36px;
-  padding: 0 16px;
-  background: #0d0d0d;
-  border-top: 1px solid #1e1e1e;
-  flex-shrink: 0;
-}
-
-.s-hint {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: #333333;
-  font-family: var(--font-ui);
-}
-
-.s-key-sm {
-  font-size: 11px;
-  color: #555555;
-  background: #161616;
-  border: 1px solid #252525;
-  border-radius: 4px;
-  padding: 2px 6px;
-}
-
-.s-branding {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: #333333;
-  font-family: var(--font-ui);
-}
-
-/* Transition */
 .spotlight-enter-active,
 .spotlight-leave-active {
   transition: opacity 0.12s ease;
