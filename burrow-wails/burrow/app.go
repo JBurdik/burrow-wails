@@ -24,6 +24,27 @@ type App struct {
 	hookSrv      *HookServer
 	burrowBinDir string
 	sessionDir   string
+
+	httpSrv        *HTTPServer
+	httpSrvRunning bool
+}
+
+// SetHttpEnabled starts/stops the remote HTTP+WS server (browser/remote
+// access), matching the frontend's `set_http_enabled` invoke call.
+func (a *App) SetHttpEnabled(enabled bool) error {
+	if enabled == a.httpSrvRunning {
+		return nil
+	}
+	if enabled {
+		a.httpSrv = NewHTTPServer(a)
+		go func() {
+			if err := a.httpSrv.ListenAndServe("127.0.0.1:37892"); err != nil {
+				log.Printf("http server: %v", err)
+			}
+		}()
+	}
+	a.httpSrvRunning = enabled
+	return nil
 }
 
 func NewApp() *App {
