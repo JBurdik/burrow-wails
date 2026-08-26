@@ -1,39 +1,39 @@
 <template>
-  <div class="kb-page">
-    <div class="kb-header">
-      <div class="kb-head-title">
-        <PhKanban :size="15" class="kb-head-icon" />
-        <span class="kb-title">Board</span>
-        <span class="kb-sub" :title="repoPath">{{ repoName }}</span>
+  <div class="fixed bottom-0 left-0 right-0 top-[var(--titlebar-height)] z-[900] flex flex-col overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)]">
+    <div class="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+      <div class="flex items-center gap-2">
+        <PhKanban :size="15" class="text-accent" />
+        <span class="text-[13px] font-semibold text-foreground">Board</span>
+        <span class="ml-1 text-[11px] text-muted-foreground" :title="repoPath">{{ repoName }}</span>
       </div>
-      <div class="kb-head-actions">
-        <button class="kb-icon-btn" title="Refresh" @click="refresh">
+      <div class="flex items-center gap-1">
+        <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh" @click="refresh">
           <PhArrowClockwise :size="14" />
         </button>
-        <button class="kb-close" title="Close (Esc)" @click="emit('close')">
+        <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="emit('close')">
           <PhX :size="15" />
         </button>
       </div>
     </div>
 
-    <div class="kb-columns">
+    <div class="flex min-h-0 flex-1 gap-3 overflow-x-auto px-4 py-3.5">
       <div
         v-for="col in BOARD_COLUMNS"
         :key="col.id"
-        class="kb-col"
-        :class="{ 'kb-col-over': overCol === col.id }"
+        class="flex min-h-0 min-w-[220px] max-w-[320px] flex-1 basis-[240px] flex-col rounded-[10px] border border-border bg-panel"
+        :class="{ 'border-accent bg-accent/5': overCol === col.id }"
         @dragover.prevent="overCol = col.id"
         @dragleave="onColLeave(col.id)"
         @drop="onDrop(col.id, $event)"
       >
-        <div class="kb-col-head">
-          <span class="kb-col-title">{{ col.label }}</span>
-          <span class="kb-col-count">{{ tasksInCol(col.id).length }}</span>
-          <button v-if="col.id === 'backlog'" class="kb-col-add" title="New task" @click="createTask">
+        <div class="flex shrink-0 items-center gap-1.5 px-2.5 pb-2 pt-2.5">
+          <span class="text-[11.5px] font-bold uppercase tracking-wide text-secondary-foreground">{{ col.label }}</span>
+          <span class="rounded-lg bg-white/6 px-1.5 py-0.5 text-[10px] text-muted-foreground">{{ tasksInCol(col.id).length }}</span>
+          <button v-if="col.id === 'backlog'" class="ml-auto flex h-[18px] w-[18px] items-center justify-center rounded bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground" title="New task" @click="createTask">
             <PhPlus :size="12" weight="bold" />
           </button>
         </div>
-        <div class="kb-col-body">
+        <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2.5">
           <div
             v-for="task in tasksInCol(col.id)"
             :key="task.id"
@@ -48,7 +48,7 @@
               @open="openTask(task)"
             />
           </div>
-          <div v-if="!tasksInCol(col.id).length" class="kb-col-empty">No tasks</div>
+          <div v-if="!tasksInCol(col.id).length" class="py-4 text-center text-[11px] text-muted-foreground">No tasks</div>
         </div>
       </div>
     </div>
@@ -144,128 +144,3 @@ async function onDrop(col: BoardColumn, e: DragEvent) {
   await board.move(taskId, col, order);
 }
 </script>
-
-<style scoped>
-.kb-page {
-  position: fixed;
-  top: var(--titlebar-height);
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg-base);
-  backdrop-filter: var(--blur-overlay, none);
-  -webkit-backdrop-filter: var(--blur-overlay, none);
-  z-index: 900;
-}
-
-.kb-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  flex-shrink: 0;
-}
-.kb-head-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.kb-head-icon { color: var(--accent, #3b82f6); }
-.kb-title { font-size: 13px; font-weight: 600; color: var(--text-primary, #e2e8f0); }
-.kb-sub { font-size: 11px; color: var(--text-muted, #64748b); margin-left: 4px; }
-.kb-head-actions { display: flex; align-items: center; gap: 4px; }
-.kb-icon-btn, .kb-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted, #94a3b8);
-  cursor: pointer;
-}
-.kb-icon-btn:hover, .kb-close:hover {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
-  color: var(--text-primary, #e2e8f0);
-}
-
-.kb-columns {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  gap: 12px;
-  padding: 14px 16px;
-  overflow-x: auto;
-}
-.kb-col {
-  flex: 1 0 240px;
-  min-width: 220px;
-  max-width: 320px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border-radius: 10px;
-  background: var(--bg-panel, rgba(255, 255, 255, 0.02));
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
-}
-.kb-col-over {
-  border-color: var(--accent, #3b82f6);
-  background: rgba(59, 130, 246, 0.05);
-}
-.kb-col-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 10px 8px;
-  flex-shrink: 0;
-}
-.kb-col-title {
-  font-size: 11.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary, #94a3b8);
-}
-.kb-col-count {
-  font-size: 10px;
-  color: var(--text-muted, #64748b);
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  padding: 1px 6px;
-}
-.kb-col-add {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-muted, #94a3b8);
-  cursor: pointer;
-}
-.kb-col-add:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); color: var(--text-primary, #e2e8f0); }
-.kb-col-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 8px 10px;
-}
-.kb-col-empty {
-  font-size: 11px;
-  color: var(--text-muted, #4b5563);
-  text-align: center;
-  padding: 16px 0;
-}
-</style>
