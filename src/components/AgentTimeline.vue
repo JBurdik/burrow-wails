@@ -1,14 +1,14 @@
 <template>
-  <div class="tl-wrap" ref="wrap">
-    <div v-if="!turns.length" class="tl-empty">No agent turns recorded yet.</div>
+  <div class="relative w-full select-none" ref="wrap">
+    <div v-if="!turns.length" class="p-4 text-center text-[11px] text-muted-foreground">No agent turns recorded yet.</div>
     <template v-else>
-      <div class="tl-toolbar">
-        <button class="tl-fit-btn" @click="autoFit" title="Fit all turns in view">Fit</button>
-        <span class="tl-range-label">{{ rangeLabel }}</span>
+      <div class="flex items-center gap-1.5 border-b border-border px-1.5 py-0.5">
+        <button class="rounded-[3px] border border-border bg-transparent px-1.5 py-0.5 font-sans text-[10px] font-medium text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="autoFit" title="Fit all turns in view">Fit</button>
+        <span class="font-mono text-[10px] text-muted-foreground">{{ rangeLabel }}</span>
       </div>
       <svg
         :width="svgW" :height="svgH"
-        class="tl-svg"
+        class="tl-svg block w-full cursor-grab overflow-visible active:cursor-grabbing"
         @mousedown="onMouseDown"
         @mousemove="onMouseMove"
         @mouseup="onMouseUp"
@@ -77,12 +77,12 @@
       <!-- Tooltip overlay -->
       <div
         v-if="tip"
-        class="tl-tip"
-        :style="{ left: tip.x + 'px', top: tip.y + 'px' }"
+        class="tl-tip pointer-events-none absolute z-10 whitespace-nowrap rounded-md border border-border p-1.5 text-[11px] leading-relaxed text-secondary-foreground shadow-[0_4px_12px_rgba(0,0,0,0.4)]"
+        :style="{ left: tip.x + 'px', top: tip.y + 'px', background: 'color-mix(in srgb, var(--bg-panel) 95%, black)' }"
       >
-        <div class="tl-tip-state" :class="`tl-tip-${tip.state}`">{{ tip.state }}</div>
-        <div class="tl-tip-dur">{{ tip.duration }}</div>
-        <div v-if="tip.turnDur" class="tl-tip-turn">turn: {{ tip.turnDur }}</div>
+        <div class="tl-tip-state text-[11px] font-semibold" :class="`tl-tip-${tip.state}`">{{ tip.state }}</div>
+        <div class="text-[10px] text-muted-foreground">{{ tip.duration }}</div>
+        <div v-if="tip.turnDur" class="text-[10px] text-muted-foreground">turn: {{ tip.turnDur }}</div>
       </div>
     </template>
   </div>
@@ -242,59 +242,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.tl-wrap {
-  width: 100%;
-  position: relative;
-  user-select: none;
-}
-
-.tl-empty {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 16px;
-  text-align: center;
-}
-
-.tl-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 6px;
-  border-bottom: 1px solid var(--border);
-}
-
-.tl-fit-btn {
-  font-size: 10px;
-  font-weight: 500;
-  padding: 2px 7px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-family: var(--font-ui);
-  transition: background 0.1s, color 0.1s;
-}
-.tl-fit-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.tl-range-label {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
-.tl-svg {
-  display: block;
-  width: 100%;
-  cursor: grab;
-  overflow: visible;
-}
-.tl-svg:active { cursor: grabbing; }
-
-/* SVG element styles via deep scoped */
+/* SVG presentation-attribute styling (fill/stroke) and status-color
+   variants — naturally CSS-class-based for SVG, left as-is rather than
+   force-fit into Tailwind's fill-*/stroke-* utilities for marginal gain. */
 .tl-axis-line {
   stroke: var(--border);
   stroke-width: 1;
@@ -336,28 +286,7 @@ onUnmounted(() => {
 .tl-seg-permission{ fill: var(--status-permission, #f59e0b); }
 .tl-seg-error     { fill: var(--status-error,      #ef4444); }
 
-/* Tooltip */
-.tl-tip {
-  position: absolute;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--bg-panel) 95%, black);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 8px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  z-index: 10;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-}
-.tl-tip-state {
-  font-weight: 600;
-  font-size: 11px;
-}
-.tl-tip-dur  { font-size: 10px; color: var(--text-muted); }
-.tl-tip-turn { font-size: 10px; color: var(--text-muted); }
-
+/* Tooltip status-color variants (layout is Tailwind classes in template) */
 .tl-tip-running    { color: var(--status-running,    #fb923c); }
 .tl-tip-waiting    { color: var(--status-waiting,    #3b82f6); }
 .tl-tip-permission { color: var(--status-permission, #f59e0b); }
