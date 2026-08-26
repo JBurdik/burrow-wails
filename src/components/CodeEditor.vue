@@ -1,10 +1,10 @@
 <template>
-  <div class="code-editor">
-    <div v-if="placeholder" class="editor-placeholder">
+  <div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+    <div v-if="placeholder" class="flex flex-1 flex-col items-center justify-center gap-2.5 bg-terminal-bg text-xs text-muted-foreground">
       <PhFileX :size="34" weight="thin" />
       <p>{{ placeholder }}</p>
     </div>
-    <div v-else ref="host" class="editor-host" />
+    <div v-else ref="host" class="editor-host min-h-0 flex-1 overflow-hidden" />
   </div>
 </template>
 
@@ -340,30 +340,8 @@ defineExpose({ focus, save, isDirty, formatDocument });
 </script>
 
 <style scoped>
-.code-editor {
-  flex: 1;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-.editor-host {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
+/* CodeMirror mounts its own DOM under .editor-host — reach it with :deep(). */
 .editor-host :deep(.cm-editor) {
   height: 100%;
-}
-.editor-placeholder {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--text-muted);
-  font-size: 12px;
-  background: var(--terminal-bg);
 }
 </style>
