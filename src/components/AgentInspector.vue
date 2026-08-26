@@ -84,6 +84,20 @@ const terminalLabel = computed(() => {
 
 const canStopAgent = computed(() => props.canStop && props.agent.status === "running");
 
+const statusDotClass = computed(() => {
+  const map: Record<AgentInspectorStatus, string> = {
+    idle: "bg-muted-foreground",
+    running: "",
+    waiting: "bg-[var(--status-waiting)]",
+    permission: "bg-[var(--status-permission)]",
+    done: "bg-[var(--status-review)]",
+    review: "bg-[var(--status-review)]",
+    error: "bg-[var(--status-error)]",
+    stopped: "bg-muted-foreground",
+  };
+  return map[props.agent.status];
+});
+
 function dismissOnEscape(event: KeyboardEvent) {
   if (event.key === "Escape") emit("dismiss");
 }
@@ -92,59 +106,78 @@ function dismissOnEscape(event: KeyboardEvent) {
 <template>
   <article
     v-if="open"
-    class="agent-inspector"
-    :class="`agent-inspector--${mode}`"
+    class="box-border flex w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-border bg-panel font-sans text-foreground shadow-[0_14px_32px_color-mix(in_srgb,var(--bg-base)_68%,transparent)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-2"
+    :class="mode === 'drawer' && 'min-h-full w-[min(400px,100%)] rounded-none shadow-none'"
     role="dialog"
     :aria-label="`${agent.title} inspector`"
     tabindex="-1"
     @keydown="dismissOnEscape"
   >
-    <header class="agent-inspector__header">
-      <div class="agent-inspector__heading">
-        <span class="agent-inspector__status" :class="`status-${agent.status}`" aria-hidden="true">
-          {{ agent.status === "running" ? spinnerFrame : "" }}
-        </span>
-        <div class="agent-inspector__title-group">
-          <h2 class="agent-inspector__title">{{ agent.title }}</h2>
-          <span class="agent-inspector__state">{{ statusLabel }}</span>
+    <header class="flex min-h-[42px] items-center justify-between gap-3 border-b border-border/72 py-2 pl-3 pr-2.5">
+      <div class="flex min-w-0 items-center gap-2">
+        <span
+          v-if="agent.status === 'running'"
+          class="shrink-0 font-mono text-[13px] font-bold leading-none text-[var(--status-running)]"
+          aria-hidden="true"
+        >{{ spinnerFrame }}</span>
+        <span v-else class="h-[7px] w-[7px] shrink-0 rounded-full" :class="statusDotClass" aria-hidden="true" />
+        <div class="grid min-w-0 gap-px">
+          <h2 class="m-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold leading-tight text-foreground">{{ agent.title }}</h2>
+          <span class="text-[10px] leading-tight text-muted-foreground">{{ statusLabel }}</span>
         </div>
       </div>
-      <button class="agent-inspector__icon-button" type="button" title="Dismiss inspector" aria-label="Dismiss inspector" @click="emit('dismiss')">
+      <button
+        class="flex h-6 w-6 shrink-0 items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-1"
+        type="button"
+        title="Dismiss inspector"
+        aria-label="Dismiss inspector"
+        @click="emit('dismiss')"
+      >
         <PhX :size="14" weight="bold" />
       </button>
     </header>
 
-    <div class="agent-inspector__content">
-      <dl class="agent-inspector__details">
-        <div v-if="agent.cwd" class="agent-inspector__detail">
-          <dt class="agent-inspector__detail-label"><PhFolder :size="13" /> Working directory</dt>
-          <dd class="agent-inspector__detail-value agent-inspector__detail-value--mono" :title="agent.cwd">{{ agent.cwd }}</dd>
+    <div class="grid gap-2.5 px-3 pb-3 pt-2.5">
+      <dl class="m-0 grid gap-1.5">
+        <div v-if="agent.cwd" class="grid min-w-0 gap-0.5">
+          <dt class="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.04em] text-muted-foreground"><PhFolder :size="13" /> Working directory</dt>
+          <dd class="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] leading-snug text-secondary-foreground" :title="agent.cwd">{{ agent.cwd }}</dd>
         </div>
-        <div v-if="terminalLabel" class="agent-inspector__detail">
-          <dt class="agent-inspector__detail-label"><PhTerminal :size="13" /> Terminal</dt>
-          <dd class="agent-inspector__detail-value agent-inspector__detail-value--mono" :title="terminalLabel">{{ terminalLabel }}</dd>
+        <div v-if="terminalLabel" class="grid min-w-0 gap-0.5">
+          <dt class="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.04em] text-muted-foreground"><PhTerminal :size="13" /> Terminal</dt>
+          <dd class="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] leading-snug text-secondary-foreground" :title="terminalLabel">{{ terminalLabel }}</dd>
         </div>
       </dl>
 
-      <section v-if="agent.recentActivity" class="agent-inspector__activity" aria-label="Most recent activity">
-        <div class="agent-inspector__activity-meta">
+      <section v-if="agent.recentActivity" class="grid gap-1 rounded-[5px] border border-border/65 bg-base px-2.5 py-2" aria-label="Most recent activity">
+        <div class="flex items-center justify-between gap-2.5 text-[9px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
           <span>Latest activity</span>
-          <time v-if="agent.recentActivityAt">{{ agent.recentActivityAt }}</time>
+          <time v-if="agent.recentActivityAt" class="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[9px] font-normal normal-case tracking-normal">{{ agent.recentActivityAt }}</time>
         </div>
-        <p class="agent-inspector__activity-message">{{ agent.recentActivity }}</p>
+        <p class="m-0 line-clamp-3 text-[11px] leading-[1.42] text-secondary-foreground">{{ agent.recentActivity }}</p>
       </section>
     </div>
 
-    <footer class="agent-inspector__actions">
-      <button class="agent-inspector__button agent-inspector__button--primary" type="button" @click="emit('focus', agent)">
+    <footer class="flex flex-wrap gap-1.5 border-t border-border/72 bg-base/58 px-3 py-2">
+      <button
+        class="flex min-h-[27px] items-center justify-center gap-1.5 rounded border px-2 py-1 font-sans text-[10.5px] font-medium text-foreground transition-colors hover:border-accent hover:bg-accent/19"
+        style="border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: color-mix(in srgb, var(--accent) 13%, transparent);"
+        type="button"
+        @click="emit('focus', agent)"
+      >
         <PhArrowSquareOut :size="14" /> Focus
       </button>
-      <button class="agent-inspector__button" type="button" @click="emit('follow-up', agent)">
+      <button
+        class="flex min-h-[27px] items-center justify-center gap-1.5 rounded border border-border bg-transparent px-2 py-1 font-sans text-[10.5px] font-medium text-secondary-foreground transition-colors hover:border-muted-foreground hover:bg-hover hover:text-foreground"
+        type="button"
+        @click="emit('follow-up', agent)"
+      >
         <PhChatTeardropText :size="14" /> Follow up
       </button>
       <button
         v-if="canStop"
-        class="agent-inspector__button agent-inspector__button--stop"
+        class="ml-auto flex min-h-[27px] items-center justify-center gap-1.5 rounded border px-2 py-1 font-sans text-[10.5px] font-medium text-destructive transition-colors hover:bg-destructive/12 disabled:cursor-default disabled:opacity-45"
+        style="border-color: color-mix(in srgb, var(--red) 48%, var(--border));"
         type="button"
         :disabled="!canStopAgent"
         :title="canStopAgent ? 'Stop agent' : 'The agent is not running'"
@@ -155,276 +188,3 @@ function dismissOnEscape(event: KeyboardEvent) {
     </footer>
   </article>
 </template>
-
-<style scoped>
-.agent-inspector {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  width: min(360px, calc(100vw - 24px));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  box-shadow: 0 14px 32px color-mix(in srgb, var(--bg-base) 68%, transparent);
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-}
-
-.agent-inspector--drawer {
-  width: min(400px, 100%);
-  min-height: 100%;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.agent-inspector:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.agent-inspector__header,
-.agent-inspector__heading,
-.agent-inspector__actions,
-.agent-inspector__detail-label,
-.agent-inspector__activity-meta,
-.agent-inspector__button,
-.agent-inspector__icon-button {
-  display: flex;
-  align-items: center;
-}
-
-.agent-inspector__header {
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 42px;
-  padding: 8px 9px 8px 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-}
-
-.agent-inspector__heading {
-  min-width: 0;
-  gap: 8px;
-}
-
-.agent-inspector__status {
-  width: 7px;
-  height: 7px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--text-muted);
-}
-
-.agent-inspector__status.status-running {
-  width: auto;
-  height: auto;
-  border-radius: 0;
-  background: transparent;
-  color: var(--status-running);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.agent-inspector__status.status-waiting { background: var(--status-waiting); }
-.agent-inspector__status.status-permission { background: var(--status-permission); }
-.agent-inspector__status.status-done,
-.agent-inspector__status.status-review { background: var(--status-review); }
-.agent-inspector__status.status-error { background: var(--status-error); }
-.agent-inspector__status.status-stopped { background: var(--text-muted); }
-
-.agent-inspector__title-group {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
-
-.agent-inspector__title {
-  overflow: hidden;
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-inspector__state {
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.2;
-}
-
-.agent-inspector__icon-button {
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.agent-inspector__icon-button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.agent-inspector__icon-button:focus-visible,
-.agent-inspector__button:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.agent-inspector__content {
-  display: grid;
-  gap: 10px;
-  padding: 10px 12px 12px;
-}
-
-.agent-inspector__details {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-}
-
-.agent-inspector__detail {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.agent-inspector__detail-label {
-  gap: 5px;
-  color: var(--text-muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.agent-inspector__detail-value {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 10.5px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-inspector__detail-value--mono {
-  font-family: var(--font-mono);
-}
-
-.agent-inspector__activity {
-  display: grid;
-  gap: 5px;
-  padding: 8px 9px;
-  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
-  border-radius: 5px;
-  background: var(--bg-base);
-}
-
-.agent-inspector__activity-meta {
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--text-muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.agent-inspector__activity-meta time {
-  overflow: hidden;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-overflow: ellipsis;
-  text-transform: none;
-  white-space: nowrap;
-}
-
-.agent-inspector__activity-message {
-  display: -webkit-box;
-  margin: 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.42;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.agent-inspector__actions {
-  gap: 6px;
-  padding: 8px 12px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  background: color-mix(in srgb, var(--bg-base) 58%, transparent);
-}
-
-.agent-inspector__button {
-  justify-content: center;
-  gap: 5px;
-  min-height: 27px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font: 500 10.5px var(--font-ui);
-  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
-}
-
-.agent-inspector__button:hover:not(:disabled) {
-  border-color: var(--text-muted);
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.agent-inspector__button--primary {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--text-primary);
-}
-
-.agent-inspector__button--primary:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 19%, transparent);
-}
-
-.agent-inspector__button--stop {
-  margin-left: auto;
-  border-color: color-mix(in srgb, var(--red) 48%, var(--border));
-  color: var(--red);
-}
-
-.agent-inspector__button--stop:hover:not(:disabled) {
-  border-color: var(--red);
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-  color: var(--red);
-}
-
-.agent-inspector__button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-@media (max-width: 420px) {
-  .agent-inspector--popover {
-    width: 100%;
-  }
-
-  .agent-inspector__actions {
-    flex-wrap: wrap;
-  }
-}
-</style>
