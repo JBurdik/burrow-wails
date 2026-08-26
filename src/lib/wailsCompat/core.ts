@@ -173,6 +173,24 @@ export async function invoke(cmd: string, args: Args = {}): Promise<any> {
     case "read_task_attachment_base64":
       return App.ReadTaskAttachmentBase64(args.id);
 
+    // Misc
+    case "system_stats":
+      return App.SystemStats();
+    case "get_config_dirs":
+      return App.GetConfigDirs();
+    case "set_config_dirs":
+      return App.SetConfigDirs(args.claude, args.codex, args.copilot);
+    case "save_temp_image":
+      return App.SaveTempImage(args.b64 ?? args.data, args.ext);
+    case "is_pid_alive":
+      return App.IsPidAlive(args.pid);
+    case "set_tab_live_status":
+      return App.SetTabLiveStatus(args.ptyId ?? args.pty_id, args.status);
+    case "set_max_agents":
+      return App.SetMaxAgents(args.n ?? args.max);
+    case "set_burrow_mcp_max_depth":
+      return App.SetBurrowMcpMaxDepth(args.n ?? args.depth);
+
     default:
       console.warn(`[wails-compat] invoke("${cmd}") has no Go binding yet`);
       throw new Error(`command not implemented in Go backend: ${cmd}`);

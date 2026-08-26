@@ -28,6 +28,10 @@ type App struct {
 
 	httpSrv        *HTTPServer
 	httpSrvRunning bool
+
+	configDirs        *ConfigDirs
+	maxAgents         int
+	burrowMcpMaxDepth int
 }
 
 // SetHttpEnabled starts/stops the remote HTTP+WS server (browser/remote
