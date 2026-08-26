@@ -1,61 +1,63 @@
 <template>
-  <div class="claude-chat" :style="{ '--agent-accent': agentAccentColor }">
-    <div class="chat-main">
-    <div class="chat-header">
-      <component :is="currentAgentIcon" :size="16" class="chat-header-icon" :style="{ color: currentAgent?.color }" />
-      <span class="chat-header-title">{{ currentAgent?.name ?? 'Claude' }}</span>
+  <div class="claude-chat flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }">
+    <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
+    <div class="flex flex-shrink-0 items-center gap-[7px] border-b border-border bg-panel px-3.5 py-[7px]">
+      <component :is="currentAgentIcon" :size="16" class="flex-shrink-0" :style="{ color: currentAgent?.color ?? '#d97706' }" />
+      <span class="text-[11px] font-semibold tracking-[0.02em] text-foreground">{{ currentAgent?.name ?? 'Claude' }}</span>
       <span
-        class="chat-runtime"
+        class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.02em] text-muted-foreground"
+        style="border-color: color-mix(in srgb, var(--success, #22c55e) 35%, transparent);"
         :title="effectiveTransport === 'acp' ? 'Connected through the locally installed provider CLI (ACP)' : effectiveTransport === 'codex-app-server' ? 'Connected through the locally installed Codex app-server (JSON-RPC)' : 'Connected through the locally installed Claude CLI (stream-json)'"
       >
-        <i class="chat-runtime-dot" /> {{ runtimeLabel }}
+        <i class="chat-runtime-dot h-[5px] w-[5px] rounded-full bg-success" style="box-shadow: 0 0 7px color-mix(in srgb, var(--success, #22c55e) 75%, transparent);" /> {{ runtimeLabel }}
       </span>
       <span
         v-if="effectiveTransport === 'acp' && acpModelOption"
-        class="chat-header-model"
+        class="inline-flex flex-shrink-0 items-baseline gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] font-semibold text-secondary-foreground"
+        style="background: color-mix(in srgb, var(--agent-accent, #a855f7) 16%, transparent); border-color: color-mix(in srgb, var(--agent-accent, #a855f7) 30%, transparent);"
         :title="`Model: ${acpModelLabel}${acpActiveModelId ? ' — ' + acpActiveModelId : ''}`"
       >
-        {{ acpModelLabel }}<span v-if="acpActiveModelId && acpActiveModelId !== acpModelLabel" class="chat-header-model-ver">{{ acpActiveModelId }}</span>
+        {{ acpModelLabel }}<span v-if="acpActiveModelId && acpActiveModelId !== acpModelLabel" class="font-mono text-[9px] font-medium text-muted-foreground">{{ acpActiveModelId }}</span>
       </span>
-      <span class="chat-header-cwd" :title="cwd">{{ cwdDisplay }}</span>
-      <button class="chat-header-btn" title="New conversation" @click="clearChat">
+      <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground" :title="cwd">{{ cwdDisplay }}</span>
+      <button class="chat-header-btn relative flex items-center rounded-[5px] p-1 text-white/45 transition-colors hover:bg-white/[0.07] hover:text-white/85" title="New conversation" @click="clearChat">
         <PhArrowCounterClockwise :size="13" />
       </button>
-      <div v-if="effectiveTransport === 'acp' && sessionId" class="agent-dropdown">
-        <button ref="acpHistoryBtnEl" class="chat-header-btn" title="Resume a past session" @click="openAcpHistory">
+      <div v-if="effectiveTransport === 'acp' && sessionId" class="agent-dropdown relative inline-flex">
+        <button ref="acpHistoryBtnEl" class="chat-header-btn relative flex items-center rounded-[5px] p-1 text-white/45 transition-colors hover:bg-white/[0.07] hover:text-white/85" title="Resume a past session" @click="openAcpHistory">
           <PhClockCounterClockwise :size="13" />
         </button>
         <Teleport to="body">
           <div v-if="acpHistoryOpen" ref="acpHistoryMenuEl" class="floating-menu acp-history-menu" :style="{ top: acpHistoryPos.top + 'px', left: acpHistoryPos.left + 'px' }">
-            <div class="acp-history-head">{{ currentAgent?.name }} sessions</div>
-            <div v-if="!acpSessions.length" class="acp-history-empty">No past sessions</div>
+            <div class="px-2.5 pb-1.5 pt-1 text-[10px] uppercase tracking-[0.04em] text-white/35">{{ currentAgent?.name }} sessions</div>
+            <div v-if="!acpSessions.length" class="p-2.5 text-center text-[11px] text-white/40">No past sessions</div>
             <button
               v-for="s in acpSessions"
               :key="s.sessionId"
-              class="floating-menu-item acp-history-item"
+              class="floating-menu-item flex-col items-start gap-0.5"
               :class="{ 'floating-menu-item-active': s.sessionId === sessionId }"
               :title="s.sessionId"
               @click="resumeAcpSession(s.sessionId)"
             >
-              <div class="acp-history-row">
+              <div class="flex max-w-full items-center gap-1.5">
                 <component :is="currentAgentIcon" :size="12" :style="{ color: currentAgent?.color }" />
-                <span class="acp-history-title">{{ s.title || s.sessionId.slice(0, 8) }}</span>
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ s.title || s.sessionId.slice(0, 8) }}</span>
               </div>
-              <span v-if="s.updatedAt" class="model-id-hint">{{ new Date(s.updatedAt).toLocaleString() }}</span>
+              <span v-if="s.updatedAt" class="model-id-hint ml-[18px]">{{ new Date(s.updatedAt).toLocaleString() }}</span>
             </button>
           </div>
         </Teleport>
       </div>
       <button
         v-if="effectiveTransport === 'acp'"
-        class="session-browse-btn"
+        class="cursor-pointer border-none bg-transparent px-1 py-0.5 text-sm opacity-60 hover:opacity-100"
         title="Browse past sessions"
         @click="openSessionBrowser"
       >⏱</button>
-      <div class="agent-dropdown">
-        <button ref="agentBtnEl" class="chat-header-btn chat-header-agent" :title="`Agent: ${currentAgent?.name}`" @click="toggleAgentMenu">
+      <div class="agent-dropdown relative inline-flex">
+        <button ref="agentBtnEl" class="chat-header-btn relative inline-flex w-auto items-center gap-1 rounded-[5px] px-1.5 py-1 text-white/45 transition-colors hover:bg-white/[0.07] hover:text-white/85" :title="`Agent: ${currentAgent?.name}`" @click="toggleAgentMenu">
           <component :is="currentAgentIcon" :size="13" :style="{ color: currentAgent?.color }" />
-          <span class="agent-name">{{ currentAgent?.name }}</span>
+          <span class="max-w-[110px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium">{{ currentAgent?.name }}</span>
           <PhCaretDown :size="8" weight="bold" />
         </button>
         <Teleport to="body">
@@ -76,7 +78,7 @@
               {{ a.name }}
               <span class="model-id-hint">{{ transportLabel(a.transport) }}</span>
             </button>
-            <button class="floating-menu-item floating-menu-config" @click="agentMenuOpen = false; agentConfigOpen = true">
+            <button class="floating-menu-item mt-0.5 justify-start gap-1.5 rounded-t-none border-t border-white/[0.08] text-white/55" @click="agentMenuOpen = false; agentConfigOpen = true">
               <PhGear :size="12" /> Configure agents…
             </button>
           </div>
@@ -86,21 +88,21 @@
     <ChatAgentConfig v-if="agentConfigOpen" :cwd="cwd" @close="agentConfigOpen = false" />
 
     <!-- Permission prompt (Bash / generic tool) -->
-    <div v-if="pendingPermission" class="permission-banner">
-      <PhShieldWarning :size="14" class="perm-icon" />
-      <div class="perm-body">
-        <span class="perm-title">{{ pendingPermission.toolName }} wants to run</span>
-        <code class="perm-detail">{{ permissionDetail }}</code>
+    <div v-if="pendingPermission" class="permission-banner perm-slide-in flex flex-shrink-0 items-center gap-2 rounded-[10px] border py-2.5 pl-3.5 pr-3 mx-3 mt-2 mb-0.5 shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: color-mix(in srgb, #f59e0b 12%, var(--bg-panel)); border-color: color-mix(in srgb, #f59e0b 30%, transparent); border-left-width: 3px; border-left-color: #f59e0b;">
+      <PhShieldWarning :size="14" class="perm-icon flex-shrink-0 text-[#f59e0b]" />
+      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span class="perm-title text-[11px] font-semibold text-foreground">{{ pendingPermission.toolName }} wants to run</span>
+        <code class="perm-detail max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground">{{ permissionDetail }}</code>
       </div>
-      <div class="perm-actions">
-        <div class="perm-allow-group">
-          <button class="perm-btn perm-allow" @click="respondPermission(true)" title="Allow once (Y)">
+      <div class="flex flex-shrink-0 items-center gap-1.5">
+        <div class="perm-allow-group relative flex">
+          <button class="perm-btn perm-allow rounded-l-md rounded-r-none" @click="respondPermission(true)" title="Allow once (Y)">
             Allow <kbd class="perm-kbd">Y</kbd>
           </button>
-          <button class="perm-btn perm-allow perm-caret-btn" @click="permDropdownOpen = !permDropdownOpen" title="More options">
+          <button class="perm-btn perm-allow !rounded-l-none !rounded-r-md border-l border-white/[0.12] !px-[5px]" @click="permDropdownOpen = !permDropdownOpen" title="More options">
             <PhCaretDown :size="9" weight="bold" />
           </button>
-          <div v-if="permDropdownOpen" class="perm-dropdown">
+          <div v-if="permDropdownOpen" class="absolute bottom-[calc(100%+4px)] right-0 z-[100] min-w-[200px] rounded-lg border border-white/[0.12] bg-[#1e1e2e] p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
             <button class="perm-dropdown-item" @click="permDropdownOpen = false; respondPermission(true)">
               Allow once
             </button>
@@ -115,7 +117,7 @@
             <button class="perm-dropdown-item" @click="permDropdownOpen = false; respondPermission(true, { always: true })">
               Always allow {{ pendingPermission.toolName }}
             </button>
-            <button class="perm-dropdown-item perm-dropdown-deny" @click="permDropdownOpen = false; respondPermission(false)">
+            <button class="perm-dropdown-item !text-red-500/80 hover:!bg-red-500/10" @click="permDropdownOpen = false; respondPermission(false)">
               Deny <kbd class="perm-kbd">N</kbd>
             </button>
           </div>
@@ -127,105 +129,112 @@
     </div>
 
     <!-- File edit: diff preview with Accept / Reject -->
-    <div v-if="pendingDiff && diffPreview" class="diff-banner">
-      <div class="diff-banner-head">
-        <PhGitDiff :size="13" class="perm-icon" />
-        <span class="perm-title">{{ pendingDiff.toolName }}</span>
-        <code class="perm-detail" :title="diffPreview.path">{{ diffPreview.path }}</code>
-        <span class="diff-spacer" />
+    <div v-if="pendingDiff && diffPreview" class="diff-banner perm-slide-in mx-3 mt-2 mb-0.5 flex-shrink-0 overflow-hidden rounded-[10px] border shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: var(--bg-panel); border-color: color-mix(in srgb, #6366f1 28%, transparent); border-left-width: 3px; border-left-color: #6366f1;">
+      <div class="flex items-center gap-2 px-3 py-2">
+        <PhGitDiff :size="13" class="perm-icon flex-shrink-0 text-[#818cf8]" />
+        <span class="perm-title text-[11px] font-semibold text-foreground">{{ pendingDiff.toolName }}</span>
+        <code class="perm-detail max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground" :title="diffPreview.path">{{ diffPreview.path }}</code>
+        <span class="flex-1" />
         <button class="perm-btn perm-allow" @click="respondPermission(true)" title="Accept (Y)">Accept <kbd class="perm-kbd">Y</kbd></button>
         <button class="perm-btn perm-always" @click="respondPermission(true, { always: true })" title="Always allow this tool">Always</button>
         <button class="perm-btn perm-deny" @click="respondPermission(false)" title="Reject (N)">Reject <kbd class="perm-kbd">N</kbd></button>
       </div>
-      <pre v-if="diffPreview.isWrite" class="diff-banner-body"><span
-        v-for="(line, i) in diffPreview.content.split('\n')" :key="i" class="diff-line diff-add">{{ line }}</span></pre>
-      <pre v-else class="diff-banner-body"><span
-        v-for="(line, i) in diffPreview.oldStr.split('\n')" :key="'o'+i" class="diff-line diff-del">{{ line }}</span><span
-        v-for="(line, i) in diffPreview.newStr.split('\n')" :key="'n'+i" class="diff-line diff-add">{{ line }}</span></pre>
+      <pre v-if="diffPreview.isWrite" class="diff-banner-body m-0 max-h-[220px] overflow-auto px-3 pb-2.5 pt-1.5 font-mono text-[11px] leading-[1.5]"><span
+        v-for="(line, i) in diffPreview.content.split('\n')" :key="i" class="diff-line diff-add block whitespace-pre-wrap break-all">{{ line }}</span></pre>
+      <pre v-else class="diff-banner-body m-0 max-h-[220px] overflow-auto px-3 pb-2.5 pt-1.5 font-mono text-[11px] leading-[1.5]"><span
+        v-for="(line, i) in diffPreview.oldStr.split('\n')" :key="'o'+i" class="diff-line diff-del block whitespace-pre-wrap break-all">{{ line }}</span><span
+        v-for="(line, i) in diffPreview.newStr.split('\n')" :key="'n'+i" class="diff-line diff-add block whitespace-pre-wrap break-all">{{ line }}</span></pre>
     </div>
 
     <!-- ExitPlanMode: plan approval -->
-    <div v-if="pendingPlan" class="plan-banner">
-      <div class="plan-head">
-        <PhListChecks :size="14" class="perm-icon" />
-        <span class="perm-title">Claude proposed a plan</span>
+    <div v-if="pendingPlan" class="plan-banner perm-slide-in mx-3 mt-2 mb-0.5 flex-shrink-0 rounded-[10px] border px-[13px] py-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: color-mix(in srgb, #10b981 10%, var(--bg-panel)); border-color: color-mix(in srgb, #10b981 28%, transparent); border-left-width: 3px; border-left-color: #10b981;">
+      <div class="mb-1.5 flex items-center gap-[7px]">
+        <PhListChecks :size="14" class="perm-icon text-[#10b981]" />
+        <span class="perm-title text-[11px] font-semibold text-foreground">Claude proposed a plan</span>
       </div>
       <!-- eslint-disable-next-line vue/no-v-html -->
-      <div class="plan-body md-body" v-html="planMd" />
+      <div class="plan-body md-body max-h-[260px] overflow-auto text-xs text-foreground" v-html="planMd" />
       <textarea
         v-model="planFeedback"
-        class="plan-feedback"
+        class="my-2 box-border w-full resize-y rounded-[5px] border border-white/10 bg-base px-2 py-1.5 font-sans text-[11px] text-foreground"
         rows="1"
         placeholder="Optional feedback if you keep planning…"
       />
-      <div class="plan-actions">
+      <div class="flex justify-end gap-2">
         <button class="perm-btn perm-allow" @click="respondPlan(true)">Approve plan</button>
         <button class="perm-btn perm-deny" @click="respondPlan(false)" title="Keep planning (Esc)">Keep planning</button>
       </div>
     </div>
 
     <!-- AskUserQuestion: multi-choice -->
-    <div v-if="pendingQuestion" class="question-banner">
-      <div v-for="(q, qi) in questionSpecs" :key="qi" class="question-block">
-        <div class="question-head">
-          <span v-if="q.header" class="question-chip">{{ q.header }}</span>
-          <span class="question-text">{{ q.question }}</span>
-          <span v-if="q.multiSelect" class="question-multi">choose any</span>
+    <div v-if="pendingQuestion" class="question-banner perm-slide-in mx-3 mt-2 mb-0.5 flex-shrink-0 rounded-[10px] border px-[13px] py-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: color-mix(in srgb, #3b82f6 10%, var(--bg-panel)); border-color: color-mix(in srgb, #3b82f6 28%, transparent); border-left-width: 3px; border-left-color: #3b82f6;">
+      <div v-for="(q, qi) in questionSpecs" :key="qi" class="mb-2.5">
+        <div class="mb-1.5 flex flex-wrap items-center gap-[7px]">
+          <span v-if="q.header" class="rounded bg-[color-mix(in_srgb,#3b82f6_25%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.04em] text-[#93c5fd]">{{ q.header }}</span>
+          <span class="text-xs font-semibold text-foreground">{{ q.question }}</span>
+          <span v-if="q.multiSelect" class="text-[9px] italic text-secondary-foreground">choose any</span>
         </div>
-        <div class="question-options">
+        <div class="flex flex-col gap-[5px]">
           <button
             v-for="(opt, oi) in q.options"
             :key="oi"
-            class="question-opt"
-            :class="{ picked: isPicked(q.question, opt.label) }"
+            class="question-opt flex cursor-pointer flex-col gap-px rounded-md border border-white/[0.12] bg-base px-2.5 py-[7px] text-left transition-colors hover:border-[color-mix(in_srgb,#3b82f6_55%,transparent)]"
+            :class="{ 'picked !border-[#3b82f6] !bg-[color-mix(in_srgb,#3b82f6_16%,var(--bg-base))]': isPicked(q.question, opt.label) }"
             @click="toggleOption(q.question, opt.label, !!q.multiSelect)"
           >
-            <span class="opt-label">{{ opt.label }}</span>
-            <span v-if="opt.description" class="opt-desc">{{ opt.description }}</span>
+            <span class="text-xs font-semibold text-foreground">{{ opt.label }}</span>
+            <span v-if="opt.description" class="text-[10px] text-secondary-foreground">{{ opt.description }}</span>
           </button>
         </div>
       </div>
-      <div class="question-actions">
+      <div class="flex justify-end gap-2">
         <button class="perm-btn perm-allow" :disabled="!canSubmitQuestion" @click="submitQuestion">Submit</button>
         <button class="perm-btn perm-deny" @click="cancelQuestion" title="Dismiss (Esc)">Skip</button>
       </div>
     </div>
 
     <!-- ACP permission request — renders the adapter's real option set -->
-    <div v-if="acpPermReq" class="permission-banner acp-perm-banner" :class="{ 'acp-perm-plan': acpPermPlan, 'acp-perm-diff': acpPermDiff && !acpPermPlan }">
-      <div class="acp-perm-head">
-        <PhListChecks v-if="acpPermPlan" :size="14" class="perm-icon" />
-        <PhGitDiff v-else-if="acpPermDiff" :size="14" class="perm-icon" />
-        <PhShieldWarning v-else :size="14" class="perm-icon" />
-        <span class="perm-title">{{ acpPermPlan ? 'Review plan' : acpPermReq.title }}</span>
-        <code v-if="acpPermDiff" class="perm-detail" :title="acpPermDiff.path">{{ acpPermDiff.path }}</code>
+    <div
+      v-if="acpPermReq"
+      class="permission-banner acp-perm-banner perm-slide-in mx-3 mt-2 mb-0.5 flex flex-shrink-0 flex-col items-stretch gap-2 rounded-[10px] border py-2.5 pl-3.5 pr-3 shadow-[0_6px_20px_rgba(0,0,0,0.28)]"
+      :class="{ 'acp-perm-plan': acpPermPlan, 'acp-perm-diff': acpPermDiff && !acpPermPlan }"
+      :style="acpPermPlan
+        ? 'background: color-mix(in srgb, #10b981 10%, var(--bg-panel)); border-color: color-mix(in srgb, #10b981 28%, transparent); border-left-width: 3px; border-left-color: #10b981;'
+        : (acpPermDiff ? 'background: var(--bg-panel); border-color: color-mix(in srgb, #6366f1 28%, transparent); border-left-width: 3px; border-left-color: #6366f1;' : 'background: color-mix(in srgb, #f59e0b 12%, var(--bg-panel)); border-color: color-mix(in srgb, #f59e0b 30%, transparent); border-left-width: 3px; border-left-color: #f59e0b;')"
+    >
+      <div class="flex min-w-0 items-center gap-[7px]">
+        <PhListChecks v-if="acpPermPlan" :size="14" class="perm-icon text-[#10b981]" />
+        <PhGitDiff v-else-if="acpPermDiff" :size="14" class="perm-icon text-[#818cf8]" />
+        <PhShieldWarning v-else :size="14" class="perm-icon text-[#f59e0b]" />
+        <span class="perm-title text-[11px] font-semibold text-foreground">{{ acpPermPlan ? 'Review plan' : acpPermReq.title }}</span>
+        <code v-if="acpPermDiff" class="perm-detail overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground" :title="acpPermDiff.path">{{ acpPermDiff.path }}</code>
       </div>
       <!-- eslint-disable-next-line vue/no-v-html -->
-      <div v-if="acpPermPlan" class="plan-body md-body" v-html="acpPermPlan" />
-      <pre v-else-if="acpPermDiff && acpPermDiff.isWrite" class="diff-banner-body"><span
-        v-for="(line, i) in acpPermDiff.content.split('\n')" :key="i" class="diff-line diff-add">{{ line }}</span></pre>
-      <pre v-else-if="acpPermDiff" class="diff-banner-body"><span
-        v-for="(line, i) in acpPermDiff.oldStr.split('\n')" :key="'o'+i" class="diff-line diff-del">{{ line }}</span><span
-        v-for="(line, i) in acpPermDiff.newStr.split('\n')" :key="'n'+i" class="diff-line diff-add">{{ line }}</span></pre>
-      <div class="acp-perm-actions">
+      <div v-if="acpPermPlan" class="plan-body md-body max-h-[320px] overflow-auto text-xs text-foreground" v-html="acpPermPlan" />
+      <pre v-else-if="acpPermDiff && acpPermDiff.isWrite" class="diff-banner-body m-0 max-h-[220px] overflow-auto px-3 pb-2.5 pt-1.5 font-mono text-[11px] leading-[1.5]"><span
+        v-for="(line, i) in acpPermDiff.content.split('\n')" :key="i" class="diff-line diff-add block whitespace-pre-wrap break-all">{{ line }}</span></pre>
+      <pre v-else-if="acpPermDiff" class="diff-banner-body m-0 max-h-[220px] overflow-auto px-3 pb-2.5 pt-1.5 font-mono text-[11px] leading-[1.5]"><span
+        v-for="(line, i) in acpPermDiff.oldStr.split('\n')" :key="'o'+i" class="diff-line diff-del block whitespace-pre-wrap break-all">{{ line }}</span><span
+        v-for="(line, i) in acpPermDiff.newStr.split('\n')" :key="'n'+i" class="diff-line diff-add block whitespace-pre-wrap break-all">{{ line }}</span></pre>
+      <div class="flex flex-wrap gap-1.5">
         <button
           v-for="o in acpPermReq.options"
           :key="o.optionId"
-          class="perm-btn"
+          class="perm-btn flex-none"
           :class="acpOptClass(o.kind)"
           @click="acpRespond(o.optionId, o.name, o.kind)"
         >{{ o.name }}</button>
       </div>
     </div>
 
-    <div ref="scrollEl" class="chat-messages">
-      <div v-if="messages.length === 0" class="chat-empty">
-        <div class="chat-empty-avatar" aria-hidden="true">
+    <div ref="scrollEl" class="chat-messages flex flex-1 flex-col gap-0.5 overflow-y-auto py-6 pb-2 [scroll-behavior:smooth]">
+      <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+        <div class="chat-empty-avatar mb-2 flex h-11 w-11 items-center justify-center rounded-[11px] text-white shadow-[0_0_0_1px_color-mix(in_srgb,var(--agent-accent,#ec4899)_36%,transparent)]" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 72%, #16161a);" aria-hidden="true">
           <component :is="currentAgentIcon" :size="28" :style="{ color: '#fff' }" />
         </div>
-        <span class="chat-empty-kicker">New conversation</span>
-        <span class="chat-empty-title">Start a focused conversation</span>
-        <span class="chat-empty-sub">Working in {{ cwdDisplay }}</span>
+        <span class="text-[9px] font-semibold uppercase tracking-[.08em] text-muted-foreground">New conversation</span>
+        <span class="text-base font-semibold text-foreground">Start a focused conversation</span>
+        <span class="mt-0.5 font-mono text-[11px] text-muted-foreground">Working in {{ cwdDisplay }}</span>
       </div>
 
       <div
@@ -236,42 +245,42 @@
       >
         <!-- User message -->
         <template v-if="msg.role === 'user'">
-          <div class="user-msg-row">
-            <div class="bubble bubble-user">
-              <div v-if="msg.images && msg.images.length > 0" class="msg-images">
+          <div class="flex items-end justify-end gap-2 px-4 py-[3px]">
+            <div class="bubble-user max-w-[72%] rounded-[16px_16px_5px_16px] border px-3.5 py-2.5 text-[13px] leading-[1.55] shadow-[0_2px_10px_rgba(0,0,0,0.22)]" style="background: var(--chat-user-bg, #1e1b2e); border-color: var(--chat-user-border, rgba(124,58,237,0.35)); color: var(--chat-text, rgba(255,255,255,0.88));">
+              <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
                 <img
                   v-for="(img, i) in msg.images"
                   :key="i"
                   :src="img"
-                  class="msg-img"
+                  class="block max-h-40 max-w-[200px] rounded object-cover"
                   :alt="`Image ${i + 1}`"
                 />
               </div>
               <template v-for="(p, i) in msgParts(msg.text)" :key="i"><span v-if="p.mention" class="mention-pill"><PhFile :size="10" class="mention-pill-icon" />{{ p.v.slice(1) }}</span><template v-else>{{ p.v }}</template></template>
             </div>
-            <div class="user-avatar">U</div>
+            <div class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-[11px] font-bold text-white/70">U</div>
           </div>
         </template>
 
         <!-- Tool call — compact row, expandable -->
         <template v-else-if="msg.role === 'tool'">
-          <div class="agent-msg-row">
-            <div class="agent-avatar-spacer" />
+          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+            <div class="w-[26px] flex-shrink-0" />
             <div class="tool-row" :class="`tool-row-${toolStatus(msg)}`" @click="msg.toolExpanded = !msg.toolExpanded">
               <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': msg.toolExpanded }" />
               <component :is="toolIconFor(msg)" :size="12" class="tool-icon" />
-              <span class="tool-name" :class="{ 'tool-name-mono': toolMonospace(msg) }">{{ toolSummaryFor(msg) }}</span>
-              <PhCircleNotch v-if="toolStatus(msg) === 'running'" :size="10" class="tool-status-icon tool-spin" />
-              <PhWarningCircle v-else-if="toolStatus(msg) === 'failed'" :size="10" class="tool-status-icon tool-status-failed" />
-              <span v-if="msg.toolOutput && !msg.toolExpanded" class="tool-output-preview">{{ msg.toolOutput.split('\n')[0].slice(0, 60) }}</span>
+              <span class="overflow-hidden text-ellipsis whitespace-nowrap" :class="{ 'font-mono': toolMonospace(msg) }">{{ toolSummaryFor(msg) }}</span>
+              <PhCircleNotch v-if="toolStatus(msg) === 'running'" :size="10" class="tool-status-icon tool-spin flex-shrink-0" />
+              <PhWarningCircle v-else-if="toolStatus(msg) === 'failed'" :size="10" class="tool-status-icon flex-shrink-0 text-destructive" />
+              <span v-if="msg.toolOutput && !msg.toolExpanded" class="max-w-[220px] flex-shrink overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">{{ msg.toolOutput.split('\n')[0].slice(0, 60) }}</span>
             </div>
           </div>
-          <div v-if="msg.toolExpanded" class="agent-msg-row">
-            <div class="agent-avatar-spacer" />
-            <div class="tool-detail">
-              <div v-if="msg.toolInput && Object.keys(msg.toolInput).length" class="tool-detail-args">
-                <div v-for="k in ['file_path','command','pattern','url','description']" :key="k" v-show="msg.toolInput[k] !== undefined" class="tool-arg-row">
-                  <span class="tool-arg-key">{{ k }}</span><span class="tool-arg-val">{{ msg.toolInput[k] }}</span>
+          <div v-if="msg.toolExpanded" class="flex items-start gap-2.5 px-4 py-[3px]">
+            <div class="w-[26px] flex-shrink-0" />
+            <div class="flex flex-col gap-1.5">
+              <div v-if="msg.toolInput && Object.keys(msg.toolInput).length" class="flex flex-col gap-[3px]">
+                <div v-for="k in ['file_path','command','pattern','url','description']" :key="k" v-show="msg.toolInput[k] !== undefined" class="flex max-w-[min(560px,90vw)] gap-1.5 font-mono text-[10px]">
+                  <span class="flex-shrink-0 text-muted-foreground">{{ k }}</span><span class="overflow-hidden text-ellipsis whitespace-nowrap text-secondary-foreground">{{ msg.toolInput[k] }}</span>
                 </div>
                 <pre class="tool-args">{{ JSON.stringify(msg.toolInput, null, 2) }}</pre>
               </div>
@@ -282,38 +291,38 @@
 
         <!-- System info marker (permission requested, plan ready, etc.) -->
         <template v-else-if="msg.role === 'system-info'">
-          <div class="system-info-row">
-            <span class="system-info-pill">{{ msg.text }}</span>
+          <div class="flex justify-center px-4 py-1">
+            <span class="rounded-[20px] border border-white/[0.08] bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-white/35">{{ msg.text }}</span>
           </div>
         </template>
 
         <!-- Queued message placeholder -->
         <template v-else-if="msg.role === 'queued'">
-          <div class="user-msg-row">
-            <div class="bubble bubble-queued">
-              <PhClock :size="11" class="queued-icon" />
+          <div class="flex items-end justify-end gap-2 px-4 py-[3px]">
+            <div class="inline-flex max-w-[min(460px,85%)] items-center gap-1.5 rounded-[14px] border border-dashed border-white/[0.12] bg-white/[0.04] px-3 py-2 text-right text-[13px] text-white/30">
+              <PhClock :size="11" class="flex-shrink-0 text-white/25" />
               {{ msg.text }}
             </div>
-            <div class="user-avatar user-avatar-muted">U</div>
+            <div class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-[11px] font-bold text-white/70 opacity-35">U</div>
           </div>
         </template>
 
         <!-- Permission log -->
         <template v-else-if="msg.role === 'permission'">
-          <div class="agent-msg-row">
-            <div class="agent-avatar-spacer" />
-            <div class="bubble bubble-permission" :class="msg.text.startsWith('✓') ? 'perm-granted' : 'perm-rejected'">
-              <span class="perm-log-text">{{ msg.text }}</span>
+          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+            <div class="w-[26px] flex-shrink-0" />
+            <div class="bubble-permission" :class="msg.text.startsWith('✓') ? 'perm-granted' : 'perm-rejected'">
+              <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ msg.text }}</span>
             </div>
           </div>
         </template>
 
         <!-- Thinking -->
         <template v-else-if="msg.role === 'thinking'">
-          <div class="agent-msg-row">
-            <div class="agent-avatar-spacer" />
-            <details class="bubble-thinking">
-              <summary class="thinking-summary">Thinking…</summary>
+          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+            <div class="w-[26px] flex-shrink-0" />
+            <details class="max-w-[90%] rounded-lg border border-dashed border-white/[0.12] px-2.5 py-1 font-mono text-[11px] text-muted-foreground opacity-75">
+              <summary class="cursor-pointer select-none italic text-muted-foreground hover:text-white/70">Thinking…</summary>
               <pre class="thinking-body">{{ msg.text }}</pre>
             </details>
           </div>
@@ -321,11 +330,11 @@
 
         <!-- Assistant message -->
         <template v-else>
-          <div class="agent-msg-row">
-            <div class="agent-avatar">
+          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+            <div class="agent-avatar mt-0.5 flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-white shadow-[0_2px_6px_color-mix(in_srgb,var(--agent-accent,#ec4899)_28%,transparent)]">
               <component :is="currentAgentIcon" :size="14" :style="{ color: '#fff' }" />
             </div>
-            <div class="assistant-content">
+            <div class="min-w-0 flex-1 pt-1 text-[13px] leading-[1.65] text-foreground">
               <!-- eslint-disable-next-line vue/no-v-html -->
               <div class="md-body" v-html="renderMd(msg.text)" />
             </div>
@@ -333,8 +342,8 @@
         </template>
       </div>
 
-      <div v-if="busy && !hasPartialAssistant" class="chat-thinking">
-        <div class="agent-avatar agent-avatar-sm">
+      <div v-if="busy && !hasPartialAssistant" class="flex items-center gap-1.5 px-4 py-1.5">
+        <div class="agent-avatar flex h-[22px] w-[22px] items-center justify-center rounded-full text-white shadow-[0_2px_6px_color-mix(in_srgb,var(--agent-accent,#ec4899)_28%,transparent)]">
           <component :is="currentAgentIcon" :size="12" :style="{ color: '#fff' }" />
         </div>
         <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
@@ -342,37 +351,37 @@
     </div>
 
     <!-- Command suggestions dropdown -->
-    <div v-if="suggestions.length > 0" ref="suggestionsEl" class="cmd-suggestions">
+    <div v-if="suggestions.length > 0" ref="suggestionsEl" class="max-h-[200px] flex-shrink-0 overflow-y-auto border-t border-white/[0.07] bg-panel">
       <div
         v-for="(s, i) in suggestions"
         :key="s.name"
-        class="cmd-suggestion"
-        :class="{ selected: i === suggestionIdx }"
+        class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-white/5"
+        :class="{ '!bg-white/5': i === suggestionIdx }"
         @mousedown.prevent="applySuggestion(s.name)"
       >
-        <span class="cmd-name">/{{ s.name }}</span>
-        <span class="cmd-desc">{{ s.description }}</span>
+        <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-[#f472b6]">/{{ s.name }}</span>
+        <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-white/38">{{ s.description }}</span>
       </div>
     </div>
 
     <!-- @-mention file suggestions dropdown -->
-    <div v-if="atSuggestions.length > 0" class="cmd-suggestions">
+    <div v-if="atSuggestions.length > 0" class="max-h-[200px] flex-shrink-0 overflow-y-auto border-t border-white/[0.07] bg-panel">
       <div
         v-for="(p, i) in atSuggestions"
         :key="p"
-        class="cmd-suggestion"
-        :class="{ selected: i === atIdx }"
+        class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-white/5"
+        :class="{ '!bg-white/5': i === atIdx }"
         @mousedown.prevent="applyAtSuggestion(p)"
       >
-        <span class="cmd-name">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
-        <span class="cmd-desc">{{ p }}</span>
+        <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-[#f472b6]">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
+        <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-white/38">{{ p }}</span>
       </div>
     </div>
 
     <!-- Image previews above input -->
-    <div v-if="pendingImages.length > 0" class="pending-images">
-      <div v-for="(img, i) in pendingImages" :key="i" class="pending-img-wrap">
-        <img :src="img" class="pending-img" :alt="`Image ${i + 1}`" />
+    <div v-if="pendingImages.length > 0" class="flex flex-shrink-0 flex-wrap gap-1.5 px-3.5 pt-1.5">
+      <div v-for="(img, i) in pendingImages" :key="i" class="relative flex-shrink-0">
+        <img :src="img" class="block h-[72px] w-[72px] rounded-md border border-white/10 object-cover" :alt="`Image ${i + 1}`" />
         <button class="pending-img-remove" @click="pendingImages.splice(i, 1)" title="Remove">
           <PhX :size="9" weight="bold" />
         </button>
@@ -380,43 +389,43 @@
     </div>
 
     <!-- New-style input bar -->
-    <div v-if="!hideComposer" class="chat-input-wrap">
+    <div v-if="!hideComposer" class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
       <!-- Queued messages panel (Zed-style) -->
-      <div v-if="messageQueue.length > 0" class="queue-panel">
-        <div class="queue-header" @click="queueExpanded = !queueExpanded">
-          <PhCaretDown :size="10" class="queue-caret" :class="{ 'queue-caret-closed': !queueExpanded }" />
-          <span class="queue-title">{{ messageQueue.length }} Queued {{ messageQueue.length === 1 ? 'Message' : 'Messages' }}</span>
-          <button class="queue-clear-all" @click.stop="clearQueue" title="Clear All">Clear All</button>
+      <div v-if="messageQueue.length > 0" class="border-b border-white/[0.07] bg-[rgba(124,58,237,0.04)]">
+        <div class="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 hover:bg-white/[0.03]" @click="queueExpanded = !queueExpanded">
+          <PhCaretDown :size="10" class="text-white/40 transition-transform" :class="{ '-rotate-90': !queueExpanded }" />
+          <span class="flex-1 text-[11px] text-white/45">{{ messageQueue.length }} Queued {{ messageQueue.length === 1 ? 'Message' : 'Messages' }}</span>
+          <button class="border-none bg-transparent px-1 py-px text-[10px] text-white/30 hover:text-white/60" @click.stop="clearQueue" title="Clear All">Clear All</button>
         </div>
-        <div v-if="queueExpanded" class="queue-items">
-          <div v-for="(msg, i) in messageQueue" :key="i" class="queue-item">
-            <span class="queue-dot">•</span>
-            <span class="queue-text">{{ msg }}</span>
+        <div v-if="queueExpanded" class="flex flex-col gap-[3px] px-2.5 pb-1.5">
+          <div v-for="(msg, i) in messageQueue" :key="i" class="flex items-center gap-1.5 py-[3px]">
+            <span class="flex-shrink-0 text-xs text-[rgba(124,58,237,0.7)]">•</span>
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-white/50">{{ msg }}</span>
             <button class="queue-item-btn" @click="removeQueued(i)" title="Remove"><PhX :size="10" /></button>
-            <button class="queue-item-btn queue-send-now" @click="sendQueuedNow(i)" title="Send Now">Send Now <kbd>↵</kbd></button>
+            <button class="queue-item-btn !text-[rgba(124,58,237,0.8)] !border-[rgba(124,58,237,0.3)] hover:!text-[rgba(124,58,237,1)] hover:!border-[rgba(124,58,237,0.6)]" @click="sendQueuedNow(i)" title="Send Now">Send Now <kbd>↵</kbd></button>
           </div>
         </div>
       </div>
       <!-- Working indicator — sits above the textarea, only when busy -->
-      <div v-if="busy" class="working-indicator">
+      <div v-if="busy" class="flex items-center gap-1.5 border-b border-white/5 px-3 pb-1 pt-1.5">
         <span class="working-dot" /><span class="working-dot" /><span class="working-dot" />
-        <span class="working-label">{{ currentActivity }}</span>
+        <span class="text-[11px] italic text-white/35">{{ currentActivity }}</span>
       </div>
-      <div class="chat-input-box" :class="{ 'input-queued': busy && inputText.trim() }">
+      <div class="chat-input-box overflow-hidden rounded-[10px] border border-white/10 transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));">
         <textarea
           ref="inputEl"
           v-model="inputText"
-          class="chat-input"
+          class="chat-input box-border block max-h-40 min-h-10 w-full resize-none overflow-y-auto border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-white/88 outline-none placeholder:text-white/30"
           :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
           rows="1"
           @keydown="onKeydown"
           @input="onInput"
           @paste="onPaste"
         />
-        <div class="chat-input-toolbar">
+        <div class="flex items-center justify-between gap-1.5 px-2 pb-2 pt-1.5">
           <!-- Left: share selection, model dropdown, perm mode -->
-          <div class="toolbar-left">
-            <img v-if="avatarSrc" :src="avatarSrc" class="toolbar-avatar" alt="Manager" />
+          <div class="flex items-center gap-1">
+            <img v-if="avatarSrc" :src="avatarSrc" class="toolbar-avatar mr-0.5 h-[22px] w-[22px] flex-shrink-0 rounded-full border border-border object-cover [object-position:center_18%]" alt="Manager" />
             <button
               v-if="editorCtx.selection"
               class="toolbar-btn"
@@ -611,8 +620,8 @@
           </div>
 
           <!-- Right: cost badge + abort/send -->
-          <div class="toolbar-right">
-            <span v-if="sessionCost > 0 && !busy" class="toolbar-cost">${{ sessionCost.toFixed(4) }}</span>
+          <div class="flex items-center gap-1.5">
+            <span v-if="sessionCost > 0 && !busy" class="px-1 font-mono text-[10px] text-white/30">${{ sessionCost.toFixed(4) }}</span>
             <button v-if="busy" class="send-btn send-btn-abort" title="Abort (Esc)" @click="abortTurn">
               <PhStop :size="14" weight="bold" />
             </button>
@@ -632,15 +641,15 @@
       </div>
 
       <!-- Context usage bar -->
-      <div v-if="contextUsageRatio > 0" class="ctx-usage-bar-wrap" :title="`${turnStats?.inputTokens.toLocaleString()} / ${CONTEXT_MAX.toLocaleString()} tokens`">
-        <div class="ctx-usage-bar" :class="contextUsageClass" :style="{ width: (contextUsageRatio * 100) + '%' }" />
+      <div v-if="contextUsageRatio > 0" class="h-0.5 overflow-hidden bg-white/[0.06]" :title="`${turnStats?.inputTokens.toLocaleString()} / ${CONTEXT_MAX.toLocaleString()} tokens`">
+        <div class="ctx-usage-bar h-full rounded-[1px] transition-[width]" :class="contextUsageClass" :style="{ width: (contextUsageRatio * 100) + '%' }" />
       </div>
 
       <!-- Status line below input — hidden when nothing to show -->
-      <div v-show="fiveHourWindow" class="status-line" style="position:relative;z-index:1;">
-        <span v-if="fiveHourWindow" class="status-item" :title="'5h usage window'">5h: {{ fiveHourWindow }}</span>
-        <span class="status-spacer" />
-        <span v-if="turnStats" class="status-item status-muted">
+      <div v-show="fiveHourWindow" class="relative z-[1] flex flex-shrink-0 items-center gap-2 border-t border-white/[0.06] px-2.5 py-[3px] min-h-[22px]">
+        <span v-if="fiveHourWindow" class="whitespace-nowrap font-mono text-[10px] text-white/38" :title="'5h usage window'">5h: {{ fiveHourWindow }}</span>
+        <span class="flex-1" />
+        <span v-if="turnStats" class="whitespace-nowrap font-mono text-[10px] text-white/28">
           {{ turnStats.inputTokens.toLocaleString() }}↑ {{ turnStats.outputTokens.toLocaleString() }}↓
         </span>
       </div>
@@ -648,22 +657,22 @@
     </div><!-- end .chat-main -->
 
     <!-- Session browser modal -->
-    <div v-if="sessionBrowserOpen" class="session-browser-overlay" @click.self="sessionBrowserOpen = false">
-      <div class="session-browser-modal">
-        <div class="session-browser-header">
+    <div v-if="sessionBrowserOpen" class="absolute inset-0 z-[200] flex items-center justify-center bg-black/50" @click.self="sessionBrowserOpen = false">
+      <div class="flex max-h-[60vh] w-[420px] flex-col overflow-y-auto rounded-lg border border-border" style="background: var(--bg2, #1e1e1e);">
+        <div class="flex items-center justify-between border-b border-border px-3.5 py-2.5 font-semibold">
           <span>Recent sessions</span>
-          <button @click="sessionBrowserOpen = false">✕</button>
+          <button class="cursor-pointer border-none bg-transparent text-foreground" @click="sessionBrowserOpen = false">✕</button>
         </div>
-        <div v-if="sessionBrowserLoading" class="session-browser-empty">Loading…</div>
-        <div v-else-if="!sessionBrowserItems.length" class="session-browser-empty">No sessions found for this project.</div>
+        <div v-if="sessionBrowserLoading" class="px-3.5 py-5 text-muted-foreground">Loading…</div>
+        <div v-else-if="!sessionBrowserItems.length" class="px-3.5 py-5 text-muted-foreground">No sessions found for this project.</div>
         <div
           v-for="s in sessionBrowserItems"
           :key="s.session_id"
-          class="session-browser-item"
+          class="flex cursor-pointer flex-col gap-0.5 border-b border-[var(--border-faint,#2a2a2a)] px-3.5 py-2.5 hover:bg-hover"
           @click="pickSession(s.session_id)"
         >
-          <span class="session-preview">{{ s.first_message }}</span>
-          <span class="session-meta">{{ s.updated_at }} · {{ s.session_id.slice(0, 8) }}</span>
+          <span class="text-[13px] text-foreground">{{ s.first_message }}</span>
+          <span class="text-[11px] text-muted-foreground">{{ s.updated_at }} · {{ s.session_id.slice(0, 8) }}</span>
         </div>
       </div>
     </div>
@@ -2646,10 +2655,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 
 <style scoped>
 .claude-chat {
-  display: flex;
-  flex-direction: row;
-  height: 100%;
-  overflow: hidden;
   /* Inherit the app theme (set as :root vars by the ui store); fall back to the
      original dark palette when a var is absent. */
   --chat-bg: var(--bg-base, #0f0f11);
@@ -2661,128 +2666,19 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   --chat-muted: var(--text-muted, rgba(255,255,255,0.42));
   --chat-user-bg: color-mix(in srgb, var(--chat-accent) 14%, var(--chat-bg));
   --chat-user-border: color-mix(in srgb, var(--chat-accent) 35%, transparent);
-  background: var(--chat-bg);
-}
-
-.chat-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--chat-bg);
 }
 
 .diff-line { line-height: 1.5; }
-.diff-add { color: var(--green); }
-.diff-del { color: var(--red); }
-
-/* Toggle button badge (legacy) */
-.changes-badge {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  min-width: 12px;
-  height: 12px;
-  padding: 0 3px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 7px;
-  font-weight: 700;
-  border-radius: 6px;
-  line-height: 12px;
-  text-align: center;
-  pointer-events: none;
-}
+.diff-add { color: var(--success); }
+.diff-del { color: var(--destructive); }
 
 .chat-header-btn { position: relative; }
 
-.chat-header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 14px;
-  border-bottom: 1px solid var(--chat-border);
-  flex-shrink: 0;
-  background: var(--chat-surface);
-}
-
-.chat-header-icon { color: #d97706; flex-shrink: 0; }
-
-.chat-header-title {
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--text-primary);
-  letter-spacing: 0.02em;
-}
-
-.chat-runtime {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  border: 1px solid color-mix(in srgb, var(--green, #22c55e) 35%, transparent);
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
 .chat-runtime-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--green, #22c55e);
-  box-shadow: 0 0 7px color-mix(in srgb, var(--green, #22c55e) 75%, transparent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--success, #22c55e) 75%, transparent);
 }
 
-.chat-header-cwd {
-  flex: 1;
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-header-model {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-secondary, var(--text-primary));
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--agent-accent, #a855f7) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--agent-accent, #a855f7) 30%, transparent);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.chat-header-model-ver {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.chat-header-btn {
-  background: none;
-  border: none;
-  color: rgba(255,255,255,0.45);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  border-radius: 5px;
-  transition: color .12s, background .12s;
-}
-.chat-header-btn:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.07); }
 .btn-danger-active { color: #ef4444 !important; background: rgba(239,68,68,0.15) !important; }
-.perm-mode-btn { width: auto !important; gap: 4px; padding: 0 7px; }
-.perm-mode-label { font-size: 10px; font-weight: 600; }
-.perm-mode-caret { opacity: .6; margin-left: -1px; }
 .btn-active { color: #f472b6 !important; background: rgba(124,58,237,0.15) !important; }
 
 /* Permission-mode dropdown */
@@ -2821,38 +2717,19 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .perm-mode-item-danger { color: #ef4444; }
 .perm-mode-item-danger:hover { background: rgba(239,68,68,0.12); }
 .perm-mode-item-danger.perm-mode-item-active { color: #ef4444; background: rgba(239,68,68,0.12); }
+.perm-mode-label { font-size: 10px; font-weight: 600; }
+.perm-mode-caret { opacity: .6; margin-left: -1px; }
 
-/* Permission banner */
-.permission-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px 10px 14px;
-  margin: 8px 12px 2px;
-  background: color-mix(in srgb, #f59e0b 12%, var(--bg-panel));
-  border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
-  border-left: 3px solid #f59e0b;
-  border-radius: 10px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
-  flex-shrink: 0;
-  animation: perm-slide-in 0.15s ease-out;
-}
+/* Permission-gate banners: shared animation */
+.perm-slide-in { animation: perm-slide-in 0.15s ease-out; }
 @keyframes perm-slide-in {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.perm-icon { color: #f59e0b; flex-shrink: 0; }
-.perm-body { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.perm-title { font-size: 11px; font-weight: 600; color: var(--text-primary); }
-.perm-detail {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
+
+/* Shared perm-btn design system, reused across every permission/diff/plan/
+   question/ACP banner — kept as real classes rather than repeating these
+   color/state combinations as Tailwind utilities at every call site. */
 .perm-btn {
   display: flex;
   align-items: center;
@@ -2874,18 +2751,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .perm-deny  { background: #b91c1c; color: #fff; }
 .perm-neutral { background: color-mix(in srgb, var(--agent-accent, #a855f7) 20%, var(--bg-panel)); color: var(--text-primary); border: 1px solid color-mix(in srgb, var(--agent-accent, #a855f7) 35%, transparent); }
 .perm-btn:disabled { opacity: 0.4; cursor: default; filter: none; }
-
-/* ACP permission banner: real adapter options + optional plan/diff body */
-.acp-perm-banner { flex-direction: column; align-items: stretch; gap: 8px; }
-.acp-perm-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.acp-perm-head .perm-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.acp-perm-plan { background: color-mix(in srgb, #10b981 10%, var(--bg-panel)); border-color: color-mix(in srgb, #10b981 28%, transparent); border-left-color: #10b981; }
-.acp-perm-plan .perm-icon { color: #10b981; }
-.acp-perm-diff { background: var(--bg-panel); border-color: color-mix(in srgb, #6366f1 28%, transparent); border-left-color: #6366f1; }
-.acp-perm-diff .perm-icon { color: #818cf8; }
-.acp-perm-plan .plan-body { max-height: 320px; overflow: auto; }
-.acp-perm-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.acp-perm-actions .perm-btn { flex: 0 1 auto; }
 .perm-kbd {
   font-size: 9px;
   font-family: var(--font-mono);
@@ -2895,270 +2760,52 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   padding: 1px 4px;
   line-height: 1.4;
 }
-
-/* ── File-edit diff banner ─────────────────────────────────────────────── */
-.diff-banner {
-  flex-shrink: 0;
-  margin: 8px 12px 2px;
-  background: var(--bg-panel);
-  border: 1px solid color-mix(in srgb, #6366f1 28%, transparent);
-  border-left: 3px solid #6366f1;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
-  animation: perm-slide-in 0.15s ease-out;
-}
-.diff-banner-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
-.diff-banner-head .perm-icon { color: #818cf8; }
-.diff-spacer { flex: 1; }
-.diff-banner-body {
-  margin: 0;
-  max-height: 220px;
-  overflow: auto;
-  padding: 6px 12px 10px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
-}
-.diff-banner-body .diff-line { display: block; white-space: pre-wrap; word-break: break-all; }
-
-/* ── ExitPlanMode banner ───────────────────────────────────────────────── */
-.plan-banner {
-  flex-shrink: 0;
-  padding: 11px 13px;
-  margin: 8px 12px 2px;
-  background: color-mix(in srgb, #10b981 10%, var(--bg-panel));
-  border: 1px solid color-mix(in srgb, #10b981 28%, transparent);
-  border-left: 3px solid #10b981;
-  border-radius: 10px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
-  animation: perm-slide-in 0.15s ease-out;
-}
-.plan-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
-.plan-head .perm-icon { color: #10b981; }
-.plan-body { max-height: 260px; overflow: auto; font-size: 12px; color: var(--text-primary); }
-.plan-feedback {
+.perm-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
-  margin: 8px 0;
-  resize: vertical;
-  background: var(--bg-base);
-  border: 1px solid var(--border-subtle, rgba(255,255,255,0.1));
+  padding: 6px 10px;
+  background: none;
+  border: none;
   border-radius: 5px;
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  padding: 6px 8px;
-  box-sizing: border-box;
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  text-align: left;
 }
-.plan-actions, .question-actions { display: flex; gap: 8px; justify-content: flex-end; }
-
-/* ── AskUserQuestion banner ────────────────────────────────────────────── */
-.question-banner {
-  flex-shrink: 0;
-  padding: 11px 13px;
-  margin: 8px 12px 2px;
-  background: color-mix(in srgb, #3b82f6 10%, var(--bg-panel));
-  border: 1px solid color-mix(in srgb, #3b82f6 28%, transparent);
-  border-left: 3px solid #3b82f6;
-  border-radius: 10px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
-  animation: perm-slide-in 0.15s ease-out;
-}
-.question-block { margin-bottom: 10px; }
-.question-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; flex-wrap: wrap; }
-.question-chip {
-  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-  background: color-mix(in srgb, #3b82f6 25%, transparent); color: #93c5fd;
-  border-radius: 4px; padding: 2px 6px;
-}
-.question-text { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-.question-multi { font-size: 9px; color: var(--text-secondary); font-style: italic; }
-.question-options { display: flex; flex-direction: column; gap: 5px; }
-.question-opt {
-  display: flex; flex-direction: column; gap: 1px; text-align: left;
-  background: var(--bg-base);
-  border: 1px solid var(--border-subtle, rgba(255,255,255,0.12));
-  border-radius: 6px; padding: 7px 10px; cursor: pointer;
-  transition: border-color .1s, background .1s;
-}
-.question-opt:hover { border-color: color-mix(in srgb, #3b82f6 55%, transparent); }
-.question-opt.picked {
-  border-color: #3b82f6;
-  background: color-mix(in srgb, #3b82f6 16%, var(--bg-base));
-}
-.opt-label { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-.opt-desc { font-size: 10px; color: var(--text-secondary); }
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 0 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  scroll-behavior: smooth;
+.perm-dropdown-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
+.perm-pattern {
+  font-size: 10px;
+  color: rgba(255,255,255,0.45);
+  background: rgba(255,255,255,0.07);
+  border-radius: 3px;
+  padding: 1px 4px;
 }
 
-.chat-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  text-align: center;
-  padding: 40px 24px;
-}
-.chat-empty-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--agent-accent, #ec4899) 72%, #16161a);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  margin-bottom: 8px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-accent, #ec4899) 36%, transparent);
-}
-.chat-empty-kicker { color: var(--chat-muted); font: 600 9px/1 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
-.chat-empty-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--chat-text, rgba(255,255,255,0.88));
-}
-.chat-empty-sub { font-size: 11px; font-family: var(--font-mono); color: var(--chat-muted, rgba(255,255,255,0.42)); margin-top: 2px; }
-
-/* Row layouts */
-.user-msg-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 3px 16px;
-}
-.agent-msg-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 3px 16px;
-}
+/* ACP permission banner variants (plan / diff icon+border tint) */
+.acp-perm-plan .perm-icon { color: #10b981; }
+.acp-perm-diff .perm-icon { color: #818cf8; }
+.acp-perm-plan .plan-body { max-height: 320px; overflow: auto; }
 
 /* Avatars */
-.user-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.15);
-  color: rgba(255,255,255,0.7);
-  font-size: 11px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
 .agent-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
   background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--agent-accent, #ec4899) 80%, #fff) 0%, var(--agent-accent, #ec4899) 60%, color-mix(in srgb, var(--agent-accent, #ec4899) 55%, #000) 100%);
-  display: flex;
+}
+
+.mention-pill {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  color: #fff;
-  flex-shrink: 0;
-  margin-top: 2px;
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--agent-accent, #ec4899) 28%, transparent);
+  gap: 3px;
+  padding: 1px 6px;
+  margin: 0 1px;
+  background: rgba(124,58,237,0.18);
+  border: 1px solid rgba(124,58,237,0.35);
+  border-radius: 10px;
+  font-size: 0.92em;
+  vertical-align: baseline;
 }
-.agent-avatar-sm {
-  width: 22px;
-  height: 22px;
-  margin-top: 0;
-}
-.agent-avatar-spacer {
-  width: 26px;
-  flex-shrink: 0;
-}
-
-/* User bubble */
-.bubble-user {
-  max-width: 72%;
-  padding: 10px 14px;
-  border-radius: 16px 16px 5px 16px;
-  font-size: 13px;
-  line-height: 1.55;
-  word-break: break-word;
-  background: var(--chat-user-bg, #1e1b2e);
-  border: 1px solid var(--chat-user-border, rgba(124,58,237,0.35));
-  color: var(--chat-text, rgba(255,255,255,0.88));
-  box-shadow: 0 2px 10px rgba(0,0,0,0.22);
-}
-
-.msg-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 6px;
-}
-.msg-img {
-  max-width: 200px;
-  max-height: 160px;
-  object-fit: cover;
-  border-radius: 5px;
-  display: block;
-}
-
-/* Assistant message — no bubble, just content */
-.assistant-content {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--chat-text, rgba(255,255,255,0.88));
-  padding-top: 4px;
-}
-
-.partial-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 13px;
-  background: var(--agent-accent, var(--chat-accent, #ec4899));
-  vertical-align: middle;
-  margin-left: 2px;
-  animation: blink 1s step-end infinite;
-}
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-
-/* Thinking */
-.bubble-thinking {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--chat-muted, rgba(255,255,255,0.42));
-  border: 1px dashed rgba(255,255,255,0.12);
-  border-radius: 8px;
-  padding: 4px 10px;
-  max-width: 90%;
-  opacity: 0.75;
-}
-.thinking-summary {
-  cursor: pointer;
-  color: var(--chat-muted, rgba(255,255,255,0.42));
-  font-style: italic;
-  user-select: none;
-}
-.thinking-summary:hover { color: rgba(255,255,255,0.7); }
-.thinking-body {
-  margin: 6px 0 2px;
-  white-space: pre-wrap;
-  color: var(--chat-muted, rgba(255,255,255,0.42));
-  font-size: 10px;
-  line-height: 1.4;
-  max-height: 200px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
+.mention-pill-icon { color: rgba(167,139,250,0.95); flex-shrink: 0; }
 
 /* Tool row — quiet activity-log line, expandable */
 .tool-row {
@@ -3183,8 +2830,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 .tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 32%, transparent); }
 .tool-row-failed {
-  background: color-mix(in srgb, var(--red, #ef4444) 8%, transparent);
-  border-color: color-mix(in srgb, var(--red, #ef4444) 30%, transparent);
+  background: color-mix(in srgb, var(--destructive, #ef4444) 8%, transparent);
+  border-color: color-mix(in srgb, var(--destructive, #ef4444) 30%, transparent);
 }
 .tool-caret {
   flex-shrink: 0;
@@ -3193,33 +2840,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 .tool-caret-open { transform: rotate(90deg); }
 .tool-icon { color: var(--agent-accent, #ec4899); flex-shrink: 0; }
-.tool-row-failed .tool-icon { color: var(--red, #ef4444); }
-.tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-name-mono { font-family: var(--font-mono); }
+.tool-row-failed .tool-icon { color: var(--destructive, #ef4444); }
 .tool-status-icon { flex-shrink: 0; }
 .tool-spin { animation: tool-spin 0.9s linear infinite; color: var(--agent-accent, #ec4899); }
-.tool-status-failed { color: var(--red, #ef4444); }
 @keyframes tool-spin { to { transform: rotate(360deg); } }
-.tool-output-preview {
-  color: var(--text-muted, rgba(255,255,255,0.3));
-  font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
-  flex-shrink: 1;
-}
-.tool-detail { display: flex; flex-direction: column; gap: 6px; }
-.tool-detail-args { display: flex; flex-direction: column; gap: 3px; }
-.tool-arg-row {
-  display: flex;
-  gap: 6px;
-  font-size: 10px;
-  font-family: var(--font-mono);
-  max-width: min(560px, 90vw);
-}
-.tool-arg-key { color: var(--text-muted); flex-shrink: 0; }
-.tool-arg-val { color: var(--text-secondary, var(--text-primary)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-args {
   margin: 0;
   padding: 8px 12px;
@@ -3238,8 +2862,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .tool-output {
   margin: 0;
   padding: 8px 12px;
-  background: color-mix(in srgb, var(--green, #16a34a) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--green, #16a34a) 16%, transparent);
+  background: color-mix(in srgb, var(--success, #16a34a) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 16%, transparent);
   border-radius: 8px;
   font-size: 10px;
   font-family: var(--font-mono);
@@ -3251,108 +2875,35 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   max-width: min(560px, 90vw);
 }
 .tool-output-failed {
-  background: color-mix(in srgb, var(--red, #ef4444) 6%, transparent);
-  border-color: color-mix(in srgb, var(--red, #ef4444) 20%, transparent);
+  background: color-mix(in srgb, var(--destructive, #ef4444) 6%, transparent);
+  border-color: color-mix(in srgb, var(--destructive, #ef4444) 20%, transparent);
 }
 
-/* System info markers (permission/plan in feed) */
-.system-info-row {
-  display: flex;
-  justify-content: center;
-  padding: 4px 16px;
-}
-.system-info-pill {
-  font-size: 11px;
-  color: rgba(255,255,255,0.35);
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 20px;
-  padding: 2px 10px;
-}
-
-/* Queued message placeholder */
-.bubble-queued {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px dashed rgba(255,255,255,0.12);
-  border-radius: 14px;
-  font-size: 13px;
-  color: rgba(255,255,255,0.3);
-  max-width: min(460px, 85%);
-  text-align: right;
-}
-.queued-icon { color: rgba(255,255,255,0.25); flex-shrink: 0; }
-.user-avatar-muted { opacity: 0.35; }
-
-/* Working indicator above input */
-.working-indicator {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px 4px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-.working-dot {
+/* Working / thinking dots */
+.working-dot, .thinking-dot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
   background: rgba(124,58,237,0.7);
   animation: thinking 1.2s ease-in-out infinite;
 }
-.working-dot:nth-child(2) { animation-delay: 0.2s; }
-.working-dot:nth-child(3) { animation-delay: 0.4s; }
-.working-label {
-  font-size: 11px;
-  color: rgba(255,255,255,0.35);
-  font-style: italic;
+.thinking-dot { width: 5px; height: 5px; background: rgba(124,58,237,0.6); }
+.working-dot:nth-child(2), .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+.working-dot:nth-child(3), .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinking { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+.thinking-body {
+  margin: 6px 0 2px;
+  white-space: pre-wrap;
+  color: var(--chat-muted, rgba(255,255,255,0.42));
+  font-size: 10px;
+  line-height: 1.4;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
-/* Cost badge in toolbar */
-.toolbar-cost {
-  font-size: 10px;
-  color: rgba(255,255,255,0.3);
-  font-family: var(--font-mono);
-  padding: 0 4px;
-}
-
-/* Queue panel */
-.queue-panel {
-  border-bottom: 1px solid rgba(255,255,255,0.07);
-  background: rgba(124,58,237,0.04);
-}
-.queue-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  cursor: pointer;
-  user-select: none;
-}
-.queue-header:hover { background: rgba(255,255,255,0.03); }
-.queue-caret { color: rgba(255,255,255,0.4); transition: transform .15s; }
-.queue-caret-closed { transform: rotate(-90deg); }
-.queue-title { font-size: 11px; color: rgba(255,255,255,0.45); flex: 1; }
-.queue-clear-all {
-  font-size: 10px;
-  color: rgba(255,255,255,0.3);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 1px 4px;
-}
-.queue-clear-all:hover { color: rgba(255,255,255,0.6); }
-.queue-items { padding: 0 10px 6px; display: flex; flex-direction: column; gap: 3px; }
-.queue-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 0;
-}
-.queue-dot { color: rgba(124,58,237,0.7); font-size: 12px; flex-shrink: 0; }
-.queue-text { font-size: 12px; color: rgba(255,255,255,0.5); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Queue item action buttons */
 .queue-item-btn {
   font-size: 10px;
   color: rgba(255,255,255,0.3);
@@ -3367,86 +2918,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   flex-shrink: 0;
 }
 .queue-item-btn:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.25); }
-.queue-send-now { color: rgba(124,58,237,0.8); border-color: rgba(124,58,237,0.3); }
-.queue-send-now:hover { color: rgba(124,58,237,1); border-color: rgba(124,58,237,0.6); }
 
-/* Inline @file mention pill (rendered in the user bubble) */
-.mention-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 6px;
-  margin: 0 1px;
-  background: rgba(124,58,237,0.18);
-  border: 1px solid rgba(124,58,237,0.35);
-  border-radius: 10px;
-  font-size: 0.92em;
-  vertical-align: baseline;
-}
-.mention-pill-icon { color: rgba(167,139,250,0.95); flex-shrink: 0; }
-
-/* Context usage bar */
-.ctx-usage-bar-wrap {
-  height: 2px;
-  background: rgba(255,255,255,0.06);
-  overflow: hidden;
-}
-.ctx-usage-bar {
-  height: 100%;
-  transition: width 0.5s ease;
-  border-radius: 1px;
-}
+/* Context usage bar fill colors */
 .ctx-usage-bar.ctx-ok { background: rgba(124,58,237,0.5); }
 .ctx-usage-bar.ctx-warning { background: rgba(234,179,8,0.7); }
 .ctx-usage-bar.ctx-exceeded { background: rgba(239,68,68,0.8); }
 
-/* Permission dropdown */
-.perm-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.perm-allow-group { position: relative; display: flex; }
-.perm-caret-btn {
-  padding: 3px 5px !important;
-  border-left: 1px solid rgba(255,255,255,0.12) !important;
-  border-radius: 0 6px 6px 0 !important;
-}
-.perm-allow-group .perm-allow:first-child { border-radius: 6px 0 0 6px !important; }
-.perm-dropdown {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  right: 0;
-  background: #1e1e2e;
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 8px;
-  padding: 4px;
-  min-width: 200px;
-  z-index: 100;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-}
-.perm-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 10px;
-  background: none;
-  border: none;
-  border-radius: 5px;
-  font-size: 12px;
-  color: rgba(255,255,255,0.7);
-  cursor: pointer;
-  text-align: left;
-}
-.perm-dropdown-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
-.perm-dropdown-deny { color: rgba(239,68,68,0.8) !important; }
-.perm-dropdown-deny:hover { background: rgba(239,68,68,0.1) !important; }
-.perm-pattern {
-  font-size: 10px;
-  color: rgba(255,255,255,0.45);
-  background: rgba(255,255,255,0.07);
-  border-radius: 3px;
-  padding: 1px 4px;
-}
-
-/* Permission log */
+/* Permission log bubble */
 .bubble-permission {
   display: inline-flex;
   align-items: center;
@@ -3469,159 +2947,11 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   border: 1px solid rgba(185,28,28,0.3);
   color: #f87171;
 }
-.perm-log-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.chat-thinking {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-}
-.thinking-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: rgba(124,58,237,0.6);
-  animation: thinking 1.2s ease-in-out infinite;
-}
-.thinking-dot:nth-child(2) { animation-delay: 0.2s; }
-.thinking-dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes thinking { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
-
-/* Status line */
-.status-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 10px;
-  border-top: 1px solid rgba(255,255,255,0.06);
-  flex-shrink: 0;
-  min-height: 22px;
-}
-
-.status-spacer { flex: 1; }
-
-.status-item {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: rgba(255,255,255,0.38);
-  white-space: nowrap;
-}
-
-.status-muted { color: rgba(255,255,255,0.28); }
-.status-cost { color: #f472b6; }
-.status-busy { color: #f472b6; animation: blink 1s step-end infinite; }
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-.status-queued { color: rgba(255,255,255,0.3); font-family: var(--font-mono); }
 
 /* Command suggestions */
-.cmd-suggestions {
-  border-top: 1px solid rgba(255,255,255,0.07);
-  background: #18181c;
-  max-height: 200px;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-
-.cmd-suggestion {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: background .1s;
-}
-.cmd-suggestion:hover,
 .cmd-suggestion.selected { background: rgba(255,255,255,0.05); }
 
-.cmd-name {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  color: #f472b6;
-  flex-shrink: 0;
-  min-width: 100px;
-}
-
-.cmd-desc {
-  font-size: 11px;
-  color: rgba(255,255,255,0.38);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* New-style input wrap */
-.chat-input-wrap {
-  padding: 10px 18px 8px;
-  flex-shrink: 0;
-  background: var(--chat-bg);
-}
-
-.chat-input-box {
-  background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 10px;
-  overflow: hidden;
-  transition: border-color .15s, box-shadow .15s;
-}
-.chat-input-box:focus-within {
-  border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 55%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, #ec4899) 15%, transparent);
-}
-.input-queued { border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 40%, transparent) !important; }
-
-.chat-input {
-  display: block;
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: rgba(255,255,255,0.88);
-  font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1.5;
-  outline: none;
-  padding: 10px 12px 4px;
-  resize: none;
-  min-height: 40px;
-  max-height: 160px;
-  overflow-y: auto;
-  scrollbar-width: none;
-  box-sizing: border-box;
-}
-.chat-input::-webkit-scrollbar { display: none; }
-.chat-input::placeholder { color: rgba(255,255,255,0.3); }
-
-.chat-input-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 8px 8px;
-  gap: 6px;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.toolbar-avatar {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  object-fit: cover;
-  object-position: center 18%;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.18));
-  flex-shrink: 0;
-  margin-right: 2px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
+/* Input toolbar buttons */
 .toolbar-btn {
   background: none;
   border: none;
@@ -3656,7 +2986,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
-
 .floating-menu-item {
   display: flex;
   align-items: center;
@@ -3676,28 +3005,16 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 .floating-menu-item:hover { background: rgba(255,255,255,0.06); }
 .floating-menu-item-active { color: #f472b6; background: rgba(124,58,237,0.12); }
-
 .model-id-hint {
   font-size: 9px;
   font-family: var(--font-mono);
   color: rgba(255,255,255,0.3);
   margin-left: 6px;
 }
-
-/* Agent switcher in the chat header */
-.agent-dropdown { position: relative; display: inline-flex; }
-.chat-header-agent { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; width: auto; }
-.chat-header-agent .agent-name { font-size: 11px; font-weight: 500; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .floating-menu-item > .model-id-hint { margin-left: auto; }
-.floating-menu-config { color: rgba(255,255,255,0.55); border-top: 1px solid rgba(255,255,255,0.08); border-radius: 0 0 7px 7px; margin-top: 2px; gap: 6px; justify-content: flex-start; }
 
+.agent-dropdown { position: relative; display: inline-flex; }
 .acp-history-menu { min-width: 280px; max-width: 360px; max-height: 320px; overflow-y: auto; }
-.acp-history-head { padding: 4px 10px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(255,255,255,0.35); }
-.acp-history-item { flex-direction: column; align-items: flex-start; gap: 2px; }
-.acp-history-row { display: flex; align-items: center; gap: 6px; max-width: 100%; }
-.acp-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.acp-history-item > .model-id-hint { margin-left: 18px; }
-.acp-history-empty { padding: 10px; font-size: 11px; color: rgba(255,255,255,0.4); text-align: center; }
 
 /* Send button */
 .send-btn {
@@ -3720,29 +3037,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .send-btn-abort { background: #dc2626; }
 .send-btn-abort:hover:not(:disabled) { background: #b91c1c; }
 
-/* Pending image previews */
-.pending-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 14px 0;
-  flex-shrink: 0;
-}
-
-.pending-img-wrap {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.pending-img {
-  width: 72px;
-  height: 72px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.1);
-  display: block;
-}
-
 .pending-img-remove {
   position: absolute;
   top: -5px;
@@ -3762,14 +3056,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 .pending-img-remove:hover { color: #f87171; background: rgba(185,28,28,0.2); }
 
-/* Markdown body inside assistant messages */
-.md-body {
-  font-family: var(--font-ui);
-  font-size: 13px;
-  color: rgba(255,255,255,0.88);
-  line-height: 1.65;
-  white-space: normal;
-}
+.chat-input::-webkit-scrollbar { display: none; }
+
+/* Markdown body inside assistant messages — v-html content, needs real
+   selectors (:deep) since these elements aren't authored in this SFC. */
 .md-body :deep(p) { margin: 0 0 10px; }
 .md-body :deep(p:last-child) { margin-bottom: 0; }
 .md-body :deep(ul), .md-body :deep(ol) { margin: 4px 0 10px; padding-left: 20px; }
@@ -3787,60 +3077,4 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .md-body :deep(table) { border-collapse: collapse; font-size: 12px; margin: 8px 0; }
 .md-body :deep(th), .md-body :deep(td) { border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; }
 .md-body :deep(th) { background: rgba(255,255,255,0.05); font-weight: 600; }
-
-.session-browse-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  opacity: 0.6;
-  font-size: 14px;
-  padding: 2px 4px;
-}
-.session-browse-btn:hover { opacity: 1; }
-
-.session-browser-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-.session-browser-modal {
-  background: var(--bg2, #1e1e1e);
-  border: 1px solid var(--border, #333);
-  border-radius: 8px;
-  width: 420px;
-  max-height: 60vh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-.session-browser-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border, #333);
-  font-weight: 600;
-}
-.session-browser-header button {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--fg, #ccc);
-}
-.session-browser-item {
-  padding: 10px 14px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--border-faint, #2a2a2a);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.session-browser-item:hover { background: var(--bg3, #252525); }
-.session-preview { font-size: 13px; color: var(--fg, #ccc); }
-.session-meta { font-size: 11px; color: var(--fg-muted, #666); }
-.session-browser-empty { padding: 20px 14px; color: var(--fg-muted, #666); }
 </style>
