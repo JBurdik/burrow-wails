@@ -221,6 +221,13 @@ func runningAppBundle() (string, error) {
 	if !strings.HasSuffix(bundle, ".app") {
 		return "", fmt.Errorf("not running from a .app bundle (%s) — self-update only works on an installed app", bundle)
 	}
+	// Gatekeeper runs a still-quarantined app from a read-only randomised
+	// path instead of where it actually lives, so the swap below would fail
+	// with a confusing rename error. Dragging the app in Finder clears the
+	// quarantine flag; a scripted copy does not.
+	if strings.Contains(bundle, "/AppTranslocation/") {
+		return "", fmt.Errorf("Burrow is running from a temporary read-only copy (macOS App Translocation) and cannot update itself.\n\nMove Burrow.app to your Applications folder in Finder and open it from there, or run:\n  xattr -dr com.apple.quarantine \"/Applications/Burrow.app\"")
+	}
 	return bundle, nil
 }
 
