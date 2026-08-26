@@ -292,7 +292,6 @@ async function openNewWorkspace() {
 // the initial PTY/workspace load) and every 6 hours after. Silent: failures in
 // browser-only dev (no Tauri) are swallowed.
 let updateTimer: number | undefined;
-let unlistenFloat: UnlistenFn | null = null;
 let unlistenMenuUpdate: UnlistenFn | null = null;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
 
@@ -345,20 +344,6 @@ onMounted(async () => {
   unlistenWorkspacesChanged = await listen("workspaces-changed", () => {
     ws.load();
   });
-
-  // Float bubble "focus main" — switch to the right workspace + leaf
-  unlistenFloat = await listen<{ ptyId: number; wsId: number }>(
-    "float-focus-tab",
-    ({ payload }) => {
-      const target = ws.workspaces.find((w) => w.id === payload.wsId);
-      if (target) ws.open(target);
-      // Defer focus until Terminal for that workspace is mounted/active
-      setTimeout(() => {
-        const term = termRefs.get(payload.wsId);
-        term?.focusLeaf(payload.ptyId);
-      }, 50);
-    },
-  );
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
@@ -366,7 +351,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', onResizeUp);
   if (updateTimer) clearInterval(updateTimer);
   unlistenMenuUpdate?.();
-  unlistenFloat?.();
   unlistenWorkspacesChanged?.();
 });
 

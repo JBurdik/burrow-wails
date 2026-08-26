@@ -70,10 +70,6 @@ export function CleanDaemon() {
   return window['go']['main']['App']['CleanDaemon']();
 }
 
-export function CloseFloatWindow(arg1) {
-  return window['go']['main']['App']['CloseFloatWindow'](arg1);
-}
-
 export function CodexSend(arg1, arg2) {
   return window['go']['main']['App']['CodexSend'](arg1, arg2);
 }
@@ -222,10 +218,6 @@ export function NotifyFloatGrid(arg1, arg2, arg3) {
   return window['go']['main']['App']['NotifyFloatGrid'](arg1, arg2, arg3);
 }
 
-export function OpenFloatWindow(arg1) {
-  return window['go']['main']['App']['OpenFloatWindow'](arg1);
-}
-
 export function OpenGitPanelWindow() {
   return window['go']['main']['App']['OpenGitPanelWindow']();
 }
@@ -346,10 +338,6 @@ export function SetConfigDirs(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetConfigDirs'](arg1, arg2, arg3);
 }
 
-export function SetFloatCorner(arg1, arg2) {
-  return window['go']['main']['App']['SetFloatCorner'](arg1, arg2);
-}
-
 export function SetHttpEnabled(arg1) {
   return window['go']['main']['App']['SetHttpEnabled'](arg1);
 }
@@ -380,14 +368,6 @@ export function SetWorkspaceIcon(arg1, arg2) {
 
 export function SetWorkspaceOrder(arg1) {
   return window['go']['main']['App']['SetWorkspaceOrder'](arg1);
-}
-
-export function SnapFloatWindow(arg1) {
-  return window['go']['main']['App']['SnapFloatWindow'](arg1);
-}
-
-export function SyncFloatSize(arg1) {
-  return window['go']['main']['App']['SyncFloatSize'](arg1);
 }
 
 export function SystemStats() {

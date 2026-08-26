@@ -36,8 +36,6 @@ export function ClaudeUsage5h(arg1:string):Promise<main.ClaudeUsage>;
 
 export function CleanDaemon():Promise<number>;
 
-export function CloseFloatWindow(arg1:string):Promise<void>;
-
 export function CodexSend(arg1:string,arg2:string):Promise<void>;
 
 export function CodexStart(arg1:string,arg2:Array<string>):Promise<string>;
@@ -112,8 +110,6 @@ export function MoveBoardTask(arg1:string,arg2:string,arg3:number):Promise<void>
 
 export function NotifyFloatGrid(arg1:string,arg2:number,arg3:number):Promise<void>;
 
-export function OpenFloatWindow(arg1:string):Promise<void>;
-
 export function OpenGitPanelWindow():Promise<void>;
 
 export function OpenPathIn(arg1:string,arg2:string):Promise<void>;
@@ -174,8 +170,6 @@ export function SetBurrowMcpMaxDepth(arg1:number):Promise<void>;
 
 export function SetConfigDirs(arg1:string,arg2:string,arg3:string):Promise<main.ConfigDirs>;
 
-export function SetFloatCorner(arg1:string,arg2:string):Promise<void>;
-
 export function SetHttpEnabled(arg1:boolean):Promise<void>;
 
 export function SetMaxAgents(arg1:number):Promise<void>;
@@ -191,10 +185,6 @@ export function SetTailscaleServe(arg1:boolean,arg2:number):Promise<main.Tailsca
 export function SetWorkspaceIcon(arg1:number,arg2:string):Promise<void>;
 
 export function SetWorkspaceOrder(arg1:Array<number>):Promise<void>;
-
-export function SnapFloatWindow(arg1:string):Promise<void>;
-
-export function SyncFloatSize(arg1:string):Promise<void>;
 
 export function SystemStats():Promise<main.SystemStats>;
 

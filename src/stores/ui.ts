@@ -287,14 +287,6 @@ export const useUIStore = defineStore("ui", () => {
     spawnMode.value = p.spawnMode ?? "terminal";
   });
 
-  // Push the float-window corner to Rust whenever it changes (and on load), so
-  // every floating window snaps + stacks at the chosen corner.
-  watch(
-    floatCorner,
-    (c) => { invoke("set_float_corner", { corner: c }).catch(() => {}); },
-    { immediate: true },
-  );
-
   // Publish the soft sub-agent cap to a file the `burrow` CLI can read (it can't
   // see localStorage). No-op in browser-only dev where Tauri invoke is absent.
   watch(

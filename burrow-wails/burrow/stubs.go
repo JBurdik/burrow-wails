@@ -1,24 +1,39 @@
 package main
 
-// Deliberately-stubbed commands (see plan phase 7 notes): float/bubble
-// windows need a Wails-appropriate redesign (single-window model) rather
-// than a mechanical port, and Claude account/usage + remote-chat sync
-// aren't implemented yet. These no-op instead of throwing so the frontend
-// doesn't hard-fail on load — call sites already treat empty/absent data
-// as "unavailable", matching Tauri behavior when e.g. not logged in.
+import "github.com/wailsapp/wails/v2/pkg/runtime"
 
-// --- float windows (no-op: Wails is single-window) ---
+// Deliberately-stubbed commands (see plan phase 7 notes): Claude account/
+// usage, remote-chat sync, and daemon admin telemetry aren't implemented
+// yet. These no-op instead of throwing so the frontend doesn't hard-fail
+// on load — call sites already treat empty/absent data as "unavailable",
+// matching Tauri behavior when e.g. not logged in.
+//
+// Float/bubble *windows* were removed outright per user decision (Wails v2
+// has no multi-window support; not worth a v3 migration or an overlay
+// redesign right now) — see popOutTab/FloatBubble.vue removal. The
+// snapshot *protocol* below is NOT float-window-specific despite the name:
+// TaskLiveTerm.vue's read-only task live-view reuses the same request/
+// send/grid events, so these three stay real (relayed via Wails events),
+// not stubbed.
 
-func (a *App) OpenFloatWindow(_ptyID string) error                            { return nil }
-func (a *App) CloseFloatWindow(_ptyID string) error                           { return nil }
-func (a *App) SetFloatCorner(_ptyID, _corner string) error                    { return nil }
-func (a *App) SnapFloatWindow(_ptyID string) error                            { return nil }
-func (a *App) SyncFloatSize(_ptyID string) error                              { return nil }
-func (a *App) RequestFloatSnapshot(_ptyID string) error                       { return nil }
-func (a *App) SendFloatSnapshot(_ptyID, _data string, _cols, _rows int) error { return nil }
-func (a *App) NotifyFloatGrid(_ptyID string, _cols, _rows int) error          { return nil }
-func (a *App) OpenGitPanelWindow() error                                      { return nil }
-func (a *App) RegisterTmuxWin(_winID, _ptyID string) error                    { return nil }
+func (a *App) RequestFloatSnapshot(ptyID string) error {
+	runtime.EventsEmit(a.ctx, "float-snap-req-"+ptyID)
+	return nil
+}
+
+func (a *App) SendFloatSnapshot(ptyID string, data string, cols, rows int) error {
+	runtime.EventsEmit(a.ctx, "float-snap-"+ptyID, map[string]any{"data": data, "cols": cols, "rows": rows})
+	return nil
+}
+
+func (a *App) NotifyFloatGrid(ptyID string, cols, rows int) error {
+	runtime.EventsEmit(a.ctx, "float-grid-"+ptyID, map[string]any{"cols": cols, "rows": rows})
+	return nil
+}
+
+func (a *App) OpenGitPanelWindow() error { return nil }
+
+func (a *App) RegisterTmuxWin(_winID, _ptyID string) error { return nil }
 
 // --- Claude account/usage (needs the real API surface Claude Code exposes
 // for this; not reverse-engineered yet) ---

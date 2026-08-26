@@ -89,13 +89,6 @@
           class="tab-split-count"
           :title="`${tabLeafCount(tab)} panes`"
         >{{ tabLeafCount(tab) }}</span>
-        <PhArrowSquareOut
-          :size="10"
-          class="tab-float"
-          title="Pop out as floating window"
-          data-no-drag
-          @click.stop="popOutTab(tab)"
-        />
         <PhX
           :size="10"
           weight="bold"
@@ -270,7 +263,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { createActor, type Actor } from "xstate";
 import { agentStatusMachine, isBusyStatus } from "@/machines/agentStatus";
-import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhArrowSquareOut, PhFileCode, PhGlobe, PhChatCenteredText, PhInfo, PhColumns } from "@phosphor-icons/vue";
+import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe, PhChatCenteredText, PhInfo, PhColumns } from "@phosphor-icons/vue";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -1824,20 +1817,7 @@ onBeforeUnmount(() => {
   tabsStore.clear(props.workspaceId);
 });
 
-function popOutTab(tab: Tab) {
-  const leaf =
-    focusedLeafId.value !== 0
-      ? findLeaf(tab.root, focusedLeafId.value) ?? getFirstLeaf(tab.root)
-      : getFirstLeaf(tab.root);
-  invoke("open_float_window", {
-    ptyId: leaf.id,
-    title: leaf.title,
-    wsId: props.workspaceId,
-  });
-}
-
-// Activate the tab containing ptyId and focus that leaf. Called by App.vue
-// when main window regains focus from a float bubble.
+// Activate the tab containing ptyId and focus that leaf.
 function focusLeaf(ptyId: number) {
   for (const tab of tabs.value) {
     const leaf = findLeaf(tab.root, ptyId);

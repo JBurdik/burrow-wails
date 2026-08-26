@@ -202,17 +202,10 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "write_config":
       return App.WriteConfig(args.content);
 
-    // Float windows (no-op: Wails is single-window, see plan phase 7)
-    case "open_float_window":
-      return App.OpenFloatWindow(args.ptyId ?? args.pty_id);
-    case "close_float_window":
-      return App.CloseFloatWindow(args.ptyId ?? args.pty_id);
-    case "set_float_corner":
-      return App.SetFloatCorner(args.ptyId ?? args.pty_id, args.corner);
-    case "snap_float_window":
-      return App.SnapFloatWindow(args.ptyId ?? args.pty_id);
-    case "sync_float_size":
-      return App.SyncFloatSize(args.ptyId ?? args.pty_id);
+    // Float bubble windows were removed (Wails v2 has no multi-window
+    // support; see plan). request_float_snapshot/send_float_snapshot/
+    // notify_float_grid stay — TaskLiveTerm.vue's task live-view reuses
+    // the same event protocol and isn't a float window.
     case "request_float_snapshot":
       return App.RequestFloatSnapshot(args.ptyId ?? args.pty_id);
     case "send_float_snapshot":
