@@ -1,27 +1,27 @@
 <template>
-  <div class="td-backdrop" @click.self="emit('close')">
-    <div class="td-panel">
-      <div class="td-header">
-        <span class="td-status status-dot" :class="`status-${status}`">{{ status === 'running' ? spinnerFrame : '' }}</span>
+  <div class="fixed bottom-0 left-0 right-0 top-[var(--titlebar-height)] z-[950] flex items-center justify-center bg-black/55" @click.self="emit('close')">
+    <div class="flex max-h-[86vh] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+      <div class="flex shrink-0 items-center gap-2 border-b border-border px-3.5 py-3">
+        <span class="status-dot shrink-0" :class="`status-${status}`">{{ status === 'running' ? spinnerFrame : '' }}</span>
         <input
           v-model="local.title"
-          class="td-title-input"
+          class="min-w-0 flex-1 border-0 bg-transparent font-sans text-sm font-semibold text-foreground outline-none"
           placeholder="Task title"
           @blur="persistMeta"
         />
-        <span v-if="local.board_column !== 'backlog'" class="td-col-badge">{{ colLabel }}</span>
-        <button class="td-close" title="Close (Esc)" @click="emit('close')">
+        <span v-if="local.board_column !== 'backlog'" class="rounded-[5px] bg-blue-400/14 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.04em] text-blue-400">{{ colLabel }}</span>
+        <button class="flex h-6 w-6 items-center justify-center rounded-md bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="emit('close')">
           <PhX :size="15" />
         </button>
       </div>
 
-      <div class="td-body">
+      <div class="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-3.5">
         <!-- Description -->
-        <div class="td-section">
-          <label class="td-label">Description</label>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">Description</label>
           <textarea
             v-model="local.description"
-            class="td-desc"
+            class="min-h-[80px] resize-y rounded-lg border border-border bg-white/4 px-2.5 py-2 font-sans text-[12.5px] leading-relaxed text-foreground outline-none focus:border-accent read-only:opacity-75"
             :readonly="local.board_column !== 'backlog'"
             rows="5"
             placeholder="What should the agent do? Paste or drop screenshots below."
@@ -32,98 +32,105 @@
 
         <!-- Attachments -->
         <div
-          class="td-section"
+          class="flex flex-col gap-1.5"
           @dragover.prevent
           @drop.prevent="onDrop"
         >
-          <label class="td-label">Attachments</label>
-          <div class="td-attachments">
-            <div v-for="a in attachments" :key="a.id" class="td-attach-wrap">
-              <img :src="thumbs[a.id] ?? ''" class="td-attach-img" />
-              <button v-if="local.board_column === 'backlog'" class="td-attach-rm" title="Remove" @click="removeAttachment(a.id)">×</button>
+          <label class="text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">Attachments</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <div v-for="a in attachments" :key="a.id" class="relative">
+              <img :src="thumbs[a.id] ?? ''" class="h-14 w-14 rounded-md border border-border object-cover" />
+              <button v-if="local.board_column === 'backlog'" class="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border-0 bg-black/70 text-[11px] leading-none text-white" title="Remove" @click="removeAttachment(a.id)">×</button>
             </div>
-            <label v-if="local.board_column === 'backlog'" class="td-attach-add">
+            <label v-if="local.board_column === 'backlog'" class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-md border border-dashed border-border text-muted-foreground hover:border-accent hover:text-accent">
               <PhImage :size="16" />
-              <input type="file" accept="image/*" multiple class="td-attach-input" @change="onFilePick" />
+              <input type="file" accept="image/*" multiple class="hidden" @change="onFilePick" />
             </label>
-            <span v-if="!attachments.length && local.board_column === 'backlog'" class="td-attach-hint">Paste, drop, or pick images</span>
+            <span v-if="!attachments.length && local.board_column === 'backlog'" class="text-[11px] text-muted-foreground">Paste, drop, or pick images</span>
           </div>
         </div>
 
         <!-- Config (Backlog only) -->
-        <div v-if="local.board_column === 'backlog'" class="td-section td-config">
-          <div class="td-field">
-            <label class="td-label">Model</label>
-            <select v-model="local.model" class="td-select">
+        <div v-if="local.board_column === 'backlog'" class="flex flex-row flex-wrap gap-3">
+          <div class="flex flex-col gap-1">
+            <label class="text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">Model</label>
+            <select v-model="local.model" class="rounded-lg border border-border bg-white/5 px-2 py-1.5 text-xs text-foreground">
               <option v-for="m in MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
             </select>
           </div>
-          <div class="td-field td-field-toggle">
-            <label class="td-label">Worktree</label>
-            <button class="td-toggle" :class="{ 'td-toggle-on': !!local.use_worktree }" @click="local.use_worktree = local.use_worktree ? 0 : 1">
+          <div class="flex flex-col justify-end gap-1">
+            <label class="text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">Worktree</label>
+            <button
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-[11px] text-secondary-foreground"
+              :class="{ 'text-green-400 border-green-400/40': !!local.use_worktree }"
+              @click="local.use_worktree = local.use_worktree ? 0 : 1"
+            >
               <PhTree v-if="local.use_worktree" :size="12" weight="bold" />
               <PhGitBranch v-else :size="12" weight="bold" />
               {{ local.use_worktree ? 'New worktree' : 'Current branch' }}
             </button>
           </div>
         </div>
-        <div v-else class="td-section td-config td-config-readonly">
-          <span class="td-badge">{{ shortModel(local.model) }}</span>
-          <span v-if="local.worktree_branch" class="td-badge td-badge-branch"><PhGitBranch :size="10" weight="bold" />{{ local.worktree_branch }}</span>
-          <span v-else class="td-badge td-badge-branch"><PhGitBranch :size="10" weight="bold" />current branch</span>
+        <div v-else class="flex flex-row flex-wrap items-center gap-3">
+          <span class="inline-flex items-center gap-1 rounded-md bg-white/6 px-2 py-1 text-[10px] font-semibold text-secondary-foreground">{{ shortModel(local.model) }}</span>
+          <span v-if="local.worktree_branch" class="inline-flex items-center gap-1 rounded-md bg-green-400/10 px-2 py-1 text-[10px] font-semibold text-green-400"><PhGitBranch :size="10" weight="bold" />{{ local.worktree_branch }}</span>
+          <span v-else class="inline-flex items-center gap-1 rounded-md bg-green-400/10 px-2 py-1 text-[10px] font-semibold text-green-400"><PhGitBranch :size="10" weight="bold" />current branch</span>
         </div>
 
-        <p v-if="startError" class="td-error">{{ startError }}</p>
+        <p v-if="startError" class="m-0 text-[11.5px] text-red-400">{{ startError }}</p>
 
         <!-- Live view (post-spawn only) -->
-        <div v-if="local.board_column !== 'backlog' && livePtyId != null" class="td-section td-live">
-          <div class="td-live-head">
-            <label class="td-label">Live view</label>
+        <div v-if="local.board_column !== 'backlog' && livePtyId != null" class="flex flex-col gap-1.5 border-t border-border pt-3">
+          <div class="flex items-center gap-2.5">
+            <label class="text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">Live view</label>
           </div>
-          <div class="td-chat-embed">
+          <div class="td-chat-embed h-[440px] overflow-hidden rounded-lg border border-border">
             <TaskLiveTerm :pty-id="livePtyId" />
           </div>
         </div>
-        <p v-else-if="local.board_column !== 'backlog'" class="td-live-pending">Waiting for terminal to spawn…</p>
+        <p v-else-if="local.board_column !== 'backlog'" class="m-0 text-[11.5px] text-muted-foreground">Waiting for terminal to spawn…</p>
 
         <!-- Per-turn Git trees, never the workspace-wide working diff. -->
-        <div v-if="local.board_column !== 'backlog'" class="td-section td-turns">
-          <label class="td-label">Changes in turns</label>
-          <p v-if="turnsLoading" class="td-turn-hint">Loading changes…</p>
-          <p v-else-if="!turns.length" class="td-turn-hint">No completed turns yet.</p>
-          <div v-for="turn in turns" :key="turn.id" class="td-turn-row">
+        <div v-if="local.board_column !== 'backlog'" class="flex flex-col gap-1.5 border-t border-border">
+          <label class="text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground">Changes in turns</label>
+          <p v-if="turnsLoading" class="my-1 text-xs text-muted-foreground">Loading changes…</p>
+          <p v-else-if="!turns.length" class="my-1 text-xs text-muted-foreground">No completed turns yet.</p>
+          <div v-for="turn in turns" :key="turn.id" class="flex items-start justify-between gap-2.5 border-b border-border/[.06] py-1.5 text-xs">
             <div>
               <strong>Turn {{ turn.id }}</strong>
-              <span v-if="turn.changesAvailable"> · {{ turn.files.length }} files · <b class="add">+{{ turn.additions }}</b> <b class="del">-{{ turn.deletions }}</b></span>
+              <span v-if="turn.changesAvailable"> · {{ turn.files.length }} files · <b class="text-[#55c48a]">+{{ turn.additions }}</b> <b class="text-[#ef7272]">-{{ turn.deletions }}</b></span>
               <span v-else> · changes unavailable</span>
-              <details v-if="turn.changesAvailable && turn.files.length">
+              <details v-if="turn.changesAvailable && turn.files.length" class="mt-1 text-muted-foreground">
                 <summary>Files</summary>
-                <div v-for="file in turn.files" :key="file" class="td-turn-file">{{ file }}</div>
+                <div v-for="file in turn.files" :key="file" class="pl-2 font-mono text-[11px]">{{ file }}</div>
               </details>
             </div>
-            <button v-if="turn.changesAvailable && turn.completedAt" class="td-btn" @click="openTurnDiff(turn.id)">Review</button>
+            <button v-if="turn.changesAvailable && turn.completedAt" class="rounded-lg border-0 px-3.5 py-2 text-[12.5px] font-semibold" @click="openTurnDiff(turn.id)">Review</button>
           </div>
-          <p v-if="turnError" class="td-error">{{ turnError }}</p>
+          <p v-if="turnError" class="m-0 text-[11.5px] text-red-400">{{ turnError }}</p>
         </div>
 
         <!-- Actions -->
-        <div class="td-actions">
-          <button v-if="local.board_column === 'backlog'" class="td-btn td-btn-primary" :disabled="starting || !local.title.trim()" @click="start">
+        <div class="flex gap-2 pt-1">
+          <button v-if="local.board_column === 'backlog'" class="ml-auto rounded-lg border-0 bg-accent px-3.5 py-2 text-[12.5px] font-semibold text-white disabled:cursor-default disabled:opacity-50" :disabled="starting || !local.title.trim()" @click="start">
             {{ starting ? 'Starting…' : 'Start' }}
           </button>
           <button
             v-if="local.board_column === 'for_review'"
-            class="td-btn td-btn-primary"
+            class="ml-auto rounded-lg border-0 bg-accent px-3.5 py-2 text-[12.5px] font-semibold text-white"
             @click="moveTo('done')"
           >
             Mark Done
           </button>
-          <button class="td-btn td-btn-danger" @click="remove">Delete</button>
+          <button class="rounded-lg border-0 bg-destructive/12 px-3.5 py-2 text-[12.5px] font-semibold text-red-400 hover:bg-destructive/20" @click="remove">Delete</button>
         </div>
       </div>
     </div>
-    <div v-if="turnDiff" class="td-diff-modal">
-      <div class="td-diff-head"><span>{{ turnDiff.title }}</span><button class="td-close" @click="turnDiff = null"><PhX :size="15" /></button></div>
+    <div v-if="turnDiff" class="fixed inset-[8vh_8vw] z-[960] flex flex-col overflow-hidden rounded-[10px] border border-border bg-base shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+      <div class="flex items-center justify-between border-b border-border px-3 py-2 text-xs">
+        <span>{{ turnDiff.title }}</span>
+        <button class="flex h-6 w-6 items-center justify-center rounded-md bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground" @click="turnDiff = null"><PhX :size="15" /></button>
+      </div>
       <DiffTab diff-file="turn changes" :diff-staged="false" :diff="turnDiff.diff" />
     </div>
   </div>
@@ -300,178 +307,5 @@ onMounted(() => window.addEventListener("keydown", onKeydown));
 </script>
 
 <style scoped>
-.td-backdrop {
-  position: fixed;
-  top: var(--titlebar-height);
-  right: 0;
-  bottom: 0;
-  left: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 950;
-}
-.td-panel {
-  width: 720px;
-  max-width: 92vw;
-  max-height: 86vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-panel, #16161a);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  overflow: hidden;
-}
-.td-turns { border-top: 1px solid var(--border, rgba(255,255,255,.08)); }
-.td-turn-hint { margin: 4px 0; color: var(--text-muted); font-size: 12px; }
-.td-turn-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 7px 0; font-size: 12px; border-bottom: 1px solid var(--border, rgba(255,255,255,.06)); }
-.td-turn-row details { margin-top: 4px; color: var(--text-muted); }
-.td-turn-file { font-family: var(--font-mono); font-size: 11px; padding-left: 8px; }
-.add { color: #55c48a; }.del { color: #ef7272; }
-.td-diff-modal { position: fixed; z-index: 960; inset: 8vh 8vw; display: flex; flex-direction: column; background: var(--bg-base); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
-.td-diff-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 12px; border-bottom: 1px solid var(--border); }
-.td-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  flex-shrink: 0;
-}
-.td-status { flex-shrink: 0; }
-.td-status.status-running { font-size: 12px; }
-.td-title-input {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text-primary, #e2e8f0);
-  font-size: 14px;
-  font-weight: 600;
-  font-family: var(--font-ui);
-}
-.td-col-badge {
-  font-size: 9.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: rgba(59, 130, 246, 0.14);
-  color: #60a5fa;
-}
-.td-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted, #94a3b8);
-  cursor: pointer;
-}
-.td-close:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); color: var(--text-primary, #e2e8f0); }
-
-.td-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.td-section { display: flex; flex-direction: column; gap: 6px; }
-.td-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted, #64748b);
-}
-.td-desc {
-  resize: vertical;
-  min-height: 80px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  border-radius: 8px;
-  padding: 8px 10px;
-  color: var(--text-primary, #e2e8f0);
-  font-family: var(--font-ui);
-  font-size: 12.5px;
-  line-height: 1.5;
-  outline: none;
-}
-.td-desc:focus { border-color: var(--accent, #3b82f6); }
-.td-desc[readonly] { opacity: 0.75; }
-
-.td-attachments { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.td-attach-wrap { position: relative; }
-.td-attach-img {
-  width: 56px; height: 56px; object-fit: cover; border-radius: 6px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-}
-.td-attach-rm {
-  position: absolute; top: -5px; right: -5px; width: 16px; height: 16px;
-  border-radius: 50%; background: rgba(0,0,0,0.7); border: none; color: #fff;
-  font-size: 11px; line-height: 1; cursor: pointer;
-}
-.td-attach-add {
-  width: 56px; height: 56px; display: flex; align-items: center; justify-content: center;
-  border: 1px dashed var(--border, rgba(255, 255, 255, 0.2)); border-radius: 6px;
-  color: var(--text-muted, #64748b); cursor: pointer;
-}
-.td-attach-add:hover { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
-.td-attach-input { display: none; }
-.td-attach-hint { font-size: 11px; color: var(--text-muted, #64748b); }
-
-.td-config { flex-direction: row; gap: 12px; flex-wrap: wrap; }
-.td-config-readonly { align-items: center; }
-.td-field { display: flex; flex-direction: column; gap: 4px; }
-.td-field-toggle { justify-content: flex-end; }
-.td-select {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 7px;
-  color: var(--text-primary, #e2e8f0);
-  font-size: 12px;
-  padding: 5px 8px;
-}
-.td-toggle {
-  display: inline-flex; align-items: center; gap: 5px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 7px; background: transparent; color: var(--text-secondary, #94a3b8);
-  font-size: 11px; padding: 5px 9px; cursor: pointer;
-}
-.td-toggle-on { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); }
-
-.td-badge {
-  font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06); color: var(--text-secondary, #94a3b8);
-  display: inline-flex; align-items: center; gap: 4px;
-}
-.td-badge-branch { color: #4ade80; background: rgba(74, 222, 128, 0.1); }
-
-.td-error { color: #f87171; font-size: 11.5px; margin: 0; }
-
-.td-live { border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08)); padding-top: 12px; }
-.td-live-pending { font-size: 11.5px; color: var(--text-muted, #64748b); margin: 0; }
-.td-live-head { display: flex; align-items: center; gap: 10px; }
-.td-chat-embed { height: 440px; border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; overflow: hidden; }
 .td-chat-embed :deep(.claude-chat) { background: transparent; }
-
-.td-actions { display: flex; gap: 8px; padding-top: 4px; }
-.td-btn {
-  border: none; border-radius: 8px; padding: 8px 14px; font-size: 12.5px; font-weight: 600;
-  cursor: pointer;
-}
-.td-btn-primary { background: var(--accent, #3b82f6); color: #fff; margin-left: auto; }
-.td-btn-primary:disabled { opacity: 0.5; cursor: default; }
-.td-btn-danger { background: rgba(239, 68, 68, 0.12); color: #f87171; }
-.td-btn-danger:hover { background: rgba(239, 68, 68, 0.2); }
 </style>
