@@ -84,8 +84,26 @@ sign:
     codesign --verify --deep --strict --verbose=2 "{{app}}"
     echo "signed: $ID"
 
+# Fail loudly unless every Mach-O in the bundle carries a Developer ID
+# signature with a hardened runtime. A running `wails dev` writes its own
+# adhoc-signed binary over build/bin, so a bundle that passed `just sign`
+# minutes ago can silently regress — Apple rejects it 5 minutes later with
+# "not signed with a valid Developer ID certificate".
+assert-signed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for bin in Burrow burrow-daemon; do
+      out="$(codesign -dv "{{app}}/Contents/MacOS/$bin" 2>&1)"
+      grep -q "TeamIdentifier={{APPLE_TEAM_ID}}" <<<"$out" \
+        || { echo "❌ $bin is not signed by team {{APPLE_TEAM_ID}} (is 'wails dev' running and overwriting build/bin?) — run 'just sign'"; exit 1; }
+      grep -q "flags=.*runtime" <<<"$out" \
+        || { echo "❌ $bin has no hardened runtime — run 'just sign'"; exit 1; }
+    done
+    codesign --verify --deep --strict "{{app}}"
+    echo "signature check: ✓ Developer ID + hardened runtime"
+
 # Notarize + staple the .app (submits a zip; the ticket is stapled to the app).
-notarize-app:
+notarize-app: assert-signed
     #!/usr/bin/env bash
     set -euo pipefail
     ZIP="src-wails/build/bin/Burrow-notarize.zip"
@@ -105,7 +123,11 @@ dmg:
     ln -s /Applications "$STAGE/Applications"
     hdiutil create -volname "Burrow" -srcfolder "$STAGE" -ov -format UDZO "{{dmg}}"
     rm -rf "$STAGE"
-    echo "dmg: {{dmg}}"
+    # The dmg needs its own Developer ID signature, not just a notarization
+    # ticket: Gatekeeper checks the disk image itself on download, and an
+    # unsigned one is rejected with "no usable signature" even when stapled.
+    codesign --force --timestamp --sign "Developer ID Application: Jakub Gál ({{APPLE_TEAM_ID}})" "{{dmg}}"
+    echo "dmg: {{dmg}} (signed)"
 
 # Notarize + staple the .dmg (Gatekeeper checks the dmg itself on download,
 # so it needs its own ticket even though the app inside is already stapled).
