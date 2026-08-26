@@ -1,8 +1,8 @@
 <template>
   <div
     v-if="node.type === 'leaf'"
-    class="split-leaf"
-    :class="{ focused: focusedId === node.id }"
+    class="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+    :class="{ 'after:pointer-events-none after:absolute after:inset-0 after:z-[1] after:border after:border-accent after:opacity-35 after:content-[\'\']': focusedId === node.id }"
     @mousedown.capture="$emit('focus', (node as Leaf).id)"
   >
     <DiffTab
@@ -37,8 +37,8 @@
   </div>
   <div
     v-else
-    class="split-container"
-    :class="node.direction === 'h' ? 'split-h' : 'split-v'"
+    class="flex min-h-0 min-w-0 flex-1 overflow-hidden"
+    :class="node.direction === 'h' ? 'flex-row' : 'flex-col'"
   >
     <TerminalSplitView
       :node="node.first"
@@ -50,7 +50,7 @@
       @dirty="(id, d) => $emit('dirty', id, d)"
       @saved="(id) => $emit('saved', id)"
     />
-    <div class="split-divider" :class="node.direction === 'h' ? 'divider-v' : 'divider-h'" />
+    <div class="shrink-0 bg-border" :class="node.direction === 'h' ? 'w-px' : 'h-px'" />
     <TerminalSplitView
       :node="node.second"
       :cwd="cwd"
@@ -129,53 +129,3 @@ defineEmits<{
 
 const registerRef = inject<(id: number, el: unknown) => void>("registerRef")!;
 </script>
-
-<style scoped>
-.split-leaf {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-  min-width: 0;
-  min-height: 0;
-  position: relative;
-}
-
-.split-leaf.focused::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border: 1px solid var(--accent);
-  opacity: 0.35;
-  z-index: 1;
-}
-
-.split-container {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-  min-width: 0;
-  min-height: 0;
-}
-
-.split-h {
-  flex-direction: row;
-}
-
-.split-v {
-  flex-direction: column;
-}
-
-.split-divider {
-  background: var(--border);
-  flex-shrink: 0;
-}
-
-.divider-v {
-  width: 1px;
-}
-
-.divider-h {
-  height: 1px;
-}
-</style>

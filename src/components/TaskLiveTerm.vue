@@ -1,6 +1,8 @@
 <template>
-  <div class="tlt-viewport" ref="viewportEl">
-    <div class="tlt-inner" ref="hostEl" />
+  <div class="h-full w-full overflow-auto px-1.5 py-1" ref="viewportEl">
+    <!-- xterm sizes this to its real cols*rows pixel dimensions — wider/taller
+         than the viewport is exactly what makes the outer scrollbars appear. -->
+    <div class="h-fit w-fit" ref="hostEl" />
   </div>
 </template>
 
@@ -139,18 +141,3 @@ watch(() => props.ptyId, async () => {
   attach();
 });
 </script>
-
-<style scoped>
-.tlt-viewport {
-  width: 100%;
-  height: 100%;
-  overflow: auto;
-  padding: 4px 6px;
-}
-.tlt-inner {
-  /* xterm sizes this to its real cols*rows pixel dimensions — wider/taller
-     than the viewport is exactly what makes .tlt-viewport's scrollbars appear. */
-  width: fit-content;
-  height: fit-content;
-}
-</style>
