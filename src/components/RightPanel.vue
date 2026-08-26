@@ -1,12 +1,15 @@
 <template>
-  <aside class="right-panel" ref="panelEl">
+  <aside
+    ref="panelEl"
+    class="flex w-[var(--right-panel-width,300px)] shrink-0 grow-0 basis-[var(--right-panel-width,300px)] flex-col overflow-hidden border-l border-border bg-panel text-xs [backdrop-filter:var(--blur-panels,none)]"
+  >
     <!-- Tab bar -->
-    <div class="panel-tabs">
+    <div class="flex h-8 shrink-0 border-b border-border">
       <button
         v-for="tab in tabs"
         :key="tab.id"
-        class="panel-tab"
-        :class="{ active: activeTab === tab.id }"
+        class="flex flex-1 items-center justify-center gap-1 border-0 border-b-2 border-b-transparent bg-transparent px-1 font-sans text-[11px] text-muted-foreground transition-colors hover:text-secondary-foreground"
+        :class="activeTab === tab.id && 'border-b-accent bg-accent/5 text-foreground'"
         @click="activeTab = tab.id"
       >
         <component :is="tab.icon" :size="12" />
@@ -15,44 +18,44 @@
     </div>
 
     <!-- Explorer tab -->
-    <div v-if="activeTab === 'explorer'" class="panel-content">
-      <div v-if="!props.cwd" class="hint">No workspace open</div>
-      <div v-else-if="fileTree.rootError" class="hint error">{{ fileTree.rootError }}</div>
-      <div v-else class="file-tree">
+    <div v-if="activeTab === 'explorer'" class="flex flex-1 flex-col overflow-y-auto">
+      <div v-if="!props.cwd" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
+      <div v-else-if="fileTree.rootError" class="p-4 text-center text-[11px] text-destructive">{{ fileTree.rootError }}</div>
+      <div v-else class="flex-1 py-1">
         <FileTreeNode v-for="node in fileTree.tree" :key="node.id" :node="node" :depth="0" />
       </div>
     </div>
 
     <!-- Git tab -->
-    <div v-else-if="activeTab === 'git'" class="panel-content git-panel">
+    <div v-else-if="activeTab === 'git'" class="flex flex-1 flex-col overflow-hidden overflow-y-auto">
       <!-- Header -->
-      <div class="git-header">
-        <div class="branch-tag">
-          <PhGitBranch :size="12" />
+      <div class="flex shrink-0 items-center justify-between border-b border-border px-2 py-[5px]">
+        <div class="flex items-center gap-1 font-mono text-[11px] text-secondary-foreground">
+          <PhGitBranch :size="12" class="shrink-0 text-yellow-400" style="color: var(--yellow);" />
           <span>{{ git.branch || "—" }}</span>
-          <span v-if="git.ahead > 0" class="ahead-tag" title="Commits ahead of upstream">↑{{ git.ahead }}</span>
-          <span v-if="git.behind > 0" class="behind-tag" title="Commits behind upstream">↓{{ git.behind }}</span>
+          <span v-if="git.ahead > 0" class="text-[10px] text-success" title="Commits ahead of upstream">↑{{ git.ahead }}</span>
+          <span v-if="git.behind > 0" class="text-[10px] text-warning" title="Commits behind upstream">↓{{ git.behind }}</span>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-[3px]">
           <button
             v-if="!git.error && git.hasUpstream && git.behind > 0"
-            class="push-btn"
+            class="flex items-center gap-[3px] rounded border border-border bg-transparent px-[7px] py-0.5 font-sans text-[10px] font-medium text-secondary-foreground transition-colors hover:border-accent/40 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
             :disabled="git.pulling || git.pushing || git.loading"
             @click="git.pull()"
             title="git pull --ff-only"
           >
-            <PhArrowDown :size="11" :class="{ spin: git.pulling }" />
+            <PhArrowDown :size="11" :class="git.pulling && 'animate-spin'" />
             Pull
             <span>({{ git.behind }})</span>
           </button>
           <button
             v-if="!git.error"
-            class="push-btn"
+            class="flex items-center gap-[3px] rounded border border-border bg-transparent px-[7px] py-0.5 font-sans text-[10px] font-medium text-secondary-foreground transition-colors hover:border-accent/40 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
             :disabled="git.pushing || git.loading || (git.hasUpstream && git.ahead === 0)"
             @click="git.push()"
             :title="git.hasUpstream ? 'git push' : 'git push -u origin ' + git.branch"
           >
-            <PhArrowUp :size="11" :class="{ spin: git.pushing }" />
+            <PhArrowUp :size="11" :class="git.pushing && 'animate-spin'" />
             {{ git.hasUpstream ? "Push" : "Publish" }}
             <span v-if="git.ahead > 0">({{ git.ahead }})</span>
           </button>
@@ -63,24 +66,35 @@
             :toggle="ar.toggle"
             :set-refresh-interval="ar.setRefreshInterval"
           />
-          <button class="icon-btn" :disabled="git.loading" @click="git.refresh()" title="Refresh">
-            <PhArrowClockwise :size="13" :class="{ spin: git.loading }" />
+          <button
+            class="flex items-center rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
+            :disabled="git.loading"
+            @click="git.refresh()"
+            title="Refresh"
+          >
+            <PhArrowClockwise :size="13" :class="git.loading && 'animate-spin'" />
           </button>
         </div>
       </div>
 
       <!-- Push/pull loader -->
-      <div v-if="git.pushing || git.pulling" class="git-progress">
-        <div class="git-progress-bar"></div>
-        <span class="git-progress-label">{{ git.pushing ? "Pushing…" : "Pulling…" }}</span>
+      <div v-if="git.pushing || git.pulling" class="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1">
+        <div class="relative h-0.5 flex-1 overflow-hidden rounded-full bg-border">
+          <div class="git-progress-bar" />
+        </div>
+        <span class="text-[10px] text-muted-foreground">{{ git.pushing ? "Pushing…" : "Pulling…" }}</span>
       </div>
 
-      <div class="git-body">
+      <div class="flex flex-1 flex-col overflow-y-auto py-1.5">
         <!-- Error -->
-        <div v-if="git.error" class="git-error">
+        <div v-if="git.error" class="flex flex-wrap items-center gap-1.5 px-2.5 py-4 text-[11px] text-secondary-foreground">
           <PhWarning :size="13" />
           Not a git repository
-          <button class="git-init-btn" :disabled="git.loading" @click="git.gitInit()">
+          <button
+            class="ml-auto flex items-center gap-1 rounded border border-border bg-hover px-2 py-[3px] text-[11px] text-foreground hover:border-warning hover:bg-warning hover:text-black disabled:cursor-default disabled:opacity-35"
+            :disabled="git.loading"
+            @click="git.gitInit()"
+          >
             <PhGitBranch :size="12" />
             Git Init
           </button>
@@ -88,81 +102,81 @@
 
         <template v-else>
           <!-- Staged -->
-          <div class="section-label section-label-row">
+          <div class="flex items-center justify-between px-2 pb-[3px] pt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground opacity-65">
             Staged
             <button
               v-if="git.staged.length > 0"
-              class="stage-all-btn"
+              class="flex items-center gap-0.5 rounded border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100"
               @click="openAllDiffInTab(true)"
               title="Open all staged diffs in new tab"
             ><PhArrowUpRight :size="10" /> View</button>
           </div>
-          <div v-if="git.staged.length === 0" class="empty-hint">Nothing staged</div>
+          <div v-if="git.staged.length === 0" class="px-2 pb-1.5 pt-0.5 text-[11px] text-muted-foreground opacity-60">Nothing staged</div>
           <div
             v-for="f in git.staged"
             :key="'s:' + f.path"
-            class="git-file staged"
+            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
             @click="git.showDiff(f.path, true)"
           >
-            <span class="file-status">{{ f.x }}</span>
-            <span class="file-path" :title="f.path">{{ f.path }}</span>
-            <button class="file-btn" @click.stop="git.unstageFile(f.path)" title="Unstage">−</button>
+            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-success">{{ f.x }}</span>
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-foreground group-hover:block" @click.stop="git.unstageFile(f.path)" title="Unstage">−</button>
           </div>
 
           <!-- Unstaged + untracked -->
-          <div class="section-label section-label-row" style="margin-top: 8px;">
+          <div class="mt-2 flex items-center justify-between px-2 pb-[3px] pt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground opacity-65">
             Changes
-            <div class="section-actions">
+            <div class="flex items-center gap-[3px]">
               <button
                 v-if="git.unstaged.length > 0"
-                class="stage-all-btn"
+                class="flex items-center gap-0.5 rounded border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100"
                 @click="openAllDiffInTab(false)"
                 title="Open all unstaged diffs in new tab"
               ><PhArrowUpRight :size="10" /> View</button>
               <button
                 v-if="git.unstaged.length > 0 || git.untracked.length > 0"
-                class="stage-all-btn"
+                class="rounded border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100 disabled:cursor-default disabled:opacity-30"
                 :disabled="git.loading"
                 @click="git.stageAll()"
                 title="Stage all"
               >+ All</button>
             </div>
           </div>
-          <div v-if="git.unstaged.length === 0 && git.untracked.length === 0" class="empty-hint">
+          <div v-if="git.unstaged.length === 0 && git.untracked.length === 0" class="px-2 pb-1.5 pt-0.5 text-[11px] text-muted-foreground opacity-60">
             Working tree clean
           </div>
           <div
             v-for="f in git.unstaged"
             :key="'u:' + f.path"
-            class="git-file unstaged"
+            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
             @click="git.showDiff(f.path, false)"
           >
-            <span class="file-status">{{ f.y }}</span>
-            <span class="file-path" :title="f.path">{{ f.path }}</span>
-            <button class="file-btn add" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
+            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-warning">{{ f.y }}</span>
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-success group-hover:block" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
           </div>
           <div
             v-for="f in git.untracked"
             :key="'t:' + f.path"
-            class="git-file untracked"
+            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
           >
-            <span class="file-status">?</span>
-            <span class="file-path" :title="f.path">{{ f.path }}</span>
-            <button class="file-btn add" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
+            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-muted-foreground">?</span>
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-success group-hover:block" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
           </div>
 
           <!-- Commit -->
-          <div class="commit-section">
+          <div class="mt-1.5 flex shrink-0 flex-col gap-[5px] border-t border-border p-2">
             <textarea
               v-model="git.commitMsg"
-              class="commit-input"
+              class="commit-input box-border w-full min-h-[52px] max-h-[100px] resize-none rounded border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 font-sans text-[11px] leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/60"
               placeholder="Commit message…"
               rows="3"
               @keydown.ctrl.enter="git.commit()"
               @keydown.meta.enter="git.commit()"
             />
             <button
-              class="commit-btn"
+              class="flex w-full items-center justify-center gap-[5px] rounded border-0 bg-accent/85 px-2.5 py-[5px] font-sans text-[11px] font-semibold text-white transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-35"
               :disabled="!git.commitMsg.trim() || git.staged.length === 0"
               @click="git.commit()"
             >
@@ -172,41 +186,45 @@
           </div>
 
           <!-- Diff (hidden when panel is too narrow — use cq.is.md = ≥320px) -->
-          <div v-if="git.diffFile && cq.is.md" class="diff-section">
-            <div class="diff-header">
-              <span class="diff-title">{{ git.diffFile }}</span>
-              <span class="diff-mode">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
-              <button class="icon-btn" @click="git.clearDiff()" title="Close">
+          <div v-if="git.diffFile && cq.is.md" class="flex max-h-[220px] shrink-0 flex-col border-t border-border">
+            <div class="flex shrink-0 items-center gap-1.5 bg-[color-mix(in_srgb,var(--border)_20%,var(--bg-panel))] px-2 py-1">
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground">{{ git.diffFile }}</span>
+              <span class="shrink-0 text-[10px] text-muted-foreground">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
+              <button class="flex items-center rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="git.clearDiff()" title="Close">
                 <PhX :size="11" />
               </button>
             </div>
-            <pre class="diff-view"><span
+            <pre class="m-0 flex-1 overflow-auto whitespace-pre px-0 py-[5px] font-mono text-[10px] leading-normal"><span
               v-for="(line, i) in git.diff.split('\n')"
               :key="i"
+              class="block"
               :class="diffLineClass(line)"
             >{{ line }}
 </span></pre>
           </div>
 
           <!-- History -->
-          <div class="history-section">
-            <div class="section-label section-label-row history-toggle" @click="showHistory = !showHistory">
-              <span class="history-title"><PhCaretRight :size="9" :class="{ open: showHistory }" /> History</span>
+          <div class="mt-1.5 shrink-0 border-t border-border pt-1">
+            <div
+              class="flex cursor-pointer select-none items-center justify-between px-2 pb-[3px] pt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground opacity-65"
+              @click="showHistory = !showHistory"
+            >
+              <span class="flex items-center gap-1"><PhCaretRight :size="9" class="transition-transform" :class="showHistory && 'rotate-90'" /> History</span>
             </div>
             <template v-if="showHistory">
-              <div v-if="git.log.length === 0" class="empty-hint">No commits</div>
+              <div v-if="git.log.length === 0" class="px-2 pb-1.5 pt-0.5 text-[11px] text-muted-foreground opacity-60">No commits</div>
               <div
                 v-for="(c, i) in git.log"
                 :key="c.hash"
-                class="log-row"
-                :class="{ unpushed: i < git.ahead }"
+                class="mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
+                :class="i < git.ahead && 'bg-accent/[0.06] hover:bg-accent/[0.12]'"
                 :title="c.subject + '\n' + c.author + (i < git.ahead ? '\n↑ Not pushed' : '')"
                 @click="openCommitDiff(c)"
               >
-                <span class="log-hash">{{ c.shortHash }}</span>
-                <span v-if="i < git.ahead" class="log-unpushed-dot" title="Not pushed">↑</span>
-                <span class="log-subject">{{ c.subject }}</span>
-                <span class="log-meta">{{ c.relTime }}</span>
+                <span class="shrink-0 font-mono text-[10px] text-warning" :class="i < git.ahead && 'text-accent'">{{ c.shortHash }}</span>
+                <span v-if="i < git.ahead" class="shrink-0 text-[9px] font-bold text-accent" title="Not pushed">↑</span>
+                <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-secondary-foreground transition-colors hover:text-foreground">{{ c.subject }}</span>
+                <span class="shrink-0 text-[10px] text-muted-foreground">{{ c.relTime }}</span>
               </div>
             </template>
           </div>
@@ -317,155 +335,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.right-panel {
-  width: var(--right-panel-width, 300px);
-  flex: 0 0 var(--right-panel-width, 300px);
-  background: var(--bg-panel);
-  backdrop-filter: var(--blur-panels, none);
-  -webkit-backdrop-filter: var(--blur-panels, none);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  overflow: hidden;
-  font-size: 12px;
-}
-
-.panel-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  height: 32px;
-}
-
-.panel-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11px;
-  font-family: var(--font-ui);
-  padding: 0 4px;
-  transition: color 0.1s;
-}
-.panel-tab:hover { color: var(--text-secondary); }
-.panel-tab.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-
-.panel-content {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-
-.hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 16px;
-  text-align: center;
-}
-.hint.error { color: var(--red); }
-
-.file-tree {
-  flex: 1;
-  padding: 4px 0;
-}
-
-/* Git panel */
-.git-panel { overflow: hidden; }
-
-.git-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.branch-tag {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-family: var(--font-mono);
-}
-.branch-tag :deep(svg) { color: var(--yellow); flex-shrink: 0; }
-
-.ahead-tag { color: var(--green); font-size: 10px; }
-.behind-tag { color: var(--yellow); font-size: 10px; }
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.push-btn {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 500;
-  font-family: var(--font-ui);
-  padding: 2px 7px;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-}
-.push-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-}
-.push-btn:disabled { opacity: 0.35; cursor: default; }
-
-.icon-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 3px;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  transition: color 0.1s, background 0.1s;
-}
-.icon-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-.icon-btn:disabled { opacity: 0.35; cursor: default; }
-
-@keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin 1s linear infinite; }
-
-.git-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-}
-.git-progress-bar {
-  position: relative;
-  flex: 1;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--border);
-  overflow: hidden;
-}
 .git-progress-bar::after {
   content: "";
   position: absolute;
@@ -476,299 +345,10 @@ onBeforeUnmount(() => {
   background: var(--accent);
   animation: git-indeterminate 1.1s ease-in-out infinite;
 }
-.git-progress-label { font-size: 10px; color: var(--text-muted); }
 @keyframes git-indeterminate {
   0%   { left: -40%; }
   100% { left: 100%; }
 }
 
-.git-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.git-error {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  color: var(--text-secondary);
-  padding: 16px 10px;
-  font-size: 11px;
-}
-
-.git-init-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  font-size: 11px;
-  cursor: pointer;
-}
-.git-init-btn:hover { background: var(--yellow); color: #000; border-color: var(--yellow); }
-.git-init-btn:disabled { opacity: 0.35; cursor: default; }
-
-.section-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  opacity: 0.65;
-  padding: 4px 8px 3px;
-}
-
-.section-label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.stage-all-btn {
-  font-size: 10px;
-  font-weight: 500;
-  padding: 1px 5px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  text-transform: none;
-  letter-spacing: 0;
-  opacity: 0.8;
-  transition: background 0.1s, color 0.1s, opacity 0.1s;
-}
-.stage-all-btn:hover { background: var(--bg-hover); color: var(--text-primary); opacity: 1; }
-.stage-all-btn:disabled { opacity: 0.3; cursor: default; }
-
-.section-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.empty-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  opacity: 0.6;
-  padding: 2px 8px 6px;
-}
-
-.git-file {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  cursor: pointer;
-  border-radius: 3px;
-  margin: 0 3px;
-  transition: background 0.08s;
-}
-.git-file:hover { background: var(--bg-hover); }
-
-.file-status {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  width: 11px;
-  flex-shrink: 0;
-  text-align: center;
-}
-.staged   .file-status { color: var(--green); }
-.unstaged .file-status { color: var(--yellow); }
-.untracked .file-status { color: var(--text-muted); }
-
-.file-path {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  transition: color 0.08s;
-}
-.git-file:hover .file-path { color: var(--text-primary); }
-
-.file-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1;
-  padding: 0 2px;
-  flex-shrink: 0;
-  display: none;
-}
-.git-file:hover .file-btn { display: block; }
-.file-btn:hover { color: var(--text-primary); }
-.file-btn.add:hover { color: var(--green); }
-
-/* Commit */
-.commit-section {
-  margin-top: 6px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.commit-input {
-  background: color-mix(in srgb, var(--border) 15%, var(--bg-panel));
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  line-height: 1.5;
-  outline: none;
-  padding: 6px 8px;
-  resize: none;
-  width: 100%;
-  min-height: 52px;
-  max-height: 100px;
-  box-sizing: border-box;
-  transition: border-color 0.1s;
-}
-.commit-input::placeholder { color: var(--text-muted); opacity: 0.6; }
-.commit-input:focus { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
 .commit-input::-webkit-scrollbar { display: none; }
-
-.commit-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  background: color-mix(in srgb, var(--accent) 85%, transparent);
-  border: none;
-  border-radius: 4px;
-  color: #fff;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 600;
-  font-family: var(--font-ui);
-  padding: 5px 10px;
-  transition: background 0.1s;
-}
-.commit-btn:hover:not(:disabled) { background: var(--accent); }
-.commit-btn:disabled { opacity: 0.35; cursor: default; }
-
-/* Diff */
-.diff-section {
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  max-height: 220px;
-}
-
-.diff-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: color-mix(in srgb, var(--border) 20%, var(--bg-panel));
-  flex-shrink: 0;
-}
-
-.diff-title {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
-.diff-mode {
-  font-size: 10px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.diff-view {
-  overflow: auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.5;
-  white-space: pre;
-  margin: 0;
-  padding: 5px 0;
-  flex: 1;
-}
-
-.diff-add  { color: var(--green); display: block; }
-.diff-del  { color: var(--red); display: block; }
-.diff-hunk { color: var(--accent); display: block; }
-.diff-ctx  { color: var(--text-secondary); display: block; }
-
-/* History */
-.history-section {
-  border-top: 1px solid var(--border);
-  margin-top: 6px;
-  padding-top: 4px;
-  flex-shrink: 0;
-}
-
-.history-toggle { cursor: pointer; user-select: none; }
-.history-title { display: flex; align-items: center; gap: 4px; }
-.history-title :deep(svg) { transition: transform 0.12s; }
-.history-title .open { transform: rotate(90deg); }
-
-.log-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  cursor: pointer;
-  margin: 0 3px;
-  border-radius: 3px;
-  transition: background 0.08s;
-}
-.log-row:hover { background: var(--bg-hover); }
-.log-row.unpushed { background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.log-row.unpushed:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.log-row.unpushed .log-hash { color: var(--accent); }
-
-.log-unpushed-dot {
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.log-hash {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--yellow);
-  flex-shrink: 0;
-}
-.log-subject {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--text-secondary);
-  transition: color 0.08s;
-}
-.log-row:hover .log-subject { color: var(--text-primary); }
-.log-meta {
-  font-size: 10px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
 </style>
