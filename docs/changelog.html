@@ -79,11 +79,57 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.1.1 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.1.1</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">srpen 2026</span>
+    </div>
+
+    <div class="section break">
+      <div class="section-label">Nový backend, nové číslování</div>
+      <ul>
+        <li><strong>Rust/Tauri backend nahrazen Go/Wails v2</strong> — celý nativní backend byl přepsán do Go (<code>src-wails/</code>). Vue frontend zůstal beze změny, na Go se napojuje přes kompatibilní vrstvu v <code>src/lib/wailsCompat/</code>.</li>
+        <li><strong>Verzování začíná znovu od 0.1.x</strong> a vydává se z nového repozitáře <code>JBurdik/burrow-wails</code>. Tauri verze (2.24.3) zůstává tam, kde byla — tohle není její pokračování, ale samostatná linie.</li>
+        <li><strong>Aplikace má nové bundle ID</strong> <code>com.agenticide.wails</code>, takže se instaluje vedle staré verze, ne přes ni.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Samoaktualizace</div>
+      <ul>
+        <li><strong>Stahování a instalace aktualizací funguje</strong> — v přepisu do Go zůstala jen kontrola verze, samotné <code>downloadAndInstall()</code> hlásilo chybu a restart aplikace byl prázdná funkce. Doplněno v <code>src-wails/updater.go</code>.</li>
+        <li><strong>Dvě povinné kontroly před instalací</strong> — sha256 staženého archivu musí sedět s otiskem v manifestu a rozbalený balík musí být podepsaný týmem <code>9QY36KZ8JP</code>. Nesouhlas kterékoli z nich instalaci zruší a ponechá stávající verzi.</li>
+        <li><strong>Odpadl samostatný podpisový klíč</strong> — dřívější Tauri flow vyžadoval vlastní ed25519 klíč navíc k Apple podpisu. Nově slouží jako záruka přímo Apple Developer ID podpis, který build stejně nese; o jeden tajný klíč méně.</li>
+        <li><strong>Ukazatel průběhu stahování</strong> jede přes událost <code>update:progress</code>, banner tedy zobrazuje reálný postup místo neurčitého pruhu.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Vydávání verzí</div>
+      <ul>
+        <li><strong><code>just release</code> staví, podepisuje, notarizuje a publikuje</strong> — build → podpis Developer ID → notarizace u Applu → dmg → aktualizační balíček → tag → GitHub release. Dřív recept jen vypsal, že přepis ještě není hotový.</li>
+        <li><strong><code>just bump</code> drží verzi v jednom čísle</strong> napříč <code>wails.json</code>, <code>package.json</code> a <code>version.go</code> — dřív byly rozjeté a aplikace hlásila jinou verzi, než jaká se vydávala.</li>
+        <li><strong><code>just verify</code></strong> projde podpis, Gatekeeper i notarizační lístky včetně simulace stažené kopie.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Notarizace tiše odesílala nepodepsaný build</strong> — běžící <code>wails dev</code> přepisuje <code>build/bin</code> vlastní binárkou, takže balík podepsaný před minutou mohl u Applu spadnout na „not signed with a valid Developer ID certificate“. Nový krok <code>assert-signed</code> to zachytí lokálně během vteřiny.</li>
+        <li><strong>Dmg neprocházel Gatekeeperem</strong> — byl notarizovaný, ale ne podepsaný, a systém obraz disku při stažení kontroluje zvlášť (<code>no usable signature</code>). Nyní se podepisuje před notarizací.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v2.24.3 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v2.24.3</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">srpen 2026</span>
     </div>
 
