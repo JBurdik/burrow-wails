@@ -49,21 +49,21 @@ func migrate(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS mission_tasks (
 			id TEXT PRIMARY KEY,
 			workspace_id INTEGER,
-			pty_id TEXT,
+			pty_id INTEGER,
 			title TEXT NOT NULL,
 			cwd TEXT,
 			model TEXT,
 			status TEXT,
 			turns INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+			created_at INTEGER NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS agent_turns (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
-			pty_id TEXT,
+			pty_id INTEGER,
 			worktree_path TEXT,
-			started_at TEXT NOT NULL DEFAULT (datetime('now')),
-			completed_at TEXT,
+			started_at INTEGER NOT NULL,
+			completed_at INTEGER,
 			state TEXT NOT NULL DEFAULT 'running',
 			start_tree TEXT,
 			end_tree TEXT,
@@ -81,7 +81,7 @@ func migrate(db *sql.DB) error {
 			ord INTEGER NOT NULL DEFAULT 0,
 			mime_type TEXT,
 			file_path TEXT,
-			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+			created_at INTEGER NOT NULL
 		)`,
 	}
 	for _, s := range stmts {
@@ -111,10 +111,10 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE mission_tasks ADD COLUMN use_worktree INTEGER DEFAULT 1`,
 		`ALTER TABLE mission_tasks ADD COLUMN worktree_branch TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN task_workspace_id INTEGER`,
-		`ALTER TABLE mission_tasks ADD COLUMN chat_id TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN chat_id INTEGER`,
 		`ALTER TABLE mission_tasks ADD COLUMN session_id TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN board_order REAL DEFAULT 0`,
-		`ALTER TABLE mission_tasks ADD COLUMN updated_at TEXT`,
+		`ALTER TABLE mission_tasks ADD COLUMN updated_at INTEGER`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {

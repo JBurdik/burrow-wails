@@ -1,16 +1,20 @@
 export namespace main {
 	
-	export class AgentTurn {
+	export class AgentTurnChange {
 	    id: number;
 	    taskId: string;
-	    ptyId?: string;
-	    worktreePath?: string;
-	    startedAt: string;
-	    completedAt?: string;
+	    ptyId: number;
+	    startedAt: number;
+	    completedAt?: number;
 	    state: string;
+	    changesAvailable: boolean;
+	    changeError?: string;
+	    files: string[];
+	    additions: number;
+	    deletions: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new AgentTurn(source);
+	        return new AgentTurnChange(source);
 	    }
 	
 	    constructor(source: any = {}) {
@@ -18,38 +22,14 @@ export namespace main {
 	        this.id = source["id"];
 	        this.taskId = source["taskId"];
 	        this.ptyId = source["ptyId"];
-	        this.worktreePath = source["worktreePath"];
 	        this.startedAt = source["startedAt"];
 	        this.completedAt = source["completedAt"];
 	        this.state = source["state"];
-	    }
-	}
-	export class BoardTask {
-	    id: string;
-	    repoWorkspaceId?: number;
-	    title: string;
-	    description?: string;
-	    boardColumn: string;
-	    boardOrder: number;
-	    status?: string;
-	    agentKind?: string;
-	    updatedAt?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new BoardTask(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.repoWorkspaceId = source["repoWorkspaceId"];
-	        this.title = source["title"];
-	        this.description = source["description"];
-	        this.boardColumn = source["boardColumn"];
-	        this.boardOrder = source["boardOrder"];
-	        this.status = source["status"];
-	        this.agentKind = source["agentKind"];
-	        this.updatedAt = source["updatedAt"];
+	        this.changesAvailable = source["changesAvailable"];
+	        this.changeError = source["changeError"];
+	        this.files = source["files"];
+	        this.additions = source["additions"];
+	        this.deletions = source["deletions"];
 	    }
 	}
 	export class ClaudeAccountInfo {
@@ -142,13 +122,28 @@ export namespace main {
 	}
 	export class MissionTask {
 	    id: string;
-	    workspaceId?: number;
-	    ptyId?: string;
+	    workspace_id?: number;
+	    pty_id?: number;
 	    title: string;
 	    cwd?: string;
 	    model?: string;
 	    status?: string;
-	    turns: number;
+	    turns?: number;
+	    created_at: number;
+	    handed_off?: number;
+	    profile_id?: string;
+	    repo_workspace_id?: number;
+	    board_column: string;
+	    description?: string;
+	    agent_kind?: string;
+	    transport?: string;
+	    use_worktree?: number;
+	    worktree_branch?: string;
+	    task_workspace_id?: number;
+	    chat_id?: number;
+	    session_id?: string;
+	    board_order: number;
+	    updated_at?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new MissionTask(source);
@@ -157,13 +152,28 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
-	        this.workspaceId = source["workspaceId"];
-	        this.ptyId = source["ptyId"];
+	        this.workspace_id = source["workspace_id"];
+	        this.pty_id = source["pty_id"];
 	        this.title = source["title"];
 	        this.cwd = source["cwd"];
 	        this.model = source["model"];
 	        this.status = source["status"];
 	        this.turns = source["turns"];
+	        this.created_at = source["created_at"];
+	        this.handed_off = source["handed_off"];
+	        this.profile_id = source["profile_id"];
+	        this.repo_workspace_id = source["repo_workspace_id"];
+	        this.board_column = source["board_column"];
+	        this.description = source["description"];
+	        this.agent_kind = source["agent_kind"];
+	        this.transport = source["transport"];
+	        this.use_worktree = source["use_worktree"];
+	        this.worktree_branch = source["worktree_branch"];
+	        this.task_workspace_id = source["task_workspace_id"];
+	        this.chat_id = source["chat_id"];
+	        this.session_id = source["session_id"];
+	        this.board_order = source["board_order"];
+	        this.updated_at = source["updated_at"];
 	    }
 	}
 	export class SkillInfo {

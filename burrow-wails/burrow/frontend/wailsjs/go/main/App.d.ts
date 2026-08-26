@@ -14,7 +14,7 @@ export function AcpStop(arg1:string):Promise<void>;
 
 export function AddMcpServer(arg1:string,arg2:Record<string, any>):Promise<void>;
 
-export function BeginAgentTurn(arg1:string,arg2:string,arg3:string):Promise<number>;
+export function BeginAgentTurn(arg1:string,arg2:number,arg3:string):Promise<number>;
 
 export function ClaudeAbort(arg1:string):Promise<void>;
 
@@ -42,7 +42,7 @@ export function CodexStart(arg1:string,arg2:Array<string>):Promise<string>;
 
 export function CodexStop(arg1:string):Promise<void>;
 
-export function CompleteAgentTurn(arg1:string,arg2:string):Promise<void>;
+export function CompleteAgentTurn(arg1:number,arg2:string):Promise<void>;
 
 export function CreatePty(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
@@ -76,9 +76,9 @@ export function KillOrphanSessions(arg1:Array<string>):Promise<number>;
 
 export function KillPty(arg1:string):Promise<void>;
 
-export function ListAgentTurnChanges(arg1:string):Promise<Array<main.AgentTurn>>;
+export function ListAgentTurnChanges(arg1:string):Promise<Array<main.AgentTurnChange>>;
 
-export function ListBoardTasks(arg1:number):Promise<Array<main.BoardTask>>;
+export function ListBoardTasks(arg1:number):Promise<Array<main.MissionTask>>;
 
 export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSessionInfo>>;
 
@@ -194,7 +194,7 @@ export function TakeSpawnRequests(arg1:string):Promise<Array<main.SpawnRequest>>
 
 export function TouchWorkspace(arg1:number):Promise<void>;
 
-export function UpsertBoardTask(arg1:main.BoardTask):Promise<void>;
+export function UpsertBoardTask(arg1:main.MissionTask):Promise<void>;
 
 export function UpsertMissionTask(arg1:main.MissionTask):Promise<void>;
 

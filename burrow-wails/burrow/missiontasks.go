@@ -1,23 +1,19 @@
 package main
 
-import "time"
+import "encoding/json"
 
-// MissionTask mirrors a row of `mission_tasks` as used by the Mission
-// Control view (as opposed to the kanban board — see board.go), matching
-// upsert_mission_task/delete_mission_task in src-tauri/src/lib.rs.
-type MissionTask struct {
-	ID          string  `json:"id"`
-	WorkspaceID *int64  `json:"workspaceId,omitempty"`
-	PtyID       *string `json:"ptyId,omitempty"`
-	Title       string  `json:"title"`
-	Cwd         *string `json:"cwd,omitempty"`
-	Model       *string `json:"model,omitempty"`
-	Status      *string `json:"status,omitempty"`
-	Turns       int     `json:"turns"`
+func parseJSONStringArray(s string) []string {
+	var out []string
+	_ = json.Unmarshal([]byte(s), &out)
+	return out
 }
 
+// ListMissionTasks/UpsertMissionTask/DeleteMissionTask operate on the same
+// MissionTask type as board.go — see its comment for why (one shared table
+// + frontend type for both the kanban board and the plain task list).
+
 func (a *App) ListMissionTasks() ([]MissionTask, error) {
-	rows, err := a.db.Query(`SELECT id, workspace_id, pty_id, title, cwd, model, status, turns FROM mission_tasks ORDER BY created_at DESC`)
+	rows, err := a.db.Query("SELECT " + missionTaskCols + " FROM mission_tasks ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -25,8 +21,8 @@ func (a *App) ListMissionTasks() ([]MissionTask, error) {
 
 	var out []MissionTask
 	for rows.Next() {
-		var t MissionTask
-		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.PtyID, &t.Title, &t.Cwd, &t.Model, &t.Status, &t.Turns); err != nil {
+		t, err := scanMissionTask(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -35,39 +31,34 @@ func (a *App) ListMissionTasks() ([]MissionTask, error) {
 }
 
 func (a *App) UpsertMissionTask(t MissionTask) error {
-	_, err := a.db.Exec(`INSERT INTO mission_tasks (id, workspace_id, pty_id, title, cwd, model, status, turns)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			workspace_id = excluded.workspace_id,
-			pty_id = excluded.pty_id,
-			title = excluded.title,
-			cwd = excluded.cwd,
-			model = excluded.model,
-			status = excluded.status,
-			turns = excluded.turns`,
-		t.ID, t.WorkspaceID, t.PtyID, t.Title, t.Cwd, t.Model, t.Status, t.Turns)
-	return err
+	return a.UpsertBoardTask(t)
 }
 
 func (a *App) DeleteMissionTask(id string) error {
-	_, err := a.db.Exec(`DELETE FROM mission_tasks WHERE id = ?`, id)
-	return err
+	return a.DeleteBoardTask(id)
 }
 
 // --- agent turns (per-run diff tracking) ---
-
-type AgentTurn struct {
-	ID           int64   `json:"id"`
-	TaskID       string  `json:"taskId"`
-	PtyID        *string `json:"ptyId,omitempty"`
-	WorktreePath *string `json:"worktreePath,omitempty"`
-	StartedAt    string  `json:"startedAt"`
-	CompletedAt  *string `json:"completedAt,omitempty"`
-	State        string  `json:"state"`
+// AgentTurnChange mirrors the frontend's AgentTurnChange interface
+// (src/stores/boardTasks.ts) — NOTE this one is camelCase, unlike
+// MissionTask; that's what the original Rust struct actually serialized.
+type AgentTurnChange struct {
+	ID               int64    `json:"id"`
+	TaskID           string   `json:"taskId"`
+	PtyID            int64    `json:"ptyId"`
+	StartedAt        int64    `json:"startedAt"`
+	CompletedAt      *int64   `json:"completedAt,omitempty"`
+	State            string   `json:"state"`
+	ChangesAvailable bool     `json:"changesAvailable"`
+	ChangeError      *string  `json:"changeError,omitempty"`
+	Files            []string `json:"files"`
+	Additions        int      `json:"additions"`
+	Deletions        int      `json:"deletions"`
 }
 
-func (a *App) BeginAgentTurn(taskID, ptyID, worktreePath string) (int64, error) {
-	res, err := a.db.Exec(`INSERT INTO agent_turns (task_id, pty_id, worktree_path, state) VALUES (?, ?, ?, 'running')`, taskID, ptyID, worktreePath)
+func (a *App) BeginAgentTurn(taskID string, ptyID int64, worktreePath string) (int64, error) {
+	res, err := a.db.Exec(`INSERT INTO agent_turns (task_id, pty_id, worktree_path, started_at, state) VALUES (?, ?, ?, ?, 'running')`,
+		taskID, ptyID, worktreePath, nowMillis())
 	if err != nil {
 		return 0, err
 	}
@@ -75,28 +66,40 @@ func (a *App) BeginAgentTurn(taskID, ptyID, worktreePath string) (int64, error) 
 	return res.LastInsertId()
 }
 
-func (a *App) CompleteAgentTurn(ptyID, state string) error {
+func (a *App) CompleteAgentTurn(ptyID int64, state string) error {
 	_, err := a.db.Exec(`UPDATE agent_turns SET state = ?, completed_at = ? WHERE pty_id = ? AND completed_at IS NULL`,
-		state, time.Now().UTC().Format(time.RFC3339), ptyID)
+		state, nowMillis(), ptyID)
 	if a.ctx != nil {
 		emitAgentDone(a.ctx)
 	}
 	return err
 }
 
-func (a *App) ListAgentTurnChanges(taskID string) ([]AgentTurn, error) {
-	rows, err := a.db.Query(`SELECT id, task_id, pty_id, worktree_path, started_at, completed_at, state FROM agent_turns WHERE task_id = ? ORDER BY started_at`, taskID)
+func (a *App) ListAgentTurnChanges(taskID string) ([]AgentTurnChange, error) {
+	rows, err := a.db.Query(`SELECT id, task_id, pty_id, started_at, completed_at, state, changes_available, change_error, files_json, additions, deletions
+		FROM agent_turns WHERE task_id = ? ORDER BY started_at`, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []AgentTurn
+	var out []AgentTurnChange
 	for rows.Next() {
-		var t AgentTurn
-		if err := rows.Scan(&t.ID, &t.TaskID, &t.PtyID, &t.WorktreePath, &t.StartedAt, &t.CompletedAt, &t.State); err != nil {
+		var t AgentTurnChange
+		var changesAvailable *int
+		var filesJSON string
+		var additions, deletions *int
+		if err := rows.Scan(&t.ID, &t.TaskID, &t.PtyID, &t.StartedAt, &t.CompletedAt, &t.State, &changesAvailable, &t.ChangeError, &filesJSON, &additions, &deletions); err != nil {
 			return nil, err
 		}
+		t.ChangesAvailable = changesAvailable != nil && *changesAvailable != 0
+		if additions != nil {
+			t.Additions = *additions
+		}
+		if deletions != nil {
+			t.Deletions = *deletions
+		}
+		t.Files = parseJSONStringArray(filesJSON)
 		out = append(out, t)
 	}
 	return out, rows.Err()

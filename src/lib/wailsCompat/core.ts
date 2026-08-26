@@ -132,9 +132,9 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "delete_mission_task":
       return App.DeleteMissionTask(args.id);
     case "begin_agent_turn":
-      return App.BeginAgentTurn(args.taskId ?? args.task_id, args.ptyId ?? args.pty_id, args.worktreePath ?? args.worktree_path ?? "");
+      return App.BeginAgentTurn(args.taskId ?? args.task_id, Number(args.ptyId ?? args.pty_id), args.worktreePath ?? args.worktree_path ?? "");
     case "complete_agent_turn":
-      return App.CompleteAgentTurn(args.ptyId ?? args.pty_id, args.state);
+      return App.CompleteAgentTurn(Number(args.ptyId ?? args.pty_id), args.state);
     case "list_agent_turn_changes":
       return App.ListAgentTurnChanges(args.taskId ?? args.task_id);
 
