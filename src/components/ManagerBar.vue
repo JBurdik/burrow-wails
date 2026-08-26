@@ -1,9 +1,9 @@
 <template>
-  <div class="mb-root" :class="{ 'mb-open': expanded }">
+  <div class="relative z-30 flex shrink-0 flex-col border-t border-border bg-[var(--bg-base,#0d0d0d)] [background-image:linear-gradient(var(--bg-panel,#111),var(--bg-panel,#111))]">
     <!-- Drag handle (top border) — resize the expanded panel height -->
     <div
       v-show="expanded"
-      class="mb-resize"
+      class="-mt-[3px] h-[5px] shrink-0 cursor-row-resize hover:bg-accent/40"
       @mousedown="startResize"
     />
 
@@ -13,11 +13,11 @@
          the strip below. -->
     <div
       v-if="started"
-      class="mb-panel-wrap"
-      :style="{ height: (expanded ? panelHeight : 0) + 'px', transition: isResizing ? 'none' : undefined }"
+      class="shrink-0 overflow-hidden"
+      :style="{ height: (expanded ? panelHeight : 0) + 'px', transition: isResizing ? 'none' : 'height 0.22s cubic-bezier(0.4,0,0.2,1)' }"
     >
-      <div class="mb-panel" :style="{ height: panelHeight + 'px' }">
-        <div class="mb-chat">
+      <div class="mb-panel flex min-h-0 flex-col border-b border-border" :style="{ height: panelHeight + 'px' }">
+        <div class="mb-chat min-h-0 flex-1 bg-[var(--bg-base,#0d0d0d)]">
           <!-- One ClaudeChat per engaged repo, kept mounted and v-show'd. This is
                what lets a busy Manager keep streaming when you switch workspace:
                we flip visibility instead of unmounting (which would claude_stop). -->
@@ -40,51 +40,55 @@
     </div>
 
     <!-- Always-visible bottom strip — holds the one Manager composer -->
-    <div class="mb-strip">
-      <PhSparkle :size="15" weight="fill" class="mb-strip-icon" />
-      <span class="mb-strip-title">Manager</span>
-      <span class="mb-status-dot" :class="`mb-dot-${dotKind}`" :title="dotTitle" />
-      <span class="mb-strip-sub" :title="rootCwd">{{ rootName }}</span>
+    <div class="flex min-h-[38px] shrink-0 items-center gap-2 px-2.5 py-1.5">
+      <PhSparkle :size="15" weight="fill" class="shrink-0 text-accent" />
+      <span class="shrink-0 text-xs font-semibold text-foreground">Manager</span>
+      <span class="mb-status-dot h-2 w-2 shrink-0 rounded-full" :class="`mb-dot-${dotKind}`" :title="dotTitle" />
+      <span class="shrink-0 max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground" :title="rootCwd">{{ rootName }}</span>
 
       <!-- Quick input with multiline + suggestions -->
-      <div class="mb-quick-wrap">
+      <div class="mb-quick-wrap relative min-w-0 flex-1 overflow-hidden rounded-[14px] border border-white/10 bg-[#1a1a20] transition-colors focus-within:border-accent/50">
         <!-- /command suggestions -->
-        <div v-if="cmdSuggestions.length" class="mb-suggestions">
+        <div v-if="cmdSuggestions.length" class="absolute inset-x-0 bottom-[calc(100%+4px)] z-[80] max-h-[200px] overflow-y-auto rounded-lg border border-border bg-[var(--bg-dropdown,#18181c)] shadow-[0_-8px_24px_rgba(0,0,0,0.4)]">
           <div
             v-for="(s, i) in cmdSuggestions"
             :key="s.name"
-            class="mb-suggestion"
-            :class="{ 'mb-sug-active': i === cmdIdx }"
+            class="flex cursor-pointer items-baseline gap-2.5 px-2.5 py-1.5 transition-colors hover:bg-white/[0.06]"
+            :class="i === cmdIdx && 'bg-white/[0.06]'"
             @mousedown.prevent="applyCmd(s.name)"
           >
-            <span class="mb-sug-name">/{{ s.name }}</span>
-            <span class="mb-sug-desc">{{ s.description }}</span>
+            <span class="mb-sug-name min-w-[90px] shrink-0 font-mono text-xs font-semibold">/{{ s.name }}</span>
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-white/40">{{ s.description }}</span>
           </div>
         </div>
         <!-- @file suggestions -->
-        <div v-if="atSuggestions.length" class="mb-suggestions">
+        <div v-if="atSuggestions.length" class="absolute inset-x-0 bottom-[calc(100%+4px)] z-[80] max-h-[200px] overflow-y-auto rounded-lg border border-border bg-[var(--bg-dropdown,#18181c)] shadow-[0_-8px_24px_rgba(0,0,0,0.4)]">
           <div
             v-for="(p, i) in atSuggestions"
             :key="p"
-            class="mb-suggestion"
-            :class="{ 'mb-sug-active': i === atIdx }"
+            class="flex cursor-pointer items-baseline gap-2.5 px-2.5 py-1.5 transition-colors hover:bg-white/[0.06]"
+            :class="i === atIdx && 'bg-white/[0.06]'"
             @mousedown.prevent="applyAt(p)"
           >
-            <span class="mb-sug-name">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
-            <span class="mb-sug-desc">{{ p }}</span>
+            <span class="mb-sug-name min-w-[90px] shrink-0 font-mono text-xs font-semibold">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-white/40">{{ p }}</span>
           </div>
         </div>
         <!-- Pasted image thumbnails -->
-        <div v-if="pastedImages.length" class="mb-pasted-imgs">
-          <div v-for="(img, i) in pastedImages" :key="i" class="mb-pasted-img-wrap">
-            <img :src="img" class="mb-pasted-img" :alt="`Image ${i + 1}`" />
-            <button class="mb-pasted-img-rm" title="Remove" @mousedown.prevent="pastedImages.splice(i, 1)">×</button>
+        <div v-if="pastedImages.length" class="flex flex-wrap gap-1.5 py-1">
+          <div v-for="(img, i) in pastedImages" :key="i" class="relative shrink-0">
+            <img :src="img" class="block h-12 w-12 rounded-md border border-white/10 object-cover" :alt="`Image ${i + 1}`" />
+            <button
+              class="absolute -right-[5px] -top-[5px] flex h-4 w-4 items-center justify-center rounded-full border-0 bg-black/70 p-0 text-[11px] leading-none text-white"
+              title="Remove"
+              @mousedown.prevent="pastedImages.splice(i, 1)"
+            >×</button>
           </div>
         </div>
         <textarea
           ref="quickEl"
           v-model="quickText"
-          class="mb-quick"
+          class="mb-quick box-border block max-h-[160px] min-h-[40px] w-full resize-none overflow-y-auto border-none bg-transparent px-3.5 pb-1.5 pt-3 font-sans text-[13px] leading-normal text-white/[0.88] outline-none placeholder:text-white/50"
           rows="1"
           :placeholder="busy ? 'Manager is working — queue a message…' : 'Message Manager… (Enter=send, Shift+Enter=newline, @file, /cmd)'"
           @focus="ensureStarted"
@@ -95,119 +99,127 @@
       </div>
 
       <!-- Model picker (Manager has its own model, default Sonnet) -->
-      <div class="mb-wt">
+      <div class="relative shrink-0">
         <button
-          class="mb-wt-btn"
+          class="inline-flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[7px] border border-border bg-transparent px-2 font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground"
           title="Manager model"
           @click="mdlMenuOpen = !mdlMenuOpen"
         >
           <PhCpu :size="13" weight="bold" />
-          <span class="mb-wt-label">{{ managerModelLabel }}</span>
-          <PhCaretUp :size="9" weight="bold" class="mb-wt-caret" />
+          <span class="font-medium">{{ managerModelLabel }}</span>
+          <PhCaretUp :size="9" weight="bold" class="opacity-60" />
         </button>
-        <div v-if="mdlMenuOpen" class="mb-wt-menu mb-wt-menu-narrow">
-          <div class="mb-wt-menu-head">Manager model</div>
+        <div v-if="mdlMenuOpen" class="absolute bottom-[calc(100%+6px)] right-0 z-[70] w-[230px] rounded-[10px] border border-border bg-[var(--bg-dropdown,var(--bg-panel,#111))] p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
+          <div class="px-2 pb-1.5 pt-1 text-[10px] uppercase tracking-[0.07em] text-muted-foreground">Manager model</div>
           <button
             v-for="m in MANAGER_MODELS"
             :key="m.id"
-            class="mb-wt-item"
-            :class="{ 'mb-wt-item-on': managerModel === m.id }"
+            class="mb-wt-item flex w-full items-center gap-[9px] rounded-lg border-0 bg-transparent p-2 text-left text-secondary-foreground hover:bg-white/[0.07]"
+            :class="managerModel === m.id && 'mb-wt-item-on text-foreground'"
             @click="selectManagerModel(m.id)"
           >
             <PhCpu :size="14" weight="bold" />
-            <div class="mb-wt-item-text">
-              <span class="mb-wt-item-title">{{ m.label }}</span>
-              <span class="mb-wt-item-sub">{{ m.note }}</span>
+            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span class="text-xs font-semibold text-foreground">{{ m.label }}</span>
+              <span class="text-[10px] leading-[1.3] text-muted-foreground">{{ m.note }}</span>
             </div>
-            <PhCheck v-if="managerModel === m.id" :size="13" weight="bold" class="mb-wt-item-check" />
+            <PhCheck v-if="managerModel === m.id" :size="13" weight="bold" class="shrink-0 text-accent" />
           </button>
         </div>
       </div>
 
       <!-- Spawn-target picker: clear labeled dropdown (replaces the cryptic
            icon toggle). Tells you where the Manager puts new agents. -->
-      <div class="mb-wt">
+      <div class="relative shrink-0">
         <button
-          class="mb-wt-btn"
+          class="inline-flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[7px] border border-border bg-transparent px-2 font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground"
           :title="'Where the Manager spawns new agents'"
           @click="wtMenuOpen = !wtMenuOpen"
         >
           <PhTree v-if="worktreeMode" :size="13" weight="bold" />
           <PhGitBranch v-else :size="13" weight="bold" />
-          <span class="mb-wt-label">{{ worktreeMode ? 'New worktree' : 'Current branch' }}</span>
-          <PhCaretUp :size="9" weight="bold" class="mb-wt-caret" />
+          <span class="font-medium">{{ worktreeMode ? 'New worktree' : 'Current branch' }}</span>
+          <PhCaretUp :size="9" weight="bold" class="opacity-60" />
         </button>
-        <div v-if="wtMenuOpen" class="mb-wt-menu">
-          <div class="mb-wt-menu-head">Spawn agents in…</div>
+        <div v-if="wtMenuOpen" class="absolute bottom-[calc(100%+6px)] right-0 z-[70] w-[260px] rounded-[10px] border border-border bg-[var(--bg-dropdown,var(--bg-panel,#111))] p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
+          <div class="px-2 pb-1.5 pt-1 text-[10px] uppercase tracking-[0.07em] text-muted-foreground">Spawn agents in…</div>
           <button
-            class="mb-wt-item"
-            :class="{ 'mb-wt-item-on': !worktreeMode }"
+            class="mb-wt-item flex w-full items-center gap-[9px] rounded-lg border-0 bg-transparent p-2 text-left text-secondary-foreground hover:bg-white/[0.07]"
+            :class="!worktreeMode && 'mb-wt-item-on text-foreground'"
             @click="selectWorktreeMode(false)"
           >
             <PhGitBranch :size="14" weight="bold" />
-            <div class="mb-wt-item-text">
-              <span class="mb-wt-item-title">Current branch</span>
-              <span class="mb-wt-item-sub">Shared working tree — fast, agents see each other's edits</span>
+            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span class="text-xs font-semibold text-foreground">Current branch</span>
+              <span class="text-[10px] leading-[1.3] text-muted-foreground">Shared working tree — fast, agents see each other's edits</span>
             </div>
-            <PhCheck v-if="!worktreeMode" :size="13" weight="bold" class="mb-wt-item-check" />
+            <PhCheck v-if="!worktreeMode" :size="13" weight="bold" class="shrink-0 text-accent" />
           </button>
           <button
-            class="mb-wt-item"
-            :class="{ 'mb-wt-item-on': worktreeMode }"
+            class="mb-wt-item flex w-full items-center gap-[9px] rounded-lg border-0 bg-transparent p-2 text-left text-secondary-foreground hover:bg-white/[0.07]"
+            :class="worktreeMode && 'mb-wt-item-on text-foreground'"
             @click="selectWorktreeMode(true)"
           >
             <PhTree :size="14" weight="bold" />
-            <div class="mb-wt-item-text">
-              <span class="mb-wt-item-title">New worktree each</span>
-              <span class="mb-wt-item-sub">Isolated branch per agent — safe for parallel work</span>
+            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span class="text-xs font-semibold text-foreground">New worktree each</span>
+              <span class="text-[10px] leading-[1.3] text-muted-foreground">Isolated branch per agent — safe for parallel work</span>
             </div>
-            <PhCheck v-if="worktreeMode" :size="13" weight="bold" class="mb-wt-item-check" />
+            <PhCheck v-if="worktreeMode" :size="13" weight="bold" class="shrink-0 text-accent" />
           </button>
         </div>
       </div>
 
       <!-- Permission mode switcher -->
-      <div class="mb-wt">
+      <div class="relative shrink-0">
         <button
-          class="mb-wt-btn"
-          :class="{ 'mb-wt-btn-danger': activePermMeta.danger }"
+          class="inline-flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[7px] border border-border bg-transparent px-2 font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground"
+          :class="activePermMeta.danger && 'border-destructive text-destructive hover:bg-destructive/12'"
           :title="activePermMeta.title"
           @click="permMenuOpen = !permMenuOpen"
         >
           <component :is="PERM_ICON[activePermMode]" :size="13" weight="bold" />
-          <span class="mb-wt-label">{{ activePermMeta.label }}</span>
+          <span class="font-medium">{{ activePermMeta.label }}</span>
         </button>
-        <div v-if="permMenuOpen" class="mb-wt-menu">
-          <div class="mb-wt-menu-head">Permission mode</div>
+        <div v-if="permMenuOpen" class="absolute bottom-[calc(100%+6px)] right-0 z-[70] w-[260px] rounded-[10px] border border-border bg-[var(--bg-dropdown,var(--bg-panel,#111))] p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
+          <div class="px-2 pb-1.5 pt-1 text-[10px] uppercase tracking-[0.07em] text-muted-foreground">Permission mode</div>
           <button
             v-for="m in PERM_MODES"
             :key="m"
-            class="mb-wt-item"
-            :class="{ 'mb-wt-item-on': activePermMode === m, 'mb-wt-item-danger': PERM_META[m].danger }"
+            class="mb-wt-item flex w-full items-center gap-[9px] rounded-lg border-0 bg-transparent p-2 text-left text-secondary-foreground hover:bg-white/[0.07]"
+            :class="[activePermMode === m && 'mb-wt-item-on text-foreground', PERM_META[m].danger && 'mb-wt-item-danger text-destructive hover:bg-destructive/10']"
             :title="PERM_META[m].title"
             @click="selectPermMode(m)"
           >
             <component :is="PERM_ICON[m]" :size="14" weight="bold" />
-            <div class="mb-wt-item-text">
-              <span class="mb-wt-item-title">{{ PERM_META[m].label }}</span>
-              <span class="mb-wt-item-sub">{{ PERM_META[m].title }}</span>
+            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span class="text-xs font-semibold text-foreground">{{ PERM_META[m].label }}</span>
+              <span class="text-[10px] leading-[1.3] text-muted-foreground">{{ PERM_META[m].title }}</span>
             </div>
           </button>
         </div>
       </div>
 
       <button
-        class="mb-btn"
+        class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
         :title="expanded ? 'Collapse Manager (⌘J)' : 'Expand Manager (⌘J)'"
         @click="toggleExpanded"
       >
         <PhCaretDown v-if="expanded" :size="15" weight="bold" />
         <PhCaretUp v-else :size="15" weight="bold" />
       </button>
-      <button class="mb-btn" title="Reset Manager session (clears conversation history, starts fresh)" @click="resetSession">
+      <button
+        class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
+        title="Reset Manager session (clears conversation history, starts fresh)"
+        @click="resetSession"
+      >
         <PhArrowCounterClockwise :size="15" weight="bold" />
       </button>
-      <button class="mb-btn" title="Project config" @click="emit('openProjectConfig')">
+      <button
+        class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
+        title="Project config"
+        @click="emit('openProjectConfig')"
+      >
         <PhGear :size="15" weight="bold" />
       </button>
     </div>
@@ -803,146 +815,13 @@ const managerPrimer = computed(() => {
 </script>
 
 <style scoped>
-.mb-root {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  /* Opaque backing even under translucent themes. */
-  background-color: var(--bg-base, #0d0d0d);
-  background-image: linear-gradient(var(--bg-panel, #111111), var(--bg-panel, #111111));
-  position: relative;
-  z-index: 30;
-}
-
-/* ── Resize handle ── */
-.mb-resize {
-  height: 5px;
-  margin-top: -3px;
-  cursor: row-resize;
-  flex-shrink: 0;
-}
-.mb-resize:hover { background: var(--accent, #3b82f6); opacity: 0.4; }
-
-/* ── Expanded panel ── */
-.mb-panel-wrap {
-  flex-shrink: 0;
-  overflow: hidden;
-  transition: height 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.mb-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-}
-.mb-chat {
-  flex: 1;
-  min-height: 0;
-  background-color: var(--bg-base, #0d0d0d);
-}
 .mb-chat :deep(.claude-chat) { background: transparent; backdrop-filter: none; }
 
-/* ── Bottom strip ── */
-.mb-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 6px 10px;
-  flex-shrink: 0;
-}
-.mb-strip-icon { color: var(--accent, #3b82f6); flex-shrink: 0; }
-.mb-strip-title { font-size: 12px; font-weight: 600; color: var(--text-primary, #e2e8f0); flex-shrink: 0; }
-.mb-strip-sub {
-  font-size: 10px;
-  color: var(--text-muted, #64748b);
-  flex-shrink: 0;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mb-spacer { flex: 1; }
-.mb-quick-wrap {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-  background: #1a1a20;
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 14px;
-  overflow: hidden;
-  transition: border-color .15s;
-}
-.mb-quick-wrap:focus-within { border-color: rgba(124,58,237,0.5); }
-.mb-quick {
-  display: block;
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: rgba(255,255,255,0.88);
-  font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1.5;
-  outline: none;
-  padding: 12px 14px 6px;
-  resize: none;
-  min-height: 40px;
-  max-height: 160px;
-  overflow-y: auto;
-  scrollbar-width: none;
-  box-sizing: border-box;
-}
-.mb-quick::placeholder { color: rgba(255,255,255,0.5); }
 .mb-quick::-webkit-scrollbar { display: none; }
 
-/* Suggestions dropdown above the input */
-.mb-suggestions {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: var(--bg-dropdown, #18181c);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 8px;
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4);
-  max-height: 200px;
-  overflow-y: auto;
-  z-index: 80;
-}
-.mb-suggestion {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 6px 10px;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.mb-suggestion:hover,
-.mb-sug-active { background: rgba(255, 255, 255, 0.06); }
-.mb-sug-name {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  color: #a78bfa;
-  flex-shrink: 0;
-  min-width: 90px;
-}
-.mb-sug-desc {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.38);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.mb-sug-name { color: var(--accent); }
 
-/* ── Status dot ── */
-.mb-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
+.mb-status-dot { }
 .mb-dot-idle { background: var(--text-muted, #475569); }
 .mb-dot-busy { background: #4ade80; animation: mb-pulse 1.4s ease-in-out infinite; }
 .mb-dot-waiting { background: #3b82f6; }
@@ -953,124 +832,6 @@ const managerPrimer = computed(() => {
   50% { box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.28); }
 }
 
-/* ── Buttons ── */
-.mb-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted, #94a3b8);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.mb-btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); color: var(--text-primary, #e2e8f0); }
-
-/* ── Spawn-target picker ── */
-.mb-wt { position: relative; flex-shrink: 0; }
-.mb-wt-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-secondary, #94a3b8);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.mb-wt-btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); color: var(--text-primary, #e2e8f0); }
-.mb-wt-label { font-weight: 500; }
-.mb-wt-caret { opacity: 0.6; }
-.mb-wt-btn-danger { color: #ef4444; }
-.mb-wt-btn-danger:hover { background: rgba(239, 68, 68, 0.12); }
-.mb-wt-item-danger { color: #ef4444; }
-.mb-wt-item-danger:hover { background: rgba(239, 68, 68, 0.1); }
-.mb-wt-item-danger > svg:first-child { color: #ef4444; }
-
-.mb-wt-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
-  width: 260px;
-  padding: 6px;
-  background-color: var(--bg-dropdown, var(--bg-panel, #111));
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-  z-index: 70;
-}
-.mb-wt-menu-narrow { width: 230px; }
-.mb-wt-menu-head {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-muted, #64748b);
-  padding: 4px 8px 6px;
-}
-.mb-wt-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 8px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-secondary, #94a3b8);
-  cursor: pointer;
-  text-align: left;
-}
-.mb-wt-item:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.07)); }
-.mb-wt-item-on { color: var(--text-primary, #e2e8f0); }
-.mb-wt-item-on > svg:first-child { color: var(--accent, #3b82f6); }
-.mb-wt-item-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.mb-wt-item-title { font-size: 12px; font-weight: 600; color: var(--text-primary, #e2e8f0); }
-.mb-wt-item-sub { font-size: 10px; line-height: 1.3; color: var(--text-muted, #64748b); }
-.mb-wt-item-check { color: var(--accent, #3b82f6); flex-shrink: 0; }
-
-/* ── Pasted image thumbnails ── */
-.mb-pasted-imgs {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 4px 0 4px;
-}
-.mb-pasted-img-wrap {
-  position: relative;
-  flex-shrink: 0;
-}
-.mb-pasted-img {
-  display: block;
-  width: 48px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--border, rgba(255,255,255,0.12));
-}
-.mb-pasted-img-rm {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.7);
-  border: none;
-  color: #fff;
-  font-size: 11px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
+.mb-wt-item-on > svg:first-child { color: var(--accent); }
+.mb-wt-item-danger > svg:first-child { color: var(--red, #ef4444); }
 </style>
