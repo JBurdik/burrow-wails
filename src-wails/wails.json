@@ -1,14 +1,19 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "burrow",
-  "outputfilename": "burrow",
+  "name": "Burrow",
+  "outputfilename": "Burrow",
   "frontenddir": "..",
-  "frontend:install": "pnpm install",
-  "frontend:build": "bash /Users/jirkab/code/agentic-ide-go-wails/src-wails/build-frontend.sh",
   "frontend:dev:watcher": "pnpm dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "Jiří Burdych",
     "email": "jiriburdych@Astratexbombardaky.onmicrosoft.com"
+  },
+  "info": {
+    "companyName": "Burrow",
+    "productName": "Burrow",
+    "productVersion": "0.1.0",
+    "copyright": "© 2026 Jiří Burdych",
+    "comments": "Multi-workspace IDE shell for AI coding agents"
   }
 }

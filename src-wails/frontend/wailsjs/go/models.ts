@@ -1,5 +1,51 @@
 export namespace main {
 	
+	export class AcpStartOpts {
+	    id: string;
+	    cwd: string;
+	    command: string;
+	    args: string[];
+	    env: Record<string, string>;
+	    kind: string;
+	    configDir: string;
+	    envFile: string;
+	    resumeSessionId: string;
+	    emitHistory: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AcpStartOpts(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.cwd = source["cwd"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	        this.env = source["env"];
+	        this.kind = source["kind"];
+	        this.configDir = source["configDir"];
+	        this.envFile = source["envFile"];
+	        this.resumeSessionId = source["resumeSessionId"];
+	        this.emitHistory = source["emitHistory"];
+	    }
+	}
+	export class AgentModel {
+	    id: string;
+	    label: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentModel(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.description = source["description"];
+	    }
+	}
 	export class AgentTurnChange {
 	    id: number;
 	    taskId: string;
@@ -331,6 +377,8 @@ export namespace main {
 	    version: string;
 	    current_version: string;
 	    notes: string;
+	    url: string;
+	    sha256: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdateInfo(source);
@@ -342,6 +390,8 @@ export namespace main {
 	        this.version = source["version"];
 	        this.current_version = source["current_version"];
 	        this.notes = source["notes"];
+	        this.url = source["url"];
+	        this.sha256 = source["sha256"];
 	    }
 	}
 	export class Workspace {

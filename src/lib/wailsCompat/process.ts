@@ -1,5 +1,7 @@
-// Stub for "@tauri-apps/plugin-process"'s relaunch() — paired with the
-// updater stub; no-op until the Go updater exists (plan phase 7).
+// Shim for "@tauri-apps/plugin-process"'s relaunch() — backed by Go's
+// RelaunchApp (src-wails/updater.go), which re-opens the bundle and quits.
+import * as App from "../../../src-wails/frontend/wailsjs/go/main/App";
+
 export async function relaunch(): Promise<void> {
-  console.warn("[wails-compat] process relaunch() is not ported yet");
+  await App.RelaunchApp();
 }
