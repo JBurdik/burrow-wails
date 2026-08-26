@@ -2,6 +2,7 @@
 import { computed, watch } from "vue";
 import { PhArrowClockwise, PhArrowSquareOut, PhCheck, PhGitPullRequest, PhGitMerge, PhMagnifyingGlass, PhPlus, PhSealWarning, PhX } from "@phosphor-icons/vue";
 import { usePullRequests, type PrScope } from "@/composables/usePullRequests";
+import { cn } from "@/lib/utils";
 
 const props = defineProps<{ cwd: string }>();
 const pr = usePullRequests(() => props.cwd);
@@ -16,37 +17,129 @@ function postComment() { const body = comment.value.trim(); if (!body || !pr.sel
 </script>
 
 <template>
-  <section class="pr-panel">
+  <section class="flex min-h-0 flex-1 flex-col overflow-hidden text-[11px] text-secondary-foreground">
     <template v-if="!pr.selected.value">
-      <header class="pr-header"><span class="pr-heading"><PhGitPullRequest :size="14" /> Pull requests</span><span class="pr-actions"><button class="pr-icon" :disabled="pr.loading.value" title="Refresh" @click="pr.refresh"><PhArrowClockwise :size="13" :class="{ spin: pr.loading.value }" /></button><button class="pr-icon" :disabled="pr.actionLoading.value" title="Create pull request" @click="pr.create"><PhPlus :size="15" /></button></span></header>
-      <div class="pr-filters"><button v-for="item in scopes" :key="item.id" :class="{ active: pr.scope.value === item.id }" @click="pr.scope.value = item.id">{{ item.label }}</button></div>
-      <label class="pr-search"><PhMagnifyingGlass :size="12" /><input v-model="pr.query.value" placeholder="Search pull requests" /></label>
-      <p v-if="pr.error.value" class="pr-error"><PhSealWarning :size="13" />{{ pr.error.value }}</p>
-      <div v-if="pr.loading.value" class="pr-empty">Načítám pull requesty…</div>
-      <div v-else-if="!props.cwd" class="pr-empty">Otevři Git workspace.</div>
-      <div v-else-if="pr.items.value.length === 0" class="pr-empty">Žádné pull requesty. Přihlas se přes <code>gh auth login</code>.</div>
-      <button v-for="item in pr.items.value" v-else :key="item.url" class="pr-row" @click="pr.select(item)"><span class="pr-row-top"><span class="pr-number">#{{ item.number }}</span><span class="pr-status" :class="item.isDraft ? 'draft' : item.reviewDecision?.toLowerCase()">{{ item.isDraft ? 'Draft' : item.reviewDecision || 'Open' }}</span></span><span class="pr-title">{{ item.title }}</span><span class="pr-meta">{{ item.repository?.nameWithOwner }}<template v-if="item.headRefName"> · {{ item.headRefName }}</template></span></button>
+      <header class="flex items-center justify-between border-b border-border p-2">
+        <span class="flex items-center gap-1.5 font-semibold text-foreground"><PhGitPullRequest :size="14" /> Pull requests</span>
+        <span class="flex items-center gap-1.5">
+          <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground disabled:opacity-40" :disabled="pr.loading.value" title="Refresh" @click="pr.refresh">
+            <PhArrowClockwise :size="13" :class="{ 'animate-spin': pr.loading.value }" />
+          </button>
+          <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground disabled:opacity-40" :disabled="pr.actionLoading.value" title="Create pull request" @click="pr.create">
+            <PhPlus :size="15" />
+          </button>
+        </span>
+      </header>
+      <div class="flex gap-1 border-b border-border p-1.5">
+        <button
+          v-for="item in scopes"
+          :key="item.id"
+          :class="cn('rounded px-1.5 py-1 text-muted-foreground', pr.scope.value === item.id && 'bg-accent/18 text-foreground')"
+          @click="pr.scope.value = item.id"
+        >{{ item.label }}</button>
+      </div>
+      <label class="flex items-center gap-1 border-b border-border px-2 py-1.5 text-muted-foreground">
+        <PhMagnifyingGlass :size="12" />
+        <input v-model="pr.query.value" placeholder="Search pull requests" class="min-w-0 flex-1 border-0 bg-transparent text-foreground outline-none" />
+      </label>
+      <p v-if="pr.error.value" class="flex gap-1.5 p-4 text-center text-destructive"><PhSealWarning :size="13" />{{ pr.error.value }}</p>
+      <div v-if="pr.loading.value" class="p-4 text-center leading-relaxed text-muted-foreground">Načítám pull requesty…</div>
+      <div v-else-if="!props.cwd" class="p-4 text-center leading-relaxed text-muted-foreground">Otevři Git workspace.</div>
+      <div v-else-if="pr.items.value.length === 0" class="p-4 text-center leading-relaxed text-muted-foreground">Žádné pull requesty. Přihlas se přes <code>gh auth login</code>.</div>
+      <button
+        v-for="item in pr.items.value"
+        v-else
+        :key="item.url"
+        class="flex flex-col gap-0.5 border-b border-border/65 p-2 text-left hover:bg-hover"
+        @click="pr.select(item)"
+      >
+        <span class="flex items-center justify-between">
+          <span class="font-mono text-accent">#{{ item.number }}</span>
+          <span class="text-[10px]" :class="item.isDraft ? 'text-warning' : 'text-success'">{{ item.isDraft ? 'Draft' : item.reviewDecision || 'Open' }}</span>
+        </span>
+        <span class="font-semibold leading-snug text-foreground">{{ item.title }}</span>
+        <span class="truncate text-muted-foreground">{{ item.repository?.nameWithOwner }}<template v-if="item.headRefName"> · {{ item.headRefName }}</template></span>
+      </button>
     </template>
 
     <template v-else>
-      <header class="pr-detail-head"><button class="pr-back" @click="pr.selected.value = null">← Pull requests</button><button class="pr-icon" title="Open on GitHub" @click="pr.act(['pr', 'view', pr.selected.value.url, '--web'])"><PhArrowSquareOut :size="13" /></button></header>
-      <div class="pr-title-block"><div class="pr-title-line"><span class="pr-number">#{{ pr.selected.value.number }}</span><span class="pr-state" :class="stateLabel.toLowerCase()">{{ stateLabel }}</span></div><h2>{{ pr.selected.value.title }}</h2><p>{{ pr.selected.value.author?.login || 'Unknown' }} · {{ pr.selected.value.headRefName }} → {{ pr.selected.value.baseRefName }}</p></div>
-      <div class="pr-detail-tabs"><button v-for="tab in [{ id: 'summary', label: 'Summary' }, { id: 'timeline', label: 'Timeline' }, { id: 'code', label: 'Code' }]" :key="tab.id" :class="{ active: pr.activeTab.value === tab.id }" @click="pr.activeTab.value = tab.id as any">{{ tab.label }}</button></div>
-      <p v-if="pr.error.value" class="pr-error"><PhSealWarning :size="13" />{{ pr.error.value }}</p>
-      <div class="pr-scroll">
-        <template v-if="pr.activeTab.value === 'summary'"><div class="pr-facts"><span>Reviewers <b>{{ pr.selected.value.reviewDecision || 'None' }}</b></span><span>Comments <b>{{ pr.selected.value.comments?.length || 0 }}</b></span><span>Checks <b>{{ checkCount }}</b></span></div><section class="pr-section"><h3>Description</h3><p class="pr-body">{{ pr.selected.value.body || 'No description provided.' }}</p></section></template>
-        <template v-else-if="pr.activeTab.value === 'timeline'"><section class="pr-section"><h3>Comments</h3><p v-if="!pr.selected.value.comments?.length" class="pr-muted">No comments yet.</p><article v-for="entry in pr.selected.value.comments" :key="entry.createdAt + entry.body" class="pr-comment"><b>{{ entry.author?.login || 'Unknown' }}</b><p>{{ entry.body }}</p></article></section></template>
-        <template v-else><section class="pr-section"><h3>Files · {{ pr.selected.value.files?.length || 0 }}</h3><div v-for="file in pr.selected.value.files" :key="file.path" class="pr-file"><span>{{ file.path }}</span><span><i>+{{ file.additions }}</i> <em>-{{ file.deletions }}</em></span></div></section></template>
-        <section class="pr-section"><h3>Checks · {{ checkCount }}</h3><p v-if="!checkCount" class="pr-muted">No checks reported.</p><div v-for="check in pr.selected.value.statusCheckRollup" :key="check.name" class="pr-check"><PhCheck v-if="check.conclusion === 'SUCCESS'" :size="12" /><PhX v-else :size="12" /><span>{{ check.name || 'Check' }}</span><small>{{ check.conclusion || check.status }}</small></div></section>
-        <section class="pr-section"><h3>Leave a comment</h3><textarea v-model="comment" placeholder="Leave a comment" rows="4" /><button class="pr-submit" :disabled="!comment.trim() || pr.actionLoading.value" @click="postComment">Comment</button></section>
+      <header class="flex items-center justify-between border-b border-border p-2">
+        <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" @click="pr.selected.value = null">← Pull requests</button>
+        <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open on GitHub" @click="pr.act(['pr', 'view', pr.selected.value.url, '--web'])"><PhArrowSquareOut :size="13" /></button>
+      </header>
+      <div class="border-b border-border p-2.5">
+        <div class="flex justify-between">
+          <span class="font-mono text-accent">#{{ pr.selected.value.number }}</span>
+          <span class="text-[10px]" :class="stateLabel === 'Draft' ? 'text-warning' : 'text-success'">{{ stateLabel }}</span>
+        </div>
+        <h2 class="my-1.5 text-[13px] leading-snug text-foreground">{{ pr.selected.value.title }}</h2>
+        <p class="truncate text-muted-foreground">{{ pr.selected.value.author?.login || 'Unknown' }} · {{ pr.selected.value.headRefName }} → {{ pr.selected.value.baseRefName }}</p>
       </div>
-      <footer class="pr-footer"><button :disabled="pr.actionLoading.value" @click="pr.act(['pr', 'review', pr.selected.value.url, '--approve'])">Approve</button><button :disabled="pr.actionLoading.value" @click="pr.act(['pr', 'review', pr.selected.value.url, '--request-changes'])">Request changes</button><button class="merge" :disabled="pr.actionLoading.value || pr.selected.value.isDraft" @click="pr.act(['pr', 'merge', pr.selected.value.url, '--merge', '--delete-branch'])"><PhGitMerge :size="13" /> Merge</button></footer>
+      <div class="flex border-b border-border">
+        <button
+          v-for="tab in [{ id: 'summary', label: 'Summary' }, { id: 'timeline', label: 'Timeline' }, { id: 'code', label: 'Code' }]"
+          :key="tab.id"
+          :class="cn('flex-1 border-b-2 border-transparent px-1.5 py-1 text-muted-foreground', pr.activeTab.value === tab.id && 'border-accent text-foreground')"
+          @click="pr.activeTab.value = tab.id as any"
+        >{{ tab.label }}</button>
+      </div>
+      <p v-if="pr.error.value" class="flex gap-1.5 p-4 text-center text-destructive"><PhSealWarning :size="13" />{{ pr.error.value }}</p>
+      <div class="flex-1 overflow-auto">
+        <template v-if="pr.activeTab.value === 'summary'">
+          <div class="grid grid-cols-3 gap-1 p-2 text-muted-foreground">
+            <span class="flex flex-col gap-0.5">Reviewers <b class="font-medium text-secondary-foreground">{{ pr.selected.value.reviewDecision || 'None' }}</b></span>
+            <span class="flex flex-col gap-0.5">Comments <b class="font-medium text-secondary-foreground">{{ pr.selected.value.comments?.length || 0 }}</b></span>
+            <span class="flex flex-col gap-0.5">Checks <b class="font-medium text-secondary-foreground">{{ checkCount }}</b></span>
+          </div>
+          <section class="p-2.5">
+            <h3 class="mb-2 text-foreground">Description</h3>
+            <p class="whitespace-pre-wrap leading-relaxed">{{ pr.selected.value.body || 'No description provided.' }}</p>
+          </section>
+        </template>
+        <template v-else-if="pr.activeTab.value === 'timeline'">
+          <section class="p-2.5">
+            <h3 class="mb-2 text-foreground">Comments</h3>
+            <p v-if="!pr.selected.value.comments?.length" class="text-muted-foreground">No comments yet.</p>
+            <article v-for="entry in pr.selected.value.comments" :key="entry.createdAt + entry.body" class="border-t border-border/70 py-1.5">
+              <b>{{ entry.author?.login || 'Unknown' }}</b>
+              <p class="leading-relaxed">{{ entry.body }}</p>
+            </article>
+          </section>
+        </template>
+        <template v-else>
+          <section class="p-2.5">
+            <h3 class="mb-2 text-foreground">Files · {{ pr.selected.value.files?.length || 0 }}</h3>
+            <div v-for="file in pr.selected.value.files" :key="file.path" class="flex items-center justify-between gap-2 py-1 font-mono">
+              <span class="truncate">{{ file.path }}</span>
+              <span><i class="not-italic text-success">+{{ file.additions }}</i> <em class="not-italic text-destructive">-{{ file.deletions }}</em></span>
+            </div>
+          </section>
+        </template>
+        <section class="p-2.5">
+          <h3 class="mb-2 text-foreground">Checks · {{ checkCount }}</h3>
+          <p v-if="!checkCount" class="text-muted-foreground">No checks reported.</p>
+          <div v-for="check in pr.selected.value.statusCheckRollup" :key="check.name" class="flex items-center gap-1.5 py-0.5">
+            <PhCheck v-if="check.conclusion === 'SUCCESS'" :size="12" />
+            <PhX v-else :size="12" />
+            <span>{{ check.name || 'Check' }}</span>
+            <small class="ml-auto text-muted-foreground">{{ check.conclusion || check.status }}</small>
+          </div>
+        </section>
+        <section class="p-2.5">
+          <h3 class="mb-2 text-foreground">Leave a comment</h3>
+          <textarea v-model="comment" placeholder="Leave a comment" rows="4" class="box-border w-full resize-y rounded border border-border bg-panel p-1.5 text-foreground outline-none" />
+          <button class="mt-1.5 rounded border border-border px-1.5 py-1 text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-40" :disabled="!comment.trim() || pr.actionLoading.value" @click="postComment">Comment</button>
+        </section>
+      </div>
+      <footer class="flex gap-1.5 border-t border-border p-1.5">
+        <button class="rounded border border-border px-1.5 py-1 text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-40" :disabled="pr.actionLoading.value" @click="pr.act(['pr', 'review', pr.selected.value.url, '--approve'])">Approve</button>
+        <button class="rounded border border-border px-1.5 py-1 text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-40" :disabled="pr.actionLoading.value" @click="pr.act(['pr', 'review', pr.selected.value.url, '--request-changes'])">Request changes</button>
+        <button
+          class="ml-auto flex items-center gap-1 rounded border border-border px-1.5 py-1 text-success hover:bg-hover disabled:opacity-40"
+          :disabled="pr.actionLoading.value || pr.selected.value.isDraft"
+          @click="pr.act(['pr', 'merge', pr.selected.value.url, '--merge', '--delete-branch'])"
+        ><PhGitMerge :size="13" /> Merge</button>
+      </footer>
     </template>
   </section>
 </template>
-
-<style scoped>
-.pr-panel { display:flex; flex:1; min-height:0; flex-direction:column; color:var(--text-secondary); font-size:11px; overflow:hidden; }
-.pr-header,.pr-detail-head,.pr-title-block,.pr-filters,.pr-search,.pr-section,.pr-facts,.pr-footer { border-bottom:1px solid var(--border); }
-.pr-header,.pr-detail-head { display:flex; align-items:center; justify-content:space-between; padding:8px; }.pr-heading,.pr-actions,.pr-row-top,.pr-file,.pr-check { display:flex; align-items:center; gap:6px; }.pr-heading { color:var(--text-primary); font-weight:600; }.pr-icon,.pr-back { background:none; border:0; color:var(--text-muted); cursor:pointer; display:inline-flex; padding:3px; }.pr-icon:hover,.pr-back:hover { color:var(--text-primary); background:var(--bg-hover); }.pr-filters { display:flex; padding:6px; gap:3px; }.pr-filters button,.pr-detail-tabs button { border:0; background:none; color:var(--text-muted); padding:4px 7px; cursor:pointer; font:inherit; }.pr-filters button.active { color:var(--text-primary); background:color-mix(in srgb,var(--accent) 18%,transparent); border-radius:4px; }.pr-search { display:flex; align-items:center; gap:5px; padding:6px 8px; color:var(--text-muted); }.pr-search input,.pr-section textarea { color:var(--text-primary); background:color-mix(in srgb,var(--border) 12%,var(--bg-panel)); border:1px solid var(--border); border-radius:4px; font:inherit; outline:none; }.pr-search input { border:0; background:transparent; min-width:0; flex:1; }.pr-row { border:0; border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent); background:none; color:inherit; cursor:pointer; text-align:left; padding:8px; display:flex; flex-direction:column; gap:3px; }.pr-row:hover { background:var(--bg-hover); }.pr-row-top { justify-content:space-between; }.pr-number { font-family:var(--font-mono); color:var(--accent); }.pr-status,.pr-state { font-size:10px; color:var(--green); }.draft { color:var(--yellow); }.pr-title { color:var(--text-primary); font-weight:600; line-height:1.35; }.pr-meta,.pr-muted { color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.pr-empty,.pr-error { padding:16px 10px; text-align:center; color:var(--text-muted); line-height:1.6; }.pr-error { color:var(--red); display:flex; gap:5px; text-align:left; }.pr-title-block { padding:9px 10px; }.pr-title-line { display:flex; justify-content:space-between; }.pr-title-block h2 { color:var(--text-primary); font-size:13px; line-height:1.35; margin:5px 0; }.pr-title-block p { color:var(--text-muted); margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.pr-detail-tabs { display:flex; border-bottom:1px solid var(--border); }.pr-detail-tabs button { flex:1; border-bottom:2px solid transparent; }.pr-detail-tabs button.active { color:var(--text-primary); border-bottom-color:var(--accent); }.pr-scroll { flex:1; overflow:auto; }.pr-facts { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; padding:8px; color:var(--text-muted); }.pr-facts span { display:flex; flex-direction:column; gap:2px; }.pr-facts b { color:var(--text-secondary); font-weight:500; }.pr-section { padding:10px; }.pr-section h3 { color:var(--text-primary); font-size:11px; margin:0 0 8px; }.pr-body,.pr-comment p { margin:0; white-space:pre-wrap; line-height:1.55; }.pr-comment { border-top:1px solid color-mix(in srgb,var(--border) 70%,transparent); padding:7px 0; }.pr-file { justify-content:space-between; gap:8px; padding:4px 0; font-family:var(--font-mono); }.pr-file span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.pr-file i { color:var(--green); font-style:normal; }.pr-file em { color:var(--red); font-style:normal; }.pr-check { padding:3px 0; }.pr-check small { margin-left:auto; color:var(--text-muted); }.pr-section textarea { box-sizing:border-box; width:100%; padding:7px; resize:vertical; }.pr-submit,.pr-footer button { margin-top:6px; border:1px solid var(--border); border-radius:4px; background:none; color:var(--text-secondary); cursor:pointer; font:inherit; padding:4px 7px; }.pr-submit:hover,.pr-footer button:hover:not(:disabled) { background:var(--bg-hover); color:var(--text-primary); }.pr-footer { display:flex; padding:7px; gap:5px; }.pr-footer .merge { margin-left:auto; color:var(--green); display:flex; align-items:center; gap:4px; }.pr-footer button:disabled,.pr-icon:disabled { opacity:.4; cursor:default; }.spin { animation:spin 1s linear infinite; }@keyframes spin { to { transform:rotate(360deg); } }
-</style>
