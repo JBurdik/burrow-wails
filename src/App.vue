@@ -472,10 +472,16 @@ function onKeydown(e: KeyboardEvent) {
   --radius: 0.375rem;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* MUST be @layer base, not unlayered: Tailwind v4's utilities live in
+   @layer utilities, and unlayered CSS always wins over ANY layered rule
+   regardless of specificity — an unlayered `* { padding: 0 }` was silently
+   nuking every Tailwind p-*/m-* utility app-wide. */
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 :root {
