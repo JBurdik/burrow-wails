@@ -1,40 +1,40 @@
 <template>
-  <div class="browser-pane">
-    <div class="browser-toolbar">
-      <button class="browser-btn" @click="refresh" title="Refresh">
+  <div class="flex h-full w-full flex-col overflow-hidden bg-panel">
+    <div class="flex shrink-0 items-center gap-1 border-b border-border bg-panel px-1.5 py-1">
+      <button class="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="refresh" title="Refresh">
         <PhArrowClockwise :size="13" />
       </button>
       <input
         v-model="inputUrl"
-        class="browser-url"
+        class="min-w-0 flex-1 rounded-[5px] border border-border bg-base px-2 py-1 font-sans text-xs text-foreground outline-none focus:border-accent"
         spellcheck="false"
         placeholder="Enter URL or localhost:3000…"
         @keydown.enter="navigate"
         @focus="($event.target as HTMLInputElement).select()"
       />
-      <button class="browser-btn" @click="openExternal" title="Open in system browser">
+      <button class="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="openExternal" title="Open in system browser">
         <PhArrowSquareOut :size="13" />
       </button>
     </div>
-    <div class="browser-frame-wrap">
+    <div class="relative flex-1 overflow-hidden">
       <iframe
         v-if="committedUrl"
         ref="iframeEl"
-        class="browser-frame"
+        class="block h-full w-full border-0 bg-white"
         :src="committedUrl"
         allow="clipboard-read; clipboard-write"
         @load="onLoad"
         @error="onError"
       />
-      <div v-else class="browser-empty">
-        <PhGlobe :size="36" class="browser-empty-icon" />
+      <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-2.5 p-6 text-center text-[13px] text-muted-foreground">
+        <PhGlobe :size="36" class="mb-1 opacity-35" />
         <p>Enter a URL above to browse</p>
-        <p class="browser-empty-hint">Works best with localhost dev servers.<br />External sites may block embedding.</p>
+        <p class="text-[11px] leading-relaxed opacity-60">Works best with localhost dev servers.<br />External sites may block embedding.</p>
       </div>
-      <div v-if="blocked" class="browser-blocked">
-        <PhProhibit :size="28" class="browser-empty-icon" />
+      <div v-if="blocked" class="absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-panel p-6 text-center text-[13px] text-muted-foreground">
+        <PhProhibit :size="28" class="mb-1 opacity-35" />
         <p>This site blocked embedding (X-Frame-Options).</p>
-        <button class="browser-ext-btn" @click="openExternal">Open in system browser</button>
+        <button class="mt-1.5 rounded-[5px] border border-border bg-accent px-3.5 py-1 text-xs text-foreground transition-colors hover:brightness-110" @click="openExternal">Open in system browser</button>
       </div>
     </div>
   </div>
@@ -112,117 +112,3 @@ function onError() {
   blocked.value = true;
 }
 </script>
-
-<style scoped>
-.browser-pane {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  background: var(--bg-panel, #1a1a1a);
-  overflow: hidden;
-}
-
-.browser-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
-  background: var(--bg-panel, #1a1a1a);
-  border-bottom: 1px solid var(--border, #333);
-  flex-shrink: 0;
-}
-
-.browser-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: var(--text-muted, #888);
-  cursor: pointer;
-  padding: 3px 5px;
-  border-radius: 4px;
-  transition: color .1s, background .1s;
-  flex-shrink: 0;
-}
-.browser-btn:hover {
-  background: var(--bg-hover, #2a2a2a);
-  color: var(--text, #ddd);
-}
-
-.browser-url {
-  flex: 1;
-  background: var(--bg-input, #111);
-  border: 1px solid var(--border, #333);
-  border-radius: 5px;
-  color: var(--text, #ddd);
-  font-size: 12px;
-  font-family: var(--font-ui, sans-serif);
-  padding: 3px 8px;
-  outline: none;
-  min-width: 0;
-}
-.browser-url:focus {
-  border-color: var(--accent, #555);
-}
-
-.browser-frame-wrap {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-}
-
-.browser-frame {
-  width: 100%;
-  height: 100%;
-  border: none;
-  display: block;
-  background: #fff;
-}
-
-.browser-empty,
-.browser-blocked {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--text-muted, #888);
-  font-size: 13px;
-  text-align: center;
-  padding: 24px;
-}
-
-.browser-empty-icon {
-  opacity: 0.35;
-  margin-bottom: 4px;
-}
-
-.browser-empty-hint {
-  font-size: 11px;
-  opacity: 0.6;
-  line-height: 1.5;
-}
-
-.browser-blocked {
-  background: var(--bg-panel, #1a1a1a);
-}
-
-.browser-ext-btn {
-  margin-top: 6px;
-  background: var(--accent, #444);
-  border: 1px solid var(--border, #555);
-  border-radius: 5px;
-  color: var(--text, #ddd);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 5px 14px;
-  transition: background .1s;
-}
-.browser-ext-btn:hover {
-  background: var(--accent-hover, #555);
-}
-</style>
