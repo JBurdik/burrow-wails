@@ -1,10 +1,10 @@
 <template>
-  <div class="agent-toolbar">
-    <div class="agent-btns">
+  <div class="flex h-9 shrink-0 items-center border-b border-border bg-panel px-2.5">
+    <div class="flex items-center gap-1.5">
       <button
         v-for="a in store.agents"
         :key="a.id"
-        class="agent-btn"
+        class="agent-btn flex items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 py-1 font-sans text-[11.5px] font-medium text-secondary-foreground transition-colors active:opacity-75 disabled:cursor-default disabled:opacity-35"
         :style="{ '--agent-color': a.color }"
         :disabled="!a.command.trim()"
         :title="store.commandLine(a) || 'No command set'"
@@ -12,15 +12,15 @@
       >
         <component :is="iconFor(a.icon)" :size="12" :style="{ color: a.color }" />
         {{ a.name }}
-        <span v-if="a.shortcut" class="agent-kbd">{{ a.shortcut }}</span>
+        <span v-if="a.shortcut" class="agent-kbd ml-px shrink-0 rounded-[3px] px-1 py-px font-sans text-[9px] text-muted-foreground">{{ a.shortcut }}</span>
       </button>
-      <span v-if="store.agents.length === 0" class="no-agents">No agents configured</span>
+      <span v-if="store.agents.length === 0" class="text-[11px] text-muted-foreground">No agents configured</span>
     </div>
-    <div class="toolbar-end">
-      <div class="scripts-wrap">
+    <div class="ml-auto flex items-center gap-1.5">
+      <div class="relative">
         <button
-          class="scripts-btn"
-          :class="{ on: scriptsOpen }"
+          class="flex items-center gap-1.5 rounded-[5px] border border-emerald-400/18 bg-emerald-400/6 px-2.5 py-1 font-sans text-[11.5px] font-medium text-muted-foreground transition-colors [&_svg]:text-emerald-400 hover:bg-emerald-400/13 hover:text-foreground"
+          :class="{ 'bg-emerald-400/13 text-foreground': scriptsOpen }"
           title="Run a script"
           @click.stop="scriptsOpen = !scriptsOpen"
         >
@@ -28,30 +28,30 @@
           <span>Scripts</span>
           <PhCaretDown :size="9" />
         </button>
-        <div v-if="scriptsOpen" class="scripts-pop" @click.stop>
-          <div class="sp-head">Run script</div>
+        <div v-if="scriptsOpen" class="absolute right-0 top-[calc(100%+6px)] z-[200] min-w-[240px] max-w-[420px] rounded-lg border border-border bg-panel p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.45)]" @click.stop>
+          <div class="px-2 pb-1.5 pt-1 text-[10px] font-semibold tracking-wide text-muted-foreground">Run script</div>
           <button
             v-for="s in mergedScripts"
             :key="s.id"
-            class="sp-row"
+            class="flex w-full items-center gap-2 rounded-[5px] bg-transparent px-2 py-1.5 text-left text-foreground hover:bg-accent/12 disabled:cursor-default disabled:opacity-40"
             :disabled="!scriptsStore.commandLine(s)"
             :title="scriptsStore.commandLine(s) || 'No steps'"
             @click="runScript(s)"
           >
-            <span class="sp-dot" :style="{ background: s.color || '#60a5fa' }" />
-            <span class="sp-name">{{ s.name }}</span>
-            <code class="sp-cmd">{{ scriptsStore.commandLine(s) || "—" }}</code>
+            <span class="h-2 w-2 shrink-0 rounded-full" :style="{ background: s.color || '#60a5fa' }" />
+            <span class="shrink-0 text-xs font-medium">{{ s.name }}</span>
+            <code class="ml-auto truncate font-mono text-[10.5px] text-muted-foreground">{{ scriptsStore.commandLine(s) || "—" }}</code>
           </button>
-          <div v-if="mergedScripts.length === 0" class="sp-empty">
+          <div v-if="mergedScripts.length === 0" class="px-2 py-1.5 text-[11px] text-muted-foreground">
             No scripts. Add some in Settings → Scripts.
           </div>
         </div>
       </div>
-      <button class="browser-btn" title="Open browser tab" @click="$emit('open-browser')">
+      <button class="flex items-center gap-1.5 rounded-[5px] border border-blue-400/18 bg-blue-400/6 px-2.5 py-1 font-sans text-[11.5px] font-medium text-muted-foreground transition-colors [&_svg]:text-blue-400 hover:bg-blue-400/13 hover:text-foreground" title="Open browser tab" @click="$emit('open-browser')">
         <PhGlobe :size="13" />
         <span>Browser</span>
       </button>
-      <button class="claude-ui-btn" title="Open a new conversation" @click="$emit('open-chat')">
+      <button class="flex items-center gap-1.5 rounded-[5px] border border-amber-600/18 bg-amber-600/6 px-2.5 py-1 font-sans text-[11.5px] font-medium text-muted-foreground transition-colors [&_svg]:text-amber-600 hover:bg-amber-600/13 hover:text-foreground" title="Open a new conversation" @click="$emit('open-chat')">
         <PhChatCenteredText :size="13" />
         <span>Chat</span>
       </button>
@@ -105,180 +105,18 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
 </script>
 
 <style scoped>
-.agent-toolbar {
-  display: flex;
-  align-items: center;
-  height: 36px;
-  padding: 0 10px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.agent-btns {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
+/* Per-agent accent color is set at runtime via --agent-color (a.color) and
+   mixed with the theme accent/border — genuinely dynamic per-instance
+   theming that color-mix() can't express as static Tailwind classes. */
 .agent-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 5px;
   border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 22%, var(--border));
   background: color-mix(in srgb, var(--agent-color, var(--accent)) 7%, transparent);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 11.5px;
-  font-weight: 500;
-  font-family: var(--font-ui);
-  padding: 4px 9px;
-  transition: background .12s, color .12s;
-  white-space: nowrap;
 }
 .agent-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--agent-color, var(--accent)) 14%, transparent);
   color: var(--text-primary);
 }
-.agent-btn:active:not(:disabled) { opacity: 0.75; }
-.agent-btn:disabled { opacity: 0.35; cursor: default; }
-
-.no-agents {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
 .agent-kbd {
-  font-family: var(--font-ui);
-  font-size: 9px;
-  color: var(--text-muted);
   background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, rgba(255,255,255,0.05));
-  border-radius: 3px;
-  padding: 1px 4px;
-  margin-left: 1px;
-  flex-shrink: 0;
-}
-
-.toolbar-end {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-}
-
-.toolbar-end {
-  gap: 5px;
-}
-
-.scripts-wrap { position: relative; }
-.scripts-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 5px;
-  border: 1px solid color-mix(in srgb, #34d399 18%, var(--border));
-  background: color-mix(in srgb, #34d399 6%, transparent);
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11.5px;
-  font-weight: 500;
-  font-family: var(--font-ui);
-  padding: 4px 9px;
-  transition: background .12s, color .12s;
-}
-.scripts-btn :deep(svg) { color: #34d399; }
-.scripts-btn:hover, .scripts-btn.on {
-  background: color-mix(in srgb, #34d399 13%, transparent);
-  color: var(--text-primary);
-}
-
-.scripts-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  min-width: 240px;
-  max-width: 420px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  padding: 5px;
-  z-index: 200;
-}
-.sp-head {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  padding: 4px 8px 6px;
-}
-.sp-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  border: none;
-  background: transparent;
-  border-radius: 5px;
-  padding: 6px 8px;
-  cursor: pointer;
-  color: var(--text-primary);
-}
-.sp-row:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.sp-row:disabled { opacity: 0.4; cursor: default; }
-.sp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.sp-name { font-size: 12px; font-weight: 500; flex-shrink: 0; }
-.sp-cmd {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
-  margin-left: auto;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sp-empty { font-size: 11px; color: var(--text-muted); padding: 6px 8px; }
-
-.browser-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 5px;
-  border: 1px solid color-mix(in srgb, #60a5fa 18%, var(--border));
-  background: color-mix(in srgb, #60a5fa 6%, transparent);
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11.5px;
-  font-weight: 500;
-  font-family: var(--font-ui);
-  padding: 4px 9px;
-  transition: background .12s, color .12s;
-}
-.browser-btn :deep(svg) { color: #60a5fa; }
-.browser-btn:hover {
-  background: color-mix(in srgb, #60a5fa 13%, transparent);
-  color: var(--text-primary);
-}
-
-.claude-ui-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 5px;
-  border: 1px solid color-mix(in srgb, #d97706 18%, var(--border));
-  background: color-mix(in srgb, #d97706 6%, transparent);
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11.5px;
-  font-weight: 500;
-  font-family: var(--font-ui);
-  padding: 4px 9px;
-  transition: background .12s, color .12s;
-}
-.claude-ui-btn :deep(svg) { color: #d97706; }
-.claude-ui-btn:hover {
-  background: color-mix(in srgb, #d97706 13%, transparent);
-  color: var(--text-primary);
 }
 </style>
