@@ -63,6 +63,7 @@ Standalone HTML reference (no build step — open in a browser):
 
 | File | Covers |
 |------|--------|
+| [`docs/product.md`](docs/product.md) | Product direction: thread-first multi-agent coding workspace |
 | `docs/context.html` | Whole-project overview: architecture, features, key files, Wails bindings, shortcuts |
 | `docs/burrow.html` | The `burrow` CLI: spawn/wait/capture, agent-docs install |
 

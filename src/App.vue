@@ -34,14 +34,19 @@
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
       </div>
       <div v-show="ui.rightPanelVisible" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
-      <RightPanel v-show="ui.rightPanelVisible" class="panel-right" :cwd="ws.active?.path ?? ''" :is-git="ws.active?.is_git !== false" />
+      <RightPanel
+        ref="rightPanelRef"
+        class="panel-right"
+        :open="ui.rightPanelVisible"
+        :cwd="ws.active?.path ?? ''"
+        :workspace-id="ws.active?.id"
+        :is-git="ws.active?.is_git !== false"
+        @open-panel="ui.rightPanelVisible = true"
+        @close-panel="ui.rightPanelVisible = false"
+        @manager-open="ui.rightPanelWidth = Math.max(ui.rightPanelWidth, 440)"
+        @open-project-config="showProjectConfig = true"
+      />
     </div>
-    <ManagerBar
-      v-if="ui.floatChatEnabled && ws.active"
-      :cwd="ws.active.path"
-      :ws-id="ws.active.id"
-      @open-project-config="showProjectConfig = true"
-    />
     <WorkspaceConfig
       v-if="showProjectConfig && ws.active"
       :workspace-id="ws.active.parent_id ?? ws.active.id"
@@ -56,7 +61,7 @@
       @open-project-config="showProjectConfig = true"
       @open-browser="activeTerm()?.openBrowserTab()"
       @repaint="activeTerm()?.repaintAll()"
-      @toggle-manager="ui.toggleFloatChat()"
+      @toggle-manager="openManagerPanel"
       @open-file="openSearchHit"
     />
     <ToastStack />
@@ -91,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, provide, watch, nextTick } from "vue";
+import { ref, onMounted, onBeforeUnmount, computed, provide, watch, nextTick, useTemplateRef } from "vue";
 import { PhX } from "@phosphor-icons/vue";
 import TitleBar from "@/components/TitleBar.vue";
 import Sidebar from "@/components/Sidebar.vue";
@@ -103,7 +108,6 @@ import Spotlight from "@/components/Spotlight.vue";
 import ToastStack from "@/components/ToastStack.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
-import ManagerBar from "@/components/ManagerBar.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -123,6 +127,13 @@ let resizeStartX = 0;
 let resizeStartWidth = 0;
 
 const showProjectConfig = ref(false);
+const rightPanelRef = useTemplateRef<InstanceType<typeof RightPanel>>("rightPanelRef");
+
+function openManagerPanel() {
+  ui.rightPanelVisible = true;
+  ui.rightPanelWidth = Math.max(ui.rightPanelWidth, 440);
+  nextTick(() => rightPanelRef.value?.openManager());
+}
 
 const ws = useWorkspaceStore();
 const ui = useUIStore();
@@ -424,7 +435,7 @@ function onKeydown(e: KeyboardEvent) {
       ui.toggleSidebar();
     } else if (e.key === "j") {
       e.preventDefault();
-      ui.toggleFloatChat();
+      openManagerPanel();
     } else if (/^[1-9]$/.test(e.key)) {
       e.preventDefault();
       const idx = parseInt(e.key) - 1;

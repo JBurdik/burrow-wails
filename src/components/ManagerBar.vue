@@ -1,8 +1,8 @@
 <template>
-  <div class="relative z-30 flex shrink-0 flex-col border-t border-border bg-[var(--bg-base,#0d0d0d)] [background-image:linear-gradient(var(--bg-panel,#111),var(--bg-panel,#111))]">
+  <div class="relative z-30 flex min-h-0 flex-col bg-[var(--bg-base,#0d0d0d)] [background-image:linear-gradient(var(--bg-panel,#111),var(--bg-panel,#111))]" :class="props.rail ? 'h-full flex-1' : 'shrink-0 border-t border-border'">
     <!-- Drag handle (top border) — resize the expanded panel height -->
     <div
-      v-show="expanded"
+      v-show="!props.rail && expanded"
       class="-mt-[3px] h-[5px] shrink-0 cursor-row-resize hover:bg-accent/40"
       @mousedown="startResize"
     />
@@ -13,10 +13,11 @@
          the strip below. -->
     <div
       v-if="started"
-      class="shrink-0 overflow-hidden"
-      :style="{ height: (expanded ? panelHeight : 0) + 'px', transition: isResizing ? 'none' : 'height 0.22s cubic-bezier(0.4,0,0.2,1)' }"
+      class="overflow-hidden"
+      :class="props.rail ? 'flex min-h-0 flex-1' : 'shrink-0'"
+      :style="props.rail ? undefined : { height: (expanded ? panelHeight : 0) + 'px', transition: isResizing ? 'none' : 'height 0.22s cubic-bezier(0.4,0,0.2,1)' }"
     >
-      <div class="mb-panel flex min-h-0 flex-col border-b border-border" :style="{ height: panelHeight + 'px' }">
+      <div class="mb-panel flex min-h-0 flex-1 flex-col border-b border-border" :style="props.rail ? undefined : { height: panelHeight + 'px' }">
         <div class="mb-chat min-h-0 flex-1 bg-[var(--bg-base,#0d0d0d)]">
           <!-- One ClaudeChat per engaged repo, kept mounted and v-show'd. This is
                what lets a busy Manager keep streaming when you switch workspace:
@@ -40,14 +41,15 @@
     </div>
 
     <!-- Always-visible bottom strip — holds the one Manager composer -->
-    <div class="flex min-h-[38px] shrink-0 items-center gap-2 px-2.5 py-1.5">
-      <PhSparkle :size="15" weight="fill" class="shrink-0 text-accent" />
-      <span class="shrink-0 text-xs font-semibold text-foreground">Manager</span>
-      <span class="mb-status-dot h-2 w-2 shrink-0 rounded-full" :class="`mb-dot-${dotKind}`" :title="dotTitle" />
-      <span class="shrink-0 max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground" :title="rootCwd">{{ rootName }}</span>
+    <div class="shrink-0 border-t border-border" :class="props.rail ? 'p-2' : 'flex min-h-[38px] items-center gap-2 px-2.5 py-1.5'">
+      <PhSparkle v-if="!props.rail" :size="15" weight="fill" class="shrink-0 text-accent" />
+      <span v-if="!props.rail" class="shrink-0 text-xs font-semibold text-foreground">Manager</span>
+      <span v-if="!props.rail" class="mb-status-dot h-2 w-2 shrink-0 rounded-full" :class="`mb-dot-${dotKind}`" :title="dotTitle" />
+      <span v-if="!props.rail" class="shrink-0 max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground" :title="rootCwd">{{ rootName }}</span>
 
       <!-- Quick input with multiline + suggestions -->
-      <div class="mb-quick-wrap relative min-w-0 flex-1 overflow-hidden rounded-[14px] border border-white/10 bg-[#1a1a20] transition-colors focus-within:border-accent/50">
+      <ComposerBox class="mb-quick-wrap min-w-0 flex-1 overflow-hidden rounded-[14px] border border-white/10 bg-[#1a1a20] transition-colors focus-within:border-accent/50">
+      <div class="relative">
         <!-- /command suggestions -->
         <div v-if="cmdSuggestions.length" class="absolute inset-x-0 bottom-[calc(100%+4px)] z-[80] max-h-[200px] overflow-y-auto rounded-lg border border-border bg-[var(--bg-dropdown,#18181c)] shadow-[0_-8px_24px_rgba(0,0,0,0.4)]">
           <div
@@ -85,7 +87,7 @@
             >×</button>
           </div>
         </div>
-        <textarea
+        <ComposerTextInput
           ref="quickEl"
           v-model="quickText"
           class="mb-quick box-border block max-h-[160px] min-h-[40px] w-full resize-none overflow-y-auto border-none bg-transparent px-3.5 pb-1.5 pt-3 font-sans text-[13px] leading-normal text-white/[0.88] outline-none placeholder:text-white/50"
@@ -97,9 +99,40 @@
           @paste="onQuickPaste"
         />
       </div>
+      <template v-if="props.rail" #toolbar>
+        <div class="flex items-center gap-1.5 border-t border-white/[0.07] px-2 py-1.5">
+          <div class="flex min-w-0 items-center gap-1.5 text-[11px] text-secondary-foreground">
+            <PhSparkle :size="13" weight="fill" class="shrink-0 text-accent" />
+            <span class="font-semibold">Manager</span>
+            <span class="mb-status-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="`mb-dot-${dotKind}`" :title="dotTitle" />
+          </div>
+          <div class="relative ml-auto flex items-center gap-1">
+            <button class="flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground" title="Manager options" @click="railOptionsOpen = !railOptionsOpen">
+              <PhSlidersHorizontal :size="14" />
+              Options
+            </button>
+            <div v-if="railOptionsOpen" class="absolute bottom-[calc(100%+6px)] right-0 z-[80] w-[240px] rounded-[10px] border border-border bg-[var(--bg-dropdown,var(--bg-panel,#111))] p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
+              <div class="px-2 pb-1 pt-1 text-[10px] uppercase tracking-[0.07em] text-muted-foreground">Manager options</div>
+              <div class="px-2 py-1 text-[10px] font-semibold text-muted-foreground">Model</div>
+              <button v-for="m in MANAGER_MODELS" :key="m.id" class="mb-wt-item flex w-full items-center gap-2 rounded-lg border-0 bg-transparent p-2 text-left text-secondary-foreground hover:bg-white/[0.07]" :class="managerModel === m.id && 'mb-wt-item-on text-foreground'" @click="selectManagerModel(m.id); railOptionsOpen = false">
+                <PhCpu :size="13" weight="bold" /><span class="flex-1 text-[11px]">{{ m.label }}</span><PhCheck v-if="managerModel === m.id" :size="13" class="text-accent" />
+              </button>
+              <div class="mt-1 border-t border-border/60 px-2 pb-1 pt-2 text-[10px] font-semibold text-muted-foreground">Agent workspace</div>
+              <button class="mb-wt-item flex w-full items-center gap-2 rounded-lg border-0 bg-transparent p-2 text-left text-secondary-foreground hover:bg-white/[0.07]" @click="selectWorktreeMode(false); railOptionsOpen = false"><PhGitBranch :size="13" /><span class="flex-1 text-[11px]">Current branch</span><PhCheck v-if="!worktreeMode" :size="13" class="text-accent" /></button>
+              <button class="mb-wt-item flex w-full items-center gap-2 rounded-lg border-0 bg-transparent p-2 text-left text-secondary-foreground hover:bg-white/[0.07]" @click="selectWorktreeMode(true); railOptionsOpen = false"><PhTree :size="13" /><span class="flex-1 text-[11px]">New worktree each</span><PhCheck v-if="worktreeMode" :size="13" class="text-accent" /></button>
+              <div class="mt-1 border-t border-border/60 px-2 pb-1 pt-2 text-[10px] font-semibold text-muted-foreground">Permission</div>
+              <button v-for="m in PERM_MODES" :key="m" class="mb-wt-item flex w-full items-center gap-2 rounded-lg border-0 bg-transparent p-2 text-left text-secondary-foreground hover:bg-white/[0.07]" :class="PERM_META[m].danger && 'text-destructive'" @click="selectPermMode(m); railOptionsOpen = false"><component :is="PERM_ICON[m]" :size="13" /><span class="flex-1 text-[11px]">{{ PERM_META[m].label }}</span><PhCheck v-if="activePermMode === m" :size="13" class="text-accent" /></button>
+            </div>
+            <button class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground" title="Reset Manager session" @click="resetSession"><PhArrowCounterClockwise :size="14" /></button>
+            <button class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground" title="Project config" @click="emit('openProjectConfig')"><PhGear :size="14" /></button>
+            <button class="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-40" title="Send to Manager" :disabled="!quickText.trim()" @click="quickSend"><PhArrowUp :size="14" weight="bold" /></button>
+          </div>
+        </div>
+      </template>
+      </ComposerBox>
 
       <!-- Model picker (Manager has its own model, default Sonnet) -->
-      <div class="relative shrink-0">
+      <div v-if="!props.rail" class="relative shrink-0">
         <button
           class="inline-flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[7px] border border-border bg-transparent px-2 font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground"
           title="Manager model"
@@ -130,7 +163,7 @@
 
       <!-- Spawn-target picker: clear labeled dropdown (replaces the cryptic
            icon toggle). Tells you where the Manager puts new agents. -->
-      <div class="relative shrink-0">
+      <div v-if="!props.rail" class="relative shrink-0">
         <button
           class="inline-flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[7px] border border-border bg-transparent px-2 font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground"
           :title="'Where the Manager spawns new agents'"
@@ -171,7 +204,7 @@
       </div>
 
       <!-- Permission mode switcher -->
-      <div class="relative shrink-0">
+      <div v-if="!props.rail" class="relative shrink-0">
         <button
           class="inline-flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[7px] border border-border bg-transparent px-2 font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground"
           :class="activePermMeta.danger && 'border-destructive text-destructive hover:bg-destructive/12'"
@@ -201,6 +234,7 @@
       </div>
 
       <button
+        v-if="!props.rail"
         class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
         :title="expanded ? 'Collapse Manager (⌘J)' : 'Expand Manager (⌘J)'"
         @click="toggleExpanded"
@@ -209,6 +243,7 @@
         <PhCaretUp v-else :size="15" weight="bold" />
       </button>
       <button
+        v-if="!props.rail"
         class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
         title="Reset Manager session (clears conversation history, starts fresh)"
         @click="resetSession"
@@ -216,6 +251,7 @@
         <PhArrowCounterClockwise :size="15" weight="bold" />
       </button>
       <button
+        v-if="!props.rail"
         class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
         title="Project config"
         @click="emit('openProjectConfig')"
@@ -228,16 +264,18 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
-import { PhSparkle, PhGitBranch, PhTree, PhCaretDown, PhCaretUp, PhCheck, PhCpu, PhGear, PhArrowCounterClockwise, PhShieldWarning, PhPencilSimple, PhShieldCheck, PhListChecks, PhFastForward } from "@phosphor-icons/vue";
+import { PhSparkle, PhGitBranch, PhTree, PhCaretDown, PhCaretUp, PhCheck, PhCpu, PhGear, PhArrowCounterClockwise, PhShieldWarning, PhPencilSimple, PhShieldCheck, PhListChecks, PhFastForward, PhSlidersHorizontal, PhArrowUp } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import ClaudeChat from "./ClaudeChat.vue";
+import ComposerTextInput from "./ComposerTextInput.vue";
+import ComposerBox from "./ComposerBox.vue";
 import { useUIStore } from "@/stores/ui";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { getDefaultManagerPrimer, SPAWN_MODE_WORKTREE, SPAWN_MODE_BRANCH } from "@/utils/managerPrimer";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
-const props = defineProps<{ cwd: string; wsId: number }>();
+const props = withDefaults(defineProps<{ cwd: string; wsId: number; rail?: boolean }>(), { rail: false });
 const emit = defineEmits<{ openProjectConfig: [] }>();
 
 const ui = useUIStore();
@@ -250,7 +288,8 @@ function setChatRef(repoId: number, el: unknown) {
   if (el) chatRefs.set(repoId, el as InstanceType<typeof ClaudeChat>);
   else chatRefs.delete(repoId);
 }
-const quickEl = ref<HTMLTextAreaElement | null>(null);
+const quickEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
+const quickTextarea = computed(() => quickEl.value?.element ?? null);
 const DRAFT_KEY = computed(() => `burrow.draft.manager.${props.wsId}`);
 const quickText = ref(localStorage.getItem(DRAFT_KEY.value) ?? "");
 watch(quickText, (val) => {
@@ -258,6 +297,7 @@ watch(quickText, (val) => {
   else localStorage.removeItem(DRAFT_KEY.value);
 });
 const pastedImages = ref<string[]>([]);
+const railOptionsOpen = ref(false);
 
 // ── Suggestions ─────────────────────────────────────────────────────────────
 interface Command { name: string; description: string }
@@ -290,7 +330,7 @@ function updateCmdSuggestions() {
 }
 
 function atQueryBeforeCursor(): string | null {
-  const el = quickEl.value;
+  const el = quickTextarea.value;
   const pos = el?.selectionStart ?? quickText.value.length;
   const upto = quickText.value.slice(0, pos);
   const m = upto.match(/(?:^|\s)@([^\s@]*)$/);
@@ -321,7 +361,7 @@ function applyCmd(name: string) {
 }
 
 function applyAt(path: string) {
-  const el = quickEl.value;
+  const el = quickTextarea.value;
   const pos = el?.selectionStart ?? quickText.value.length;
   const upto = quickText.value.slice(0, pos);
   const after = quickText.value.slice(pos);
@@ -334,7 +374,7 @@ function applyAt(path: string) {
 }
 
 function quickAutoResize() {
-  const el = quickEl.value;
+  const el = quickTextarea.value;
   if (!el) return;
   el.style.height = "auto";
   el.style.height = Math.min(el.scrollHeight, 120) + "px";
@@ -380,7 +420,8 @@ function onQuickKeydown(e: KeyboardEvent) {
   // Shift+Enter or Cmd+Enter = newline
   if (e.key === "Enter" && (e.shiftKey || e.metaKey)) {
     e.preventDefault();
-    const el = quickEl.value!;
+    const el = quickTextarea.value;
+    if (!el) return;
     const s = el.selectionStart ?? quickText.value.length;
     const en = el.selectionEnd ?? s;
     quickText.value = quickText.value.slice(0, s) + "\n" + quickText.value.slice(en);
@@ -394,7 +435,7 @@ function onQuickKeydown(e: KeyboardEvent) {
 // Expanded state is shared with the existing ui pref (floatChatOpen) so ⌘J and the
 // persisted preference keep working unchanged. `started` gates the first claude
 // spawn: we don't launch a Manager process until the user first opens or types.
-const expanded = computed(() => ui.floatChatOpen);
+const expanded = computed(() => props.rail || ui.floatChatOpen);
 const started = ref(false);
 
 function ensureStarted() {
@@ -402,7 +443,7 @@ function ensureStarted() {
   if (typeof rootId.value === "number") ensureControlSession(rootId.value);
 }
 function toggleExpanded() {
-  ui.toggleFloatChat();
+  if (!props.rail) ui.toggleFloatChat();
 }
 
 // ── Active workspace anchoring ──
@@ -737,7 +778,7 @@ onMounted(async () => {
   window.addEventListener("mousemove", onResizeMove);
   window.addEventListener("mouseup", onResizeUp);
   window.addEventListener("mousedown", onDocMouseDown);
-  document.documentElement.style.setProperty("--manager-bar-h", `${STRIP_H}px`);
+  if (!props.rail) document.documentElement.style.setProperty("--manager-bar-h", `${STRIP_H}px`);
   if (expanded.value && typeof rootId.value === "number") {
     started.value = true;
     ensureControlSession(rootId.value);
@@ -801,7 +842,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("mousemove", onResizeMove);
   window.removeEventListener("mouseup", onResizeUp);
   window.removeEventListener("mousedown", onDocMouseDown);
-  document.documentElement.style.setProperty("--manager-bar-h", "0px");
+  if (!props.rail) document.documentElement.style.setProperty("--manager-bar-h", "0px");
 });
 
 

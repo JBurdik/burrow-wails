@@ -21,15 +21,17 @@
       </DropdownMenuRoot>
 
       <h1 class="welcome-title">What should we build in <span class="welcome-ws">{{ target.worktree_branch || target.name }}</span>?</h1>
-      <div class="welcome-compose">
-        <textarea
+      <ComposerBox class="welcome-compose">
+        <ComposerTextInput
           ref="inputEl"
           v-model="text"
           class="welcome-input composer-input"
           placeholder="Ask for changes, send follow-ups, or attach images"
           rows="3"
+          autofocus
           @keydown.enter.exact.prevent="submit"
         />
+        <template #toolbar>
         <div class="welcome-toolbar">
           <div class="welcome-pillbar">
             <ModelPicker :agent-id="selectedAgentId" :model-id="selectedModel" :cwd="target.path" @select="onModelSelect" />
@@ -98,7 +100,8 @@
             </button>
           </div>
         </div>
-      </div>
+        </template>
+      </ComposerBox>
     </template>
     <template v-else>
       <PhFolderOpen :size="32" weight="thin" />
@@ -109,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from "vue";
+import { ref, computed, watch, nextTick } from "vue";
 import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -119,6 +122,8 @@ import { getConfig, setConfig } from "@/lib/config";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { modelsFor } from "@/lib/chatModels";
 import ModelPicker from "@/components/ModelPicker.vue";
+import ComposerBox from "@/components/ComposerBox.vue";
+import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
 import { getProjectSettings } from "@/lib/projectSettings";
 
@@ -130,7 +135,7 @@ const ui = useUIStore();
 const chatAgents = useChatAgentsStore();
 
 const text = ref("");
-const inputEl = ref<HTMLTextAreaElement>();
+const inputEl = ref<InstanceType<typeof ComposerTextInput>>();
 
 // Which agent (Claude/Codex/Gemini/…) launches the chat, like T3 Code's model
 // switcher — starts on the user's configured default, overridable per-send.
@@ -216,7 +221,6 @@ watch(target, (t) => {
   if (s.modelId) selectedModel.value = s.modelId;
 }, { immediate: true });
 
-onMounted(() => nextTick(() => inputEl.value?.focus()));
 
 function submit() {
   const prompt = text.value.trim();

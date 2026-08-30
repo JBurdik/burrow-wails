@@ -1,20 +1,48 @@
 <template>
   <aside
     ref="panelEl"
-    class="flex w-[var(--right-panel-width,300px)] shrink-0 grow-0 basis-[var(--right-panel-width,300px)] flex-col overflow-hidden border-l border-border bg-panel text-xs [backdrop-filter:var(--blur-panels,none)]"
+    class="flex h-full shrink-0 grow-0 overflow-hidden bg-panel text-xs [backdrop-filter:var(--blur-panels,none)]"
+    :class="props.open ? 'w-[var(--right-panel-width,300px)] basis-[var(--right-panel-width,300px)] border-l border-border' : 'w-0 basis-0'"
   >
-    <!-- Tab bar -->
-    <div class="flex h-8 shrink-0 border-b border-border">
-      <button
-        v-for="tab in tabs"
-        :key="tab.id"
-        class="flex flex-1 items-center justify-center gap-1 border-0 border-b-2 border-b-transparent bg-transparent px-1 font-sans text-[11px] text-muted-foreground transition-colors hover:text-secondary-foreground"
-        :class="activeTab === tab.id && 'border-b-accent bg-accent/5 text-foreground'"
-        @click="activeTab = tab.id"
-      >
-        <component :is="tab.icon" :size="12" />
-        <span v-if="cq.is.sm">{{ tab.label }}</span>
-      </button>
+    <div v-if="props.open" class="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div class="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 hide-scrollbar">
+        <button
+          v-for="tab in openedTabs"
+          :key="tab.id"
+          class="group flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
+          :class="activeTab === tab.id && 'bg-accent/15 text-foreground'"
+          @click="activeTab = tab.id"
+        >
+          <span class="relative flex h-[13px] w-[13px] shrink-0 items-center justify-center">
+            <component :is="tab.icon" :size="13" class="group-hover:opacity-0" />
+            <span class="absolute inset-0 hidden items-center justify-center rounded text-muted-foreground hover:bg-black/10 hover:text-foreground group-hover:flex" role="button" :aria-label="`Close ${tab.label}`" @click.stop="closeSurface(tab.id)"><PhX :size="12" /></span>
+          </span>
+          <span class="font-medium">{{ tab.label }}</span>
+        </button>
+        <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="showSurfacePicker"><PhPlus :size="15" /></button>
+      </div>
+
+    <div v-if="!activeTab" class="flex flex-1 items-center justify-center overflow-y-auto p-5">
+      <div class="w-full max-w-[420px]">
+        <div class="mb-5 text-center">
+          <h2 class="m-0 text-sm font-semibold text-foreground">Open a surface</h2>
+          <p class="mt-1 text-[11px] text-muted-foreground">Choose what to show in the right panel.</p>
+        </div>
+        <div class="grid gap-2" :class="cq.is.md ? 'grid-cols-2' : 'grid-cols-1'">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            class="group flex min-h-[66px] items-start gap-3 rounded-lg border border-border/70 bg-transparent px-3 py-3 text-left transition-colors hover:border-accent/45 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            @click="openSurface(tab.id)"
+          >
+            <component :is="tab.icon" :size="16" class="mt-0.5 shrink-0 text-secondary-foreground group-hover:text-accent" />
+            <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span class="text-xs font-semibold text-foreground">{{ tab.label }}</span>
+              <span class="text-[10.5px] leading-relaxed text-muted-foreground">{{ tab.description }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Explorer tab -->
@@ -241,6 +269,31 @@
 
     <PullRequestsPanel v-else-if="activeTab === 'pull-requests'" :cwd="props.cwd" />
 
+    <div v-else-if="activeTab === 'diff'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div class="flex shrink-0 items-center justify-between border-b border-border px-2 py-1.5">
+        <div class="flex items-center gap-1.5">
+          <PhGitCommit :size="13" class="text-secondary-foreground" />
+          <span class="text-[11px] font-semibold text-secondary-foreground">Workspace diff</span>
+        </div>
+        <button class="rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="workspaceDiffLoading" @click="loadWorkspaceDiff"><PhArrowClockwise :size="12" :class="workspaceDiffLoading && 'animate-spin'" /></button>
+      </div>
+      <div v-if="workspaceDiffLoading" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
+      <div v-else-if="!workspaceDiff" class="p-4 text-center text-[11px] leading-relaxed text-muted-foreground">No unstaged or staged changes.</div>
+      <pre v-else class="m-0 min-h-0 flex-1 overflow-auto whitespace-pre px-2 py-2 font-mono text-[10px] leading-normal"><span v-for="(line, i) in workspaceDiff.split('\n')" :key="i" class="block" :class="diffLineClass(line)">{{ line }}
+</span></pre>
+    </div>
+
+    <ManagerBar
+      v-else-if="activeTab === 'manager' && props.workspaceId"
+      rail
+      :cwd="props.cwd"
+      :ws-id="props.workspaceId"
+      @open-project-config="emit('openProjectConfig')"
+    />
+    <div v-else-if="activeTab === 'manager'" class="flex flex-1 items-center justify-center p-6 text-center text-[11px] leading-relaxed text-muted-foreground">
+      Open a project to start a Manager thread.
+    </div>
+
     <!-- History tab: pre-turn worktree snapshots, newest first -->
     <div v-else-if="activeTab === 'history'" class="flex flex-1 flex-col overflow-y-auto">
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
@@ -297,6 +350,7 @@
         </div>
       </div>
     </Teleport>
+    </div>
   </aside>
 </template>
 
@@ -307,7 +361,7 @@ import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight,
-  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple,
+  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
@@ -316,11 +370,16 @@ import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
+import ManagerBar from "./ManagerBar.vue";
 
-const props = withDefaults(defineProps<{ cwd: string; isGit?: boolean }>(), { isGit: true });
+const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
+const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
 const git = useGitStore();
 const fileTree = useFileTreeStore();
-const activeTab = ref("git");
+const activeTab = ref<string | null>(null);
+const openedTabIds = ref<string[]>([]);
+const workspaceDiff = ref("");
+const workspaceDiffLoading = ref(false);
 const showHistory = ref(false);
 const activeTerm = inject<() => any>('activeTerm', () => undefined);
 
@@ -343,22 +402,46 @@ async function openCommitDiff(c: GitCommit) {
   activeTerm()?.openDiffInTab(`${c.shortHash} ${c.subject}`, false, out.stdout);
 }
 
-// Non-git folders are first-class workspaces but expose no Git tab.
+// Keep Git surfaces visible even before a repository exists. Changes already
+// explains that state and offers Git Init; hiding Diff made the surface picker
+// look incomplete for newly opened folders.
 const tabs = computed(() => {
   const all = [
-    { id: "git",      label: "Git",      icon: PhGitBranch },
-    { id: "pull-requests", label: "PRs", icon: PhGitBranch },
-    { id: "explorer", label: "Explorer", icon: PhFiles },
-    { id: "history",  label: "History",  icon: PhClockCounterClockwise },
+    { id: "git", label: "Changes", icon: PhGitBranch, description: "Inspect, stage and commit workspace changes." },
+    { id: "pull-requests", label: "Pull requests", icon: PhGitBranch, description: "Check pull requests for this workspace." },
+    { id: "explorer", label: "Files", icon: PhFiles, description: "Browse the current workspace." },
+    { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
+    { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
+    { id: "manager", label: "Manager", icon: PhSparkle, description: "Plan and coordinate agent work for this project." },
   ];
-  // Checkpoints are git snapshots, so History shares the Git tab's precondition.
-  return props.isGit ? all : all.filter((t) => t.id !== "git" && t.id !== "history");
+  return all;
 });
 
-// Keep the active tab valid: a non-git workspace can't sit on the hidden Git tab.
-watch(() => props.isGit, (isGit) => {
-  if (!isGit && (activeTab.value === "git" || activeTab.value === "history")) activeTab.value = "explorer";
-}, { immediate: true });
+const openedTabs = computed(() => openedTabIds.value
+  .map((id) => tabs.value.find((tab) => tab.id === id))
+  .filter((tab): tab is NonNullable<typeof tab> => Boolean(tab)));
+
+function openSurface(id: string) {
+  if (!openedTabIds.value.includes(id)) openedTabIds.value.push(id);
+  activeTab.value = id;
+  if (!props.open) emit("openPanel");
+  if (id === "manager") emit("managerOpen");
+}
+
+function closeSurface(id: string) {
+  openedTabIds.value = openedTabIds.value.filter((openedId) => openedId !== id);
+  if (activeTab.value === id) activeTab.value = openedTabs.value[0]?.id ?? null;
+}
+
+function showSurfacePicker() {
+  activeTab.value = null;
+}
+
+function openManager() {
+  openSurface("manager");
+}
+
+defineExpose({ openManager });
 
 // --- Checkpoints (History tab) ---
 interface Checkpoint {
@@ -409,6 +492,21 @@ async function confirmRestore() {
 }
 
 watch([activeTab, () => props.cwd], () => { if (activeTab.value === "history") loadCheckpoints(); });
+watch([activeTab, () => props.cwd], () => { if (activeTab.value === "diff") loadWorkspaceDiff(); });
+
+async function loadWorkspaceDiff() {
+  if (!props.cwd) { workspaceDiff.value = ""; return; }
+  workspaceDiffLoading.value = true;
+  try {
+    const [unstaged, staged] = await Promise.all([git.fetchAllDiff(false), git.fetchAllDiff(true)]);
+    workspaceDiff.value = [
+      unstaged && "# Unstaged changes\n" + unstaged,
+      staged && "# Staged changes\n" + staged,
+    ].filter(Boolean).join("\n\n");
+  } finally {
+    workspaceDiffLoading.value = false;
+  }
+}
 
 watch(() => props.cwd, (p) => {
   if (p) {
