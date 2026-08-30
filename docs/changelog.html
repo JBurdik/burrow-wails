@@ -79,11 +79,67 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.2.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.2.0</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">srpen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Sidebar jen s vlákny</div>
+      <ul>
+        <li><strong>Vlákna místo projektů</strong> — sidebar teď vypisuje pouze vlákna. Projekty se přesunuly do filtru: vybráním projektu se repo připojí a otevře se composer, takže i repo bez vláken je dostupné. Skripty a Browser jsou dole v liště.</li>
+        <li><strong>Terminál bez tří řad chromu</strong> — zmizel AgentToolbar, přepínač Chat/Terminál i lišta tabů; duplikovaly to, co už dělá sidebar a composer. Rozdělení panelů zůstává na <code>⌘D</code> / <code>⌘⇧D</code>.</li>
+        <li><strong>Composer jako jediný vstup pro nové vlákno</strong> — WelcomeScreen má vedle odeslání přepínač Chat UI / Terminál. V režimu Terminál spustí interaktivní CLI agenta a prompt mu předá jako první argument (<code>src/lib/agentCommand.ts</code>, otestované POSIX quotování).</li>
+        <li><strong>Výběr projektu na <code>⌘⇧O</code></strong> — command palette v režimu „jen projekty“: vyber repo, připojí se a přistaneš v composeru. Stejnou cestou jde i „New chat“ v sidebaru, který dřív otevíral chat tab v projektu, jenž ještě nemusel být připojený.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Nastavení projektu</div>
+      <ul>
+        <li><strong>Vlastní nastavení pro každý projekt</strong> — WorkspaceConfig má záložku General (zobrazované jméno, ikona, výchozí agent a model composeru, adresář pro worktree, připnutí/archivace/smazání) a otevírá se z command palette. Přepisy žijí v <code>src/lib/projectSettings.ts</code> a padají zpět na globální hodnotu; čte je composer i obě místa, která staví cestu k worktree.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Vzdálený přístup z telefonu</div>
+      <ul>
+        <li><strong>Párovací kód místo tokenu</strong> — telefon se přihlásí šestimístným kódem, který <code>/pair</code> vymění za bearer token; 48znakový token se tak nikdy nikam neopisuje. Kód je náhodný (dřívější build ukazoval prvních šest znaků tokenu, což token prozrazovalo a nic neověřovalo), na jedno použití, porovnává se v konstantním čase a po 5 chybných pokusech se zamkne, dokud ho v Nastavení nevygeneruješ znovu.</li>
+        <li><strong>Chaty na mobilu</strong> — <code>RemoteListChats</code> čte konverzace přímo z <code>config.json</code> desktopu (seznam i přepisy) a doplní jméno a cestu projektu, takže u každého chatu je vidět, ke kterému repu patří. Zatím jen pro čtení: desktop přepisuje <code>config.json</code> celý, takže druhý zapisovatel by se tiše přemazal.</li>
+        <li><strong>Živé relace</strong> — obrazovka Sessions spojuje taby z SQLite s tím, co skutečně drží daemon, takže běžící PTY se ukáže i bez uloženého tabu.</li>
+        <li><strong>Události chatu doputují i do prohlížeče</strong> — <code>claude-data</code>, <code>acp-data</code> a <code>acp-req</code> jdou přes <code>emitAll</code>, ne jen do okna Wails.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Vlákna přežijí restart</strong> — obnova už nečte zvláštní seznam otevřených chat tabů z localStorage; prázdný nebo zastaralý seznam dokázal schovat úplně všechna vlákna. Otevřené taby se odvozují ze seznamu relací, který je zdrojem pravdy. Zavření vlákna proto relaci i maže — jinak by se tab při dalším spuštění vrátil.</li>
+        <li><strong>Pořadí v sidebaru přežije restart</strong> — razítka poslední aktivity se ukládají a první synchronizace po načtení už nerazítkuje znovu (tam vypadá každý tab jako nový a přerazítkování by srovnalo právě to pořadí, které se má zachovat). Odpojení projektu je taky nezapomene.</li>
+        <li><strong>Kliknutí na vlákno už nepřehazuje sidebar</strong> — aktivace tabu razítkovala hodiny aktivity, podle kterých se feed řadí, takže řádek uskočil nahoru pod kurzorem. Aktivace už není událost aktivity.</li>
+        <li><strong>Chat zůstával navždy na „Done“</strong> — <code>markTabSeen()</code> uměl jen stavové aktory PTY listů; aktor chatu žije v chats store a dostal <code>MARK_SEEN</code> jedinkrát, při mountu. Nově se označí ten aktor, kterému list opravdu patří, a za „viděno“ se počítá i návrat do okna.</li>
+        <li><strong>Git tab se vůbec nevykresloval</strong> — Terminal.vue převzal vykreslování panelů, ale nedostal větev pro <code>leafType === 'git'</code>, takže git list propadl do <code>&lt;XTerm&gt;</code> a spustil shell. Vykresluje GitPanel.</li>
+        <li><strong>Prázdný seznam tabů po restartu</strong> — <code>persist()</code> běžel ještě během čekání na <code>list_terminal_tabs</code> a uložil seznam bez dosud neobnovených řádků. Ukládání je nově podmíněné dokončením obnovy a obnova chatů čeká na <code>configReady</code>.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Vývoj</div>
+      <ul>
+        <li><strong><code>BURROW_DEV_MOBILE</code></strong> — servíruje mobilní bundle z disku. <code>//go:embed</code> ho zapéká při kompilaci a <code>wails dev</code> překládá jen při změně Go zdrojáku, takže práce na mobilním UI dřív znamenala restart dev serveru po každé iteraci.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.1.2 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.1.2</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">srpen 2026</span>
     </div>
 
