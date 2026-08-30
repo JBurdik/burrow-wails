@@ -79,11 +79,29 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.2.3 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.2.3</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">srpen 2026</span>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Spolehlivá samoaktualizace</div>
+      <ul>
+        <li><strong>Aktualizační balík už neztratí podpis</strong> — release pipeline před zabalením ověří Developer ID podpis <code>Burrow.app</code>, archiv znovu rozbalí a ověří i jeho podpis. Pokud <code>wails dev</code> mezitím přepíše produkční bundle vlastním ad-hoc buildem, vydání se bezpečně zastaví místo publikování neinstalovatelné aktualizace.</li>
+        <li><strong>Zachovaná kompatibilita se staršími aplikacemi</strong> — updater dál používá formát <code>.tar.gz</code>, který umí instalovat i verze 0.2.0 a 0.2.1. Tento release opravuje chybný aktualizační artefakt z předchozího vydání.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.2.0 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.2.0</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">srpen 2026</span>
     </div>
 
