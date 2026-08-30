@@ -18,7 +18,7 @@ repo := "JBurdik/burrow-wails"
 version := `node -p "require('./src-wails/wails.json').info.productVersion" 2>/dev/null || echo 0.0.0`
 
 app     := "src-wails/build/bin/Burrow.app"
-tarball := "src-wails/build/bin/Burrow.app.zip"
+tarball := "src-wails/build/bin/Burrow.app.tar.gz"
 dmg     := "src-wails/build/bin/Burrow_" + version + "_aarch64.dmg"
 
 # List recipes
@@ -140,17 +140,17 @@ notarize-dmg:
     xcrun notarytool submit "{{dmg}}" --keychain-profile "{{profile}}" --wait
     xcrun stapler staple "{{dmg}}"
 
-# Pack the updater artifacts: Burrow.app.zip + latest.json (with the sha256
+# Pack the updater artifacts: Burrow.app.tar.gz + latest.json (with the sha256
 # the in-app updater checks before installing — see src-wails/updater.go).
 pack notes="": assert-signed
     #!/usr/bin/env bash
     set -euo pipefail
     [ -d "{{app}}" ] || { echo "❌ {{app}} missing — run 'just build' first"; exit 1; }
     rm -f "{{tarball}}"
-    ditto -c -k --keepParent --sequesterRsrc "{{app}}" "{{tarball}}"
+    tar -czf "{{tarball}}" -C "$(dirname "{{app}}")" "$(basename "{{app}}")"
     VERIFY_DIR="$(mktemp -d)"
     trap 'rm -rf "$VERIFY_DIR"' EXIT
-    ditto -x -k "{{tarball}}" "$VERIFY_DIR"
+    tar -xzf "{{tarball}}" -C "$VERIFY_DIR"
     codesign --verify --deep --strict "$VERIFY_DIR/Burrow.app"
     SUM="$(shasum -a 256 "{{tarball}}" | awk '{print $1}')"
     NOTES="{{notes}}"
@@ -164,7 +164,7 @@ pack notes="": assert-signed
         pub_date: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
         platforms: {
           "darwin-aarch64": {
-            url: `https://github.com/${repo}/releases/download/v${version}/Burrow.app.zip`,
+            url: `https://github.com/${repo}/releases/download/v${version}/Burrow.app.tar.gz`,
             sha256: sum,
           },
         },
