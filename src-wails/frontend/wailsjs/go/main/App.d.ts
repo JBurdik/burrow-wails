@@ -128,6 +128,8 @@ export function ReadFileBase64(arg1:string):Promise<string>;
 
 export function ReadTextFile(arg1:string):Promise<string>;
 
+export function RegeneratePairCode():Promise<string>;
+
 export function RegisterTmuxWin(arg1:string,arg2:string):Promise<void>;
 
 export function RelaunchApp():Promise<void>;

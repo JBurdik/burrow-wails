@@ -123,7 +123,7 @@ func (a *App) ListTerminalTabs(workspaceID int64) ([]TerminalTab, error) {
 	}
 	defer rows.Close()
 
-	var out []TerminalTab
+	out := []TerminalTab{}
 	for rows.Next() {
 		var t TerminalTab
 		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Ord, &t.Title, &t.InitialCmd, &t.PtyID, &t.Cwd, &t.DefaultTitle, &t.SessionID); err != nil {

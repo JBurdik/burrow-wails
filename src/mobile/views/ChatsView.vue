@@ -31,7 +31,7 @@ onMounted(() => { if (!store.chats.length) store.loadChats(); });
     <p class="eyebrow">ŽIVÉ CHATY</p>
     <button v-for="chat in orderedChats" :key="chat.id" class="chat-row" type="button" @click="store.openChat(chat)">
       <span :class="['chat-orb', { 'chat-orb--busy': chat.busy }]">✦</span>
-      <span class="chat-row-main"><strong>{{ chat.title }}</strong><small>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
+      <span class="chat-row-main"><strong>{{ chat.title }}</strong><small><span v-if="chat.workspaceName" class="chat-ws">{{ chat.workspaceName }}</span>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
       <span :class="['chat-status', { 'chat-status--busy': chat.busy }]">{{ chat.busy ? 'Pracuje' : 'Připraven' }}</span>
       <span class="chevron">›</span>
     </button>
@@ -42,4 +42,15 @@ onMounted(() => { if (!store.chats.length) store.loadChats(); });
 
 <style scoped>
 .refresh{border:0;background:transparent;color:var(--accent);font-size:20px}.chat-list{padding:20px 16px calc(84px + var(--safe-bottom))}.eyebrow{margin:20px 0 9px;color:var(--text-muted);font:700 10px/1 var(--font-mono);letter-spacing:.12em}.eyebrow:first-child{margin-top:0}.create-grid{display:grid;grid-template-columns:1fr 100px;gap:8px}.create-grid select,.create-grid button{min-height:40px;border:1px solid var(--border);border-radius:8px;background:var(--bg-hover);color:var(--text-primary);padding:0 9px;font:12px var(--font-ui)}.create-grid button{grid-column:span 2;border-color:var(--accent);background:var(--accent);font-weight:700}.create-grid button:disabled{opacity:.45}.create-error{margin:8px 0 0;color:var(--red);font-size:11px}.chat-row{width:100%;min-height:75px;display:flex;align-items:center;gap:10px;padding:10px 2px;border:0;border-top:1px solid var(--border);background:transparent;color:inherit;text-align:left}.chat-row:last-of-type{border-bottom:1px solid var(--border)}.chat-orb{width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border);border-radius:50%;color:var(--text-secondary)}.chat-orb--busy{border-color:var(--yellow);color:var(--yellow);box-shadow:0 0 18px color-mix(in srgb,var(--yellow) 25%,transparent)}.chat-row-main{flex:1;min-width:0;display:grid;gap:4px}.chat-row-main strong,.chat-row-main small{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.chat-row-main strong{font:650 14px/1.2 var(--font-mono);color:var(--text-primary)}.chat-row-main small{color:var(--text-muted);font:11px/1.2 var(--font-mono)}.chat-status{color:var(--text-muted);font-size:10px}.chat-status--busy{color:var(--yellow)}.chevron{color:var(--text-muted);font-size:22px}.empty{min-height:310px;display:grid;place-content:center;gap:10px;text-align:center;color:var(--text-secondary)}.empty span{color:var(--accent);font-size:28px}.empty strong{color:var(--text-primary)}.empty p{max-width:260px;margin:0;font-size:12px}.bottom-nav{position:fixed;right:0;bottom:0;left:0;display:grid;grid-template-columns:repeat(3,1fr);padding:9px 10px calc(9px + var(--safe-bottom));border-top:1px solid var(--border);background:var(--bg-panel)}.nav-item{min-height:48px;display:grid;place-items:center;gap:3px;border:0;background:transparent;color:var(--text-muted);font-size:10px}.nav-item span{font:700 22px/.9 var(--font-mono)}.nav-item--active{color:var(--accent)}
+
+/* Which project a chat belongs to is the first thing you need when several
+   agents are running — lead the meta line with it. */
+.chat-ws {
+  color: var(--accent);
+  margin-right: 6px;
+}
+.chat-ws::after {
+  content: " ·";
+  color: var(--text-muted);
+}
 </style>

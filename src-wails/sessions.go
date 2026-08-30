@@ -92,7 +92,7 @@ func (a *App) ListClaudeSessions(cwd string) ([]ClaudeSessionInfo, error) {
 		return nil, err
 	}
 
-	var out []ClaudeSessionInfo
+	out := []ClaudeSessionInfo{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue

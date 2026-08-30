@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Claude Code chat runtime. Ports claude_start/claude_send/claude_stop/
@@ -184,8 +182,8 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 	// status hook stays a no-op for it.
 
 	return a.claudeMgr().Start(id, bin, args, cwd, env,
-		func(line string) { runtime.EventsEmit(a.ctx, "claude-data-"+id, line) },
-		func() { runtime.EventsEmit(a.ctx, "claude-data-"+id, `{"type":"exit"}`) },
+		func(line string) { emitAll(a.ctx, "claude-data-"+id, line) },
+		func() { emitAll(a.ctx, "claude-data-"+id, `{"type":"exit"}`) },
 	)
 }
 

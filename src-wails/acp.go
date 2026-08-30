@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // ACP / Codex app-server bridge. Ports acp_start/codex_start/acp_send/
@@ -112,7 +110,7 @@ type AcpStartOpts struct {
 	ConfigDir       string            `json:"configDir"`
 	EnvFile         string            `json:"envFile"`
 	ResumeSessionID string            `json:"resumeSessionId"`
-	EmitHistory     bool             `json:"emitHistory"`
+	EmitHistory     bool              `json:"emitHistory"`
 }
 
 // jsonRPCReader reads newline JSON from the child and can wait for one response id.
@@ -264,9 +262,9 @@ func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 		if hasMethod && hasID {
 			topic = "acp-req-" + chatID
 		}
-		runtime.EventsEmit(a.ctx, topic, raw)
+		emitAll(a.ctx, topic, raw)
 	}
-	runtime.EventsEmit(a.ctx, "acp-data-"+chatID, `{"_burrow":"exit"}`)
+	emitAll(a.ctx, "acp-data-"+chatID, `{"_burrow":"exit"}`)
 }
 
 // pumpCodexLine translates Codex app-server notifications into the ACP
@@ -279,7 +277,7 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		if err != nil {
 			return
 		}
-		runtime.EventsEmit(a.ctx, "acp-data-"+chatID, string(line))
+		emitAll(a.ctx, "acp-data-"+chatID, string(line))
 	}
 	switch method {
 	case "item/agentMessage/delta":
@@ -319,7 +317,7 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		if _, hasID := msg["id"]; hasID && method != "" {
 			line, err := json.Marshal(msg)
 			if err == nil {
-				runtime.EventsEmit(a.ctx, "acp-req-"+chatID, string(line))
+				emitAll(a.ctx, "acp-req-"+chatID, string(line))
 			}
 		}
 	}
@@ -339,7 +337,7 @@ func (a *App) emitSession(chatID, sessionID string, modes any, configOptions any
 	if err != nil {
 		return
 	}
-	runtime.EventsEmit(a.ctx, "acp-data-"+chatID, string(line))
+	emitAll(a.ctx, "acp-data-"+chatID, string(line))
 }
 
 // AcpStart spawns an ACP adapter for chat opts.ID and completes its handshake.
@@ -465,7 +463,7 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 		// the history rendered (picker resume).
 		resp, err := reader.await(1, func(raw string, msg map[string]any) {
 			if m, _ := msg["method"].(string); m == "session/update" && opts.EmitHistory {
-				runtime.EventsEmit(a.ctx, "acp-data-"+opts.ID, raw)
+				emitAll(a.ctx, "acp-data-"+opts.ID, raw)
 			}
 		})
 		if err != nil {

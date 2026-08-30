@@ -106,6 +106,10 @@ type HttpServerStatus struct {
 	Port      int    `json:"port"`
 	TokenPath string `json:"tokenPath"`
 	Token     string `json:"token"`
+	// PairCode is the six-digit code the phone types on the Connect screen.
+	// Empty while pairing is locked out after too many wrong guesses.
+	PairCode   string `json:"pairCode"`
+	PairLocked bool   `json:"pairLocked"`
 }
 
 func (a *App) GetHttpServerStatus() HttpServerStatus {
@@ -117,8 +121,18 @@ func (a *App) GetHttpServerStatus() HttpServerStatus {
 	}
 	if a.httpSrv != nil {
 		s.Token = a.httpSrv.token
+		s.PairCode = a.httpSrv.PairCode()
+		s.PairLocked = s.PairCode == ""
 	}
 	return s
+}
+
+// RegeneratePairCode issues a fresh pairing code and clears the lockout.
+func (a *App) RegeneratePairCode() string {
+	if a.httpSrv == nil {
+		return ""
+	}
+	return a.httpSrv.RegeneratePairCode()
 }
 
 func NewApp() *App {

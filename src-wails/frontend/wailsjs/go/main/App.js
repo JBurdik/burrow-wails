@@ -254,6 +254,10 @@ export function ReadTextFile(arg1) {
   return window['go']['main']['App']['ReadTextFile'](arg1);
 }
 
+export function RegeneratePairCode() {
+  return window['go']['main']['App']['RegeneratePairCode']();
+}
+
 export function RegisterTmuxWin(arg1, arg2) {
   return window['go']['main']['App']['RegisterTmuxWin'](arg1, arg2);
 }

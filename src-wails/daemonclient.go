@@ -173,5 +173,8 @@ func (d *DaemonClient) List() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if resp.IDs == nil {
+		return []string{}, nil // never hand JS a null to .map over
+	}
 	return resp.IDs, nil
 }

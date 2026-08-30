@@ -35,7 +35,7 @@ func (a *App) ListSkills() ([]SkillInfo, error) {
 		return nil, err
 	}
 
-	var out []SkillInfo
+	out := []SkillInfo{}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue

@@ -46,6 +46,8 @@ export interface RemoteChat {
   agentKind?: string | null;
   transport: "claude-cli" | "codex-app-server" | "acp";
   claudeSessionId: string;
+  workspaceName?: string;
+  workspacePath?: string;
   messages: RemoteMessage[];
 }
 
@@ -154,7 +156,7 @@ export const useRemoteStore = defineStore("remote", () => {
       const wss: { id: number; name: string; path: string }[] = await client.call("list_workspaces");
       const groups: WorkspaceGroup[] = [];
       for (const ws of wss) {
-        const tabs: any[] = await client.call("list_terminal_tabs", { workspaceId: ws.id });
+        const tabs: any[] = (await client.call("list_terminal_tabs", { workspaceId: ws.id })) ?? [];
         const liveTabs: Tab[] = tabs
           .filter((t) => typeof t.pty_id === "number")
           .map((t) => ({
@@ -175,7 +177,7 @@ export const useRemoteStore = defineStore("remote", () => {
       // daemon what it is actually holding and surface the leftovers, rather
       // than showing an empty list next to a running agent.
       const known = new Set(groups.flatMap((g) => g.tabs.map((t) => t.ptyId)));
-      const live: string[] = await client.call("list_pty_sessions").catch(() => []);
+      const live: string[] = (await client.call("list_pty_sessions").catch(() => [])) ?? [];
       const orphans: Tab[] = live
         .map((id) => Number(id))
         .filter((id) => Number.isFinite(id) && !known.has(id))

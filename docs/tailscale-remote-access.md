@@ -161,16 +161,48 @@ from the tailnet, so nothing is exposed by reflection:
 |---------|-----------|
 | `list_workspaces` | `ListWorkspaces` |
 | `list_terminal_tabs` | `ListTerminalTabs` |
+| `list_pty_sessions` | `ListPtySessions` |
+| `remote_list_chats` | `RemoteListChats` |
 | `write_pty` | `WritePty` |
 | `resize_pty` | `ResizePty` |
 
-**Terminal only.** The Chats screen calls `remote_list_chats` /
-`remote_create_chat` / `claude_send` / `acp_send`; the first two are still
-stubs in `src-wails/stubs.go`, so those commands are not in the allow-list
-and ChatsView does not work remotely yet.
+**Read-only so far.** `RemoteListChats` (`src-wails/remote.go`) reads the
+desktop's own `config.json` — `chatSessions` for the list,
+`chatMessageHistory` for the transcripts, inlined as `messages` — and hides
+Mission Control's `control: true` session. Nothing on the remote side ever
+*writes* `config.json`: the desktop rewrites the whole file on every
+`setConfig`, so a second writer would be silently clobbered on the next
+save. The desktop stays the single writer.
+
+Sessions merges the SQLite tabs with whatever `list_pty_sessions` says the
+daemon is holding, so a PTY that has not been persisted yet still shows up
+(under "Živé relace").
+
+Still missing, and each one can run a tool on the host, so they get added
+deliberately rather than in bulk: `claude_send`, `claude_respond_control`
+(the permission allow/deny reply), `acp_send`, `acp_respond_permission`, and
+a `remote_start_chat` that would resolve `ClaudeStart`'s ten parameters from
+`config.json` + the workspace row.
 
 Events reach browser clients through `emitAll` (`src-wails/events.go`),
 which emits to the Wails window *and* `HTTPServer.Broadcast`. Wired up so
-far: `pty-data-{id}`, `pty-exit-{id}`, `pty-hook-{id}`. Any event the mobile
+far: `pty-data-{id}`, `pty-exit-{id}`, `pty-hook-{id}`, `claude-data-{id}`,
+`acp-data-{id}`, `acp-req-{id}`. Any event the mobile
 UI needs must use `emitAll`, not `runtime.EventsEmit`. There is still no
 replay buffer — you only see events emitted after you connect.
+
+## 9. Iterating on the mobile UI
+
+`//go:embed` snapshots the bundle when the Go binary compiles, and `wails
+dev` only recompiles when Go source actually changes — `touch` is not
+enough. So a fresh `pnpm build:mobile` will not appear until something in
+`src-wails/*.go` really changes, or the dev server restarts.
+
+To skip that loop entirely, serve the bundle from disk:
+
+```sh
+BURROW_DEV_MOBILE=$PWD/src-wails/dist-mobile/app wails dev
+```
+
+Then `pnpm build:mobile` + reload the phone is the whole cycle. Unset in
+release builds — the embed is what makes the .app self-contained.

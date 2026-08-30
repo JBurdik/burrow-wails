@@ -30,7 +30,7 @@ type SpawnRequest struct {
 // dirs, claims (deletes) each one owned by cwd, answers read-commands
 // in-process, and returns the rest for the frontend to act on.
 func (a *App) TakeSpawnRequests(cwd string) []SpawnRequest {
-	var out []SpawnRequest
+	out := []SpawnRequest{}
 	if a.sessionDir == "" {
 		return out
 	}

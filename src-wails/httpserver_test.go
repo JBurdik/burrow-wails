@@ -110,3 +110,74 @@ func TestWSRejectsTruncatedToken(t *testing.T) {
 		}
 	}
 }
+
+// Pairing is the only unauthenticated way to obtain the bearer token, so its
+// three guarantees each get a case: right code works, a used code does not
+// work twice, and guessing runs out of budget.
+func TestPairing(t *testing.T) {
+	s := &HTTPServer{token: "the-real-token", pairCode: "123456"}
+	srv := httptest.NewServer(http.HandlerFunc(s.handlePair))
+	defer srv.Close()
+
+	pair := func(code string) (int, string) {
+		res, err := http.Post(srv.URL, "application/json",
+			strings.NewReader(`{"code":"`+code+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var body struct {
+			Token string `json:"token"`
+		}
+		_ = json.NewDecoder(res.Body).Decode(&body)
+		return res.StatusCode, body.Token
+	}
+
+	if code, tok := pair("123456"); code != 200 || tok != "the-real-token" {
+		t.Fatalf("correct code: got %d/%q, want 200/the-real-token", code, tok)
+	}
+	if code, _ := pair("123456"); code != 401 {
+		t.Fatalf("reused code: got %d, want 401 — a paired code must be burned", code)
+	}
+	if s.PairCode() == "123456" {
+		t.Fatal("code did not rotate after a successful pair")
+	}
+
+	// One failure is already on the counter from the reuse above.
+	for i := 1; i < pairMaxFailures; i++ {
+		pair("000000")
+	}
+	if code, _ := pair("000000"); code != 429 {
+		t.Fatalf("after %d failures: got %d, want 429", pairMaxFailures, code)
+	}
+	if s.PairCode() != "" {
+		t.Fatal("a locked-out server must not keep advertising a code")
+	}
+	// Even the right code stays refused while locked.
+	live := s.pairCode
+	if code, _ := pair(live); code != 429 {
+		t.Fatalf("locked out but correct code: got %d, want 429", code)
+	}
+	if s.RegeneratePairCode() == "" || s.PairCode() == "" {
+		t.Fatal("regenerate must unlock pairing")
+	}
+}
+
+func TestRandomPairCodeIsSixDigits(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		c := randomPairCode()
+		if len(c) != 6 {
+			t.Fatalf("got %q, want 6 digits", c)
+		}
+		for _, r := range c {
+			if r < '0' || r > '9' {
+				t.Fatalf("non-digit in %q", c)
+			}
+		}
+		seen[c] = true
+	}
+	if len(seen) < 40 {
+		t.Fatalf("only %d distinct codes in 50 draws — not random enough", len(seen))
+	}
+}

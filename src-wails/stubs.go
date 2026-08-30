@@ -60,8 +60,10 @@ func (a *App) ClaudeUsage5h(_configDir string) (ClaudeUsage, error) {
 
 // --- Remote chat sync (needs its own transport design) ---
 
-func (a *App) RemoteSyncChat(_chat map[string]any) error            { return nil }
-func (a *App) RemoteListChats() ([]map[string]any, error)           { return nil, nil }
+func (a *App) RemoteSyncChat(_chat map[string]any) error { return nil }
+
+// RemoteListChats now lives in remote.go. RemoteCreateChat is still a stub:
+// creating a chat means writing config.json, which only the desktop may do.
 func (a *App) RemoteCreateChat(_cwd string) (map[string]any, error) { return map[string]any{}, nil }
 
 // --- Daemon admin (daemon.go doesn't exist yet — these operate through

@@ -163,6 +163,8 @@ export namespace main {
 	    port: number;
 	    tokenPath: string;
 	    token: string;
+	    pairCode: string;
+	    pairLocked: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new HttpServerStatus(source);
@@ -174,6 +176,8 @@ export namespace main {
 	        this.port = source["port"];
 	        this.tokenPath = source["tokenPath"];
 	        this.token = source["token"];
+	        this.pairCode = source["pairCode"];
+	        this.pairLocked = source["pairLocked"];
 	    }
 	}
 	export class SearchHit {

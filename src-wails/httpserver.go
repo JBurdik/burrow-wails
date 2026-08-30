@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -41,14 +42,103 @@ type HTTPServer struct {
 	mu      sync.Mutex
 	srv     *http.Server
 	clients map[*websocket.Conn]struct{}
+
+	pairMu       sync.Mutex
+	pairCode     string
+	pairFailures int
 }
+
+// pairMaxFailures locks pairing after this many wrong codes. Six digits
+// against five guesses is 5-in-a-million, and /pair is only reachable from
+// the tailnet — but the endpoint has to be unauthenticated (that is the
+// point of pairing), so the attempt budget is what keeps it honest.
+const pairMaxFailures = 5
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 func NewHTTPServer(app *App) *HTTPServer {
-	return &HTTPServer{app: app, clients: make(map[*websocket.Conn]struct{}), token: loadOrCreateHTTPToken()}
+	return &HTTPServer{
+		app:      app,
+		clients:  make(map[*websocket.Conn]struct{}),
+		token:    loadOrCreateHTTPToken(),
+		pairCode: randomPairCode(),
+	}
+}
+
+// randomPairCode returns six uniformly random digits. Deliberately NOT
+// derived from the bearer token: an earlier build showed the token's first
+// six characters as a "pairing code", which leaked token material into the
+// UI and never actually authenticated anything.
+func randomPairCode() string {
+	digits := make([]byte, 6)
+	for i := range digits {
+		n, err := rand.Int(rand.Reader, big.NewInt(10))
+		if err != nil {
+			return ""
+		}
+		digits[i] = byte('0' + n.Int64())
+	}
+	return string(digits)
+}
+
+// PairCode is the code to show in Settings. Empty means pairing is locked
+// out and needs a regenerate.
+func (s *HTTPServer) PairCode() string {
+	s.pairMu.Lock()
+	defer s.pairMu.Unlock()
+	if s.pairFailures >= pairMaxFailures {
+		return ""
+	}
+	return s.pairCode
+}
+
+// RegeneratePairCode issues a fresh code and clears any lockout.
+func (s *HTTPServer) RegeneratePairCode() string {
+	s.pairMu.Lock()
+	defer s.pairMu.Unlock()
+	s.pairCode = randomPairCode()
+	s.pairFailures = 0
+	return s.pairCode
+}
+
+// handlePair trades a correct pairing code for the bearer token, so a phone
+// never has to be told the 48-character token. Unauthenticated by
+// necessity; single-use (a success rotates the code) and budgeted (see
+// pairMaxFailures).
+func (s *HTTPServer) handlePair(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	s.pairMu.Lock()
+	defer s.pairMu.Unlock()
+
+	if s.pairFailures >= pairMaxFailures {
+		http.Error(w, "pairing locked — regenerate the code in Settings", http.StatusTooManyRequests)
+		return
+	}
+	if s.token == "" || s.pairCode == "" ||
+		subtle.ConstantTimeCompare([]byte(req.Code), []byte(s.pairCode)) != 1 {
+		s.pairFailures++
+		http.Error(w, "invalid code", http.StatusUnauthorized)
+		return
+	}
+
+	// Single use: burn the code so a shoulder-surfed screen stays useless.
+	s.pairCode = randomPairCode()
+	s.pairFailures = 0
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"token": s.token})
 }
 
 // loadOrCreateHTTPToken persists a random bearer token in the app data dir
@@ -116,6 +206,7 @@ func (s *HTTPServer) ListenAndServe(addr string) error {
 	// Authorization header, so the shell and the health probe have to be
 	// open. Everything that touches a PTY sits behind the token.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("/pair", s.handlePair)
 	mux.HandleFunc("/", s.handleAssets)
 	srv := &http.Server{Addr: addr, Handler: mux}
 	s.mu.Lock()
@@ -201,9 +292,9 @@ type wsArgs struct {
 // allow-list, not reflection: this surface is reachable from the tailnet,
 // so every remotely-invokable method is one someone typed here on purpose.
 //
-// ponytail: terminal-only. remote_list_chats/remote_create_chat/claude_send/
-// acp_send are what ChatsView wants, but RemoteListChats/RemoteCreateChat are
-// still stubs in stubs.go — wire them here once they do something.
+// Read-only so far. The write half (claude_send, claude_respond_control,
+// remote_start_chat) is the next stage — every one of those can run a tool on
+// the user's machine, so they get added deliberately, not in bulk.
 func (s *HTTPServer) dispatch(c wsCall) (any, error) {
 	switch c.Command {
 	case "list_workspaces":
@@ -214,6 +305,10 @@ func (s *HTTPServer) dispatch(c wsCall) (any, error) {
 		return nil, s.app.WritePty(c.Args.ID, c.Args.Data)
 	case "resize_pty":
 		return nil, s.app.ResizePty(c.Args.ID, c.Args.Cols, c.Args.Rows)
+	case "list_pty_sessions":
+		return s.app.ListPtySessions()
+	case "remote_list_chats":
+		return s.app.RemoteListChats()
 	default:
 		return nil, fmt.Errorf("unknown command %q", c.Command)
 	}
@@ -223,10 +318,19 @@ func (s *HTTPServer) dispatch(c wsCall) (any, error) {
 // (vite names the entry after its input file, and renaming it in the build
 // buys nothing).
 func (s *HTTPServer) handleAssets(w http.ResponseWriter, r *http.Request) {
-	sub, err := fs.Sub(mobileAssets, "dist-mobile/app")
-	if err != nil {
-		http.Error(w, "assets unavailable", http.StatusInternalServerError)
-		return
+	// //go:embed snapshots the bundle at compile time, and `wails dev` only
+	// recompiles when Go source actually changes — so during mobile UI work a
+	// fresh `pnpm build:mobile` would otherwise need a dev-server restart to
+	// show up. Point BURROW_DEV_MOBILE at dist-mobile/app to serve from disk.
+	var sub fs.FS
+	if dir := os.Getenv("BURROW_DEV_MOBILE"); dir != "" {
+		sub = os.DirFS(dir)
+	} else {
+		var err error
+		if sub, err = fs.Sub(mobileAssets, "dist-mobile/app"); err != nil {
+			http.Error(w, "assets unavailable", http.StatusInternalServerError)
+			return
+		}
 	}
 	name := strings.TrimPrefix(r.URL.Path, "/")
 	if name == "" {
