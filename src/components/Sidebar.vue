@@ -407,6 +407,7 @@ import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
 import { archivedIds, isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
 import { buildActivityRows, type ActivityRow } from "@/lib/sidebarGroups";
 import { snoozedKeys, isSnoozed, toggleSnooze } from "@/lib/snoozedTabs";
+import { getProjectSettings } from "@/lib/projectSettings";
 
 import { useScriptsStore, type Script } from "@/stores/scripts";
 
@@ -775,7 +776,7 @@ const wtTargetPath = computed(() => {
   if (!wtParent.value) return "";
   const repo = wtParent.value.path.split("/").filter(Boolean).pop() || "repo";
   const branch = wtBranch.value.trim() || "<branch>";
-  return `${ui.worktreesDir}/${repo}/${branch}`;
+  return `${getProjectSettings(wtParent.value?.id ?? -1).worktreesDir || ui.worktreesDir}/${repo}/${branch}`;
 });
 
 async function openWtDialog(parent: Workspace) {

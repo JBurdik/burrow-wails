@@ -109,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted } from "vue";
+import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -120,6 +120,7 @@ import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMen
 import { modelsFor } from "@/lib/chatModels";
 import ModelPicker from "@/components/ModelPicker.vue";
 import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
+import { getProjectSettings } from "@/lib/projectSettings";
 
 const emit = defineEmits<{ (e: "open-folder"): void }>();
 
@@ -205,6 +206,15 @@ const target = computed<Workspace | null>(
   () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
 );
 function pick(repo: Workspace) { override.value = repo; }
+
+// A project can pin its own agent/model (Project Settings → General); the
+// app-wide default only applies where it hasn't.
+watch(target, (t) => {
+  if (!t) return;
+  const s = getProjectSettings(t.parent_id ?? t.id);
+  selectedAgentId.value = s.agentId || ui.defaultChatAgent;
+  if (s.modelId) selectedModel.value = s.modelId;
+}, { immediate: true });
 
 onMounted(() => nextTick(() => inputEl.value?.focus()));
 

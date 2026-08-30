@@ -117,6 +117,7 @@ const emit = defineEmits<{
   newTerminal: [];
   newWorkspace: [];
   openSettings: [];
+  openProjectConfig: [];
   openBrowser: [];
   repaint: [];
   toggleManager: [];
@@ -362,6 +363,7 @@ const sections = computed(() => {
   const cmdDefs: { id: string; title: string; icon: Component; shortcut?: string; action: () => void }[] = [
     { id: "cmd-new-ws", title: "New Workspace", icon: PhPlus as Component, action: () => { emit("newWorkspace"); close(); } },
     { id: "cmd-add-project", title: "Add Project…", icon: PhFolderOpen as Component, action: enterBrowse },
+    { id: "cmd-project-config", title: "Project Settings…", icon: PhGear as Component, action: () => { emit("openProjectConfig"); close(); } },
     { id: "cmd-split", title: "Split Terminal", icon: PhColumns as Component, shortcut: "⌘\\", action: () => close() },
     { id: "cmd-theme", title: "Change Theme", icon: PhPalette as Component, action: () => close() },
     { id: "cmd-keys", title: "Keyboard Shortcuts", icon: PhKeyboard as Component, shortcut: "⌘K ⌘S", action: () => close() },

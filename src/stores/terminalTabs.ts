@@ -36,6 +36,34 @@ type TabRequest = {
   nonce: number;
 };
 
+const ACTIVITY_KEY = "burrow.tab_activity";
+
+function loadActivity(): Record<number, Record<number, number>> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Whether a tab's recency stamp should be reset to now. A tab we have never
+ * synced before (`before` undefined) is NOT automatically new — after a restart
+ * every tab looks that way, and restamping them all would flatten the order the
+ * persisted stamps exist to preserve. Only a genuine change, or a tab with no
+ * stamp at all, moves it.
+ */
+export function shouldRestamp(
+  before: Pick<TabSummary, "status" | "title" | "round"> | undefined,
+  tab: Pick<TabSummary, "status" | "title" | "round">,
+  hasStamp: boolean,
+): boolean {
+  if (!hasStamp) return true;
+  if (!before) return false;
+  return before.status !== tab.status || before.title !== tab.title || before.round !== tab.round;
+}
+
 export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   const tabsByWs = ref<Record<number, TabSummary[]>>({});
   const activeByWs = ref<Record<number, number>>({});
@@ -46,7 +74,7 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   // retitled, another agent round) — deliberately NOT activation, which would
   // reshuffle the feed under the cursor. The sidebar lists tabs from every open
   // project in one flat feed, so it needs a recency key per tab.
-  const activityByWs = ref<Record<number, Record<number, number>>>({});
+  const activityByWs = ref<Record<number, Record<number, number>>>(loadActivity());
   const request = ref<TabRequest | null>(null);
   let nonce = 0;
 
@@ -73,11 +101,7 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     const toWake: string[] = [];
     for (const tab of tabs) {
       const before = prevTabs.get(tab.id);
-      const changed = !before
-        || before.status !== tab.status
-        || before.title !== tab.title
-        || before.round !== tab.round;
-      if (changed || stamps[tab.id] == null) stamps[tab.id] = now;
+      if (shouldRestamp(before, tab, stamps[tab.id] != null)) stamps[tab.id] = now;
       if (before && before.status !== tab.status && tab.status !== "idle") {
         toWake.push(snoozeKey(wsId, tab.id));
       }
@@ -90,6 +114,7 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     }
     if (toWake.length) wake(toWake);
     activityByWs.value[wsId] = stamps;
+    saveActivity();
 
     tabsByWs.value[wsId] = tabs;
   }
@@ -100,7 +125,12 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     delete tabsByWs.value[wsId];
     delete activeByWs.value[wsId];
     delete seenCompletionsByWs.value[wsId];
-    delete activityByWs.value[wsId];
+  }
+
+  function saveActivity() {
+    try {
+      localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityByWs.value));
+    } catch {}
   }
 
   /** Recency key for the sidebar feed; 0 for a tab we have never seen. */

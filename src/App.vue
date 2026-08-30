@@ -44,8 +44,7 @@
     />
     <WorkspaceConfig
       v-if="showProjectConfig && ws.active"
-      :workspace-path="ws.active.path"
-      :workspace-name="ws.active.name"
+      :workspace-id="ws.active.parent_id ?? ws.active.id"
       @close="showProjectConfig = false"
     />
     <Spotlight
@@ -54,6 +53,7 @@
       @new-terminal="activeTerm()?.addTab()"
       @new-workspace="openNewWorkspace"
       @open-settings="ui.openSettings()"
+      @open-project-config="showProjectConfig = true"
       @open-browser="activeTerm()?.openBrowserTab()"
       @repaint="activeTerm()?.repaintAll()"
       @toggle-manager="ui.toggleFloatChat()"

@@ -18,6 +18,9 @@ export interface Tab {
   workspaceName: string;
 }
 
+// Synthetic group for live PTYs the workspace tables do not know about.
+export const LIVE_GROUP_ID = -1;
+
 export interface WorkspaceGroup {
   id: number;
   name: string;
@@ -167,6 +170,30 @@ export const useRemoteStore = defineStore("remote", () => {
           watchTabStatus(t.ptyId);
         }
       }
+      // A tab only reaches SQLite when the desktop saves the workspace, so a
+      // freshly spawned PTY can be live while absent from every group. Ask the
+      // daemon what it is actually holding and surface the leftovers, rather
+      // than showing an empty list next to a running agent.
+      const known = new Set(groups.flatMap((g) => g.tabs.map((t) => t.ptyId)));
+      const live: string[] = await client.call("list_pty_sessions").catch(() => []);
+      const orphans: Tab[] = live
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && !known.has(id))
+        .map((id) => ({
+          ptyId: id,
+          title: `PTY ${id}`,
+          cwd: "",
+          workspaceId: LIVE_GROUP_ID,
+          workspaceName: "Živé relace",
+        }));
+      if (orphans.length) {
+        groups.push({ id: LIVE_GROUP_ID, name: "Živé relace", path: "", tabs: orphans });
+        for (const t of orphans) {
+          if (!statuses.has(t.ptyId)) statuses.set(t.ptyId, "idle");
+          watchTabStatus(t.ptyId);
+        }
+      }
+
       workspaces.value = groups;
     } catch (e: any) {
       listError.value = e?.message ?? "Failed to load sessions";

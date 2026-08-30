@@ -180,6 +180,7 @@ import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vu
 import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import { spinnerFrame } from "@/lib/spinner";
 import { configReady } from "@/lib/config";
+import { getProjectSettings } from "@/lib/projectSettings";
 import { playSound } from "@/lib/sounds";
 import { notifyNtfy } from "@/lib/ntfy";
 import type { NtfyEvent } from "@/stores/ui";
@@ -664,10 +665,15 @@ function isWatching(tab: Tab): boolean {
 }
 
 // Mark every finished leaf in a tab as seen (user opened/returned to it).
+// A leaf's status actor lives in one of two places: PTY leaves own one here,
+// chat leaves borrow their session's actor from the chats store. Marking only
+// the local ones left a chat stuck on "Done" forever — nothing else ever sent
+// it MARK_SEEN after ClaudeChat's mount.
 function markTabSeen(tab: Tab) {
   for (const leaf of getAllLeaves(tab.root)) {
     // MARK_SEEN is only handled in done/review/error — a no-op elsewhere.
-    leafActors.get(leaf.id)?.send({ type: "MARK_SEEN" });
+    if (leaf.leafType === "chat" && leaf.chatId != null) chatsStore.markSeen(leaf.chatId);
+    else leafActors.get(leaf.id)?.send({ type: "MARK_SEEN" });
   }
 }
 
@@ -1414,8 +1420,19 @@ function applyTabRequest(req: typeof tabsStore.request) {
 
 watch(() => tabsStore.request, applyTabRequest);
 
+// Coming back to the window counts as seeing the active tab. Without this a turn
+// that finished while the app was in the background left its "review" badge up
+// until the user clicked away and back — the ws/mode watchers below only fire on
+// a switch, and returning to an already-active tab is neither.
+function onWindowFocus() {
+  if (uiStore.mode !== "terminal" || wsStore.active?.id !== props.workspaceId) return;
+  const tab = tabs.value.find((t) => t.id === activeTabId.value);
+  if (tab) markTabSeen(tab);
+}
+
 onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
+  window.addEventListener("focus", onWindowFocus);
 
   const [saved, daemonSessions] = await Promise.all([
     invoke<PersistedTab[]>("list_terminal_tabs", { workspaceId: props.workspaceId }),
@@ -1508,7 +1525,7 @@ async function handleWorktreeRequest(branch: string, base: string) {
   const parentId = self?.parent_id ?? props.workspaceId;
   const parent = wsStore.workspaces.find((w) => w.id === parentId) ?? self;
   const repo = (parent?.path.split("/").filter(Boolean).pop()) || "repo";
-  const path = `${uiStore.worktreesDir}/${repo}/${branch}`;
+  const path = `${getProjectSettings(parentId).worktreesDir || uiStore.worktreesDir}/${repo}/${branch}`;
   try {
     const ws = await wsStore.createWorktree(parentId, branch, base.trim() || null, path);
     wsStore.open(ws);
@@ -1607,6 +1624,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("focus", onWindowFocus);
   if (spawnPoll) clearInterval(spawnPoll);
   leafUnlisteners.forEach((fns) => fns.forEach((fn) => fn()));
   leafUnlisteners.clear();
