@@ -4,8 +4,26 @@
       <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[165px]" @mousedown.self="close">
         <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-xl border border-[#2a2a2a] bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.6),0_1px_0_rgba(255,255,255,0.08)] [backdrop-filter:var(--blur-overlay,none)]">
           <div class="flex h-14 shrink-0 items-center gap-3 border-b border-[#1e1e1e] px-4">
-            <PhTerminal :size="18" color="#ec4899" />
+            <button v-if="browsing" class="shrink-0 text-[#666] hover:text-[#e2e2e2]" title="Back" @click="exitBrowse">
+              <PhArrowLeft :size="16" />
+            </button>
+            <PhTerminal v-else :size="18" color="#ec4899" />
             <input
+              v-if="browsing"
+              ref="browseRef"
+              v-model="browsePath"
+              placeholder="~/code/"
+              class="flex-1 border-0 bg-transparent font-mono text-[15px] text-[#e2e2e2] outline-none placeholder:text-[#444] [caret-color:#a78bfa]"
+              spellcheck="false"
+              autocomplete="off"
+              @keydown.esc.prevent="exitBrowse"
+              @keydown.enter.prevent="addProject"
+              @keydown.tab.prevent="completeSelected"
+              @keydown.up.prevent="move(-1)"
+              @keydown.down.prevent="move(1)"
+            />
+            <input
+              v-else
               ref="inputRef"
               v-model="query"
               placeholder="run claude --"
@@ -17,7 +35,12 @@
               @keydown.up.prevent="move(-1)"
               @keydown.down.prevent="move(1)"
             />
-            <div class="shrink-0 rounded border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-0.5 text-[11px] text-[#555]">esc</div>
+            <div
+              v-if="browsing"
+              class="shrink-0 cursor-pointer rounded border border-[#a78bfa33] bg-[#17141f] px-2 py-0.5 text-[11px] text-[#a78bfa]"
+              @click="addProject"
+            >Add ↵</div>
+            <div v-else class="shrink-0 rounded border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-0.5 text-[11px] text-[#555]">esc</div>
           </div>
 
           <div class="s-results flex-1 overflow-y-auto py-1.5">
@@ -52,7 +75,14 @@
             </template>
           </div>
 
-          <div class="flex h-9 shrink-0 items-center gap-4 border-t border-[#1e1e1e] bg-[#0d0d0d] px-4">
+          <div v-if="browsing" class="flex h-9 shrink-0 items-center gap-4 border-t border-[#1e1e1e] bg-[#0d0d0d] px-4">
+            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↑↓</span><span>navigate</span></div>
+            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">⇥</span><span>enter dir</span></div>
+            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↵</span><span>add project</span></div>
+            <div class="flex-1" />
+            <div class="truncate font-mono text-[11px] text-[#333]">{{ browseError || expanded }}</div>
+          </div>
+          <div v-else class="flex h-9 shrink-0 items-center gap-4 border-t border-[#1e1e1e] bg-[#0d0d0d] px-4">
             <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↑↓</span><span>navigate</span></div>
             <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↵</span><span>run</span></div>
             <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">⌘↵</span><span>new tab</span></div>
@@ -74,7 +104,9 @@ import { ref, computed, watch, nextTick } from "vue";
 import {
   PhTerminal, PhSparkle, PhCode, PhGitBranch, PhRobot,
   PhFolderOpen, PhGear, PhPlus, PhColumns, PhPalette, PhKeyboard, PhGlobe, PhPlayCircle,
+  PhFolder, PhArrowLeft, PhArrowUUpLeft, PhFileText, PhMagnifyingGlass,
 } from "@phosphor-icons/vue";
+import { invoke } from "@tauri-apps/api/core";
 import { useAgentsStore } from "@/stores/agents";
 import { useScriptsStore } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -88,12 +120,120 @@ const emit = defineEmits<{
   openBrowser: [];
   repaint: [];
   toggleManager: [];
+  openFile: [path: string, line: number];
 }>();
 
 const isOpen = ref(false);
 const query = ref("");
 const selectedId = ref("");
 const inputRef = ref<HTMLInputElement | null>(null);
+
+// --- workspace search: rg over the active project, debounced per keystroke.
+// ponytail: no index, no cache — one shell-out is faster than keeping an index
+// honest, and results die with the palette anyway.
+interface SearchHit { path: string; line: number; text: string }
+const hits = ref<SearchHit[]>([]);
+let searchTimer: number | undefined;
+let searchSeq = 0;
+
+watch(query, (q) => {
+  clearTimeout(searchTimer);
+  const term = q.trim();
+  const cwd = wsStore.active?.path;
+  if (term.length < 2 || !cwd || browsing.value) return (hits.value = []);
+  const seq = ++searchSeq;
+  searchTimer = window.setTimeout(async () => {
+    const found = await invoke<SearchHit[]>("search_files", { cwd, query: term, limit: 24 }).catch(() => []);
+    // Drop a slow reply whose query the user has already typed past.
+    if (seq === searchSeq) hits.value = found;
+  }, 140);
+});
+
+function openHit(hit: SearchHit) {
+  emit("openFile", hit.path, hit.line);
+  close();
+}
+
+// --- directory browse mode (t3code-style "Add project" without a native dialog)
+const browsing = ref(false);
+const browsePath = ref("~/");
+const browseRef = ref<HTMLInputElement | null>(null);
+const browseEntries = ref<string[]>([]);
+const browseError = ref("");
+let home = "";
+
+// The input holds a path; everything after the last "/" filters the listing of
+// the dir before it — so typing and navigating are the same gesture.
+const browseDir = computed(() => browsePath.value.slice(0, browsePath.value.lastIndexOf("/") + 1) || "~/");
+const browseFilter = computed(() => browsePath.value.slice(browsePath.value.lastIndexOf("/") + 1).toLowerCase());
+const expanded = computed(() => expand(browsePath.value));
+
+function expand(p: string) {
+  return p.startsWith("~") ? home + p.slice(1) : p;
+}
+
+async function loadDir(dir: string) {
+  browseError.value = "";
+  try {
+    // The Go backend serializes `isDir`; the older Rust payload used `is_dir`.
+    const entries = await invoke<{ name: string; is_dir?: boolean; isDir?: boolean }[]>("read_dir_shallow", { path: expand(dir) });
+    browseEntries.value = entries
+      .filter((e) => (e.is_dir ?? e.isDir) && !e.name.startsWith("."))
+      .map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b));
+  } catch (e) {
+    browseEntries.value = [];
+    browseError.value = String(e);
+  }
+}
+
+watch(browseDir, (dir) => { if (browsing.value) loadDir(dir); });
+
+async function enterBrowse() {
+  if (!home) {
+    // ponytail: no dedicated home-dir binding — derive it from the Claude config dir.
+    const dirs = await invoke<{ claude: string }>("get_config_dirs").catch(() => null);
+    home = dirs?.claude.replace(/\/\.claude\/?$/, "") ?? "";
+  }
+  browsing.value = true;
+  browsePath.value = "~/";
+  await loadDir("~/");
+  nextTick(() => { browseRef.value?.focus(); selectFirst(); });
+}
+
+function exitBrowse() {
+  browsing.value = false;
+  nextTick(() => { inputRef.value?.focus(); selectFirst(); });
+}
+
+function descend(name: string) {
+  browsePath.value = name === ".." ? parentOf(browseDir.value) : browseDir.value + name + "/";
+  nextTick(() => { browseRef.value?.focus(); selectFirst(); });
+}
+
+function parentOf(dir: string) {
+  const trimmed = dir.replace(/\/$/, "");
+  const cut = trimmed.lastIndexOf("/");
+  return cut <= 0 ? "/" : trimmed.slice(0, cut + 1);
+}
+
+function completeSelected() {
+  const item = flatItems.value.find((i) => i.id === selectedId.value);
+  if (item?.id.startsWith("dir-")) descend(item.id.slice(4));
+}
+
+async function addProject() {
+  const path = expand(browsePath.value).replace(/\/$/, "");
+  if (!path) return;
+  const name = path.split("/").filter(Boolean).pop() ?? path;
+  try {
+    const ws = await wsStore.create(name, path);
+    wsStore.open(ws);
+    close();
+  } catch (e) {
+    browseError.value = String(e);
+  }
+}
 
 const agentsStore = useAgentsStore();
 const scriptsStore = useScriptsStore();
@@ -128,6 +268,23 @@ interface SpotlightItem {
 }
 
 const sections = computed(() => {
+  if (browsing.value) {
+    const items: SpotlightItem[] = [
+      { name: "..", up: true },
+      ...browseEntries.value.filter((n) => !browseFilter.value || n.toLowerCase().includes(browseFilter.value)).map((n) => ({ name: n, up: false })),
+    ].map(({ name, up }) => ({
+      id: `dir-${name}`,
+      title: name,
+      icon: (up ? PhArrowUUpLeft : PhFolder) as Component,
+      iconColor: "#a78bfa",
+      iconBg: hexBg("#a78bfa"),
+      iconBorder: "#a78bfa33",
+      dim: true,
+      action: () => descend(name),
+    }));
+    return [{ key: "dirs", label: "DIRECTORIES", items }];
+  }
+
   const q = query.value.toLowerCase().trim();
 
   const agentItems: SpotlightItem[] = agentsStore.agents
@@ -204,6 +361,7 @@ const sections = computed(() => {
 
   const cmdDefs: { id: string; title: string; icon: Component; shortcut?: string; action: () => void }[] = [
     { id: "cmd-new-ws", title: "New Workspace", icon: PhPlus as Component, action: () => { emit("newWorkspace"); close(); } },
+    { id: "cmd-add-project", title: "Add Project…", icon: PhFolderOpen as Component, action: enterBrowse },
     { id: "cmd-split", title: "Split Terminal", icon: PhColumns as Component, shortcut: "⌘\\", action: () => close() },
     { id: "cmd-theme", title: "Change Theme", icon: PhPalette as Component, action: () => close() },
     { id: "cmd-keys", title: "Keyboard Shortcuts", icon: PhKeyboard as Component, shortcut: "⌘K ⌘S", action: () => close() },
@@ -223,11 +381,25 @@ const sections = computed(() => {
       action: c.action,
     }));
 
+  const fileItems: SpotlightItem[] = hits.value.map((h, i) => ({
+    id: `hit-${i}`,
+    title: h.line ? `${h.path}:${h.line}` : h.path,
+    desc: h.text || undefined,
+    icon: (h.line ? PhMagnifyingGlass : PhFileText) as Component,
+    iconColor: "#60a5fa",
+    iconBg: hexBg("#60a5fa"),
+    iconBorder: "#60a5fa33",
+    shortcut: undefined,
+    dim: true,
+    action: () => openHit(h),
+  }));
+
   return [
     { key: "agents", label: "AGENTS", items: agentItems },
     { key: "scripts", label: "SCRIPTS", items: scriptItems },
     { key: "recent", label: "RECENT", items: recentItems },
     { key: "commands", label: "COMMANDS", items: commandItems },
+    { key: "files", label: "IN FILES", items: fileItems },
   ].filter((s) => s.items.length > 0);
 });
 
@@ -256,7 +428,9 @@ function runItem(item: SpotlightItem) {
 
 function show() {
   isOpen.value = true;
+  browsing.value = false;
   query.value = "";
+  hits.value = [];
   nextTick(() => {
     inputRef.value?.focus();
     selectFirst();

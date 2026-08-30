@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strconv"
 	"strings"
 )
 
@@ -13,11 +12,18 @@ import (
 // thin wrapper, not a port of http_server/tailscale.rs's embedded-tsnet
 // approach (that needs the tsnet Go library and its own auth key flow,
 // out of scope for this pass).
+// tailscaleServePath is the sub-path Burrow publishes on. Mounting at "/"
+// would clobber whatever else the user already serves on this tailnet
+// node, which is exactly what the Settings copy promises not to do.
+const tailscaleServePath = "/burrow"
+
 func (a *App) TailscaleServe(port int) (string, error) {
 	if _, err := exec.LookPath("tailscale"); err != nil {
 		return "", fmt.Errorf("tailscale CLI not found on PATH")
 	}
-	out, err := exec.Command("tailscale", "serve", "--bg", strconv.Itoa(port)).CombinedOutput()
+	target := fmt.Sprintf("http://127.0.0.1:%d", port)
+	out, err := exec.Command("tailscale", "serve", "--bg",
+		"--set-path="+tailscaleServePath, target).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("tailscale serve: %w: %s", err, out)
 	}
@@ -28,7 +34,10 @@ func (a *App) TailscaleServeStop() error {
 	if _, err := exec.LookPath("tailscale"); err != nil {
 		return fmt.Errorf("tailscale CLI not found on PATH")
 	}
-	return exec.Command("tailscale", "serve", "--https=443", "off").Run()
+	// Scoped to our own path — a bare `serve off` would tear down every
+	// other handler on this node too.
+	return exec.Command("tailscale", "serve", "--https=443",
+		"--set-path="+tailscaleServePath, "off").Run()
 }
 
 // TailscaleStatus mirrors Settings.vue's local TailscaleStatus interface.
@@ -65,16 +74,32 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 		}
 	}
 
+	// "Serving" must mean *our* path points at *our* port. Checking only
+	// that some serve config exists reported success while /burrow was
+	// still proxying to a dead port from an older build.
 	serveOut, err := exec.Command(path, "serve", "status", "--json").Output()
 	if err == nil {
-		var serveStatus map[string]any
-		if json.Unmarshal(serveOut, &serveStatus) == nil && len(serveStatus) > 0 {
-			status.Serving = true
-			if status.DNSName != nil {
-				url := "https://" + *status.DNSName + "/burrow"
-				status.ServeURL = &url
+		var serveStatus struct {
+			Web map[string]struct {
+				Handlers map[string]struct {
+					Proxy string `json:"Proxy"`
+				} `json:"Handlers"`
+			} `json:"Web"`
+		}
+		want := fmt.Sprintf("http://127.0.0.1:%d", httpServerPort)
+		if json.Unmarshal(serveOut, &serveStatus) == nil {
+			for _, host := range serveStatus.Web {
+				if h, ok := host.Handlers[tailscaleServePath]; ok && h.Proxy == want {
+					status.Serving = true
+				}
 			}
 		}
+	}
+	if status.Serving && status.DNSName != nil {
+		// Trailing slash matters: the bundle loads its assets relatively,
+		// so from ".../burrow" they would resolve against "/" and 404.
+		url := "https://" + *status.DNSName + tailscaleServePath + "/"
+		status.ServeURL = &url
 	}
 	return status
 }

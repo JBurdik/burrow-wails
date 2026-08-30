@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"burrow/internal/daemonproto"
 )
@@ -112,9 +111,9 @@ func (d *DaemonClient) readLoop(conn net.Conn) {
 			f := env.Frame
 			switch f.Event {
 			case "pty-data":
-				runtime.EventsEmit(d.ctx, "pty-data-"+f.ID, f.Data)
+				emitAll(d.ctx, "pty-data-"+f.ID, f.Data)
 			case "pty-exit":
-				runtime.EventsEmit(d.ctx, "pty-exit-"+f.ID, nil)
+				emitAll(d.ctx, "pty-exit-"+f.ID, nil)
 			}
 		}
 	}

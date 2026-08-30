@@ -174,17 +174,6 @@
       </ul>
     </div>
     <div class="card">
-      <h3>Mission Control — tank-style task dashboard <span style="font-size:10px;color:var(--muted)">POC</span></h3>
-      <ul>
-        <li>In-window view (<code>ui.mode === 'mission'</code>, 🚀 in the ActivityBar) running headless <code>claude</code> PTYs as disposable tasks — spawn, status dots, follow-up conversation, live-attach xterm, result capture, sequential queue</li>
-        <li>Status dots: running/waiting/<strong>error</strong> (red pulse — failed turn, shows <code>statusDetail</code> e.g. <code>rate_limit</code>/<code>billing_error</code>)/done. The <code>pty-hook-{id}</code> listener parses both the legacy bare-string payload and the structured object <code>{state,detail?,model?,source?,title?}</code>: <code>error</code> is terminal+sticky (notifies, not silently resumed) and <code>session</code> (SessionStart) populates <code>model</code>/<code>title</code> without touching status</li>
-        <li>Reuses Burrow's native PTY + global hook server (no new wiring); tasks persist in the shared <code>workspaces.db</code> (<code>mission_tasks</code> table), grouped by workspace</li>
-        <li>Scope = the sidebar's active workspace (<code>wsStore.active</code>), mirrored read-only in the rail; no active workspace → centered <q>pick a workspace</q> blank state. Chrome uses Phosphor icons (no emoji)</li>
-        <li><code>src/components/MissionControl.vue</code> + Rust <code>read_claude_result</code> / <code>list|upsert|delete_mission_task</code></li>
-        <li><a href="mission-control.html" style="color:var(--accent)">Mission Control →</a> · <a href="tank-analysis.html" style="color:var(--accent)">tank analysis &amp; clone recipe →</a></li>
-      </ul>
-    </div>
-    <div class="card">
       <h3>Manager — floating per-repo orchestrator</h3>
       <ul>
         <li><code>FloatChat.vue</code>: a persistent Mission-Control chat (round launcher → compact card, bottom-right) that drives the app and git/GitHub via the <code>burrow</code> CLI (never the Agents SDK / <code>claude -p</code>)</li>
@@ -241,7 +230,7 @@
       <tr><td>src/components/Terminal.vue</td><td>Multi-tab terminal shell; tab/pane lifecycle; persistence via invoke</td></tr>
       <tr><td>src/components/XTerm.vue</td><td>xterm.js wrapper; PTY create/write/resize/listen</td></tr>
       <tr><td>src/components/TerminalSplitView.vue</td><td>Recursive split tree (leaf | split{h,v}); renders XTerm at leaves</td></tr>
-      <tr><td>src/components/AgentToolbar.vue</td><td>Colored agent launch buttons + settings/spotlight shortcuts</td></tr>
+      <tr><td>src/components/WelcomeScreen.vue</td><td>Composer ("What should we build in X?") — the single entry point for a new thread; picks agent/model and whether it opens as a Chat UI or a terminal</td></tr>
       <tr><td>src/components/Spotlight.vue</td><td>⌘P command palette overlay</td></tr>
       <tr><td>src/components/Sidebar.vue</td><td>Workspace list; folder picker dialog; create/remove workspaces</td></tr>
       <tr><td>src/components/RightPanel.vue</td><td>Tab panel: file explorer + git status/diff/stage</td></tr>
@@ -392,11 +381,6 @@
       <strong>dead-PTY watchdog</strong> in the 2 s poll settles a stuck in-flight dot when the foreground reads empty for ≥3
       polls <em>and</em> <code>list_pty_sessions</code> confirms the PTY is dead — covers an agent killed/crashed with no
       <code>Stop</code>. See <a href="burrow.html">burrow.html</a>.</p>
-      <p><strong>Mission Control</strong> shares the same <code>pty-hook-{id}</code> channel, so (1) and (2) apply to MC
-      tasks too. MC-specific: its reducer now maps <code>permission</code> → <code>waiting</code> (MC has no amber state); the
-      old <code>done→waiting</code> flip on PTY re-attach was removed (it made every reloaded finished task read "waiting for
-      input" forever); and the transcript fallback (<code>reconcileStatuses</code>) now forward-settles from <code>waiting</code>
-      too, so a resolved blocking question or a dropped post-wait <code>done</code> still lands on <code>done</code>.</p>
     </div>
     <div class="card">
       <h3>Feat: OS window title syncs to active tab</h3>

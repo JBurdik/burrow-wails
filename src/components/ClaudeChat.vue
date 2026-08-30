@@ -1959,6 +1959,13 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
 
   const msgImages = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
   messages.value.push({ id: nextMsgId++, role: "user", text, images: msgImages });
+  // Snapshot the worktree before the turn so it is revertable from the History
+  // panel. Best-effort, and a no-op outside a git repo.
+  invoke("create_checkpoint", {
+    cwd: props.cwd,
+    ptyId: `chat-${props.chatId}`,
+    label: text.slice(0, 60),
+  }).catch(() => {});
   busy.value = true;
   chats.sendStatusEvent(props.chatId, { type: "START" });
 

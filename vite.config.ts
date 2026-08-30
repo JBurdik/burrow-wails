@@ -40,7 +40,12 @@ export default defineConfig(async () => ({
     // bundle; the dev server (unminified) was fine. Disabling minification is the
     // safe fix for a desktop app where the JS loads from local disk (size is moot).
     minify: false,
-    outDir: isMobileBuild ? "dist-mobile" : "dist",
+    // The mobile bundle is //go:embed-ed by src-wails/httpserver.go, so it
+    // has to land inside the Go module dir (embed cannot reach ../). The
+    // extra app/ level keeps the committed .gitkeep out of reach of
+    // emptyOutDir — go:embed needs the dir non-empty to compile.
+    emptyOutDir: true,
+    outDir: isMobileBuild ? "src-wails/dist-mobile/app" : "dist",
     rollupOptions: {
       input: isMobileBuild
         ? { mobile: resolve(__dirname, "mobile.html") }

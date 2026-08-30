@@ -1,6 +1,7 @@
 node_modules
-dist
-dist-mobile
+/dist
+/dist-mobile
+src-wails/dist-mobile/app
 .DS_Store
 src-tauri/target
 src-tauri/gen

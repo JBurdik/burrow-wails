@@ -61,14 +61,13 @@ interface Prefs {
   debugOverlay: boolean; // show the per-terminal diagnostic overlay (XTerm.vue)
   floatCorner: string; // which screen corner floating windows snap+stack to
   worktreesDir: string; // parent dir for git worktrees: <dir>/<repo>/<branch>
-  mode: "terminal" | "claude" | "git" | "mission" | "dashboard"; // active main-pane mode, switched via activity bar
-  missionShowActivity: boolean; // MC detail feed: show thinking + tool_use/result entries (off = text messages only)
+  mode: "terminal" | "claude" | "dashboard"; // active main-pane mode
   bgImagePath: string; // absolute path to user wallpaper (empty = none)
   bgOpacity: number; // 0–1 opacity of panels/terminal over the wallpaper
   // Per-element backdrop-blur radius in px (0 = off). Separate so each surface
   // tunes its own frosted-glass strength over the wallpaper.
   blurPanels: number; // sidebar, activity bar, right panel, title bar
-  blurContent: number; // Mission Control rail + Dashboard cards
+  blurContent: number; // Dashboard cards
   blurTerminal: number; // terminal panes
   blurOverlay: number; // spotlight, settings, modal composers
   blurDropdown: number; // titlebar popup menus (notifications, stats, branch)
@@ -86,6 +85,7 @@ interface Prefs {
   // ── Floating mission-control chat ──
   floatChatEnabled: boolean; // master toggle for the bottom-right control chat button
   floatChatOpen: boolean; // expanded (true) vs collapsed to a button (false)
+  sidebarVisible: boolean; // left sidebar shown (default off — opens via ⌘B / titlebar toggle)
   sidebarWidth: number; // left sidebar panel width in px
   rightPanelWidth: number; // right panel width in px
   toastPosition: ToastPosition; // screen anchor for toast notifications
@@ -143,7 +143,6 @@ const DEFAULT_PREFS: Prefs = {
   floatCorner: "top-right",
   worktreesDir: "~/burrow-worktrees",
   mode: "terminal",
-  missionShowActivity: true,
   bgImagePath: "",
   bgOpacity: 0.82,
   blurPanels: 20,
@@ -162,6 +161,7 @@ const DEFAULT_PREFS: Prefs = {
   petsLeveling: true,
   floatChatEnabled: true,
   floatChatOpen: false,
+  sidebarVisible: false,
   sidebarWidth: 220,
   rightPanelWidth: 300,
   toastPosition: "bottom-left",
@@ -181,9 +181,6 @@ function normalize(parsed: unknown): Prefs {
 
 export const useUIStore = defineStore("ui", () => {
   const settingsOpen = ref(false);
-  // Kanban board overlay (KanbanBoard.vue), keyed by root repo workspace id — same
-  // full-screen-overlay pattern as Settings. Not persisted: reopens closed on restart.
-  const boardRepoId = ref<number | null>(null);
 
   const loaded = { ...DEFAULT_PREFS };
   const uiFont = ref(loaded.uiFont);
@@ -207,8 +204,10 @@ export const useUIStore = defineStore("ui", () => {
   const debugOverlay = ref(loaded.debugOverlay);
   const floatCorner = ref(loaded.floatCorner);
   const worktreesDir = ref(loaded.worktreesDir);
-  const mode = ref<"terminal" | "claude" | "git" | "mission" | "dashboard">(loaded.mode);
-  const missionShowActivity = ref(loaded.missionShowActivity);
+  // A pref saved before git became a tab can still say "git" — fall back to terminal.
+  const mode = ref<"terminal" | "claude" | "dashboard">(
+    (loaded.mode as string) === "git" ? "terminal" : loaded.mode,
+  );
   const bgImagePath = ref(loaded.bgImagePath);
   const bgOpacity = ref(loaded.bgOpacity);
   const blurPanels = ref(loaded.blurPanels);
@@ -227,6 +226,11 @@ export const useUIStore = defineStore("ui", () => {
   const petsLeveling = ref(loaded.petsLeveling);
   const floatChatEnabled = ref(loaded.floatChatEnabled);
   const floatChatOpen = ref(loaded.floatChatOpen);
+
+  // Compose ("What should we build in X?") screen, shown over the terminal host.
+  // Session-only — a reload lands you back on your threads, not the composer.
+  const welcomeOpen = ref(false);
+  const sidebarVisible = ref(loaded.sidebarVisible ?? false);
   const sidebarWidth = ref(loaded.sidebarWidth ?? 220);
   const rightPanelWidth = ref(loaded.rightPanelWidth ?? 300);
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "bottom-left");
@@ -234,7 +238,6 @@ export const useUIStore = defineStore("ui", () => {
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
-  const missionActiveCount = ref(0);
 
   configReady.then(() => {
     migrateFromLocalStorage(PREFS_KEY, CONFIG_KEY);
@@ -260,8 +263,7 @@ export const useUIStore = defineStore("ui", () => {
     debugOverlay.value = p.debugOverlay;
     floatCorner.value = p.floatCorner;
     worktreesDir.value = p.worktreesDir;
-    mode.value = p.mode;
-    missionShowActivity.value = p.missionShowActivity;
+    mode.value = (p.mode as string) === "mission" ? "terminal" : p.mode; // "mission" was the removed Mission Control pane
     bgImagePath.value = p.bgImagePath;
     bgOpacity.value = p.bgOpacity;
     blurPanels.value = p.blurPanels;
@@ -280,6 +282,7 @@ export const useUIStore = defineStore("ui", () => {
     petsLeveling.value = p.petsLeveling;
     floatChatEnabled.value = p.floatChatEnabled;
     floatChatOpen.value = p.floatChatOpen;
+    sidebarVisible.value = p.sidebarVisible ?? false;
     sidebarWidth.value = p.sidebarWidth ?? 220;
     rightPanelWidth.value = p.rightPanelWidth ?? 300;
     toastPosition.value = p.toastPosition ?? "bottom-left";
@@ -415,7 +418,6 @@ export const useUIStore = defineStore("ui", () => {
         floatCorner: floatCorner.value,
         worktreesDir: worktreesDir.value,
         mode: mode.value,
-        missionShowActivity: missionShowActivity.value,
         bgImagePath: bgImagePath.value,
         bgOpacity: bgOpacity.value,
         blurPanels: blurPanels.value,
@@ -434,6 +436,7 @@ export const useUIStore = defineStore("ui", () => {
         petsLeveling: petsLeveling.value,
         floatChatEnabled: floatChatEnabled.value,
         floatChatOpen: floatChatOpen.value,
+        sidebarVisible: sidebarVisible.value,
         sidebarWidth: sidebarWidth.value,
         rightPanelWidth: rightPanelWidth.value,
         toastPosition: toastPosition.value,
@@ -451,10 +454,10 @@ export const useUIStore = defineStore("ui", () => {
   watch(
     [uiFont, uiFontSize, uiScale, terminalFont, terminalFontSize, swapPanels, theme,
      soundEnabled, soundDoneEnabled, soundWaitingEnabled, soundDoneId, soundDoneCustomPath,
-     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode, missionShowActivity,
+     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode],
     () => {
       savePrefs();
       applyTheme();
@@ -495,12 +498,6 @@ export const useUIStore = defineStore("ui", () => {
   function toggleSettings() {
     settingsOpen.value = !settingsOpen.value;
   }
-  function openBoard(repoId: number) {
-    boardRepoId.value = repoId;
-  }
-  function closeBoard() {
-    boardRepoId.value = null;
-  }
   function toggleRightPanel() {
     rightPanelVisible.value = !rightPanelVisible.value;
   }
@@ -509,7 +506,7 @@ export const useUIStore = defineStore("ui", () => {
     theme.value = key;
   }
 
-  function setMode(m: "terminal" | "claude" | "git" | "mission" | "dashboard") {
+  function setMode(m: "terminal" | "claude" | "dashboard") {
     mode.value = m;
   }
 
@@ -517,8 +514,8 @@ export const useUIStore = defineStore("ui", () => {
     mode.value = mode.value === "dashboard" ? "terminal" : "dashboard";
   }
 
-  function toggleGitPanel() {
-    mode.value = mode.value === "git" ? "terminal" : "git";
+  function toggleSidebar() {
+    sidebarVisible.value = !sidebarVisible.value;
   }
 
   function resetFonts() {
@@ -537,11 +534,16 @@ export const useUIStore = defineStore("ui", () => {
     floatChatOpen.value = !floatChatOpen.value;
   }
 
+  function openWelcome() {
+    welcomeOpen.value = true;
+    mode.value = "terminal"; // composer lives in the terminal host
+  }
+  function closeWelcome() {
+    welcomeOpen.value = false;
+  }
+
   return {
     settingsOpen,
-    boardRepoId,
-    openBoard,
-    closeBoard,
     uiFont,
     uiFontSize,
     uiScale,
@@ -569,10 +571,8 @@ export const useUIStore = defineStore("ui", () => {
     floatCorner,
     worktreesDir,
     mode,
-    missionShowActivity,
     setMode,
     toggleDashboard,
-    toggleGitPanel,
     openSettings,
     closeSettings,
     toggleSettings,
@@ -586,7 +586,6 @@ export const useUIStore = defineStore("ui", () => {
     blurTerminal,
     blurOverlay,
     blurDropdown,
-    missionActiveCount,
     ntfyEnabled,
     ntfyServer,
     ntfyTopic,
@@ -599,6 +598,11 @@ export const useUIStore = defineStore("ui", () => {
     floatChatEnabled,
     floatChatOpen,
     toggleFloatChat,
+    welcomeOpen,
+    openWelcome,
+    closeWelcome,
+    sidebarVisible,
+    toggleSidebar,
     sidebarWidth,
     rightPanelWidth,
     toastPosition,

@@ -1,0 +1,2 @@
+Placeholder so //go:embed all:dist-mobile compiles before `pnpm build:mobile`
+has written the real bundle into app/. Everything under app/ is generated.

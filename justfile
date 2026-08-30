@@ -56,10 +56,15 @@ check:
 build-web:
     bash src-wails/build-frontend.sh
 
+# Mobile remote/PWA bundle -> src-wails/dist-mobile/app, //go:embed-ed by
+# httpserver.go and served at / when remote access is on.
+build-mobile:
+    pnpm build:mobile
+
 # Full unsigned build: frontend + app bundle + the daemon binary inside it.
 # `wails build -s` skips Wails' own frontend step — build-web already ran it,
 # and Wails runs frontend:build from a directory the script can't be found in.
-build: build-web
+build: build-web build-mobile
     #!/usr/bin/env bash
     set -euo pipefail
     cd src-wails

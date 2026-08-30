@@ -46,36 +46,28 @@ export namespace main {
 	        this.description = source["description"];
 	    }
 	}
-	export class AgentTurnChange {
+	export class Checkpoint {
 	    id: number;
-	    taskId: string;
-	    ptyId: number;
-	    startedAt: number;
-	    completedAt?: number;
-	    state: string;
-	    changesAvailable: boolean;
-	    changeError?: string;
-	    files: string[];
-	    additions: number;
-	    deletions: number;
+	    cwd: string;
+	    ptyId: string;
+	    label: string;
+	    commit: string;
+	    tree: string;
+	    createdAt: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new AgentTurnChange(source);
+	        return new Checkpoint(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
-	        this.taskId = source["taskId"];
+	        this.cwd = source["cwd"];
 	        this.ptyId = source["ptyId"];
-	        this.startedAt = source["startedAt"];
-	        this.completedAt = source["completedAt"];
-	        this.state = source["state"];
-	        this.changesAvailable = source["changesAvailable"];
-	        this.changeError = source["changeError"];
-	        this.files = source["files"];
-	        this.additions = source["additions"];
-	        this.deletions = source["deletions"];
+	        this.label = source["label"];
+	        this.commit = source["commit"];
+	        this.tree = source["tree"];
+	        this.createdAt = source["createdAt"];
 	    }
 	}
 	export class ClaudeAccountInfo {
@@ -171,7 +163,6 @@ export namespace main {
 	    port: number;
 	    tokenPath: string;
 	    token: string;
-	    pairingCode: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new HttpServerStatus(source);
@@ -183,63 +174,22 @@ export namespace main {
 	        this.port = source["port"];
 	        this.tokenPath = source["tokenPath"];
 	        this.token = source["token"];
-	        this.pairingCode = source["pairingCode"];
 	    }
 	}
-	export class MissionTask {
-	    id: string;
-	    workspace_id?: number;
-	    pty_id?: number;
-	    title: string;
-	    cwd?: string;
-	    model?: string;
-	    status?: string;
-	    turns?: number;
-	    created_at: number;
-	    handed_off?: number;
-	    profile_id?: string;
-	    repo_workspace_id?: number;
-	    board_column: string;
-	    description?: string;
-	    agent_kind?: string;
-	    transport?: string;
-	    use_worktree?: number;
-	    worktree_branch?: string;
-	    task_workspace_id?: number;
-	    chat_id?: number;
-	    session_id?: string;
-	    board_order: number;
-	    updated_at?: number;
+	export class SearchHit {
+	    path: string;
+	    line: number;
+	    text: string;
 	
 	    static createFrom(source: any = {}) {
-	        return new MissionTask(source);
+	        return new SearchHit(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.workspace_id = source["workspace_id"];
-	        this.pty_id = source["pty_id"];
-	        this.title = source["title"];
-	        this.cwd = source["cwd"];
-	        this.model = source["model"];
-	        this.status = source["status"];
-	        this.turns = source["turns"];
-	        this.created_at = source["created_at"];
-	        this.handed_off = source["handed_off"];
-	        this.profile_id = source["profile_id"];
-	        this.repo_workspace_id = source["repo_workspace_id"];
-	        this.board_column = source["board_column"];
-	        this.description = source["description"];
-	        this.agent_kind = source["agent_kind"];
-	        this.transport = source["transport"];
-	        this.use_worktree = source["use_worktree"];
-	        this.worktree_branch = source["worktree_branch"];
-	        this.task_workspace_id = source["task_workspace_id"];
-	        this.chat_id = source["chat_id"];
-	        this.session_id = source["session_id"];
-	        this.board_order = source["board_order"];
-	        this.updated_at = source["updated_at"];
+	        this.path = source["path"];
+	        this.line = source["line"];
+	        this.text = source["text"];
 	    }
 	}
 	export class SkillInfo {
@@ -320,28 +270,6 @@ export namespace main {
 	        this.dns_name = source["dns_name"];
 	        this.serving = source["serving"];
 	        this.serve_url = source["serve_url"];
-	    }
-	}
-	export class TaskAttachment {
-	    id: number;
-	    task_id: string;
-	    ord: number;
-	    mime_type: string;
-	    file_path: string;
-	    created_at: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new TaskAttachment(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.task_id = source["task_id"];
-	        this.ord = source["ord"];
-	        this.mime_type = source["mime_type"];
-	        this.file_path = source["file_path"];
-	        this.created_at = source["created_at"];
 	    }
 	}
 	export class TerminalTab {

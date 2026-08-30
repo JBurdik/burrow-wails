@@ -1,6 +1,6 @@
 // burrow-mcp is the stdio MCP server binary — spawned by an agent client's
 // MCP config (e.g. Claude Code's ~/.claude.json mcpServers block) to give
-// it board/spawn tools without going through the app's own IPC.
+// it spawn tools without going through the app's own IPC.
 package main
 
 import (

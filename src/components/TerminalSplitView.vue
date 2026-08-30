@@ -16,6 +16,7 @@
       :leaf-id="(node as Leaf).id"
       :path="(node as Leaf).filePath!"
       :cwd="(node as Leaf).cwd ?? cwd"
+      :initial-line="(node as Leaf).fileLine"
       :ref="(el: unknown) => registerRef((node as Leaf).id, el)"
       @title="(t: string) => $emit('title', (node as Leaf).id, t)"
       @dirty="(d: boolean) => $emit('dirty', (node as Leaf).id, d)"
@@ -24,6 +25,10 @@
     <BrowserPane
       v-else-if="(node as Leaf).leafType === 'browser'"
       :initial-url="(node as Leaf).browserUrl"
+    />
+    <GitPanel
+      v-else-if="(node as Leaf).leafType === 'git'"
+      class="min-w-0 flex-1"
     />
     <XTerm
       v-else
@@ -70,6 +75,7 @@ import XTerm from "./XTerm.vue";
 import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
 import BrowserPane from "./BrowserPane.vue";
+import GitPanel from "./GitPanel.vue";
 import TerminalSplitView from "./TerminalSplitView.vue";
 
 export interface Leaf {
@@ -83,7 +89,7 @@ export interface Leaf {
   initialCmd?: string;
   cwd?: string;          // per-tab cwd override (else workspace cwd)
   resultToken?: string;  // set on tabs spawned via `burrow spawn --token`
-  leafType?: "terminal" | "diff" | "editor" | "chat" | "browser";  // default "terminal"
+  leafType?: "terminal" | "diff" | "editor" | "chat" | "browser" | "git";  // default "terminal"
   browserUrl?: string; // set when leafType === "browser"
   round?: number;       // increments on each new user prompt submission (UserPromptSubmit)
   statusText?: string;  // set by `burrow set-status`; shown next to status dot
@@ -93,12 +99,12 @@ export interface Leaf {
   progress?: number;    // 0.0–1.0; set by `burrow set-progress`
   progressLabel?: string;
   sessionId?: string;   // Claude session_id for cross-restart resume
-  taskId?: string;      // Kanban board task id, when this leaf was spawned by TaskDetail.vue
   diffFile?: string;
   diffStaged?: boolean;
   diff?: string;
   diffOwnerPtyId?: number; // agent PTY that requested this diff, if any
   filePath?: string;  // set when leafType === "editor" (absolute path)
+  fileLine?: number;  // editor: 1-based line to reveal on open (⌘P search hit)
   dirty?: boolean;    // editor: unsaved changes
   chatId?: number;    // set when leafType === "chat"
   initialPrompt?: string; // chat: first message to auto-send once its runtime is up

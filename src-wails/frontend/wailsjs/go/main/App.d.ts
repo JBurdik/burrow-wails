@@ -20,9 +20,9 @@ export function AcpStop(arg1:string):Promise<void>;
 
 export function AddMcpServer(arg1:string,arg2:Record<string, any>):Promise<void>;
 
-export function BeginAgentTurn(arg1:string,arg2:number,arg3:string):Promise<number>;
-
 export function CheckUpdate():Promise<main.UpdateInfo>;
+
+export function CheckpointDiff(arg1:string,arg2:string):Promise<string>;
 
 export function ClaudeAbort(arg1:string):Promise<void>;
 
@@ -50,7 +50,7 @@ export function CodexStart(arg1:string,arg2:string,arg3:Record<string, string>,a
 
 export function CodexStop(arg1:string):Promise<void>;
 
-export function CompleteAgentTurn(arg1:number,arg2:string):Promise<void>;
+export function CreateCheckpoint(arg1:string,arg2:string,arg3:string):Promise<main.Checkpoint>;
 
 export function CreatePty(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
@@ -60,13 +60,7 @@ export function CreateWorktree(arg1:string,arg2:string,arg3:string,arg4:string,a
 
 export function DaemonStats():Promise<Record<string, any>>;
 
-export function DeleteBoardTask(arg1:string):Promise<void>;
-
-export function DeleteMissionTask(arg1:string):Promise<void>;
-
 export function DeleteSkill(arg1:string):Promise<void>;
-
-export function DeleteTaskAttachment(arg1:number):Promise<void>;
 
 export function DeleteWorkspace(arg1:number):Promise<void>;
 
@@ -90,21 +84,15 @@ export function KillOrphanSessions(arg1:Array<string>):Promise<number>;
 
 export function KillPty(arg1:string):Promise<void>;
 
-export function ListAgentTurnChanges(arg1:string):Promise<Array<main.AgentTurnChange>>;
-
-export function ListBoardTasks(arg1:number):Promise<Array<main.MissionTask>>;
+export function ListCheckpoints(arg1:string,arg2:number):Promise<Array<main.Checkpoint>>;
 
 export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSessionInfo>>;
 
 export function ListMcpServers():Promise<Record<string, any>>;
 
-export function ListMissionTasks():Promise<Array<main.MissionTask>>;
-
 export function ListPtySessions():Promise<Array<string>>;
 
 export function ListSkills():Promise<Array<main.SkillInfo>>;
-
-export function ListTaskAttachments(arg1:string):Promise<Array<main.TaskAttachment>>;
 
 export function ListTerminalTabs(arg1:number):Promise<Array<main.TerminalTab>>;
 
@@ -115,8 +103,6 @@ export function LspSend(arg1:string,arg2:string):Promise<void>;
 export function LspStart(arg1:string,arg2:string,arg3:Array<string>,arg4:string):Promise<void>;
 
 export function LspStop(arg1:string):Promise<void>;
-
-export function MoveBoardTask(arg1:string,arg2:string,arg3:number):Promise<void>;
 
 export function NotifyFloatGrid(arg1:string,arg2:number,arg3:number):Promise<void>;
 
@@ -139,8 +125,6 @@ export function ReadConfig():Promise<string>;
 export function ReadDirShallow(arg1:string):Promise<Array<main.DirEntry>>;
 
 export function ReadFileBase64(arg1:string):Promise<string>;
-
-export function ReadTaskAttachmentBase64(arg1:number):Promise<string>;
 
 export function ReadTextFile(arg1:string):Promise<string>;
 
@@ -168,6 +152,8 @@ export function ResizePty(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function RestartDaemon():Promise<void>;
 
+export function RestoreCheckpoint(arg1:string,arg2:string):Promise<main.Checkpoint>;
+
 export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
@@ -175,6 +161,8 @@ export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 export function SaveTempImage(arg1:string,arg2:string):Promise<string>;
 
 export function SaveTerminalTabs(arg1:number,arg2:Array<main.TerminalTab>):Promise<void>;
+
+export function SearchFiles(arg1:string,arg2:string,arg3:number):Promise<Array<main.SearchHit>>;
 
 export function SendFloatSnapshot(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
@@ -208,14 +196,8 @@ export function TakeSpawnRequests(arg1:string):Promise<Array<main.SpawnRequest>>
 
 export function TouchWorkspace(arg1:number):Promise<void>;
 
-export function UpsertBoardTask(arg1:main.MissionTask):Promise<void>;
-
-export function UpsertMissionTask(arg1:main.MissionTask):Promise<void>;
-
 export function WriteConfig(arg1:string):Promise<void>;
 
 export function WritePty(arg1:string,arg2:Array<number>):Promise<void>;
-
-export function WriteTaskAttachment(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.TaskAttachment>;
 
 export function WriteTextFile(arg1:string,arg2:string):Promise<void>;

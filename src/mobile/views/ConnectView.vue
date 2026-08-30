@@ -7,15 +7,14 @@
 
     <form class="pair-form" @submit.prevent="tryConnect">
       <p class="pair-target">{{ urlInput }}</p>
-      <label class="pair-label">Párovací kód</label>
+      <label class="pair-label">Přístupový token</label>
       <input
         v-model="tokenInput"
-        class="m-input"
-        type="tel"
-        inputmode="numeric"
-        maxlength="6"
-        placeholder="000000"
-        autocomplete="one-time-code"
+        class="m-input pair-token"
+        type="text"
+        inputmode="text"
+        placeholder="48 znaků z Nastavení"
+        autocomplete="off"
         autocorrect="off"
         autocapitalize="none"
         spellcheck="false"
@@ -32,7 +31,8 @@
     </form>
 
     <p class="pair-hint">
-      Na desktopu v Nastavení → Remote access zkopíruj šestimístný párovací kód.
+      Na desktopu v Nastavení → Remote access zkopíruj celou adresu i s tokenem —
+      otevřením takového odkazu se pole vyplní samo.
     </p>
   </div>
 </template>
@@ -135,6 +135,13 @@ async function tryConnect() {
   letter-spacing: 0.08em;
   color: var(--text-muted);
   margin-bottom: -4px;
+}
+
+/* 48 hex chars has to stay readable on a phone. */
+.pair-token {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
 }
 
 .pair-error {

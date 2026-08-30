@@ -38,12 +38,12 @@ export function AddMcpServer(arg1, arg2) {
   return window['go']['main']['App']['AddMcpServer'](arg1, arg2);
 }
 
-export function BeginAgentTurn(arg1, arg2, arg3) {
-  return window['go']['main']['App']['BeginAgentTurn'](arg1, arg2, arg3);
-}
-
 export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
+}
+
+export function CheckpointDiff(arg1, arg2) {
+  return window['go']['main']['App']['CheckpointDiff'](arg1, arg2);
 }
 
 export function ClaudeAbort(arg1) {
@@ -98,8 +98,8 @@ export function CodexStop(arg1) {
   return window['go']['main']['App']['CodexStop'](arg1);
 }
 
-export function CompleteAgentTurn(arg1, arg2) {
-  return window['go']['main']['App']['CompleteAgentTurn'](arg1, arg2);
+export function CreateCheckpoint(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CreateCheckpoint'](arg1, arg2, arg3);
 }
 
 export function CreatePty(arg1, arg2, arg3, arg4) {
@@ -118,20 +118,8 @@ export function DaemonStats() {
   return window['go']['main']['App']['DaemonStats']();
 }
 
-export function DeleteBoardTask(arg1) {
-  return window['go']['main']['App']['DeleteBoardTask'](arg1);
-}
-
-export function DeleteMissionTask(arg1) {
-  return window['go']['main']['App']['DeleteMissionTask'](arg1);
-}
-
 export function DeleteSkill(arg1) {
   return window['go']['main']['App']['DeleteSkill'](arg1);
-}
-
-export function DeleteTaskAttachment(arg1) {
-  return window['go']['main']['App']['DeleteTaskAttachment'](arg1);
 }
 
 export function DeleteWorkspace(arg1) {
@@ -178,12 +166,8 @@ export function KillPty(arg1) {
   return window['go']['main']['App']['KillPty'](arg1);
 }
 
-export function ListAgentTurnChanges(arg1) {
-  return window['go']['main']['App']['ListAgentTurnChanges'](arg1);
-}
-
-export function ListBoardTasks(arg1) {
-  return window['go']['main']['App']['ListBoardTasks'](arg1);
+export function ListCheckpoints(arg1, arg2) {
+  return window['go']['main']['App']['ListCheckpoints'](arg1, arg2);
 }
 
 export function ListClaudeSessions(arg1) {
@@ -194,20 +178,12 @@ export function ListMcpServers() {
   return window['go']['main']['App']['ListMcpServers']();
 }
 
-export function ListMissionTasks() {
-  return window['go']['main']['App']['ListMissionTasks']();
-}
-
 export function ListPtySessions() {
   return window['go']['main']['App']['ListPtySessions']();
 }
 
 export function ListSkills() {
   return window['go']['main']['App']['ListSkills']();
-}
-
-export function ListTaskAttachments(arg1) {
-  return window['go']['main']['App']['ListTaskAttachments'](arg1);
 }
 
 export function ListTerminalTabs(arg1) {
@@ -228,10 +204,6 @@ export function LspStart(arg1, arg2, arg3, arg4) {
 
 export function LspStop(arg1) {
   return window['go']['main']['App']['LspStop'](arg1);
-}
-
-export function MoveBoardTask(arg1, arg2, arg3) {
-  return window['go']['main']['App']['MoveBoardTask'](arg1, arg2, arg3);
 }
 
 export function NotifyFloatGrid(arg1, arg2, arg3) {
@@ -276,10 +248,6 @@ export function ReadDirShallow(arg1) {
 
 export function ReadFileBase64(arg1) {
   return window['go']['main']['App']['ReadFileBase64'](arg1);
-}
-
-export function ReadTaskAttachmentBase64(arg1) {
-  return window['go']['main']['App']['ReadTaskAttachmentBase64'](arg1);
 }
 
 export function ReadTextFile(arg1) {
@@ -334,6 +302,10 @@ export function RestartDaemon() {
   return window['go']['main']['App']['RestartDaemon']();
 }
 
+export function RestoreCheckpoint(arg1, arg2) {
+  return window['go']['main']['App']['RestoreCheckpoint'](arg1, arg2);
+}
+
 export function RunGh(arg1, arg2) {
   return window['go']['main']['App']['RunGh'](arg1, arg2);
 }
@@ -348,6 +320,10 @@ export function SaveTempImage(arg1, arg2) {
 
 export function SaveTerminalTabs(arg1, arg2) {
   return window['go']['main']['App']['SaveTerminalTabs'](arg1, arg2);
+}
+
+export function SearchFiles(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3);
 }
 
 export function SendFloatSnapshot(arg1, arg2, arg3, arg4) {
@@ -414,24 +390,12 @@ export function TouchWorkspace(arg1) {
   return window['go']['main']['App']['TouchWorkspace'](arg1);
 }
 
-export function UpsertBoardTask(arg1) {
-  return window['go']['main']['App']['UpsertBoardTask'](arg1);
-}
-
-export function UpsertMissionTask(arg1) {
-  return window['go']['main']['App']['UpsertMissionTask'](arg1);
-}
-
 export function WriteConfig(arg1) {
   return window['go']['main']['App']['WriteConfig'](arg1);
 }
 
 export function WritePty(arg1, arg2) {
   return window['go']['main']['App']['WritePty'](arg1, arg2);
-}
-
-export function WriteTaskAttachment(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['WriteTaskAttachment'](arg1, arg2, arg3, arg4);
 }
 
 export function WriteTextFile(arg1, arg2) {

@@ -4,7 +4,7 @@ import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "../l
 
 // A Claude "profile" = a launch identity: which binary to run, which config dir
 // (CLAUDE_CONFIG_DIR — sessions/auth/settings live there, so a profile is really
-// a separate Claude account/config), and any extra flags. Mission Control picks
+// a separate Claude account/config), and any extra flags. A chat session picks
 // one per task; the choice persists on the task so `--resume` reuses the same
 // config dir (a session created under one config dir is invisible to another).
 export interface ClaudeProfile {

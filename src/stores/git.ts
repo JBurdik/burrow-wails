@@ -110,6 +110,10 @@ export const useGitStore = defineStore("git", () => {
   const prByWs = ref<Record<number, PrInfo | null>>({});
   // Per-workspace in-flight guard so the 60s poll never stacks gh calls.
   const prInFlight = new Set<number>();
+  // Current branch per workspace, filled by the same 60s sweep as the PR badges.
+  // The single `branch` ref above only tracks the ACTIVE cwd; the sidebar lists
+  // every workspace at once and needs one branch each.
+  const branchByWs = ref<Record<number, string>>({});
 
   // Fetch PR status for one workspace via `gh pr view`. Never throws — any
   // failure (no gh, not authed, no PR, not a GitHub repo) caches null so the
@@ -118,6 +122,8 @@ export const useGitStore = defineStore("git", () => {
     if (!cwd || prInFlight.has(wsId)) return;
     prInFlight.add(wsId);
     try {
+      const head = await invoke<GitOutput>("run_git", { cwd, args: ["branch", "--show-current"] }).catch(() => null);
+      if (head?.code === 0) branchByWs.value[wsId] = head.stdout.trim();
       const out = await invoke<GitOutput>("run_gh", {
         cwd,
         args: ["pr", "view", "--json", "number,state,isDraft,statusCheckRollup,url"],
@@ -384,6 +390,6 @@ export const useGitStore = defineStore("git", () => {
     setCwd, refresh, stageFile, unstageFile, unstageAll, stageAll, commit, showDiff, clearDiff, fetchAllDiff, gitInit,
     push, pull, refreshLog,
     branches, fetching, fetchBranches, switchBranch, createBranch, fetch, discardFile,
-    prByWs, fetchPr, fetchPrs,
+    prByWs, branchByWs, fetchPr, fetchPrs,
   };
 });

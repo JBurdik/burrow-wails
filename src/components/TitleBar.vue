@@ -8,6 +8,16 @@
     <!-- Spacer for native macOS traffic lights (~72px) -->
     <div class="w-[72px] shrink-0" data-tauri-drag-region />
 
+    <!-- Sidebar toggle — the sidebar is hidden by default (⌘B) -->
+    <button
+      class="tb-btn shrink-0 [-webkit-app-region:no-drag]"
+      :class="sidebarVisible && 'text-accent'"
+      :title="sidebarVisible ? 'Hide sidebar (⌘B)' : 'Show sidebar (⌘B)'"
+      @click="$emit('toggle-sidebar')"
+    >
+      <PhSidebarSimple :size="14" class="-scale-x-100" />
+    </button>
+
     <!-- Notification center -->
     <div class="relative ml-1 flex shrink-0 [-webkit-app-region:no-drag]">
       <button
@@ -209,8 +219,8 @@ import { useGitStore } from "@/stores/git";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
-const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?: string; rightPanelVisible?: boolean }>();
-defineEmits(["back", "toggle-rightpanel", "open-settings"]);
+const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?: string; rightPanelVisible?: boolean; sidebarVisible?: boolean }>();
+defineEmits(["back", "toggle-rightpanel", "open-settings", "toggle-sidebar"]);
 
 const menuOpen = ref(false);
 type OpenInTarget = "finder" | "vscode" | "zed";

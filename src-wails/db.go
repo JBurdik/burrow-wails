@@ -46,6 +46,9 @@ func migrate(db *sql.DB) error {
 			title TEXT,
 			initial_cmd TEXT
 		)`,
+		// Dead schema: mission_tasks/agent_turns/task_attachments backed the removed
+		// Kanban board + Mission Control. Kept so existing DBs still open (and their
+		// rows survive) — nothing reads or writes them any more.
 		`CREATE TABLE IF NOT EXISTS mission_tasks (
 			id TEXT PRIMARY KEY,
 			workspace_id INTEGER,
@@ -75,6 +78,16 @@ func migrate(db *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_turns_task_id ON agent_turns(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_turns_pty_id ON agent_turns(pty_id)`,
+		`CREATE TABLE IF NOT EXISTS checkpoints (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			cwd TEXT NOT NULL,
+			pty_id TEXT,
+			label TEXT,
+			commit_sha TEXT NOT NULL,
+			tree_sha TEXT NOT NULL,
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_checkpoints_cwd ON checkpoints(cwd, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS task_attachments (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			task_id TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,

@@ -53,10 +53,7 @@ type Server struct {
 func New(db *sql.DB, sessionDir string) *Server {
 	s := &Server{db: db, sessDir: sessionDir}
 	s.tools = map[string]func(json.RawMessage) (any, error){
-		"board_list":   s.toolBoardList,
-		"board_create": s.toolBoardCreate,
-		"board_move":   s.toolBoardMove,
-		"spawn_agent":  s.toolSpawnAgent,
+		"spawn_agent": s.toolSpawnAgent,
 	}
 	return s
 }
@@ -111,22 +108,6 @@ const appVersionPlaceholder = "dev"
 
 func (s *Server) listTools() []Tool {
 	return []Tool{
-		{Name: "board_list", Description: "List kanban board tasks for a repo workspace", InputSchema: map[string]any{
-			"type": "object", "properties": map[string]any{"repo_workspace_id": map[string]any{"type": "integer"}}, "required": []string{"repo_workspace_id"},
-		}},
-		{Name: "board_create", Description: "Create a kanban board task", InputSchema: map[string]any{
-			"type": "object", "properties": map[string]any{
-				"repo_workspace_id": map[string]any{"type": "integer"},
-				"title":             map[string]any{"type": "string"},
-				"description":       map[string]any{"type": "string"},
-			}, "required": []string{"repo_workspace_id", "title"},
-		}},
-		{Name: "board_move", Description: "Move a board task to a different column (not done — that's human-only)", InputSchema: map[string]any{
-			"type": "object", "properties": map[string]any{
-				"task_id": map[string]any{"type": "string"},
-				"column":  map[string]any{"type": "string", "enum": []string{"backlog", "todo", "in_progress", "for_review"}},
-			}, "required": []string{"task_id", "column"},
-		}},
 		{Name: "spawn_agent", Description: "Spawn a sub-agent in a new terminal tab", InputSchema: map[string]any{
 			"type": "object", "properties": map[string]any{
 				"cwd": map[string]any{"type": "string"},
@@ -159,67 +140,6 @@ func (s *Server) handleToolCall(req rpcRequest) *rpcResponse {
 	return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 		"content": []map[string]string{{"type": "text", "text": string(text)}},
 	}}
-}
-
-func (s *Server) toolBoardList(params json.RawMessage) (any, error) {
-	var p struct {
-		RepoWorkspaceID int64 `json:"repo_workspace_id"`
-	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.Query(`SELECT id, title, board_column, status FROM mission_tasks WHERE repo_workspace_id = ? ORDER BY board_column, board_order`, p.RepoWorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []map[string]any
-	for rows.Next() {
-		var id, title, column string
-		var status *string
-		if err := rows.Scan(&id, &title, &column, &status); err != nil {
-			return nil, err
-		}
-		out = append(out, map[string]any{"id": id, "title": title, "column": column, "status": status})
-	}
-	return out, rows.Err()
-}
-
-func (s *Server) toolBoardCreate(params json.RawMessage) (any, error) {
-	var p struct {
-		RepoWorkspaceID int64  `json:"repo_workspace_id"`
-		Title           string `json:"title"`
-		Description     string `json:"description"`
-	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, err
-	}
-	id := fmt.Sprintf("task_%d", time.Now().UnixMilli())
-	_, err := s.db.Exec(`INSERT INTO mission_tasks (id, repo_workspace_id, title, description, board_column, board_order, created_at)
-		VALUES (?, ?, ?, ?, 'backlog', 0, ?)`, id, p.RepoWorkspaceID, p.Title, p.Description, time.Now().UnixMilli())
-	if err != nil {
-		return nil, err
-	}
-	return map[string]string{"id": id}, nil
-}
-
-func (s *Server) toolBoardMove(params json.RawMessage) (any, error) {
-	var p struct {
-		TaskID string `json:"task_id"`
-		Column string `json:"column"`
-	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, err
-	}
-	if p.Column == "done" {
-		return nil, fmt.Errorf("moving to 'done' is human-only")
-	}
-	_, err := s.db.Exec(`UPDATE mission_tasks SET board_column = ?, updated_at = ? WHERE id = ?`, p.Column, time.Now().UnixMilli(), p.TaskID)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]string{"status": "ok"}, nil
 }
 
 // toolSpawnAgent drops a request dir under sessDir/requests, the same

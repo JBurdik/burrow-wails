@@ -53,21 +53,25 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "remove_worktree":
       return App.RemoveWorktree(args.id, !!args.force);
 
-    // Board
-    case "list_board_tasks":
-      return App.ListBoardTasks(args.repoWorkspaceId ?? args.repo_workspace_id);
-    case "upsert_board_task":
-      return App.UpsertBoardTask(args.task);
-    case "move_board_task":
-      return App.MoveBoardTask(args.taskId ?? args.task_id, args.column, args.order ?? 0);
-    case "delete_board_task":
-      return App.DeleteBoardTask(args.taskId ?? args.task_id);
-
     // Git / gh
     case "run_git":
       return App.RunGit(args.cwd, args.args ?? []);
     case "run_gh":
       return App.RunGh(args.cwd, args.args ?? []);
+
+    // Checkpoints — pre-turn worktree snapshots (src-wails/checkpoints.go)
+    case "create_checkpoint":
+      return App.CreateCheckpoint(args.cwd, String(args.ptyId ?? ""), args.label ?? "");
+    case "list_checkpoints":
+      return App.ListCheckpoints(args.cwd, args.limit ?? 50);
+    case "checkpoint_diff":
+      return App.CheckpointDiff(args.cwd, args.commit);
+    case "restore_checkpoint":
+      return App.RestoreCheckpoint(args.cwd, args.commit);
+
+    // Workspace search (⌘P)
+    case "search_files":
+      return App.SearchFiles(args.cwd, args.query, args.limit ?? 30);
 
     // FS / misc
     case "write_text_file":
@@ -156,20 +160,6 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "lsp_stop":
       return App.LspStop(args.id);
 
-    // Mission tasks / agent turns
-    case "list_mission_tasks":
-      return App.ListMissionTasks();
-    case "upsert_mission_task":
-      return App.UpsertMissionTask(args.task);
-    case "delete_mission_task":
-      return App.DeleteMissionTask(args.id);
-    case "begin_agent_turn":
-      return App.BeginAgentTurn(args.taskId ?? args.task_id, Number(args.ptyId ?? args.pty_id), args.worktreePath ?? args.worktree_path ?? "");
-    case "complete_agent_turn":
-      return App.CompleteAgentTurn(Number(args.ptyId ?? args.pty_id), args.state);
-    case "list_agent_turn_changes":
-      return App.ListAgentTurnChanges(args.taskId ?? args.task_id);
-
     // Skills / MCP servers
     case "list_skills":
       return App.ListSkills();
@@ -199,16 +189,6 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.AcpRespondPermission(String(args.id), args.rpcId ?? args.rpc_id, args.optionId ?? args.option_id);
     case "acp_respond_user_input":
       return App.AcpRespondUserInput(String(args.id), args.rpcId ?? args.rpc_id, args.text);
-
-    // Task attachments
-    case "write_task_attachment":
-      return App.WriteTaskAttachment(args.taskId ?? args.task_id, args.mimeType ?? args.mime_type, args.data, args.ext);
-    case "list_task_attachments":
-      return App.ListTaskAttachments(args.taskId ?? args.task_id);
-    case "delete_task_attachment":
-      return App.DeleteTaskAttachment(args.id);
-    case "read_task_attachment_base64":
-      return App.ReadTaskAttachmentBase64(args.id);
 
     // Misc
     case "system_stats":

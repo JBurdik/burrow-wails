@@ -182,9 +182,21 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   // Back to the picker: keep `opened` (and its live terminals) intact.
   function close() { active.value = null; }
 
+  // Unmount a workspace: its Terminal disappears, PTYs detach (the daemon keeps
+  // the sessions, so re-opening reattaches). Also unmounts its worktrees — they
+  // were only mounted to keep the parent's status dots live.
+  function closeWorkspace(id: number) {
+    const childIds = (worktreesByParent.value[id] || []).map((w) => w.id);
+    const dropped = new Set([id, ...childIds]);
+    opened.value = opened.value.filter((w) => !dropped.has(w.id));
+    if (active.value && dropped.has(active.value.id)) {
+      active.value = opened.value[opened.value.length - 1] ?? null;
+    }
+  }
+
   return {
     workspaces, active, opened, icons, topLevel, worktreesByParent,
-    load, create, remove, rename, open, ensureOpen, close, setIcon, clearIcon,
+    load, create, remove, rename, open, ensureOpen, close, closeWorkspace, setIcon, clearIcon,
     createWorktree, removeWorktree, reorderTopLevel,
   };
 });

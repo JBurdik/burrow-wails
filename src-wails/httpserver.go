@@ -3,16 +3,28 @@ package main
 import (
 	"crypto/rand"
 	"crypto/subtle"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
 )
+
+// The mobile web client (src/mobile/, built by `pnpm build:mobile`) is
+// baked into the binary so the .app bundle can serve it with no extra
+// packaging step. The checked-in dir holds only .gitkeep — CI/`just
+// build` runs the vite build before `wails build`.
+//
+//go:embed all:dist-mobile
+var mobileAssets embed.FS
 
 // HTTPServer is a minimal port of src-tauri's http_server/ (axum + WS) —
 // lets a browser reach the same App methods and event stream as the native
@@ -27,6 +39,7 @@ type HTTPServer struct {
 	token string
 
 	mu      sync.Mutex
+	srv     *http.Server
 	clients map[*websocket.Conn]struct{}
 }
 
@@ -71,7 +84,7 @@ func (s *HTTPServer) authorized(r *http.Request) bool {
 func (s *HTTPServer) Broadcast(eventName string, payload any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	msg := map[string]any{"event": eventName, "data": payload}
+	msg := map[string]any{"event": eventName, "payload": payload}
 	for c := range s.clients {
 		if err := c.WriteJSON(msg); err != nil {
 			c.Close()
@@ -80,12 +93,36 @@ func (s *HTTPServer) Broadcast(eventName string, payload any) {
 	}
 }
 
+// Close stops the listener and drops every WS client. Safe to call twice.
+func (s *HTTPServer) Close() error {
+	s.mu.Lock()
+	for c := range s.clients {
+		c.Close()
+		delete(s.clients, c)
+	}
+	srv := s.srv
+	s.mu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	return srv.Close()
+}
+
 func (s *HTTPServer) ListenAndServe(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/rpc/", s.handleRPC)
+	// Both unauthenticated on purpose: a plain browser GET cannot send an
+	// Authorization header, so the shell and the health probe have to be
+	// open. Everything that touches a PTY sits behind the token.
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("/", s.handleAssets)
+	srv := &http.Server{Addr: addr, Handler: mux}
+	s.mu.Lock()
+	s.srv = srv
+	s.mu.Unlock()
 	log.Printf("http server listening on %s", addr)
-	return http.ListenAndServe(addr, mux)
+	return srv.ListenAndServe()
 }
 
 func (s *HTTPServer) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -111,10 +148,95 @@ func (s *HTTPServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var c wsCall
+		if json.Unmarshal(raw, &c) != nil {
+			continue
+		}
+		// {subscribe: "<event>"} needs no server-side bookkeeping: Broadcast
+		// fans every event out to every client and api.ts routes by its own
+		// handler map. Accept and ignore.
+		if c.Command == "" {
+			continue
+		}
+		result, err := s.dispatch(c)
+		reply := map[string]any{"id": c.ID}
+		if err != nil {
+			reply["error"] = err.Error()
+		} else {
+			reply["result"] = result
+		}
+		s.mu.Lock()
+		werr := conn.WriteJSON(reply)
+		s.mu.Unlock()
+		if werr != nil {
 			return
 		}
 	}
+}
+
+// wsCall is the client->server frame from src/mobile/api.ts: either a
+// call ({id, command, args}) or a subscribe ({subscribe}).
+type wsCall struct {
+	ID        int    `json:"id"`
+	Command   string `json:"command"`
+	Subscribe string `json:"subscribe"`
+	Args      wsArgs `json:"args"`
+}
+
+// wsArgs is the union of every argument object the mobile client sends.
+// Keys are camelCase because that is what api.ts puts on the wire.
+type wsArgs struct {
+	ID          string `json:"id"`
+	WorkspaceID int64  `json:"workspaceId"`
+	Data        []int  `json:"data"`
+	Cols        uint16 `json:"cols"`
+	Rows        uint16 `json:"rows"`
+}
+
+// dispatch maps a WS call onto an App method. Deliberately an explicit
+// allow-list, not reflection: this surface is reachable from the tailnet,
+// so every remotely-invokable method is one someone typed here on purpose.
+//
+// ponytail: terminal-only. remote_list_chats/remote_create_chat/claude_send/
+// acp_send are what ChatsView wants, but RemoteListChats/RemoteCreateChat are
+// still stubs in stubs.go — wire them here once they do something.
+func (s *HTTPServer) dispatch(c wsCall) (any, error) {
+	switch c.Command {
+	case "list_workspaces":
+		return s.app.ListWorkspaces()
+	case "list_terminal_tabs":
+		return s.app.ListTerminalTabs(c.Args.WorkspaceID)
+	case "write_pty":
+		return nil, s.app.WritePty(c.Args.ID, c.Args.Data)
+	case "resize_pty":
+		return nil, s.app.ResizePty(c.Args.ID, c.Args.Cols, c.Args.Rows)
+	default:
+		return nil, fmt.Errorf("unknown command %q", c.Command)
+	}
+}
+
+// handleAssets serves the embedded mobile bundle. `/` maps to mobile.html
+// (vite names the entry after its input file, and renaming it in the build
+// buys nothing).
+func (s *HTTPServer) handleAssets(w http.ResponseWriter, r *http.Request) {
+	sub, err := fs.Sub(mobileAssets, "dist-mobile/app")
+	if err != nil {
+		http.Error(w, "assets unavailable", http.StatusInternalServerError)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	if name == "" {
+		name = "mobile.html"
+	}
+	if _, err := fs.Stat(sub, name); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFileFS(w, r, sub, name)
 }
 
 type rpcRequest struct {

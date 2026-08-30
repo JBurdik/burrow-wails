@@ -29,7 +29,7 @@ import { jumpToDefinition } from "@codemirror/lsp-client";
 import { useUIStore } from "@/stores/ui";
 import { useEditorContextStore } from "@/stores/editorContext";
 
-const props = defineProps<{ leafId: number; path: string; cwd: string }>();
+const props = defineProps<{ leafId: number; path: string; cwd: string; initialLine?: number }>();
 const emit = defineEmits<{
   title: [t: string];
   dirty: [d: boolean];
@@ -311,6 +311,7 @@ onMounted(async () => {
     ],
   });
   view = new EditorView({ state, parent: host.value });
+  if (props.initialLine) revealLine(props.initialLine);
 
   // Counter-zoom now and whenever the pane resizes (incl. when this tab becomes
   // visible again after being display:none, which fires a 0→real size change).
@@ -336,7 +337,16 @@ onBeforeUnmount(() => {
   view = null;
 });
 
-defineExpose({ focus, save, isDirty, formatDocument });
+// Put the caret on a 1-based line and scroll it into the middle of the pane —
+// how a ⌘P search hit lands in the file.
+function revealLine(line: number) {
+  if (!view) return;
+  const target = Math.min(Math.max(1, line), view.state.doc.lines);
+  const pos = view.state.doc.line(target).from;
+  view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+}
+
+defineExpose({ focus, save, isDirty, formatDocument, revealLine });
 </script>
 
 <style scoped>

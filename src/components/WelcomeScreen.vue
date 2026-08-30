@@ -71,9 +71,32 @@
               </DropdownMenuRoot>
             </template>
           </div>
-          <button class="welcome-send" type="button" :disabled="!text.trim()" @click="submit">
-            <PhArrowUp :size="14" weight="bold" />
-          </button>
+          <div class="welcome-sendgroup">
+            <DropdownMenuRoot>
+              <DropdownMenuTrigger as-child>
+                <button class="welcome-mode" type="button" :title="`Send as ${launchMode === 'chat' ? 'chat' : 'terminal'}`">
+                  <PhChatCenteredText v-if="launchMode === 'chat'" :size="12" />
+                  <PhTerminal v-else :size="12" />
+                  <PhCaretDown :size="9" weight="bold" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top" class="min-w-[210px]">
+                <DropdownMenuItem
+                  class="text-[11.5px]"
+                  :class="{ 'text-foreground bg-accent/10': launchMode === 'chat' }"
+                  @select="pickMode('chat')"
+                >Chat UI — rich conversation</DropdownMenuItem>
+                <DropdownMenuItem
+                  class="text-[11.5px]"
+                  :class="{ 'text-foreground bg-accent/10': launchMode === 'terminal' }"
+                  @select="pickMode('terminal')"
+                >Terminal — run {{ terminalProgram }} in a PTY</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenuRoot>
+            <button class="welcome-send" type="button" :disabled="!text.trim()" @click="submit">
+              <PhArrowUp :size="14" weight="bold" />
+            </button>
+          </div>
         </div>
       </div>
     </template>
@@ -87,7 +110,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted } from "vue";
-import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck } from "@phosphor-icons/vue";
+import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
@@ -96,6 +119,7 @@ import { getConfig, setConfig } from "@/lib/config";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { modelsFor } from "@/lib/chatModels";
 import ModelPicker from "@/components/ModelPicker.vue";
+import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
 
 const emit = defineEmits<{ (e: "open-folder"): void }>();
 
@@ -167,6 +191,13 @@ function pickPermMode(mode: PermMode) {
   setConfig("chatPermissionMode", cfg);
 }
 
+// Chat UI (rich conversation) or a plain PTY running the agent's own CLI. The
+// prompt is the same either way — only the surface it lands in differs.
+type LaunchMode = "chat" | "terminal";
+const launchMode = ref<LaunchMode>(getConfig<LaunchMode>("welcomeLaunchMode", "chat") === "terminal" ? "terminal" : "chat");
+function pickMode(m: LaunchMode) { launchMode.value = m; setConfig("welcomeLaunchMode", m); }
+const terminalProgram = computed(() => terminalProgramFor(selectedAgent.value));
+
 // Active workspace, else the most recently opened one, unless the user picked
 // a different one from the dropdown.
 const override = ref<Workspace | null>(null);
@@ -184,9 +215,15 @@ function submit() {
   if (ui.mode !== "terminal") ui.setMode("terminal");
   const wasOpen = store.opened.some((w) => w.id === t.id);
   store.open(t);
-  const open = () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt);
+  const open = launchMode.value === "terminal"
+    ? () => termTabs.add(t.id, buildTerminalCommand(
+        { kind: selectedAgent.value.kind, command: selectedAgent.value.command, model: selectedModel.value, permMode: selectedPermMode.value },
+        prompt,
+      ))
+    : () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt);
   wasOpen ? open() : nextTick(open); // freshly-mounted Terminal needs a tick to attach its request watcher
   text.value = "";
+  ui.closeWelcome();
 }
 </script>
 
@@ -285,6 +322,26 @@ function submit() {
   border-radius: 6px;
 }
 .welcome-pill:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+.welcome-sendgroup {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.welcome-mode {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 5px 6px;
+  border-radius: 6px;
+}
+.welcome-mode:hover { color: var(--text-primary); background: var(--bg-hover); }
 
 .welcome-send {
   flex-shrink: 0;

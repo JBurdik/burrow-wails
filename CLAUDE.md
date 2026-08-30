@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > architectural reference for *what the Go backend needs to replicate*, not as current
 > code on this branch. The actual Go backend lives in `src-wails/`; see its
 > command surface across `*.go` files there (one file per subsystem: `workspace.go`,
-> `board.go`, `agents.go`, `lsp.go`, etc.) and `src/lib/wailsCompat/` for how the
+> `agents.go`, `lsp.go`, etc.) and `src/lib/wailsCompat/` for how the
 > unmodified `src/` Vue frontend is wired to it. Progress/remaining-gaps status:
 > `~/.claude/plans/ahoj-pros-mt-el-by-distributed-glade.md`.
 

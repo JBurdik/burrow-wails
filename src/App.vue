@@ -5,16 +5,16 @@
       :branch="ws.active?.is_git === false ? '' : git.branch"
       :folder-path="ws.active?.path"
       :right-panel-visible="ui.rightPanelVisible"
+      :sidebar-visible="ui.sidebarVisible"
+      @toggle-sidebar="ui.toggleSidebar()"
       @back="ws.close()"
       @toggle-rightpanel="ui.toggleRightPanel()"
       @open-settings="ui.openSettings()"
     />
     <Settings v-if="ui.settingsOpen" @close="ui.closeSettings()" />
-    <KanbanBoard v-if="ui.boardRepoId !== null" :repo-id="ui.boardRepoId" @close="ui.closeBoard()" />
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
-      <ActivityBar class="panel-activity" />
-      <Sidebar class="panel-sidebar" />
-      <div class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
+      <Sidebar v-show="ui.sidebarVisible" class="panel-sidebar" @open-browser="activeTerm()?.openBrowserTab()" />
+      <div v-show="ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
       <div class="ide-main">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
              them on a mode switch ran XTerm.onBeforeUnmount → detach_pty + dispose;
@@ -32,8 +32,6 @@
           />
         </div>
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
-        <GitPanel v-else-if="ui.mode === 'git'" class="git-main-panel" />
-        <MissionControl v-else-if="ui.mode === 'mission'" class="mission-main-panel" />
       </div>
       <div v-show="ui.rightPanelVisible" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
       <RightPanel v-show="ui.rightPanelVisible" class="panel-right" :cwd="ws.active?.path ?? ''" :is-git="ws.active?.is_git !== false" />
@@ -59,6 +57,7 @@
       @open-browser="activeTerm()?.openBrowserTab()"
       @repaint="activeTerm()?.repaintAll()"
       @toggle-manager="ui.toggleFloatChat()"
+      @open-file="openSearchHit"
     />
     <ToastStack />
     <UpdateBanner />
@@ -96,14 +95,10 @@ import { ref, onMounted, onBeforeUnmount, computed, provide, watch, nextTick } f
 import { PhX } from "@phosphor-icons/vue";
 import TitleBar from "@/components/TitleBar.vue";
 import Sidebar from "@/components/Sidebar.vue";
-import ActivityBar from "@/components/ActivityBar.vue";
 import Terminal from "@/components/Terminal.vue";
 import RightPanel from "@/components/RightPanel.vue";
-import GitPanel from "@/components/GitPanel.vue";
-import MissionControl from "@/components/MissionControl.vue";
 import Dashboard from "@/components/Dashboard.vue";
 import Settings from "@/components/Settings.vue";
-import KanbanBoard from "@/components/KanbanBoard.vue";
 import Spotlight from "@/components/Spotlight.vue";
 import ToastStack from "@/components/ToastStack.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
@@ -139,7 +134,7 @@ const tabsStore = useTerminalTabsStore();
 
 // No active workspace, or the active one has no tabs open yet.
 const showWelcome = computed(() =>
-  !ws.active || (tabsStore.tabsByWs[ws.active.id]?.length ?? 0) === 0,
+  ui.welcomeOpen || !ws.active || (tabsStore.tabsByWs[ws.active.id]?.length ?? 0) === 0,
 );
 
 const panelStyles = computed(() => ({
@@ -277,6 +272,15 @@ function setTermRef(id: number, el: unknown) {
   if (el) termRefs.set(id, el as InstanceType<typeof Terminal>);
   else termRefs.delete(id);
 }
+// A ⌘P search hit carries a repo-relative path; the editor wants an absolute one.
+function openSearchHit(path: string, line: number) {
+  const root = ws.active?.path;
+  if (!root) return;
+  const abs = path.startsWith("/") ? path : `${root.replace(/\/$/, "")}/${path}`;
+  ui.setMode("terminal");
+  nextTick(() => activeTerm()?.openFileInTab(abs, path.split("/").pop() ?? path, line || undefined));
+}
+
 function activeTerm() {
   return ws.active ? termRefs.get(ws.active.id) : undefined;
 }
@@ -408,6 +412,9 @@ function onKeydown(e: KeyboardEvent) {
     } else if (e.key === "/") {
       e.preventDefault();
       cheatsheetOpen.value = !cheatsheetOpen.value;
+    } else if (e.key === "b") {
+      e.preventDefault();
+      ui.toggleSidebar();
     } else if (e.key === "j") {
       e.preventDefault();
       ui.toggleFloatChat();
@@ -424,9 +431,6 @@ function onKeydown(e: KeyboardEvent) {
     } else if (ui.settingsOpen) {
       e.preventDefault();
       ui.closeSettings();
-    } else if (ui.boardRepoId !== null) {
-      e.preventDefault();
-      ui.closeBoard();
     }
   }
 }
@@ -561,16 +565,6 @@ body {
   overflow: hidden;
 }
 
-.git-main-panel {
-  flex: 1;
-  overflow: hidden;
-}
-
-.mission-main-panel {
-  flex: 1;
-  overflow: hidden;
-}
-
 .dashboard-main-panel {
   flex: 1;
   overflow: hidden;
@@ -591,7 +585,6 @@ body {
   opacity: 0.4;
 }
 
-.panels-swapped .panel-activity { order: 0; }
 .panels-swapped .panel-sidebar { order: 5; }
 .panels-swapped .panel-resize-left { order: 4; }
 .panels-swapped .ide-main { order: 3; }

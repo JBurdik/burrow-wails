@@ -107,17 +107,70 @@ pairing flow (just the host + bearer token from step 4).
 pnpm build:mobile
 ```
 
-This produces `dist-mobile/mobile.html` + assets. Enable the HTTP toggle in
-Settings (desktop app → Settings → the HTTP/WS transport section), restart
-Burrow, then from your phone (on the same tailnet) visit:
+This produces `src-wails/dist-mobile/app/` — `//go:embed`-ed into the Go
+binary by `src-wails/httpserver.go`, so a release build serves it with no
+extra packaging step (`just build` runs this for you). Enable the HTTP
+toggle in Settings (desktop app → Settings → the HTTP/WS transport
+section), restart Burrow, then from your phone (on the same tailnet)
+visit:
 
 ```
 http://<tailscale-host>:<port>/
 ```
 
-`/` is served straight from `dist-mobile/`, unauthenticated (a plain browser
-GET can't send an `Authorization` header — same reasoning as `/healthz`).
+`/` is served straight from the embedded bundle, unauthenticated (a plain
+browser GET can't send an `Authorization` header — same reasoning as
+`/healthz`).
 Paste that same base URL and the bearer token — Settings now shows the
 token itself with a copy button, no need to `cat` the file — into the
 Connect screen. Sessions lists every open workspace/tab with a live status
 dot; tapping one opens a real terminal.
+
+## 7. Install as a PWA
+
+`mobile.html` ships a web app manifest (`public/manifest.webmanifest`,
+`display: standalone`) plus 192/512 icons and an `apple-touch-icon`, so
+Burrow Remote installs to the home screen and runs without browser chrome.
+
+Install needs a secure context, which in practice means **going through
+`tailscale serve`** (real HTTPS cert) rather than `http://<host>:<port>`
+directly:
+
+- **iOS/Safari** — Share → *Add to Home Screen*.
+- **Android/Chrome** — the *Install app* prompt. Chrome gates that prompt on
+  a registered service worker with a `fetch` handler, so `public/sw.js`
+  exists purely to satisfy it. **It caches nothing** — the whole UI is a
+  live WebSocket session, so an offline shell could only show a
+  "disconnected" screen. Add caching there if that ever changes.
+
+Push notifications (agent needs permission / turn finished → phone buzzes)
+are *not* wired up: that needs VAPID keys, a subscription store and a push
+endpoint in Go. Deferred.
+
+## 8. What the remote transport actually supports
+
+`/ws` accepts the two frames `src/mobile/api.ts` sends:
+
+- `{"id": N, "command": "...", "args": {...}}` → `{"id": N, "result": ...}` or `{"id": N, "error": "..."}`
+- `{"subscribe": "<event>"}` → accepted and ignored; every event is broadcast to every client and the client routes by its own handler map.
+
+`HTTPServer.dispatch` is a deliberate allow-list — this surface is reachable
+from the tailnet, so nothing is exposed by reflection:
+
+| Command | App method |
+|---------|-----------|
+| `list_workspaces` | `ListWorkspaces` |
+| `list_terminal_tabs` | `ListTerminalTabs` |
+| `write_pty` | `WritePty` |
+| `resize_pty` | `ResizePty` |
+
+**Terminal only.** The Chats screen calls `remote_list_chats` /
+`remote_create_chat` / `claude_send` / `acp_send`; the first two are still
+stubs in `src-wails/stubs.go`, so those commands are not in the allow-list
+and ChatsView does not work remotely yet.
+
+Events reach browser clients through `emitAll` (`src-wails/events.go`),
+which emits to the Wails window *and* `HTTPServer.Broadcast`. Wired up so
+far: `pty-data-{id}`, `pty-exit-{id}`, `pty-hook-{id}`. Any event the mobile
+UI needs must use `emitAll`, not `runtime.EventsEmit`. There is still no
+replay buffer — you only see events emitted after you connect.

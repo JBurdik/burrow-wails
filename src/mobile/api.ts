@@ -1,15 +1,16 @@
-// Transport client for the axum /ws JSON-RPC-ish endpoint (src-tauri/src/http_server/).
+// Transport client for the /ws endpoint (src-wails/httpserver.go).
 //
-// Wire format (read from websocket.rs / dispatch.rs, not guessed):
+// Wire format:
 //   call:      client -> {id, command, args}      server -> {id, result} | {id, error}
-//   subscribe: client -> {subscribe: "<event>"}    server -> {event, payload} once matching events fire
-//   there is no unsubscribe message server-side (websocket.rs only ever inserts into the
-//   subscribed set) — unsubscribe() here is client-side only: it stops routing that event
-//   locally, the server keeps sending it into the void.
+//   subscribe: client -> {subscribe: "<event>"}    server -> {event, payload}
+//   The server keeps no subscription state: it broadcasts every event to every client
+//   and we route by the handler map below. So subscribe() is really "start listening"
+//   and unsubscribe() is client-side only — the server keeps sending into the void.
 //
-// pty-hook-{id} caveat: the "object" branch (error/session states, pid) uses app.emit()
-// (Tauri-only), NOT emit_all() — it never reaches WS clients. Only the plain state STRING
-// (running/waiting/permission/done) is broadcast over WS. So mobile can't see error/session.
+// The command allow-list lives in HTTPServer.dispatch and is terminal-only for now
+// (list_workspaces, list_terminal_tabs, write_pty, resize_pty). The chat commands
+// this file also calls are not served yet — RemoteListChats/RemoteCreateChat are
+// still stubs in src-wails/stubs.go, so ChatsView does not work remotely.
 
 export type CallResult = any;
 

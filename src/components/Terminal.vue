@@ -1,114 +1,5 @@
 <template>
   <div class="terminal-pane relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--terminal-bg)] [-webkit-backdrop-filter:var(--blur-terminal,none)] [backdrop-filter:var(--blur-terminal,none)]" @click="focusActive">
-    <AgentToolbar @launch="spawnAgent" @open-chat="openClaudeChat()" @open-browser="openBrowserTab()" />
-
-    <nav class="flex h-[33px] shrink-0 items-center gap-0.5 border-b border-border bg-[color-mix(in_srgb,var(--bg-panel)_92%,var(--terminal-bg))] px-2.5" aria-label="Workspace surface">
-      <button
-        class="inline-flex h-6 items-center gap-[5px] rounded-[5px] border border-transparent bg-transparent px-2 font-sans text-[10.5px] font-semibold leading-none text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-        :class="activeSurface === 'chat' && '!border-[color-mix(in_srgb,var(--accent)_24%,var(--border))] !bg-[color-mix(in_srgb,var(--accent)_11%,var(--bg-panel))] !text-foreground'"
-        :aria-pressed="activeSurface === 'chat'"
-        title="Show chat"
-        @click.stop="focusSurface('chat')"
-      >
-        <PhChatCenteredText :size="13" />
-        <span>Chat</span>
-      </button>
-      <button
-        class="inline-flex h-6 items-center gap-[5px] rounded-[5px] border border-transparent bg-transparent px-2 font-sans text-[10.5px] font-semibold leading-none text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-        :class="activeSurface === 'terminal' && '!border-[color-mix(in_srgb,var(--accent)_24%,var(--border))] !bg-[color-mix(in_srgb,var(--accent)_11%,var(--bg-panel))] !text-foreground'"
-        :aria-pressed="activeSurface === 'terminal'"
-        title="Show terminal"
-        @click.stop="focusSurface('terminal')"
-      >
-        <PhTerminal :size="13" />
-        <span>Terminal</span>
-      </button>
-      <span class="mx-[5px] h-[13px] w-px bg-border" />
-      <span class="font-mono text-[10px] font-medium leading-none text-muted-foreground">{{ activeSurface === 'chat' ? 'Conversation' : 'Workspace' }}</span>
-      <div class="relative ml-auto">
-        <button
-          class="grid h-[23px] w-[25px] place-items-center rounded border border-border bg-transparent p-0 font-sans text-[10px] font-semibold leading-none text-secondary-foreground transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--border))] hover:bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg-panel))] hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-          :aria-expanded="splitMenuOpen"
-          title="Split the active tab"
-          aria-label="Split the active tab"
-          @click.stop="splitMenuOpen = !splitMenuOpen"
-        ><PhColumns :size="13" weight="bold" /></button>
-        <div v-if="splitMenuOpen" class="absolute right-0 top-[calc(100%+6px)] z-40 grid min-w-[148px] gap-px rounded-[7px] border border-border bg-panel p-1 shadow-[0_12px_28px_rgba(0,0,0,0.36)]" @click.stop>
-          <button class="rounded border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="splitFocused('terminal', 'h')">Terminal right</button>
-          <button class="rounded border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="splitFocused('terminal', 'v')">Terminal below</button>
-          <button class="rounded border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="splitFocused('chat', 'h')">Chat right</button>
-          <button class="rounded border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="splitFocused('chat', 'v')">Chat below</button>
-        </div>
-      </div>
-    </nav>
-
-    <TransitionGroup v-if="tabs.length > 0" name="tab-move" tag="div" class="terminal-tabs flex shrink-0 items-center gap-px overflow-x-auto border-b border-border bg-panel px-1.5">
-      <button
-        v-for="(tab, tabIdx) in tabs"
-        :key="tab.id"
-        class="tab group relative flex max-w-[200px] shrink-0 touch-none items-center gap-[5px] whitespace-nowrap border-0 border-b-2 border-transparent bg-transparent py-[5px] pl-2 pr-[9px] font-sans text-[11.5px] text-muted-foreground transition-colors hover:bg-[color-mix(in_srgb,var(--border)_35%,transparent)] hover:text-secondary-foreground"
-        :class="{
-          '!border-accent !bg-[color-mix(in_srgb,var(--accent)_7%,transparent)] !text-foreground': activeTabId === tab.id,
-          'drag-over': tabOverIdx === tabIdx && tabDragIdx !== tabIdx,
-          dragging: tabDragIdx === tabIdx,
-        }"
-        :data-reorder-idx="tabIdx"
-        data-reorder-group="tab"
-        :title="tabTooltip(tab)"
-        @click.stop="activateTab(tab.id)"
-        @pointerdown="(e: PointerEvent) => tabDragDown(tabIdx, e, 'tab')"
-      >
-        <PhFileCode v-if="tabIsEditor(tab)" :size="12" class="shrink-0 text-muted-foreground" :class="{ '!text-secondary-foreground': activeTabId === tab.id }" />
-        <PhChatCenteredText v-else-if="tabIsChat(tab)" :size="12" class="shrink-0 text-secondary-foreground" />
-        <PhGlobe v-else-if="tabIsBrowser(tab)" :size="12" class="shrink-0 text-muted-foreground" :class="{ '!text-secondary-foreground': activeTabId === tab.id }" />
-        <PhRobot v-else-if="tabIsAgent(tab)" :size="12" class="shrink-0 text-accent" />
-        <PhTerminal v-else :size="12" class="shrink-0 text-muted-foreground" :class="{ '!text-secondary-foreground': activeTabId === tab.id }" />
-        <span v-if="tabIsEditor(tab) && tabDirty(tab)" class="dirty-dot h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground" />
-        <span
-          v-else-if="tabStatus(tab) !== 'idle'"
-          class="status-dot"
-          :class="`status-${tabStatus(tab)}`"
-          :title="tabStatus(tab) === 'error' ? tabStatusDetail(tab) : undefined"
-        >{{ tabStatus(tab) === 'running' ? spinnerFrame : '' }}</span>
-        <span class="tab-label max-w-[140px] overflow-hidden text-ellipsis" :class="{ 'tab-flash': getAllLeaves(tab.root).some(l => flashingLeafs.has(l.id)) }">{{ tabTitle(tab) }}</span>
-        <button
-          v-if="activeTabId === tab.id"
-          class="tab-inspector flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-[3px] opacity-0 transition-opacity group-hover:opacity-45 hover:!opacity-100 hover:!bg-white/[0.09] hover:!text-foreground"
-          type="button"
-          title="Inspect active agent"
-          aria-label="Inspect active agent"
-          data-no-drag
-          @click.stop="inspectorOpen = !inspectorOpen"
-        >
-          <PhInfo :size="11" weight="bold" />
-        </button>
-        <span v-if="tabStatusText(tab)" class="max-w-[80px] shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground opacity-65">{{ tabStatusText(tab) }}</span>
-        <span
-          v-if="tabProgress(tab) !== undefined"
-          class="inline-flex h-[3px] w-9 shrink-0 items-center overflow-hidden rounded-sm bg-white/10"
-          :title="tabProgressLabel(tab)"
-        >
-          <span class="h-full min-w-[2px] rounded-sm bg-accent transition-[width] duration-300 ease-out" :style="{ width: `${(tabProgress(tab)! * 100).toFixed(0)}%` }" />
-        </span>
-        <span
-          v-if="tabLeafCount(tab) > 1"
-          class="inline-flex h-[13px] min-w-[13px] shrink-0 items-center justify-center rounded-md bg-white/[0.08] px-1 text-[9px] font-semibold leading-none text-muted-foreground"
-          :title="`${tabLeafCount(tab)} panes`"
-        >{{ tabLeafCount(tab) }}</span>
-        <PhX
-          :size="10"
-          weight="bold"
-          class="tab-close flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-[3px] opacity-0 transition-opacity group-hover:opacity-45 hover:!opacity-100 hover:!bg-destructive/[0.18] hover:!text-destructive"
-          data-no-drag
-          @click.stop="closeTab(tab.id)"
-        />
-      </button>
-      <button key="__add" class="tab tab-add max-w-none shrink-0 border-0 bg-transparent py-[5px] px-[7px] text-muted-foreground opacity-50 transition-opacity hover:bg-hover hover:text-secondary-foreground hover:opacity-100" @click="addTab()" title="New terminal">
-        <PhPlus :size="12" />
-      </button>
-
-    </TransitionGroup>
-
     <!-- Log strip: last entries from `burrow log` for the active tab -->
     <TransitionGroup
       v-if="activeTabLogs.length"
@@ -169,12 +60,6 @@
           :data-leaf-id="pane.leaf.id"
           @mousedown.capture="activateLeaf(pane.leaf.id)"
         >
-          <template v-if="splitDragActive">
-            <div class="drop-zone absolute left-0 top-0 z-20 h-full w-1/4 pointer-events-none transition-[background,opacity] duration-[120ms]" :class="{ 'dz-active bg-[color-mix(in_srgb,var(--accent)_28%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'h' && hoveredZone?.side === 'first' }" />
-            <div class="drop-zone absolute right-0 top-0 z-20 h-full w-1/4 pointer-events-none transition-[background,opacity] duration-[120ms]" :class="{ 'dz-active bg-[color-mix(in_srgb,var(--accent)_28%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'h' && hoveredZone?.side === 'second' }" />
-            <div class="drop-zone absolute left-0 top-0 z-20 h-1/4 w-full pointer-events-none transition-[background,opacity] duration-[120ms]" :class="{ 'dz-active bg-[color-mix(in_srgb,var(--accent)_28%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'v' && hoveredZone?.side === 'first' }" />
-            <div class="drop-zone absolute bottom-0 left-0 z-20 h-1/4 w-full pointer-events-none transition-[background,opacity] duration-[120ms]" :class="{ 'dz-active bg-[color-mix(in_srgb,var(--accent)_28%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]': hoveredZone?.leafId === pane.leaf.id && hoveredZone?.dir === 'v' && hoveredZone?.side === 'second' }" />
-          </template>
           <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[26px] shrink-0 items-center gap-[5px] border-b border-[#1e1e1e] bg-[#111111] px-2 text-[11px] text-secondary-foreground" @mousedown.stop>
             <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="10" class="shrink-0 text-muted-foreground" />
             <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="10" class="shrink-0 text-muted-foreground" />
@@ -280,7 +165,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { createActor, type Actor } from "xstate";
 import { agentStatusMachine, isBusyStatus } from "@/machines/agentStatus";
-import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe, PhChatCenteredText, PhInfo, PhColumns } from "@phosphor-icons/vue";
+import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe } from "@phosphor-icons/vue";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -289,7 +174,6 @@ import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
 import ClaudeChat from "./ClaudeChat.vue";
 import BrowserPane from "./BrowserPane.vue";
-import AgentToolbar from "./AgentToolbar.vue";
 import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vue";
 import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import { spinnerFrame } from "@/lib/spinner";
@@ -308,11 +192,8 @@ import AgentInspector, { type AgentInspectorAgent } from "@/components/AgentInsp
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
-import { useBoardTasksStore } from "@/stores/boardTasks";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useGitStore } from "@/stores/git";
-import { usePointerReorder } from "@/composables/usePointerReorder";
-import { useDragSplit, type SplitZone } from "@/composables/useDragSplit";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useDiagram } from "@/composables/useDiagram";
 
@@ -322,7 +203,6 @@ const uiStore = useUIStore();
 const { showDiagram } = useDiagram();
 const chatsStore = useClaudeChatsStore();
 const tabsStore = useTerminalTabsStore();
-const boardTasksStore = useBoardTasksStore();
 const notifStore = useNotificationsStore();
 const gitStore = useGitStore();
 const historyStore = useAgentHistoryStore();
@@ -360,14 +240,9 @@ const tabs = ref<Tab[]>([]);
 const activeTabId = ref(0);
 const focusedLeafId = ref(0);
 const splitWorkspace = ref(false);
-const splitMenuOpen = ref(false);
 const inspectorOpen = ref(false);
 const lastChatTabId = ref(0);
 const lastTerminalTabId = ref(0);
-const activeSurface = computed<"chat" | "terminal">(() => {
-  const active = tabs.value.find((tab) => tab.id === activeTabId.value);
-  return active && tabIsChat(active) ? "chat" : "terminal";
-});
 const splitChatTab = computed(() =>
   tabs.value.find((tab) => tab.id === lastChatTabId.value && tabIsChat(tab))
   ?? tabs.value.find(tabIsChat),
@@ -549,11 +424,6 @@ function insertSplit(
   };
 }
 
-function containsLeaf(node: TreeNode, id: number): boolean {
-  if (node.type === "leaf") return node.id === id;
-  return containsLeaf(node.first, id) || containsLeaf(node.second, id);
-}
-
 // ── tab helpers ─────────────────────────────────────────────────────────────
 
 function tabTitle(tab: Tab): string {
@@ -576,26 +446,13 @@ function isChat(tab: Tab): boolean {
   return tabIsChat(tab);
 }
 
-// A single-leaf editor tab shows a file icon + dirty dot instead of a status dot.
-function tabIsEditor(tab: Tab): boolean {
-  return tab.root.type === "leaf" && tab.root.leafType === "editor";
-}
-
 function tabIsChat(tab: Tab): boolean {
   return tab.root.type === "leaf" && tab.root.leafType === "chat";
-}
-
-function tabIsBrowser(tab: Tab): boolean {
-  return tab.root.type === "leaf" && tab.root.leafType === "browser";
 }
 
 function isTabVisible(tab: Tab): boolean {
   if (!splitWorkspace.value) return activeTabId.value === tab.id;
   return tab.id === splitChatTab.value?.id || tab.id === splitTerminalTab.value?.id;
-}
-
-function tabDirty(tab: Tab): boolean {
-  return getAllLeaves(tab.root).some((l) => l.leafType === "editor" && l.dirty);
 }
 
 // ── Per-leaf hook-server event listeners ─────────────────────────────────────
@@ -727,7 +584,7 @@ function unregisterLeafListeners(leafId: number) {
   if (actor) { actor.stop(); leafActors.delete(leafId); }
 }
 
-function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; id?: number; taskId?: string }): Leaf {
+function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; id?: number }): Leaf {
   terminalCounter++;
   return {
     type: "leaf",
@@ -740,7 +597,6 @@ function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: str
     initialCmd,
     cwd: extra?.cwd,
     resultToken: extra?.resultToken,
-    taskId: extra?.taskId,
   };
 }
 
@@ -822,19 +678,13 @@ function onAgentState(id: number, s: string, detail?: string) {
   // Track turn count before sending (subscription updates leaf.status after send).
   if (s === "running" && leaf.status !== "running") {
     leaf.round = (leaf.round ?? 0) + 1;
-    // A board task runs in its own worktree by default. Capture its baseline
-    // before the agent starts work; non-board terminals intentionally remain
-    // un-attributed instead of falling back to the global Git diff.
-    if (leaf.taskId) {
-      invoke("begin_agent_turn", {
-        taskId: leaf.taskId,
-        ptyId: leaf.id,
-        worktreePath: leaf.cwd ?? props.cwd,
-      }).catch(() => {});
-    }
-  }
-  if ((s === "done" || s === "error") && leaf.taskId) {
-    invoke("complete_agent_turn", { ptyId: leaf.id, state: s }).catch(() => {});
+    // Snapshot the worktree before the agent touches it, so this turn is
+    // revertable from the History panel. No-op outside a git repo.
+    invoke("create_checkpoint", {
+      cwd: leaf.cwd ?? props.cwd,
+      ptyId: leaf.id,
+      label: leaf.title || "Agent turn",
+    }).catch(() => {}); // best-effort: never block a turn on the snapshot
   }
   historyStore.addEvent(leaf.id, s);
   const actor = leafActors.get(id);
@@ -912,46 +762,6 @@ function onLeafNeedsInput(id: number, needs: boolean) {
 
 function tabStatus(tab: Tab): TermStatus {
   return aggregateStatus(getAllLeaves(tab.root), (l) => l.status);
-}
-
-function tabStatusText(tab: Tab): string {
-  for (const l of getAllLeaves(tab.root)) {
-    if (l.statusText) return l.statusText;
-  }
-  return "";
-}
-
-// Error cause (rate_limit|overloaded|…) for the red dot's tooltip.
-function tabStatusDetail(tab: Tab): string {
-  for (const l of getAllLeaves(tab.root)) {
-    if (l.status === "error" && l.statusDetail) return l.statusDetail;
-  }
-  return "";
-}
-
-// Unobtrusive tab tooltip: agent model (from SessionStart) + any error cause.
-function tabTooltip(tab: Tab): string | undefined {
-  const parts: string[] = [];
-  for (const l of getAllLeaves(tab.root)) {
-    if (l.model) { parts.push(`Model: ${l.model}`); break; }
-  }
-  const detail = tabStatusDetail(tab);
-  if (detail) parts.push(`Error: ${detail}`);
-  return parts.length ? parts.join(" · ") : undefined;
-}
-
-function tabProgress(tab: Tab): number | undefined {
-  for (const l of getAllLeaves(tab.root)) {
-    if (l.progress !== undefined) return l.progress;
-  }
-  return undefined;
-}
-
-function tabProgressLabel(tab: Tab): string {
-  for (const l of getAllLeaves(tab.root)) {
-    if (l.progressLabel) return l.progressLabel;
-  }
-  return "";
 }
 
 const activeTabLogs = computed(() => {
@@ -1073,26 +883,6 @@ function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initial
   if (initialPrompt) leaf.initialPrompt = initialPrompt;
 }
 
-function switchSurface(surface: "chat" | "terminal") {
-  if (activeSurface.value === surface) return;
-  const matchingTab = tabs.value.find((tab) => surface === "chat" ? tabIsChat(tab) : !tabIsChat(tab));
-  if (matchingTab) {
-    activateTab(matchingTab.id);
-    return;
-  }
-  if (surface === "chat") openClaudeChat();
-  else addTab();
-}
-
-function focusSurface(surface: "chat" | "terminal") {
-  if (!splitWorkspace.value) {
-    switchSurface(surface);
-    return;
-  }
-  const tab = surface === "chat" ? splitChatTab.value : splitTerminalTab.value;
-  if (tab) activateTab(tab.id);
-}
-
 function activateLeaf(id: number) {
   const tab = tabs.value.find((candidate) => findLeaf(candidate.root, id));
   if (!tab) return;
@@ -1120,7 +910,26 @@ function openBrowserTab(url?: string) {
   activateTab(tab.id);
 }
 
-function addTab(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; background?: boolean; taskId?: string }): Leaf {
+/** Full git manager as a tab (leafType "git") — same slot as browser/editor tabs. */
+function openGitTab() {
+  const existing = tabs.value.find((t) => t.root.type === "leaf" && t.root.leafType === "git");
+  if (existing) { activateTab(existing.id); return; }
+  const leaf: Leaf = {
+    type: "leaf",
+    id: nextPtyId(),
+    title: "Git",
+    defaultTitle: "Git",
+    isAgent: false,
+    busy: false,
+    status: "idle",
+    leafType: "git",
+  };
+  const tab: Tab = { id: leaf.id, root: leaf };
+  tabs.value.push(tab);
+  activateTab(tab.id);
+}
+
+function addTab(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; background?: boolean }): Leaf {
   const leaf = makeLeaf(initialCmd, extra);
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
@@ -1172,35 +981,6 @@ function reorderTabs(from: number, to: number) {
   const moved = tabs.value.splice(from, 1)[0];
   if (moved) tabs.value.splice(to, 0, moved);
 }
-
-function onSplit(fromIdx: number, zone: SplitZone) {
-  const srcTab = tabs.value[fromIdx];
-  if (!srcTab) return;
-  const targetTab = tabs.value.find((t) => containsLeaf(t.root, zone.leafId));
-  if (!targetTab || srcTab === targetTab) return;
-
-  targetTab.root = insertSplit(targetTab.root, zone.leafId, zone.dir, srcTab.root, zone.side);
-  tabs.value.splice(fromIdx, 1);
-  if (activeTabId.value === srcTab.id) activeTabId.value = targetTab.id;
-}
-
-const {
-  active: splitDragActive,
-  hoveredZone,
-  activate: activateSplitDrag,
-} = useDragSplit({ onSplit });
-
-// Pointer-based drag reorder for the top tab bar (HTML5 DnD is swallowed by
-// Tauri's native handler — see usePointerReorder). Group "tab" so a drag can only
-// land on another tab button. Dragging downward past the tab bar switches to
-// split-drop mode via onEscape.
-const {
-  dragIdx: tabDragIdx,
-  overIdx: tabOverIdx,
-  down: tabDragDown,
-} = usePointerReorder((from, to) => reorderTabs(from, to), {
-  onEscape: (idx, e) => activateSplitDrag(idx, e, tabTitle(tabs.value[idx])),
-});
 
 // Inject a file/folder path from the explorer into the focused leaf's PTY as an
 // "@path " context reference (relative to the workspace cwd when possible) so the
@@ -1285,7 +1065,7 @@ function isLeafDirty(leaf: Leaf): boolean {
 
 // Open a file from the explorer as an editor tab beside the terminal tabs. If the
 // file is already open anywhere, focus it instead of duplicating.
-function openFileInTab(path: string, name: string) {
+function openFileInTab(path: string, name: string, line?: number) {
   for (const tab of tabs.value) {
     const existing = getAllLeaves(tab.root).find(
       (l) => l.leafType === "editor" && l.filePath === path,
@@ -1294,7 +1074,10 @@ function openFileInTab(path: string, name: string) {
       activeTabId.value = tab.id;
       markTabSeen(tab);
       focusedLeafId.value = existing.id;
-      nextTick(() => xtermRefs.get(existing.id)?.focus());
+      nextTick(() => {
+        if (line) xtermRefs.get(existing.id)?.revealLine?.(line);
+        xtermRefs.get(existing.id)?.focus();
+      });
       return;
     }
   }
@@ -1309,6 +1092,7 @@ function openFileInTab(path: string, name: string) {
     status: "idle",
     leafType: "editor",
     filePath: path,
+    fileLine: line,
     dirty: false,
   };
   const tab: Tab = { id, root: leaf };
@@ -1331,7 +1115,6 @@ function splitFocused(kind: "terminal" | "chat", direction: "h" | "v") {
   tab.root = insertSplit(tab.root, focusedLeafId.value, direction, newLeaf);
   focusedLeafId.value = newLeaf.id;
   if (kind === "terminal") registerLeafListeners(newLeaf.id);
-  splitMenuOpen.value = false;
   nextTick(() => xtermRefs.get(newLeaf.id)?.focus());
 }
 
@@ -1386,10 +1169,6 @@ async function closeTab(tabId: number) {
 
 function isTabSplit(tab: Tab): boolean {
   return tab.root.type === 'split';
-}
-
-function tabLeafCount(tab: Tab): number {
-  return getAllLeaves(tab.root).length;
 }
 
 // Pull the task prompt out of a `burrow spawn` command line for chat-mode spawns.
@@ -1538,7 +1317,6 @@ function syncStore() {
       status: tabStatus(t),
       leafCount: getAllLeaves(t.root).length,
       round: Math.max(0, ...getAllLeaves(t.root).map((l) => l.round ?? 0)),
-      taskId: getAllLeaves(t.root)[0]?.taskId,
       sessionId: getAllLeaves(t.root)[0]?.sessionId,
     })),
   );
@@ -1588,7 +1366,7 @@ watch(
   },
 );
 
-// Returning to terminal mode (from dashboard/git/mission) counts as seeing the
+// Returning to terminal mode (from dashboard/git) counts as seeing the
 // active tab — clear any "review" badge it earned while a non-terminal mode was up.
 watch(
   () => uiStore.mode,
@@ -1612,11 +1390,12 @@ function applyTabRequest(req: typeof tabsStore.request) {
   if (req.action === "activate" && !tabs.value.some((t) => t.id === req.tabId)) return;
   handledNonce = req.nonce;
   if (req.action === "activate" && req.tabId != null) activateTab(req.tabId);
-  else if (req.action === "add") addTab(req.cmd || undefined, { taskId: req.taskId });
+  else if (req.action === "add") addTab(req.cmd || undefined);
   else if (req.action === "close" && req.tabId != null) closeTab(req.tabId);
   else if (req.action === "reorder" && req.fromIdx != null && req.toIdx != null) {
     reorderTabs(req.fromIdx, req.toIdx);
   }
+  else if (req.action === "openGit") openGitTab();
   else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId, undefined, req.initialPrompt);
   else if (req.action === "rename" && req.tabId != null && req.title != null) {
     const tab = tabs.value.find((t) => t.id === req.tabId);
@@ -1644,9 +1423,9 @@ onMounted(async () => {
   // id and `create_pty` would re-attach to the dead/closed session instead of
   // starting clean. Done unconditionally so a workspace with no saved tabs but
   // live orphan sessions still can't collide.
-  // Exclude Mission Control's offset id-space (>= PTY_BASE = 2_000_000): those are
-  // a separate range on purpose, and counting them would shove normal tabs up into
-  // the MC range. Anything below MC_RANGE_START is a normal tab id.
+  // Exclude the legacy offset id-space (>= 1_000_000) left behind by the removed
+  // Mission Control feature: an old daemon session in that range would otherwise
+  // shove fresh tab ids up into it. Anything below MC_RANGE_START is a normal tab.
   const MC_RANGE_START = 1_000_000;
   const maxDaemonId = daemonSessions.reduce(
     (m, s) => (s.pty_id != null && s.pty_id < MC_RANGE_START ? Math.max(m, s.pty_id) : m),
@@ -1783,23 +1562,6 @@ onMounted(() => {
           for (const [wid, list] of Object.entries(tabsStore.tabsByWs)) {
             if (list.some((t) => t.id === tabId)) { tabsStore.close(Number(wid), tabId); break; }
           }
-        } else if (r.kind === "board-move") {
-          // Frontend half of `burrow board-move <taskId> todo` (lib.rs's
-          // take_spawn_requests board-move arm pushes this instead of answering
-          // purely in Rust, since the Backlog→Todo transition needs worktree
-          // creation + agent spawn — client-only logic). r.wsid carries the task
-          // id (reusing the generic field slot); r.tabid is always "todo" here
-          // (every other column is answered in Rust with no frontend involved).
-          // The claiming Terminal (ws === cwd, i.e. this workspace) is the task's
-          // repo — that's where the Manager runs `burrow board-move` from.
-          const taskId = r.wsid;
-          try {
-            await boardTasksStore.load(props.workspaceId);
-            const task = (boardTasksStore.tasksByRepo[props.workspaceId] || []).find((t) => t.id === taskId);
-            if (task && task.board_column === "backlog") await boardTasksStore.startTask(task);
-          } catch (err) {
-            console.error("burrow board-move (todo) failed:", err);
-          }
         } else if (r.kind === "workspace-create") {
           // Add a workspace (DB insert via the store) and open it. r.cmd = name,
           // r.cwd = path. The store reloads so the Sidebar reflects it immediately.
@@ -1872,7 +1634,7 @@ const activeAgentLeafId = computed((): number | null => {
 });
 
 
-defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, refitAll, repaintAll });
+defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
 </script>
 
 <style scoped>

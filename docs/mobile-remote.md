@@ -1,5 +1,10 @@
 # Burrow Remote (mobile MVP)
 
+> **Stale — describes the old Rust `burrow-web` binary and its pairing-code
+> flow.** On the Go/Wails backend the mobile client is served by the in-app
+> HTTP server instead (bearer token, no pairing code) and the bundle is
+> embedded in the app binary. See `docs/tailscale-remote-access.md`.
+
 Burrow Remote is a small mobile-first web client served by a separate `burrow-web`
 process. The desktop app and `burrow-daemon` remain the owners of PTYs. The web
 gateway binds to loopback by default and should be exposed only through a private

@@ -2,11 +2,11 @@
   Dashboard.vue — the "home" landing view (first activity-bar item).
 
   A full main-pane mode (ui.mode === 'dashboard'), same slot as GitPanel /
-  MissionControl. Four panels:
+  the main pane. Four panels:
     1. Agent activity   — cross-workspace roll-up of terminal-tab statuses
                           (running/waiting/review/done) + an "attention" list.
-    2. Quick actions    — launcher buttons (new terminal/chat/workspace, Mission
-                          Control, settings).
+    2. Quick actions    — launcher buttons (new terminal/chat/workspace,
+                          settings).
     3. Workspaces       — card grid of every top-level repo + its worktrees, with
                           live git branch / dirty count, click to open.
   Reads the workspace + terminalTabs stores; pulls per-workspace git state via the
@@ -68,9 +68,6 @@
           <button class="flex flex-col items-center gap-1.5 rounded-[10px] border border-transparent bg-hover px-2 py-3.5 text-xs font-[550] text-foreground transition-colors hover:border-accent hover:text-accent" @click="$emit('new-workspace')">
             <PhFolderPlus :size="18" /><span>New workspace</span>
           </button>
-          <button class="flex flex-col items-center gap-1.5 rounded-[10px] border border-transparent bg-hover px-2 py-3.5 text-xs font-[550] text-foreground transition-colors hover:border-accent hover:text-accent" @click="ui.setMode('mission')">
-            <PhRocketLaunch :size="18" /><span>Mission Control</span>
-          </button>
           <button class="flex flex-col items-center gap-1.5 rounded-[10px] border border-transparent bg-hover px-2 py-3.5 text-xs font-[550] text-foreground transition-colors hover:border-accent hover:text-accent" @click="ui.openSettings()">
             <PhGear :size="18" /><span>Settings</span>
           </button>
@@ -131,7 +128,7 @@ import { ref, computed, reactive, onMounted, onBeforeUnmount, watch } from "vue"
 import { invoke } from "@tauri-apps/api/core";
 import {
   PhSquaresFour, PhTerminal, PhFolder, PhFolderPlus, PhGitBranch,
-  PhRocketLaunch, PhGear, PhArrowsClockwise,
+  PhGear, PhArrowsClockwise,
 } from "@phosphor-icons/vue";
 import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";

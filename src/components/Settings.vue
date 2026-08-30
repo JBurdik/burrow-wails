@@ -376,11 +376,11 @@
           <div class="flex max-w-[880px] flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Burrow Remote</span>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
-            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span class="text-[11px] text-muted-foreground">Enter this six-digit code in Burrow Remote. The full token remains available for integrations.</span><code class="mt-1.5 block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ httpStatus.pairingCode }}</code></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(httpStatus.pairingCode, 'pairing-code')">{{ copiedLabel === 'pairing-code' ? 'Copied' : 'Copy code' }}</Button></div>
+            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Access token</span><span class="text-[11px] text-muted-foreground">Paste this into Burrow Remote. Treat it like an SSH key — it is full access to your terminals.</span><code class="mt-1.5 block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ httpStatus.token }}</code></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(httpStatus.token, 'token')">{{ copiedLabel === 'token' ? 'Copied' : 'Copy token' }}</Button></div>
             <div v-else class="flex items-center gap-4 rounded-md border border-dashed border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Not enabled</span><span class="text-[11px] text-muted-foreground">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
             <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Private tunnel</span>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
-            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ tailscaleStatus.serve_url }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then paste the token above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
+            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ tailscaleStatus.serve_url }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone. &ldquo;Copy link&rdquo; appends the token as a URL fragment so you do not have to type it — the fragment never reaches the server and Burrow Remote clears it from the address bar once read.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(remoteLinkWithToken, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy link' }}</Button></div>
           </div>
         </section>
 
@@ -455,7 +455,7 @@
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
               <h2 class="text-[15px] font-semibold text-foreground">Claude Profiles</h2>
-              <span class="text-xs text-muted-foreground">Launch Mission Control tasks with a different config dir, binary, or flags</span>
+              <span class="text-xs text-muted-foreground">Launch agent chats with a different config dir, binary, or flags</span>
             </div>
             <div class="ml-auto flex items-center gap-2.5">
               <Button variant="outline" size="sm" @click="profilesStore.add()">
@@ -467,7 +467,7 @@
 
           <p class="m-0 text-xs leading-relaxed text-muted-foreground">
             A profile sets <code class="rounded bg-hover px-1 font-mono text-[11px] text-secondary-foreground">CLAUDE_CONFIG_DIR</code> (a separate Claude account / settings / session
-            store), the binary to run, and extra flags. Pick one per task in Mission Control's composer.
+            store), the binary to run, and extra flags. Pick one per chat session.
           </p>
 
           <div class="flex flex-col gap-3">
@@ -1540,7 +1540,7 @@ function bgFileName(path: string): string {
 // Per-element backdrop-blur sliders (keys map to ui store refs).
 const blurControls = [
   { key: "blurPanels", label: "Panels (sidebar, bars)" },
-  { key: "blurContent", label: "Mission Control & Dashboard" },
+  { key: "blurContent", label: "Dashboard" },
   { key: "blurTerminal", label: "Terminal" },
   { key: "blurOverlay", label: "Overlays (spotlight, settings)" },
   { key: "blurDropdown", label: "Dropdowns (menus, notifications)" },
@@ -1864,10 +1864,18 @@ function clampRange(v: string, min: number, max: number, fallback: number): numb
 // (server::maybe_start runs once at Tauri setup), so this just writes the
 // pref file and reflects the pending state back.
 const httpEnabled = ref(false);
-const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string; token: string; pairingCode: string } | null>(null);
+const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string; token: string } | null>(null);
+
+// The one-tap pairing link: serve URL + the token in a fragment.
+const remoteLinkWithToken = computed(() => {
+  const url = tailscaleStatus.value?.serve_url;
+  const tok = httpStatus.value?.token;
+  if (!url) return "";
+  return tok ? `${url}#t=${encodeURIComponent(tok)}` : url;
+});
 async function refreshHttpStatus() {
   try {
-    const s = await invoke<{ enabled: boolean; port: number; tokenPath: string; token: string; pairingCode: string }>("get_http_server_status");
+    const s = await invoke<{ enabled: boolean; port: number; tokenPath: string; token: string }>("get_http_server_status");
     httpStatus.value = s;
     httpEnabled.value = s.enabled;
   } catch { /* browser-only dev — no Tauri backend */ }

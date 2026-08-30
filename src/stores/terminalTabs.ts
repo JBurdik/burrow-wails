@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import type { TermStatus } from "@/lib/terminalStatus";
+import { snoozeKey, wake } from "@/lib/snoozedTabs";
 
 // Lightweight mirror of each workspace's terminal tabs so the Sidebar can render
 // them nested under its project. The Terminal component remains the source of
@@ -15,15 +16,13 @@ export interface TabSummary {
   status: TermStatus;
   leafCount?: number;
   round?: number;
-  /** Kanban board task id, when this tab's first leaf was spawned by TaskDetail.vue. */
-  taskId?: string;
   /** Agent-native session id (for --resume), mirrored from the leaf. */
   sessionId?: string;
 }
 
 type TabRequest = {
   wsId: number;
-  action: "activate" | "add" | "close" | "reorder" | "openChat" | "rename";
+  action: "activate" | "add" | "close" | "reorder" | "openChat" | "openGit" | "rename";
   tabId?: number;
   chatId?: number;
   agentId?: string;
@@ -34,8 +33,6 @@ type TabRequest = {
   initialPrompt?: string;
   /** Optional command to run in a newly-added tab (action: "add"). */
   cmd?: string;
-  /** Optional Kanban board task id to stamp onto the newly-added tab's leaf (action: "add"). */
-  taskId?: string;
   nonce: number;
 };
 
@@ -45,6 +42,10 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   // A `review` status is terminal-owned and persists until Terminal receives
   // MARK_SEEN. Keep the sidebar responsive while that hand-off completes.
   const seenCompletionsByWs = ref<Record<number, Record<number, true>>>({});
+  // Last time each tab did something worth sorting on (created, status change,
+  // retitled, another agent round, activated). The sidebar lists tabs from every
+  // open project in one flat feed, so it needs a recency key per tab.
+  const activityByWs = ref<Record<number, Record<number, number>>>({});
   const request = ref<TabRequest | null>(null);
   let nonce = 0;
 
@@ -62,6 +63,33 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
       if (!currentIds.has(Number(tabId))) delete seen[Number(tabId)];
     }
     seenCompletionsByWs.value[wsId] = seen;
+
+    const prevTabs = new Map((tabsByWs.value[wsId] ?? []).map((tab) => [tab.id, tab]));
+    const stamps = { ...(activityByWs.value[wsId] ?? {}) };
+    const now = Date.now();
+    // A snoozed tab wakes on its own as soon as the agent moves — that (and the
+    // tab going away) is the only thing that clears a snooze automatically.
+    const toWake: string[] = [];
+    for (const tab of tabs) {
+      const before = prevTabs.get(tab.id);
+      const changed = !before
+        || before.status !== tab.status
+        || before.title !== tab.title
+        || before.round !== tab.round;
+      if (changed || stamps[tab.id] == null) stamps[tab.id] = now;
+      if (before && before.status !== tab.status && tab.status !== "idle") {
+        toWake.push(snoozeKey(wsId, tab.id));
+      }
+    }
+    for (const key of Object.keys(stamps)) {
+      if (!currentIds.has(Number(key))) {
+        toWake.push(snoozeKey(wsId, Number(key)));
+        delete stamps[Number(key)];
+      }
+    }
+    if (toWake.length) wake(toWake);
+    activityByWs.value[wsId] = stamps;
+
     tabsByWs.value[wsId] = tabs;
   }
   function setActive(wsId: number, tabId: number) {
@@ -71,6 +99,12 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     delete tabsByWs.value[wsId];
     delete activeByWs.value[wsId];
     delete seenCompletionsByWs.value[wsId];
+    delete activityByWs.value[wsId];
+  }
+
+  /** Recency key for the sidebar feed; 0 for a tab we have never seen. */
+  function activityAt(wsId: number, tabId: number): number {
+    return activityByWs.value[wsId]?.[tabId] ?? 0;
   }
 
   function isCompletionUnseen(wsId: number, tabId: number): boolean {
@@ -88,10 +122,11 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     // Terminal also clears its durable review state. This makes the sidebar
     // acknowledge the completion immediately, before the component round-trip.
     markCompletionSeen(wsId, tabId);
+    activityByWs.value[wsId] = { ...(activityByWs.value[wsId] ?? {}), [tabId]: Date.now() };
     request.value = { wsId, action: "activate", tabId, nonce: ++nonce };
   }
-  function add(wsId: number, cmd?: string, taskId?: string) {
-    request.value = { wsId, action: "add", cmd, taskId, nonce: ++nonce };
+  function add(wsId: number, cmd?: string) {
+    request.value = { wsId, action: "add", cmd, nonce: ++nonce };
   }
   function close(wsId: number, tabId: number) {
     request.value = { wsId, action: "close", tabId, nonce: ++nonce };
@@ -102,9 +137,13 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   function openChat(wsId: number, chatId?: number, agentId?: string, initialPrompt?: string) {
     request.value = { wsId, action: "openChat", chatId, agentId, initialPrompt, nonce: ++nonce };
   }
+  /** Open the full git manager as a tab in that workspace's Terminal. */
+  function openGit(wsId: number) {
+    request.value = { wsId, action: "openGit", nonce: ++nonce };
+  }
   function rename(wsId: number, tabId: number, title: string) {
     request.value = { wsId, action: "rename", tabId, title, nonce: ++nonce };
   }
 
-  return { tabsByWs, activeByWs, request, setTabs, setActive, clear, isCompletionUnseen, activate, add, close, reorder, openChat, rename };
+  return { tabsByWs, activeByWs, activityByWs, request, setTabs, setActive, clear, activityAt, isCompletionUnseen, activate, add, close, reorder, openChat, openGit, rename };
 });

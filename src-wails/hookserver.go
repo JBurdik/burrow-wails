@@ -6,8 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // HookServer receives `burrow status <state>` POSTs from the `burrow`
@@ -59,13 +57,13 @@ func (h *HookServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	eventName := "pty-hook-" + p.PtyID
 	switch p.State {
 	case "waiting", "permission", "running", "done":
-		runtime.EventsEmit(h.ctx, eventName, p.State)
+		emitAll(h.ctx, eventName, p.State)
 	case "error":
-		runtime.EventsEmit(h.ctx, eventName, map[string]string{"state": "error", "detail": p.Detail})
+		emitAll(h.ctx, eventName, map[string]string{"state": "error", "detail": p.Detail})
 	case "session":
-		runtime.EventsEmit(h.ctx, eventName, map[string]string{"state": "session", "model": p.Model, "source": p.Source, "title": p.Title})
+		emitAll(h.ctx, eventName, map[string]string{"state": "session", "model": p.Model, "source": p.Source, "title": p.Title})
 	default:
-		runtime.EventsEmit(h.ctx, eventName, p.State)
+		emitAll(h.ctx, eventName, p.State)
 	}
 
 	w.WriteHeader(http.StatusOK)

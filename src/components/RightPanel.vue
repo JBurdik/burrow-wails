@@ -67,6 +67,13 @@
             :set-refresh-interval="ar.setRefreshInterval"
           />
           <button
+            class="flex items-center rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            @click="activeTerm()?.openGitTab()"
+            title="Open the full git manager as a tab"
+          >
+            <PhArrowsOutSimple :size="13" />
+          </button>
+          <button
             class="flex items-center rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
             :disabled="git.loading"
             @click="git.refresh()"
@@ -233,6 +240,63 @@
     </div>
 
     <PullRequestsPanel v-else-if="activeTab === 'pull-requests'" :cwd="props.cwd" />
+
+    <!-- History tab: pre-turn worktree snapshots, newest first -->
+    <div v-else-if="activeTab === 'history'" class="flex flex-1 flex-col overflow-y-auto">
+      <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
+        <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Checkpoints</span>
+        <button class="rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh" @click="loadCheckpoints">
+          <PhArrowClockwise :size="12" />
+        </button>
+      </div>
+
+      <div v-if="!checkpoints.length" class="m-2 rounded-lg border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
+        No checkpoints yet.<br />One is taken before every agent turn.
+      </div>
+
+      <div
+        v-for="cp in checkpoints"
+        :key="cp.id"
+        class="group/cp flex cursor-pointer items-center gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
+        @click="openCheckpointDiff(cp)"
+      >
+        <PhClockCounterClockwise :size="11" class="shrink-0 text-muted-foreground" />
+        <div class="flex min-w-0 flex-1 flex-col">
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ cp.label || "Checkpoint" }}</span>
+          <span class="font-mono text-[9.5px] text-muted-foreground">{{ cpTime(cp.createdAt) }} · {{ cp.commit.slice(0, 7) }}</span>
+        </div>
+        <button
+          class="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground group-hover/cp:opacity-100"
+          title="Restore the working tree to this checkpoint"
+          @click.stop="restoreTarget = cp"
+        >
+          <PhArrowUUpLeft :size="12" />
+        </button>
+      </div>
+    </div>
+    <!-- Restore confirm — overwrites files on disk, so it always asks first -->
+    <Teleport to="body">
+      <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="restoreTarget" @click.self="restoreTarget = null">
+        <div class="flex w-[430px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+          <h3 class="text-sm font-semibold text-foreground">Restore checkpoint “{{ restoreTarget!.label || restoreTarget!.commit.slice(0, 7) }}”?</h3>
+          <p class="text-[11.5px] leading-[1.7] text-secondary-foreground">
+            Every file in this workspace goes back to how it looked at
+            <strong>{{ cpTime(restoreTarget!.createdAt) }}</strong> — later edits are overwritten and files
+            created since are deleted. Your commits and the staging area are untouched.
+          </p>
+          <p class="text-[11.5px] leading-[1.7] text-secondary-foreground">
+            The current state is saved as a new checkpoint first, so this is undoable.
+          </p>
+          <p v-if="restoreError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ restoreError }}</p>
+          <div class="flex justify-end gap-2">
+            <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="restoreTarget = null">Cancel</button>
+            <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" :disabled="restoreBusy" @click="confirmRestore">
+              {{ restoreBusy ? "Restoring…" : "Restore" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
@@ -243,6 +307,7 @@ import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight,
+  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
@@ -284,14 +349,66 @@ const tabs = computed(() => {
     { id: "git",      label: "Git",      icon: PhGitBranch },
     { id: "pull-requests", label: "PRs", icon: PhGitBranch },
     { id: "explorer", label: "Explorer", icon: PhFiles },
+    { id: "history",  label: "History",  icon: PhClockCounterClockwise },
   ];
-  return props.isGit ? all : all.filter((t) => t.id !== "git");
+  // Checkpoints are git snapshots, so History shares the Git tab's precondition.
+  return props.isGit ? all : all.filter((t) => t.id !== "git" && t.id !== "history");
 });
 
 // Keep the active tab valid: a non-git workspace can't sit on the hidden Git tab.
 watch(() => props.isGit, (isGit) => {
-  if (!isGit && activeTab.value === "git") activeTab.value = "explorer";
+  if (!isGit && (activeTab.value === "git" || activeTab.value === "history")) activeTab.value = "explorer";
 }, { immediate: true });
+
+// --- Checkpoints (History tab) ---
+interface Checkpoint {
+  id: number;
+  cwd: string;
+  ptyId: string;
+  label: string;
+  commit: string;
+  tree: string;
+  createdAt: number;
+}
+
+const checkpoints = ref<Checkpoint[]>([]);
+const restoreTarget = ref<Checkpoint | null>(null);
+const restoreError = ref("");
+const restoreBusy = ref(false);
+
+async function loadCheckpoints() {
+  if (!props.cwd) return (checkpoints.value = []);
+  checkpoints.value = await invoke<Checkpoint[]>("list_checkpoints", { cwd: props.cwd, limit: 50 });
+}
+
+function cpTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+// What has changed in the workspace since this checkpoint was taken.
+async function openCheckpointDiff(cp: Checkpoint) {
+  const diff = await invoke<string>("checkpoint_diff", { cwd: props.cwd, commit: cp.commit });
+  if (!diff.trim()) return;
+  activeTerm()?.openDiffInTab(`Since “${cp.label || cp.commit.slice(0, 7)}”`, false, diff);
+}
+
+async function confirmRestore() {
+  if (!restoreTarget.value) return;
+  restoreBusy.value = true;
+  restoreError.value = "";
+  try {
+    await invoke("restore_checkpoint", { cwd: props.cwd, commit: restoreTarget.value.commit });
+    restoreTarget.value = null;
+    await loadCheckpoints();
+    git.refresh(true);
+  } catch (e) {
+    restoreError.value = String(e);
+  } finally {
+    restoreBusy.value = false;
+  }
+}
+
+watch([activeTab, () => props.cwd], () => { if (activeTab.value === "history") loadCheckpoints(); });
 
 watch(() => props.cwd, (p) => {
   if (p) {

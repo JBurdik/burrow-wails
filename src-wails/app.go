@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"burrow/internal/agentproc"
 )
@@ -37,19 +37,63 @@ type App struct {
 
 const httpServerPort = 37892
 
+// httpEnabledPrefPath is the marker file that survives a restart. Its
+// presence is the whole pref — the Rust backend used the same
+// `http_enabled` file for this.
+func httpEnabledPrefPath() (string, error) {
+	dataDir, err := appDataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "http_enabled"), nil
+}
+
 // SetHttpEnabled starts/stops the remote HTTP+WS server (browser/remote
-// access), matching the frontend's `set_http_enabled` invoke call.
+// access), matching the frontend's `set_http_enabled` invoke call, and
+// persists the choice so it survives a restart.
 func (a *App) SetHttpEnabled(enabled bool) error {
+	if err := a.setHttpEnabled(enabled); err != nil {
+		return err
+	}
+	path, err := httpEnabledPrefPath()
+	if err != nil {
+		return err
+	}
+	if enabled {
+		return os.WriteFile(path, []byte("1"), 0o644)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// setHttpEnabled is the in-process half, without touching the pref file —
+// startup() calls it directly when restoring the persisted state.
+func (a *App) setHttpEnabled(enabled bool) error {
 	if enabled == a.httpSrvRunning {
 		return nil
 	}
 	if enabled {
 		a.httpSrv = NewHTTPServer(a)
+		// Publish it so emitAll fans events out to browser clients too.
+		wsBroadcaster.Store(a.httpSrv)
+		srv := a.httpSrv
 		go func() {
-			if err := a.httpSrv.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", httpServerPort)); err != nil {
+			if err := srv.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", httpServerPort)); err != nil && err != http.ErrServerClosed {
 				log.Printf("http server: %v", err)
 			}
 		}()
+	} else {
+		wsBroadcaster.Store(nil)
+		// Actually close the listener. "Remote access: off" that leaves the
+		// port open until the next restart is not off.
+		if a.httpSrv != nil {
+			if err := a.httpSrv.Close(); err != nil {
+				log.Printf("http server close: %v", err)
+			}
+			a.httpSrv = nil
+		}
 	}
 	a.httpSrvRunning = enabled
 	return nil
@@ -58,11 +102,10 @@ func (a *App) SetHttpEnabled(enabled bool) error {
 // HttpServerStatus mirrors Settings.vue's local httpStatus shape exactly
 // (camelCase — that's what the original Rust command actually returned).
 type HttpServerStatus struct {
-	Enabled     bool   `json:"enabled"`
-	Port        int    `json:"port"`
-	TokenPath   string `json:"tokenPath"`
-	Token       string `json:"token"`
-	PairingCode string `json:"pairingCode"`
+	Enabled   bool   `json:"enabled"`
+	Port      int    `json:"port"`
+	TokenPath string `json:"tokenPath"`
+	Token     string `json:"token"`
 }
 
 func (a *App) GetHttpServerStatus() HttpServerStatus {
@@ -74,9 +117,6 @@ func (a *App) GetHttpServerStatus() HttpServerStatus {
 	}
 	if a.httpSrv != nil {
 		s.Token = a.httpSrv.token
-		if len(s.Token) >= 6 {
-			s.PairingCode = strings.ToUpper(s.Token[:6])
-		}
 	}
 	return s
 }
@@ -121,6 +161,16 @@ func (a *App) startup(ctx context.Context) {
 	a.hookSrv = hookSrv
 	if err := os.WriteFile(filepath.Join(dataDir, "hook.port"), []byte(fmt.Sprintf("%d", hookSrv.port)), 0o644); err != nil {
 		log.Printf("write hook.port: %v", err)
+	}
+
+	// Restore remote access if it was left on. Without this the Settings
+	// toggle silently reset to off on every launch.
+	if path, err := httpEnabledPrefPath(); err == nil {
+		if _, err := os.Stat(path); err == nil {
+			if err := a.setHttpEnabled(true); err != nil {
+				log.Printf("restore http server: %v", err)
+			}
+		}
 	}
 }
 
