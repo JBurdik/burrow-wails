@@ -262,6 +262,8 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     // Remote HTTP server / Tailscale
     case "get_http_server_status":
       return App.GetHttpServerStatus();
+    case "regenerate_pair_code":
+      return App.RegeneratePairCode();
     case "get_tailscale_status":
       return App.GetTailscaleStatus();
     case "set_tailscale_serve":

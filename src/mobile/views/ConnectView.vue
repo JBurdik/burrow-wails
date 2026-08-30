@@ -5,40 +5,39 @@
       <span class="pair-product">Burrow Remote</span>
     </div>
 
-    <form class="pair-form" @submit.prevent="tryConnect">
+    <form class="pair-form" @submit.prevent="tryPair">
       <p class="pair-target">{{ urlInput }}</p>
-      <label class="pair-label">Přístupový token</label>
-      <input
-        v-model="tokenInput"
-        class="m-input pair-token"
-        type="text"
-        inputmode="text"
-        placeholder="48 znaků z Nastavení"
-        autocomplete="off"
-        autocorrect="off"
-        autocapitalize="none"
-        spellcheck="false"
-        required
-      />
+      <label class="pair-label">Párovací kód</label>
+      <PinInputRoot
+        v-model="codeDigits"
+        class="pin-root"
+        type="number"
+        placeholder="•"
+        :disabled="busy"
+        @complete="tryPair"
+      >
+        <PinInputInput v-for="i in 6" :key="i" :index="i - 1" class="pin-cell" />
+      </PinInputRoot>
 
       <div v-if="err" class="pair-error" :class="{ 'pair-error--network': isNetworkError }" role="alert">
         {{ err }}
       </div>
 
-      <button class="m-btn" type="submit" :disabled="busy">
-        {{ busy ? 'Connecting…' : 'Connect' }}
+      <button class="m-btn" type="submit" :disabled="busy || codeDigits.length < 6">
+        {{ busy ? 'Připojuji…' : 'Připojit' }}
       </button>
     </form>
 
     <p class="pair-hint">
-      Na desktopu v Nastavení → Remote access zkopíruj celou adresu i s tokenem —
-      otevřením takového odkazu se pole vyplní samo.
+      Na desktopu v Nastavení → Remote access najdeš šestimístný kód.
+      Platí na jedno použití — po spárování se telefon připojuje sám.
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import { PinInputRoot, PinInputInput } from 'reka-ui';
 import { useRemoteStore } from '../store';
 
 const store = useRemoteStore();
@@ -47,27 +46,27 @@ function currentRemoteUrl() {
   const path = window.location.pathname.replace(/\/(?:mobile\.html)?$/, '') || '/';
   return `${window.location.origin}${path === '/' ? '' : path}`;
 }
-const urlInput   = ref(store.baseUrl || currentRemoteUrl());
-const tokenInput = ref(store.token || '');
+const urlInput = ref(store.baseUrl || currentRemoteUrl());
+const codeDigits = ref<number[]>([]);
 const busy = ref(false);
 const err  = ref('');
 const isNetworkError = ref(false);
 
-async function tryConnect() {
+async function tryPair() {
+  const code = codeDigits.value.join('');
+  if (busy.value || code.length < 6) return;
   busy.value = true;
   err.value = '';
   isNetworkError.value = false;
   try {
-    await store.connect(urlInput.value.trim(), tokenInput.value.trim());
+    await store.pair(urlInput.value.trim(), code);
   } catch (e: any) {
-    const msg: string = e?.message ?? 'Connection failed';
-    // A 401 from the /ws upgrade surfaces as a closed-before-open WebSocket error —
-    // distinguish "reachable but wrong token" from "can't reach host at all" using
-    // the healthCheck outcome that already ran inside store.connect().
-    isNetworkError.value = !/token|unauthor/i.test(msg);
-    err.value = isNetworkError.value
-      ? `Could not reach ${urlInput.value}: ${msg}`
-      : 'Connected to server, but the token was rejected (401).';
+    const msg: string = e?.message ?? 'Připojení selhalo';
+    // Anything from /pair itself is a server answer, so the host is reachable.
+    // Only a transport failure (or a rejected /ws upgrade) is a network problem.
+    isNetworkError.value = !/kód|zamčené|token|unauthor/i.test(msg);
+    err.value = isNetworkError.value ? `Nedostupné ${urlInput.value}: ${msg}` : msg;
+    codeDigits.value = [];
   } finally {
     busy.value = false;
   }
@@ -137,12 +136,31 @@ async function tryConnect() {
   margin-bottom: -4px;
 }
 
-/* 48 hex chars has to stay readable on a phone. */
-.pair-token {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.02em;
+/* reka-ui PinInput, styled with the mobile theme instead of shadcn's
+   tailwind skin — src/mobile/ carries no tailwind. */
+.pin-root {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
 }
+.pin-cell {
+  width: 44px;
+  height: 56px;
+  padding: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  color: var(--text);
+  background: var(--bg-input, var(--bg-panel));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.pin-cell::-webkit-outer-spin-button,
+.pin-cell::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pin-cell:focus { border-color: var(--accent); }
+.pin-cell::placeholder { color: var(--text-muted); }
 
 .pair-error {
   font-family: var(--font-mono);

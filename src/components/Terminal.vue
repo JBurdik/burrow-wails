@@ -109,6 +109,7 @@
             v-else-if="pane.leaf.leafType === 'browser'"
             :initial-url="pane.leaf.browserUrl"
           />
+          <GitPanel v-else-if="pane.leaf.leafType === 'git'" class="min-w-0 flex-1" />
           <XTerm
             v-else
             :pty-id="pane.leaf.id"
@@ -174,9 +175,11 @@ import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
 import ClaudeChat from "./ClaudeChat.vue";
 import BrowserPane from "./BrowserPane.vue";
+import GitPanel from "./GitPanel.vue";
 import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vue";
 import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import { spinnerFrame } from "@/lib/spinner";
+import { configReady } from "@/lib/config";
 import { playSound } from "@/lib/sounds";
 import { notifyNtfy } from "@/lib/ntfy";
 import type { NtfyEvent } from "@/stores/ui";
@@ -1271,7 +1274,13 @@ function allLeaves(): Leaf[] {
 
 const CHAT_TABS_KEY = (wsId: number) => `burrow.chat_tabs.${wsId}`;
 
+// Flipped once onMounted has finished reading the saved tabs. Until then any
+// tab mutation (e.g. a chat request that arrives mid-mount) would persist a
+// list that doesn't include the not-yet-restored rows, wiping them.
+let restored = false;
+
 function persist() {
+  if (!restored) return;
   // Editor leaves have no PTY — don't persist them as bogus pty rows. Restoring
   // open editors on restart is a follow-up.
   const payload: PersistedTab[] = allLeaves()
@@ -1461,10 +1470,13 @@ onMounted(async () => {
       tabs.value.push(tab);
       registerLeafListeners(leaf.id);
     });
-    activateTab(tabs.value[0].id);
+    if (!activeTabId.value) activateTab(tabs.value[0].id);
   }
 
-  // Restore chat tabs saved from the previous session.
+  // Restore chat tabs saved from the previous session. The sessions themselves
+  // arrive behind configReady — reading before that resolves finds none of them
+  // and silently drops every chat thread.
+  await configReady;
   try {
     const raw = localStorage.getItem(CHAT_TABS_KEY(props.workspaceId));
     if (raw) {
@@ -1478,6 +1490,8 @@ onMounted(async () => {
     }
   } catch {}
 
+  restored = true;
+  persist(); // the restore may have renumbered dead PTYs; save the ids we settled on
   syncStore();
   // Replay a request that landed while this Terminal was mounting/restoring —
   // e.g. the sidebar clicking a tab of a workspace that wasn't open yet.

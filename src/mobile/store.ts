@@ -5,17 +5,6 @@ import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/li
 
 const URL_LEGACY_KEY = "burrow-mobile-url";
 const TOKEN_LEGACY_KEY = "burrow-mobile-token";
-// Settings hands out a "<serve url>#t=<token>" link so the token never has to
-// be typed on a phone. A fragment never leaves the browser (not sent to the
-// server, absent from proxy logs); it is stripped from the address bar right
-// after it is read so it does not linger in a screenshot or a shared URL.
-function tokenFromHash(): string {
-  const m = /[#&]t=([^&]+)/.exec(window.location.hash);
-  if (!m) return "";
-  history.replaceState(null, "", window.location.pathname + window.location.search);
-  return decodeURIComponent(m[1]);
-}
-
 const URL_CONFIG_KEY = "mobileBaseUrl";
 const TOKEN_CONFIG_KEY = "mobileToken";
 
@@ -66,7 +55,7 @@ export const useRemoteStore = defineStore("remote", () => {
     migrateFromLocalStorage(URL_LEGACY_KEY, URL_CONFIG_KEY);
     migrateFromLocalStorage(TOKEN_LEGACY_KEY, TOKEN_CONFIG_KEY);
     baseUrl.value = getConfig<string>(URL_CONFIG_KEY, "");
-    token.value = tokenFromHash() || getConfig<string>(TOKEN_CONFIG_KEY, "");
+    token.value = getConfig<string>(TOKEN_CONFIG_KEY, "");
   });
   const connected = ref(false);
   const connecting = ref(false);
@@ -102,6 +91,14 @@ export const useRemoteStore = defineStore("remote", () => {
         doneTimers.set(ptyId, t);
       }
     });
+  }
+
+  // Pair with a six-digit code, then connect with the token it returns.
+  // connect() persists that token, so this only happens on the first visit.
+  async function pair(url: string, code: string): Promise<void> {
+    const normalized = url.replace(/\/$/, "");
+    const tok = await BurrowWsClient.pair(normalized, code);
+    await connect(normalized, tok);
   }
 
   async function connect(url: string, tok: string): Promise<void> {
@@ -317,7 +314,7 @@ export const useRemoteStore = defineStore("remote", () => {
     baseUrl, token, connected, connecting, connectError,
     view, workspaces, loading, listError, activeTab,
     chats, activeChat,
-    connect, disconnect, loadSessions, loadChats, openTerminal, closeTerminal, showDashboard, showSessions, showChats, openChat, closeChat, sendChat, createChat,
+    pair, connect, disconnect, loadSessions, loadChats, openTerminal, closeTerminal, showDashboard, showSessions, showChats, openChat, closeChat, sendChat, createChat,
     statusFor, getClient,
   };
 });

@@ -100,11 +100,46 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     return migrated;
   }
 
+  // ── session restore ────────────────────────────────────────────────────────
+  // `opened` is what keeps a workspace's Terminal mounted, and the sidebar only
+  // lists threads of mounted workspaces. Without restoring it, every thread
+  // looks lost after a restart even though its rows are still in SQLite.
+  const SESSION_KEY = "burrow.open_workspaces";
+  let sessionRestored = false;
+
+  function saveSession() {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        ids: opened.value.map((w) => w.id),
+        activeId: active.value?.id ?? null,
+      }));
+    } catch {}
+  }
+
+  function restoreSession() {
+    let saved: { ids: number[]; activeId: number | null };
+    try {
+      saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "");
+    } catch { return; }
+    if (!Array.isArray(saved?.ids)) return;
+    for (const id of saved.ids) {
+      const ws = workspaces.value.find((w) => w.id === id);
+      if (ws && !opened.value.some((w) => w.id === id)) opened.value.push(ws);
+    }
+    active.value = opened.value.find((w) => w.id === saved.activeId) ?? opened.value[0] ?? null;
+  }
+
   async function load() {
     workspaces.value = await invoke<Workspace[]>("list_workspaces");
     const migrated = await migrateLegacyLocalStorage();
     if (migrated) {
       workspaces.value = await invoke<Workspace[]>("list_workspaces"); // re-fetch with migrated values
+    }
+    // Only on the first load — later ones come from `workspaces-changed`, where
+    // re-opening workspaces the user has since closed would be wrong.
+    if (!sessionRestored) {
+      sessionRestored = true;
+      restoreSession();
     }
   }
 
@@ -171,16 +206,18 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     if (!opened.value.some((w) => w.id === ws.id)) opened.value.push(ws);
     active.value = ws;
     invoke("touch_workspace", { id: ws.id }).catch(() => {});
+    saveSession();
   }
 
   // Mount a workspace's Terminal (so it reattaches sessions / syncs tabs) WITHOUT
   // making it active. Used to eager-mount worktrees under an expanded parent.
   function ensureOpen(ws: Workspace) {
     if (!opened.value.some((w) => w.id === ws.id)) opened.value.push(ws);
+    saveSession();
   }
 
   // Back to the picker: keep `opened` (and its live terminals) intact.
-  function close() { active.value = null; }
+  function close() { active.value = null; saveSession(); }
 
   // Unmount a workspace: its Terminal disappears, PTYs detach (the daemon keeps
   // the sessions, so re-opening reattaches). Also unmounts its worktrees — they
@@ -192,6 +229,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     if (active.value && dropped.has(active.value.id)) {
       active.value = opened.value[opened.value.length - 1] ?? null;
     }
+    saveSession();
   }
 
   return {

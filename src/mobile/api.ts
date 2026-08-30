@@ -102,6 +102,25 @@ export class BurrowWsClient {
     this.ws = null;
   }
 
+  // Trades the six-digit pairing code shown in desktop Settings for the
+  // bearer token, so the token never has to be typed on a phone. The code is
+  // single-use server-side; five wrong ones lock pairing until it is
+  // regenerated on the desktop.
+  static async pair(baseUrl: string, code: string): Promise<string> {
+    const res = await fetch(baseUrl.replace(/\/$/, "") + "/pair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.status === 401) throw new Error("Neplatný kód");
+    if (res.status === 429) throw new Error("Párování zamčené — vygeneruj nový kód v Nastavení");
+    if (!res.ok) throw new Error(`Párování selhalo (${res.status})`);
+    const { token } = await res.json();
+    if (!token) throw new Error("Server nevrátil token");
+    return token;
+  }
+
   static async healthCheck(baseUrl: string): Promise<boolean> {
     const res = await fetch(baseUrl.replace(/\/$/, "") + "/healthz", { signal: AbortSignal.timeout(5000) });
     return res.ok;

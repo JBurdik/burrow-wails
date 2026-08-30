@@ -43,8 +43,9 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   // MARK_SEEN. Keep the sidebar responsive while that hand-off completes.
   const seenCompletionsByWs = ref<Record<number, Record<number, true>>>({});
   // Last time each tab did something worth sorting on (created, status change,
-  // retitled, another agent round, activated). The sidebar lists tabs from every
-  // open project in one flat feed, so it needs a recency key per tab.
+  // retitled, another agent round) — deliberately NOT activation, which would
+  // reshuffle the feed under the cursor. The sidebar lists tabs from every open
+  // project in one flat feed, so it needs a recency key per tab.
   const activityByWs = ref<Record<number, Record<number, number>>>({});
   const request = ref<TabRequest | null>(null);
   let nonce = 0;
@@ -122,7 +123,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     // Terminal also clears its durable review state. This makes the sidebar
     // acknowledge the completion immediately, before the component round-trip.
     markCompletionSeen(wsId, tabId);
-    activityByWs.value[wsId] = { ...(activityByWs.value[wsId] ?? {}), [tabId]: Date.now() };
+    // Deliberately does NOT stamp activity: the sidebar sorts by it, so merely
+    // focusing a thread would shuffle the row out from under the cursor.
     request.value = { wsId, action: "activate", tabId, nonce: ++nonce };
   }
   function add(wsId: number, cmd?: string) {
