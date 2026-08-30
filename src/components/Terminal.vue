@@ -1194,11 +1194,12 @@ function spawnPrompt(cmd: string): string {
 // close (closeTab/closePane) — ClaudeChat.onBeforeUnmount deliberately no longer
 // stops the proc, so a background remount can't kill a live agent. Transport is
 // per-session; a wrong-map stop is a harmless no-op, but resolve it to be clean.
+// Closing a thread deletes it: restore now derives the open tabs from the
+// session list, so leaving the session behind would resurrect the tab on the
+// next launch. `remove` stops the right runtime (claude/codex/acp) for us.
 function stopChatSession(leaf: Leaf) {
   if (leaf.chatId == null) return;
-  const sess = chatsStore.sessions.find((s) => s.id === leaf.chatId);
-  const cmd = sess?.transport === "acp" ? "acp_stop" : "claude_stop";
-  invoke(cmd, { id: leaf.chatId }).catch(() => {});
+  chatsStore.remove(leaf.chatId);
 }
 
 async function closePane(leafId: number) {
@@ -1278,8 +1279,6 @@ function allLeaves(): Leaf[] {
   return tabs.value.flatMap((t) => getAllLeaves(t.root));
 }
 
-const CHAT_TABS_KEY = (wsId: number) => `burrow.chat_tabs.${wsId}`;
-
 // Flipped once onMounted has finished reading the saved tabs. Until then any
 // tab mutation (e.g. a chat request that arrives mid-mount) would persist a
 // list that doesn't include the not-yet-restored rows, wiping them.
@@ -1300,14 +1299,6 @@ function persist() {
     session_id: l.sessionId ?? null,
   }));
   invoke("save_terminal_tabs", { workspaceId: props.workspaceId, tabs: payload });
-
-  // Persist open chat tab chatIds separately (no PTY, so not in SQLite).
-  const chatIds = allLeaves()
-    .filter((l) => l.leafType === "chat" && l.chatId != null)
-    .map((l) => l.chatId!);
-  try {
-    localStorage.setItem(CHAT_TABS_KEY(props.workspaceId), JSON.stringify(chatIds));
-  } catch {}
 }
 
 // Include title, defaultTitle, and sessionId so any of those changes triggers a save.
@@ -1494,18 +1485,14 @@ onMounted(async () => {
   // arrive behind configReady — reading before that resolves finds none of them
   // and silently drops every chat thread.
   await configReady;
-  try {
-    const raw = localStorage.getItem(CHAT_TABS_KEY(props.workspaceId));
-    if (raw) {
-      const chatIds: number[] = JSON.parse(raw);
-      for (const chatId of chatIds) {
-        // openClaudeChat skips if session no longer exists (creates a fresh one),
-        // and skips if tab is already open — safe to call unconditionally.
-        const sessionExists = chatsStore.sessions.some((s) => s.id === chatId);
-        if (sessionExists) openClaudeChat(chatId);
-      }
-    }
-  } catch {}
+  // The sessions ARE the threads — no separate "which tabs were open" list to
+  // fall out of sync (a stale empty one used to hide every thread on restart).
+  // Skip the hidden Manager session and never-used blanks left by older builds.
+  for (const s of chatsStore.sessionsForWs(props.workspaceId)) {
+    if (s.control) continue;
+    if (!s.claudeSessionId && !s.messageCount) continue;
+    openClaudeChat(s.id);
+  }
 
   restored = true;
   persist(); // the restore may have renumbered dead PTYs; save the ids we settled on

@@ -110,6 +110,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAgentsStore } from "@/stores/agents";
 import { useScriptsStore } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { useUIStore } from "@/stores/ui";
 import type { Component } from "vue";
 
 const emit = defineEmits<{
@@ -239,6 +240,11 @@ async function addProject() {
 const agentsStore = useAgentsStore();
 const scriptsStore = useScriptsStore();
 const wsStore = useWorkspaceStore();
+const ui = useUIStore();
+
+// ⌘⇧O / Sidebar "New chat" open the palette scoped to just projects — pick
+// one, land on the Welcome composer for it instead of jumping into a chat tab.
+const projectOnly = ref(false);
 
 const ICON_MAP: Record<string, Component> = {
   sparkle: PhSparkle,
@@ -287,6 +293,24 @@ const sections = computed(() => {
   }
 
   const q = query.value.toLowerCase().trim();
+
+  if (projectOnly.value) {
+    const items: SpotlightItem[] = [...wsStore.topLevel]
+      .sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))
+      .filter((w) => !q || w.name.toLowerCase().includes(q) || w.path.toLowerCase().includes(q))
+      .map((w) => ({
+        id: `ws-${w.id}`,
+        title: w.name,
+        desc: w.path,
+        icon: PhFolderOpen as Component,
+        iconColor: "#a78bfa",
+        iconBg: hexBg("#a78bfa"),
+        iconBorder: "#a78bfa33",
+        dim: false,
+        action: () => { wsStore.open(w); close(); ui.openWelcome(); },
+      }));
+    return [{ key: "projects", label: "PROJECTS", items }];
+  }
 
   const agentItems: SpotlightItem[] = agentsStore.agents
     .filter((a) => !q || a.name.toLowerCase().includes(q) || agentsStore.commandLine(a).includes(q))
@@ -428,9 +452,10 @@ function runItem(item: SpotlightItem) {
   item.action();
 }
 
-function show() {
+function show(opts?: { projectOnly?: boolean }) {
   isOpen.value = true;
   browsing.value = false;
+  projectOnly.value = !!opts?.projectOnly;
   query.value = "";
   hits.value = [];
   nextTick(() => {

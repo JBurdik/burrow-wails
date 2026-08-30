@@ -578,13 +578,10 @@ function selectTab(row: ActivityRow) {
   nextTick(() => termTabs.activate(row.ws.id, row.tab.id));
 }
 
-// Rows for every project are listed, so a click may target a workspace with no
-// mounted Terminal yet — open it first, or the request has nothing to consume it.
-function newChatSession(ws: Workspace) {
-  const wasOpen = isOpened(ws.id);
-  selectWs(ws);
-  const open = () => termTabs.openChat(ws.id);
-  wasOpen ? open() : nextTick(open);
+// "New chat" opens the project picker (⌘⇧O's Spotlight mode) rather than a
+// chat tab directly — same command-palette → Welcome composer flow either way.
+function newChatSession(_ws: Workspace) {
+  ui.pickProjectThenWelcome();
 }
 
 function openGitTab(ws: Workspace) {

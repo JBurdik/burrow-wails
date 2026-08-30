@@ -542,6 +542,16 @@ export const useUIStore = defineStore("ui", () => {
     welcomeOpen.value = false;
   }
 
+  // Spotlight lives in App.vue's tree, so callers elsewhere (Sidebar's "New
+  // chat") reach it through this registered handle instead of prop-drilling a ref.
+  const spotlightApi = ref<{ show: (opts?: { projectOnly?: boolean }) => void } | null>(null);
+  function registerSpotlightApi(api: { show: (opts?: { projectOnly?: boolean }) => void }) {
+    spotlightApi.value = api;
+  }
+  function pickProjectThenWelcome() {
+    spotlightApi.value?.show({ projectOnly: true });
+  }
+
   return {
     settingsOpen,
     uiFont,
@@ -601,6 +611,8 @@ export const useUIStore = defineStore("ui", () => {
     welcomeOpen,
     openWelcome,
     closeWelcome,
+    registerSpotlightApi,
+    pickProjectThenWelcome,
     sidebarVisible,
     toggleSidebar,
     sidebarWidth,

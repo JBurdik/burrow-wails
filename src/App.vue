@@ -222,6 +222,7 @@ watch(
 );
 
 const spotlightRef = ref<InstanceType<typeof Spotlight> | null>(null);
+watch(spotlightRef, (v) => { if (v) ui.registerSpotlightApi({ show: (opts) => v.show(opts) }); });
 const cheatsheetOpen = ref(false);
 
 const CHEATSHEET_GROUPS = [
@@ -386,6 +387,12 @@ function onKeydown(e: KeyboardEvent) {
   if (e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey && (e.key === "R" || e.key === "r")) {
     e.preventDefault();
     activeTerm()?.repaintAll();
+    return;
+  }
+  // ⌘⇧O — project picker (Spotlight, scoped to projects) → Welcome composer
+  if (e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey && (e.key === "O" || e.key === "o")) {
+    e.preventDefault();
+    ui.pickProjectThenWelcome();
     return;
   }
   // ⌘⇧U — jump to first unread (review) tab across ALL workspaces
