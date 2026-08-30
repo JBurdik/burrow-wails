@@ -18,7 +18,7 @@ import (
 
 // Self-update, replacing tauri-plugin-updater. Same shape as before: a
 // latest.json manifest on GitHub Releases (published by the justfile's
-// `release` recipe), a .app.tar.gz artifact, download → verify → swap →
+// `release` recipe), a .app.zip artifact, download → verify → swap →
 // relaunch.
 //
 // Verification differs from Tauri's: instead of a separate minisign keypair
@@ -112,7 +112,7 @@ func (a *App) InstallUpdate(url, wantSum string) error {
 	}
 	defer os.RemoveAll(staging)
 
-	archive := filepath.Join(staging, "update.tar.gz")
+	archive := filepath.Join(staging, "update.zip")
 	gotSum, err := a.downloadTo(url, archive)
 	if err != nil {
 		return err
@@ -121,10 +121,10 @@ func (a *App) InstallUpdate(url, wantSum string) error {
 		return fmt.Errorf("checksum mismatch: manifest says %s, download is %s — refusing to install", wantSum, gotSum)
 	}
 
-	// Shell out to bsdtar: it preserves the symlinks, permissions and
-	// extended attributes an .app bundle's signature depends on, which a
-	// hand-rolled archive/tar walk would quietly drop.
-	if out, err := exec.Command("/usr/bin/tar", "-xzf", archive, "-C", staging).CombinedOutput(); err != nil {
+	// Use ditto for the matching macOS ZIP format. Generic tar archives omit
+	// the extended attributes and resource metadata a signed .app needs, which
+	// turns a valid Developer ID bundle into an unsigned one after extraction.
+	if out, err := exec.Command("/usr/bin/ditto", "-x", "-k", archive, staging).CombinedOutput(); err != nil {
 		return fmt.Errorf("extract failed: %v: %s", err, out)
 	}
 
