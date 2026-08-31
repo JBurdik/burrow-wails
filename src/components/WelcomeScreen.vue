@@ -1,26 +1,32 @@
 <template>
   <div class="welcome">
     <template v-if="target">
-      <DropdownMenuRoot>
-        <DropdownMenuTrigger as-child>
-          <button class="welcome-crumb" type="button">
-            <PhFolder :size="11" weight="fill" />
-            {{ target.name }}
-            <PhCaretDown :size="9" weight="bold" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" class="max-h-[300px] min-w-[200px] overflow-y-auto hide-scrollbar">
-          <DropdownMenuItem
-            v-for="repo in store.topLevel"
-            :key="repo.id"
-            class="text-[11.5px]"
-            :class="{ 'text-foreground bg-accent/10': repo.id === target.id }"
-            @select="pick(repo)"
-          >{{ repo.name }}</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenuRoot>
-
-      <h1 class="welcome-title">What should we build in <span class="welcome-ws">{{ target.worktree_branch || target.name }}</span>?</h1>
+      <h1 class="welcome-title">
+        What should we build in
+        <DropdownMenuRoot>
+          <DropdownMenuTrigger as-child>
+            <button class="welcome-ws" type="button">
+              <img v-if="store.icons[target.parent_id ?? target.id]" class="welcome-ws-icon" :src="store.icons[target.parent_id ?? target.id]" alt="" />
+              <PhFolder v-else :size="15" weight="fill" />
+              {{ target.worktree_branch || target.name }}
+              <PhCaretDown :size="11" weight="bold" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" class="max-h-[300px] min-w-[200px] overflow-y-auto hide-scrollbar">
+            <DropdownMenuItem
+              v-for="repo in store.topLevel"
+              :key="repo.id"
+              class="text-[11.5px]"
+              :class="{ 'text-foreground bg-accent/10': repo.id === target.id }"
+              @select="pick(repo)"
+            >
+              <img v-if="store.icons[repo.id]" class="mr-1.5 h-3.5 w-3.5 shrink-0 rounded-sm object-cover" :src="store.icons[repo.id]" alt="" />
+              <PhFolder v-else :size="12" weight="fill" class="mr-1.5 shrink-0 text-accent" />
+              {{ repo.name }}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenuRoot>?
+      </h1>
       <ComposerBox class="welcome-compose">
         <ComposerTextInput
           ref="inputEl"
@@ -151,6 +157,10 @@ const chatAgents = useChatAgentsStore();
 
 const text = ref("");
 const inputEl = ref<InstanceType<typeof ComposerTextInput>>();
+
+// App.vue keeps this screen mounted behind v-show, so the textarea's own
+// autofocus only fires once. App re-focuses it whenever the screen reappears.
+defineExpose({ focus: () => inputEl.value?.focus() });
 const imageInput = useTemplateRef<HTMLInputElement>("imageInput");
 const pendingImages = ref<string[]>([]);
 
@@ -342,7 +352,27 @@ async function submit() {
   max-width: 560px;
   margin-bottom: 6px;
 }
-.welcome-ws { color: var(--accent); }
+.welcome-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.welcome-ws {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 7px;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.welcome-ws:hover { background: var(--bg-hover); }
+.welcome-ws-icon { height: 17px; width: 17px; border-radius: 4px; object-fit: cover; }
 
 .welcome-compose {
   position: relative;

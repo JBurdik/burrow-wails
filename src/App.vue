@@ -21,7 +21,7 @@
              returning replayed the daemon ring-buffer into a fresh fit → scrambled
              buffer. Keeping them mounted avoids the detach/reattach entirely. -->
         <div v-show="ui.mode === 'terminal'" class="terminal-host">
-          <WelcomeScreen v-show="showWelcome" @open-folder="openNewWorkspace" />
+          <WelcomeScreen ref="welcomeEl" v-show="showWelcome" @open-folder="openNewWorkspace" />
           <Terminal
             v-for="w in ws.opened"
             v-show="ws.active && w.id === ws.active.id && !showWelcome"
@@ -147,6 +147,10 @@ const tabsStore = useTerminalTabsStore();
 const showWelcome = computed(() =>
   ui.welcomeOpen || !ws.active || (tabsStore.tabsByWs[ws.active.id]?.length ?? 0) === 0,
 );
+
+// Screen stays mounted behind v-show, so re-focus its composer each time it shows.
+const welcomeEl = useTemplateRef<{ focus: () => void }>("welcomeEl");
+watch(showWelcome, (on) => { if (on) nextTick(() => welcomeEl.value?.focus()); });
 
 const panelStyles = computed(() => ({
   '--sidebar-width': ui.sidebarWidth + 'px',

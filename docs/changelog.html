@@ -79,11 +79,37 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.2.6 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.2.6</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">srpen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Plynulejší práce s vlákny</div>
+      <ul>
+        <li><strong>Oznámení z chatu</strong> — dokončený turn i žádost o povolení teď respektují stejné zvuky a nastavení ntfy jako terminál; při sledování aktivního vlákna se dokončovací zvuk nepřehraje.</li>
+        <li><strong>Výběr projektu přímo v zadání</strong> — úvodní composer zobrazuje zvolený projekt s ikonou přímo v otázce a dovolí jej okamžitě změnit.</li>
+        <li><strong>Composer se vrací do fokusu</strong> — po návratu na úvodní obrazovku je vstup znovu připravený k psaní, i když obrazovka zůstává připojená na pozadí.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Spolehlivé otázky Claude Code</div>
+      <ul>
+        <li><strong>AskUserQuestion nezůstane viset</strong> — opakovaně doručené požadavky se deduplikují podle <code>request_id</code> a zrušený <code>control_cancel_request</code> prompt bezpečně odstraní. Odpovědi používají kompatibilní mapu <code>updatedInput.answers</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.2.3 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.2.3</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">srpen 2026</span>
     </div>
 

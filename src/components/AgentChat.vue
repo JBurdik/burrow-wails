@@ -617,6 +617,9 @@ import ChatAgentConfig from "@/components/ChatAgentConfig.vue";
 import ModelPicker from "@/components/ModelPicker.vue";
 import { modelsFor, learnModels, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { playSound } from "@/lib/sounds";
+import { notifyNtfy } from "@/lib/ntfy";
+import { useUIStore, type NtfyEvent } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
@@ -667,6 +670,7 @@ const emit = defineEmits<{ (e: "prompt-sent"): void }>();
 
 const chats = useClaudeChatsStore();
 const notifStore = useNotificationsStore();
+const uiStore = useUIStore();
 const scriptsStore = useScriptsStore();
 const chatAgents = useChatAgentsStore();
 const editorCtx = useEditorContextStore();
@@ -1341,10 +1345,30 @@ function onPermMenuOutside(e: MouseEvent) {
   permMenuOpen.value = false;
 }
 
+// Same ntfy gating as Terminal.vue (enabled, topic set, event subscribed, away-only).
+function maybeNtfy(event: NtfyEvent, message: string) {
+  if (!uiStore.ntfyEnabled || !uiStore.ntfyTopic) return;
+  if (!uiStore.ntfyEvents.includes(event)) return;
+  if (uiStore.ntfyOnlyWhenAway && document.hasFocus()) return;
+  notifyNtfy(
+    { server: uiStore.ntfyServer, topic: uiStore.ntfyTopic, token: uiStore.ntfyToken || undefined },
+    event,
+    message || "Chat",
+  ).catch(() => {}); // best-effort: a failed push must never disrupt the UI
+}
+
+// Is the user actually looking at this chat right now?
+function watchingNow(): boolean {
+  return (props.isWatching ?? false) && document.hasFocus();
+}
+
 async function notifyDone() {
   const session = chats.sessions.find((s) => s.id === props.chatId);
   const body = session?.title || "Claude finished";
   notifStore.push({ type: "done", title: "Claude", body, workspaceId: props.workspaceId });
+  // Mirror Terminal.vue: no chime while the user is watching the turn finish.
+  if (!watchingNow()) playSound("done");
+  maybeNtfy("done", body);
   if (!document.hasFocus()) {
     let granted = await isPermissionGranted();
     if (!granted) { const p = await requestPermission(); granted = p === "granted"; }
@@ -1359,6 +1383,8 @@ async function notifyPermission(cr: CanUseToolReq) {
   const target = (cr.input?.command ?? cr.input?.file_path ?? cr.input?.path ?? cr.description ?? "") as string;
   const body = target ? `${cr.toolName}: ${String(target).slice(0, 80)}` : cr.toolName;
   notifStore.push({ type: "info", title: "Povolení", body, workspaceId: props.workspaceId });
+  playSound("waiting");
+  maybeNtfy("permission", body);
   if (!document.hasFocus()) {
     let granted = await isPermissionGranted();
     if (!granted) { const p = await requestPermission(); granted = p === "granted"; }
@@ -1388,6 +1414,51 @@ const pendingDiffMsgId = ref<number | null>(null);
 // Keep native Claude prompts mounted until the control JSON was accepted by
 // stdin. This prevents a failed write from looking like an automatic denial.
 const nativeControlResponsePending = ref(false);
+// Claude may replay an in-flight control request after a reconnect. Keep a
+// small settled-id ledger so an already answered question cannot re-open.
+const settledControlRequestIds = new Set<string>();
+
+function settleControlRequest(requestId: string) {
+  if (!requestId) return;
+  settledControlRequestIds.add(requestId);
+  // IDs are unique per process; retain enough to cover a reconnect without
+  // growing a long-lived chat indefinitely.
+  if (settledControlRequestIds.size > 200) {
+    const oldest = settledControlRequestIds.values().next().value;
+    if (oldest) settledControlRequestIds.delete(oldest);
+  }
+}
+
+function hasActiveControlRequest(requestId: string) {
+  return [pendingPermission.value, pendingDiff.value, pendingQuestion.value, pendingPlan.value]
+    .some((request) => request?.requestId === requestId);
+}
+
+function dismissCancelledControlRequest(requestId: string) {
+  let dismissed = false;
+  if (pendingPermission.value?.requestId === requestId) {
+    removeFeedMarker(pendingPermissionMsgId.value); pendingPermissionMsgId.value = null;
+    pendingPermission.value = null; dismissed = true;
+  }
+  if (pendingDiff.value?.requestId === requestId) {
+    removeFeedMarker(pendingDiffMsgId.value); pendingDiffMsgId.value = null;
+    pendingDiff.value = null; dismissed = true;
+  }
+  if (pendingQuestion.value?.requestId === requestId) {
+    removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
+    pendingQuestion.value = null; dismissed = true;
+  }
+  if (pendingPlan.value?.requestId === requestId) {
+    removeFeedMarker(pendingPlanMsgId.value); pendingPlanMsgId.value = null;
+    pendingPlan.value = null; dismissed = true;
+  }
+  if (dismissed) {
+    settleControlRequest(requestId);
+    nativeControlResponsePending.value = false;
+    chats.sendStatusEvent(props.chatId, { type: "RESUME" });
+    syncStore();
+  }
+}
 
 function removeFeedMarker(id: number | null) {
   if (id === null) return;
@@ -1618,6 +1689,13 @@ function onLine(line: string) {
 
   const type = event.type as string;
 
+  // Claude withdraws a pending question/permission when the turn is aborted,
+  // answered from another client, or otherwise no longer needs input.
+  if (type === "control_cancel_request") {
+    dismissCancelledControlRequest(event.request_id as string);
+    return;
+  }
+
   if (type === "control_request") {
     const req = (event.request ?? {}) as Record<string, unknown>;
     if (req.subtype !== "can_use_tool") return; // other control subtypes: ignore (fail-open)
@@ -1629,6 +1707,9 @@ function onLine(line: string) {
       suggestions: (req.permission_suggestions ?? []) as Array<Record<string, unknown>>,
       toolUseId: req.tool_use_id as string | undefined,
     };
+    // A request can be replayed during reconnect. Rendering it again after we
+    // replied is what made AskUserQuestion look permanently stuck.
+    if (settledControlRequestIds.has(cr.requestId) || hasActiveControlRequest(cr.requestId)) return;
     // Auto-allow when an "always" rule matches — no UI.
     if (chats.hasPermissionRule(ruleKeys(cr.toolName, cr.input))) {
       void respondControl(cr.requestId, { behavior: "allow", updatedInput: cr.input }).catch((e) => {
@@ -2075,6 +2156,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
 // ({behavior:"allow",updatedInput} | {behavior:"deny",message}); the Rust side wraps it.
 async function respondControl(requestId: string, response: Record<string, unknown>) {
   await invoke("claude_respond_control", { id: props.chatId, requestId, response });
+  settleControlRequest(requestId);
   chats.sendStatusEvent(props.chatId, { type: "RESUME" });
   syncStore();
 }
