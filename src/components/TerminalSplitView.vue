@@ -108,6 +108,7 @@ export interface Leaf {
   dirty?: boolean;    // editor: unsaved changes
   chatId?: number;    // set when leafType === "chat"
   initialPrompt?: string; // chat: first message to auto-send once its runtime is up
+  initialImages?: string[]; // chat: images paired with the initial prompt
 }
 
 export interface SplitNode {

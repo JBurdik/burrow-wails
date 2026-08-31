@@ -31,6 +31,8 @@ type TabRequest = {
   title?: string;
   /** Sent as the first message right after the chat tab opens (action: "openChat"). */
   initialPrompt?: string;
+  /** Images paired with the first chat prompt (data URIs). */
+  initialImages?: string[];
   /** Optional command to run in a newly-added tab (action: "add"). */
   cmd?: string;
   nonce: number;
@@ -166,8 +168,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   function reorder(wsId: number, fromIdx: number, toIdx: number) {
     request.value = { wsId, action: "reorder", fromIdx, toIdx, nonce: ++nonce };
   }
-  function openChat(wsId: number, chatId?: number, agentId?: string, initialPrompt?: string) {
-    request.value = { wsId, action: "openChat", chatId, agentId, initialPrompt, nonce: ++nonce };
+  function openChat(wsId: number, chatId?: number, agentId?: string, initialPrompt?: string, initialImages?: string[]) {
+    request.value = { wsId, action: "openChat", chatId, agentId, initialPrompt, initialImages, nonce: ++nonce };
   }
   /** Open the full git manager as a tab in that workspace's Terminal. */
   function openGit(wsId: number) {

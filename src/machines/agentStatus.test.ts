@@ -41,6 +41,12 @@ describe("agentStatusMachine", () => {
       expect(a.getSnapshot().value).toBe("permission");
     });
 
+    it("idle → PERMISSION_REQUEST → permission for a native approval", () => {
+      const a = actor(true);
+      a.send({ type: "PERMISSION_REQUEST" });
+      expect(a.getSnapshot().value).toBe("permission");
+    });
+
     it("waiting → RESUME → running", () => {
       const a = actor();
       a.send({ type: "START" });

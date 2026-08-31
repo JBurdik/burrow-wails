@@ -100,6 +100,10 @@ export const agentStatusMachine = setup({
     idle: {
       on: {
         START: "running",
+        // Native app-server agents can deliver a permission RPC before their
+        // first visible output.  It is still actionable and must reach the
+        // Sidebar as "Needs input", even when no START arrived first.
+        PERMISSION_REQUEST: "permission",
         BUSY: { guard: "notAgent", target: "running" },
       },
     },
@@ -156,6 +160,7 @@ export const agentStatusMachine = setup({
       on: {
         MARK_SEEN: "idle",
         START: { target: "running", actions: "clearError" },
+        PERMISSION_REQUEST: { target: "permission", actions: "clearError" },
         BUSY: { guard: "notAgent", target: "running", actions: "clearError" },
       },
     },
@@ -166,6 +171,7 @@ export const agentStatusMachine = setup({
       on: {
         MARK_SEEN: "idle",
         START: { target: "running", actions: "clearError" },
+        PERMISSION_REQUEST: { target: "permission", actions: "clearError" },
         BUSY: { guard: "notAgent", target: "running", actions: "clearError" },
       },
     },
@@ -176,6 +182,7 @@ export const agentStatusMachine = setup({
       on: {
         MARK_SEEN: { target: "idle", actions: "clearError" },
         START: { target: "running", actions: "clearError" },
+        PERMISSION_REQUEST: { target: "permission", actions: "clearError" },
         BUSY: { guard: "notAgent", target: "running", actions: "clearError" },
       },
     },

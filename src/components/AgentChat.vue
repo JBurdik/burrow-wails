@@ -12,10 +12,10 @@
       </div>
       <div class="flex flex-shrink-0 items-center gap-1.5">
         <div class="perm-allow-group relative flex">
-          <button class="perm-btn perm-allow rounded-l-md rounded-r-none" @click="respondPermission(true)" title="Allow once (Y)">
+          <button class="perm-btn perm-allow rounded-l-md rounded-r-none" :disabled="nativeControlResponsePending" @click="respondPermission(true)" title="Allow once (Y)">
             Allow <kbd class="perm-kbd">Y</kbd>
           </button>
-          <button class="perm-btn perm-allow !rounded-l-none !rounded-r-md border-l border-white/[0.12] !px-[5px]" @click="permDropdownOpen = !permDropdownOpen" title="More options">
+          <button class="perm-btn perm-allow !rounded-l-none !rounded-r-md border-l border-white/[0.12] !px-[5px]" :disabled="nativeControlResponsePending" @click="permDropdownOpen = !permDropdownOpen" title="More options">
             <PhCaretDown :size="9" weight="bold" />
           </button>
           <div v-if="permDropdownOpen" class="absolute bottom-[calc(100%+4px)] right-0 z-[100] min-w-[200px] rounded-lg border border-white/[0.12] bg-[#1e1e2e] p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
@@ -38,7 +38,7 @@
             </button>
           </div>
         </div>
-        <button class="perm-btn perm-deny" @click="respondPermission(false)" title="Deny (N)">
+        <button class="perm-btn perm-deny" :disabled="nativeControlResponsePending" @click="respondPermission(false)" title="Deny (N)">
           Deny <kbd class="perm-kbd">N</kbd>
         </button>
       </div>
@@ -51,9 +51,9 @@
         <span class="perm-title text-[11px] font-semibold text-foreground">{{ pendingDiff.toolName }}</span>
         <code class="perm-detail max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground" :title="diffPreview.path">{{ diffPreview.path }}</code>
         <span class="flex-1" />
-        <button class="perm-btn perm-allow" @click="respondPermission(true)" title="Accept (Y)">Accept <kbd class="perm-kbd">Y</kbd></button>
-        <button class="perm-btn perm-always" @click="respondPermission(true, { always: true })" title="Always allow this tool">Always</button>
-        <button class="perm-btn perm-deny" @click="respondPermission(false)" title="Reject (N)">Reject <kbd class="perm-kbd">N</kbd></button>
+        <button class="perm-btn perm-allow" :disabled="nativeControlResponsePending" @click="respondPermission(true)" title="Accept (Y)">Accept <kbd class="perm-kbd">Y</kbd></button>
+        <button class="perm-btn perm-always" :disabled="nativeControlResponsePending" @click="respondPermission(true, { always: true })" title="Always allow this tool">Always</button>
+        <button class="perm-btn perm-deny" :disabled="nativeControlResponsePending" @click="respondPermission(false)" title="Reject (N)">Reject <kbd class="perm-kbd">N</kbd></button>
       </div>
       <pre v-if="diffPreview.isWrite" class="diff-banner-body m-0 max-h-[220px] overflow-auto px-3 pb-2.5 pt-1.5 font-mono text-[11px] leading-[1.5]"><span
         v-for="(line, i) in diffPreview.content.split('\n')" :key="i" class="diff-line diff-add block whitespace-pre-wrap break-all">{{ line }}</span></pre>
@@ -77,8 +77,8 @@
         placeholder="Optional feedback if you keep planning…"
       />
       <div class="flex justify-end gap-2">
-        <button class="perm-btn perm-allow" @click="respondPlan(true)">Approve plan</button>
-        <button class="perm-btn perm-deny" @click="respondPlan(false)" title="Keep planning (Esc)">Keep planning</button>
+        <button class="perm-btn perm-allow" :disabled="nativeControlResponsePending" @click="respondPlan(true)">Approve plan</button>
+        <button class="perm-btn perm-deny" :disabled="nativeControlResponsePending" @click="respondPlan(false)" title="Keep planning (Esc)">Keep planning</button>
       </div>
     </div>
 
@@ -104,8 +104,8 @@
         </div>
       </div>
       <div class="flex justify-end gap-2">
-        <button class="perm-btn perm-allow" :disabled="!canSubmitQuestion" @click="submitQuestion">Submit</button>
-        <button class="perm-btn perm-deny" @click="cancelQuestion" title="Dismiss (Esc)">Skip</button>
+        <button class="perm-btn perm-allow" :disabled="!canSubmitQuestion || nativeControlResponsePending" @click="submitQuestion">Submit</button>
+        <button class="perm-btn perm-deny" :disabled="nativeControlResponsePending" @click="cancelQuestion" title="Dismiss (Esc)">Skip</button>
       </div>
     </div>
 
@@ -138,6 +138,7 @@
           :key="o.optionId"
           class="perm-btn flex-none"
           :class="acpOptClass(o.kind)"
+          :disabled="permissionResponsePending"
           @click="acpRespond(o.optionId, o.name, o.kind)"
         >{{ o.name }}</button>
       </div>
@@ -161,7 +162,7 @@
       >
         <!-- User message -->
         <template v-if="msg.role === 'user'">
-          <div class="flex items-end justify-end gap-2 px-4 py-[3px]">
+          <div class="group flex items-end justify-end gap-2 px-4 py-[3px]">
             <div class="bubble-user max-w-[72%] rounded-[16px_16px_5px_16px] border px-3.5 py-2.5 text-[13px] leading-[1.55] shadow-[0_2px_10px_rgba(0,0,0,0.22)]" style="background: var(--chat-user-bg, #1e1b2e); border-color: var(--chat-user-border, rgba(124,58,237,0.35)); color: var(--chat-text, rgba(255,255,255,0.88));">
               <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
                 <img
@@ -174,13 +175,17 @@
               </div>
               <template v-for="(p, i) in msgParts(msg.text)" :key="i"><span v-if="p.mention" class="mention-pill"><PhFile :size="10" class="mention-pill-icon" />{{ p.v.slice(1) }}</span><template v-else>{{ p.v }}</template></template>
             </div>
+            <button class="message-copy-btn" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
+              <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
+              <PhCopy v-else :size="13" />
+            </button>
             <div class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-[11px] font-bold text-white/70">U</div>
           </div>
         </template>
 
         <!-- Tool call — compact row, expandable -->
         <template v-else-if="msg.role === 'tool'">
-          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+          <div class="group flex items-start gap-2.5 px-4 py-[3px]">
             <div class="w-[26px] flex-shrink-0" />
             <div class="tool-row" :class="`tool-row-${toolStatus(msg)}`" @click="msg.toolExpanded = !msg.toolExpanded">
               <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': msg.toolExpanded }" />
@@ -254,6 +259,10 @@
               <!-- eslint-disable-next-line vue/no-v-html -->
               <div class="md-body" v-html="renderMd(msg.text)" />
             </div>
+            <button class="message-copy-btn mt-0.5" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
+              <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
+              <PhCopy v-else :size="13" />
+            </button>
           </div>
         </template>
       </div>
@@ -592,7 +601,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
-import { PhArrowUp, PhArrowCounterClockwise, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhFile, PhSparkle, PhFastForward, PhGear, PhClockCounterClockwise, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCircleNotch } from "@phosphor-icons/vue";
+import { PhArrowUp, PhArrowCounterClockwise, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhFile, PhSparkle, PhFastForward, PhGear, PhClockCounterClockwise, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCircleNotch, PhCopy, PhCheck } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
@@ -650,6 +659,8 @@ const props = defineProps<{
   // First message to send automatically once this chat's runtime is up (used by
   // the welcome-screen composer, which creates the chat and its prompt at once).
   initialPrompt?: string;
+  // Images paired with the first prompt from the welcome-screen composer.
+  initialImages?: string[];
 }>();
 
 const emit = defineEmits<{ (e: "prompt-sent"): void }>();
@@ -696,6 +707,7 @@ interface AcpPermReq {
 }
 const acpPermReq = ref<AcpPermReq | null>(null);
 const acpPermMsgId = ref<number | null>(null);
+const permissionResponsePending = ref(false);
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
   const p = acpPermReq.value?.rawInput?.plan;
@@ -1234,6 +1246,8 @@ watch(inputText, (val) => {
   }
 });
 const busy = ref(false);
+const copiedMessageId = ref<number | null>(null);
+let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 const messageQueue = ref<string[]>([]);
 // Set before an INTENTIONAL claude restart (mode switch / abort) so the `exit`
 // event that teardown emits doesn't fire a spurious "Claude finished" toast.
@@ -1371,6 +1385,9 @@ const pendingPermissionMsgId = ref<number | null>(null);
 const pendingQuestionMsgId = ref<number | null>(null);
 const pendingPlanMsgId = ref<number | null>(null);
 const pendingDiffMsgId = ref<number | null>(null);
+// Keep native Claude prompts mounted until the control JSON was accepted by
+// stdin. This prevents a failed write from looking like an automatic denial.
+const nativeControlResponsePending = ref(false);
 
 function removeFeedMarker(id: number | null) {
   if (id === null) return;
@@ -1614,7 +1631,10 @@ function onLine(line: string) {
     };
     // Auto-allow when an "always" rule matches — no UI.
     if (chats.hasPermissionRule(ruleKeys(cr.toolName, cr.input))) {
-      respondControl(cr.requestId, { behavior: "allow", updatedInput: cr.input });
+      void respondControl(cr.requestId, { behavior: "allow", updatedInput: cr.input }).catch((e) => {
+        messages.value.push({ id: nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
+        saveMessages(props.chatId, messages.value);
+      });
       return;
     }
     if (cr.toolName === "AskUserQuestion") {
@@ -1744,6 +1764,22 @@ function onLine(line: string) {
 function onAcpData(raw: string) {
   let msg: Record<string, unknown>;
   try { msg = JSON.parse(raw); } catch { return; }
+
+  // The app-server resolves requests asynchronously. Keep the approval visible
+  // until this acknowledgement arrives, so a failed response can be retried
+  // instead of appearing as an automatic deny or a lost prompt.
+  if (msg.method === "serverRequest/resolved") {
+    const requestId = (msg.params as { requestId?: number })?.requestId;
+    if (requestId != null && requestId === acpPermRpcId.value) {
+      removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
+      acpPermReq.value = null;
+      acpPermRpcId.value = null;
+      permissionResponsePending.value = false;
+      chats.sendStatusEvent(props.chatId, { type: "RESUME" });
+      syncStore();
+    }
+    return;
+  }
 
   // Session info emitted by acp_start after the handshake: sessionId (for resume)
   // + modes/configOptions (populate the permission-mode / model selectors).
@@ -1891,20 +1927,50 @@ function onAcpReq(raw: string) {
 }
 
 // Reply to a rich ACP permission request with the chosen adapter optionId.
-function acpRespond(optionId: string, optName: string, kind: string) {
+async function acpRespond(optionId: string, optName: string, kind: string) {
   const r = acpPermReq.value;
-  if (!r) return;
-  removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
-  acpPermReq.value = null;
+  if (!r || permissionResponsePending.value) return;
+  permissionResponsePending.value = true;
   const reject = kind.startsWith("reject");
-  messages.value.push({ id: nextMsgId++, role: "permission", text: `${reject ? "✗" : "✓"} ${optName}: ${r.title}` });
-  saveMessages(props.chatId, messages.value);
-  invoke("acp_respond_permission", { id: props.chatId, rpcId: r.rpcId, optionId }).catch((e) => {
+  try {
+    await invoke("acp_respond_permission", { id: props.chatId, rpcId: r.rpcId, optionId });
+    messages.value.push({ id: nextMsgId++, role: "permission", text: `${reject ? "✗" : "✓"} ${optName}: ${r.title}` });
+    saveMessages(props.chatId, messages.value);
+    // serverRequest/resolved closes the prompt and updates the Sidebar state.
+  } catch (e) {
     messages.value.push({ id: nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
-  });
-  acpPermRpcId.value = null;
-  chats.sendStatusEvent(props.chatId, { type: "RESUME" });
-  syncStore();
+    saveMessages(props.chatId, messages.value);
+    permissionResponsePending.value = false;
+  }
+}
+
+async function copyMessage(msg: ChatMessage) {
+  if (!msg.text) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(msg.text);
+    } else {
+      const temporary = document.createElement("textarea");
+      temporary.value = msg.text;
+      temporary.setAttribute("readonly", "");
+      temporary.style.position = "fixed";
+      temporary.style.opacity = "0";
+      document.body.appendChild(temporary);
+      temporary.select();
+      const copied = document.execCommand("copy");
+      temporary.remove();
+      if (!copied) throw new Error("Clipboard API unavailable");
+    }
+    copiedMessageId.value = msg.id;
+    if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = setTimeout(() => {
+      copiedMessageId.value = null;
+      copyFeedbackTimer = null;
+    }, 1_200);
+  } catch (e) {
+    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Could not copy message: ${e}` });
+    saveMessages(props.chatId, messages.value);
+  }
 }
 
 // The welcome-screen composer creates a chat and its first prompt together. The
@@ -1912,7 +1978,7 @@ function acpRespond(optionId: string, optName: string, kind: string) {
 // only has a session after its handshake lands on acp-data.
 // ponytail: 20 s cap, no retry — if the adapter is that slow the prompt stays in
 // the feed as a plain user message and the user can resend.
-async function sendInitialPrompt(prompt: string) {
+async function sendInitialPrompt(prompt: string, images?: string[]) {
   emit("prompt-sent");
   if (usesRpcRuntime.value && !sessionId.value) {
     await new Promise<void>((resolve) => {
@@ -1920,7 +1986,7 @@ async function sendInitialPrompt(prompt: string) {
       setTimeout(() => { stop(); resolve(); }, 20_000);
     });
   }
-  await sendMessage(prompt);
+  await sendMessage(prompt, images);
 }
 
 async function sendMessage(forcedText?: string, extraImages?: string[]) {
@@ -2008,25 +2074,33 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
 // Reply to a can_use_tool control_request. `response` is the inner decision object
 // ({behavior:"allow",updatedInput} | {behavior:"deny",message}); the Rust side wraps it.
 async function respondControl(requestId: string, response: Record<string, unknown>) {
-  try {
-    await invoke("claude_respond_control", { id: props.chatId, requestId, response });
-  } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
-    saveMessages(props.chatId, messages.value);
-  }
-  // Transition machine back to running — callers clear the pending ref before calling us.
+  await invoke("claude_respond_control", { id: props.chatId, requestId, response });
   chats.sendStatusEvent(props.chatId, { type: "RESUME" });
   syncStore();
 }
 
+async function resolveClaudePrompt(
+  cr: CanUseToolReq,
+  response: Record<string, unknown>,
+  clearPrompt: () => void,
+) {
+  nativeControlResponsePending.value = true;
+  try {
+    await respondControl(cr.requestId, response);
+    clearPrompt();
+  } catch (e) {
+    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
+    saveMessages(props.chatId, messages.value);
+  } finally {
+    nativeControlResponsePending.value = false;
+    syncStore();
+  }
+}
+
 // Generic tool permission + diff Accept/Reject (both pull from pendingPermission|pendingDiff).
-function respondPermission(allow: boolean, opts?: { always?: boolean; updatedInput?: Record<string, unknown>; message?: string }) {
+async function respondPermission(allow: boolean, opts?: { always?: boolean; updatedInput?: Record<string, unknown>; message?: string }) {
   const cr = pendingPermission.value ?? pendingDiff.value;
   if (!cr) return;
-  removeFeedMarker(pendingPermissionMsgId.value); pendingPermissionMsgId.value = null;
-  removeFeedMarker(pendingDiffMsgId.value); pendingDiffMsgId.value = null;
-  pendingPermission.value = null;
-  pendingDiff.value = null;
   // ACP transport: reply to the agent's blocking request_permission.
   if (usesRpcRuntime.value && acpPermRpcId.value !== null) {
     // ACP optionIds are agent-defined — pick the matching one by kind from the
@@ -2049,21 +2123,31 @@ function respondPermission(allow: boolean, opts?: { always?: boolean; updatedInp
     syncStore();
     return;
   }
+  if (nativeControlResponsePending.value) return;
+  nativeControlResponsePending.value = true;
   const detail = (cr.input.command ?? cr.input.file_path ?? cr.input.path ?? cr.description ?? "") as string;
   const detailStr = detail ? ` — ${detail.length > 80 ? detail.slice(0, 80) + "…" : detail}` : "";
-  if (allow) {
-    if (opts?.always) {
+  try {
+    await respondControl(cr.requestId, allow
+      ? { behavior: "allow", updatedInput: opts?.updatedInput ?? cr.input }
+      : { behavior: "deny", message: opts?.message || "User denied this action." });
+    removeFeedMarker(pendingPermissionMsgId.value); pendingPermissionMsgId.value = null;
+    removeFeedMarker(pendingDiffMsgId.value); pendingDiffMsgId.value = null;
+    pendingPermission.value = null;
+    pendingDiff.value = null;
+    if (allow && opts?.always) {
       const keys = ruleKeys(cr.toolName, cr.input);
       chats.addPermissionRule(keys[keys.length - 1]);
     }
-    const label = opts?.always ? "✓ Always allowed" : "✓ Allowed";
+    const label = allow ? (opts?.always ? "✓ Always allowed" : "✓ Allowed") : "✗ Denied";
     messages.value.push({ id: nextMsgId++, role: "permission", text: `${label}: ${cr.toolName}${detailStr}` });
     saveMessages(props.chatId, messages.value);
-    respondControl(cr.requestId, { behavior: "allow", updatedInput: opts?.updatedInput ?? cr.input });
-  } else {
-    messages.value.push({ id: nextMsgId++, role: "permission", text: `✗ Denied: ${cr.toolName}${detailStr}` });
+  } catch (e) {
+    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
     saveMessages(props.chatId, messages.value);
-    respondControl(cr.requestId, { behavior: "deny", message: opts?.message || "User denied this action." });
+  } finally {
+    nativeControlResponsePending.value = false;
+    syncStore();
   }
 }
 
@@ -2079,46 +2163,72 @@ function isPicked(question: string, label: string) {
   return (questionAnswers.value[question] ?? []).includes(label);
 }
 
-function submitQuestion() {
+async function submitQuestion() {
   const cr = pendingQuestion.value;
-  if (!cr || !canSubmitQuestion.value) return;
-  removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
-  pendingQuestion.value = null;
+  if (!cr || !canSubmitQuestion.value || nativeControlResponsePending.value) return;
   // The tool reads input.answers keyed by question text; multi-select joins with ", ".
   const answers: Record<string, string> = {};
   for (const [q, labels] of Object.entries(questionAnswers.value)) {
     if (labels.length) answers[q] = labels.join(", ");
   }
-  respondControl(cr.requestId, { behavior: "allow", updatedInput: { ...cr.input, answers } });
+  await resolveClaudePrompt(cr, { behavior: "allow", updatedInput: { ...cr.input, answers } }, () => {
+    removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
+    pendingQuestion.value = null;
+  });
 }
-function cancelQuestion() {
+async function cancelQuestion() {
   const cr = pendingQuestion.value;
-  if (!cr) return;
-  removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
-  pendingQuestion.value = null;
+  if (!cr || nativeControlResponsePending.value) return;
   // allow with empty answers → tool reports "did not answer" (clean dismiss, no error).
-  respondControl(cr.requestId, { behavior: "allow", updatedInput: { ...cr.input, answers: {} } });
+  await resolveClaudePrompt(cr, { behavior: "allow", updatedInput: { ...cr.input, answers: {} } }, () => {
+    removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
+    pendingQuestion.value = null;
+  });
 }
 
-function respondPlan(approve: boolean) {
+async function respondPlan(approve: boolean) {
   const cr = pendingPlan.value;
-  if (!cr) return;
-  removeFeedMarker(pendingPlanMsgId.value); pendingPlanMsgId.value = null;
-  pendingPlan.value = null;
-  if (approve) {
-    respondControl(cr.requestId, { behavior: "allow", updatedInput: cr.input });
-  } else {
-    respondControl(cr.requestId, { behavior: "deny", message: planFeedback.value.trim() || "Keep planning — do not exit plan mode yet." });
-  }
+  if (!cr || nativeControlResponsePending.value) return;
+  await resolveClaudePrompt(cr, approve
+    ? { behavior: "allow", updatedInput: cr.input }
+    : { behavior: "deny", message: planFeedback.value.trim() || "Keep planning — do not exit plan mode yet." }, () => {
+      removeFeedMarker(pendingPlanMsgId.value); pendingPlanMsgId.value = null;
+      pendingPlan.value = null;
+    });
 }
 
 // Pick a permission mode from the header dropdown (default / acceptEdits / bypassPermissions).
-// Restart claude with --resume so the conversation continues under the new mode.
+// RPC runtimes update the active thread in place; restarting them loses the
+// pending approval context and was the source of "unknown agent session" errors.
 async function selectPermMode(mode: PermMode) {
   permMenuOpen.value = false;
   if (mode === permMode.value) return;
+
+  const previousMode = permMode.value;
   permMode.value = mode;
   savePermMode(props.chatId, permMode.value);
+
+  if (usesRpcRuntime.value) {
+    try {
+      const requestId = await invoke<number>("acp_set_mode", {
+        id: props.chatId,
+        modeId: mode,
+      });
+      acpControlIds.add(requestId);
+    } catch (err) {
+      // Do not leave the picker claiming a policy that the server rejected.
+      permMode.value = previousMode;
+      savePermMode(props.chatId, previousMode);
+      messages.value.push({
+        id: nextMsgId++,
+        role: "assistant",
+        text: `Couldn't update the permission mode: ${String(err)}`,
+      });
+      syncStore();
+    }
+    return;
+  }
+
   await restartClaude();
 }
 
@@ -2500,7 +2610,7 @@ onMounted(async () => {
     await scriptsStore.loadForPath(props.cwd);
     const startErr = await startRpcRuntime().catch((e: unknown) => e);
     if (startErr) messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
-    else if (props.initialPrompt) sendInitialPrompt(props.initialPrompt);
+    else if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
     return;
   }
   let startErr: unknown = null;
@@ -2522,7 +2632,7 @@ onMounted(async () => {
     return e;
   }).then((e) => { startErr = e; });
   unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
-  if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt);
+  if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
 
   // Load account info (plan, 5h window) — non-blocking.
   invoke<AccountInfo>("claude_get_account", { cwd: props.cwd })
@@ -2543,6 +2653,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("mousedown", onPermMenuOutside);
   window.removeEventListener("mousedown", onEffortMenuOutside);
@@ -2873,6 +2984,25 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   color: #f87171;
 }
 
+.message-copy-btn {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: color .12s ease, background-color .12s ease, opacity .12s ease;
+}
+.group:hover .message-copy-btn, .message-copy-btn:focus-visible { opacity: 1; }
+.message-copy-btn:hover { background: color-mix(in srgb, var(--foreground) 8%, transparent); color: var(--foreground); }
+.message-copy-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
 /* Command suggestions */
 .cmd-suggestion.selected { background: rgba(255,255,255,0.05); }
 
@@ -2980,8 +3110,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   transition: color .1s, background .1s;
 }
 .pending-img-remove:hover { color: #f87171; background: rgba(185,28,28,0.2); }
-
-.chat-input::-webkit-scrollbar { display: none; }
 
 /* Markdown body inside assistant messages — v-html content, needs real
    selectors (:deep) since these elements aren't authored in this SFC. */

@@ -313,6 +313,11 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		if rpc != 0 {
 			emit(map[string]any{"id": rpc, "result": map[string]any{}})
 		}
+	case "serverRequest/resolved":
+		// This is Codex's authoritative acknowledgement that an approval (or
+		// input request) is no longer pending. Forward it so the UI does not
+		// optimistically clear the prompt before the app-server accepted it.
+		emit(map[string]any{"method": method, "params": params})
 	default:
 		if _, hasID := msg["id"]; hasID && method != "" {
 			line, err := json.Marshal(msg)
@@ -554,12 +559,19 @@ func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID 
 	}
 	configOptions := codexConfigOptions(entries)
 
-	startParams := map[string]any{"cwd": cwd, "approvalPolicy": "on-request", "sandbox": "workspace-write"}
+	// Codex only sends its approval RPCs to the client when the client is the
+	// reviewer.  Be explicit here instead of relying on a config default: an
+	// auto-reviewer can otherwise decide a request before the chat UI sees it.
+	startParams := map[string]any{
+		"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "workspace-write",
+	}
 	var resp map[string]any
 	if tid := strings.TrimSpace(resumeSessionID); tid != "" {
 		if err := sess.write(map[string]any{
 			"jsonrpc": "2.0", "id": next, "method": "thread/resume",
-			"params": map[string]any{"threadId": tid, "cwd": cwd, "approvalPolicy": "on-request", "sandbox": "workspace-write"},
+			"params": map[string]any{
+				"threadId": tid, "cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "workspace-write",
+			},
 		}); err != nil {
 			return fail(err)
 		}
@@ -730,10 +742,45 @@ func (a *App) AcpSetMode(id, modeID string) (int64, error) {
 		return 0, fmt.Errorf("acp adapter not running")
 	}
 	rpc := sess.rpcID()
+	if sess.proto == protoCodexAppServer {
+		approvalPolicy, sandbox, ok := codexModeSettings(modeID)
+		if !ok {
+			return 0, fmt.Errorf("unsupported Codex permission mode %q", modeID)
+		}
+		// Codex is not an ACP session.  Sending session/set_mode here used an
+		// incompatible session id and produced "unknown agent session".  Its
+		// v2 app-server API updates an existing thread in place, so the next turn
+		// keeps its history and adopts the new permission settings.
+		return rpc, sess.write(map[string]any{
+			"jsonrpc": "2.0", "id": rpc, "method": "thread/settings/update",
+			"params": map[string]any{
+				"threadId": sess.sessionID, "approvalPolicy": approvalPolicy,
+				"approvalsReviewer": "user", "sandboxPolicy": map[string]any{"type": sandbox},
+			},
+		})
+	}
 	return rpc, sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpc, "method": "session/set_mode",
 		"params": map[string]any{"sessionId": sess.sessionID, "modeId": modeID},
 	})
+}
+
+// codexModeSettings translates Burrow's shared mode ids to the settings the
+// Codex app-server accepts.  Keep the aliases: ACP agents may expose the
+// descriptive Codex names while the legacy Claude dropdown uses its own ids.
+func codexModeSettings(modeID string) (approvalPolicy, sandbox string, ok bool) {
+	switch modeID {
+	case "default", "ask", "approval-required", "plan", "read-only":
+		return "untrusted", "readOnly", true
+	case "auto", "acceptEdits", "auto-accept-edits":
+		return "on-request", "workspaceWrite", true
+	case "dontAsk":
+		return "never", "workspaceWrite", true
+	case "bypassPermissions", "full-access", "danger-full-access":
+		return "never", "dangerFullAccess", true
+	default:
+		return "", "", false
+	}
 }
 
 // AcpSetConfig sets a session config option (model / effort). Codex has no

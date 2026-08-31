@@ -45,7 +45,7 @@
       </button>
     </div>
     <div class="fc-solid fc-body min-h-0 flex-1">
-      <ClaudeChat
+      <AgentChat
         v-if="controlChatId !== null"
         :key="controlChatId"
         compact
@@ -64,7 +64,7 @@ import { ref, computed, watch, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { PhSparkle, PhMinus, PhGitBranch, PhTree, PhArrowCounterClockwise } from "@phosphor-icons/vue";
 import { getDefaultManagerPrimer, SPAWN_MODE_WORKTREE, SPAWN_MODE_BRANCH } from "@/utils/managerPrimer";
-import ClaudeChat from "./ClaudeChat.vue";
+import AgentChat from "./AgentChat.vue";
 import { useUIStore } from "@/stores/ui";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";

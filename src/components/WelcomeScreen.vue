@@ -30,10 +30,24 @@
           rows="3"
           autofocus
           @keydown.enter.exact.prevent="submit"
+          @paste="onPaste"
         />
+        <div v-if="pendingImages.length" class="welcome-image-previews">
+          <div v-for="(image, index) in pendingImages" :key="image" class="welcome-image-preview">
+            <img :src="image" :alt="'Attached image ' + (index + 1)" />
+            <button type="button" class="welcome-image-remove" :aria-label="'Remove attached image ' + (index + 1)" @click="pendingImages.splice(index, 1)">
+              <PhX :size="11" weight="bold" />
+            </button>
+          </div>
+        </div>
         <template #toolbar>
         <div class="welcome-toolbar">
           <div class="welcome-pillbar">
+            <input ref="imageInput" class="sr-only" type="file" accept="image/*" multiple @change="onImageSelect" />
+            <button class="welcome-pill" type="button" title="Attach images" @click="imageInput?.click()">
+              <PhPaperclip :size="12" weight="bold" />
+              Attach
+            </button>
             <ModelPicker :agent-id="selectedAgentId" :model-id="selectedModel" :cwd="target.path" @select="onModelSelect" />
             <template v-if="isClaude">
               <DropdownMenuRoot>
@@ -112,8 +126,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from "vue";
-import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText } from "@phosphor-icons/vue";
+import { ref, computed, watch, nextTick, useTemplateRef } from "vue";
+import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhPaperclip, PhX } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
@@ -136,6 +150,35 @@ const chatAgents = useChatAgentsStore();
 
 const text = ref("");
 const inputEl = ref<InstanceType<typeof ComposerTextInput>>();
+const imageInput = useTemplateRef<HTMLInputElement>("imageInput");
+const pendingImages = ref<string[]>([]);
+
+function attachImages(files: Iterable<File>) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") pendingImages.value.push(reader.result);
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function onPaste(event: ClipboardEvent) {
+  const files = Array.from(event.clipboardData?.items ?? [])
+    .filter((item) => item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+  if (!files.length) return;
+  event.preventDefault();
+  attachImages(files);
+}
+
+function onImageSelect(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (input.files) attachImages(input.files);
+  input.value = "";
+}
 
 // Which agent (Claude/Codex/Gemini/…) launches the chat, like T3 Code's model
 // switcher — starts on the user's configured default, overridable per-send.
@@ -226,6 +269,7 @@ function submit() {
   const prompt = text.value.trim();
   const t = target.value;
   if (!prompt || !t) return;
+  const images = [...pendingImages.value];
   if (ui.mode !== "terminal") ui.setMode("terminal");
   const wasOpen = store.opened.some((w) => w.id === t.id);
   store.open(t);
@@ -234,9 +278,10 @@ function submit() {
         { kind: selectedAgent.value.kind, command: selectedAgent.value.command, model: selectedModel.value, permMode: selectedPermMode.value },
         prompt,
       ))
-    : () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt);
+    : () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt, images);
   wasOpen ? open() : nextTick(open); // freshly-mounted Terminal needs a tick to attach its request watcher
   text.value = "";
+  pendingImages.value = [];
   ui.closeWelcome();
 }
 </script>
@@ -304,6 +349,44 @@ function submit() {
   line-height: 1.5;
 }
 .welcome-input::placeholder { color: var(--text-muted); }
+
+.welcome-image-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.welcome-image-preview {
+  position: relative;
+  height: 64px;
+  width: 64px;
+}
+
+.welcome-image-preview img {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+.welcome-image-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.welcome-image-remove:hover { color: var(--text-primary); background: var(--bg-hover); }
 
 .welcome-toolbar {
   display: flex;

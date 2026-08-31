@@ -22,7 +22,7 @@
           <!-- One ClaudeChat per engaged repo, kept mounted and v-show'd. This is
                what lets a busy Manager keep streaming when you switch workspace:
                we flip visibility instead of unmounting (which would claude_stop). -->
-          <ClaudeChat
+          <AgentChat
             v-for="m in mountedManagers"
             v-show="m.repoId === rootId"
             :key="m.sessionId"
@@ -266,7 +266,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { PhSparkle, PhGitBranch, PhTree, PhCaretDown, PhCaretUp, PhCheck, PhCpu, PhGear, PhArrowCounterClockwise, PhShieldWarning, PhPencilSimple, PhShieldCheck, PhListChecks, PhFastForward, PhSlidersHorizontal, PhArrowUp } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
-import ClaudeChat from "./ClaudeChat.vue";
+import AgentChat from "./AgentChat.vue";
 import ComposerTextInput from "./ComposerTextInput.vue";
 import ComposerBox from "./ComposerBox.vue";
 import { useUIStore } from "@/stores/ui";
@@ -283,9 +283,9 @@ const chats = useClaudeChatsStore();
 const wsStore = useWorkspaceStore();
 
 // One live ClaudeChat instance per engaged repo (function refs keyed by repo id).
-const chatRefs = new Map<number, InstanceType<typeof ClaudeChat>>();
+const chatRefs = new Map<number, InstanceType<typeof AgentChat>>();
 function setChatRef(repoId: number, el: unknown) {
-  if (el) chatRefs.set(repoId, el as InstanceType<typeof ClaudeChat>);
+  if (el) chatRefs.set(repoId, el as InstanceType<typeof AgentChat>);
   else chatRefs.delete(repoId);
 }
 const quickEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);

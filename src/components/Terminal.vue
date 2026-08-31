@@ -96,13 +96,14 @@
             @saved="() => onLeafSaved(pane.leaf.id)"
             @error="(m) => onLeafError(m)"
           />
-          <ClaudeChat
+          <AgentChat
             v-else-if="pane.leaf.leafType === 'chat'"
             :chat-id="pane.leaf.chatId!"
             :workspace-id="workspaceId"
             :cwd="pane.leaf.cwd ?? cwd"
             :is-watching="isWatching(tab)"
             :initial-prompt="pane.leaf.initialPrompt"
+            :initial-images="pane.leaf.initialImages"
             @prompt-sent="pane.leaf.initialPrompt = undefined"
           />
           <BrowserPane
@@ -173,7 +174,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import XTerm from "./XTerm.vue";
 import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
-import ClaudeChat from "./ClaudeChat.vue";
+import AgentChat from "./AgentChat.vue";
 import BrowserPane from "./BrowserPane.vue";
 import GitPanel from "./GitPanel.vue";
 import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vue";
@@ -858,7 +859,7 @@ function activateTab(id: number) {
   nextTick(() => xtermRefs.get(leaf.id)?.focus());
 }
 
-function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string) {
+function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[]) {
   let session: import("@/stores/claudeChats").ClaudeSession;
   if (chatId != null) {
     session = chatsStore.sessions.find((s) => s.id === chatId) ?? chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
@@ -889,7 +890,10 @@ function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initial
   activateTab(tab.id);
   // ClaudeChat sends this itself once its runtime is up (a chat leaf has no
   // xtermRefs entry, and its CLI/ACP session isn't ready on the next tick).
-  if (initialPrompt) leaf.initialPrompt = initialPrompt;
+  if (initialPrompt) {
+    leaf.initialPrompt = initialPrompt;
+    leaf.initialImages = initialImages;
+  }
 }
 
 function activateLeaf(id: number) {
@@ -1402,7 +1406,7 @@ function applyTabRequest(req: typeof tabsStore.request) {
     reorderTabs(req.fromIdx, req.toIdx);
   }
   else if (req.action === "openGit") openGitTab();
-  else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId, undefined, req.initialPrompt);
+  else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId, undefined, req.initialPrompt, req.initialImages);
   else if (req.action === "rename" && req.tabId != null && req.title != null) {
     const tab = tabs.value.find((t) => t.id === req.tabId);
     if (tab) getAllLeaves(tab.root).forEach((l) => { l.title = req.title!; });

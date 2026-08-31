@@ -52,6 +52,27 @@ func TestCodexConfigOptionsEmpty(t *testing.T) {
 	}
 }
 
+func TestCodexModeSettings(t *testing.T) {
+	cases := map[string]struct {
+		approval string
+		sandbox  string
+	}{
+		"default":           {"untrusted", "readOnly"},
+		"acceptEdits":       {"on-request", "workspaceWrite"},
+		"plan":              {"untrusted", "readOnly"},
+		"bypassPermissions": {"never", "dangerFullAccess"},
+	}
+	for mode, want := range cases {
+		approval, sandbox, ok := codexModeSettings(mode)
+		if !ok || approval != want.approval || sandbox != want.sandbox {
+			t.Fatalf("mode %q: got (%q, %q, %t), want (%q, %q, true)", mode, approval, sandbox, ok, want.approval, want.sandbox)
+		}
+	}
+	if _, _, ok := codexModeSettings("not-a-mode"); ok {
+		t.Fatal("unknown mode must not silently change Codex settings")
+	}
+}
+
 // Live smoke test against the installed Codex CLI: proves the probe (spawn →
 // initialize → model/list) really returns models. Skipped when codex is absent.
 func TestCodexListModelsLive(t *testing.T) {

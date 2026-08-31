@@ -15,17 +15,24 @@
 textarea {
   overflow-x: hidden;
   overflow-wrap: break-word;
-  scrollbar-width: none;
-}
-textarea::-webkit-scrollbar {
-  width: 0;
-  height: 0;
 }
 
-/* Vertical growth still scrolls once the composer hits its max height; the bar
-   is just invisible. */
+/* Vertical growth still scrolls once the composer hits its max height. Keep
+   that affordance visible, while the rule above prevents a horizontal bar. */
 .composer-input {
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 55%, transparent) transparent;
+}
+.composer-input::-webkit-scrollbar {
+  width: 8px;
+  height: 0;
+}
+.composer-input::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }
 
 /* Dropdown panels: keep them scrollable, drop the grey bar (macOS "Show scroll
