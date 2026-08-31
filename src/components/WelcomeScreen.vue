@@ -133,6 +133,7 @@ import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
 import { useChatAgentsStore } from "@/stores/chatAgents";
 import { getConfig, setConfig } from "@/lib/config";
+import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { modelsFor } from "@/lib/chatModels";
 import ModelPicker from "@/components/ModelPicker.vue";
@@ -178,6 +179,21 @@ function onImageSelect(event: Event) {
   const input = event.target as HTMLInputElement;
   if (input.files) attachImages(input.files);
   input.value = "";
+}
+
+async function persistTerminalImages(images: string[]): Promise<string[]> {
+  return Promise.all(images.map(async (image) => {
+    const match = /^data:image\/([a-z0-9.+-]+);base64,(.+)$/i.exec(image);
+    if (!match) throw new Error("Unsupported image format");
+    return invoke<string>("save_temp_image", { b64: match[2], ext: match[1] });
+  }));
+}
+
+function promptWithImagePaths(prompt: string, paths: string[]): string {
+  if (!paths.length) return prompt;
+  const label = paths.length === 1 ? "image" : "images";
+  const newline = String.fromCharCode(10);
+  return "Please inspect the attached " + label + " before answering:" + newline + paths.join(newline) + newline + newline + prompt;
 }
 
 // Which agent (Claude/Codex/Gemini/…) launches the chat, like T3 Code's model
@@ -265,18 +281,21 @@ watch(target, (t) => {
 }, { immediate: true });
 
 
-function submit() {
+async function submit() {
   const prompt = text.value.trim();
   const t = target.value;
   if (!prompt || !t) return;
   const images = [...pendingImages.value];
+  const terminalPrompt = launchMode.value === "terminal" && images.length > 0
+    ? promptWithImagePaths(prompt, await persistTerminalImages(images))
+    : prompt;
   if (ui.mode !== "terminal") ui.setMode("terminal");
   const wasOpen = store.opened.some((w) => w.id === t.id);
   store.open(t);
   const open = launchMode.value === "terminal"
     ? () => termTabs.add(t.id, buildTerminalCommand(
         { kind: selectedAgent.value.kind, command: selectedAgent.value.command, model: selectedModel.value, permMode: selectedPermMode.value },
-        prompt,
+        terminalPrompt,
       ))
     : () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt, images);
   wasOpen ? open() : nextTick(open); // freshly-mounted Terminal needs a tick to attach its request watcher
