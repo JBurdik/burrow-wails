@@ -6,8 +6,8 @@ import type { TabSummary } from "@/stores/terminalTabs";
 function mkWs(id: number, name: string, parent_id: number | null = null): Workspace {
   return { id, name, path: `/r/${name}`, created_at: 0, last_opened: null, parent_id, sort_order: id };
 }
-function mkTab(id: number, title: string): TabSummary {
-  return { id, title, isAgent: false, busy: false, status: "idle" };
+function mkTab(id: number, title: string, extra?: Partial<TabSummary>): TabSummary {
+  return { id, title, isAgent: false, busy: false, status: "idle", ...extra };
 }
 
 const repoA = mkWs(1, "a");
@@ -21,21 +21,21 @@ describe("buildActivityRows", () => {
   const open = [repoA, wtA1, repoB];
 
   it("flattens every open workspace's tabs, newest first", () => {
-    const { live, settled } = buildActivityRows({ openedWorkspaces: open, tabsByWs, activityAt, archivedIds: [], filterProjectId: null });
+    const { live, snoozed } = buildActivityRows({ openedWorkspaces: open, tabsByWs, activityAt, archivedIds: [], filterProjectId: null });
     expect(live.map((r) => r.tab.id)).toEqual([101, 200, 100, 300]);
-    expect(settled).toEqual([]);
+    expect(snoozed).toEqual([]);
   });
 
-  it("settles tabs of an archived workspace", () => {
-    const { live, settled } = buildActivityRows({ openedWorkspaces: open, tabsByWs, activityAt, archivedIds: [10], filterProjectId: null });
+  it("snoozes tabs of an archived workspace", () => {
+    const { live, snoozed } = buildActivityRows({ openedWorkspaces: open, tabsByWs, activityAt, archivedIds: [10], filterProjectId: null });
     expect(live.map((r) => r.tab.id)).toEqual([101, 100, 300]);
-    expect(settled.map((r) => r.tab.id)).toEqual([200]);
+    expect(snoozed.map((r) => r.tab.id)).toEqual([200]);
   });
 
-  it("settles a worktree's tabs when its parent repo is archived", () => {
-    const { live, settled } = buildActivityRows({ openedWorkspaces: open, tabsByWs, activityAt, archivedIds: [1], filterProjectId: null });
+  it("snoozes a worktree's tabs when its parent repo is archived", () => {
+    const { live, snoozed } = buildActivityRows({ openedWorkspaces: open, tabsByWs, activityAt, archivedIds: [1], filterProjectId: null });
     expect(live.map((r) => r.tab.id)).toEqual([300]);
-    expect(settled.map((r) => r.tab.id)).toEqual([101, 200, 100]);
+    expect(snoozed.map((r) => r.tab.id)).toEqual([101, 200, 100]);
   });
 
   it("filters by repo, keeping that repo's worktree rows", () => {
@@ -43,13 +43,13 @@ describe("buildActivityRows", () => {
     expect(live.map((r) => r.tab.id)).toEqual([101, 200, 100]);
   });
 
-  it("settles a snoozed tab, leaving its siblings live", () => {
-    const { live, settled } = buildActivityRows({
+  it("snoozes a snoozed tab, leaving its siblings live", () => {
+    const { live, snoozed } = buildActivityRows({
       openedWorkspaces: open, tabsByWs, activityAt,
       archivedIds: [], snoozedKeys: ["1:101", "10:200"], filterProjectId: null,
     });
     expect(live.map((r) => r.tab.id)).toEqual([100, 300]);
-    expect(settled.map((r) => r.tab.id)).toEqual([101, 200]);
+    expect(snoozed.map((r) => r.tab.id)).toEqual([101, 200]);
   });
 
   it("keeps never-stamped tabs in a stable order", () => {
@@ -59,5 +59,26 @@ describe("buildActivityRows", () => {
       activityAt: () => 0, archivedIds: [], filterProjectId: null,
     });
     expect(live.map((r) => r.tab.id)).toEqual([301, 300]);
+  });
+
+  it("buckets a settled chat tab separately from live and snoozed", () => {
+    const { live, settledChats, snoozed } = buildActivityRows({
+      openedWorkspaces: [repoA],
+      tabsByWs: { 1: [mkTab(100, "a1"), mkTab(101, "a2", { isChat: true, settled: true })] },
+      activityAt, archivedIds: [], filterProjectId: null,
+    });
+    expect(live.map((r) => r.tab.id)).toEqual([100]);
+    expect(settledChats.map((r) => r.tab.id)).toEqual([101]);
+    expect(snoozed).toEqual([]);
+  });
+
+  it("a snoozed workspace's tabs win over per-chat settled status", () => {
+    const { settledChats, snoozed } = buildActivityRows({
+      openedWorkspaces: [wtA1],
+      tabsByWs: { 10: [mkTab(200, "wt", { isChat: true, settled: true })] },
+      activityAt, archivedIds: [10], filterProjectId: null,
+    });
+    expect(settledChats).toEqual([]);
+    expect(snoozed.map((r) => r.tab.id)).toEqual([200]);
   });
 });

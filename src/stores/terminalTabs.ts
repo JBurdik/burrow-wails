@@ -18,6 +18,10 @@ export interface TabSummary {
   round?: number;
   /** Agent-native session id (for --resume), mirrored from the leaf. */
   sessionId?: string;
+  /** Internal claudeChats session id, for chat tabs only. */
+  chatId?: number;
+  /** Chat-only: no attention needed right now — see claudeChats.isSettled(). */
+  settled?: boolean;
 }
 
 type TabRequest = {

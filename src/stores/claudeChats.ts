@@ -27,6 +27,13 @@ export interface ClaudeSession {
   agentKind?: string;
   // Native provider runtime or a generic Agent Client Protocol adapter.
   transport?: ChatTransport;
+  // Set when the chat was archived (soft-hidden, process stopped, reversible via
+  // unarchive). null/undefined means it's a normal, listed session.
+  archivedAt?: number | null;
+  // Manual override of the computed "settled" (no attention needed) bucket —
+  // "settled" pins it settled even mid-run, "active" pins it active even once
+  // idle. Cleared back to auto (undefined) whenever a new turn starts (see sync()).
+  settledOverride?: "settled" | "active" | null;
 }
 
 const SESSIONS_KEY = "chatSessions";
@@ -111,7 +118,13 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   }
 
   function sessionsForWs(workspaceId: number): ClaudeSession[] {
-    return sessions.value.filter((s) => s.workspaceId === workspaceId);
+    return sessions.value.filter((s) => s.workspaceId === workspaceId && !s.archivedAt);
+  }
+
+  function archivedSessionsForWs(workspaceId: number): ClaudeSession[] {
+    return sessions.value
+      .filter((s) => s.workspaceId === workspaceId && !!s.archivedAt)
+      .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0));
   }
 
   function activeSession(workspaceId: number): ClaudeSession | undefined {
@@ -176,6 +189,56 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     persist();
   }
 
+  // Soft-hide: stop the process like remove(), but keep the row (and its
+  // history) so it can be found again in the Archived shelf and unarchived.
+  async function archive(id: number) {
+    const s = sessions.value.find((x) => x.id === id);
+    if (!s) return;
+    actors.get(id)?.stop();
+    actors.delete(id);
+    await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
+    s.archivedAt = Date.now();
+    if (activeByWs.value[s.workspaceId] === id) {
+      const remaining = sessionsForWs(s.workspaceId);
+      if (remaining.length) activeByWs.value[s.workspaceId] = remaining[0].id;
+      else delete activeByWs.value[s.workspaceId];
+    }
+    persist();
+  }
+
+  // Reverses archive(); does NOT restart the actor/process — the caller (chat
+  // reopen) is responsible for that, same as opening any other existing chat.
+  function unarchive(id: number) {
+    const s = sessions.value.find((x) => x.id === id);
+    if (!s) return;
+    s.archivedAt = null;
+    persist();
+  }
+
+  function settle(id: number) {
+    const s = sessions.value.find((x) => x.id === id);
+    if (!s) return;
+    s.settledOverride = "settled";
+    persist();
+  }
+
+  function unsettle(id: number) {
+    const s = sessions.value.find((x) => x.id === id);
+    if (!s) return;
+    s.settledOverride = "active";
+    persist();
+  }
+
+  // Whether a chat needs no more attention right now — auto-computed the same
+  // way t3code derives it (not busy, not running/waiting/permission), unless
+  // manually pinned via settledOverride.
+  function isSettled(s: ClaudeSession | undefined): boolean {
+    if (!s) return false;
+    if (s.settledOverride === "settled") return true;
+    if (s.settledOverride === "active") return false;
+    return !(s.busy || s.status === "running" || s.status === "waiting" || s.status === "permission");
+  }
+
   // Turn event tracking for 5-hour usage window.
   function recordTurn(inputTokens: number, outputTokens: number) {
     const now = Date.now();
@@ -204,6 +267,10 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   function sync(id: number, patch: Partial<Pick<ClaudeSession, "busy" | "messageCount" | "claudeSessionId" | "title" | "status" | "control" | "agentKind" | "transport">>) {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
+    // A fresh turn starting is real reactivation — drop any settle/unsettle pin
+    // so the next done/review transition auto-settles again instead of being
+    // stuck (mirrors t3code clearing settledOverride on a system-triggered unsettle).
+    if (patch.status === "running" && s.settledOverride) s.settledOverride = null;
     Object.assign(s, patch);
     if (patch.claudeSessionId !== undefined || patch.title !== undefined || patch.messageCount !== undefined || patch.control !== undefined || patch.agentKind !== undefined || patch.transport !== undefined) {
       persist();
@@ -232,11 +299,17 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     windowStart,
     recordTurn,
     sessionsForWs,
+    archivedSessionsForWs,
     activeSession,
     create,
     ensureSession,
     setActive,
     remove,
+    archive,
+    unarchive,
+    settle,
+    unsettle,
+    isSettled,
     sync,
     permissionRules,
     addPermissionRule,

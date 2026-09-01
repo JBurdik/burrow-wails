@@ -865,6 +865,9 @@ function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initial
   } else {
     session = chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   }
+  // Reopening an archived chat (e.g. from the Sidebar's Archived shelf) always
+  // un-archives it — a chat with an open tab is never archived.
+  if (session.archivedAt) chatsStore.unarchive(session.id);
   // Focus existing tab if already open
   const existing = tabs.value.find(
     (t) => t.root.type === "leaf" && t.root.leafType === "chat" && (t.root as Leaf).chatId === session.id
@@ -1187,12 +1190,12 @@ function isTabSplit(tab: Tab): boolean {
 // close (closeTab/closePane) — ClaudeChat.onBeforeUnmount deliberately no longer
 // stops the proc, so a background remount can't kill a live agent. Transport is
 // per-session; a wrong-map stop is a harmless no-op, but resolve it to be clean.
-// Closing a thread deletes it: restore now derives the open tabs from the
-// session list, so leaving the session behind would resurrect the tab on the
-// next launch. `remove` stops the right runtime (claude/codex/acp) for us.
+// Closing a thread archives it (kills the process, keeps the row): restore
+// filters archived sessions out of `sessionsForWs`, so it won't resurrect as an
+// open tab on the next launch, but it stays reachable from the Archived shelf.
 function stopChatSession(leaf: Leaf) {
   if (leaf.chatId == null) return;
-  chatsStore.remove(leaf.chatId);
+  chatsStore.archive(leaf.chatId);
 }
 
 async function closePane(leafId: number) {
@@ -1320,6 +1323,10 @@ function syncStore() {
       leafCount: getAllLeaves(t.root).length,
       round: Math.max(0, ...getAllLeaves(t.root).map((l) => l.round ?? 0)),
       sessionId: getAllLeaves(t.root)[0]?.sessionId,
+      chatId: tabIsChat(t) ? (t.root as Leaf).chatId : undefined,
+      settled: tabIsChat(t)
+        ? chatsStore.isSettled(chatsStore.sessions.find((s) => s.id === (t.root as Leaf).chatId))
+        : false,
     })),
   );
   tabsStore.setActive(props.workspaceId, activeTabId.value);

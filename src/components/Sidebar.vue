@@ -147,16 +147,75 @@
         <template v-else>Nothing open.<br />Pick a project up top.</template>
       </div>
 
-      <!-- Settled: tabs of archived projects / worktrees -->
-      <template v-if="feed.settled.length">
+      <!-- Settled: chats the agent finished with, no attention needed right now -->
+      <template v-if="feed.settledChats.length">
         <button class="section-header" @click="toggleSection('settled')">
           <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('settled') && '-rotate-90'" />
           Settled
-          <span class="opacity-60">{{ feed.settled.length }}</span>
+          <span class="opacity-60">{{ feed.settledChats.length }}</span>
         </button>
         <template v-if="!collapsed.includes('settled')">
           <div
-            v-for="row in settledVisible"
+            v-for="row in settledChatsVisible"
+            :key="rowKey(row)"
+            class="group flex cursor-pointer items-center gap-1.5 px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
+            @click="selectTab(row)"
+            @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+          >
+            <PhChatCenteredText :size="10" class="shrink-0" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
+            <span v-if="git.prByWs[row.ws.id]" class="shrink-0 font-mono text-[9px]">#{{ git.prByWs[row.ws.id]!.number }}</span>
+            <span class="shrink-0 text-[10px] tabular-nums">{{ ago(row.ts) }}</span>
+          </div>
+          <button
+            v-if="feed.settledChats.length > settledChatsLimit"
+            class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
+            @click="settledChatsLimit += 25"
+          >
+            <PhPlus :size="10" />
+            Show {{ feed.settledChats.length - settledChatsLimit }} more
+          </button>
+        </template>
+      </template>
+
+      <!-- Archived chats: the current workspace's chats closed by the user — no
+           open tab, process stopped, reversible by clicking to reopen. -->
+      <template v-if="active && archivedChats.length">
+        <button class="section-header" @click="toggleSection('archivedChats')">
+          <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('archivedChats') && '-rotate-90'" />
+          Archived chats
+          <span class="opacity-60">{{ archivedChats.length }}</span>
+        </button>
+        <template v-if="!collapsed.includes('archivedChats')">
+          <div
+            v-for="s in archivedChats"
+            :key="s.id"
+            class="group flex cursor-pointer items-center gap-1.5 px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
+            @click="unarchiveAndOpen(s.id)"
+          >
+            <PhChatCenteredText :size="10" class="shrink-0" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ s.title }}</span>
+            <span class="shrink-0 text-[10px] tabular-nums">{{ ago(s.archivedAt!) }}</span>
+            <PhTrash
+              :size="10"
+              class="shrink-0 rounded-sm p-px opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:!text-destructive"
+              title="Delete permanently"
+              @click.stop="deletePermanently(s.id)"
+            />
+          </div>
+        </template>
+      </template>
+
+      <!-- Snoozed: tabs of archived projects / worktrees, or individually snoozed -->
+      <template v-if="feed.snoozed.length">
+        <button class="section-header" @click="toggleSection('snoozed')">
+          <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('snoozed') && '-rotate-90'" />
+          Snoozed
+          <span class="opacity-60">{{ feed.snoozed.length }}</span>
+        </button>
+        <template v-if="!collapsed.includes('snoozed')">
+          <div
+            v-for="row in snoozedVisible"
             :key="rowKey(row)"
             class="flex cursor-pointer items-center gap-1.5 px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
             @click="selectTab(row)"
@@ -171,12 +230,12 @@
             <span class="shrink-0 text-[10px] tabular-nums">{{ ago(row.ts) }}</span>
           </div>
           <button
-            v-if="feed.settled.length > settledLimit"
+            v-if="feed.snoozed.length > snoozedLimit"
             class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
-            @click="settledLimit += 25"
+            @click="snoozedLimit += 25"
           >
             <PhPlus :size="10" />
-            Show {{ feed.settled.length - settledLimit }} more
+            Show {{ feed.snoozed.length - snoozedLimit }} more
           </button>
         </template>
       </template>
@@ -249,6 +308,9 @@
         <button class="menu-item" @click="withMenu((ws, tab) => startTabRename(ws.id, tab!))">Rename tab…</button>
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSnooze(ws.id, tab!.id))">
           {{ isSnoozed(rowMenu.ws.id, rowMenu.tab?.id ?? -1) ? "Wake" : "Snooze" }}
+        </button>
+        <button v-if="rowMenu.tab.isChat" class="menu-item" @click="withMenu((_ws, tab) => toggleSettled(tab!))">
+          {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
         </button>
         <button class="menu-item" @click="withMenu((ws, tab) => termTabs.close(ws.id, tab!.id))">Close tab</button>
         <div class="menu-sep" />
@@ -408,12 +470,14 @@ import {
   PhSquaresFour,
   PhPlayCircle,
   PhGlobe,
+  PhTrash,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
 import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore, type TabSummary } from "@/stores/terminalTabs";
+import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useUIStore } from "@/stores/ui";
 import { spinnerFrame } from "@/lib/spinner";
 import {
@@ -434,6 +498,7 @@ const emit = defineEmits<{ (e: "open-browser"): void }>();
 
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
+const chats = useClaudeChatsStore();
 const ui = useUIStore();
 const git = useGitStore();
 const scriptsStore = useScriptsStore();
@@ -487,11 +552,29 @@ const feed = computed(() =>
   }),
 );
 
-const settledLimit = ref(12);
-const settledVisible = computed(() => feed.value.settled.slice(0, settledLimit.value));
+const settledChatsLimit = ref(12);
+const settledChatsVisible = computed(() => feed.value.settledChats.slice(0, settledChatsLimit.value));
+const snoozedLimit = ref(12);
+const snoozedVisible = computed(() => feed.value.snoozed.slice(0, snoozedLimit.value));
 
-type SectionKey = "settled";
-const collapsed = ref<SectionKey[]>(["settled"]);
+const archivedChats = computed(() => (active.value ? chats.archivedSessionsForWs(active.value.id) : []));
+
+function unarchiveAndOpen(chatId: number) {
+  if (!active.value) return;
+  termTabs.openChat(active.value.id, chatId);
+}
+function deletePermanently(chatId: number) {
+  if (!window.confirm("Delete this chat permanently? This cannot be undone.")) return;
+  chats.remove(chatId);
+}
+function toggleSettled(tab: TabSummary) {
+  if (tab.chatId == null) return;
+  if (tab.settled) chats.unsettle(tab.chatId);
+  else chats.settle(tab.chatId);
+}
+
+type SectionKey = "settled" | "snoozed" | "archivedChats";
+const collapsed = ref<SectionKey[]>(["settled", "snoozed", "archivedChats"]);
 function toggleSection(key: SectionKey) {
   collapsed.value = collapsed.value.includes(key)
     ? collapsed.value.filter((k) => k !== key)
