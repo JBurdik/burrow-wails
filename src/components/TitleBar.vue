@@ -120,25 +120,34 @@
       <div class="relative flex gap-0">
         <button
           class="tb-btn rounded-l-[5px] rounded-r-none pr-1.5"
-          :title="OPEN_IN_META[lastOpenIn].title"
+          :title="lastOpenTarget.id === 'finder' ? 'Reveal in Finder' : `Open in ${lastOpenTarget.name}`"
           :disabled="!folderPath"
-          @click.stop="openIn(lastOpenIn)"
+          @click.stop="openIn(lastOpenTarget.id)"
         >
-          <PhFolderOpen :size="14" />
-          <span class="text-[11px] font-medium">{{ OPEN_IN_META[lastOpenIn].label }}</span>
+          <img v-if="lastOpenTarget.icon" :src="lastOpenTarget.icon" class="h-3.5 w-3.5 shrink-0" />
+          <PhFolderOpen v-else :size="14" />
+          <span class="text-[11px] font-medium">{{ lastOpenTarget.name }}</span>
         </button>
         <button
           class="tb-btn rounded-l-none rounded-r-[5px] border-l border-border pl-[5px] pr-[5px]"
           title="Open folder in…"
           :disabled="!folderPath"
-          @click.stop="menuOpen = !menuOpen"
+          @click.stop="toggleMenu"
         >
           <PhCaretDown :size="9" />
         </button>
         <div v-if="menuOpen" class="tb-menu" @click.stop>
-          <button class="tb-menu-item" :class="lastOpenIn === 'finder' && '!text-accent'" @click="openIn('finder')"><PhFolderNotchOpen :size="14" />Reveal in Finder</button>
-          <button class="tb-menu-item" :class="lastOpenIn === 'vscode' && '!text-accent'" @click="openIn('vscode')"><PhCode :size="14" />Open in VS Code</button>
-          <button class="tb-menu-item" :class="lastOpenIn === 'zed' && '!text-accent'" @click="openIn('zed')"><PhLightning :size="14" />Open in Zed</button>
+          <button
+            v-for="t in openTargets"
+            :key="t.id"
+            class="tb-menu-item"
+            :class="lastOpenIn === t.id && '!text-accent'"
+            @click="openIn(t.id)"
+          >
+            <img v-if="t.icon" :src="t.icon" class="h-3.5 w-3.5 shrink-0" />
+            <PhFolderNotchOpen v-else :size="14" />
+            {{ t.id === "finder" ? "Reveal in Finder" : `Open in ${t.name}` }}
+          </button>
           <div class="my-1 h-px bg-border" />
           <button class="tb-menu-item" @click="copyPath()"><PhCopy :size="14" />Copy Path</button>
         </div>
@@ -209,7 +218,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhHouse, PhGitBranch, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhCode, PhLightning, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhPlus, PhSkull, PhCopy } from "@phosphor-icons/vue";
+import { PhHouse, PhGitBranch, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhPlus, PhSkull, PhCopy } from "@phosphor-icons/vue";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
@@ -220,19 +229,39 @@ const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?
 defineEmits(["back", "toggle-rightpanel", "toggle-sidebar"]);
 
 const menuOpen = ref(false);
-type OpenInTarget = "finder" | "vscode" | "zed";
+type OpenTarget = { id: string; name: string; icon: string };
+const FINDER_TARGET: OpenTarget = { id: "finder", name: "Finder", icon: "" };
+
+// "Open in…" targets are the installed apps Go finds in /Applications
+// (see ListOpenTargets in fs.go), fetched once and cached for the session.
+const openTargets = ref<OpenTarget[]>([FINDER_TARGET]);
+let openTargetsLoaded = false;
+async function loadOpenTargets() {
+  if (openTargetsLoaded) return;
+  openTargetsLoaded = true;
+  try {
+    openTargets.value = await invoke<OpenTarget[]>("list_open_targets", {});
+  } catch (e) {
+    console.error("list_open_targets failed", e);
+  }
+}
+
+// Last-used target is remembered per project (keyed by folder path), not globally.
 const LAST_OPEN_IN_LEGACY_KEY = "tb-last-open-in";
-const LAST_OPEN_IN_CONFIG_KEY = "titlebarLastOpenIn";
-const lastOpenIn = ref<OpenInTarget>("finder");
+const LAST_OPEN_IN_CONFIG_KEY = "titlebarLastOpenInByProject";
+const lastOpenInByProject = ref<Record<string, string>>({});
 configReady.then(() => {
   migrateFromLocalStorage(LAST_OPEN_IN_LEGACY_KEY, LAST_OPEN_IN_CONFIG_KEY);
-  lastOpenIn.value = getConfig<OpenInTarget>(LAST_OPEN_IN_CONFIG_KEY, "finder");
+  const stored = getConfig<Record<string, string> | string>(LAST_OPEN_IN_CONFIG_KEY, {});
+  lastOpenInByProject.value = typeof stored === "string" ? {} : stored;
 });
-const OPEN_IN_META: Record<OpenInTarget, { title: string; label: string }> = {
-  finder: { title: "Reveal in Finder", label: "Finder" },
-  vscode:  { title: "Open in VS Code", label: "VS Code" },
-  zed:     { title: "Open in Zed",     label: "Zed" },
-};
+const lastOpenIn = computed(() => (props.folderPath && lastOpenInByProject.value[props.folderPath]) || "finder");
+const lastOpenTarget = computed(() => openTargets.value.find((t) => t.id === lastOpenIn.value) ?? FINDER_TARGET);
+
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value;
+  if (menuOpen.value) loadOpenTargets();
+}
 
 // ── Branch picker ───────────────────────────────────────────────────────────
 const git = useGitStore();
@@ -401,11 +430,11 @@ async function restartDaemon() {
   }
 }
 
-async function openIn(target: OpenInTarget) {
+async function openIn(target: string) {
   menuOpen.value = false;
   if (!props.folderPath) return;
-  lastOpenIn.value = target;
-  setConfig(LAST_OPEN_IN_CONFIG_KEY, target);
+  lastOpenInByProject.value = { ...lastOpenInByProject.value, [props.folderPath]: target };
+  setConfig(LAST_OPEN_IN_CONFIG_KEY, lastOpenInByProject.value);
   try {
     await invoke("open_path_in", { path: props.folderPath, target });
   } catch (e) {
@@ -427,6 +456,7 @@ function onDocClick() {
 }
 onMounted(() => {
   window.addEventListener("click", onDocClick);
+  loadOpenTargets();
 });
 onBeforeUnmount(() => {
   window.removeEventListener("click", onDocClick);

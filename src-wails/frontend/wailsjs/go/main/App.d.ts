@@ -100,6 +100,8 @@ export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSession
 
 export function ListMcpServers():Promise<Record<string, any>>;
 
+export function ListOpenTargets():Promise<Array<main.OpenTarget>>;
+
 export function ListPtySessions():Promise<Array<string>>;
 
 export function ListSkills():Promise<Array<main.SkillInfo>>;

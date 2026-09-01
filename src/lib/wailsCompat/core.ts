@@ -91,6 +91,8 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.ReadDirShallow(args.path);
     case "open_path_in":
       return App.OpenPathIn(args.path, args.target);
+    case "list_open_targets":
+      return App.ListOpenTargets();
     case "get_app_version":
       return App.GetAppVersion();
     case "set_sleep_inhibit":

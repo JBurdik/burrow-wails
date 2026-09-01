@@ -81,33 +81,6 @@
       </div>
     </div>
 
-    <!-- AskUserQuestion: multi-choice -->
-    <div v-if="pendingQuestion" class="question-banner perm-slide-in mx-3 mt-2 mb-0.5 flex-shrink-0 rounded-[10px] border px-[13px] py-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: color-mix(in srgb, #3b82f6 10%, var(--bg-panel)); border-color: color-mix(in srgb, #3b82f6 28%, transparent); border-left-width: 3px; border-left-color: #3b82f6;">
-      <div v-for="(q, qi) in questionSpecs" :key="qi" class="mb-2.5">
-        <div class="mb-1.5 flex flex-wrap items-center gap-[7px]">
-          <span v-if="q.header" class="rounded bg-[color-mix(in_srgb,#3b82f6_25%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.04em] text-[#93c5fd]">{{ q.header }}</span>
-          <span class="text-xs font-semibold text-foreground">{{ q.question }}</span>
-          <span v-if="q.multiSelect" class="text-[9px] italic text-secondary-foreground">choose any</span>
-        </div>
-        <div class="flex flex-col gap-[5px]">
-          <button
-            v-for="(opt, oi) in q.options"
-            :key="oi"
-            class="question-opt flex cursor-pointer flex-col gap-px rounded-md border border-white/[0.12] bg-base px-2.5 py-[7px] text-left transition-colors hover:border-[color-mix(in_srgb,#3b82f6_55%,transparent)]"
-            :class="{ 'picked !border-[#3b82f6] !bg-[color-mix(in_srgb,#3b82f6_16%,var(--bg-base))]': isPicked(q.question, opt.label) }"
-            @click="toggleOption(q.question, opt.label, !!q.multiSelect)"
-          >
-            <span class="text-xs font-semibold text-foreground">{{ opt.label }}</span>
-            <span v-if="opt.description" class="text-[10px] text-secondary-foreground">{{ opt.description }}</span>
-          </button>
-        </div>
-      </div>
-      <div class="flex justify-end gap-2">
-        <button class="perm-btn perm-allow" :disabled="!canSubmitQuestion || nativeControlResponsePending" @click="submitQuestion">Submit</button>
-        <button class="perm-btn perm-deny" :disabled="nativeControlResponsePending" @click="cancelQuestion" title="Dismiss (Esc)">Skip</button>
-      </div>
-    </div>
-
     <!-- ACP permission request — renders the adapter's real option set -->
     <div
       v-if="acpPermReq"
@@ -143,7 +116,7 @@
       </div>
     </div>
 
-    <div ref="scrollEl" class="chat-messages flex flex-1 flex-col gap-0.5 overflow-y-auto py-6 pb-2 [scroll-behavior:smooth]">
+    <div ref="scrollEl" class="chat-messages flex flex-1 flex-col gap-0.5 overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
         <div class="chat-empty-avatar mb-2 flex h-11 w-11 items-center justify-center rounded-[11px] text-white shadow-[0_0_0_1px_color-mix(in_srgb,var(--agent-accent,#ec4899)_36%,transparent)]" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 72%, #16161a);" aria-hidden="true">
           <component :is="currentAgentIcon" :size="28" :style="{ color: '#fff' }" />
@@ -154,13 +127,27 @@
       </div>
 
       <div
-        v-for="msg in messages"
+        v-for="msg in displayItems"
         :key="msg.id"
         class="chat-message"
         :class="[`role-${msg.role}`, { partial: msg.partial }]"
       >
+        <!-- Collapsed tool-call group pill ("Ran N commands" / "Used N tools") -->
+        <template v-if="msg.role === 'tool-group-header'">
+          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+            <div class="w-[26px] flex-shrink-0" />
+            <div class="tool-row" :class="{ 'tool-row-failed': groupHasFailure(msg.items) }" @click="toggleGroup(msg.groupId)">
+              <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': isGroupExpanded(msg.groupId) }" />
+              <component :is="groupIcon(msg.items)" :size="12" class="tool-icon" />
+              <span class="font-medium">{{ groupLabel(msg.items) }}</span>
+              <PhCircleNotch v-if="groupIsRunning(msg.items)" :size="10" class="tool-status-icon tool-spin flex-shrink-0" />
+              <PhWarningCircle v-else-if="groupHasFailure(msg.items)" :size="10" class="tool-status-icon flex-shrink-0 text-destructive" />
+            </div>
+          </div>
+        </template>
+
         <!-- User message -->
-        <template v-if="msg.role === 'user'">
+        <template v-else-if="msg.role === 'user'">
           <div class="group flex items-end justify-end gap-2 px-4 py-[3px]">
             <div class="bubble-user max-w-[72%] rounded-[16px_16px_5px_16px] border px-3.5 py-2.5 text-[13px] leading-[1.55] shadow-[0_2px_10px_rgba(0,0,0,0.22)]" style="background: var(--chat-user-bg, #1e1b2e); border-color: var(--chat-user-border, rgba(124,58,237,0.35)); color: var(--chat-text, rgba(255,255,255,0.88));">
               <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
@@ -182,31 +169,33 @@
           </div>
         </template>
 
-        <!-- Tool call — compact row, expandable -->
+        <!-- Tool call — compact row, expandable; hidden while its parent group pill is collapsed -->
         <template v-else-if="msg.role === 'tool'">
-          <div class="group flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
-            <div class="tool-row" :class="`tool-row-${toolStatus(msg)}`" @click="msg.toolExpanded = !msg.toolExpanded">
-              <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': msg.toolExpanded }" />
-              <component :is="toolIconFor(msg)" :size="12" class="tool-icon" />
-              <span class="overflow-hidden text-ellipsis whitespace-nowrap" :class="{ 'font-mono': toolMonospace(msg) }">{{ toolSummaryFor(msg) }}</span>
-              <PhCircleNotch v-if="toolStatus(msg) === 'running'" :size="10" class="tool-status-icon tool-spin flex-shrink-0" />
-              <PhWarningCircle v-else-if="toolStatus(msg) === 'failed'" :size="10" class="tool-status-icon flex-shrink-0 text-destructive" />
-              <span v-if="msg.toolOutput && !msg.toolExpanded" class="max-w-[220px] flex-shrink overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">{{ msg.toolOutput.split('\n')[0].slice(0, 60) }}</span>
-            </div>
-          </div>
-          <div v-if="msg.toolExpanded" class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
-            <div class="flex flex-col gap-1.5">
-              <div v-if="msg.toolInput && Object.keys(msg.toolInput).length" class="flex flex-col gap-[3px]">
-                <div v-for="k in ['file_path','command','pattern','url','description']" :key="k" v-show="msg.toolInput[k] !== undefined" class="flex max-w-[min(560px,90vw)] gap-1.5 font-mono text-[10px]">
-                  <span class="flex-shrink-0 text-muted-foreground">{{ k }}</span><span class="overflow-hidden text-ellipsis whitespace-nowrap text-secondary-foreground">{{ msg.toolInput[k] }}</span>
-                </div>
-                <pre class="tool-args">{{ JSON.stringify(msg.toolInput, null, 2) }}</pre>
+          <template v-if="!groupIdOf(msg.id) || isGroupExpanded(groupIdOf(msg.id))">
+            <div class="group flex items-start gap-2.5 px-4 py-[3px]">
+              <div class="w-[26px] flex-shrink-0" />
+              <div class="tool-row" :class="`tool-row-${toolStatus(msg)}`" @click="msg.toolExpanded = !msg.toolExpanded">
+                <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': msg.toolExpanded }" />
+                <component :is="toolIconFor(msg)" :size="12" class="tool-icon" />
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap" :class="{ 'font-mono': toolMonospace(msg) }">{{ toolSummaryFor(msg) }}</span>
+                <PhCircleNotch v-if="toolStatus(msg) === 'running'" :size="10" class="tool-status-icon tool-spin flex-shrink-0" />
+                <PhWarningCircle v-else-if="toolStatus(msg) === 'failed'" :size="10" class="tool-status-icon flex-shrink-0 text-destructive" />
+                <span v-if="msg.toolOutput && !msg.toolExpanded" class="max-w-[220px] flex-shrink overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">{{ msg.toolOutput.split('\n')[0].slice(0, 60) }}</span>
               </div>
-              <pre v-if="msg.toolOutput" class="tool-output" :class="{ 'tool-output-failed': msg.toolFailed }">{{ msg.toolOutput }}</pre>
             </div>
-          </div>
+            <div v-if="msg.toolExpanded" class="flex items-start gap-2.5 px-4 py-[3px]">
+              <div class="w-[26px] flex-shrink-0" />
+              <div class="flex flex-col gap-1.5">
+                <div v-if="msg.toolInput && Object.keys(msg.toolInput).length" class="flex flex-col gap-[3px]">
+                  <div v-for="k in ['file_path','command','pattern','url','description']" :key="k" v-show="msg.toolInput[k] !== undefined" class="flex max-w-[min(560px,90vw)] gap-1.5 font-mono text-[10px]">
+                    <span class="flex-shrink-0 text-muted-foreground">{{ k }}</span><span class="overflow-hidden text-ellipsis whitespace-nowrap text-secondary-foreground">{{ msg.toolInput[k] }}</span>
+                  </div>
+                  <pre class="tool-args">{{ JSON.stringify(msg.toolInput, null, 2) }}</pre>
+                </div>
+                <pre v-if="msg.toolOutput" class="tool-output" :class="{ 'tool-output-failed': msg.toolFailed }">{{ msg.toolOutput }}</pre>
+              </div>
+            </div>
+          </template>
         </template>
 
         <!-- System info marker (permission requested, plan ready, etc.) -->
@@ -336,6 +325,46 @@
         <span class="text-[11px] italic text-white/35">{{ currentActivity }}</span>
       </div>
       <div class="chat-input-box overflow-hidden rounded-[10px] border border-white/10 transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));">
+        <!-- AskUserQuestion: one question at a time, stepped, above the textarea -->
+        <div v-if="pendingQuestion && activeQuestion" class="question-panel perm-slide-in border-b border-white/10 bg-white/[0.03] px-3.5 py-3">
+          <div class="mb-2 flex items-center gap-2">
+            <span v-if="activeQuestion.header" class="rounded bg-[color-mix(in_srgb,#3b82f6_22%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.04em] text-[#93c5fd]">{{ activeQuestion.header }}</span>
+            <span v-if="questionSpecs.length > 1" class="ml-auto flex h-5 flex-shrink-0 items-center rounded-md bg-white/10 px-1.5 text-[10px] font-medium tabular-nums text-secondary-foreground">{{ activeQuestionIndex + 1 }}/{{ questionSpecs.length }}</span>
+          </div>
+          <p class="mb-1 text-[13px] font-semibold text-foreground">{{ activeQuestion.question }}</p>
+          <p v-if="activeQuestion.multiSelect" class="mb-1.5 text-[10.5px] text-secondary-foreground/70">Select one or more options.</p>
+          <div class="mt-1.5 flex flex-col gap-1.5">
+            <button
+              v-for="(opt, oi) in activeQuestion.options"
+              :key="oi"
+              type="button"
+              class="question-opt flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-[7px] text-left transition-colors"
+              :class="isPicked(activeQuestion.question, opt.label)
+                ? 'border-[#3b82f6] bg-[color-mix(in_srgb,#3b82f6_16%,var(--bg-base))]'
+                : 'border-white/[0.12] bg-base hover:border-[color-mix(in_srgb,#3b82f6_55%,transparent)]'"
+              :disabled="nativeControlResponsePending"
+              @click="selectQuestionOption(opt.label)"
+            >
+              <span class="flex min-w-0 flex-1 flex-col gap-px">
+                <span class="text-xs font-semibold text-foreground">{{ opt.label }}</span>
+                <span v-if="opt.description" class="text-[10px] text-secondary-foreground">{{ opt.description }}</span>
+              </span>
+              <PhCheck v-if="isPicked(activeQuestion.question, opt.label)" :size="13" weight="bold" class="flex-shrink-0 text-[#3b82f6]" />
+              <kbd v-else-if="oi < 9" class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-white/15 text-[10px] text-secondary-foreground/60">{{ oi + 1 }}</kbd>
+            </button>
+          </div>
+          <div class="mt-2.5 flex items-center justify-between gap-2">
+            <button class="perm-btn perm-deny !px-2 !py-1 text-[11px]" :disabled="nativeControlResponsePending" @click="cancelQuestion" title="Dismiss (Esc)">Skip</button>
+            <div class="flex items-center gap-1.5">
+              <button v-if="activeQuestionIndex > 0" class="perm-btn !px-2.5 !py-1 text-[11px]" :disabled="nativeControlResponsePending" @click="previousQuestion">Back</button>
+              <button
+                class="perm-btn perm-allow !px-3 !py-1 text-[11px]"
+                :disabled="!canAdvanceQuestion || nativeControlResponsePending"
+                @click="advanceQuestion"
+              >{{ isLastQuestion ? 'Submit' : 'Next' }}</button>
+            </div>
+          </div>
+        </div>
         <textarea
           ref="inputEl"
           v-model="inputText"
@@ -599,7 +628,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 import { PhArrowUp, PhArrowCounterClockwise, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhFile, PhSparkle, PhFastForward, PhGear, PhClockCounterClockwise, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCircleNotch, PhCopy, PhCheck } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -1170,6 +1199,73 @@ function toolStatus(msg: ChatMessage): ToolStatus {
   return "running";
 }
 
+// Collapsed "Ran N commands" / "Used N tools" pill grouping — folds consecutive
+// finished tool calls (2+) between two non-tool messages into one header.
+// The trailing in-flight run is left ungrouped so the live tool call stays visible.
+interface ToolGroupHeader {
+  role: "tool-group-header";
+  id: string;
+  groupId: string;
+  items: ChatMessage[];
+  partial?: false;
+}
+const toolGroupExpanded = reactive<Record<string, boolean>>({});
+function isBashTool(msg: ChatMessage): boolean {
+  return toolIconFor(msg) === PhTerminalWindow;
+}
+function groupLabel(items: ChatMessage[]): string {
+  const n = items.length;
+  const bash = items.filter(isBashTool).length;
+  const s = (c: number) => (c === 1 ? "" : "s");
+  if (bash === n) return `Ran ${n} command${s(n)}`;
+  if (bash === 0) return `Used ${n} tool${s(n)}`;
+  return `Used ${n} tools and ran ${bash} command${s(bash)}`;
+}
+function groupIcon(items: ChatMessage[]): unknown {
+  return items.every(isBashTool) ? PhTerminalWindow : PhWrench;
+}
+function groupHasFailure(items: ChatMessage[]): boolean {
+  return items.some((m) => m.toolFailed);
+}
+function groupIsRunning(items: ChatMessage[]): boolean {
+  return items.some((m) => toolStatus(m) === "running");
+}
+const grouping = computed(() => {
+  const display: (ChatMessage | ToolGroupHeader)[] = [];
+  const groupIdByMsgId = new Map<number, string>();
+  const groupsById = new Map<string, ToolGroupHeader>();
+  const msgs = messages.value;
+  let i = 0;
+  while (i < msgs.length) {
+    const m = msgs[i];
+    if (m.role !== "tool") { display.push(m); i++; continue; }
+    const start = i;
+    while (i < msgs.length && msgs[i].role === "tool") i++;
+    const run = msgs.slice(start, i);
+    const trailingLive = i === msgs.length && toolStatus(run[run.length - 1]) === "running";
+    if (run.length < 2 || trailingLive) { display.push(...run); continue; }
+    const groupId = String(run[0].toolUseId ?? run[0].id);
+    const header: ToolGroupHeader = { role: "tool-group-header", id: `hdr-${groupId}`, groupId, items: run };
+    display.push(header);
+    groupsById.set(groupId, header);
+    for (const item of run) { display.push(item); groupIdByMsgId.set(item.id, groupId); }
+  }
+  return { display, groupIdByMsgId, groupsById };
+});
+const displayItems = computed(() => grouping.value.display);
+function groupIdOf(msgId: number): string | undefined {
+  return grouping.value.groupIdByMsgId.get(msgId);
+}
+function isGroupExpanded(groupId: string | undefined): boolean {
+  if (!groupId) return true;
+  const explicit = toolGroupExpanded[groupId];
+  if (explicit !== undefined) return explicit;
+  return groupHasFailure(grouping.value.groupsById.get(groupId)?.items ?? []);
+}
+function toggleGroup(groupId: string) {
+  toolGroupExpanded[groupId] = !isGroupExpanded(groupId);
+}
+
 // Built-in claude slash commands
 interface Command { name: string; description: string }
 
@@ -1560,6 +1656,65 @@ const questionSpecs = computed<QuestionSpec[]>(() =>
   ((pendingQuestion.value?.input?.questions ?? []) as QuestionSpec[]));
 const canSubmitQuestion = computed(() =>
   questionSpecs.value.every((q) => (questionAnswers.value[q.question] ?? []).length > 0));
+
+// Stepped AskUserQuestion — one question shown at a time, mirroring t3code's
+// ComposerPendingUserInputPanel (index reset whenever a new request arrives).
+const activeQuestionIndex = ref(0);
+const activeQuestion = computed(() => questionSpecs.value[activeQuestionIndex.value] ?? null);
+const isLastQuestion = computed(() => activeQuestionIndex.value >= questionSpecs.value.length - 1);
+const canAdvanceQuestion = computed(() => {
+  const q = activeQuestion.value;
+  return !!q && (questionAnswers.value[q.question] ?? []).length > 0;
+});
+let questionAutoAdvanceTimer: number | null = null;
+function clearQuestionAutoAdvance() {
+  if (questionAutoAdvanceTimer !== null) { window.clearTimeout(questionAutoAdvanceTimer); questionAutoAdvanceTimer = null; }
+}
+function selectQuestionOption(label: string) {
+  const q = activeQuestion.value;
+  if (!q) return;
+  clearQuestionAutoAdvance();
+  toggleOption(q.question, label, !!q.multiSelect);
+  // Single-select auto-advances shortly after picking, same as t3code; multi-select
+  // needs an explicit Next since the user may still want to toggle more options.
+  if (!q.multiSelect) {
+    questionAutoAdvanceTimer = window.setTimeout(() => { questionAutoAdvanceTimer = null; advanceQuestion(); }, 200);
+  }
+}
+function advanceQuestion() {
+  if (!canAdvanceQuestion.value) return;
+  if (isLastQuestion.value) { void submitQuestion(); return; }
+  activeQuestionIndex.value++;
+}
+function previousQuestion() {
+  clearQuestionAutoAdvance();
+  activeQuestionIndex.value = Math.max(0, activeQuestionIndex.value - 1);
+}
+// Number-key shortcuts (1-9) pick the corresponding option, matching t3code —
+// only while a question is pending and focus isn't in an editable field.
+function onQuestionKeydown(event: KeyboardEvent) {
+  if (!pendingQuestion.value || nativeControlResponsePending.value) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+  const digit = Number.parseInt(event.key, 10);
+  if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
+  const q = activeQuestion.value;
+  const opt = q?.options[digit - 1];
+  if (!opt) return;
+  event.preventDefault();
+  selectQuestionOption(opt.label);
+}
+watch(pendingQuestion, (cr) => {
+  clearQuestionAutoAdvance();
+  activeQuestionIndex.value = 0;
+  if (cr) document.addEventListener("keydown", onQuestionKeydown);
+  else document.removeEventListener("keydown", onQuestionKeydown);
+});
+onBeforeUnmount(() => {
+  clearQuestionAutoAdvance();
+  document.removeEventListener("keydown", onQuestionKeydown);
+});
 
 // Diff preview for a pending Edit/Write. For Write/NotebookEdit it's full content;
 // for Edit it's old→new strings.
@@ -2248,12 +2403,18 @@ function isPicked(question: string, label: string) {
 async function submitQuestion() {
   const cr = pendingQuestion.value;
   if (!cr || !canSubmitQuestion.value || nativeControlResponsePending.value) return;
-  // The tool reads input.answers keyed by question text; multi-select joins with ", ".
-  const answers: Record<string, string> = {};
-  for (const [q, labels] of Object.entries(questionAnswers.value)) {
-    if (labels.length) answers[q] = labels.join(", ");
+  // The tool reads input.answers keyed by question text. A multi-select answer
+  // must stay an array (the CLI expects the same shape it gave options in) —
+  // joining it into a comma string here is what made multi-select questions
+  // look permanently stuck after Submit.
+  const answers: Record<string, string | string[]> = {};
+  for (const q of questionSpecs.value) {
+    const labels = questionAnswers.value[q.question] ?? [];
+    if (!labels.length) continue;
+    answers[q.question] = q.multiSelect ? labels : labels[0];
   }
   await resolveClaudePrompt(cr, { behavior: "allow", updatedInput: { ...cr.input, answers } }, () => {
+    if (pendingQuestion.value?.requestId !== cr.requestId) return; // superseded by a newer request
     removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
     pendingQuestion.value = null;
   });
@@ -2263,6 +2424,7 @@ async function cancelQuestion() {
   if (!cr || nativeControlResponsePending.value) return;
   // allow with empty answers → tool reports "did not answer" (clean dismiss, no error).
   await resolveClaudePrompt(cr, { behavior: "allow", updatedInput: { ...cr.input, answers: {} } }, () => {
+    if (pendingQuestion.value?.requestId !== cr.requestId) return; // superseded by a newer request
     removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
     pendingQuestion.value = null;
   });

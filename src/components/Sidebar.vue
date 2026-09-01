@@ -53,6 +53,19 @@
     </div>
 
     <div class="flex-1 overflow-y-auto pb-2">
+      <!-- Surfaces: non-terminal views for the active workspace -->
+      <template v-if="active">
+        <div class="section-header">Surfaces</div>
+        <button
+          class="flex w-full items-center gap-1.5 px-2.5 py-[5px] text-left text-[11.5px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
+          title="Open browser tab"
+          @click="emit('open-browser')"
+        >
+          <PhGlobe :size="12" class="shrink-0 text-accent" />
+          Browser
+        </button>
+      </template>
+
       <!-- Live feed: every open project's tabs, newest activity first -->
       <div
         v-for="row in feed.live"
@@ -196,13 +209,6 @@
           @click.stop="scriptsOpen = !scriptsOpen"
         ><PhPlayCircle :size="14" /></button>
       </div>
-      <button
-        class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground active:scale-90"
-        :disabled="!active"
-        :class="!active && 'opacity-35'"
-        title="Open browser tab"
-        @click="emit('open-browser')"
-      ><PhGlobe :size="14" /></button>
     </div>
   </aside>
 

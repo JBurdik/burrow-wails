@@ -198,6 +198,10 @@ export function ListMcpServers() {
   return window['go']['main']['App']['ListMcpServers']();
 }
 
+export function ListOpenTargets() {
+  return window['go']['main']['App']['ListOpenTargets']();
+}
+
 export function ListPtySessions() {
   return window['go']['main']['App']['ListPtySessions']();
 }

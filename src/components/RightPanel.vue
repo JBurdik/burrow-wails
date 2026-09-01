@@ -229,13 +229,7 @@
                 <PhX :size="11" />
               </button>
             </div>
-            <pre class="m-0 flex-1 overflow-auto whitespace-pre px-0 py-[5px] font-mono text-[10px] leading-normal"><span
-              v-for="(line, i) in git.diff.split('\n')"
-              :key="i"
-              class="block"
-              :class="diffLineClass(line)"
-            >{{ line }}
-</span></pre>
+            <DiffView :diff="git.diff" :diff-key="git.diffFile" />
           </div>
 
           <!-- History -->
@@ -279,8 +273,7 @@
       </div>
       <div v-if="workspaceDiffLoading" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
       <div v-else-if="!workspaceDiff" class="p-4 text-center text-[11px] leading-relaxed text-muted-foreground">No unstaged or staged changes.</div>
-      <pre v-else class="m-0 min-h-0 flex-1 overflow-auto whitespace-pre px-2 py-2 font-mono text-[10px] leading-normal"><span v-for="(line, i) in workspaceDiff.split('\n')" :key="i" class="block" :class="diffLineClass(line)">{{ line }}
-</span></pre>
+      <DiffView v-else :diff="workspaceDiff" diff-key="workspace" />
     </div>
 
     <ManagerPanel
@@ -369,6 +362,7 @@ import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
 import ManagerPanel from "./ManagerPanel.vue";
+import DiffView from "./DiffView.vue";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
@@ -514,13 +508,6 @@ watch(() => props.cwd, (p) => {
     fileTree.clearTree();
   }
 }, { immediate: true });
-
-function diffLineClass(line: string) {
-  if (line.startsWith("+") && !line.startsWith("+++")) return "diff-add";
-  if (line.startsWith("-") && !line.startsWith("---")) return "diff-del";
-  if (line.startsWith("@@")) return "diff-hunk";
-  return "diff-ctx";
-}
 
 // --- Auto-refresh: window focus + configurable interval ---
 function autoRefresh() {

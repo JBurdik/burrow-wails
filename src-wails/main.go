@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 
 	"github.com/wailsapp/wails/v2"
@@ -26,6 +27,11 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup:        app.startup,
+		OnDomReady:       app.restoreWindowState,
+		OnBeforeClose: func(ctx context.Context) bool {
+			app.saveWindowState(ctx)
+			return false
+		},
 		Bind: []interface{}{
 			app,
 		},

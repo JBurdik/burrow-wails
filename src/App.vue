@@ -173,15 +173,15 @@ function onResizeMove(e: MouseEvent) {
   const delta = e.clientX - resizeStartX;
   if (!ui.swapPanels) {
     if (resizing === 'left') {
-      ui.sidebarWidth = Math.min(400, Math.max(150, resizeStartWidth + delta));
+      ui.sidebarWidth = Math.min(window.innerWidth * 0.5, Math.max(150, resizeStartWidth + delta));
     } else {
-      ui.rightPanelWidth = Math.min(500, Math.max(200, resizeStartWidth - delta));
+      ui.rightPanelWidth = Math.min(window.innerWidth * 0.5, Math.max(200, resizeStartWidth - delta));
     }
   } else {
     if (resizing === 'right') {
-      ui.rightPanelWidth = Math.min(500, Math.max(200, resizeStartWidth + delta));
+      ui.rightPanelWidth = Math.min(window.innerWidth * 0.5, Math.max(200, resizeStartWidth + delta));
     } else {
-      ui.sidebarWidth = Math.min(400, Math.max(150, resizeStartWidth - delta));
+      ui.sidebarWidth = Math.min(window.innerWidth * 0.5, Math.max(150, resizeStartWidth - delta));
     }
   }
 }

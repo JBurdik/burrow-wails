@@ -255,13 +255,7 @@
             <span class="shrink-0 text-[10px] text-muted-foreground">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
             <button class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="git.clearDiff(); activeDiff = null" title="Close diff"><PhX :size="11" /></button>
           </div>
-          <pre class="m-0 flex-1 overflow-auto whitespace-pre px-0 py-1.5 font-mono text-[11px] leading-[1.6]"><span
-            v-for="(line, idx) in git.diff.split('\n')"
-            :key="idx"
-            class="block px-3"
-            :class="diffLineClass(line)"
-          >{{ line }}
-</span></pre>
+          <DiffView :diff="git.diff" :diff-key="git.diffFile" />
         </div>
 
         <!-- Diff view: commit diff -->
@@ -270,13 +264,7 @@
             <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground">{{ commitDiff.subject }}</span>
             <button class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="commitDiff = null" title="Close diff"><PhX :size="11" /></button>
           </div>
-          <pre class="m-0 flex-1 overflow-auto whitespace-pre px-0 py-1.5 font-mono text-[11px] leading-[1.6]"><span
-            v-for="(line, idx) in commitDiff.text.split('\n')"
-            :key="idx"
-            class="block px-3"
-            :class="diffLineClass(line)"
-          >{{ line }}
-</span></pre>
+          <DiffView :diff="commitDiff.text" :diff-key="commitDiff.hash + (commitDiff.filePath ?? '')" />
         </div>
 
         <div v-else class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground opacity-50">
@@ -326,6 +314,7 @@ import {
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
+import DiffView from "./DiffView.vue";
 
 const git = useGitStore();
 const wsStore = useWorkspaceStore();
@@ -403,13 +392,6 @@ function toggleDiff(path: string, staged: boolean) {
     activeDiff.value = { path, staged };
     git.showDiff(path, staged);
   }
-}
-
-function diffLineClass(line: string) {
-  if (line.startsWith("+") && !line.startsWith("+++")) return "diff-add";
-  if (line.startsWith("-") && !line.startsWith("---")) return "diff-del";
-  if (line.startsWith("@@")) return "diff-hunk";
-  return "diff-ctx";
 }
 
 function applyType(t: string) {
@@ -537,11 +519,6 @@ body {
 @keyframes progress-slide { to { left: 100%; } }
 
 .gp-commit-input::-webkit-scrollbar { display: none; }
-
-.diff-add  { background: color-mix(in srgb, var(--green) 6%, transparent); color: var(--green); }
-.diff-del  { background: color-mix(in srgb, var(--red) 6%, transparent); color: var(--red); }
-.diff-hunk { color: var(--accent); opacity: 0.7; }
-.diff-ctx  { color: var(--text-secondary); opacity: 0.6; }
 
 .cf-added    { color: var(--green); }
 .cf-deleted  { color: var(--red); }

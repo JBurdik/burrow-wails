@@ -3,9 +3,37 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
+
+// tailscaleBin resolves the CLI. exec.LookPath alone is not enough: a bundle
+// launched from Finder inherits launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+// which excludes the /usr/local/bin shim the macOS Tailscale app installs — so
+// the toggle reported "not installed" and sat disabled on a working tailnet.
+func tailscaleBin() string {
+	if p, err := exec.LookPath("tailscale"); err == nil {
+		return p
+	}
+	for _, c := range []string{
+		"/usr/local/bin/tailscale",
+		"/opt/homebrew/bin/tailscale",
+		"/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+	} {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		c := filepath.Join(home, "Applications/Tailscale.app/Contents/MacOS/Tailscale")
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c
+		}
+	}
+	return ""
+}
 
 // TailscaleServe/TailscaleServeStop shell out to the `tailscale` CLI's own
 // `serve` subcommand to expose the local HTTP server on the tailnet — a
@@ -18,11 +46,12 @@ import (
 const tailscaleServePath = "/burrow"
 
 func (a *App) TailscaleServe(port int) (string, error) {
-	if _, err := exec.LookPath("tailscale"); err != nil {
+	bin := tailscaleBin()
+	if bin == "" {
 		return "", fmt.Errorf("tailscale CLI not found on PATH")
 	}
 	target := fmt.Sprintf("http://127.0.0.1:%d", port)
-	out, err := exec.Command("tailscale", "serve", "--bg",
+	out, err := exec.Command(bin, "serve", "--bg",
 		"--set-path="+tailscaleServePath, target).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("tailscale serve: %w: %s", err, out)
@@ -31,12 +60,13 @@ func (a *App) TailscaleServe(port int) (string, error) {
 }
 
 func (a *App) TailscaleServeStop() error {
-	if _, err := exec.LookPath("tailscale"); err != nil {
+	bin := tailscaleBin()
+	if bin == "" {
 		return fmt.Errorf("tailscale CLI not found on PATH")
 	}
 	// Scoped to our own path — a bare `serve off` would tear down every
 	// other handler on this node too.
-	return exec.Command("tailscale", "serve", "--https=443",
+	return exec.Command(bin, "serve", "--https=443",
 		"--set-path="+tailscaleServePath, "off").Run()
 }
 
@@ -50,8 +80,8 @@ type TailscaleStatus struct {
 }
 
 func (a *App) GetTailscaleStatus() TailscaleStatus {
-	path, err := exec.LookPath("tailscale")
-	if err != nil {
+	path := tailscaleBin()
+	if path == "" {
 		return TailscaleStatus{}
 	}
 	status := TailscaleStatus{Installed: true}
