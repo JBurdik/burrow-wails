@@ -25,7 +25,10 @@ type hookPayload struct {
 	Title  string `json:"title,omitempty"`
 }
 
-func StartHookServer(ctx context.Context) (*HookServer, error) {
+// StartHookServer listens on a loopback ephemeral port. Callers pass registrars
+// for the other loopback routes (the control API) so everything an agent's shell
+// needs lives behind one port + one port file.
+func StartHookServer(ctx context.Context, routes ...func(*http.ServeMux)) (*HookServer, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -34,10 +37,35 @@ func StartHookServer(ctx context.Context) (*HookServer, error) {
 
 	h := &HookServer{ctx: ctx, port: port}
 	mux := http.NewServeMux()
+	// /hook is the path the `burrow` CLI has always posted to; /status is kept as
+	// an alias. Serving only /status silently broke every status dot: the CLI's
+	// `curl -sf` failed on the 404 and exited 0, so a lost state looked like an
+	// agent that never reported.
+	mux.HandleFunc("/hook", h.handleStatus)
 	mux.HandleFunc("/status", h.handleStatus)
+	// Posted by `burrow capture` once a sub-agent's result file is written, so a
+	// Manager can collect immediately instead of polling.
+	mux.HandleFunc("/agent-done", h.handleAgentDone)
+	for _, register := range routes {
+		register(mux)
+	}
 	go http.Serve(ln, mux)
 
 	return h, nil
+}
+
+// handleAgentDone re-emits a finished sub-agent as an app event. The token is
+// all the payload carries; the result itself is read with collect_results.
+func (h *HookServer) handleAgentDone(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var p struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&p)
+	if p.Token != "" {
+		emitAll(h.ctx, "control:result", map[string]string{"token": p.Token})
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *HookServer) handleStatus(w http.ResponseWriter, r *http.Request) {

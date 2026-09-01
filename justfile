@@ -61,7 +61,9 @@ build-web:
 build-mobile:
     pnpm build:mobile
 
-# Full unsigned build: frontend + app bundle + the daemon binary inside it.
+# Full unsigned build: frontend + app bundle + the sidecar binaries inside it
+# (burrow-daemon holds the PTYs; burrow-mcp serves the control verbs to agent
+# clients that speak MCP).
 # `wails build -s` skips Wails' own frontend step — build-web already ran it,
 # and Wails runs frontend:build from a directory the script can't be found in.
 build: build-web build-mobile
@@ -70,6 +72,8 @@ build: build-web build-mobile
     cd src-wails
     wails build -platform darwin/arm64 -clean -s
     go build -o build/bin/Burrow.app/Contents/MacOS/burrow-daemon ./cmd/burrow-daemon
+    go build -ldflags "-X main.buildVersion={{version}}" \
+      -o build/bin/Burrow.app/Contents/MacOS/burrow-mcp ./cmd/burrow-mcp
     echo "built: {{app}}"
 
 # Codesign the bundle with the Developer ID identity + hardened runtime.
@@ -80,7 +84,7 @@ sign:
     set -euo pipefail
     ID="Developer ID Application: Jakub Gál ({{APPLE_TEAM_ID}})"
     ENT="src-wails/build/darwin/entitlements.plist"
-    for bin in burrow-daemon Burrow; do
+    for bin in burrow-daemon burrow-mcp Burrow; do
       codesign --force --timestamp --options runtime --entitlements "$ENT" \
                --sign "$ID" "{{app}}/Contents/MacOS/$bin"
     done
@@ -97,7 +101,7 @@ sign:
 assert-signed:
     #!/usr/bin/env bash
     set -euo pipefail
-    for bin in Burrow burrow-daemon; do
+    for bin in Burrow burrow-daemon burrow-mcp; do
       out="$(codesign -dv "{{app}}/Contents/MacOS/$bin" 2>&1)"
       grep -q "TeamIdentifier={{APPLE_TEAM_ID}}" <<<"$out" \
         || { echo "❌ $bin is not signed by team {{APPLE_TEAM_ID}} (is 'wails dev' running and overwriting build/bin?) — run 'just sign'"; exit 1; }
@@ -258,7 +262,7 @@ verify:
     hr "signature + hardened runtime"
     codesign -dvvv "{{app}}" 2>&1 | grep -E "Authority=|TeamIdentifier=|flags=|Runtime Version" | head
     hr "nested binaries"
-    for b in Burrow burrow-daemon; do
+    for b in Burrow burrow-daemon burrow-mcp; do
       printf '%-14s ' "$b"; codesign --verify --strict "{{app}}/Contents/MacOS/$b" && echo ok
     done
     hr "Gatekeeper — app (exec)"

@@ -408,7 +408,7 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 			env[k] = v
 		}
 	}
-	env["PATH"] = augmentedPath(opts.Cwd)
+	a.addBurrowEnv(env, opts.Cwd)
 
 	cmd, stdin, reader, stderrTail, err := spawnStdio(bin, args, opts.Cwd, env)
 	if err != nil {
@@ -459,7 +459,7 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 	if sid := strings.TrimSpace(opts.ResumeSessionID); sid != "" {
 		if err := sess.write(map[string]any{
 			"jsonrpc": "2.0", "id": 1, "method": "session/load",
-			"params": map[string]any{"sessionId": sid, "cwd": opts.Cwd, "mcpServers": []any{}},
+			"params": map[string]any{"sessionId": sid, "cwd": opts.Cwd, "mcpServers": acpMcpServers()},
 		}); err != nil {
 			return fail(err)
 		}
@@ -483,7 +483,7 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 	if sessionID == "" {
 		if err := sess.write(map[string]any{
 			"jsonrpc": "2.0", "id": 2, "method": "session/new",
-			"params": map[string]any{"cwd": opts.Cwd, "mcpServers": []any{}},
+			"params": map[string]any{"cwd": opts.Cwd, "mcpServers": acpMcpServers()},
 		}); err != nil {
 			return fail(err)
 		}
@@ -521,7 +521,7 @@ func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID 
 	for k, v := range env {
 		e[k] = v
 	}
-	e["PATH"] = augmentedPath(cwd)
+	a.addBurrowEnv(e, cwd)
 
 	cmd, stdin, reader, stderrTail, err := spawnStdio(bin, []string{"app-server"}, cwd, e)
 	if err != nil {

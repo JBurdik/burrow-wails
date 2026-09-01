@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Burrow — the `burrow` CLI (sub-agent delegation)</title>
+<title>Burrow — the control API and the `burrow` CLI</title>
 <style>
   :root {
     --bg: #0d0d0d;
@@ -47,431 +47,212 @@
 <div class="wrap">
 
   <a class="back" href="context.html">← Project context</a>
-  <h1>The <code>burrow</code> CLI</h1>
-  <div class="tagline">Let an AI agent running inside Burrow delegate work to sub-agents in new terminal tabs — and optionally wait for their results.</div>
+  <h1>The control API &amp; the <code>burrow</code> CLI</h1>
+  <div class="tagline">One set of verbs for driving the running app — delegating to sub-agents, supervising them, managing worktrees and pull requests — reachable from a shell, from MCP, and from the UI itself.</div>
 
   <h2>The idea</h2>
   <p>
-    Every agent in Burrow runs inside a terminal tab. To delegate, <code>burrow spawn</code> drops a small <strong>request
-    file</strong> in a directory Burrow watches; the app polls it and opens a new tab. Results come back through result files.
-    No port, no socket, no MCP server.
+    Everything an agent may do to the app is a <strong>verb</strong> in one registry
+    (<code>src-wails/internal/control</code>). The registry knows nothing about HTTP, MCP or Wails: it takes its
+    capabilities as interfaces (database, git/gh/exec runners, PTY writer, worktrees, a UI bridge) and exposes
+    <code>Call(scope, name, params)</code>. Transports sit on top of it.
+  </p>
+  <p>
+    That is the whole point: <strong>one implementation, three doors</strong>. An MCP tool cannot behave differently from
+    the same verb typed in a shell, and <code>burrow help</code>, the MCP tool schemas and the Manager's system prompt are
+    all generated from the registry, so none of them can advertise something the app can't do.
+  </p>
+  <div class="note">
+    <strong>Subscription-safe by design.</strong> Sub-agents are launched <strong>interactively</strong> — never
+    <code>claude -p</code> / <code>--print</code>, never <code>codex exec</code>, never an Agent SDK. <code>spawn</code>
+    takes a <em>task</em> and the frontend builds the command from the user's configured agents, so no caller can inject
+    a non-interactive flag.
+  </div>
+
+  <h2>Transports</h2>
+  <table>
+    <tr><th>Transport</th><th>Client</th><th>Auth</th><th>Verbs</th></tr>
+    <tr><td>loopback <code>POST /v1/&lt;verb&gt;</code></td><td><code>burrow</code> CLI (curl), <code>burrow-mcp</code></td><td><code>control.token</code></td><td>all</td></tr>
+    <tr><td>tailnet HTTP</td><td>mobile / PWA</td><td><code>http.token</code> + pairing code</td><td><code>ScopeRemote</code> only</td></tr>
+    <tr><td>Wails bindings</td><td>the desktop UI</td><td>in-process</td><td>as needed</td></tr>
+  </table>
+  <p>
+    The loopback listener shares the hook server's ephemeral port, so an agent's shell needs exactly one port file
+    (<code>$BURROW_HOME_DIR/hook.port</code>) and one token file (<code>control.token</code>, mode 0600). Loopback is
+    reachable by <em>every</em> process on the machine and <code>spawn</code> starts programs, hence the token — and it
+    fails closed if the token could not be persisted.
   </p>
   <div class="warn">
-    <strong>Why files, not the terminal?</strong> An earlier design printed an escape sequence to <code>/dev/tty</code>.
-    But agents invoke <code>burrow</code> through their Bash tool / hooks, whose subprocesses have <strong>no controlling
-    terminal</strong> — so <code>/dev/tty</code> fails with <em>"Device not configured"</em> and Claude also captures the
-    command's stdout, so the bytes never reach the PTY. File-based transport sidesteps both problems and works from any
-    subprocess.
-  </div>
-  <div class="note">
-    <strong>Subscription-safe by design.</strong> Sub-agents are launched <strong>interactively</strong> (plain <code>claude</code>,
-    with the prompt as a positional arg) — never <code>claude -p</code> / <code>--print</code> and never the Agent SDK. This
-    matches the post-2025-06-15 policy for subscription use. The CLI passes commands through verbatim and must never inject <code>-p</code>.
+    <strong>Scope is opt-in.</strong> A verb is local-only unless it declares <code>ScopeRemote</code>. A phone can list
+    and focus things, read status and diffs; it cannot <code>spawn</code>, <code>run</code>, close tabs, remove worktrees
+    or merge PRs. Adding a verb without thinking about the network leaves it off the network.
   </div>
 
-  <h2>Commands</h2>
-
-  <h3><code>burrow spawn [--token T] [--cwd DIR] &lt;command...&gt;</code></h3>
-  <p>Open a new terminal tab in the <strong>current project</strong> and run <code>command</code> in it. <strong>Fire-and-forget</strong> — returns immediately.</p>
+  <h2>Using the CLI</h2>
+  <pre><code>burrow &lt;verb&gt; [POSITIONAL...] [--arg value] [--flag]</code></pre>
   <ul>
-    <li><code>--token T</code> — attach an id so you can <code>burrow collect T</code> for the result later.</li>
-    <li><code>--cwd DIR</code> — run the new tab in <code>DIR</code> instead of the current project dir.</li>
+    <li>Verb and argument names may be written with dashes; the API speaks snake_case (<code>worktree-remove</code> → <code>worktree_remove</code>).</li>
+    <li>Positional arguments fill each verb's primary parameters in order (<code>burrow send-to-tab 42 "hi"</code>), everything else is <code>--named</code>.</li>
+    <li>A bare flag is <code>true</code> (<code>--force</code>, <code>--squash</code>, <code>--stat</code>).</li>
+    <li><code>cwd</code> always rides along from <code>$BURROW_CWD</code>, so verbs resolve "this repo" without the agent knowing workspace ids.</li>
+    <li>Output is the verb's JSON result on stdout; errors go to stderr with a non-zero exit.</li>
+    <li><code>burrow help</code> prints the live registry.</li>
   </ul>
-  <pre><code>burrow spawn claude "write unit tests for src/foo"
-burrow spawn codex  "refactor the auth module"</code></pre>
   <p>
-    On success it prints the <strong>soft per-workspace concurrency limit</strong> (default 3, configurable in Settings →
-    Agents, published to <code>&lt;app-data&gt;/max_agents</code>). The limit is advisory — the <code>/burrow</code> skill is
-    told to respect it; <code>spawn</code> does not enforce it.
+    The script needs only <code>curl</code> and <code>sed</code> — no <code>python3</code>, no <code>node</code>, no
+    controlling terminal — which is what lets it work from Claude's Bash tool and from hook subprocesses.
   </p>
 
-  <h3><code>burrow collect [token...]</code></h3>
-  <p>
-    <strong>Non-blocking recap.</strong> For each given token that has <em>finished</em> (its <code>&lt;token&gt;.done</code>
-    exists), print its final message and <strong>consume</strong> it (delete <code>.done</code> + <code>.result</code>), so a
-    later <code>collect</code> only returns newly-finished ones. Tokens still running are reported as pending. With no tokens,
-    collects every finished sub-agent in the session. This is the preferred pattern: fan out, keep working, then
-    <code>collect</code> — never sit blocked.
-  </p>
-  <pre><code>burrow spawn --token a claude "audit src/auth for bugs"
-burrow spawn --token b claude "audit src/api for bugs"
-# …do your own work…
-burrow collect a b   # prints whichever FINISHED, consumes them; reports the rest as pending
-burrow collect       # or: every finished sub-agent, no token list</code></pre>
-
-  <h3><code>burrow sessions [--count]</code></h3>
-  <p>
-    List the live PTY sessions the daemon is holding (pty id + cwd), or just their count with <code>--count</code>. Speaks the
-    daemon's newline-JSON socket protocol (<code>Auth</code> then <code>ListSessions</code>) via <code>python3</code>, reading
-    <code>daemon.sock</code> + <code>daemon.token</code> from <code>BURROW_HOME_DIR</code>.
-  </p>
-
-  <h3><code>burrow list-workspaces</code> &nbsp;/&nbsp; <code>burrow list-tabs [--ws ID]</code> <span style="color:var(--muted);font-weight:400;font-size:12px">(read)</span></h3>
-  <p>
-    Inspect the app from the terminal. <code>list-workspaces</code> prints every workspace as
-    <code>&lt;id&gt;\t&lt;name&gt;\t&lt;path&gt;</code>; <code>list-tabs</code> prints a workspace's tabs as
-    <code>&lt;pty_id&gt;\t&lt;title&gt;</code> (default: the workspace this tab belongs to, or <code>--ws ID</code> for another).
-    Both are <strong>read commands</strong>: they drop a request dir carrying a <code>token</code>, then block briefly polling
-    <code>&lt;session&gt;/&lt;token&gt;.result</code> — exactly the channel <code>burrow wait</code> uses. They're answered
-    <strong>entirely in Rust</strong> inside <code>take_spawn_requests</code> (a SQLite query writes the result file); the
-    request never reaches the frontend. Parse the ids out of the output to feed the focus / new-tab commands.
-  </p>
-  <pre><code>burrow list-workspaces           # 1\tagentic-ide\t/Users/me/code/agentic-ide
-burrow list-tabs                  # 42\tclaude — fix auth bug
-burrow list-tabs --ws 3</code></pre>
-
-  <h3><code>burrow focus-workspace &lt;ID&gt;</code> &nbsp;/&nbsp; <code>burrow focus-tab &lt;ID&gt;</code> &nbsp;/&nbsp; <code>burrow new-tab [--ws ID] [--cmd CMD]</code></h3>
-  <p>
-    Drive the UI. <code>focus-workspace</code> switches Burrow to (and opens) a workspace; <code>focus-tab</code> activates a tab
-    by its pty id, switching to its owning workspace first; <code>new-tab</code> opens a fresh terminal tab in the current (or a
-    given) workspace, optionally running a command. These are <strong>UI actions</strong>: same file-based request transport as
-    <code>spawn</code>, routed to the <strong>origin workspace</strong> (<code>ws == BURROW_CWD</code>, always mounted), then
-    pushed to <code>Terminal.vue</code>'s poll which dispatches via the shared <code>workspace</code> / <code>terminalTabs</code>
-    stores (<code>wsStore.open</code>, <code>tabsStore.activate/add</code>). <code>new-tab</code> differs from <code>spawn</code>:
-    <code>spawn</code> delegates a sub-agent in the current project; <code>new-tab</code> is a plain tab open that can target any
-    workspace by id.
-  </p>
-  <pre><code>burrow focus-workspace 3
-burrow focus-tab 42
-burrow new-tab --cmd "npm test"
-burrow new-tab --ws 3 --cmd htop</code></pre>
-
-  <h3><code>burrow worktree &lt;branch&gt; [--base-ref REF] [--path DIR]</code></h3>
-  <p>
-    Create a git worktree off <strong>this workspace's repo</strong> on a new or existing branch, and surface it in the
-    Sidebar nested under the parent repo — ready to open and run agents in. Same file-based transport + per-workspace
-    routing as <code>spawn</code>: drops a request dir with <code>kind=worktree</code> plus raw <code>branch</code>/<code>base</code>/<code>path</code>/<code>ws</code>
-    files and a <code>ready</code> marker. <code>Terminal.vue</code>'s poll branches on <code>kind</code>: it resolves the parent repo
-    (climbing <code>parent_id</code> if this PTY is itself inside a worktree — no worktree-of-a-worktree), computes the disk path
-    <code>&lt;worktreesDir&gt;/&lt;repo&gt;/&lt;branch&gt;</code> (same convention as the New-worktree dialog), and calls the store's
-    <code>createWorktree</code>. That runs <code>git worktree add</code> in Rust <em>and</em> reloads the workspace list, so the Sidebar
-    updates with no manual refresh.
-  </p>
-  <ul>
-    <li><code>--base-ref REF</code> — base for a <strong>new</strong> branch (default <code>HEAD</code>; ignored if the branch already exists).</li>
-    <li><code>--path DIR</code> — override the on-disk location of the worktree.</li>
-  </ul>
-  <pre><code>burrow worktree feat/login                # new branch off HEAD (or check out existing)
-burrow worktree hotfix --base-ref main     # new branch based on main
-burrow worktree feat/x --path ~/wt/x       # custom on-disk location</code></pre>
-
-  <h3><code>burrow worktree-remove &lt;branch|path&gt; [--force]</code> <span style="color:var(--muted);font-weight:400;font-size:12px">(read)</span></h3>
-  <p>
-    Delete a worktree of <strong>this repo</strong> — both the git worktree and its Burrow workspace row — identified by branch
-    name (preferred) or on-disk path. <code>--force</code> discards uncommitted changes. Answered <strong>entirely in Rust</strong>
-    inside <code>take_spawn_requests</code> (<code>remove_worktree_by</code> resolves the child worktree, runs <code>git worktree remove</code>/<code>prune</code>,
-    deletes the DB row), then writes the result the CLI is polling. This is the <strong>Manager</strong>'s teardown command — it
-    confirms with the user before calling it.
-  </p>
-  <pre><code>burrow worktree-remove feat/login          # by branch
-burrow worktree-remove ~/wt/x --force      # by path, discard local changes</code></pre>
-
-  <h3><code>burrow pr-create</code> &nbsp;/&nbsp; <code>pr-list</code> &nbsp;/&nbsp; <code>pr-view</code> &nbsp;/&nbsp; <code>pr-merge</code> <span style="color:var(--muted);font-weight:400;font-size:12px">(read · gh)</span></h3>
-  <p>
-    Pull-request management via the <code>gh</code> CLI, run by Rust (<code>gh_in</code>) in the optional <code>--cwd DIR</code> (a worktree
-    path, so its branch is in context) else the origin repo. Same Rust-answered read transport as <code>list-workspaces</code>;
-    never the Agents SDK. These power the <strong>Manager</strong>'s PR workflow.
-  </p>
-  <ul>
-    <li><code>pr-create --title T --body B [--base main] [--head BRANCH] [--cwd DIR]</code> — open a PR.</li>
-    <li><code>pr-list [--state open|closed|all] [--cwd DIR]</code> — list PRs.</li>
-    <li><code>pr-view &lt;number&gt; [--cwd DIR]</code> — show a PR's details.</li>
-    <li><code>pr-merge &lt;number&gt; [--squash] [--cwd DIR]</code> — merge a PR (squash or plain merge).</li>
-  </ul>
-  <pre><code>burrow pr-create --title "Add login" --body "Implements OAuth" --base main --cwd ~/wt/feat-login
-burrow pr-list --state open
-burrow pr-view 42
-burrow pr-merge 42 --squash</code></pre>
-
-  <h3><code>burrow wait &lt;token&gt; [--timeout SECONDS]</code> <span style="color:var(--muted);font-weight:400;font-size:12px">(legacy)</span></h3>
-  <p>Block until the sub-agent launched with that token finishes its turn, then print its final message to stdout. Exits 1 on timeout. Still available, but prefer <code>collect</code> so you stay productive instead of blocked.</p>
-  <pre><code>burrow spawn --token t1 claude "summarize what changed in this PR"
-burrow wait  t1                 # blocks, then prints the sub-agent's final message
-burrow wait  t1 --timeout 600   # give up after 10 minutes</code></pre>
-
-  <h3><code>burrow capture &lt;token&gt;</code> <span style="color:var(--muted);font-weight:400;font-size:12px">(internal)</span></h3>
-  <p>
-    Not called by hand — it is wired as the spawned Claude's <strong>Stop hook</strong> (only on tabs that carry a
-    <code>resultToken</code>). It reads the Stop-hook JSON on stdin, pulls <code>transcript_path</code>, extracts the last
-    assistant message (parsed with <code>node</code>, which Claude Code guarantees), then writes <code>&lt;token&gt;.result</code>
-    and <code>&lt;token&gt;.done</code> into <code>$BURROW_SESSION_DIR</code>, and finally calls <code>burrow status done</code>.
-  </p>
-  <div class="callout" style="border-left:3px solid var(--green);padding-left:12px">
-    <strong>Why capture also sends <code>status done</code>:</strong> a spawned sub-agent runs with a per-launch
-    <code>--settings</code> whose <code>Stop</code> hook is this <code>capture</code>. Claude Code gives that file precedence and
-    does <em>not</em> also run the globally-installed <code>burrow hook</code> <code>Stop</code> (same event) — so without this
-    the sub-agent's status dot would stick orange after it finished.
-  </div>
-
-  <h3><code>burrow status &lt;running|waiting|permission|done|error|session&gt; [meta…]</code></h3>
-  <p>
-    Reports the current tab's agent state to Burrow's <strong>hook HTTP server</strong> (a <code>POST /hook</code> with
-    <code>{ptyId,state,…}</code>). Two states carry optional metadata flags: <code>error --detail &lt;error_type&gt;</code>
-    (e.g. <code>billing_error</code>) POSTs <code>{ptyId,state:"error",detail}</code>, and
-    <code>session --model M --source S --title T</code> POSTs <code>{ptyId,state:"session",model,source,title}</code> (source =
-    <code>startup|resume|clear|compact</code>). Metadata values are JSON-escaped. Reads <code>BURROW_PTY_ID</code> + the port.
-    Port resolution is <strong>file-first</strong>: the
-    live <code>&lt;BURROW_HOME_DIR&gt;/hook.port</code> file is authoritative (the app rewrites it every launch with the current
-    random server port), and <code>BURROW_HOOK_PORT</code> is only a fallback. (Env-first was a bug: a daemon-reattached PTY
-    carries a stale baked-in port and POSTed to a dead server, so the dot never updated.) A no-op outside Burrow. The frontend
-    turns <code>running</code>/<code>waiting</code>/<code>permission</code>/<code>done</code> into the tab's status dot (orange
-    spinner / blue / amber-pulse / green-<em>review</em>).
-  </p>
-  <div class="callout" style="border-left:3px solid var(--green);padding-left:12px">
-    <strong>Sticky states self-heal a dropped POST.</strong> If the server is momentarily unreachable (the ~3&nbsp;s window the
-    app self-reclaims a stale <code>hook.port</code>), a lost status update would leave the dot stuck. So
-    <code>waiting</code>/<code>permission</code>/<code>done</code>/<code>error</code>/<code>session</code> — the states that
-    <em>persist</em> until the next turn — retry up
-    to 3× with a 1&nbsp;s sleep + <code>hook.port</code> re-read between attempts. <code>running</code> takes a single fast
-    attempt: it fires on every tool call and a lost one self-corrects on the very next event, so it must never block the agent
-    with sleeps (e.g. if the app is fully down).
-  </div>
-
-  <h3><code>burrow hook</code> <span style="color:var(--muted);font-weight:400;font-size:12px">(internal)</span></h3>
-  <p>
-    The status mechanism — modeled on Superset's single global <code>notify.sh</code>. At startup
-    <code>install_status_hooks</code> merges <strong>one persistent hook into each agent's own global config</strong>
-    (<code>~/.claude/settings.json</code>, <code>~/.codex/hooks.json</code> — identical schema), running
-    <code>[ -n "$BURROW_PTY_ID" ] &amp;&amp; '…/bin/burrow' hook || true</code>. <code>burrow hook</code> reads the hook JSON on
-    stdin, maps <code>hook_event_name</code> → state and forwards via <code>burrow status</code>:
-  </p>
-  <ul>
-    <li><code>UserPromptSubmit</code> / <code>PostToolUse</code> → <strong>running</strong></li>
-    <li><code>PreToolUse</code> → <strong>waiting</strong> for the blocking tools <code>AskUserQuestion</code> /
-      <code>ExitPlanMode</code> (a question / a plan to approve), else running</li>
-    <li><code>PermissionRequest</code> → <strong>permission</strong> — the agent is blocked on an allow/deny decision (amber dot +
-      Sidebar bell), distinct from a plain <code>waiting</code></li>
-    <li><code>Stop</code> → <strong>done</strong>, <em>except</em> a Stop carrying still-running <code>background_tasks</code> →
-      running. That's an interim stop (the agent parked on background sub-agents and Claude auto-resumes the same session);
-      reporting done there was the premature-completion bug. The <code>background_tasks</code> status check is scoped to that
-      array slice, so an unrelated <code>"status":"running"</code> elsewhere in the JSON can't false-positive.</li>
-    <li><code>SessionStart</code> → <strong>session</strong> — forwards <code>model</code> / <code>source</code> /
-      <code>session_title</code> as metadata so Burrow can label the tab (fires on session begin/resume).</li>
-    <li><code>StopFailure</code> → <strong>error</strong> — the turn ended on an API error; the <code>error_type</code> field
-      (<code>rate_limit</code>, <code>billing_error</code>, <code>server_error</code>, …) is passed through as <code>detail</code>.</li>
-    <li><code>Notification</code> → refined by the <code>type</code> field: <code>permission_prompt</code> →
-      <strong>permission</strong>, <code>idle_prompt</code> → <strong>waiting</strong>, everything else <strong>no-op</strong>
-      (the old blanket behavior). Real permission requests still arrive as <code>PermissionRequest</code>; this just rescues
-      clients that surface it as a <code>Notification</code> instead.</li>
-    <li><code>SubagentStop</code> / <code>SessionEnd</code> → <strong>no-op</strong> (telemetry, not a turn boundary).</li>
-  </ul>
-  <p style="color:var(--muted);font-size:13px">
-    <code>SessionStart</code> / <code>StopFailure</code> and the <code>Notification</code> <code>type</code> discrimination are
-    Claude-only hook events — <code>install_status_hooks</code> registers them in <code>~/.claude/settings.json</code> only; Codex
-    stays on its existing lifecycle events. The hook server re-emits <code>error</code>/<code>session</code> on the same
-    <code>pty-hook-{id}</code> Tauri event as an object (extra fields passed through); the four legacy states stay bare strings.
-  </p>
-  <p>
-    Because it's <strong>global + env-driven</strong>, status works for <em>every</em> agent session — launched-by-button, typed
-    by hand, or reattached after restart — not just per-launch ones. The merge is non-destructive (append + dedupe +
-    <code>.burrow-bak</code>) and a no-op outside Burrow.
-  </p>
-  <div class="callout" style="border-left:3px solid var(--green);padding-left:12px">
-    <strong>The poll never fabricates "busy" for an agent.</strong> An agent stays the foreground process whether it's
-    thinking or idle at its own prompt — so equating presence with busy left a permanent orange spinner. Status now comes
-    only from hooks; the 2 s poll only titles agent tabs and clears state when the shell returns (rescuing a Ctrl+C'd agent
-    that never fired <code>done</code>). The poll is <strong>sticky per agent session</strong> and <strong>ignores an empty
-    foreground reading</strong> (a daemon race), so child processes the agent spawns and momentary blanks no longer rename the
-    tab to "Terminal N" mid-conversation. <code>XTerm.vue</code> forwards the hook state as one semantic <code>agentState</code>
-    event (running/waiting/permission/done) — a single event has no ordering hazard, so a trailing <code>waiting</code> can't
-    clobber a fresh <code>done</code>.
-    <br><br>
-    <strong>Dead-PTY watchdog.</strong> The one case the shell-return rescue misses is an agent <em>killed or crashed</em> while
-    still foreground — no <code>Stop</code>, no shell return, so an in-flight dot would stick forever. If the foreground reads
-    empty for ≥3 consecutive polls while the last hook state is in-flight (running/waiting/permission), the poll confirms the PTY
-    is actually dead via <code>list_pty_sessions</code> (<code>alive=false</code>) and only then settles the dot. A single empty
-    read is still ignored as a transient race.
-  </div>
-
-  <h2>How a spawn flows</h2>
-  <pre><code>agent runs:  burrow spawn --token t1 claude "fix tests"
-   │  writes  $BURROW_SESSION_DIR/requests/req.XXXXXX/
-   │     cmd="claude 'fix tests'"   token="t1"   cwd=&lt;new tab dir&gt;   ws=&lt;workspace dir&gt;
-   │     ready                       ← marker written LAST (avoids reading half-written req)
-   ▼
-Terminal.vue polls take_spawn_requests(cwd) every 1s
-   │  Rust claims (deletes) request dirs whose `ws` == this workspace's cwd → routing
-   │  → addTab(cmd, { cwd, resultToken })          (Leaf carries cwd + resultToken)
-   ▼
-new tab runs cmd; status comes from the GLOBAL burrow hook; for a token,
-   │     a per-launch --settings adds:  Stop → burrow capture &lt;token&gt;
-   ▼
-new tab running the sub-agent  ──(on turn end)──►  &lt;token&gt;.result / &lt;token&gt;.done written
-   ▲
-   └── the spawner keeps working; later `burrow collect t1` reads + consumes the result
-       (non-blocking — returns only what has finished). `burrow wait t1` is the legacy
-       blocking variant.</code></pre>
-  <p>
-    <strong>Routing to the correct workspace:</strong> the request records its workspace dir as <code>ws</code> (from the
-    <code>BURROW_CWD</code> env Burrow sets per PTY). Each <code>Terminal.vue</code> polls with its own <code>cwd</code>, and
-    <code>take_spawn_requests</code> only hands back — and deletes — requests whose <code>ws</code> matches, so the new tab opens
-    in the spawning agent's project. <code>--cwd</code> sets the new tab's own directory via <code>Leaf.cwd</code>.
-  </p>
-
-  <h2>Two channels (both files)</h2>
+  <h2>Verbs</h2>
+  <h3>Delegation &amp; supervision</h3>
   <table>
-    <thead><tr><th>Direction</th><th>Mechanism</th><th>Used for</th></tr></thead>
-    <tbody>
-      <tr><td>CLI → app</td><td><code>requests/req.XXXXXX/</code> dirs in <code>$BURROW_SESSION_DIR</code></td><td><code>spawn</code> requests (polled by the frontend)</td></tr>
-      <tr><td>app → CLI</td><td><code>&lt;token&gt;.result</code> / <code>&lt;token&gt;.done</code> in <code>$BURROW_SESSION_DIR</code></td><td><code>collect</code> (or legacy <code>wait</code>) reading <code>capture</code>'s output</td></tr>
-    </tbody>
+    <tr><th>Verb</th><th>What it does</th></tr>
+    <tr><td>spawn</td><td>Delegate a <em>task</em> to a sub-agent in a new tab (or chat). Args: <code>task*</code>, <code>agent</code>, <code>model</code>, <code>cwd</code>, <code>target</code>, <code>capture</code>. Returns the new <code>pty_id</code> and a result <code>token</code>.</td></tr>
+    <tr><td>list_agents</td><td>Agent instances configured in Settings → Providers, spawnable by name.</td></tr>
+    <tr><td>agent_status</td><td>Every agent in the app (tabs and chats) with its live status.</td></tr>
+    <tr><td>tab_output</td><td>Tail of a tab's terminal output — how you check on an agent mid-task.</td></tr>
+    <tr><td>send_to_tab</td><td>Type a follow-up into a running agent's tab and submit it.</td></tr>
+    <tr><td>wait_result</td><td>Block until a spawned agent finishes; returns its final message.</td></tr>
+    <tr><td>collect_results</td><td>Take every finished result that hasn't been collected yet.</td></tr>
   </table>
 
-  <h2>Request format</h2>
+  <h3>Navigation</h3>
+  <table>
+    <tr><th>Verb</th><th>What it does</th></tr>
+    <tr><td>list_workspaces</td><td>Every workspace, worktrees included (<code>parent_id</code> set).</td></tr>
+    <tr><td>list_tabs</td><td>Tabs in a workspace with each agent's status.</td></tr>
+    <tr><td>focus_workspace</td><td>Switch the user's view to a workspace, opening it if needed.</td></tr>
+    <tr><td>focus_tab</td><td>Activate a tab by pty id, switching workspace first.</td></tr>
+    <tr><td>new_tab</td><td>Open a plain terminal tab.</td></tr>
+    <tr><td>tab_rename / tab_close</td><td>Retitle a tab; close it and kill its PTY.</td></tr>
+    <tr><td>workspace_create</td><td>Add a directory as a workspace and open it.</td></tr>
+    <tr><td>diagram</td><td>Render Mermaid source in a panel for the user.</td></tr>
+  </table>
+
+  <h3>Repo, worktrees, pull requests</h3>
+  <table>
+    <tr><th>Verb</th><th>What it does</th></tr>
+    <tr><td>create_worktree</td><td><code>git worktree add</code> + a workspace row, so it appears nested under its repo. Path defaults to <code>&lt;worktreesDir&gt;/&lt;repo&gt;/&lt;branch&gt;</code>; the caller's cwd is climbed to the ROOT repo first (no worktree of a worktree).</td></tr>
+    <tr><td>worktree_remove</td><td>Remove a worktree of <em>this</em> repo, by branch or path. Scoped to the repo on purpose — a same-named branch elsewhere is not a match.</td></tr>
+    <tr><td>git_status / git_log / git_diff</td><td>Read the repo. Exit codes are reported, not swallowed.</td></tr>
+    <tr><td>run</td><td>Read-only shell: an allow-list of programs (ls, cat, head, tail, wc, grep, rg, find, fd, tree, jq, …), no shell, so a pipeline or redirect is refused rather than half-executed. <code>git</code> is deliberately absent — the git_* verbs cover reads and can't be talked into <code>git push</code>.</td></tr>
+    <tr><td>pr_create / pr_list / pr_view / pr_merge</td><td>Pull requests via the <code>gh</code> CLI, in <code>cwd</code> (a worktree, so its branch is in context).</td></tr>
+  </table>
+
+  <h2>Verbs only the UI can perform</h2>
   <p>
-    Each request is a directory of raw, unencoded files — no escaping, no base64. The command is re-quoted before storage
-    (program name bare, each arg single-quoted) so it re-parses correctly when typed into the new tab:
+    Opening a tab, focusing a workspace and reading a terminal's scrollback live in the frontend. Those verbs call
+    <code>UIBridge.Do</code>, which emits a <code>control:action</code> event and <strong>blocks for the frontend's
+    ack</strong>:
   </p>
-  <pre><code>requests/req.Ab12Cd/
-  cmd     claude 'say hi to the user'      ← re-quoted shell line
-  token   t1                               ← may be empty
-  cwd     /Users/me/code/app               ← new tab's dir
-  ws      /Users/me/code/app               ← workspace routing key
-  ready                                    ← empty marker, written last</code></pre>
+  <pre><code>burrow spawn "fix the cache bug"
+  → POST /v1/spawn                      (CLI → app, token-authenticated)
+  → verb allocates a result token
+  → emit control:action {id, action:"spawn", args}
+  → src/lib/controlBridge.ts performs it:
+      resolve the agent + model → buildTerminalCommand()
+      open the target workspace (the worktree, if cwd is one)
+      tabsStore.add(ws, cmd, {cwd, resultToken, background})
+      Terminal.vue creates the tab → fulfillAdd(nonce, ptyId)
+  → invoke("ack_control_action", {id, resultJson})
+  → verb returns {"pty_id":37,"token":"res1712…","target":"tab"}</code></pre>
+  <ul>
+    <li>One app-wide listener, not one per Terminal: actions are addressed by workspace/pty id, so "is that workspace mounted?" stops being the agent's problem.</li>
+    <li>Requests are keyed by id and tracked in a map, so a Manager spawning three agents at once gets three answers back — the Sidebar's single-slot request ref would have clobbered them.</li>
+    <li>A UI that never answers (window closed, JS exception) surfaces as an error after 15 s instead of hanging the agent.</li>
+  </ul>
+  <div class="note">
+    This replaced a file-based transport: <code>burrow spawn</code> used to drop a request dir under
+    <code>$BURROW_SESSION_DIR/requests/</code> that every mounted <code>Terminal.vue</code> polled at 1 Hz, with
+    DB-arbitrated rules deciding which one got to claim it. Gone with it: the 1 s latency, the claim race, the
+    "target workspace must be mounted" caveat, and the split of one verb's logic across Go and Vue.
+  </div>
+
+  <h2>Result capture (still files)</h2>
   <p>
-    (Status is a separate channel: globally-installed agent hooks → <code>burrow hook</code> → <code>burrow status</code> →
-    <code>POST /hook</code> on the local HTTP server. No OSC, no tty — see the <code>burrow status</code> / <code>burrow hook</code>
-    sections above. The old <code>OSC 9998</code> tty protocol is retired.)
+    A spawned agent's <em>result</em> does travel as files, because the writer is a hook in another process and the
+    result must survive an app restart:
+  </p>
+  <ul>
+    <li><code>spawn</code> allocates <code>token</code> and passes it to the new tab as <code>Leaf.resultToken</code>.</li>
+    <li><code>XTerm.vue</code> injects a per-launch <code>--settings</code> whose <code>Stop</code> hook runs <code>burrow capture &lt;token&gt;</code>.</li>
+    <li><code>burrow capture</code> reads the Stop-hook JSON on stdin, extracts the last assistant message from the transcript, writes <code>&lt;token&gt;.result</code> + <code>.done</code>, calls <code>burrow status done</code> (the per-launch hook takes precedence over the global one, so without this the dot would stick), then POSTs <code>/agent-done</code> so the app emits <code>control:result</code>.</li>
+    <li><code>wait_result</code> polls for <code>.done</code>; <code>collect_results</code> drains every finished token. Both <strong>consume</strong> what they return, so a result is never reported twice.</li>
+  </ul>
+
+  <h2>Status plumbing (not verbs)</h2>
+  <p>
+    These keep their own bare-POST transport, because they have to work before the control API is up and are invoked by
+    hooks rather than by an agent's reasoning:
+  </p>
+  <table>
+    <tr><th>Subcommand</th><th>Role</th></tr>
+    <tr><td>burrow status</td><td>Report this tab's agent state to <code>/hook</code>: <code>running</code>, <code>waiting</code>, <code>permission</code>, <code>done</code>, <code>error --detail</code>, <code>session --model/--source/--title</code>, plus <code>--pid</code> for the liveness sweep. Port resolution is file-first (<code>hook.port</code> is rewritten every launch; the baked <code>BURROW_HOOK_PORT</code> goes stale after a restart). Sticky states retry 3×; <code>running</code> takes one fast attempt.</td></tr>
+    <tr><td>burrow hook</td><td>Invoked by the globally-installed Claude/Codex hooks; maps <code>hook_event_name</code> → state with <code>sed</code>, no node/jq.</td></tr>
+    <tr><td>burrow notify</td><td>Legacy Codex notify-program path, kept as a fallback.</td></tr>
+    <tr><td>burrow capture</td><td>Result capture, above.</td></tr>
+  </table>
+  <div class="warn">
+    <strong>Bug worth remembering:</strong> the CLI has always posted status to <code>/hook</code>, but the Go hook server
+    only served <code>/status</code>. Because the CLI uses <code>curl -sf</code> and exits 0 on failure, every status dot
+    silently depended on an endpoint that answered 404. Both paths are served now.
+  </div>
+
+  <h2>MCP server</h2>
+  <p>
+    <code>burrow-mcp</code> (<code>src-wails/cmd/burrow-mcp</code>, built and signed into the bundle) exposes the same
+    verbs as MCP tools: <code>tools/list</code> is <code>/v1/_verbs</code> translated into JSON schemas (so a client sends
+    <code>42</code>, not <code>"42"</code>, where a verb wants a number) and <code>tools/call</code> is one POST. It holds
+    no database and no logic of its own.
+  </p>
+  <p>
+    It's injected into chat sessions automatically — Claude via <code>--mcp-config</code>, ACP agents via
+    <code>session/new</code> — and skipped silently when the sidecar isn't next to the executable (a <code>wails dev</code>
+    run), because the CLI on PATH is always there as the universal path. A failed tool call comes back as a result with
+    <code>isError</code> and the verb's own message, so the model can adapt instead of seeing a broken transport.
   </p>
 
   <h2>How agents discover the CLI</h2>
-  <p>On Tauri <code>setup</code>, <code>install_agent_docs()</code> writes usage docs so agents know the CLI exists:</p>
-  <table>
-    <thead><tr><th>Agent</th><th>Where</th><th>How</th></tr></thead>
-    <tbody>
-      <tr><td>Claude</td><td><code>~/.claude/skills/burrow/SKILL.md</code></td><td>Global skill, auto-discovered (overwritten each launch to stay fresh)</td></tr>
-      <tr><td>Codex</td><td><code>~/.codex/AGENTS.md</code></td><td>Managed <code>&lt;!-- BURROW:BEGIN/END --&gt;</code> block, non-destructive merge</td></tr>
-    </tbody>
-  </table>
-  <p>Doc text lives in the <code>BURROW_SKILL_MD</code> / <code>BURROW_AGENT_DOC</code> consts in <code>lib.rs</code>.</p>
+  <p><code>installAgentDocs</code> (<code>src-wails/agentdocs.go</code>, at startup) writes into every known config dir:</p>
+  <ul>
+    <li><strong>Claude</strong> — the <code>burrow</code> skill at <code>&lt;dir&gt;/skills/burrow/SKILL.md</code>, plus a short always-in-context rule in <code>&lt;dir&gt;/CLAUDE.md</code> inside a managed <code>&lt;!-- BURROW:BEGIN/END --&gt;</code> block, so Claude reaches for <code>burrow spawn</code> before its own in-process <code>Agent</code> tool.</li>
+    <li><strong>Codex</strong> — the same content as a managed block in <code>&lt;dir&gt;/AGENTS.md</code> (no skill mechanism).</li>
+    <li><strong>Copilot</strong> — the skill, plus its <code>skills</code> dir registered in <code>settings.json</code>'s <code>skillDirectories</code> (Copilot has no implicit lookup).</li>
+  </ul>
 
   <h2>Files &amp; environment</h2>
   <table>
-    <thead><tr><th>Thing</th><th>Detail</th></tr></thead>
-    <tbody>
-      <tr><td>src-tauri/bin/burrow</td><td>The POSIX sh CLI, embedded via <code>include_str!</code></td></tr>
-      <tr><td>&lt;app-data&gt;/bin/burrow</td><td>Written on each PTY spawn (<code>ensure_burrow_bin</code>); this dir is prepended to PATH</td></tr>
-      <tr><td>&lt;app-data&gt;/sessions/</td><td><code>BURROW_SESSION_DIR</code>; holds <code>requests/</code> dirs + <code>&lt;token&gt;.result</code> / <code>&lt;token&gt;.done</code></td></tr>
-      <tr><td>&lt;app-data&gt;/hook.port</td><td>Current hook-server port (<code>BURROW_HOME_DIR</code>); <strong>authoritative</strong> source for <code>burrow status</code> (env port is only a fallback)</td></tr>
-      <tr><td>&lt;app-data&gt;/max_agents</td><td>Soft per-workspace sub-agent cap, written by <code>set_max_agents</code> from Settings; read by <code>burrow spawn</code></td></tr>
-      <tr><td>~/.claude/settings.json, ~/.codex/hooks.json</td><td>Global status hook merged in by <code>install_status_hooks</code> (<code>.burrow-bak</code> backup); removed by <code>remove_status_hooks</code></td></tr>
-      <tr><td>PTY env</td><td><code>BURROW_SESSION_DIR</code>, <code>BURROW_CWD</code>, <code>BURROW_PTY_ID</code>, <code>BURROW_HOOK_PORT</code>, <code>BURROW_HOME_DIR</code></td></tr>
-      <tr><td>lib.rs</td><td><code>take_spawn_requests(cwd)</code> claims matching request dirs; sets the <code>BURROW_*</code> env per PTY</td></tr>
-      <tr><td>Terminal.vue</td><td>Polls <code>take_spawn_requests</code> every 1s → <code>addTab(cmd, { cwd, resultToken })</code></td></tr>
-      <tr><td>XTerm.vue</td><td>Injects the <code>capture</code> Stop hook when <code>resultToken</code> is set (latent OSC 9999 parser unused)</td></tr>
-      <tr><td>TerminalSplitView.vue</td><td><code>Leaf</code> interface gained <code>cwd?</code> + <code>resultToken?</code></td></tr>
-    </tbody>
+    <tr><th>Name</th><th>Meaning</th></tr>
+    <tr><td>BURROW_HOME_DIR</td><td>App data dir; holds <code>hook.port</code>, <code>control.token</code>, <code>bin/</code>, <code>sessions/</code>.</td></tr>
+    <tr><td>BURROW_SESSION_DIR</td><td>Where result files live (<code>&lt;token&gt;.result</code>, <code>.done</code>).</td></tr>
+    <tr><td>BURROW_CWD</td><td>The workspace dir this shell belongs to — every verb's default <code>cwd</code>.</td></tr>
+    <tr><td>BURROW_PTY_ID</td><td>This tab's pty id. Set in PTYs only; its absence is what makes the global status hooks a no-op outside Burrow (and in chats, which are not tabs).</td></tr>
+    <tr><td>BURROW_HOOK_PORT</td><td>Port baked in at PTY creation; the <code>hook.port</code> file wins when they disagree.</td></tr>
   </table>
+  <p>
+    Chat sessions (Claude and ACP alike) get the <code>burrow</code> bin on PATH and the same <code>BURROW_*</code> values
+    minus <code>BURROW_PTY_ID</code> — without that an ACP agent such as Codex or Gemini could not act as a Manager at all.
+  </p>
 
   <h2>Examples</h2>
-  <h3>Fan out, then collect (non-blocking)</h3>
-  <pre><code>burrow spawn --token a claude "audit src/auth for bugs"
-burrow spawn --token b claude "audit src/api for bugs"
-# …keep doing your own work…
-burrow collect a b      # prints whichever finished, consumes them
-burrow collect a b      # later: picks up the stragglers</code></pre>
-  <h3>Delegate in another project</h3>
-  <pre><code>burrow spawn --cwd ~/code/other-app claude "bump deps and run the build"</code></pre>
+  <pre><code># Delegate three independent pieces, keep working, collect later
+burrow spawn "Add tests for src/lib/cache.ts. Do not touch src/components." --model claude-sonnet-5
+burrow spawn "Rename useFoo to useBar across src/. Mechanical only." --model claude-haiku-4-5-20251001
+burrow spawn "Investigate the flaky terminal resize test. Report findings, change nothing." --agent codex
+burrow collect-results
 
-  <h2>Sidebar feedback — set-status, trigger-flash, diff, log, progress</h2>
-  <p>Agenti mohou posílat live feedback přímo do záhlaví tabu bez tisku do terminálu.</p>
-  <table>
-    <thead><tr><th>Příkaz</th><th>Co dělá</th></tr></thead>
-    <tbody>
-      <tr><td>burrow set-status "text"</td><td>Zobrazí krátký label vedle status tečky v tabu (fáze práce: "analyzing", "testing"…)</td></tr>
-      <tr><td>burrow set-status</td><td>Vymaže label — volat na konci turnu</td></tr>
-      <tr><td>burrow trigger-flash</td><td>Krátký vizuální záblesk tabu — "dokončeno, podívej se sem"</td></tr>
-      <tr><td>burrow diff --last-turn</td><td>Git diff od HEAD na začátku turnu — otevře diff tab v UI + tiskne do stdout</td></tr>
-      <tr><td>burrow set-progress 0.4 --label "Building"</td><td>Progress bar v tabu (0.0–1.0); <code>burrow set-progress</code> bez arg vymaže</td></tr>
-      <tr><td>burrow log -- "message"</td><td>Timestampovaný log řádek pod tab barem; <code>--level warn|error</code> pro problémy</td></tr>
-      <tr><td>burrow top</td><td>Tabulka všech živých PTY sessions v Burrow</td></tr>
-    </tbody>
-  </table>
-  <h3>Vzorový turn lifecycle (SKILL.md pravidla)</h3>
-  <pre><code>burrow set-status "analyzing"
-burrow log -- "Reading 8 files"
-# …read + understand…
-burrow set-status "fixing"
-burrow set-progress 0.0 --label "Editing"
-# …edits, update progress per file…
-burrow set-progress 1.0 --label "Editing"
-burrow set-status "testing"
-# …run tests…
-burrow log -- "All tests passed"
-burrow set-progress          # clear
-burrow diff --last-turn      # sanity check — co se vlastně změnilo
-burrow set-status            # clear — turn done
-burrow trigger-flash         # ping uživatele: "tento tab skončil"</code></pre>
-  <p>Podrobná pravidla kdy volat co jsou zabudována do <code>~/.claude/skills/burrow/SKILL.md</code> (přepisován při každém spuštění).</p>
+# Isolate parallel work in worktrees
+path=$(burrow create-worktree feat/cache-fix | sed -n 's/.*"path":"\([^"]*\)".*/\1/p')
+burrow spawn "Implement the cache fix." --cwd "$path"
 
-  <h2>tmux shim — CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS</h2>
-  <p>
-    V <code>&lt;app-data&gt;/bin/</code> (prepended to PATH každého PTY) leží vedle <code>burrow</code> i falešný <code>tmux</code> binary.
-    Překládá tmux API volání na Burrow nativní operace — takže Claude Code's <strong>agent teams</strong> feature
-    (<code>CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1</code>) funguje v Burrow bez skutečného tmux.
-  </p>
-  <table>
-    <thead><tr><th>tmux příkaz</th><th>Přeloženo na</th></tr></thead>
-    <tbody>
-      <tr><td>tmux new-window [cmd]</td><td><code>burrow spawn --tmux-win @N [cmd]</code> — nový tab</td></tr>
-      <tr><td>tmux split-window [cmd]</td><td>totéž — Burrow nemá split, otevře nový tab</td></tr>
-      <tr><td>tmux send-keys -t @N keys Enter</td><td><code>POST /write</code> na hook server → zapíše do PTY daného tabu</td></tr>
-      <tr><td>tmux new-session / has-session</td><td>no-op (exit 0)</td></tr>
-      <tr><td>tmux list-* / select-* / set-*</td><td>minimální fake output nebo no-op</td></tr>
-      <tr><td>tmux -V</td><td>prints "tmux 3.3a"</td></tr>
-    </tbody>
-  </table>
-  <p>
-    Mapování window ID (<code>@1</code>, <code>@2</code>…) na Burrow PTY ID drží soubor
-    <code>&lt;app-data&gt;/tmux_wins/@N</code> — zapíše <code>burrow spawn</code> přes flag <code>--tmux-win</code>,
-    přečte <code>send-keys</code> při psaní do tabu.
-  </p>
-  <div class="note">
-    <strong>Proč shim?</strong> Agent teams spouští sub-agenty přes <code>tmux new-window</code>. Reálný tmux by otevřel
-    session mimo Burrow — v šedém terminálovém okně, bez status dotů, bez sidebar feedbacku. Shim zachytí volání
-    a přesměruje je do Burrow tabů, kde jsou sub-agenti viditelní a mají plný status tracking.
-  </div>
+# Supervise
+burrow agent-status
+burrow tab-output 37 --lines 120
+burrow send-to-tab 37 "You also need to update the snapshot test."
 
-  <h2>Příklady promptů — co říct agentovi</h2>
-  <p>Agenti SKILL.md znají automaticky. Tady jsou příklady co napsat člověkem:</p>
-
-  <h3>Spustit sub-agenta v novém tabu</h3>
-  <pre><code># Agent to udělá sám (spawn je v SKILL.md), ale kdybys chtěl ručně:
-burrow spawn claude "write unit tests for src/auth"
-burrow spawn --cwd ~/code/other-project claude "bump deps and build"</code></pre>
-
-  <h3>Paralelní práce s výsledky</h3>
-  <pre><code>burrow spawn --token a claude "audit src/auth for security bugs"
-burrow spawn --token b claude "audit src/api for security bugs"
-# …dělej svou práci…
-burrow collect a b      # vytiskne co doběhlo, konzumuje tokeny
-burrow collect          # nebo: vše co doběhlo, bez seznamu tokenů</code></pre>
-
-  <h3>Prompt pro agenta — delegace s feedbackem</h3>
-  <pre><code># Příklad promptu co napsat Claude:
-"Rozděl tuto úlohu na tři části a spusť každou jako samostatný sub-agent
- přes burrow spawn. Průběžně updatuj set-status a na konci zavolej
- trigger-flash a diff --last-turn."</code></pre>
-
-  <h3>Prompt pro agent teams (tmux shim)</h3>
-  <pre><code># Stačí mít CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 v prostředí
-# (Burrow to nastavuje automaticky). Claude pak sám spouští sub-agenty
-# přes tmux new-window — shim je zachytí a otevře Burrow taby.</code></pre>
-
-  <h3>Worktree pro izolovanou feature</h3>
-  <pre><code>burrow worktree feat/login                 # nová větev z HEAD
-burrow worktree hotfix --base-ref main      # větev z main
-burrow worktree feat/x --path ~/wt/x        # vlastní disk location</code></pre>
-
-  <h2>Caveats</h2>
-  <div class="warn">
-    <ul style="margin:0;color:#fde68a;">
-      <li>The Stop hook fires on <strong>every</strong> turn end — if a sub-agent pauses to ask a question, that counts as "done". Tell it "don't ask, just do it" in the prompt (or rely on <code>--dangerously-skip-permissions</code>).</li>
-      <li>Result capture is <strong>Claude-only</strong> (it uses Claude's Stop hook). Other agents spawn fine, but <code>wait</code> only resolves once a <code>.done</code> marker is written.</li>
-      <li>Windows ships the POSIX <code>sh</code> version only for now; a <code>burrow.cmd</code> variant is a future add.</li>
-      <li>Any process in any tab that prints OSC 9999 can open a tab, and any process can <code>POST /hook</code> to the local status server — same trust model (the user's own machine; the server binds <code>127.0.0.1</code> only).</li>
-    </ul>
-  </div>
+# Ship
+burrow git-diff --rev main..HEAD --stat
+burrow pr-create --title "Fix cache invalidation" --body "Closes #42" --cwd "$path"</code></pre>
 
 </div>
 </body>

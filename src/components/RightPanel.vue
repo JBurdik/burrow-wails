@@ -283,12 +283,10 @@
 </span></pre>
     </div>
 
-    <ManagerBar
+    <ManagerPanel
       v-else-if="activeTab === 'manager' && props.workspaceId"
-      rail
       :cwd="props.cwd"
       :ws-id="props.workspaceId"
-      @open-project-config="emit('openProjectConfig')"
     />
     <div v-else-if="activeTab === 'manager'" class="flex flex-1 items-center justify-center p-6 text-center text-[11px] leading-relaxed text-muted-foreground">
       Open a project to start a Manager thread.
@@ -370,7 +368,7 @@ import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
-import ManagerBar from "./ManagerBar.vue";
+import ManagerPanel from "./ManagerPanel.vue";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();

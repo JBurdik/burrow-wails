@@ -82,7 +82,7 @@ func TestEmptyListsMarshalAsArrays(t *testing.T) {
 		"workspaces":      []Workspace{},
 		"claude sessions": []ClaudeSessionInfo{},
 		"skills":          []SkillInfo{},
-		"spawn requests":  []SpawnRequest{},
+		"control verbs":   []ControlVerb{},
 		"pty sessions":    []string{},
 	} {
 		b, err := json.Marshal(v)

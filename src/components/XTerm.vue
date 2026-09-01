@@ -8,6 +8,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
+import { registerTerm, unregisterTerm } from "@/lib/termRegistry";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -816,9 +817,30 @@ onMounted(async () => {
   poll();
   pollTimer = setInterval(poll, 2000);
   dbgTimer = setInterval(refreshDbg, 500);
+
+  // Let the control API read this tab's output (`burrow tab-output`), which is
+  // how a Manager checks on an agent mid-task instead of waiting for its result.
+  registerTerm(props.ptyId, { readOutput });
 });
 
+/**
+ * The tail of the buffer as plain text. Trailing blank rows are dropped (an
+ * agent's TUI pads the screen, and a Manager reading 80 lines of padding learns
+ * nothing), and each row is right-trimmed.
+ */
+function readOutput(lines: number): string {
+  if (!term) return "";
+  const b = term.buffer.active;
+  const rows: string[] = [];
+  for (let y = 0; y < b.baseY + b.cursorY + 1; y++) {
+    rows.push(b.getLine(y)?.translateToString(true).replace(/\s+$/, "") ?? "");
+  }
+  while (rows.length && rows[rows.length - 1] === "") rows.pop();
+  return rows.slice(-lines).join("\n");
+}
+
 onBeforeUnmount(async () => {
+  unregisterTerm(props.ptyId);
   clearInterval(pollTimer);
   clearInterval(dbgTimer);
   resizeObserver?.disconnect();
@@ -881,6 +903,7 @@ watch(
 
 defineExpose({
   focus() { term?.focus(); },
+  readOutput,
   refit() { safeFit(); deferredFit(); },
   // Force a full TUI redraw — un-scramble a garbled alt-screen agent.
   repaint() { forceRepaint(); },
