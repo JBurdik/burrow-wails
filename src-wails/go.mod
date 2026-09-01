@@ -6,7 +6,9 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/shirou/gopsutil/v4 v4.26.8
 	github.com/wailsapp/wails/v2 v2.13.0
+	golang.org/x/image v0.45.0
 	modernc.org/sqlite v1.57.0
 )
 
@@ -34,7 +36,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/samber/lo v1.49.1 // indirect
-	github.com/shirou/gopsutil/v4 v4.26.8 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/tkrajina/go-reflector v0.5.8 // indirect
@@ -44,7 +45,6 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
-	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect

@@ -34,6 +34,8 @@ export namespace main {
 	    id: string;
 	    label: string;
 	    description?: string;
+	    efforts?: string[];
+	    defaultEffort?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentModel(source);
@@ -44,6 +46,8 @@ export namespace main {
 	        this.id = source["id"];
 	        this.label = source["label"];
 	        this.description = source["description"];
+	        this.efforts = source["efforts"];
+	        this.defaultEffort = source["defaultEffort"];
 	    }
 	}
 	export class Checkpoint {

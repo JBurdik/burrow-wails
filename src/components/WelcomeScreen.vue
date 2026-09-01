@@ -92,6 +92,43 @@
                 </DropdownMenuContent>
               </DropdownMenuRoot>
             </template>
+            <template v-else-if="isCodex">
+              <DropdownMenuRoot v-if="codexEfforts.length">
+                <DropdownMenuTrigger as-child>
+                  <button class="welcome-pill" type="button">
+                    {{ codexEffort }}
+                    <PhCaretDown :size="9" weight="bold" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="top" class="min-w-[170px]">
+                  <DropdownMenuItem
+                    v-for="e in codexEfforts"
+                    :key="e"
+                    class="text-[11.5px]"
+                    :class="{ 'text-foreground bg-accent/10': e === codexEffort }"
+                    @select="pickCodexEffort(e)"
+                  >{{ e }}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenuRoot>
+              <DropdownMenuRoot>
+                <DropdownMenuTrigger as-child>
+                  <button class="welcome-pill" type="button">
+                    <PhShieldCheck :size="12" weight="bold" />
+                    {{ codexPermLabel }}
+                    <PhCaretDown :size="9" weight="bold" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="top" class="min-w-[170px]">
+                  <DropdownMenuItem
+                    v-for="m in CODEX_PERM_MODES"
+                    :key="m.id"
+                    class="text-[11.5px]"
+                    :class="{ 'text-foreground bg-accent/10': m.id === codexPermMode }"
+                    @select="pickCodexPermMode(m.id)"
+                  >{{ m.label }}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenuRoot>
+            </template>
           </div>
           <div class="welcome-sendgroup">
             <DropdownMenuRoot>
@@ -141,7 +178,7 @@ import { useProvidersStore, binaryFor } from "@/stores/providers";
 import { getConfig, setConfig } from "@/lib/config";
 import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { modelsFor } from "@/lib/chatModels";
+import { modelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
 import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
@@ -278,6 +315,44 @@ function pickPermMode(mode: PermMode) {
   cfg.last = mode;
   setConfig("chatPermissionMode", cfg);
 }
+
+// Codex publishes its own reasoning efforts per model and its own approval
+// policies, so its pills are driven by the catalog rather than Claude's lists.
+// Both are stashed in "chatAcpLast", which AgentChat.restoreAcpSelections()
+// applies to the new chat as soon as its session comes up.
+const isCodex = computed(() => selectedAgent.value.kind === "codex");
+type AcpChatSettings = { mode?: string; model?: string; effort?: string };
+function lastAcp(field: keyof AcpChatSettings): string | undefined {
+  return getConfig<Record<string, AcpChatSettings>>("chatAcpLast", {})[selectedAgentId.value]?.[field];
+}
+function saveAcp(field: keyof AcpChatSettings, value: string) {
+  const rec = { ...getConfig<Record<string, AcpChatSettings>>("chatAcpLast", {}) };
+  rec[selectedAgentId.value] = { ...rec[selectedAgentId.value], [field]: value };
+  setConfig("chatAcpLast", rec);
+}
+
+// The catalog is what knows the efforts, and it is only fetched lazily — ask for
+// it up front so the pill is there before the user opens the model picker.
+watch([selectedAgentId, () => target.value?.path], () => {
+  void ensureModels(selectedAgentId.value, selectedAgent.value.kind, target.value?.path ?? "");
+}, { immediate: true });
+
+const codexEfforts = computed(() => effortsFor(selectedAgentId.value, selectedModel.value));
+const codexEffort = computed(() =>
+  lastAcp("effort") ?? defaultEffortFor(selectedAgentId.value, selectedModel.value) ?? codexEfforts.value[0] ?? ""
+);
+function pickCodexEffort(id: string) { saveAcp("effort", id); }
+
+// Mirrors codexModes() in src-wails/acp.go — keep the ids in sync.
+const CODEX_PERM_MODES = [
+  { id: "read-only", label: "Read only" },
+  { id: "auto", label: "Auto" },
+  { id: "dontAsk", label: "Don't Ask" },
+  { id: "full-access", label: "Full access" },
+] as const;
+const codexPermMode = computed(() => lastAcp("mode") ?? "auto");
+const codexPermLabel = computed(() => CODEX_PERM_MODES.find((m) => m.id === codexPermMode.value)?.label ?? "Auto");
+function pickCodexPermMode(id: string) { saveAcp("mode", id); }
 
 // Chat UI (rich conversation) or a plain PTY running the agent's own CLI. The
 // prompt is the same either way — only the surface it lands in differs.

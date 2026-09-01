@@ -38,12 +38,15 @@ type acpSession struct {
 	proto     acpProtocol
 	sessionID string // ACP sessionId / Codex threadId
 
-	mu          sync.Mutex
-	nextID      int64
-	pendingTurn int64  // Codex: rpc id of the turn awaiting turn/completed (0 = none)
-	model       string // Codex: model override applied on the next turn/start
-	effort      string
+	mu           sync.Mutex
+	nextID       int64
+	pendingTurn  int64 // Codex: rpc id of the turn awaiting turn/completed (0 = none)
+	turnWatchdog *time.Timer
+	model        string // Codex: model override applied on the next turn/start
+	effort       string
 }
+
+const codexTurnSilenceTimeout = 10 * time.Minute
 
 func (s *acpSession) rpcID() int64 {
 	s.mu.Lock()
@@ -270,6 +273,10 @@ func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 // pumpCodexLine translates Codex app-server notifications into the ACP
 // session/update shape the frontend already renders.
 func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession) {
+	// Any app-server event proves the child and its reader are alive. Reset the
+	// watchdog before translating it; a completely silent live child is the
+	// failure mode that used to leave the composer thinking indefinitely.
+	a.resetCodexTurnWatchdog(chatID, sess)
 	method, _ := msg["method"].(string)
 	params := mapOf(msg["params"])
 	emit := func(v any) {
@@ -306,12 +313,19 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 				"content":       map[string]any{"text": delta},
 			}}})
 	case "turn/completed":
-		sess.mu.Lock()
-		rpc := sess.pendingTurn
-		sess.pendingTurn = 0
-		sess.mu.Unlock()
-		if rpc != 0 {
-			emit(map[string]any{"id": rpc, "result": map[string]any{}})
+		a.finishCodexTurn(chatID, sess, emit, codexTurnTerminalFailure(params))
+	case "turn/aborted":
+		// Newer app-server versions may report an aborted turn separately instead
+		// of (or before) turn/completed.  Leaving pendingTurn set in that case is
+		// precisely what made the composer spin forever.
+		a.finishCodexTurn(chatID, sess, emit, "Codex aborted the turn.")
+	case "error":
+		// `error` is terminal unless Codex says it will retry.  T3code treats the
+		// same notification as an error state; settle our synthetic prompt reply
+		// too, so a runtime failure cannot strand the chat in Thinking.
+		willRetry, _ := params["willRetry"].(bool)
+		if !willRetry {
+			a.finishCodexTurn(chatID, sess, emit, codexErrorMessage(params))
 		}
 	case "serverRequest/resolved":
 		// This is Codex's authoritative acknowledgement that an approval (or
@@ -326,6 +340,72 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 			}
 		}
 	}
+}
+
+// finishCodexTurn turns a terminal Codex notification into the prompt response
+// consumed by AgentChat.  Codex completes turns by notification, unlike ACP's
+// request/response session/prompt API.
+func (a *App) finishCodexTurn(chatID string, sess *acpSession, emit func(any), failure string) {
+	sess.mu.Lock()
+	rpc := sess.pendingTurn
+	sess.pendingTurn = 0
+	if sess.turnWatchdog != nil {
+		sess.turnWatchdog.Stop()
+		sess.turnWatchdog = nil
+	}
+	sess.mu.Unlock()
+	if rpc == 0 {
+		return
+	}
+	if failure != "" {
+		emit(map[string]any{"method": "session/update", "params": map[string]any{
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"messageId":     "codex-runtime-error",
+				"content":       map[string]any{"text": "Codex error: " + failure},
+			}}})
+	}
+	emit(map[string]any{"id": rpc, "result": map[string]any{}})
+}
+
+// resetCodexTurnWatchdog settles only a truly silent live app-server. Normal
+// tool-heavy turns keep emitting progress and therefore keep the timer fresh.
+func (a *App) resetCodexTurnWatchdog(chatID string, sess *acpSession) {
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if sess.pendingTurn == 0 {
+		return
+	}
+	if sess.turnWatchdog != nil {
+		sess.turnWatchdog.Stop()
+	}
+	sess.turnWatchdog = time.AfterFunc(codexTurnSilenceTimeout, func() {
+		a.finishCodexTurn(chatID, sess, func(v any) {
+			line, err := json.Marshal(v)
+			if err == nil {
+				emitAll(a.ctx, "acp-data-"+chatID, string(line))
+			}
+		}, "The Codex app-server produced no events for 10 minutes. Stop and retry the turn.")
+	})
+}
+
+// codexTurnTerminalFailure extracts a useful message from turn/completed.  A
+// completed or interrupted turn is still terminal, but only a failed one needs
+// an error bubble in the chat.
+func codexTurnTerminalFailure(params map[string]any) string {
+	turn := mapOf(params["turn"])
+	if status, _ := turn["status"].(string); status == "failed" {
+		return codexErrorMessage(turn)
+	}
+	return ""
+}
+
+func codexErrorMessage(params map[string]any) string {
+	err := mapOf(params["error"])
+	if message, _ := err["message"].(string); message != "" {
+		return message
+	}
+	return "The Codex app-server ended the turn without an error message."
 }
 
 // emitSession hands the frontend the one line its selectors populate from.
@@ -660,6 +740,17 @@ func codexConfigOptions(data []any) []any {
 	return opts
 }
 
+// effortIDs is codexEfforts reduced to bare ids, for the model catalog.
+func effortIDs(v any) []string {
+	out := []string{}
+	for _, e := range codexEfforts(v) {
+		if id, _ := mapOf(e)["value"].(string); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func codexEfforts(v any) []any {
 	list, _ := v.([]any)
 	out := []any{}
@@ -700,6 +791,7 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		sess.pendingTurn = rpc
 		model, effort := sess.model, sess.effort
 		sess.mu.Unlock()
+		a.resetCodexTurnWatchdog(id, sess)
 		params := map[string]any{"threadId": sess.sessionID, "input": input}
 		// turn/start overrides apply to this turn and subsequent ones, which is
 		// how a Codex model/effort switch takes effect at all.
@@ -709,7 +801,11 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		if effort != "" {
 			params["effort"] = effort
 		}
-		return rpc, sess.write(map[string]any{"jsonrpc": "2.0", "id": rpc, "method": "turn/start", "params": params})
+		err := sess.write(map[string]any{"jsonrpc": "2.0", "id": rpc, "method": "turn/start", "params": params})
+		if err != nil {
+			a.finishCodexTurn(id, sess, func(any) {}, "")
+		}
+		return rpc, err
 	}
 
 	prompt := []any{}
@@ -848,6 +944,12 @@ func (a *App) AcpStop(id string) error {
 	if sess == nil {
 		return nil
 	}
+	sess.mu.Lock()
+	if sess.turnWatchdog != nil {
+		sess.turnWatchdog.Stop()
+		sess.turnWatchdog = nil
+	}
+	sess.mu.Unlock()
 	_ = sess.stdin.Close()
 	if sess.cmd.Process != nil {
 		return sess.cmd.Process.Kill()
@@ -869,6 +971,10 @@ type AgentModel struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+	// Reasoning efforts this model accepts. Codex reports them per model, so the
+	// composer can offer the right set before any session exists.
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"defaultEffort,omitempty"`
 }
 
 // CodexListModels probes the locally installed Codex for its model catalog.
@@ -967,7 +1073,12 @@ func codexModels(data []any) []AgentModel {
 			label = id
 		}
 		desc, _ := m["description"].(string)
-		out = append(out, AgentModel{ID: id, Label: label, Description: desc})
+		def, _ := m["defaultReasoningEffort"].(string)
+		out = append(out, AgentModel{
+			ID: id, Label: label, Description: desc,
+			Efforts:       effortIDs(m["supportedReasoningEfforts"]),
+			DefaultEffort: def,
+		})
 	}
 	return out
 }

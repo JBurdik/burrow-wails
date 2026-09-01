@@ -9,6 +9,10 @@ import { configReady, getConfig, setConfig } from "./config";
 export interface ModelEntry {
   id: string; // "" = provider default (no --model)
   label: string;
+  // Codex reports the reasoning efforts each model accepts; the composer offers
+  // exactly those. Absent for runtimes that don't publish a catalog.
+  efforts?: string[];
+  defaultEffort?: string;
 }
 
 export const MODELS_BY_AGENT: Record<string, ModelEntry[]> = {
@@ -38,7 +42,12 @@ export function learnModels(agentId: string, entries: ModelEntry[]): void {
   const usable = entries.filter((e) => e.id && e.label);
   if (!usable.length || MODELS_BY_AGENT[agentId]) return; // hardcoded catalogs win
   const prev = seen.value[agentId] ?? [];
-  if (prev.length === usable.length && prev.every((p, i) => p.id === usable[i].id)) return;
+  // Compare the efforts too — a cache written before Codex started reporting
+  // them has the same ids, and skipping here would keep the composer's effort
+  // pill hidden forever.
+  const same = (a: ModelEntry, b: ModelEntry) =>
+    a.id === b.id && (a.efforts ?? []).join() === (b.efforts ?? []).join();
+  if (prev.length === usable.length && prev.every((p, i) => same(p, usable[i]))) return;
   seen.value = { ...seen.value, [agentId]: usable };
   setConfig(SEEN_KEY, seen.value);
 }
@@ -52,8 +61,8 @@ export async function ensureModels(agentId: string, kind: string, cwd: string): 
   if (kind !== "codex" || MODELS_BY_AGENT[agentId] || probed.has(agentId)) return;
   probed.add(agentId);
   try {
-    const models = await invoke<{ id: string; label: string }[]>("codex_list_models", { cwd });
-    learnModels(agentId, models.map((m) => ({ id: m.id, label: m.label })));
+    const models = await invoke<ModelEntry[]>("codex_list_models", { cwd });
+    learnModels(agentId, models.map((m) => ({ id: m.id, label: m.label, efforts: m.efforts, defaultEffort: m.defaultEffort })));
   } catch {
     probed.delete(agentId); // transient (codex not installed yet / spawn race) — retry later
   }
@@ -64,6 +73,15 @@ export function modelsFor(agentId: string): ModelEntry[] {
   if (catalog) return catalog;
   const learned = seen.value[agentId];
   return learned?.length ? learned : DEFAULT_ONLY;
+}
+
+/** Reasoning efforts the given model accepts, empty when it publishes none. */
+export function effortsFor(agentId: string, modelId: string): string[] {
+  return modelsFor(agentId).find((m) => m.id === modelId)?.efforts ?? [];
+}
+
+export function defaultEffortFor(agentId: string, modelId: string): string | undefined {
+  return modelsFor(agentId).find((m) => m.id === modelId)?.defaultEffort;
 }
 
 export function modelLabel(agentId: string, modelId: string): string {

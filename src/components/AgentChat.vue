@@ -395,43 +395,6 @@
               :cwd="cwd"
               @select="onPickModel"
             />
-            <button class="toolbar-btn" title="New conversation" @click="clearChat">
-              <PhArrowCounterClockwise :size="13" />
-            </button>
-            <button class="toolbar-btn" title="Configure providers…" @click="openProviderSettings">
-              <PhGear :size="13" />
-            </button>
-            <div v-if="isAcpRuntime && sessionId" class="agent-dropdown relative inline-flex">
-              <button ref="acpHistoryBtnEl" class="toolbar-btn" title="Resume a past session" @click="openAcpHistory">
-          <PhClockCounterClockwise :size="13" />
-        </button>
-        <Teleport to="body">
-          <div v-if="acpHistoryOpen" ref="acpHistoryMenuEl" class="floating-menu acp-history-menu" :style="{ top: acpHistoryPos.top + 'px', left: acpHistoryPos.left + 'px' }">
-            <div class="px-2.5 pb-1.5 pt-1 text-[10px] uppercase tracking-[0.04em] text-white/35">{{ currentAgent?.name }} sessions</div>
-            <div v-if="!acpSessions.length" class="p-2.5 text-center text-[11px] text-white/40">No past sessions</div>
-            <button
-              v-for="s in acpSessions"
-              :key="s.sessionId"
-              class="floating-menu-item flex-col items-start gap-0.5"
-              :class="{ 'floating-menu-item-active': s.sessionId === sessionId }"
-              :title="s.sessionId"
-              @click="resumeAcpSession(s.sessionId)"
-            >
-              <div class="flex max-w-full items-center gap-1.5">
-                <component :is="currentAgentIcon" :size="12" :style="{ color: currentAgent?.color }" />
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ s.title || s.sessionId.slice(0, 8) }}</span>
-              </div>
-              <span v-if="s.updatedAt" class="model-id-hint ml-[18px]">{{ new Date(s.updatedAt).toLocaleString() }}</span>
-            </button>
-          </div>
-        </Teleport>
-      </div>
-            <button
-              v-if="isAcpRuntime"
-              class="toolbar-btn"
-              title="Browse past sessions"
-              @click="openSessionBrowser"
-            ><PhClock :size="13" /></button>
             <!-- Claude Agent SDK effort is forwarded to the local Claude Code CLI. -->
             <div v-if="effectiveTransport === 'claude-cli'" class="model-dropdown">
               <button ref="effortBtnEl" class="toolbar-btn toolbar-btn-label" title="Claude reasoning effort" @click="toggleEffortMenu">
@@ -604,32 +567,12 @@
     </div>
     </div><!-- end .chat-main -->
 
-    <!-- Session browser modal -->
-    <div v-if="sessionBrowserOpen" class="absolute inset-0 z-[200] flex items-center justify-center bg-black/50" @click.self="sessionBrowserOpen = false">
-      <div class="flex max-h-[60vh] w-[420px] flex-col overflow-y-auto rounded-lg border border-border" style="background: var(--bg2, #1e1e1e);">
-        <div class="flex items-center justify-between border-b border-border px-3.5 py-2.5 font-semibold">
-          <span>Recent sessions</span>
-          <button class="cursor-pointer border-none bg-transparent text-foreground" @click="sessionBrowserOpen = false">✕</button>
-        </div>
-        <div v-if="sessionBrowserLoading" class="px-3.5 py-5 text-muted-foreground">Loading…</div>
-        <div v-else-if="!sessionBrowserItems.length" class="px-3.5 py-5 text-muted-foreground">No sessions found for this project.</div>
-        <div
-          v-for="s in sessionBrowserItems"
-          :key="s.session_id"
-          class="flex cursor-pointer flex-col gap-0.5 border-b border-[var(--border-faint,#2a2a2a)] px-3.5 py-2.5 hover:bg-hover"
-          @click="pickSession(s.session_id)"
-        >
-          <span class="text-[13px] text-foreground">{{ s.first_message }}</span>
-          <span class="text-[11px] text-muted-foreground">{{ s.updated_at }} · {{ s.session_id.slice(0, 8) }}</span>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
-import { PhArrowUp, PhArrowCounterClockwise, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhFile, PhSparkle, PhFastForward, PhGear, PhClockCounterClockwise, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCircleNotch, PhCopy, PhCheck } from "@phosphor-icons/vue";
+import { PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhFile, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCircleNotch, PhCopy, PhCheck } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
@@ -772,47 +715,12 @@ interface AcpMode { id: string; name: string; description?: string }
 interface AcpModes { currentModeId: string; availableModes: AcpMode[] }
 interface AcpConfigChoice { value: string; name: string; description?: string }
 interface AcpConfigOption { id: string; name: string; type: string; currentValue: string; options: AcpConfigChoice[] }
-interface AcpSessionInfo { sessionId: string; title?: string; updatedAt?: string }
-interface ClaudeSessionInfo {
-  session_id: string;
-  first_message: string;
-  updated_at: string;
-}
 // JSON-RPC id of the in-flight session/prompt — correlates the turn-done response.
 const acpPromptRpcId = ref<number | null>(null);
 // rpc ids of in-flight control calls (set_mode/set_config/list) → refresh UI on reply.
 const acpControlIds = new Set<number>();
 const acpModes = ref<AcpModes | null>(null);
 const acpConfigOptions = ref<AcpConfigOption[]>([]);
-const acpSessions = ref<AcpSessionInfo[]>([]);
-const acpHistoryOpen = ref(false);
-const sessionBrowserOpen = ref(false);
-const sessionBrowserItems = ref<ClaudeSessionInfo[]>([]);
-const sessionBrowserLoading = ref(false);
-
-async function openSessionBrowser() {
-  sessionBrowserOpen.value = true;
-  sessionBrowserLoading.value = true;
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    sessionBrowserItems.value = await invoke<ClaudeSessionInfo[]>("list_claude_sessions", {
-      cwd: props.cwd,
-      configDir: null,
-    });
-  } catch (e) {
-    sessionBrowserItems.value = [];
-  } finally {
-    sessionBrowserLoading.value = false;
-  }
-}
-
-async function pickSession(sid: string) {
-  sessionBrowserOpen.value = false;
-  await resumeAcpSession(sid);
-}
-const acpHistoryBtnEl = ref<HTMLElement | null>(null);
-const acpHistoryMenuEl = ref<HTMLElement | null>(null);
-const acpHistoryPos = ref({ top: 0, left: 0 });
 // Legacy per-chat localStorage key prefixes (kept only for the one-time migration below).
 type AcpChatSettings = { mode?: string; model?: string; effort?: string };
 function getAcpSetting(cid: number, field: keyof AcpChatSettings): string | undefined {
@@ -867,7 +775,6 @@ function onAcpMenuOutside(e: MouseEvent) {
   if (acpModeMenuOpen.value && !acpModeBtnEl.value?.contains(t) && !acpModeMenuEl.value?.contains(t)) acpModeMenuOpen.value = false;
   if (acpModelMenuOpen.value && !acpModelBtnEl.value?.contains(t) && !acpModelMenuEl.value?.contains(t)) acpModelMenuOpen.value = false;
   if (acpEffortMenuOpen.value && !acpEffortBtnEl.value?.contains(t) && !acpEffortMenuEl.value?.contains(t)) acpEffortMenuOpen.value = false;
-  if (acpHistoryOpen.value && !acpHistoryBtnEl.value?.contains(t) && !acpHistoryMenuEl.value?.contains(t)) acpHistoryOpen.value = false;
 }
 // What we last pushed back after an adapter reset its own selectors. An adapter
 // that refuses a value would otherwise ping-pong with us forever; a user pick
@@ -922,54 +829,22 @@ function restoreAcpSelections() {
     acpSelectModel(savedModel, false);
   }
   const savedMode = getAcpSetting(props.chatId, "mode") ?? lastAcpSetting("mode");
-  if (savedMode && acpModes.value && acpModes.value.currentModeId !== savedMode && acpRestored.mode !== savedMode) {
+  const modeOffered = acpModes.value?.availableModes.some((m) => m.id === savedMode);
+  if (savedMode && modeOffered && acpModes.value && acpModes.value.currentModeId !== savedMode && acpRestored.mode !== savedMode) {
     acpRestored.mode = savedMode;
     acpSelectMode(savedMode, false);
   }
+  // Only push a value the adapter actually offers — a saved effort can be stale
+  // after a model switch (Codex publishes its efforts per model).
   const savedEffort = getAcpSetting(props.chatId, "effort") ?? lastAcpSetting("effort");
-  if (savedEffort && acpEffortOption.value && acpEffortOption.value.currentValue !== savedEffort && acpRestored.effort !== savedEffort) {
+  const effortOffered = acpEffortOption.value?.options.some((o) => o.value === savedEffort);
+  if (savedEffort && effortOffered && acpEffortOption.value && acpEffortOption.value.currentValue !== savedEffort && acpRestored.effort !== savedEffort) {
     acpRestored.effort = savedEffort;
     acpSelectEffort(savedEffort, false);
   }
 }
 
-// History picker: list prior sessions for this cwd, then resume the chosen one.
-async function openAcpHistory() {
-  acpHistoryOpen.value = !acpHistoryOpen.value;
-  if (!acpHistoryOpen.value) return;
-  if (!sessionId.value) { acpHistoryOpen.value = false; return; } // adapter still starting
-  if (acpHistoryBtnEl.value) {
-    const r = acpHistoryBtnEl.value.getBoundingClientRect();
-    acpHistoryPos.value = { top: Math.round(r.bottom + 6), left: Math.round(Math.max(8, r.right - 280)) };
-  }
-  try {
-    const rid = await invoke<number>("acp_list_sessions", { id: props.chatId, cwd: props.cwd });
-    acpControlIds.add(rid);
-  } catch (e) {
-    console.warn("acp_list_sessions failed:", e); // transient (adapter not ready) — don't pollute the feed
-  }
-}
-async function resumeAcpSession(sid: string) {
-  acpHistoryOpen.value = false;
-  if (sid === sessionId.value) return;
-  suppressNextDone.value = true;
-  messages.value = [];
-  busy.value = false;
-  sessionId.value = sid;
-  chats.sync(props.chatId, { claudeSessionId: sid });
-  clearMessageHistory(props.chatId); // replayed history repopulates it
-  await ensureAcpListeners();
-  await invoke("acp_stop", { id: props.chatId }).catch(() => {});
-  // emitHistory:true → Rust forwards the session/load replay so old turns render.
-  const startErr = await invoke("acp_start", acpStartPayload(true)).catch((e: unknown) => e);
-  if (startErr) messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to resume: ${startErr}` });
-}
-
 // Agent switcher dropdown.
-function openProviderSettings() {
-  uiStore.openSettings("providers", currentAgent.value?.id);
-}
-
 async function selectAgent(id: string) {
   if (id === agentKind.value) return;
   // Stop OLD process before agentKind changes (effectiveTransport depends on it).
@@ -2082,10 +1957,9 @@ function onAcpData(raw: string) {
     const rid = msg.id as number;
     if (acpControlIds.has(rid)) {
       acpControlIds.delete(rid);
-      const result = msg.result as { configOptions?: AcpConfigOption[]; modes?: AcpModes; sessions?: AcpSessionInfo[] } | undefined;
+      const result = msg.result as { configOptions?: AcpConfigOption[]; modes?: AcpModes } | undefined;
       if (result?.configOptions) acpConfigOptions.value = result.configOptions;
       if (result?.modes) acpModes.value = result.modes;
-      if (result?.sessions) acpSessions.value = result.sessions;
       // A model switch comes back with the adapter's whole selector set, effort
       // and permission mode reset to its defaults — put the user's picks back.
       if (result?.configOptions || result?.modes) restoreAcpSelections();
@@ -3341,7 +3215,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .floating-menu-item > .model-id-hint { margin-left: auto; }
 
 .agent-dropdown { position: relative; display: inline-flex; }
-.acp-history-menu { min-width: 280px; max-width: 360px; max-height: 320px; overflow-y: auto; }
 
 /* Send button */
 .send-btn {

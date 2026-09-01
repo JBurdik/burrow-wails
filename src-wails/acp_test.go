@@ -52,6 +52,24 @@ func TestCodexConfigOptionsEmpty(t *testing.T) {
 	}
 }
 
+func TestCodexTurnTerminalFailure(t *testing.T) {
+	if got := codexTurnTerminalFailure(map[string]any{
+		"turn": map[string]any{"status": "completed"},
+	}); got != "" {
+		t.Fatalf("completed turn should not show an error, got %q", got)
+	}
+	if got := codexTurnTerminalFailure(map[string]any{
+		"turn": map[string]any{"status": "failed", "error": map[string]any{"message": "rate limited"}},
+	}); got != "rate limited" {
+		t.Fatalf("failed turn error = %q, want rate limited", got)
+	}
+	if got := codexTurnTerminalFailure(map[string]any{
+		"turn": map[string]any{"status": "failed"},
+	}); got != "The Codex app-server ended the turn without an error message." {
+		t.Fatalf("failed turn fallback = %q", got)
+	}
+}
+
 func TestCodexModeSettings(t *testing.T) {
 	cases := map[string]struct {
 		approval string
