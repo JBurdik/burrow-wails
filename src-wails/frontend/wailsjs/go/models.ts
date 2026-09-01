@@ -284,8 +284,9 @@ export namespace main {
 	    }
 	}
 	export class SystemStats {
-	    memAllocMB: number;
-	    numGoroutine: number;
+	    cpu_percent: number;
+	    mem_used: number;
+	    mem_total: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new SystemStats(source);
@@ -293,8 +294,9 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.memAllocMB = source["memAllocMB"];
-	        this.numGoroutine = source["numGoroutine"];
+	        this.cpu_percent = source["cpu_percent"];
+	        this.mem_used = source["mem_used"];
+	        this.mem_total = source["mem_total"];
 	    }
 	}
 	export class TailscaleStatus {

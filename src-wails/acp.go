@@ -609,7 +609,7 @@ func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID 
 
 	sess.sessionID = threadID
 	a.acpReg().put(id, sess)
-	a.emitSession(id, threadID, nil, configOptions)
+	a.emitSession(id, threadID, codexModes(), configOptions)
 	go a.pump(id, reader, sess)
 	return nil
 }
@@ -763,6 +763,23 @@ func (a *App) AcpSetMode(id, modeID string) (int64, error) {
 		"jsonrpc": "2.0", "id": rpc, "method": "session/set_mode",
 		"params": map[string]any{"sessionId": sess.sessionID, "modeId": modeID},
 	})
+}
+
+// codexModes is the permission-mode catalogue for a Codex chat, in the shape
+// the frontend's mode switcher already reads from ACP adapters. Codex has no
+// call that lists its own modes, so it is spelled out here — the ids must stay
+// in sync with codexModeSettings, which translates them for the app-server.
+// currentModeId matches the approvalPolicy/sandbox in CodexStart's startParams.
+func codexModes() map[string]any {
+	return map[string]any{
+		"currentModeId": "auto",
+		"availableModes": []map[string]any{
+			{"id": "read-only", "name": "Read only", "description": "Codex may read files, but every command and edit needs approval."},
+			{"id": "auto", "name": "Auto", "description": "Codex edits inside the workspace and asks before anything outside it."},
+			{"id": "dontAsk", "name": "Don't ask", "description": "No approval prompts, still confined to the workspace."},
+			{"id": "full-access", "name": "Full access", "description": "No prompts and no sandbox — Codex can touch anything this user can."},
+		},
+	}
 }
 
 // codexModeSettings translates Burrow's shared mode ids to the settings the

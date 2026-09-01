@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full flex-col overflow-hidden bg-base text-xs">
+  <div class="flex h-full flex-col overflow-hidden bg-base text-xs" :data-size="props.size">
 
     <!-- Top bar: title + workspace selector + actions -->
     <div class="flex h-[38px] shrink-0 items-center gap-1.5 border-b border-border bg-panel px-3">
@@ -316,6 +316,9 @@ import { useGitStore, type GitCommit } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
 import DiffView from "./DiffView.vue";
 
+// "lg" is the full-screen Git dialog; the default is the narrow right panel.
+const props = withDefaults(defineProps<{ size?: "sm" | "lg" }>(), { size: "sm" });
+
 const git = useGitStore();
 const wsStore = useWorkspaceStore();
 const isPopout = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label === "gitpanel";
@@ -507,6 +510,16 @@ body {
 </style>
 
 <style scoped>
+/* Every type size in this panel is a hard-coded px utility, tuned for the ~300px
+   right panel. `size="lg"` (the full-screen Git dialog) re-maps those same
+   utilities one step up instead of duplicating 80 class attributes. */
+[data-size="lg"] { font-size: 13px; }
+[data-size="lg"] :deep(:is(.text-\[9px\], .text-\[9\.5px\])) { font-size: 11px; }
+[data-size="lg"] :deep(.text-\[10px\]) { font-size: 12px; }
+[data-size="lg"] :deep(:is(.text-\[11px\], .text-\[11\.5px\])) { font-size: 13px; }
+[data-size="lg"] :deep(.text-\[13px\]) { font-size: 15px; }
+[data-size="lg"] :deep(.text-xs) { font-size: 13px; }
+
 .gp-progress-bar::after {
   content: "";
   position: absolute;

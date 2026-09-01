@@ -98,6 +98,8 @@ export function ListCheckpoints(arg1:string,arg2:number):Promise<Array<main.Chec
 
 export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSessionInfo>>;
 
+export function ListFonts():Promise<Array<string>>;
+
 export function ListMcpServers():Promise<Record<string, any>>;
 
 export function ListOpenTargets():Promise<Array<main.OpenTarget>>;

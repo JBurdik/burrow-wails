@@ -53,19 +53,6 @@
     </div>
 
     <div class="flex-1 overflow-y-auto pb-2">
-      <!-- Surfaces: non-terminal views for the active workspace -->
-      <template v-if="active">
-        <div class="section-header">Surfaces</div>
-        <button
-          class="flex w-full items-center gap-1.5 px-2.5 py-[5px] text-left text-[11.5px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
-          title="Open browser tab"
-          @click="emit('open-browser')"
-        >
-          <PhGlobe :size="12" class="shrink-0 text-accent" />
-          Browser
-        </button>
-      </template>
-
       <!-- Live feed: every open project's tabs, newest activity first -->
       <div
         v-for="row in feed.live"
@@ -165,7 +152,14 @@
             <PhChatCenteredText :size="10" class="shrink-0" />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
             <span v-if="git.prByWs[row.ws.id]" class="shrink-0 font-mono text-[9px]">#{{ git.prByWs[row.ws.id]!.number }}</span>
-            <span class="shrink-0 text-[10px] tabular-nums">{{ ago(row.ts) }}</span>
+            <button
+              class="hidden shrink-0 items-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground group-hover:flex"
+              title="Move back to active"
+              @click.stop="toggleSettled(row.tab)"
+            >
+              <PhArrowCounterClockwise :size="11" weight="bold" />
+            </button>
+            <span class="shrink-0 text-[10px] tabular-nums group-hover:hidden">{{ ago(row.ts) }}</span>
           </div>
           <button
             v-if="feed.settledChats.length > settledChatsLimit"
@@ -438,16 +432,19 @@
       </div>
     </div>
 
-    <!-- Git manager dialog -->
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-6" v-if="gitDialogOpen" @click.self="gitDialogOpen = false">
-      <div class="relative flex h-full w-full max-w-[1100px] flex-col overflow-hidden rounded-[10px] border border-border bg-panel">
-        <button
-          class="absolute right-2.5 top-2.5 z-10 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-          title="Close (Esc)"
-          @click="gitDialogOpen = false"
-        ><PhX :size="14" /></button>
-        <GitPanel class="min-h-0 flex-1" />
+    <!-- Git manager — a full-screen surface like Settings, not a dialog: at panel
+         scale the diff and file lists were unreadable. -->
+    <div class="fixed inset-0 z-[1000] flex flex-col overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]" v-if="gitDialogOpen">
+      <div class="relative flex h-[52px] shrink-0 items-center justify-end border-b border-border bg-panel px-6">
+        <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-2.5">
+          <PhGitBranch :size="15" class="text-muted-foreground" />
+          <span class="text-sm font-semibold text-foreground">Git</span>
+        </div>
+        <button class="flex rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="gitDialogOpen = false">
+          <PhX :size="15" />
+        </button>
       </div>
+      <GitPanel size="lg" class="min-h-0 flex-1" />
     </div>
   </Teleport>
 </template>
@@ -458,6 +455,7 @@ import {
   PhFolder,
   PhFolderPlus,
   PhCaretDown,
+  PhArrowCounterClockwise,
   PhX,
   PhTerminal,
   PhRobot,
@@ -469,7 +467,6 @@ import {
   PhGear,
   PhSquaresFour,
   PhPlayCircle,
-  PhGlobe,
   PhTrash,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
@@ -494,7 +491,6 @@ import { getProjectSettings } from "@/lib/projectSettings";
 
 import { useScriptsStore, type Script } from "@/stores/scripts";
 
-const emit = defineEmits<{ (e: "open-browser"): void }>();
 
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();

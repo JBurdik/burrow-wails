@@ -12,10 +12,17 @@ import (
 // src-tauri/src/lib.rs.
 
 func (a *App) ClaudeRespondControl(id, requestID string, response map[string]any) error {
+	// The CLI only accepts the nested envelope: request_id and the decision both
+	// live inside `response`, tagged with subtype "success". A flat
+	// {type,request_id,response} is silently dropped — the tool stays parked
+	// forever, which is what made AskUserQuestion never resume after Submit.
 	payload, err := json.Marshal(map[string]any{
-		"type":       "control_response",
-		"request_id": requestID,
-		"response":   response,
+		"type": "control_response",
+		"response": map[string]any{
+			"subtype":    "success",
+			"request_id": requestID,
+			"response":   response,
+		},
 	})
 	if err != nil {
 		return err

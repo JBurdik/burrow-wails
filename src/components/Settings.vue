@@ -207,9 +207,16 @@
                 :style="{ fontFamily: ui.uiFont }"
                 @change="ui.uiFont = val($event)"
               >
-                <option v-for="f in UI_FONTS" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
-                  {{ f.label }}
-                </option>
+                <optgroup label="Presets">
+                  <option v-for="f in UI_FONTS" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
+                    {{ f.label }}
+                  </option>
+                </optgroup>
+                <optgroup v-if="installedUiFonts.length" label="Installed">
+                  <option v-for="f in installedUiFonts" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
+                    {{ f.label }}
+                  </option>
+                </optgroup>
               </select>
             </div>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
@@ -251,9 +258,16 @@
                 :style="{ fontFamily: ui.terminalFont }"
                 @change="ui.terminalFont = val($event)"
               >
-                <option v-for="f in TERMINAL_FONTS" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
-                  {{ f.label }}
-                </option>
+                <optgroup label="Presets">
+                  <option v-for="f in TERMINAL_FONTS" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
+                    {{ f.label }}
+                  </option>
+                </optgroup>
+                <optgroup v-if="installedMonoFonts.length" label="Installed">
+                  <option v-for="f in installedMonoFonts" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
+                    {{ f.label }}
+                  </option>
+                </optgroup>
               </select>
             </div>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
@@ -1000,6 +1014,7 @@ import { Select } from "@/components/ui/select";
 import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, type NtfyEvent } from "@/stores/ui";
+import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import ProvidersPanel from "@/components/ProvidersPanel.vue";
 import { testNtfy } from "@/lib/ntfy";
@@ -1017,6 +1032,18 @@ const focusId = computed(() => ui.settingsFocusId);
 
 const scriptsStore = useScriptsStore();
 const wsStore = useWorkspaceStore();
+// Installed fonts, listed alongside the built-in presets. The terminal picker
+// only offers the monospace ones — a proportional font there is unusable.
+const systemFonts = ref<string[]>([]);
+loadSystemFonts().then((f) => (systemFonts.value = f));
+const presetLabels = new Set([...UI_FONTS, ...TERMINAL_FONTS].map((f) => f.label));
+const installedUiFonts = computed(() =>
+  systemFonts.value.filter((f) => !presetLabels.has(f)).map((f) => toPreset(f, "sans-serif"))
+);
+const installedMonoFonts = computed(() =>
+  systemFonts.value.filter((f) => !presetLabels.has(f) && isMonospace(f)).map((f) => toPreset(f, "monospace"))
+);
+
 const ui = useUIStore();
 const providers = useProvidersStore();
 const update = useUpdateStore();

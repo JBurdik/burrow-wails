@@ -6,25 +6,35 @@ import (
 	"path/filepath"
 	"runtime"
 	"syscall"
+
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 // Remaining small commands from src-tauri/src/lib.rs: system_stats,
 // save_temp_image, is_pid_alive, format_source,
 // set_tab_live_status, set_max_agents, set_burrow_mcp_max_depth.
 
-// SystemStats reports this process' own memory/goroutine stats. Rust's
-// version (via `sysinfo`) reports host-wide CPU/mem; matching that exactly
-// would need a Go equivalent of sysinfo — deferred, this is what the
-// stdlib gives us for free in the meantime.
+// SystemStats reports host-wide CPU/memory, matching the shape the title bar's
+// gauge reads (`cpu_percent`/`mem_used`/`mem_total`). The Rust build used
+// `sysinfo`; gopsutil is its Go equivalent.
 type SystemStats struct {
-	MemAllocMB   float64 `json:"memAllocMB"`
-	NumGoroutine int     `json:"numGoroutine"`
+	CPUPercent float64 `json:"cpu_percent"`
+	MemUsed    uint64  `json:"mem_used"`
+	MemTotal   uint64  `json:"mem_total"`
 }
 
 func (a *App) SystemStats() SystemStats {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return SystemStats{MemAllocMB: float64(m.Alloc) / 1024 / 1024, NumGoroutine: runtime.NumGoroutine()}
+	var out SystemStats
+	// 0 interval = usage since the previous call (since boot on the first one),
+	// which is what a 2 s poll wants — a blocking sample would stall the caller.
+	if pct, err := cpu.Percent(0, false); err == nil && len(pct) > 0 {
+		out.CPUPercent = pct[0]
+	}
+	if vm, err := mem.VirtualMemory(); err == nil {
+		out.MemUsed, out.MemTotal = vm.Used, vm.Total
+	}
+	return out
 }
 
 // HomeDir is the user's home dir, for path pickers that show a "~" root.

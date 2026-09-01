@@ -203,6 +203,8 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     // Misc
     case "system_stats":
       return App.SystemStats();
+    case "list_fonts":
+      return App.ListFonts();
     case "save_temp_image":
       return App.SaveTempImage(args.b64 ?? args.data, args.ext);
     case "is_pid_alive":

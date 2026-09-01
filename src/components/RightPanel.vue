@@ -321,6 +321,10 @@
         </button>
       </div>
     </div>
+    <!-- Browser: outside the v-if chain and kept mounted while its tab is open, so
+         switching to Changes and back doesn't reload the page being previewed. -->
+    <BrowserPane v-if="browserOpened" v-show="activeTab === 'browser'" class="min-h-0 flex-1" />
+
     <!-- Restore confirm — overwrites files on disk, so it always asks first -->
     <Teleport to="body">
       <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="restoreTarget" @click.self="restoreTarget = null">
@@ -355,7 +359,7 @@ import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight,
-  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus,
+  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
@@ -367,6 +371,7 @@ import PullRequestsPanel from "./PullRequestsPanel.vue";
 import ManagerPanel from "./ManagerPanel.vue";
 import DiffView from "./DiffView.vue";
 import CommitPushMenu from "./CommitPushMenu.vue";
+import BrowserPane from "./BrowserPane.vue";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
@@ -409,9 +414,12 @@ const tabs = computed(() => {
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
     { id: "manager", label: "Manager", icon: PhSparkle, description: "Plan and coordinate agent work for this project." },
+    { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
   ];
   return all;
 });
+
+const browserOpened = computed(() => openedTabIds.value.includes("browser"));
 
 const openedTabs = computed(() => openedTabIds.value
   .map((id) => tabs.value.find((tab) => tab.id === id))

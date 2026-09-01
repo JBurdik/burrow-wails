@@ -823,6 +823,14 @@ function setAcpSetting(cid: number, field: keyof AcpChatSettings, value: string)
   const rec = { ...getConfig<Record<string, AcpChatSettings>>("chatAcpSettings", {}) };
   rec[String(cid)] = { ...rec[String(cid)], [field]: value };
   setConfig("chatAcpSettings", rec);
+  // Also remember it per agent kind, so a brand-new chat starts where the last
+  // one left off instead of at the adapter's default.
+  const last = { ...getConfig<Record<string, AcpChatSettings>>("chatAcpLast", {}) };
+  last[agentKind.value] = { ...last[agentKind.value], [field]: value };
+  setConfig("chatAcpLast", last);
+}
+function lastAcpSetting(field: keyof AcpChatSettings): string | undefined {
+  return getConfig<Record<string, AcpChatSettings>>("chatAcpLast", {})[agentKind.value]?.[field];
 }
 const acpModelOption = computed(() => acpConfigOptions.value.find((o) => o.id === "model"));
 const acpEffortOption = computed(() => acpConfigOptions.value.find((o) => o.id === "effort"));
@@ -861,7 +869,13 @@ function onAcpMenuOutside(e: MouseEvent) {
   if (acpEffortMenuOpen.value && !acpEffortBtnEl.value?.contains(t) && !acpEffortMenuEl.value?.contains(t)) acpEffortMenuOpen.value = false;
   if (acpHistoryOpen.value && !acpHistoryBtnEl.value?.contains(t) && !acpHistoryMenuEl.value?.contains(t)) acpHistoryOpen.value = false;
 }
-async function acpSelectMode(modeId: string) {
+// What we last pushed back after an adapter reset its own selectors. An adapter
+// that refuses a value would otherwise ping-pong with us forever; a user pick
+// clears this, so the next legitimate reset is pushed again.
+let acpRestored: AcpChatSettings = {};
+
+async function acpSelectMode(modeId: string, userPick = true) {
+  if (userPick) acpRestored = {};
   acpModeMenuOpen.value = false;
   if (acpModes.value) acpModes.value.currentModeId = modeId;
   setAcpSetting(props.chatId, "mode", modeId);
@@ -872,7 +886,8 @@ async function acpSelectMode(modeId: string) {
     messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set mode: ${e}` });
   }
 }
-async function acpSelectModel(value: string) {
+async function acpSelectModel(value: string, userPick = true) {
+  if (userPick) acpRestored = {};
   acpModelMenuOpen.value = false;
   if (acpModelOption.value) acpModelOption.value.currentValue = value;
   setAcpSetting(props.chatId, "model", value);
@@ -883,7 +898,8 @@ async function acpSelectModel(value: string) {
     messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set model: ${e}` });
   }
 }
-async function acpSelectEffort(value: string) {
+async function acpSelectEffort(value: string, userPick = true) {
+  if (userPick) acpRestored = {};
   acpEffortMenuOpen.value = false;
   if (acpEffortOption.value) acpEffortOption.value.currentValue = value;
   setAcpSetting(props.chatId, "effort", value);
@@ -892,6 +908,28 @@ async function acpSelectEffort(value: string) {
     acpControlIds.add(rid);
   } catch (e) {
     messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set effort: ${e}` });
+  }
+}
+
+// Re-apply this chat's model / permission mode / effort. The adapter resets its
+// selectors to defaults on (re)start AND in the reply to a model switch, which
+// is what used to silently drop the effort and permission mode the user picked.
+function restoreAcpSelections() {
+  const savedModel = getAcpSetting(props.chatId, "model")
+    ?? getConfig<Record<string, string>>("chatAcpLastModel", {})[agentKind.value];
+  if (savedModel && acpModelOption.value && acpModelOption.value.currentValue !== savedModel && acpRestored.model !== savedModel) {
+    acpRestored.model = savedModel;
+    acpSelectModel(savedModel, false);
+  }
+  const savedMode = getAcpSetting(props.chatId, "mode") ?? lastAcpSetting("mode");
+  if (savedMode && acpModes.value && acpModes.value.currentModeId !== savedMode && acpRestored.mode !== savedMode) {
+    acpRestored.mode = savedMode;
+    acpSelectMode(savedMode, false);
+  }
+  const savedEffort = getAcpSetting(props.chatId, "effort") ?? lastAcpSetting("effort");
+  if (savedEffort && acpEffortOption.value && acpEffortOption.value.currentValue !== savedEffort && acpRestored.effort !== savedEffort) {
+    acpRestored.effort = savedEffort;
+    acpSelectEffort(savedEffort, false);
   }
 }
 
@@ -2032,21 +2070,8 @@ function onAcpData(raw: string) {
       saveMessages(props.chatId, messages.value);
       scrollToBottom();
     }
-    // Re-apply the chat's persisted model / permission mode (selectors reset to the
-    // adapter default on each (re)start, so restore the user's choice).
-    const savedModel = getAcpSetting(props.chatId, "model")
-      ?? getConfig<Record<string, string>>("chatAcpLastModel", {})[agentKind.value];
-    if (savedModel && acpModelOption.value && acpModelOption.value.currentValue !== savedModel) {
-      acpSelectModel(savedModel);
-    }
-    const savedMode = getAcpSetting(props.chatId, "mode");
-    if (savedMode && acpModes.value && acpModes.value.currentModeId !== savedMode) {
-      acpSelectMode(savedMode);
-    }
-    const savedEffort = getAcpSetting(props.chatId, "effort");
-    if (savedEffort && acpEffortOption.value && acpEffortOption.value.currentValue !== savedEffort) {
-      acpSelectEffort(savedEffort);
-    }
+    acpRestored = {};
+    restoreAcpSelections();
     return;
   }
 
@@ -2061,6 +2086,9 @@ function onAcpData(raw: string) {
       if (result?.configOptions) acpConfigOptions.value = result.configOptions;
       if (result?.modes) acpModes.value = result.modes;
       if (result?.sessions) acpSessions.value = result.sessions;
+      // A model switch comes back with the adapter's whole selector set, effort
+      // and permission mode reset to its defaults — put the user's picks back.
+      if (result?.configOptions || result?.modes) restoreAcpSelections();
       return;
     }
     if (acpPromptRpcId.value === null || rid !== acpPromptRpcId.value) return;

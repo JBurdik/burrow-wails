@@ -12,7 +12,7 @@
     />
     <Settings v-if="ui.settingsOpen" @close="ui.closeSettings()" />
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
-      <Sidebar v-show="ui.sidebarVisible" class="panel-sidebar" @open-browser="activeTerm()?.openBrowserTab()" />
+      <Sidebar v-show="ui.sidebarVisible" class="panel-sidebar" />
       <div v-show="ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
       <div class="ide-main">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting

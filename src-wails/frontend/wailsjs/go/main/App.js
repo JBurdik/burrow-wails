@@ -194,6 +194,10 @@ export function ListClaudeSessions(arg1) {
   return window['go']['main']['App']['ListClaudeSessions'](arg1);
 }
 
+export function ListFonts() {
+  return window['go']['main']['App']['ListFonts']();
+}
+
 export function ListMcpServers() {
   return window['go']['main']['App']['ListMcpServers']();
 }

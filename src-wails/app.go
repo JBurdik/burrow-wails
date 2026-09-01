@@ -176,6 +176,9 @@ func (a *App) startup(ctx context.Context) {
 	installStatusHooks(dataDir)
 	installAgentDocs()
 
+	// Warm the font list so the Settings pickers don't pay the ~1 s scan.
+	go ListFonts()
+
 	a.initControl(dataDir)
 
 	hookSrv, err := StartHookServer(ctx, a.registerControlRoutes)
