@@ -120,6 +120,7 @@ import { useKeybindingsStore } from "@/stores/keybindings";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
 import PathPicker from "@/components/PathPicker.vue";
 import { pickDir } from "@/lib/pickPath";
+import { installControlBridge } from "@/lib/controlBridge";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import DiagramModal from "@/components/DiagramModal.vue";
 import { useDiagram } from "@/composables/useDiagram";
@@ -294,6 +295,7 @@ async function openNewWorkspace() {
 // browser-only dev (no Tauri) are swallowed.
 let updateTimer: number | undefined;
 let unlistenMenuUpdate: UnlistenFn | null = null;
+let unlistenControl: (() => void) | undefined;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
 
 // Short warm synth arpeggio on app startup — no asset, no user gesture needed in
@@ -345,6 +347,10 @@ onMounted(async () => {
   unlistenWorkspacesChanged = await listen("workspaces-changed", () => {
     ws.load();
   });
+
+  // The control API's UI half: one app-wide listener performing the actions
+  // agents (and the Manager) ask for, and acking each with its result.
+  unlistenControl = await installControlBridge();
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
@@ -353,6 +359,7 @@ onBeforeUnmount(() => {
   if (updateTimer) clearInterval(updateTimer);
   unlistenMenuUpdate?.();
   unlistenWorkspacesChanged?.();
+  unlistenControl?.();
 });
 
 // One handler per rebindable app-scope command; the keybindings store owns the

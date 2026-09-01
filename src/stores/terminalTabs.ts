@@ -35,6 +35,12 @@ type TabRequest = {
   initialImages?: string[];
   /** Optional command to run in a newly-added tab (action: "add"). */
   cmd?: string;
+  /** Working dir for a newly-added tab; defaults to the workspace's own. */
+  cwd?: string;
+  /** Result-capture token for a spawned sub-agent (action: "add"). */
+  resultToken?: string;
+  /** Add the tab without switching to it — a spawned agent shouldn't steal focus. */
+  background?: boolean;
   nonce: number;
 };
 
@@ -79,6 +85,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   const activityByWs = ref<Record<number, Record<number, number>>>(loadActivity());
   const request = ref<TabRequest | null>(null);
   let nonce = 0;
+  // Resolvers for add() calls waiting on Terminal to report the new tab's id.
+  const pendingAdds = new Map<number, (ptyId: number | undefined) => void>();
 
   function setTabs(wsId: number, tabs: TabSummary[]) {
     const previous = new Map((tabsByWs.value[wsId] ?? []).map((tab) => [tab.id, tab.status]));
@@ -159,8 +167,31 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     // focusing a thread would shuffle the row out from under the cursor.
     request.value = { wsId, action: "activate", tabId, nonce: ++nonce };
   }
-  function add(wsId: number, cmd?: string) {
-    request.value = { wsId, action: "add", cmd, nonce: ++nonce };
+  /**
+   * Ask the workspace's Terminal to open a tab. Resolves with the new tab's pty
+   * id once Terminal has created it (or undefined if that workspace isn't
+   * mounted to answer) — the control API hands that id back to the agent that
+   * asked for the spawn, so it can supervise the tab afterwards.
+   */
+  function add(wsId: number, cmd?: string, extra?: { cwd?: string; resultToken?: string; background?: boolean }): Promise<number | undefined> {
+    const n = ++nonce;
+    request.value = { wsId, action: "add", cmd, ...extra, nonce: n };
+    return new Promise((resolve) => {
+      pendingAdds.set(n, resolve);
+      // An unmounted workspace never answers; don't leave the caller hanging.
+      setTimeout(() => {
+        if (pendingAdds.delete(n)) resolve(undefined);
+      }, 5000);
+    });
+  }
+
+  /** Called by Terminal once a requested tab exists. */
+  function fulfillAdd(reqNonce: number, ptyId: number) {
+    const resolve = pendingAdds.get(reqNonce);
+    if (resolve) {
+      pendingAdds.delete(reqNonce);
+      resolve(ptyId);
+    }
   }
   function close(wsId: number, tabId: number) {
     request.value = { wsId, action: "close", tabId, nonce: ++nonce };
@@ -179,5 +210,5 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     request.value = { wsId, action: "rename", tabId, title, nonce: ++nonce };
   }
 
-  return { tabsByWs, activeByWs, activityByWs, request, setTabs, setActive, clear, activityAt, isCompletionUnseen, activate, add, close, reorder, openChat, openGit, rename };
+  return { tabsByWs, activeByWs, activityByWs, request, setTabs, setActive, clear, activityAt, isCompletionUnseen, activate, add, fulfillAdd, close, reorder, openChat, openGit, rename };
 });

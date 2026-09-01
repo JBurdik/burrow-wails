@@ -99,8 +99,6 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.GetHookServerPort();
     case "set_http_enabled":
       return App.SetHttpEnabled(!!args.enabled);
-    case "take_spawn_requests":
-      return App.TakeSpawnRequests(args.cwd);
 
     // Claude Code — `id` is the frontend's chat id; the Go side emits
     // `claude-data-<id>` under exactly that name, so it must round-trip.
@@ -260,6 +258,10 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.KillOrphanSessions(args.keepIds ?? args.keep_ids ?? []);
     case "restart_daemon":
       return App.RestartDaemon();
+    case "ack_control_action":
+      return App.AckControlAction(args.id, args.resultJson ?? "", args.errMsg ?? "");
+    case "control_verbs":
+      return App.ControlVerbs();
     case "repair_agent_status":
       return App.RepairAgentStatus();
     case "reinstall_status_hooks":

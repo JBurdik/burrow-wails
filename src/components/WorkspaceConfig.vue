@@ -201,7 +201,6 @@ import { modelsFor } from '@/lib/chatModels'
 import { getProjectSettings, setProjectSettings } from '@/lib/projectSettings'
 import { isPinned, togglePin } from '@/lib/pinnedWorkspaces'
 import { isArchived, toggleArchived } from '@/lib/archivedWorkspaces'
-import { getDefaultManagerPrimer } from '@/utils/managerPrimer'
 
 const props = defineProps<{ workspaceId: number }>()
 const emit = defineEmits<{ close: [] }>()
@@ -285,10 +284,11 @@ async function loadPrompt() {
       path: workspacePath.value + '/.burrow/manager.md',
     })
     const stripped = content.replace(/<!--[\s\S]*?-->/g, '').trim()
-    const isPlaceholder = stripped === '# Project-specific Manager instructions' || stripped === ''
-    promptContent.value = isPlaceholder ? getDefaultManagerPrimer(false) : stripped
+    // Project instructions are APPENDED to the Manager's generated primer, so an
+    // empty file is the normal state — don't seed it with a copy of the primer.
+    promptContent.value = stripped === '# Project-specific Manager instructions' ? '' : stripped
   } catch {
-    promptContent.value = getDefaultManagerPrimer(false)
+    promptContent.value = ''
   }
 }
 

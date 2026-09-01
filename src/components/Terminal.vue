@@ -181,7 +181,6 @@ import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vu
 import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import { spinnerFrame } from "@/lib/spinner";
 import { configReady } from "@/lib/config";
-import { getProjectSettings } from "@/lib/projectSettings";
 import { playSound } from "@/lib/sounds";
 import { notifyNtfy } from "@/lib/ntfy";
 import type { NtfyEvent } from "@/stores/ui";
@@ -201,12 +200,10 @@ import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useGitStore } from "@/stores/git";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { useDiagram } from "@/composables/useDiagram";
 
 const props = defineProps<{ cwd: string; workspaceId: number }>();
 const wsStore = useWorkspaceStore();
 const uiStore = useUIStore();
-const { showDiagram } = useDiagram();
 const chatsStore = useClaudeChatsStore();
 const tabsStore = useTerminalTabsStore();
 const keys = useKeybindingsStore();
@@ -1186,16 +1183,6 @@ function isTabSplit(tab: Tab): boolean {
   return tab.root.type === 'split';
 }
 
-// Pull the task prompt out of a `burrow spawn` command line for chat-mode spawns.
-// burrow re-quotes args single-quoted, so the prompt is the last quoted chunk;
-// fall back to everything after the program name. ponytail: naive quote scan,
-// good enough for `claude 'task'` / `claude --model x 'task'`.
-function spawnPrompt(cmd: string): string {
-  const quoted = [...cmd.matchAll(/'([^']*)'/g)].map((m) => m[1]);
-  if (quoted.length) return quoted[quoted.length - 1];
-  return cmd.replace(/^\S+\s*/, "").trim();
-}
-
 // Explicit teardown of a chat leaf's backend adapter/CLI. Called ONLY on user
 // close (closeTab/closePane) — ClaudeChat.onBeforeUnmount deliberately no longer
 // stops the proc, so a background remount can't kill a live agent. Transport is
@@ -1405,7 +1392,15 @@ function applyTabRequest(req: typeof tabsStore.request) {
   if (req.action === "activate" && !tabs.value.some((t) => t.id === req.tabId)) return;
   handledNonce = req.nonce;
   if (req.action === "activate" && req.tabId != null) activateTab(req.tabId);
-  else if (req.action === "add") addTab(req.cmd || undefined);
+  else if (req.action === "add") {
+    const leaf = addTab(req.cmd || undefined, {
+      cwd: req.cwd || undefined,
+      resultToken: req.resultToken || undefined,
+      background: req.background,
+    });
+    // Report the id back so a control-API spawn can return it to the caller.
+    tabsStore.fulfillAdd(req.nonce, leaf.id);
+  }
   else if (req.action === "close" && req.tabId != null) closeTab(req.tabId);
   else if (req.action === "reorder" && req.fromIdx != null && req.toIdx != null) {
     reorderTabs(req.fromIdx, req.toIdx);
@@ -1511,117 +1506,9 @@ onMounted(async () => {
   applyTabRequest(tabsStore.request);
 });
 
-// Handle a `burrow worktree` request: create a git worktree off this workspace's
-// repo and let the store's reload surface it in the Sidebar (nested under the repo).
-// The parent must be a top-level repo — if this PTY runs inside a worktree, climb to
-// its parent so we never try to make a worktree of a worktree (the Rust command
-// rejects that anyway). Path matches the New-worktree dialog: <worktreesDir>/<repo>/<branch>.
-async function handleWorktreeRequest(branch: string, base: string) {
-  const self = wsStore.workspaces.find((w) => w.id === props.workspaceId);
-  const parentId = self?.parent_id ?? props.workspaceId;
-  const parent = wsStore.workspaces.find((w) => w.id === parentId) ?? self;
-  const repo = (parent?.path.split("/").filter(Boolean).pop()) || "repo";
-  const path = `${getProjectSettings(parentId).worktreesDir || uiStore.worktreesDir}/${repo}/${branch}`;
-  try {
-    const ws = await wsStore.createWorktree(parentId, branch, base.trim() || null, path);
-    wsStore.open(ws);
-  } catch (err) {
-    console.error("burrow worktree request failed:", err);
-  }
-}
-
-// Poll for `burrow spawn` requests routed to this workspace (file-based, since
-// agents' Bash/hooks have no controlling tty for the OSC channel).
-let spawnPoll: ReturnType<typeof setInterval> | undefined;
-onMounted(() => {
-  spawnPoll = setInterval(async () => {
-    try {
-      const reqs = await invoke<
-        { kind: string; cmd: string; token: string; cwd: string; branch: string; base: string; tmuxWin: string; wsid: string; tabid: string; content: string }[]
-      >("take_spawn_requests", { cwd: props.cwd });
-      for (const r of reqs) {
-        if (r.kind === "diagram") {
-          showDiagram(r.content);
-        } else if (r.kind === "worktree") {
-          await handleWorktreeRequest(r.branch, r.base);
-        } else if (r.kind === "focus-workspace") {
-          // Switch Burrow to (and mount) the requested workspace. wsStore is a shared
-          // singleton, so the origin Terminal can drive the global active workspace.
-          const ws = wsStore.workspaces.find((w) => w.id === Number(r.wsid));
-          if (ws) wsStore.open(ws);
-        } else if (r.kind === "focus-tab") {
-          // Activate a tab by its (pty) id, switching to its owning workspace first.
-          const tabId = Number(r.tabid);
-          let ownerWs: number | undefined;
-          for (const [wid, list] of Object.entries(tabsStore.tabsByWs)) {
-            if (list.some((t) => t.id === tabId)) { ownerWs = Number(wid); break; }
-          }
-          if (ownerWs !== undefined) {
-            if (wsStore.active?.id !== ownerWs) {
-              const ws = wsStore.workspaces.find((w) => w.id === ownerWs);
-              if (ws) wsStore.open(ws);
-            }
-            tabsStore.activate(ownerWs, tabId);
-          }
-        } else if (r.kind === "new-tab") {
-          // Open a new tab in the target workspace (default: this one). Same-workspace
-          // is handled directly; a different workspace is opened then messaged via the
-          // shared tabs store so its own Terminal creates the tab.
-          const targetWs = r.wsid ? Number(r.wsid) : props.workspaceId;
-          if (targetWs === props.workspaceId) {
-            addTab(r.cmd || undefined);
-          } else {
-            const ws = wsStore.workspaces.find((w) => w.id === targetWs);
-            if (ws) wsStore.open(ws);
-            tabsStore.add(targetWs, r.cmd || undefined);
-          }
-        } else if (r.kind === "tab-rename") {
-          // Rename a tab by its (pty) id — find its owning (mounted) workspace and
-          // route through the tabs store, same as the Sidebar rename. r.cmd = title.
-          const tabId = Number(r.tabid);
-          const title = r.cmd;
-          for (const [wid, list] of Object.entries(tabsStore.tabsByWs)) {
-            if (list.some((t) => t.id === tabId)) { tabsStore.rename(Number(wid), tabId, title); break; }
-          }
-        } else if (r.kind === "tab-close") {
-          // Close a tab by its (pty) id via the owning workspace's tabs store.
-          const tabId = Number(r.tabid);
-          for (const [wid, list] of Object.entries(tabsStore.tabsByWs)) {
-            if (list.some((t) => t.id === tabId)) { tabsStore.close(Number(wid), tabId); break; }
-          }
-        } else if (r.kind === "workspace-create") {
-          // Add a workspace (DB insert via the store) and open it. r.cmd = name,
-          // r.cwd = path. The store reloads so the Sidebar reflects it immediately.
-          try {
-            const ws = await wsStore.create(r.cmd, r.cwd);
-            wsStore.open(ws);
-          } catch (err) {
-            console.error("burrow workspace-create failed:", err);
-          }
-        } else if (uiStore.spawnMode === "chat") {
-          // Sub-agent spawn opens as a chat instead of a terminal tab. Seed the
-          // prompt as the input draft (ClaudeChat loads DRAFT_KEY on mount) so the
-          // user reviews + sends. ponytail: prefill, not auto-send — dodges ACP
-          // session-ready timing; `burrow wait` result-capture stays terminal-only.
-          const session = chatsStore.create(props.workspaceId, { agentKind: uiStore.defaultChatAgent });
-          const prompt = spawnPrompt(r.cmd);
-          if (prompt) localStorage.setItem(`burrow.draft.chat.${session.id}`, prompt);
-          openClaudeChat(session.id, undefined, r.cwd || undefined);
-        } else {
-          const leaf = addTab(r.cmd, { cwd: r.cwd || undefined, resultToken: r.token || undefined, background: true });
-          if (r.tmuxWin) {
-            invoke("register_tmux_win", { winId: r.tmuxWin, ptyId: leaf.id });
-          }
-        }
-      }
-    } catch { /* ignore poll errors */ }
-  }, 1000);
-});
-
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("focus", onWindowFocus);
-  if (spawnPoll) clearInterval(spawnPoll);
   leafUnlisteners.forEach((fns) => fns.forEach((fn) => fn()));
   leafUnlisteners.clear();
   tabsStore.clear(props.workspaceId);

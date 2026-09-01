@@ -84,40 +84,84 @@ Agent state (running / waiting for input / done) is detected two ways:
 
 **Claude chat sessions** (`ClaudeChat.vue` + `claudeChats.ts`) mirror this model: a session carries the same `status` (`running`/`waiting`/`permission`/`idle`), derived in `chatStatus()` from in-flight `busy` and the pending `control_request` (generic tool / file edit → `permission` + bell; AskUserQuestion / ExitPlanMode → `waiting`). The **Sidebar renders chats and terminal tabs as one list** distinguished only by icon (`ClaudeIcon` vs `PhTerminal`/`PhRobot`) — no separate "Chats" header; "New chat" lives on the workspace header row. A permission request also fires an in-app toast + (when unfocused) a native OS notification via `notifyPermission()`. Switching permission mode / aborting restarts `claude` with `--resume`; the teardown `exit` is squelched by `suppressNextDone` so it no longer fires a spurious "finished" toast.
 
-### `burrow` CLI (`src-tauri/bin/burrow`)
+### Control API + `burrow` CLI (`src-wails/internal/control`, `src-wails/bin/burrow`)
 
-A POSIX `sh` script embedded in the Rust binary (`include_str!`) and written to `<app-data>/bin/burrow` on each PTY spawn (`ensure_burrow_bin`), with that dir prepended to the shell's `PATH` and `BURROW_SESSION_DIR=<app-data>/sessions` exported. Lets an agent delegate work to sub-agents in new tabs — subscription-safe (launches `claude` **interactively**, never `claude -p` / Agent SDK).
+**One implementation of every app action, three doors.** `internal/control` holds a
+registry of *verbs* (`spawn`, `agent_status`, `focus_tab`, `create_worktree`,
+`pr_merge`, …) and knows nothing about HTTP, MCP or Wails — it takes its
+capabilities as interfaces (`Deps`: DB, git/gh/exec runners, PTY writer,
+worktrees, `UIBridge`). Transports sit on top:
 
-**Transport is file-based, NOT the OSC channel.** Claude's Bash tool and hooks run subprocesses with **no controlling tty**, so `> /dev/tty` fails (`Device not configured`) — the OSC trick can't reach the PTY from there. Instead `burrow spawn` drops a request dir that the frontend polls.
+| Transport | Client | Auth | Verbs |
+|-----------|--------|------|-------|
+| loopback HTTP `POST /v1/<verb>` (on the hook server's port) | `burrow` CLI (curl), `burrow-mcp` | `control.token` (0600, next to `hook.port`), `Authorization: Bearer` | all |
+| tailnet HTTP (`httpserver.go`) | mobile / PWA | `http.token` + pairing code | `ScopeRemote` only |
+| Wails bindings | the desktop UI | in-process | as needed |
 
-Subcommands:
-- `burrow spawn [--token T] [--cwd DIR] <cmd...>` — writes a request dir `<session>/requests/req.XXXXXX/` with raw `cmd`/`token`/`cwd`/`ws` files + a `ready` marker (written last, to avoid reading a half-written request). The command is re-quoted (program name bare so XTerm's `claude` check matches; args single-quoted) so it re-parses correctly when typed into the new tab.
-- `burrow worktree <branch> [--base-ref REF] [--path DIR]` — writes a request dir with `kind=worktree` + raw `branch`/`base`/`path`/`ws` files + `ready` marker. Same file-based transport + per-`ws` routing as `spawn`. `Terminal.vue`'s poll branches on `kind`: for `worktree` it resolves the parent repo (climbs `parent_id` if this PTY is itself in a worktree — no worktree-of-a-worktree), computes the disk path `<ui.worktreesDir>/<repo>/<branch>` (same convention as the New-worktree dialog), and calls `wsStore.createWorktree(...)`. That runs `git worktree add` in Rust (`create_worktree`) **and** the store's `load()` → the Sidebar watcher fires → the worktree appears nested under its repo, no manual refresh. `--base-ref` is the base for a NEW branch (default `HEAD`, ignored if the branch exists); `--path` overrides the default disk location.
-- `burrow wait <token> [--timeout S]` — blocks until `<session>/<token>.done` appears, prints `<token>.result`.
-- `burrow capture <token>` — internal; run by the spawned Claude's **Stop hook** (only when the tab has a `resultToken`). Reads the Stop-hook JSON on stdin, extracts the last assistant message from the transcript (via `node`, always present), writes `<token>.result` + `<token>.done`, then **also calls `burrow status done`** — the per-launch `--settings` Stop hook takes precedence over the global `burrow hook` Stop in Claude Code, so without this a spawned sub-agent's status dot would stick orange after it finished. tty-independent.
-- `burrow status <running|waiting|permission|done|error|session> [--detail D|--model M|--source S|--title T]` — POSTs `{ptyId,state,…}` to the hook server. `error` adds `detail` (the API error type); `session` adds `model`/`source`/`title` (metadata values JSON-escaped). Port resolution is **file-first**: the live `<BURROW_HOME_DIR>/hook.port` file (authoritative — rewritten every app launch) then `BURROW_HOOK_PORT` env as fallback. (Env-first was a bug: a daemon-reattached PTY carries a stale baked-in port and POSTs to a dead server.) **Sticky states (`waiting`/`permission`/`done`/`error`/`session`) retry** up to 3× with a 1 s sleep + `hook.port` re-read between attempts, so a POST dropped during the ~3 s port-reclaim window self-heals instead of leaving the dot stuck; `running` takes a single fast attempt (it fires on every tool call and a lost one self-corrects on the next event — never block the agent with sleeps). The generic multi-agent status channel.
-- `burrow sessions [--count]` — list the live PTY sessions the daemon is holding (or just their count). Talks the daemon's newline-JSON socket protocol (`Auth` then `ListSessions`) via `python3`, reading `daemon.sock` + `daemon.token` from `BURROW_HOME_DIR`.
-- `burrow hook` — internal; invoked by the **globally-installed** Claude/Codex status hooks. Reads hook JSON on stdin, maps `hook_event_name` → `burrow status` (incl. `PermissionRequest`→`permission`, `SessionStart`→`session`, `StopFailure`→`error`, `Notification` `type`→`permission`/`waiting`/no-op). `sed`-based, no `node`/`jq`. `SessionStart`/`StopFailure` + the `Notification` `type` split are Claude-only events (`install_status_hooks` registers them in `~/.claude/settings.json` only; Codex stays on its existing lifecycle events).
-- `burrow notify <json>` — internal; legacy Codex `notify`-program path (maps `"type"`). Retained as a fallback; the global `~/.codex/hooks.json` hook is now primary.
-- **App read/control commands** (supacode-parity) — all use the **same file-based request-dir transport** as `spawn`, routed to the **origin workspace** (`ws == BURROW_CWD`, always mounted & polling), so there's no double-claim race and no "target not mounted" gap:
-  - `burrow list-workspaces` — print every workspace as `<id>\t<name>\t<path>`. **Read command**: drops a request dir with a `token`, then blocks polling `<session>/<token>.result` (same convention as `burrow wait`). Answered **entirely in Rust** inside `take_spawn_requests` (DB query → writes `<token>.result`+`.done`); never reaches the frontend.
-  - `burrow list-tabs [--ws ID]` — print a workspace's tabs as `<pty_id>\t<title>` (default: the origin workspace, resolved by path). Same Rust-answered read path, querying the `terminal_tabs` table.
-  - `burrow focus-workspace ID` — switch the UI to (and `open`) workspace `ID`. **UI action**: `take_spawn_requests` pushes a `SpawnRequest{kind:"focus-workspace", wsid}` to the frontend; `Terminal.vue`'s poll branch calls `wsStore.open(ws)` (shared singleton).
-  - `burrow focus-tab ID` — activate the tab with pty id `ID`. Frontend finds its owning workspace via `tabsStore.tabsByWs`, opens that workspace if needed, then `tabsStore.activate(ws, id)`.
-  - `burrow new-tab [--ws ID] [--cmd CMD]` — open a new terminal tab. Same-workspace → `addTab(cmd)` directly; other workspace → `wsStore.open` + `tabsStore.add(ws, cmd)` (the store's `add` now carries an optional `cmd`). Distinct from `spawn`: `new-tab` is a plain UI action targeting any workspace by id, `spawn` is sub-agent delegation in the current project.
-  - `SpawnRequest` gained `wsid`/`tabid` fields (single-word names so they survive serde without camelCase surprises). Read results are written by the `write_control_result` helper.
-- **Manager orchestration commands** — same Rust-answered read transport as `list-workspaces` (drop request dir → block on `<token>.result`), all routed to the origin workspace; used by the floating **Manager** (`FloatChat.vue`): a persistent Mission-Control chat keyed by the **root repo id** (climbs `parent_id`, so it survives switching between a repo's worktrees and is never empty), carrying the `MC_PRIMER` system prompt that teaches it these commands. Its hidden session is flagged `control: true` so it doesn't appear in the Sidebar chat list:
-  - `burrow worktree-remove <branch|path> [--force]` — delete a worktree of the origin repo (git `worktree remove` + its DB row). Resolved by branch (preferred) or on-disk path via `remove_worktree_by` in `take_spawn_requests`; `--force` discards uncommitted changes. The Manager confirms with the user first.
-  - `burrow pr-create --title T --body B [--base main] [--head BRANCH] [--cwd DIR]` / `burrow pr-list [--state S] [--cwd DIR]` / `burrow pr-view <n> [--cwd DIR]` / `burrow pr-merge <n> [--squash] [--cwd DIR]` — PR management via the `gh` CLI, run by Rust (`gh_in`) in `--cwd` (a worktree dir, so its branch is in context) else the origin repo. No frontend involvement; never the Agents SDK.
+`Scope` is a field on the verb, and a verb is **local-only unless it opts in** —
+a new verb that never thought about the network stays off it. The registry is
+also the single source of truth for the MCP tool schemas (`/v1/_verbs`), the
+CLI's `burrow help`, and the Manager's primer, so none of them can drift from
+what the app supports.
 
-`BURROW_*` env exported into every PTY: `BURROW_SESSION_DIR`, `BURROW_CWD`, `BURROW_PTY_ID`, `BURROW_HOOK_PORT`, `BURROW_HOME_DIR` (app-data dir, also holds `hook.port`).
+**UI-performed verbs.** Opening a tab, focusing a workspace and reading a
+terminal's scrollback can only be done by the frontend, so those verbs call
+`UIBridge.Do`, which emits a `control:action` Wails event and **blocks for the
+frontend's ack** (`AckControlAction`, 15 s timeout). `src/lib/controlBridge.ts`
+is the single app-wide listener that performs them and acks with a JSON result —
+so `spawn` can hand the caller the new tab's `pty_id`, and an unreachable UI is a
+real error instead of a hang. This replaced the old file-based request-dir
+transport (`take_spawn_requests` polled by every `Terminal.vue` at 1 Hz), and with
+it the 1 s latency, the double-claim routing rules, and the "target workspace must
+be mounted" caveat.
 
-Frontend: each `Terminal.vue` polls `take_spawn_requests(cwd)` every 1 s. **Routing (DB-arbitrated):** for each request the Rust command picks a single *claimant* workspace — the **target dir** `newcwd` when that dir is itself a workspace row (e.g. a worktree, so the tab nests **under the worktree**, not the spawning repo), else the spawning workspace `ws` (covers `spawn --cwd <arbitrary dir>` where the dir isn't its own workspace, and `worktree` requests whose `newcwd` is empty). Only the Terminal whose `cwd == claimant` claims+deletes the dir → no double-claim race. `--cwd` also sets the new tab's own dir via `Leaf.cwd`. (Earlier this routed purely by `ws`, so a `--cwd`-into-a-worktree tab ran in the worktree dir but wrongly nested under the parent repo.) **Caveat:** the target worktree workspace must be mounted (Terminal polling) to claim — it normally is, since `burrow worktree` opens it on create and an expanded repo mounts its worktrees. (`XTerm.vue` still parses an `OSC 9999;spawn` sequence as a latent direct-PTY path, but the CLI no longer emits it.)
+**The `burrow` CLI** is a thin generic client: `burrow <verb> [POSITIONAL] [--arg value]`,
+where the verb and flag names are normalised from kebab-case, positionals map to
+the verb's primary arguments (`_primary` in the script), and `cwd` always rides
+along as `$BURROW_CWD` so agents never handle workspace row ids. It needs only
+`curl` and `sed` — no `python3`, no `node`, no tty — which is what makes it work
+from Claude's Bash tool and from hooks. `burrow help` prints the live registry.
 
-**Agent docs install** (`install_agent_docs`, called once at Tauri `setup`): teaches agents the CLI. Claude → global skill `~/.claude/skills/burrow/SKILL.md`; Codex → managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md` (non-destructive merge). Doc strings are `BURROW_SKILL_MD` / `BURROW_AGENT_DOC` consts in `lib.rs`.
+Its remaining non-verb subcommands are the status plumbing, unchanged and
+deliberately independent of the control API (they must work before it is up):
+- `burrow status <state> [--detail/--model/--source/--title/--pid]` — POSTs to `/hook`; sticky states retry 3× with a `hook.port` re-read. **`/hook` is the path this has always used; serving only `/status` in Go silently killed every status dot, because the CLI's `curl -sf` failed on the 404 and exited 0.**
+- `burrow hook` — invoked by the globally-installed Claude/Codex hooks; maps `hook_event_name` → state.
+- `burrow notify '<json>'` — legacy Codex notify-program path.
+- `burrow capture <token>` — run by a spawned agent's per-launch Stop hook (`XTerm.vue` injects `--settings` when a leaf has a `resultToken`): writes `<session>/<token>.result` + `.done`, calls `burrow status done`, then POSTs `/agent-done` so the app can emit `control:result`. `wait_result`/`collect_results` read those files, which is why results survive an app restart.
 
-**Status hooks install** (`install_status_hooks`, also at `setup`): merges the `burrow hook` status hook into `~/.claude/settings.json` + `~/.codex/hooks.json` via `merge_status_hooks` (parse → append-if-absent → `.burrow-bak`). **Copilot CLI** uses a different schema (its own file per config at `~/.copilot/hooks/<name>.json`, camelCase events, `"bash"` field not `"command"`), so it gets a dedicated `write_copilot_hooks` that writes a self-owned `hooks/burrow.json` wholesale (each event bakes in `burrow status <state>` directly — no `burrow hook` stdin parse needed; deleted wholesale on uninstall). Skips files it can't parse. This is what gives every agent session a status dot. Reverse via `unmerge_status_hooks` (drops only entries matching the `BURROW_PTY_ID`+`hook` marker, leaving the user's/Superset's hooks). Exposed as Tauri commands `reinstall_status_hooks` / `remove_status_hooks` for repair/teardown without a restart.
+**`burrow-mcp`** (`cmd/burrow-mcp`, built into the bundle by `just build`) is the
+same verbs as MCP tools: `tools/list` is `/v1/_verbs` translated to JSON schemas,
+`tools/call` is one POST. It holds no DB and no logic, so an MCP tool cannot
+behave differently from `burrow <verb>`. It's injected into chat sessions by
+`burrowMcpServers` (Claude: `--mcp-config`) and `acpMcpServers` (ACP:
+`session/new`), and skipped silently when the sidecar isn't next to the
+executable (a `wails dev` run) — the CLI still works.
 
+`BURROW_*` env exported into every PTY: `BURROW_SESSION_DIR`, `BURROW_CWD`,
+`BURROW_PTY_ID`, `BURROW_HOOK_PORT`, `BURROW_HOME_DIR` (app-data dir, which also
+holds `hook.port` and `control.token`).
+
+### Manager (`src/components/ManagerPanel.vue`)
+
+A per-repository orchestrator chat living in the right panel. One thread per
+**root repo** (climbs `parent_id`, so it survives hopping between a repo and its
+worktrees), session flagged `control: true` so it stays out of the Sidebar's chat
+list, kept mounted per engaged repo and toggled with `v-show` so a busy Manager
+keeps streaming while the user looks elsewhere. Message stream, composer,
+permission gates and model picker all come from `AgentChat` — the panel only owns
+the thread lifecycle and the primer.
+
+Its primer (`src/utils/managerPrimer.ts`) is **generated from the verb registry**
+(`control_verbs`) plus the worktree-isolation toggle and the project's
+`.burrow/manager.md`. It tells the Manager to orchestrate and never implement,
+and describes both doors (MCP tools if it has them, `burrow <verb>` otherwise) —
+any configured agent can be the Manager, so the shell is the common denominator.
+
+**Agent docs install** (`agentdocs.go`, at startup): teaches every agent the CLI.
+Claude/Copilot get the `burrow` skill (`agentdocs/skills/burrow/SKILL.md`) plus an
+always-in-context rule in `~/.claude/CLAUDE.md` (so Claude reaches for
+`burrow spawn` before its own `Agent` tool); Codex gets the same content as a
+managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md`.
 ### Backend (`src-tauri/src/lib.rs`)
 
 All Tauri commands are in `lib.rs`. Key areas:
@@ -134,7 +178,7 @@ All Tauri commands are in `lib.rs`. Key areas:
 | `\x1b]9998;waiting\x07` | PTY → app | Claude hook: waiting for user input |
 | `\x1b]9998;done\x07` | PTY → app | Claude hook: turn complete |
 
-OSC 9998 status writes go to `/dev/tty` with `2>/dev/null || true` (tolerated when no tty; status then falls back to `get_pty_foreground` polling). **`burrow spawn`/`wait`/`capture` do NOT use OSC** — they exchange files in `BURROW_SESSION_DIR` (`requests/` dirs in, `<token>.result`/`.done` out), because agent subprocesses have no controlling tty. `XTerm.vue` retains a latent `OSC 9999;spawn` parser but nothing emits it.
+OSC 9998 status writes go to `/dev/tty` with `2>/dev/null || true` (tolerated when no tty; status then falls back to `get_pty_foreground` polling). **No `burrow` subcommand uses OSC**: app actions go over the loopback control API, and result capture exchanges files in `BURROW_SESSION_DIR` (`<token>.result`/`.done`), because agent subprocesses have no controlling tty. `XTerm.vue` retains a latent `OSC 9999;spawn` parser but nothing emits it.
 
 ## Auto-update
 
@@ -155,7 +199,7 @@ Standalone HTML reference pages (no build step — open directly in a browser). 
 | File | Covers | Update when |
 |------|--------|-------------|
 | `docs/context.html` | Whole-project overview: architecture, features, key files, Tauri commands, shortcuts | Adding/removing a component, store, Tauri command, agent, or shortcut |
-| `docs/burrow.html` | The `burrow` CLI: spawn/wait/capture, OSC 9999 flow, result capture, agent-docs install | Changing the `burrow` script, OSC 9999 format, or `install_agent_docs` |
+| `docs/burrow.html` | The control API + `burrow` CLI: verb registry, transports, spawn/supervise/collect, result capture, agent-docs install | Adding or changing a verb, the `burrow` script, or `installAgentDocs` |
 | `docs/superset-concept/index.html` | Concept study: how superset-sh/superset detects terminal/agent status (HTTP lifecycle hooks vs Burrow's OSC 9998 channel) | Reference only — reverse-engineered comparison, update if porting the hook model into Burrow |
 
 `assets/` holds logos (`logo.png`, `burrowlogo-CUTOUT.png`). `index.html` is the **Vite app entry**, not documentation — do not treat it as a docs page.

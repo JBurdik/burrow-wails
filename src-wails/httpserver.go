@@ -12,7 +12,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -141,25 +140,26 @@ func (s *HTTPServer) handlePair(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"token": s.token})
 }
 
-// loadOrCreateHTTPToken persists a random bearer token in the app data dir
-// so remote clients (and this app's own future sessions) can authenticate
-// consistently across restarts.
+// loadOrCreateHTTPToken persists the tailnet bearer token in the app data dir
+// so remote clients (and this app's own future sessions) authenticate
+// consistently across restarts. The loopback control API has its own token
+// (control.token) — one compromised surface should not hand over the other.
 func loadOrCreateHTTPToken() string {
 	dataDir, err := appDataDir()
 	if err != nil {
 		return ""
 	}
-	path := filepath.Join(dataDir, "http.token")
-	if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
-		return string(b)
-	}
-	buf := make([]byte, 24)
+	return loadOrCreateToken(dataDir, "http.token")
+}
+
+// randomHex returns n random bytes hex-encoded, or "" if the system RNG fails
+// (callers fail closed rather than fall back to a guessable token).
+func randomHex(n int) string {
+	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
 		return ""
 	}
-	token := hex.EncodeToString(buf)
-	_ = os.WriteFile(path, []byte(token), 0o600)
-	return token
+	return hex.EncodeToString(buf)
 }
 
 func (s *HTTPServer) authorized(r *http.Request) bool {

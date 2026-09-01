@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"burrow/internal/agentproc"
+	"burrow/internal/control"
 )
 
 // App is the Wails-bound struct exposing methods to the frontend, replacing
@@ -24,6 +25,9 @@ type App struct {
 	lspMgr       *lspManager
 
 	hookSrv      *HookServer
+	control      *control.Core
+	ui           *uiBridge
+	controlToken string
 	burrowBinDir string
 	sessionDir   string
 
@@ -172,7 +176,9 @@ func (a *App) startup(ctx context.Context) {
 	installStatusHooks(dataDir)
 	installAgentDocs()
 
-	hookSrv, err := StartHookServer(ctx)
+	a.initControl(dataDir)
+
+	hookSrv, err := StartHookServer(ctx, a.registerControlRoutes)
 	if err != nil {
 		log.Printf("hook server: %v", err)
 		return

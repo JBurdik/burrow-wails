@@ -4,7 +4,7 @@
 # every Burrow PTY. Enables CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS without real tmux.
 #
 # Supported mappings:
-#   new-window / split-window  → burrow spawn --tmux-win @N [cmd]
+#   new-window / split-window  → burrow new-tab --cmd [cmd]
 #   send-keys -t @N keys       → POST /write to hook server (writes to PTY)
 #   has-session / new-session  → no-op (exit 0)
 #   list-* / select-* / set-* → minimal fake output or no-op
@@ -64,10 +64,12 @@ case "$sub" in
     win_id=$(_next_win_id)
     mkdir -p "${BURROW_HOME_DIR}/tmux_wins"
 
+    # new-tab, not spawn: spawn now takes a TASK for a sub-agent, while this
+    # shim is handed a literal command line by whatever thinks it's using tmux.
     if [ $# -gt 0 ]; then
-      burrow spawn --cwd "${cwd:-$PWD}" --tmux-win "$win_id" "$@"
+      burrow new-tab --cwd "${cwd:-$PWD}" --cmd "$*" >/dev/null
     else
-      burrow spawn --cwd "${cwd:-$PWD}" --tmux-win "$win_id" "${SHELL:-sh}"
+      burrow new-tab --cwd "${cwd:-$PWD}" --cmd "${SHELL:-sh}" >/dev/null
     fi
 
     printf '%s\n' "$win_id"

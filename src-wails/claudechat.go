@@ -55,12 +55,11 @@ func augmentedPath(root string) string {
 }
 
 // buildMcpConfig passes the user's own stdio MCP servers (from
-// <CLAUDE_CONFIG_DIR|~/.claude>/settings.json) through to the chat session.
-// Remote servers are dropped — they hang without a TTY.
-// ponytail: no burrow-MCP injection yet (this branch doesn't wire mcpserver at
-// all); the agent still reaches the app through the `burrow` CLI on PATH.
+// <CLAUDE_CONFIG_DIR|~/.claude>/settings.json) through to the chat session, plus
+// Burrow's own control server so a chat agent gets typed app tools instead of
+// having to shell out. Remote servers are dropped — they hang without a TTY.
 func buildMcpConfig() string {
-	const empty = `{"mcpServers":{}}`
+	empty := mustJSON(map[string]any{"mcpServers": burrowMcpServers(nil)})
 	dir := os.Getenv("CLAUDE_CONFIG_DIR")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -77,10 +76,7 @@ func buildMcpConfig() string {
 	if json.Unmarshal(raw, &cfg) != nil {
 		return empty
 	}
-	servers, ok := cfg["mcpServers"].(map[string]any)
-	if !ok {
-		return empty
-	}
+	servers, _ := cfg["mcpServers"].(map[string]any)
 	local := map[string]any{}
 	for name, v := range servers {
 		if m, ok := v.(map[string]any); ok {
@@ -90,11 +86,15 @@ func buildMcpConfig() string {
 		}
 		local[name] = v
 	}
-	out, err := json.Marshal(map[string]any{"mcpServers": local})
+	return mustJSON(map[string]any{"mcpServers": burrowMcpServers(local)})
+}
+
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
 	if err != nil {
-		return empty
+		return `{"mcpServers":{}}`
 	}
-	return string(out)
+	return string(b)
 }
 
 func oneOf(v string, allowed ...string) bool {

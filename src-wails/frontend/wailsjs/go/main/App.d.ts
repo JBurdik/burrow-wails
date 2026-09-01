@@ -156,6 +156,10 @@ export function RemoveWorktree(arg1:number,arg2:boolean):Promise<void>;
 
 export function RenameWorkspace(arg1:number,arg2:string):Promise<void>;
 
+export function AckControlAction(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function ControlVerbs():Promise<any[]>;
+
 export function RepairAgentStatus():Promise<number>;
 
 export function ReinstallStatusHooks():Promise<void>;
@@ -206,7 +210,6 @@ export function TailscaleServe(arg1:number):Promise<string>;
 
 export function TailscaleServeStop():Promise<void>;
 
-export function TakeSpawnRequests(arg1:string):Promise<Array<main.SpawnRequest>>;
 
 export function TouchWorkspace(arg1:number):Promise<void>;
 

@@ -310,6 +310,14 @@ export function RenameWorkspace(arg1, arg2) {
   return window['go']['main']['App']['RenameWorkspace'](arg1, arg2);
 }
 
+export function AckControlAction(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AckControlAction'](arg1, arg2, arg3);
+}
+
+export function ControlVerbs() {
+  return window['go']['main']['App']['ControlVerbs']();
+}
+
 export function RepairAgentStatus() {
   return window['go']['main']['App']['RepairAgentStatus']();
 }
@@ -410,9 +418,6 @@ export function TailscaleServeStop() {
   return window['go']['main']['App']['TailscaleServeStop']();
 }
 
-export function TakeSpawnRequests(arg1) {
-  return window['go']['main']['App']['TakeSpawnRequests'](arg1);
-}
 
 export function TouchWorkspace(arg1) {
   return window['go']['main']['App']['TouchWorkspace'](arg1);
