@@ -6,14 +6,17 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 )
 
 // HookServer receives `burrow status <state>` POSTs from the `burrow`
 // CLI (running inside spawned PTYs) and re-emits them as `pty-hook-{id}`
 // events, matching src-tauri's start_hook_server / tiny_http implementation.
 type HookServer struct {
-	ctx  context.Context
-	port int
+	ctx      context.Context
+	port     int
+	mu       sync.RWMutex
+	statuses map[string]hookPayload
 }
 
 type hookPayload struct {
@@ -35,7 +38,7 @@ func StartHookServer(ctx context.Context, routes ...func(*http.ServeMux)) (*Hook
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	h := &HookServer{ctx: ctx, port: port}
+	h := &HookServer{ctx: ctx, port: port, statuses: make(map[string]hookPayload)}
 	mux := http.NewServeMux()
 	// /hook is the path the `burrow` CLI has always posted to; /status is kept as
 	// an alias. Serving only /status silently broke every status dot: the CLI's
@@ -82,6 +85,32 @@ func (h *HookServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A terminal thread can already be running before its XTerm view attaches.
+	// Keep the latest state and replay it from CreatePty once that view has its
+	// listener installed; otherwise the initial `running` hook is lost and the
+	// sidebar mirror remains idle until the next hook arrives.
+	if p.PtyID != "" && p.State != "session" {
+		h.mu.Lock()
+		h.statuses[p.PtyID] = p
+		h.mu.Unlock()
+	}
+	h.emitStatus(p)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// ReplayStatus re-emits a PTY's last hook state after a frontend attaches.
+// The caller creates the PTY only after XTerm has subscribed to pty-hook-{id}.
+func (h *HookServer) ReplayStatus(ptyID string) {
+	h.mu.RLock()
+	p, ok := h.statuses[ptyID]
+	h.mu.RUnlock()
+	if ok {
+		h.emitStatus(p)
+	}
+}
+
+func (h *HookServer) emitStatus(p hookPayload) {
 	eventName := "pty-hook-" + p.PtyID
 	switch p.State {
 	case "waiting", "permission", "running", "done":
@@ -93,6 +122,4 @@ func (h *HookServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	default:
 		emitAll(h.ctx, eventName, p.State)
 	}
-
-	w.WriteHeader(http.StatusOK)
 }

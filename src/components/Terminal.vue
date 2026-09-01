@@ -698,6 +698,17 @@ function onAgentState(id: number, s: string, detail?: string) {
   historyStore.addEvent(leaf.id, s);
   const actor = leafActors.get(id);
   if (!actor) return;
+
+  // A terminal thread can be attached after its first hook already fired. The
+  // Wails hook server replays that latest state, but the status machine begins
+  // at idle and normally only accepts START there. Rebuild the minimal valid
+  // transition path so replayed waiting/done/error states reach the sidebar
+  // mirror just like their live counterparts.
+  if (leaf.status === "idle") {
+    if (s === "waiting") actor.send({ type: "START" });
+    else if (s === "done") actor.send({ type: "START" });
+    else if (s === "error") actor.send({ type: "START" });
+  }
   if (s === "running") actor.send({ type: "START" });
   else if (s === "waiting") actor.send({ type: "WAIT" });
   else if (s === "permission") actor.send({ type: "PERMISSION_REQUEST" });

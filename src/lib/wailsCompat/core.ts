@@ -25,7 +25,14 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "kill_pty":
       return App.KillPty(String(args.id));
     case "list_pty_sessions":
-      return App.ListPtySessions();
+      // The daemon binding exposes live IDs (`string[]`), while the legacy
+      // Tauri UI contract expects session records. Normalize here so restored
+      // terminal threads reattach to their existing PTY instead of allocating a
+      // new one and consequently missing its status hooks.
+      return App.ListPtySessions().then((ids) => ids
+        .map((id) => Number(id))
+        .filter((pty_id) => Number.isFinite(pty_id))
+        .map((pty_id) => ({ pty_id, cwd: "", title: "", alive: true })));
 
     // Workspaces / tabs
     case "list_workspaces":

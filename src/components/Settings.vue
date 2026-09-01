@@ -837,8 +837,12 @@
                     the global hooks.
                   </span>
                 </div>
-                <div class="shrink-0">
-                  <Button variant="outline" size="sm" :disabled="repairing" @click="repairAgentStatus">
+                <div class="flex shrink-0 items-center gap-2">
+                  <Button variant="outline" size="sm" :disabled="repairing || reinstalling" @click="reinstallStatusHooks">
+                    <PhArrowClockwise :size="12" :class="{ 'animate-spin': reinstalling }" />
+                    {{ reinstalling ? "Reinstalling…" : "Reinstall hooks" }}
+                  </Button>
+                  <Button variant="outline" size="sm" :disabled="repairing || reinstalling" @click="repairAgentStatus">
                     <PhArrowClockwise :size="12" :class="{ 'animate-spin': repairing }" />
                     {{ repairing ? "Repairing…" : "Fix agent status" }}
                   </Button>
@@ -1146,7 +1150,20 @@ import("@tauri-apps/api/app")
 // revived/reattached PTYs whose baked port went stale (e.g. after running a dev
 // build that clobbered the shared port file).
 const repairing = ref(false);
+const reinstalling = ref(false);
 const repairMsg = ref("");
+async function reinstallStatusHooks() {
+  reinstalling.value = true;
+  repairMsg.value = "";
+  try {
+    await invoke("reinstall_status_hooks");
+    repairMsg.value = "Status hooks reinstalled.";
+  } catch (e) {
+    repairMsg.value = `Reinstall failed: ${e}`;
+  } finally {
+    reinstalling.value = false;
+  }
+}
 async function repairAgentStatus() {
   repairing.value = true;
   repairMsg.value = "";

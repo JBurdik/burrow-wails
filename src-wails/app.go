@@ -231,7 +231,15 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	if a.hookSrv != nil {
 		env = append(env, fmt.Sprintf("BURROW_HOOK_PORT=%d", a.hookSrv.port))
 	}
-	return a.daemon.CreatePty(id, cwd, cols, rows, env)
+	if err := a.daemon.CreatePty(id, cwd, cols, rows, env); err != nil {
+		return err
+	}
+	// An externally spawned terminal may have sent its first hook before this
+	// frontend view attached. Replay the cached state now that XTerm is listening.
+	if a.hookSrv != nil {
+		a.hookSrv.ReplayStatus(id)
+	}
+	return nil
 }
 
 func (a *App) WritePty(id string, data []int) error {
