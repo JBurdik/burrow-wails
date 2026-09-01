@@ -114,6 +114,7 @@
           </div>
         </div>
       </div>
+      <CommitPushMenu v-if="branch" />
     </div>
 
     <div class="flex shrink-0 items-center gap-0.5 pr-2 [-webkit-app-region:no-drag]">
@@ -224,6 +225,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import CommitPushMenu from "./CommitPushMenu.vue";
 
 const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?: string; rightPanelVisible?: boolean; sidebarVisible?: boolean }>();
 defineEmits(["back", "toggle-rightpanel", "toggle-sidebar"]);

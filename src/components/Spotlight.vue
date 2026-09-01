@@ -20,7 +20,7 @@
             <kbd class="shrink-0 rounded border border-border bg-hover px-2 py-0.5 font-mono text-[11px] text-muted-foreground">esc</kbd>
           </div>
 
-          <div ref="resultsRef" class="s-results flex-1 overflow-y-auto py-1.5">
+          <div ref="resultsRef" class="s-results min-h-0 flex-1 overflow-y-auto py-1.5">
             <template v-for="(section, si) in sections" :key="section.key">
               <div class="flex h-[26px] items-center px-4 font-sans text-[10px] font-semibold tracking-[0.06em] text-muted-foreground/60">{{ section.label }}</div>
               <div
@@ -36,7 +36,8 @@
                   class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] border"
                   :style="{ background: tint(item.color), borderColor: `${item.color}33` }"
                 >
-                  <component :is="item.icon" :size="14" :color="item.color" />
+                  <img v-if="item.iconUrl" :src="item.iconUrl" class="h-5 w-5 rounded-[4px] object-cover" />
+                  <component v-else :is="item.icon" :size="14" :color="item.color" />
                 </div>
                 <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span class="truncate font-sans text-[13px] font-medium text-foreground">{{ item.title }}</span>
@@ -150,6 +151,7 @@ interface SpotlightItem {
   title: string;
   desc?: string;
   icon: Component;
+  iconUrl?: string;
   color: string;
   shortcut?: string;
   badge?: string;
@@ -180,6 +182,7 @@ const projectItems = computed<SpotlightItem[]>(() => {
       title: w.name,
       desc: w.path,
       icon: PhFolderOpen as Component,
+      iconUrl: wsStore.icons[w.id] || undefined,
       color: "#a78bfa",
       badge: w.id === activeId ? "current" : undefined,
       action: () => {
@@ -221,6 +224,7 @@ const scriptItems = computed<SpotlightItem[]>(() =>
 // palette prints is always what actually fires (incl. user rebinds).
 const commandItems = computed<SpotlightItem[]>(() => {
   const defs: { id: string; title: string; icon: Component; color: string; keyId?: string; action: () => void }[] = [
+    { id: "cmd-new-thread", title: "New Thread", icon: PhSparkle as Component, color: "#f472b6", action: () => { ui.openWelcome(); close(); } },
     { id: "cmd-newterm", title: "New Terminal Tab", icon: PhTerminal as Component, color: "#34d399", keyId: "newTab", action: () => { emit("newTerminal"); close(); } },
     { id: "cmd-split", title: "Split Terminal", icon: PhColumns as Component, color: "#34d399", keyId: "splitH", action: () => { emit("splitTerminal"); close(); } },
     { id: "cmd-browser", title: "New Browser Tab", icon: PhGlobe as Component, color: "#60a5fa", action: () => { emit("openBrowser"); close(); } },
@@ -248,9 +252,9 @@ const fileItems = computed<SpotlightItem[]>(() =>
   })),
 );
 
-// Empty query = context only (this project's agents + your projects). Commands,
-// scripts and file hits appear once you type — that's what killed the wall of
-// unrelated rows the palette used to open with.
+// Empty query = context + commands (your projects, then everything runnable).
+// Agents, scripts and file hits only appear once you type — running a raw
+// agent isn't a default action, and search results are meaningless empty.
 const sections = computed(() => {
   if (projectOnly.value) {
     return [{ key: "projects", label: "PROJECTS", items: projectItems.value }]
@@ -265,8 +269,8 @@ const sections = computed(() => {
         { key: "files", label: "IN FILES", items: fileItems.value },
       ]
     : [
-        { key: "agents", label: "RUN AGENT", items: agentItems.value.slice(0, 5) },
         { key: "projects", label: "PROJECTS", items: projectItems.value.slice(0, 5) },
+        { key: "commands", label: "COMMANDS", items: commandItems.value },
       ];
   return all.filter((s) => s.items.length);
 });

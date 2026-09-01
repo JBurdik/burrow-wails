@@ -375,6 +375,18 @@
         </div>
       </div>
     </div>
+
+    <!-- Git manager dialog -->
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-6" v-if="gitDialogOpen" @click.self="gitDialogOpen = false">
+      <div class="relative flex h-full w-full max-w-[1100px] flex-col overflow-hidden rounded-[10px] border border-border bg-panel">
+        <button
+          class="absolute right-2.5 top-2.5 z-10 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+          title="Close (Esc)"
+          @click="gitDialogOpen = false"
+        ><PhX :size="14" /></button>
+        <GitPanel class="min-h-0 flex-1" />
+      </div>
+    </div>
   </Teleport>
 </template>
 
@@ -397,6 +409,7 @@ import {
   PhPlayCircle,
   PhGlobe,
 } from "@phosphor-icons/vue";
+import GitPanel from "./GitPanel.vue";
 import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
@@ -590,11 +603,11 @@ function newChatSession(_ws: Workspace) {
   ui.pickProjectThenWelcome();
 }
 
+const gitDialogOpen = ref(false);
+
 function openGitTab(ws: Workspace) {
-  const wasOpen = isOpened(ws.id);
   selectWs(ws);
-  const open = () => termTabs.openGit(ws.id);
-  wasOpen ? open() : nextTick(open);
+  gitDialogOpen.value = true;
 }
 
 function newTerminalTab(ws: Workspace) {
@@ -727,8 +740,13 @@ function runScript(sc: Script) {
   termTabs.add(ws.id, cmd);
 }
 
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape" && gitDialogOpen.value) gitDialogOpen.value = false;
+}
+
 onMounted(() => {
   document.addEventListener("click", onDocClick);
+  document.addEventListener("keydown", onKeydown);
   mountSections();
   clock = window.setInterval(() => { now.value = Date.now(); }, 15_000);
   // Defer the first PR sweep off the critical startup path. Firing gh for every
@@ -745,6 +763,7 @@ onUnmounted(() => {
   if (prTimer) clearInterval(prTimer);
   if (clock) clearInterval(clock);
   document.removeEventListener("click", onDocClick);
+  document.removeEventListener("keydown", onKeydown);
 });
 
 // Watch only the STRUCTURE of the workspace set (its id list), not every nested

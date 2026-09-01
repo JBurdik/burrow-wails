@@ -210,14 +210,17 @@
               @keydown.ctrl.enter="git.commit()"
               @keydown.meta.enter="git.commit()"
             />
-            <button
-              class="flex w-full items-center justify-center gap-[5px] rounded border-0 bg-accent/85 px-2.5 py-[5px] font-sans text-[11px] font-semibold text-white transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-35"
-              :disabled="!git.commitMsg.trim() || git.staged.length === 0"
-              @click="git.commit()"
-            >
-              <PhGitCommit :size="12" />
-              Commit
-            </button>
+            <div class="flex gap-[5px]">
+              <button
+                class="flex flex-1 items-center justify-center gap-[5px] rounded border-0 bg-accent/85 px-2.5 py-[5px] font-sans text-[11px] font-semibold text-white transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-35"
+                :disabled="!git.commitMsg.trim() || git.staged.length === 0"
+                @click="git.commit()"
+              >
+                <PhGitCommit :size="12" />
+                Commit
+              </button>
+              <CommitPushMenu />
+            </div>
           </div>
 
           <!-- Diff (hidden when panel is too narrow — use cq.is.md = ≥320px) -->
@@ -363,6 +366,7 @@ import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
 import ManagerPanel from "./ManagerPanel.vue";
 import DiffView from "./DiffView.vue";
+import CommitPushMenu from "./CommitPushMenu.vue";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
