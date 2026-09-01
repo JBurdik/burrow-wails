@@ -37,7 +37,11 @@ func (a *App) RunGit(cwd string, args []string) GitOutput {
 }
 
 func (a *App) RunGh(cwd string, args []string) GitOutput {
-	return runCmd("gh", cwd, args)
+	bin := "gh"
+	if resolved := resolveAgentBin("gh", ""); resolved != "" {
+		bin = resolved
+	}
+	return runCmd(bin, cwd, args)
 }
 
 // --- worktrees ---
