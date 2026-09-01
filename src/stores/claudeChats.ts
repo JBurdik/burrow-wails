@@ -34,6 +34,9 @@ export interface ClaudeSession {
   // "settled" pins it settled even mid-run, "active" pins it active even once
   // idle. Cleared back to auto (undefined) whenever a new turn starts (see sync()).
   settledOverride?: "settled" | "active" | null;
+  // Last time anything happened on this chat (message, status/title change) —
+  // the reference point for the days-of-inactivity auto-settle threshold.
+  lastActivityAt?: number;
 }
 
 const SESSIONS_KEY = "chatSessions";
@@ -147,6 +150,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
       messageCount: 0,
       agentKind,
       transport,
+      lastActivityAt: Date.now(),
     };
     sessions.value.push(session);
     // Pass the REACTIVE array element (not the raw `session`) so the actor's
@@ -229,14 +233,22 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     persist();
   }
 
-  // Whether a chat needs no more attention right now — auto-computed the same
-  // way t3code derives it (not busy, not running/waiting/permission), unless
-  // manually pinned via settledOverride.
+  // t3code's own default for "Days of inactivity before auto-settle"
+  // (`sf.sidebarAutoSettleAfterDays ?? 3` in its settings panel).
+  const AUTO_SETTLE_AFTER_DAYS = 3;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  // Whether a chat needs no more attention right now. Ported from t3code's
+  // settle decision: pending work always wins (not settled), then a manual
+  // pin, then — only past AUTO_SETTLE_AFTER_DAYS of inactivity — auto-settled.
+  // A chat that just finished is NOT settled yet; it ages into the shelf.
   function isSettled(s: ClaudeSession | undefined): boolean {
     if (!s) return false;
+    if (s.busy || s.status === "running" || s.status === "waiting" || s.status === "permission") return false;
     if (s.settledOverride === "settled") return true;
     if (s.settledOverride === "active") return false;
-    return !(s.busy || s.status === "running" || s.status === "waiting" || s.status === "permission");
+    const last = s.lastActivityAt ?? 0;
+    return Date.now() - last >= AUTO_SETTLE_AFTER_DAYS * DAY_MS;
   }
 
   // Turn event tracking for 5-hour usage window.
@@ -271,6 +283,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     // so the next done/review transition auto-settles again instead of being
     // stuck (mirrors t3code clearing settledOverride on a system-triggered unsettle).
     if (patch.status === "running" && s.settledOverride) s.settledOverride = null;
+    s.lastActivityAt = Date.now();
     Object.assign(s, patch);
     if (patch.claudeSessionId !== undefined || patch.title !== undefined || patch.messageCount !== undefined || patch.control !== undefined || patch.agentKind !== undefined || patch.transport !== undefined) {
       persist();
