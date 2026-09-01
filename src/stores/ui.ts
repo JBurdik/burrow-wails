@@ -489,7 +489,14 @@ export const useUIStore = defineStore("ui", () => {
   }
   window.addEventListener("resize", applyAppScale);
 
-  function openSettings() {
+  // Which Settings nav section to land on. Set by callers that deep-link
+  // (palette → "Keybindings"/"Appearance"); Settings.vue reads it on mount.
+  const settingsSection = ref("general");
+  // Optional row to preselect inside that section (Providers: an instance id).
+  const settingsFocusId = ref("");
+  function openSettings(section?: string, focusId?: string) {
+    if (section) settingsSection.value = section;
+    settingsFocusId.value = focusId ?? "";
     settingsOpen.value = true;
   }
   function closeSettings() {
@@ -554,6 +561,8 @@ export const useUIStore = defineStore("ui", () => {
 
   return {
     settingsOpen,
+    settingsSection,
+    settingsFocusId,
     uiFont,
     uiFontSize,
     uiScale,

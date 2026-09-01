@@ -98,8 +98,16 @@ export function CodexStop(arg1) {
   return window['go']['main']['App']['CodexStop'](arg1);
 }
 
+export function ConfigFilePath() {
+  return window['go']['main']['App']['ConfigFilePath']();
+}
+
 export function CreateCheckpoint(arg1, arg2, arg3) {
   return window['go']['main']['App']['CreateCheckpoint'](arg1, arg2, arg3);
+}
+
+export function CreateDir(arg1) {
+  return window['go']['main']['App']['CreateDir'](arg1);
 }
 
 export function CreatePty(arg1, arg2, arg3, arg4) {
@@ -134,10 +142,6 @@ export function GetAppVersion() {
   return window['go']['main']['App']['GetAppVersion']();
 }
 
-export function GetConfigDirs() {
-  return window['go']['main']['App']['GetConfigDirs']();
-}
-
 export function GetHookServerPort() {
   return window['go']['main']['App']['GetHookServerPort']();
 }
@@ -150,12 +154,20 @@ export function GetTailscaleStatus() {
   return window['go']['main']['App']['GetTailscaleStatus']();
 }
 
+export function HomeDir() {
+  return window['go']['main']['App']['HomeDir']();
+}
+
 export function InstallUpdate(arg1, arg2) {
   return window['go']['main']['App']['InstallUpdate'](arg1, arg2);
 }
 
 export function IsPidAlive(arg1) {
   return window['go']['main']['App']['IsPidAlive'](arg1);
+}
+
+export function KeybindingsFilePath() {
+  return window['go']['main']['App']['KeybindingsFilePath']();
 }
 
 export function KillOrphanSessions(arg1) {
@@ -230,6 +242,10 @@ export function PickFiles(arg1, arg2) {
   return window['go']['main']['App']['PickFiles'](arg1, arg2);
 }
 
+export function ProbeProvider(arg1, arg2) {
+  return window['go']['main']['App']['ProbeProvider'](arg1, arg2);
+}
+
 export function ReadClaudeActivity(arg1, arg2) {
   return window['go']['main']['App']['ReadClaudeActivity'](arg1, arg2);
 }
@@ -248,6 +264,10 @@ export function ReadDirShallow(arg1) {
 
 export function ReadFileBase64(arg1) {
   return window['go']['main']['App']['ReadFileBase64'](arg1);
+}
+
+export function ReadKeybindings() {
+  return window['go']['main']['App']['ReadKeybindings']();
 }
 
 export function ReadTextFile(arg1) {
@@ -294,6 +314,14 @@ export function RepairAgentStatus() {
   return window['go']['main']['App']['RepairAgentStatus']();
 }
 
+export function ReinstallStatusHooks() {
+  return window['go']['main']['App']['ReinstallStatusHooks']();
+}
+
+export function RemoveStatusHooks() {
+  return window['go']['main']['App']['RemoveStatusHooks']();
+}
+
 export function RequestFloatSnapshot(arg1) {
   return window['go']['main']['App']['RequestFloatSnapshot'](arg1);
 }
@@ -336,10 +364,6 @@ export function SendFloatSnapshot(arg1, arg2, arg3, arg4) {
 
 export function SetBurrowMcpMaxDepth(arg1) {
   return window['go']['main']['App']['SetBurrowMcpMaxDepth'](arg1);
-}
-
-export function SetConfigDirs(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SetConfigDirs'](arg1, arg2, arg3);
 }
 
 export function SetHttpEnabled(arg1) {
@@ -396,6 +420,10 @@ export function TouchWorkspace(arg1) {
 
 export function WriteConfig(arg1) {
   return window['go']['main']['App']['WriteConfig'](arg1);
+}
+
+export function WriteKeybindings(arg1) {
+  return window['go']['main']['App']['WriteKeybindings'](arg1);
 }
 
 export function WritePty(arg1, arg2) {

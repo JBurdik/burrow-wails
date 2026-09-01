@@ -71,7 +71,7 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from "vue";
 import { PhTerminalWindow, PhFolder, PhFolderOpen, PhFolderPlus, PhX } from "@phosphor-icons/vue";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { pickDir } from "@/lib/pickPath";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { Button } from "@/components/ui/button";
 
@@ -85,8 +85,10 @@ const nameInputEl = ref<HTMLInputElement>();
 onMounted(() => store.load());
 
 async function pickFolder() {
-  const selected = await openDialog({ directory: true, multiple: false });
-  if (!selected || typeof selected !== "string") return;
+  // In-app picker (PathPicker.vue) instead of the native panel — same browse UI
+  // everywhere a folder is chosen, and it can create the folder too.
+  const selected = await pickDir({ title: "Add project", start: "~/" });
+  if (!selected) return;
   pendingPath.value = selected;
   pendingName.value = selected.split("/").pop() || selected;
   await nextTick();

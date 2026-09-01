@@ -55,14 +55,41 @@
           <p class="m-0 text-[11px] text-muted-foreground">Which agent and model a new thread in this project starts on. Empty = the app-wide default.</p>
           <div class="flex gap-2">
             <select v-model="agentDraft" class="flex-1 rounded-md border border-border bg-base px-2 py-[7px] text-[13px] text-foreground outline-none focus:border-accent" @change="commitDefaults">
-              <option value="">Default ({{ chatAgents.byId(ui.defaultChatAgent).name }})</option>
-              <option v-for="a in chatAgents.agents" :key="a.id" :value="a.id">{{ a.name }}</option>
+              <option value="">Default ({{ chatAgents.resolve(ui.defaultChatAgent).name }})</option>
+              <option v-for="a in chatAgents.chatAgents" :key="a.id" :value="a.id">{{ a.name }}</option>
             </select>
             <select v-model="modelDraft" class="flex-1 rounded-md border border-border bg-base px-2 py-[7px] text-[13px] text-foreground outline-none focus:border-accent" @change="commitDefaults">
               <option value="">Default model</option>
               <option v-for="m in modelOptions" :key="m.id" :value="m.id">{{ m.label }}</option>
             </select>
           </div>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[11px] font-semibold text-secondary-foreground">Agent environment</span>
+          <p class="m-0 text-[11px] text-muted-foreground">
+            Applied when a chat provider starts in this project. Saved to <code class="font-mono text-[10px]">.burrow/config.toml</code>.
+          </p>
+          <label class="flex flex-col gap-1">
+            <span class="text-[11px] text-muted-foreground">CLAUDE_CONFIG_DIR</span>
+            <input
+              :value="proj.claude_config_dir ?? ''"
+              class="min-w-0 rounded-md border border-border bg-base px-2.5 py-[7px] font-mono text-[11.5px] text-foreground outline-none focus:border-accent"
+              placeholder="(default)"
+              spellcheck="false"
+              @change="setProj('claude_config_dir', ($event.target as HTMLInputElement).value)"
+            />
+          </label>
+          <label class="flex flex-col gap-1">
+            <span class="text-[11px] text-muted-foreground">.env file</span>
+            <input
+              :value="proj.env_file ?? ''"
+              class="min-w-0 rounded-md border border-border bg-base px-2.5 py-[7px] font-mono text-[11.5px] text-foreground outline-none focus:border-accent"
+              placeholder=".env"
+              spellcheck="false"
+              @change="setProj('env_file', ($event.target as HTMLInputElement).value)"
+            />
+          </label>
         </div>
 
         <label class="flex flex-col gap-1.5">
@@ -164,11 +191,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { pickDir, pickFile } from '@/lib/pickPath'
 import { PhX, PhPlus, PhTrash, PhFolder } from '@phosphor-icons/vue'
-import { useScriptsStore } from '@/stores/scripts'
+import { useScriptsStore, type ProjectSettings } from '@/stores/scripts'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useChatAgentsStore } from '@/stores/chatAgents'
+import { useProvidersStore } from '@/stores/providers'
 import { useUIStore } from '@/stores/ui'
 import { modelsFor } from '@/lib/chatModels'
 import { getProjectSettings, setProjectSettings } from '@/lib/projectSettings'
@@ -183,7 +210,7 @@ const tab = ref<'general' | 'prompt' | 'scripts'>('general')
 
 // ── General ────────────────────────────────────────────────────────────────
 const wsStore = useWorkspaceStore()
-const chatAgents = useChatAgentsStore()
+const chatAgents = useProvidersStore()
 const ui = useUIStore()
 
 const ws = computed(() => wsStore.workspaces.find((w) => w.id === props.workspaceId) ?? null)
@@ -197,7 +224,14 @@ const modelDraft = ref(saved.modelId ?? '')
 const worktreesDraft = ref(saved.worktreesDir ?? '')
 const confirmDelete = ref(false)
 
-const modelOptions = computed(() => modelsFor(chatAgents.byId(agentDraft.value || ui.defaultChatAgent).kind))
+const modelOptions = computed(() => modelsFor(chatAgents.resolve(agentDraft.value || ui.defaultChatAgent).kind))
+
+// Per-project agent env, stored in the project's own .burrow/config.toml.
+const proj = computed<ProjectSettings>(() => scriptsStore.settingsFor(workspacePath.value))
+function setProj(key: keyof ProjectSettings, val: string) {
+  if (!workspacePath.value) return
+  scriptsStore.updateSettings(workspacePath.value, { [key]: val.trim() || undefined })
+}
 
 function commitName() {
   const name = nameDraft.value.trim()
@@ -221,18 +255,15 @@ function mimeForPath(path: string): string {
 }
 
 async function pickIcon() {
-  const selected = await openDialog({
-    multiple: false,
-    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'svg', 'ico'] }],
-  })
-  if (typeof selected !== 'string') return
+  const selected = await pickFile({ title: 'Set icon', extensions: ['png', 'jpg', 'jpeg', 'svg', 'ico'] })
+  if (!selected) return
   const b64 = await invoke<string>('read_file_base64', { path: selected })
   wsStore.setIcon(props.workspaceId, `data:${mimeForPath(selected)};base64,${b64}`)
 }
 
 async function pickWorktreesDir() {
-  const selected = await openDialog({ directory: true, multiple: false })
-  if (typeof selected !== 'string') return
+  const selected = await pickDir({ title: 'Choose folder', start: worktreesDraft.value || '~/' })
+  if (!selected) return
   worktreesDraft.value = selected
   commitDefaults()
 }

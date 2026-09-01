@@ -13,10 +13,18 @@ export const configReady: Promise<void> = (async () => {
   loaded = true;
 })();
 
+let pending: Promise<unknown> = Promise.resolve();
+
 function persist() {
-  invoke("write_config", { content: JSON.stringify(cache) }).catch(() => {
+  pending = invoke("write_config", { content: JSON.stringify(cache) }).catch(() => {
     // best-effort; next setConfig call will retry with the latest cache
   });
+}
+
+/** Resolves once the last setConfig has hit disk — for callers whose next step
+ *  is backend code that reads config.json. */
+export function flushConfig(): Promise<void> {
+  return pending.then(() => undefined);
 }
 
 export function getConfig<T>(key: string, fallback: T): T {

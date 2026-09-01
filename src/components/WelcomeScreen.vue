@@ -137,7 +137,7 @@ import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTermin
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
-import { useChatAgentsStore } from "@/stores/chatAgents";
+import { useProvidersStore, binaryFor } from "@/stores/providers";
 import { getConfig, setConfig } from "@/lib/config";
 import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -153,14 +153,27 @@ const emit = defineEmits<{ (e: "open-folder"): void }>();
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const ui = useUIStore();
-const chatAgents = useChatAgentsStore();
+const providers = useProvidersStore();
 
 const text = ref("");
 const inputEl = ref<InstanceType<typeof ComposerTextInput>>();
 
 // App.vue keeps this screen mounted behind v-show, so the textarea's own
 // autofocus only fires once. App re-focuses it whenever the screen reappears.
-defineExpose({ focus: () => inputEl.value?.focus() });
+// Rotate the launching provider (Claude → Codex → Gemini → …) from the
+// keyboard, so switching doesn't need the ModelPicker popover. Bound to the
+// rebindable "switchProvider" command; App.vue calls this.
+function cycleProvider() {
+  const list = providers.chatAgents;
+  if (list.length < 2) return;
+  const idx = list.findIndex((a) => a.id === selectedAgentId.value);
+  const next = list[(idx + 1 + list.length) % list.length];
+  // Empty model = let the new provider pick its own default (ClaudeChat.vue
+  // resolves it once the session exists).
+  onModelSelect(next.id, next.kind === "claude" ? getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id) : "");
+}
+
+defineExpose({ focus: () => inputEl.value?.focus(), cycleProvider });
 const imageInput = useTemplateRef<HTMLInputElement>("imageInput");
 const pendingImages = ref<string[]>([]);
 
@@ -209,7 +222,7 @@ function promptWithImagePaths(prompt: string, paths: string[]): string {
 // Which agent (Claude/Codex/Gemini/…) launches the chat, like T3 Code's model
 // switcher — starts on the user's configured default, overridable per-send.
 const selectedAgentId = ref(ui.defaultChatAgent);
-const selectedAgent = computed(() => chatAgents.byId(selectedAgentId.value));
+const selectedAgent = computed(() => providers.resolve(selectedAgentId.value));
 const isClaude = computed(() => selectedAgent.value.kind === "claude");
 
 // One popover picks provider + model together (see ModelPicker.vue). Effort and
@@ -221,7 +234,7 @@ function onModelSelect(agentId: string, modelId: string) {
   selectedAgentId.value = agentId;
   selectedModel.value = modelId;
   if (!modelId) return;
-  if (chatAgents.byId(agentId).kind === "claude") {
+  if (providers.resolve(agentId).kind === "claude") {
     setConfig("chatLastUsedModel", modelId);
   } else {
     // ACP / Codex models can only be applied once the session exists, so the
@@ -271,7 +284,7 @@ function pickPermMode(mode: PermMode) {
 type LaunchMode = "chat" | "terminal";
 const launchMode = ref<LaunchMode>(getConfig<LaunchMode>("welcomeLaunchMode", "chat") === "terminal" ? "terminal" : "chat");
 function pickMode(m: LaunchMode) { launchMode.value = m; setConfig("welcomeLaunchMode", m); }
-const terminalProgram = computed(() => terminalProgramFor(selectedAgent.value));
+const terminalProgram = computed(() => terminalProgramFor({ kind: selectedAgent.value.kind, command: binaryFor(selectedAgent.value) }));
 
 // Active workspace, else the most recently opened one, unless the user picked
 // a different one from the dropdown.
@@ -304,7 +317,7 @@ async function submit() {
   store.open(t);
   const open = launchMode.value === "terminal"
     ? () => termTabs.add(t.id, buildTerminalCommand(
-        { kind: selectedAgent.value.kind, command: selectedAgent.value.command, model: selectedModel.value, permMode: selectedPermMode.value },
+        { kind: selectedAgent.value.kind, command: binaryFor(selectedAgent.value), model: selectedModel.value, permMode: selectedPermMode.value },
         terminalPrompt,
       ))
     : () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt, images);

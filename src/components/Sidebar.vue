@@ -391,7 +391,7 @@ import {
   PhPlayCircle,
   PhGlobe,
 } from "@phosphor-icons/vue";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore, type TabSummary } from "@/stores/terminalTabs";
@@ -832,8 +832,10 @@ const pendingName = ref("");
 const nameInputEl = ref<HTMLInputElement>();
 
 async function pickFolder() {
-  const selected = await openDialog({ directory: true, multiple: false });
-  if (!selected || typeof selected !== "string") return;
+  // In-app picker (PathPicker.vue) instead of the native panel — same browse UI
+  // everywhere a folder is chosen, and it can create the folder too.
+  const selected = await pickDir({ title: "Add project", start: "~/" });
+  if (!selected) return;
   pendingPath.value = selected;
   pendingName.value = selected.split("/").pop() || selected;
   await nextTick();

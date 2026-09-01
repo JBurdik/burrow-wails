@@ -196,6 +196,7 @@ import AgentPlanRail from "@/components/AgentPlanRail.vue";
 import AgentInspector, { type AgentInspectorAgent } from "@/components/AgentInspector.vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
+import { useKeybindingsStore } from "@/stores/keybindings";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useGitStore } from "@/stores/git";
@@ -208,6 +209,7 @@ const uiStore = useUIStore();
 const { showDiagram } = useDiagram();
 const chatsStore = useClaudeChatsStore();
 const tabsStore = useTerminalTabsStore();
+const keys = useKeybindingsStore();
 const notifStore = useNotificationsStore();
 const gitStore = useGitStore();
 const historyStore = useAgentHistoryStore();
@@ -1247,6 +1249,7 @@ function focusActive() {
 
 function onKeydown(e: KeyboardEvent) {
   if (wsStore.active?.id !== props.workspaceId) return;
+  // ⌃1-9 tab switch — a range, so not part of the rebindable registry.
   if (e.ctrlKey && !e.metaKey && !e.altKey && /^[1-9]$/.test(e.key)) {
     e.preventDefault();
     const idx = parseInt(e.key) - 1;
@@ -1254,8 +1257,9 @@ function onKeydown(e: KeyboardEvent) {
     if (wsTabs[idx]) activateTab(wsTabs[idx].id);
     return;
   }
-  if (e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey && e.key === "U") {
-    // Jump to first unread (review) tab in this workspace.
+  // Jump to first unread (review) tab in THIS workspace; App.vue's handler
+  // covers the cross-workspace case when there's none here.
+  if (keys.matches(e, "unread")) {
     const reviewTab = tabs.value.find((t) => tabStatus(t) === "review");
     if (reviewTab) {
       e.preventDefault();
@@ -1263,17 +1267,18 @@ function onKeydown(e: KeyboardEvent) {
     }
     return;
   }
-  if (!e.metaKey || e.ctrlKey || e.altKey) return;
-  const k = e.key.toLowerCase();
-  if (k === "t") {
-    e.preventDefault();
-    addTab();
-  } else if (k === "w") {
-    e.preventDefault();
-    closePane(focusedLeafId.value);
-  } else if (k === "d") {
-    e.preventDefault();
-    splitFocused("terminal", e.shiftKey ? "v" : "h");
+  const actions: Record<string, () => void> = {
+    newTab: () => addTab(),
+    closePane: () => closePane(focusedLeafId.value),
+    splitH: () => splitFocused("terminal", "h"),
+    splitV: () => splitFocused("terminal", "v"),
+  };
+  for (const cmd of keys.inScope("terminal")) {
+    if (actions[cmd.id] && keys.matches(e, cmd.id)) {
+      e.preventDefault();
+      actions[cmd.id]();
+      return;
+    }
   }
 }
 
@@ -1657,7 +1662,11 @@ const activeAgentLeafId = computed((): number | null => {
 });
 
 
-defineExpose({ addTab, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
+function splitPane(direction: "h" | "v" = "h") {
+  splitFocused("terminal", direction);
+}
+
+defineExpose({ addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
 </script>
 
 <style scoped>

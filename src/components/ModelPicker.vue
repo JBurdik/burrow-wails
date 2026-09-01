@@ -69,7 +69,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount, watch } from "vue";
 import { PhCaretDown, PhStar, PhMagnifyingGlass } from "@phosphor-icons/vue";
-import { useChatAgentsStore } from "@/stores/chatAgents";
+import { useProvidersStore } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import { modelsFor, modelLabel, favorites, parseFav, isFavorite, toggleFavorite, ensureModels, type ModelEntry } from "@/lib/chatModels";
 
@@ -85,10 +85,10 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ (e: "select", agentId: string, modelId: string): void }>();
 
-const chatAgents = useChatAgentsStore();
-const agentById = (id: string) => chatAgents.byId(id);
-const agent = computed(() => chatAgents.byId(props.agentId));
-const providers = computed(() => (props.lockAgent ? [agent.value] : chatAgents.agents));
+const chatAgents = useProvidersStore();
+const agentById = (id: string) => chatAgents.resolve(id);
+const agent = computed(() => chatAgents.resolve(props.agentId));
+const providers = computed(() => (props.lockAgent ? [agent.value] : chatAgents.chatAgents));
 
 // Provider-default models have no name of their own — show the agent instead.
 const triggerLabel = computed(() => {
@@ -117,7 +117,7 @@ const favRows = computed<Row[]>(() =>
   favorites.value
     .map(parseFav)
     .filter((f) => !props.lockAgent || f.agentId === props.agentId)
-    .filter((f) => chatAgents.agents.some((a) => a.id === f.agentId))
+    .filter((f) => chatAgents.chatAgents.some((a) => a.id === f.agentId))
     .map((f) => ({
       agentId: f.agentId,
       id: f.modelId,

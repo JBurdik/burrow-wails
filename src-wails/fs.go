@@ -33,6 +33,12 @@ type DirEntry struct {
 	IsDir bool   `json:"isDir"`
 }
 
+// CreateDir makes path (and parents), so the in-app directory picker can
+// create a project folder without a native dialog.
+func (a *App) CreateDir(path string) error {
+	return os.MkdirAll(path, 0o755)
+}
+
 func (a *App) ReadDirShallow(path string) ([]DirEntry, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {

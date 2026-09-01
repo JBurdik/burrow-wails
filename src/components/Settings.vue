@@ -30,262 +30,9 @@
 
       <!-- Content -->
       <div class="flex-1 overflow-y-auto bg-base px-10 py-8">
-        <!-- Agents -->
-        <section v-if="active === 'agents'" class="flex flex-col gap-3.5">
-          <div v-if="flagEditId || iconPickerId || showTemplatePicker" class="fixed inset-0 z-20" @click="flagEditId = null; iconPickerId = null; showTemplatePicker = false" />
-          <div class="flex items-center gap-2.5">
-            <div class="flex items-baseline gap-2.5">
-              <h2 class="text-[15px] font-semibold text-foreground">Agents</h2>
-              <span class="text-xs text-muted-foreground">Quick-launch terminal commands</span>
-            </div>
-            <div class="ml-auto flex items-center gap-px">
-              <Button variant="outline" size="sm" class="rounded-r-none" @click="store.add()">
-                <PhPlus :size="11" /> Add Agent
-              </Button>
-              <div class="relative">
-                <Button variant="outline" size="sm" class="rounded-l-none border-l-0 px-2" title="Add from template" @click.stop="showTemplatePicker = !showTemplatePicker">
-                  <PhCaretDown :size="11" />
-                </Button>
-                <div v-if="showTemplatePicker" class="absolute right-0 top-[calc(100%+6px)] z-30 grid w-[280px] gap-0.5 rounded-lg border border-border bg-base p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]" @click.stop>
-                  <div class="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">Quick add from template</div>
-                  <button
-                    v-for="t in TEMPLATES"
-                    :key="t.id"
-                    class="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-xs text-secondary-foreground hover:bg-hover hover:text-foreground"
-                    @click="addFromTemplate(t); showTemplatePicker = false"
-                  >
-                    <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded border" :style="{ background: t.color + '22', borderColor: t.color + '44' }">
-                      <component :is="iconFor(t.icon)" :size="12" :style="{ color: t.color }" />
-                    </span>
-                    <span class="flex-1 font-medium">{{ t.name }}</span>
-                    <code class="rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{{ t.command }}</code>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="h-px bg-border" />
-
-          <div class="flex flex-col gap-2">
-            <div class="flex h-[26px] items-center px-4">
-              <span class="w-[22px] shrink-0" />
-              <span class="w-[200px] shrink-0 text-[11px] font-medium text-muted-foreground opacity-60">Agent</span>
-              <span class="w-[165px] shrink-0 text-[11px] font-medium text-muted-foreground opacity-60">Command</span>
-              <span class="flex-1 min-w-0 text-[11px] font-medium text-muted-foreground opacity-60">Args / Flags</span>
-              <span class="flex w-[84px] shrink-0 items-center justify-center gap-1 text-[11px] font-medium text-muted-foreground opacity-60">Shortcut</span>
-              <span class="flex w-[52px] shrink-0 justify-end" />
-            </div>
-
-            <div
-              v-for="(a, i) in store.agents"
-              :key="a.id"
-              class="flex h-[50px] items-center gap-0 rounded-md border border-border bg-base px-4"
-              :data-reorder-idx="i"
-              :class="{ 'opacity-40': dragIndex === i, 'border-accent shadow-[inset_0_0_0_1px_var(--accent)]': dragOverIndex === i && dragIndex !== i }"
-            >
-              <!-- Drag handle -->
-              <div
-                class="flex w-[22px] shrink-0 items-center justify-center text-muted-foreground/60 [touch-action:none] hover:text-muted-foreground active:cursor-grabbing"
-                style="cursor: grab;"
-                title="Drag to reorder"
-                @pointerdown="(e: PointerEvent) => onGripDown(i, e)"
-              >
-                <PhDotsSixVertical :size="14" />
-              </div>
-
-              <!-- Agent -->
-              <div class="flex w-[200px] shrink-0 items-center gap-2">
-                <!-- Color picker on the dot -->
-                <label class="group relative flex shrink-0 cursor-pointer items-center" title="Pick color">
-                  <span class="h-[7px] w-[7px] shrink-0 rounded-full transition-transform duration-100 group-hover:scale-[1.3]" :style="{ background: a.color }" />
-                  <input
-                    type="color"
-                    class="absolute inset-0 h-full w-full cursor-pointer border-0 p-0 opacity-0"
-                    :value="a.color"
-                    @input="store.update(a.id, { color: val($event) })"
-                  />
-                </label>
-                <!-- Icon picker popover -->
-                <div class="relative shrink-0">
-                  <button
-                    class="relative flex h-[26px] w-[26px] shrink-0 items-center justify-center overflow-hidden rounded-md border bg-transparent p-0 hover:brightness-125"
-                    :style="{ background: a.color + '22', borderColor: a.color + '55' }"
-                    title="Pick icon"
-                    @click.stop="toggleIconPicker(a.id)"
-                  >
-                    <component :is="iconFor(a.icon)" :size="13" :style="{ color: a.color }" />
-                  </button>
-                  <div v-if="iconPickerId === a.id" class="absolute left-0 top-[calc(100%+6px)] z-[25] flex w-[168px] flex-wrap gap-1 rounded-lg border border-border bg-base p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]" @click.stop>
-                    <button
-                      v-for="ic in ICON_OPTIONS"
-                      :key="ic.key"
-                      class="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-hover text-muted-foreground hover:bg-selected hover:text-foreground"
-                      :class="a.icon === ic.key && 'border-accent/40 bg-accent/15 text-accent'"
-                      :title="ic.label"
-                      @click="store.update(a.id, { icon: ic.key }); iconPickerId = null"
-                    >
-                      <component :is="ic.component" :size="14" />
-                    </button>
-                  </div>
-                </div>
-                <input
-                  class="min-w-0 w-full flex-1 border-0 bg-transparent text-[13px] font-medium text-foreground outline-none placeholder:text-muted-foreground/50"
-                  :value="a.name"
-                  placeholder="Agent name"
-                  @input="store.update(a.id, { name: val($event) })"
-                />
-              </div>
-
-              <!-- Command -->
-              <div class="w-[165px] shrink-0">
-                <div class="inline-flex max-w-[140px] items-center rounded border border-border bg-panel px-2 py-[3px]">
-                  <input
-                    class="min-w-0 w-full border-0 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/50"
-                    :style="{ color: a.color }"
-                    :value="a.command"
-                    placeholder="command"
-                    @input="store.update(a.id, { command: val($event) })"
-                  />
-                </div>
-              </div>
-
-              <!-- Args -->
-              <div class="relative flex flex-1 min-w-0 items-center gap-1.5">
-                <input
-                  class="min-w-0 w-full flex-1 border-0 bg-transparent font-mono text-[11px] text-muted-foreground outline-none placeholder:text-muted-foreground/50"
-                  :value="a.args"
-                  placeholder="--flags"
-                  @input="store.update(a.id, { args: val($event) })"
-                />
-                <button
-                  class="flex shrink-0 rounded border border-border bg-transparent p-1 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground"
-                  :class="flagEditId === a.id && 'border-accent/40 bg-accent/10 text-accent'"
-                  title="Edit flags"
-                  @click="toggleFlagEditor(a.id)"
-                >
-                  <PhListBullets :size="13" />
-                </button>
-
-                <!-- Flag editor popover -->
-                <div v-if="flagEditId === a.id" class="absolute right-0 top-[calc(100%+6px)] z-[21] grid w-[280px] gap-2 rounded-lg border border-border bg-base p-2.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]" @click.stop>
-                  <div class="flex items-baseline gap-2">
-                    <span class="text-xs font-semibold text-foreground">Flags</span>
-                    <span class="text-[10px] text-muted-foreground">one per line</span>
-                    <button class="ml-auto flex rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground" @click="flagEditId = null">
-                      <PhX :size="12" />
-                    </button>
-                  </div>
-                  <textarea
-                    class="w-full resize-y rounded-md border border-border bg-panel px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
-                    rows="6"
-                    spellcheck="false"
-                    placeholder="--flag&#10;--key value"
-                    :value="flagDraft"
-                    @input="onFlagInput(a.id, $event)"
-                  />
-                  <div class="flex">
-                    <code class="w-full truncate rounded border border-border bg-panel px-2 py-1 font-mono text-[10px] text-muted-foreground">{{ store.commandLine(a) || "—" }}</code>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Shortcut: click to record a key combo -->
-              <div class="flex w-[84px] shrink-0 items-center justify-center gap-1">
-                <button
-                  class="inline-flex min-w-[44px] items-center justify-center rounded border border-border bg-hover px-1.5 py-1 font-sans text-[11px] text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground"
-                  :class="[
-                    a.shortcut && 'text-secondary-foreground',
-                    recordingId === a.id && 'border-accent/40 bg-accent/10 text-accent',
-                  ]"
-                  :title="recordingId === a.id ? 'Press keys… (Esc to cancel)' : 'Click to set shortcut'"
-                  @click="startRecording(a.id, $event)"
-                  @keydown="onRecordKey(a.id, $event)"
-                  @blur="recordingId === a.id && (recordingId = null)"
-                >
-                  {{ recordingId === a.id ? "Press…" : (a.shortcut || "—") }}
-                </button>
-                <button
-                  v-if="a.shortcut && recordingId !== a.id"
-                  class="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground/50 hover:bg-destructive/12 hover:text-destructive"
-                  title="Clear shortcut"
-                  @click.stop="store.update(a.id, { shortcut: '' })"
-                >
-                  <PhX :size="11" />
-                </button>
-              </div>
-
-              <!-- Actions -->
-              <div class="flex w-[52px] shrink-0 justify-end">
-                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove agent" @click="store.remove(a.id)">
-                  <PhTrash :size="13" />
-                </button>
-              </div>
-            </div>
-
-            <div v-if="store.agents.length === 0" class="py-5 text-center text-xs text-muted-foreground/50">
-              No agents. Click "Add Agent".
-            </div>
-          </div>
-
-          <!-- Config directories: where Burrow installs its status hooks + agent docs -->
-          <div class="mt-[22px] flex flex-col gap-3">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Config directories</span>
-            <p class="m-0 text-[11.5px] leading-relaxed text-muted-foreground">
-              Burrow installs its status hooks (<code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">settings.json</code> / <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">hooks.json</code>)
-              and the <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">burrow</code> agent docs into these dirs. Add the dir an agent uses if
-              you point it elsewhere — e.g. a per-project <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">CLAUDE_CONFIG_DIR</code> or
-              <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">CODEX_HOME</code>. Defaults (<code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">~/.claude</code>, <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">~/.codex</code>,
-              <code class="rounded border border-border bg-hover px-1 text-[10.5px] text-secondary-foreground">~/.copilot</code>) plus any value set in Burrow's own environment at launch
-              are seeded automatically.
-            </p>
-
-            <div class="flex flex-col gap-1.5">
-              <span class="text-[11px] text-muted-foreground">Claude (<code class="text-[10px] text-secondary-foreground">CLAUDE_CONFIG_DIR</code>)</span>
-              <div v-for="(_, i) in claudeDirs" :key="'c' + i" class="flex items-center gap-1.5">
-                <input v-model="claudeDirs[i]" class="h-8 min-w-[200px] flex-1 rounded-md border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="/path/to/.claude" spellcheck="false" />
-                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove" @click="claudeDirs.splice(i, 1)">
-                  <PhTrash :size="13" />
-                </button>
-              </div>
-              <Button variant="outline" size="sm" class="self-start" @click="claudeDirs.push('')">
-                <PhPlus :size="11" /> Add Claude dir
-              </Button>
-            </div>
-
-            <div class="flex flex-col gap-1.5">
-              <span class="text-[11px] text-muted-foreground">Codex (<code class="text-[10px] text-secondary-foreground">CODEX_HOME</code>)</span>
-              <div v-for="(_, i) in codexDirs" :key="'x' + i" class="flex items-center gap-1.5">
-                <input v-model="codexDirs[i]" class="h-8 min-w-[200px] flex-1 rounded-md border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="/path/to/.codex" spellcheck="false" />
-                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove" @click="codexDirs.splice(i, 1)">
-                  <PhTrash :size="13" />
-                </button>
-              </div>
-              <Button variant="outline" size="sm" class="self-start" @click="codexDirs.push('')">
-                <PhPlus :size="11" /> Add Codex dir
-              </Button>
-            </div>
-
-            <div class="flex flex-col gap-1.5">
-              <span class="text-[11px] text-muted-foreground">Copilot (<code class="text-[10px] text-secondary-foreground">COPILOT_HOME</code>)</span>
-              <div v-for="(_, i) in copilotDirs" :key="'p' + i" class="flex items-center gap-1.5">
-                <input v-model="copilotDirs[i]" class="h-8 min-w-[200px] flex-1 rounded-md border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="/path/to/.copilot" spellcheck="false" />
-                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove" @click="copilotDirs.splice(i, 1)">
-                  <PhTrash :size="13" />
-                </button>
-              </div>
-              <Button variant="outline" size="sm" class="self-start" @click="copilotDirs.push('')">
-                <PhPlus :size="11" /> Add Copilot dir
-              </Button>
-            </div>
-
-            <div class="mt-1 flex items-center gap-3">
-              <Button size="sm" :disabled="cfgSaving" @click="saveConfigDirs">
-                <PhArrowCounterClockwise v-if="cfgSaving" :size="11" class="animate-spin" />
-                {{ cfgSaving ? "Installing…" : "Save & install hooks" }}
-              </Button>
-              <span v-if="cfgStatus" class="text-[11px] text-success">{{ cfgStatus }}</span>
-            </div>
-          </div>
+        <!-- Providers -->
+        <section v-if="active === 'providers'" class="flex flex-col gap-3.5">
+          <ProvidersPanel :focus-id="focusId" />
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Sub-agent delegation</span>
@@ -341,15 +88,7 @@
               </div>
               <Select v-model="ui.spawnMode" class="min-w-[200px]" :options="SPAWN_MODE_OPTIONS" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
-              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="text-[13px] font-medium text-foreground">Chat agents</span>
-                <span class="text-[11px] text-muted-foreground">Add / edit ACP agents — command, args, environment variables, icon &amp; color.</span>
-              </div>
-              <Button variant="outline" size="sm" @click="agentConfigOpen = true">Configure agents…</Button>
-            </div>
           </div>
-          <ChatAgentConfig v-if="agentConfigOpen" @close="agentConfigOpen = false" />
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Floating windows</span>
@@ -360,12 +99,6 @@
               </div>
               <Select v-model="ui.floatCorner" class="min-w-[200px]" :options="FLOAT_CORNER_OPTIONS" />
             </div>
-          </div>
-
-          <div class="mt-2 flex items-center gap-2.5">
-            <Button variant="outline" size="sm" @click="store.reset()">
-              <PhArrowCounterClockwise :size="12" /> Reset to defaults
-            </Button>
           </div>
         </section>
 
@@ -449,93 +182,6 @@
             </div>
           </div>
 
-        </section>
-
-        <!-- Claude Profiles -->
-        <section v-else-if="active === 'profiles'" class="flex flex-col gap-3.5">
-          <div class="flex items-center gap-2.5">
-            <div class="flex items-baseline gap-2.5">
-              <h2 class="text-[15px] font-semibold text-foreground">Claude Profiles</h2>
-              <span class="text-xs text-muted-foreground">Launch agent chats with a different config dir, binary, or flags</span>
-            </div>
-            <div class="ml-auto flex items-center gap-2.5">
-              <Button variant="outline" size="sm" @click="profilesStore.add()">
-                <PhPlus :size="11" /> Add Profile
-              </Button>
-            </div>
-          </div>
-          <div class="h-px bg-border" />
-
-          <p class="m-0 text-xs leading-relaxed text-muted-foreground">
-            A profile sets <code class="rounded bg-hover px-1 font-mono text-[11px] text-secondary-foreground">CLAUDE_CONFIG_DIR</code> (a separate Claude account / settings / session
-            store), the binary to run, and extra flags. Pick one per chat session.
-          </p>
-
-          <div class="flex flex-col gap-3">
-            <div v-for="p in profilesStore.profiles" :key="p.id" class="rounded-[10px] border border-border bg-panel px-3.5 py-3">
-              <div class="flex items-center gap-2.5">
-                <PhUserGear :size="14" class="shrink-0 text-accent" />
-                <input
-                  class="w-auto max-w-[220px] flex-none border-0 bg-transparent text-[13px] font-semibold text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-70"
-                  :value="p.name"
-                  placeholder="Profile name"
-                  :disabled="p.id === DEFAULT_PROFILE_ID"
-                  @input="profilesStore.update(p.id, { name: val($event) })"
-                />
-                <Badge v-if="p.id === DEFAULT_PROFILE_ID" variant="secondary" class="text-[10px]">built-in</Badge>
-                <span class="flex-1" />
-                <button
-                  v-if="p.id !== DEFAULT_PROFILE_ID"
-                  class="rounded p-1 text-muted-foreground hover:bg-hover hover:text-destructive"
-                  title="Delete profile"
-                  @click="profilesStore.remove(p.id)"
-                ><PhTrash :size="13" /></button>
-              </div>
-              <div class="mt-3 grid grid-cols-2 gap-x-3.5 gap-y-2.5">
-                <label class="flex min-w-0 flex-col gap-1.5">
-                  <span class="text-[11px] text-secondary-foreground">Command</span>
-                  <input
-                    class="rounded-lg border border-border bg-base/40 px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
-                    :value="p.command"
-                    placeholder="claude"
-                    @input="profilesStore.update(p.id, { command: val($event) })"
-                  />
-                </label>
-                <label class="flex min-w-0 flex-col gap-1.5">
-                  <span class="text-[11px] text-secondary-foreground">Extra flags</span>
-                  <input
-                    class="rounded-lg border border-border bg-base/40 px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
-                    :value="p.args"
-                    placeholder="--model haiku"
-                    @input="profilesStore.update(p.id, { args: val($event) })"
-                  />
-                </label>
-                <label class="col-span-2 flex min-w-0 flex-col gap-1.5">
-                  <span class="text-[11px] text-secondary-foreground">Config dir <em class="not-italic text-muted-foreground">(CLAUDE_CONFIG_DIR — blank = default)</em></span>
-                  <div class="flex items-stretch gap-1.5">
-                    <input
-                      class="flex-1 rounded-lg border border-border bg-base/40 px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
-                      :value="p.configDir"
-                      placeholder="~/.claude-work"
-                      @input="profilesStore.update(p.id, { configDir: val($event) })"
-                    />
-                    <Button variant="outline" size="icon" title="Browse…" @click="pickProfileConfigDir(p.id)">
-                      <PhFolderOpen :size="13" />
-                    </Button>
-                  </div>
-                </label>
-                <label class="col-span-2 flex flex-row items-center gap-2">
-                  <input
-                    type="checkbox"
-                    class="h-3.5 w-3.5 shrink-0 cursor-pointer accent-accent"
-                    :checked="p.orgAccount"
-                    @change="profilesStore.update(p.id, { orgAccount: ($event.target as HTMLInputElement).checked })"
-                  />
-                  <span class="text-[11px] text-secondary-foreground">Org / team account <em class="not-italic text-muted-foreground">(skips OAuth usage API, reads local transcripts instead)</em></span>
-                </label>
-              </div>
-            </div>
-          </div>
         </section>
 
         <!-- General -->
@@ -880,19 +526,43 @@
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
               <h2 class="text-[15px] font-semibold text-foreground">Keyboard Shortcuts</h2>
-              <span class="text-xs text-muted-foreground">Read-only reference — all app shortcuts</span>
+              <span class="text-xs text-muted-foreground">Click a shortcut to rebind · ⌫ clears · stored in config.json</span>
             </div>
+            <div class="flex-1" />
+            <Button variant="outline" size="sm" @click="openConfigFile">Edit config.json</Button>
+            <Button variant="outline" size="sm" @click="keys.resetAll()">Reset all</Button>
           </div>
           <div class="h-px bg-border" />
 
-          <div v-for="group in SHORTCUT_GROUPS" :key="group.label" class="flex flex-col gap-2.5">
+          <div v-for="group in keys.groups" :key="group.label" class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{{ group.label }}</span>
-            <div v-for="s in group.shortcuts" :key="s.keys" class="flex items-center justify-between gap-3 border-b border-border/40 py-1.5 last:border-b-0">
-              <span class="text-xs text-muted-foreground">{{ s.desc }}</span>
-              <span class="flex shrink-0 items-center gap-[3px]">
-                <kbd v-for="k in s.keys.split(' ')" :key="k" class="inline-flex items-center justify-center rounded border border-border bg-hover px-1.5 py-0.5 font-mono text-[11px] leading-snug text-secondary-foreground">{{ k }}</kbd>
+            <div v-for="c in group.commands" :key="c.id" class="flex items-center justify-between gap-3 border-b border-border/40 py-1.5 last:border-b-0">
+              <span class="text-xs text-muted-foreground">{{ c.label }}</span>
+              <span class="flex shrink-0 items-center gap-2">
+                <button
+                  class="min-w-[86px] rounded border px-2 py-0.5 font-mono text-[11px] leading-snug"
+                  :class="kbRecording === c.id
+                    ? 'border-accent bg-accent/10 text-accent'
+                    : 'border-border bg-hover text-secondary-foreground hover:border-accent/40'"
+                  @click="startKeyRecord(c.id, $event)"
+                  @keydown="onKeyRecord(c.id, $event)"
+                >{{ kbRecording === c.id ? "press keys…" : (c.keys || "unbound") }}</button>
+                <button
+                  v-if="c.custom"
+                  class="text-[10px] text-muted-foreground hover:text-foreground"
+                  title="Reset to default"
+                  @click="keys.reset(c.id)"
+                >reset</button>
               </span>
             </div>
+          </div>
+
+          <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Fixed (not rebindable)</span>
+          <div v-for="s in FIXED_SHORTCUTS" :key="s.keys" class="flex items-center justify-between gap-3 border-b border-border/40 py-1.5 last:border-b-0">
+            <span class="text-xs text-muted-foreground">{{ s.desc }}</span>
+            <span class="flex shrink-0 items-center gap-[3px]">
+              <kbd v-for="k in s.keys.split(' ')" :key="k" class="inline-flex items-center justify-center rounded border border-border bg-hover px-1.5 py-0.5 font-mono text-[11px] leading-snug text-secondary-foreground">{{ k }}</kbd>
+            </span>
           </div>
         </section>
 
@@ -1315,55 +985,45 @@ import { ref, computed, watch, type Component } from "vue";
 import {
   PhGearSix, PhX, PhPlus, PhTrash, PhArrowCounterClockwise,
   PhSlidersHorizontal, PhFolderOpen, PhRobot, PhPalette, PhKeyboard,
-  PhPuzzlePiece, PhInfo, PhSparkle, PhCode, PhGitBranch, PhTerminal,
-  PhListBullets, PhCaretDown, PhFolder, PhPencilSimple, PhCheck, PhBell, PhPlay,
-  PhDotsSixVertical, PhArrowClockwise, PhDownloadSimple, PhTerminalWindow,
+  PhPuzzlePiece, PhInfo, PhSparkle,
+  PhFolder, PhPencilSimple, PhCheck, PhBell, PhPlay,
+  PhArrowClockwise, PhDownloadSimple, PhTerminalWindow,
   PhPlugsConnected, PhBrowser, PhToggleLeft, PhToggleRight, PhArrowSquareOut, PhImage,
-  PhUserGear, PhPaperPlaneTilt, PhPawPrint, PhPlayCircle, PhArrowUp, PhArrowDown,
+  PhPaperPlaneTilt, PhPawPrint, PhPlayCircle, PhArrowUp, PhArrowDown,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
-import OpenAIIcon from "@/components/icons/OpenAIIcon.vue";
-import GitHubCopilotIcon from "@/components/icons/GitHubCopilotIcon.vue";
+import { pickDir, pickFile, AUDIO_EXTS, IMAGE_EXTS } from "@/lib/pickPath";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
-import { useAgentsStore, type AgentIcon } from "@/stores/agents";
 import { useScriptsStore, type Script } from "@/stores/scripts";
-import { useProfilesStore, DEFAULT_PROFILE_ID } from "@/stores/profiles";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, type NtfyEvent } from "@/stores/ui";
-import { useChatAgentsStore, transportLabel } from "@/stores/chatAgents";
-import ChatAgentConfig from "@/components/ChatAgentConfig.vue";
+import { useProvidersStore, transportLabel } from "@/stores/providers";
+import ProvidersPanel from "@/components/ProvidersPanel.vue";
 import { testNtfy } from "@/lib/ntfy";
 import { useUpdateStore } from "@/stores/update";
 import { THEMES } from "@/themes";
 import { soundsForKind, playSound, type SoundKind } from "@/lib/sounds";
-import { usePointerReorder } from "@/composables/usePointerReorder";
 import { eventToShortcut } from "@/lib/shortcuts";
+import { useKeybindingsStore } from "@/stores/keybindings";
+import { FIXED_SHORTCUTS } from "@/lib/keymap";
 
 defineEmits<{ close: [] }>();
 
-const store = useAgentsStore();
+// Deep-link into one provider instance (chat header → "configure this agent").
+const focusId = computed(() => ui.settingsFocusId);
+
 const scriptsStore = useScriptsStore();
-const profilesStore = useProfilesStore();
-async function pickProfileConfigDir(id: string) {
-  try {
-    const dir = await openDialog({ directory: true, multiple: false });
-    if (typeof dir === "string") profilesStore.update(id, { configDir: dir });
-  } catch { /* dialog cancelled */ }
-}
 const wsStore = useWorkspaceStore();
 const ui = useUIStore();
-const chatAgents = useChatAgentsStore();
-const agentConfigOpen = ref(false);
+const providers = useProvidersStore();
 const update = useUpdateStore();
 
 // ── Select option lists ──
 const chatAgentOptions = computed(() =>
-  chatAgents.agents.map((a) => ({ value: a.id, label: `${a.name} (${transportLabel(a.transport)})` })),
+  providers.chatAgents.map((a) => ({ value: a.id, label: `${a.name} (${transportLabel(a.transport as Exclude<typeof a.transport, "none">)})` })),
 );
 const SPAWN_MODE_OPTIONS = [
   { value: "terminal", label: "Terminal tab" },
@@ -1490,27 +1150,22 @@ function mimeForPath(path: string): string {
 }
 
 async function pickWsIcon(id: number) {
-  const selected = await openDialog({
-    multiple: false,
-    filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "svg", "ico"] }],
-  });
-  if (!selected || typeof selected !== "string") return;
+  const selected = await pickFile({ title: "Set icon", extensions: ["png", "jpg", "jpeg", "svg", "ico"] });
+  if (!selected) return;
   const b64 = await invoke<string>("read_file_base64", { path: selected });
   wsStore.setIcon(id, `data:${mimeForPath(selected)};base64,${b64}`);
 }
 
 async function pickWorktreesDir() {
-  const selected = await openDialog({ directory: true, multiple: false });
-  if (typeof selected === "string") ui.worktreesDir = selected;
+  const selected = await pickDir({ title: "Choose folder", start: ui.worktreesDir || "~/" });
+  if (selected) ui.worktreesDir = selected;
 }
 // Notification sounds: choose a custom audio file for done/waiting and store its
 // path; sounds.ts reads it lazily via read_file_base64.
 async function pickSound(kind: SoundKind) {
-  const selected = await openDialog({
-    multiple: false,
-    filters: [{ name: "Audio", extensions: ["wav", "mp3", "ogg", "m4a", "aac", "flac"] }],
-  });
-  if (!selected || typeof selected !== "string") return;
+  const current = kind === "done" ? ui.soundDoneCustomPath : ui.soundWaitingCustomPath;
+  const selected = await pickFile({ title: "Use sound", start: current || "~/", extensions: AUDIO_EXTS });
+  if (!selected) return;
   if (kind === "done") {
     ui.soundDoneCustomPath = selected;
     ui.soundDoneId = "custom";
@@ -1525,13 +1180,8 @@ function soundFileName(path: string): string {
 }
 
 async function pickBgImage() {
-  const selected = await openDialog({
-    multiple: false,
-    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "avif"] }],
-  });
-  if (selected && typeof selected === "string") {
-    ui.bgImagePath = selected;
-  }
+  const selected = await pickFile({ title: "Use wallpaper", start: ui.bgImagePath || "~/", extensions: IMAGE_EXTS });
+  if (selected) ui.bgImagePath = selected;
 }
 
 function bgFileName(path: string): string {
@@ -1547,51 +1197,8 @@ const blurControls = [
   { key: "blurDropdown", label: "Dropdowns (menus, notifications)" },
 ] as const;
 
-const active = ref("general");
-const flagEditId = ref<string | null>(null);
-
-// Agent config dirs (where Burrow installs hooks + docs). Loaded from the backend,
-// which seeds defaults (~/.claude, ~/.codex) + any CLAUDE_CONFIG_DIR/CODEX_HOME env.
-const claudeDirs = ref<string[]>([]);
-const codexDirs = ref<string[]>([]);
-const copilotDirs = ref<string[]>([]);
-const cfgSaving = ref(false);
-const cfgStatus = ref("");
-
-type CfgDirs = { claude: string[]; codex: string[]; copilot: string[] };
-
-async function loadConfigDirs() {
-  try {
-    const cd = await invoke<CfgDirs>("get_config_dirs");
-    claudeDirs.value = cd.claude;
-    codexDirs.value = cd.codex;
-    copilotDirs.value = cd.copilot ?? [];
-  } catch (e) {
-    console.error("get_config_dirs failed", e);
-  }
-}
-
-async function saveConfigDirs() {
-  cfgSaving.value = true;
-  cfgStatus.value = "";
-  try {
-    const cd = await invoke<CfgDirs>("set_config_dirs", {
-      claude: claudeDirs.value.map((s) => s.trim()).filter(Boolean),
-      codex: codexDirs.value.map((s) => s.trim()).filter(Boolean),
-      copilot: copilotDirs.value.map((s) => s.trim()).filter(Boolean),
-    });
-    claudeDirs.value = cd.claude;
-    codexDirs.value = cd.codex;
-    copilotDirs.value = cd.copilot;
-    cfgStatus.value = `Installed into ${cd.claude.length + cd.codex.length + cd.copilot.length} dir(s).`;
-  } catch (e) {
-    cfgStatus.value = `Failed: ${e}`;
-  } finally {
-    cfgSaving.value = false;
-  }
-}
-
-loadConfigDirs();
+// Deep-link target set by the caller (⌘P → "Keyboard Shortcuts" etc.).
+const active = ref(ui.settingsSection || "general");
 
 // ── Skills manager ────────────────────────────────────────────────────────────
 type SkillInfo = { name: string; description: string; dir: string; enabled: boolean };
@@ -1703,105 +1310,36 @@ watch(active, (id) => {
   if (id === "mcp" && mcpServers.value.length === 0) loadMcp();
 });
 
-const flagDraft = ref("");
-const iconPickerId = ref<string | null>(null);
-const showTemplatePicker = ref(false);
+// --- App keybindings (Keybindings section) ---
+const keys = useKeybindingsStore();
+const kbRecording = ref<string | null>(null);
 
-// --- Reorder (pointer-based) ---
-// HTML5 drag-and-drop is unreliable here: Tauri's WKWebView keeps its native
-// drag-drop handler on (for terminal file drops), which swallows the webview's
-// own `drop` events. Pointer events sidestep it. Drag the grip handle.
-const {
-  dragIdx: dragIndex,
-  overIdx: dragOverIndex,
-  down: onGripDown,
-} = usePointerReorder((from, to) => store.move(from, to));
-
-// --- Shortcut recorder ---
-const recordingId = ref<string | null>(null);
-
-function startRecording(id: string, e: MouseEvent) {
-  recordingId.value = recordingId.value === id ? null : id;
+function startKeyRecord(id: string, e: MouseEvent) {
+  kbRecording.value = kbRecording.value === id ? null : id;
   // WebKit doesn't focus a <button> on click, so its @keydown never fires.
-  // Focus it explicitly so the recorder can capture the next key combo.
-  if (recordingId.value === id) (e.currentTarget as HTMLElement)?.focus();
+  if (kbRecording.value === id) (e.currentTarget as HTMLElement)?.focus();
 }
 
-function onRecordKey(id: string, e: KeyboardEvent) {
-  if (recordingId.value !== id) return;
+function onKeyRecord(id: string, e: KeyboardEvent) {
+  if (kbRecording.value !== id) return;
   e.preventDefault();
   e.stopPropagation();
-  if (e.key === "Escape") {
-    recordingId.value = null;
+  if (e.key === "Escape") return void (kbRecording.value = null);
+  if (e.key === "Backspace" || e.key === "Delete") {
+    keys.set(id, "");
+    kbRecording.value = null;
     return;
   }
   const sc = eventToShortcut(e);
   if (!sc) return; // wait for a non-modifier key
-  store.update(id, { shortcut: sc });
-  recordingId.value = null;
+  keys.set(id, sc);
+  kbRecording.value = null;
 }
 
-function toggleIconPicker(id: string) {
-  iconPickerId.value = iconPickerId.value === id ? null : id;
-  flagEditId.value = null;
+async function openConfigFile() {
+  const path = await invoke<string>("config_file_path").catch(() => "");
+  if (path) invoke("open_path_in", { path, target: "editor" }).catch(() => {});
 }
-
-function addFromTemplate(t: typeof TEMPLATES[0]) {
-  store.addFromTemplate(t);
-}
-
-function toggleFlagEditor(id: string) {
-  if (flagEditId.value === id) {
-    flagEditId.value = null;
-    return;
-  }
-  const a = store.agents.find((x) => x.id === id);
-  flagDraft.value = argsToLines(a?.args ?? "");
-  flagEditId.value = id;
-}
-
-// Seed editor: split args on whitespace, one token per line.
-function argsToLines(args: string): string {
-  return args.trim().split(/\s+/).filter(Boolean).join("\n");
-}
-// Collapse lines back to a single args string (newlines + extra spaces -> single space).
-function linesToArgs(text: string): string {
-  return text.split("\n").map((l) => l.trim()).filter(Boolean).join(" ");
-}
-
-function onFlagInput(id: string, e: Event) {
-  flagDraft.value = (e.target as HTMLTextAreaElement).value;
-  store.update(id, { args: linesToArgs(flagDraft.value) });
-}
-
-const ICON_OPTIONS: { key: AgentIcon; label: string; component: unknown }[] = [
-  { key: "claude",        label: "Claude",          component: ClaudeIcon },
-  { key: "openai",        label: "OpenAI / Codex",  component: OpenAIIcon },
-  { key: "github-copilot",label: "GitHub Copilot",  component: GitHubCopilotIcon },
-  { key: "robot",         label: "Robot",            component: PhRobot },
-  { key: "sparkle",       label: "Sparkle",          component: PhSparkle },
-  { key: "code",          label: "Code",             component: PhCode },
-  { key: "git-branch",    label: "Git branch",       component: PhGitBranch },
-  { key: "terminal",      label: "Terminal",         component: PhTerminal },
-];
-
-interface TemplateConfig {
-  id: string;
-  name: string;
-  command: string;
-  args: string;
-  color: string;
-  icon: AgentIcon;
-}
-
-const TEMPLATES: TemplateConfig[] = [
-  { id: "tpl-claude",      name: "Claude Code",     command: "claude",        args: "--dangerously-skip-permissions", color: "#d97757", icon: "claude" },
-  { id: "tpl-claude-opus", name: "Claude (Opus)",   command: "claude",        args: "--model claude-opus-4-8 --dangerously-skip-permissions", color: "#f59e0b", icon: "claude" },
-  { id: "tpl-codex",       name: "Codex",           command: "codex",         args: "",                              color: "#34d399", icon: "openai" },
-  { id: "tpl-copilot",     name: "GitHub Copilot",  command: "copilot",       args: "",                              color: "#8957e5", icon: "github-copilot" },
-  { id: "tpl-aider",       name: "Aider",           command: "aider",         args: "",                              color: "#fbbf24", icon: "robot" },
-  { id: "tpl-gemini",      name: "Gemini CLI",      command: "gemini",        args: "",                              color: "#4285f4", icon: "sparkle" },
-];
 
 interface NavItem {
   id?: string;
@@ -1813,9 +1351,8 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: "general", label: "General", icon: PhSlidersHorizontal },
   { id: "workspaces", label: "Workspaces", icon: PhFolderOpen },
-  { id: "agents", label: "Agents", icon: PhRobot },
+  { id: "providers", label: "Providers", icon: PhRobot },
   { id: "scripts", label: "Scripts", icon: PhPlayCircle },
-  { id: "profiles", label: "Claude Profiles", icon: PhUserGear },
   { id: "skills", label: "Skills", icon: PhSparkle },
   { id: "mcp", label: "MCP Servers", icon: PhPlugsConnected },
   { divider: true },
@@ -1828,20 +1365,6 @@ const navItems: NavItem[] = [
   { id: "extensions", label: "Extensions", icon: PhPuzzlePiece },
   { id: "about", label: "About", icon: PhInfo },
 ];
-
-const iconMap = {
-  sparkle: PhSparkle,
-  code: PhCode,
-  "git-branch": PhGitBranch,
-  robot: PhRobot,
-  terminal: PhTerminal,
-  claude: ClaudeIcon,
-  openai: OpenAIIcon,
-  "github-copilot": GitHubCopilotIcon,
-};
-function iconFor(icon: AgentIcon) {
-  return iconMap[icon] ?? PhRobot;
-}
 
 const activeLabel = computed(
   () => navItems.find((i) => i.id === active.value)?.label ?? "",
@@ -1920,49 +1443,4 @@ async function copyToClipboard(text: string, label: string) {
   } catch { /* clipboard unavailable */ }
 }
 
-const SHORTCUT_GROUPS = [
-  {
-    label: "Global",
-    shortcuts: [
-      { keys: "⌘ ,",   desc: "Open Settings" },
-      { keys: "⌘ P",   desc: "Command Palette (Spotlight)" },
-      { keys: "⌘ /",   desc: "Toggle Keyboard Shortcut Cheatsheet" },
-      { keys: "Esc",   desc: "Close Settings / Cheatsheet" },
-    ],
-  },
-  {
-    label: "Tabs & Panes",
-    shortcuts: [
-      { keys: "⌘ T",   desc: "New tab" },
-      { keys: "⌘ W",   desc: "Close pane" },
-      { keys: "⌘ D",   desc: "Split pane horizontally" },
-      { keys: "⌘ ⇧ D", desc: "Split pane vertically" },
-    ],
-  },
-  {
-    label: "Terminal Input",
-    shortcuts: [
-      { keys: "⇧ ↵",  desc: "Insert newline (Claude multiline input)" },
-    ],
-  },
-  {
-    label: "Agents",
-    shortcuts: [
-      { keys: "⌘ ⇧ 1",  desc: "Launch Claude Code" },
-      { keys: "⌘ ⇧ 2",  desc: "Launch Codex" },
-      { keys: "⌘ ⇧ 3",  desc: "Launch GitHub Copilot" },
-      { keys: "⌘ ⇧ 4",  desc: "Launch Aider" },
-      { keys: "⌘ ⇧ 5",  desc: "Launch Cursor AI" },
-    ],
-  },
-  {
-    label: "Spotlight",
-    shortcuts: [
-      { keys: "↑ ↓",  desc: "Navigate results" },
-      { keys: "↵",    desc: "Activate selected item" },
-      { keys: "⌘ ↵",  desc: "Open in new tab" },
-      { keys: "Esc",  desc: "Close Spotlight" },
-    ],
-  },
-];
 </script>

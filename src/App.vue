@@ -9,7 +9,6 @@
       @toggle-sidebar="ui.toggleSidebar()"
       @back="ws.close()"
       @toggle-rightpanel="ui.toggleRightPanel()"
-      @open-settings="ui.openSettings()"
     />
     <Settings v-if="ui.settingsOpen" @close="ui.closeSettings()" />
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
@@ -56,14 +55,14 @@
       ref="spotlightRef"
       @launch="(cmd) => activeTerm()?.spawnAgent(cmd)"
       @new-terminal="activeTerm()?.addTab()"
-      @new-workspace="openNewWorkspace"
-      @open-settings="ui.openSettings()"
       @open-project-config="showProjectConfig = true"
       @open-browser="activeTerm()?.openBrowserTab()"
       @repaint="activeTerm()?.repaintAll()"
+      @split-terminal="activeTerm()?.splitPane('h')"
       @toggle-manager="openManagerPanel"
       @open-file="openSearchHit"
     />
+    <PathPicker />
     <ToastStack />
     <UpdateBanner />
     <DiagramModal v-if="diagramContent !== null" />
@@ -78,9 +77,9 @@
             <button class="cheatsheet-close" @click="cheatsheetOpen = false"><PhX :size="14" /></button>
           </div>
           <div class="cheatsheet-body">
-            <div v-for="group in CHEATSHEET_GROUPS" :key="group.label" class="cs-group">
+            <div v-for="group in cheatGroups" :key="group.label" class="cs-group">
               <div class="cs-group-label">{{ group.label }}</div>
-              <div v-for="s in group.shortcuts" :key="s.keys" class="cs-row">
+              <div v-for="s in group.shortcuts" :key="s.desc" class="cs-row">
                 <span class="cs-desc">{{ s.desc }}</span>
                 <span class="cs-keys">
                   <kbd v-for="k in s.keys.split(' ')" :key="k" class="cs-key">{{ k }}</kbd>
@@ -113,11 +112,14 @@ import WelcomeScreen from "@/components/WelcomeScreen.vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useGitStore } from "@/stores/git";
-import { useAgentsStore } from "@/stores/agents";
+import { useProvidersStore } from "@/stores/providers";
 import { useUpdateStore } from "@/stores/update";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { matchesShortcut } from "@/lib/shortcuts";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useKeybindingsStore } from "@/stores/keybindings";
+import { FIXED_SHORTCUTS } from "@/lib/keymap";
+import PathPicker from "@/components/PathPicker.vue";
+import { pickDir } from "@/lib/pickPath";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import DiagramModal from "@/components/DiagramModal.vue";
 import { useDiagram } from "@/composables/useDiagram";
@@ -139,7 +141,8 @@ const ws = useWorkspaceStore();
 const ui = useUIStore();
 const git = useGitStore();
 const { diagramContent } = useDiagram();
-const agents = useAgentsStore();
+const providers = useProvidersStore();
+const keys = useKeybindingsStore();
 const update = useUpdateStore();
 const tabsStore = useTerminalTabsStore();
 
@@ -149,7 +152,7 @@ const showWelcome = computed(() =>
 );
 
 // Screen stays mounted behind v-show, so re-focus its composer each time it shows.
-const welcomeEl = useTemplateRef<{ focus: () => void }>("welcomeEl");
+const welcomeEl = useTemplateRef<{ focus: () => void; cycleProvider: () => void }>("welcomeEl");
 watch(showWelcome, (on) => { if (on) nextTick(() => welcomeEl.value?.focus()); });
 
 const panelStyles = computed(() => ({
@@ -240,46 +243,20 @@ const spotlightRef = ref<InstanceType<typeof Spotlight> | null>(null);
 watch(spotlightRef, (v) => { if (v) ui.registerSpotlightApi({ show: (opts) => v.show(opts) }); });
 const cheatsheetOpen = ref(false);
 
-const CHEATSHEET_GROUPS = [
-  {
-    label: "Global",
-    shortcuts: [
-      { keys: "⌘ ,",   desc: "Settings" },
-      { keys: "⌘ P",   desc: "Command Palette" },
-      { keys: "⌘ J",   desc: "Toggle Manager" },
-      { keys: "⌘ /",   desc: "Keyboard Shortcuts" },
-      { keys: "⌘ ⇧ U", desc: "Jump to unread tab" },
-      { keys: "Esc",   desc: "Close overlay" },
-    ],
-  },
-  {
-    label: "Tabs & Panes",
-    shortcuts: [
-      { keys: "⌘ T",   desc: "New tab" },
-      { keys: "⌘ W",   desc: "Close pane" },
-      { keys: "⌘ D",   desc: "Split horizontal" },
-      { keys: "⌘ ⇧ D", desc: "Split vertical" },
-    ],
-  },
-  {
-    label: "Terminal",
-    shortcuts: [
-      { keys: "⇧ ↵",  desc: "Multiline input (Claude)" },
-    ],
-  },
-  {
-    label: "Projects",
-    shortcuts: [
-      { keys: "⌘ 1-9", desc: "Switch project" },
-    ],
-  },
-  {
-    label: "Agents",
-    shortcuts: [
-      { keys: "⌘ ⇧ 1-5", desc: "Launch agent (configurable)" },
-    ],
-  },
-];
+// Cheatsheet renders the live keybindings (so a rebind shows here too) plus the
+// handful of fixed range shortcuts that can't be expressed as one combo.
+const cheatGroups = computed(() => {
+  const groups = keys.groups.map((g) => ({
+    label: g.label,
+    shortcuts: g.commands.filter((c) => c.keys).map((c) => ({ keys: c.keys.split("").join(" "), desc: c.label })),
+  }));
+  for (const f of FIXED_SHORTCUTS) {
+    const g = groups.find((x) => x.label === f.group);
+    if (g) g.shortcuts.push({ keys: f.keys, desc: f.desc });
+    else groups.push({ label: f.group, shortcuts: [{ keys: f.keys, desc: f.desc }] });
+  }
+  return groups.filter((g) => g.shortcuts.length);
+});
 
 // One Terminal stays mounted per opened workspace; resolve the active one for
 // commands (Spotlight launch, new terminal).
@@ -305,10 +282,11 @@ provide('activeTerm', activeTerm);
 
 
 async function openNewWorkspace() {
-  const dir = await openDialog({ directory: true, multiple: false });
-  if (!dir || typeof dir !== "string") return;
+  const dir = await pickDir({ title: "Add project", start: "~/" });
+  if (!dir) return;
   const name = dir.split("/").filter(Boolean).pop() ?? dir;
-  await ws.create(name, dir);
+  const created = await ws.create(name, dir);
+  if (created) ws.open(created);
 }
 
 // Check for updates at startup (after a short delay so it doesn't compete with
@@ -377,6 +355,35 @@ onBeforeUnmount(() => {
   unlistenWorkspacesChanged?.();
 });
 
+// One handler per rebindable app-scope command; the keybindings store owns the
+// combos, so a rebind in Settings (or a hand-edit of config.json) takes effect
+// with no code change here.
+const KEY_ACTIONS: Record<string, () => void> = {
+  palette: () => spotlightRef.value?.show(),
+  settings: () => ui.toggleSettings(),
+  cheatsheet: () => { cheatsheetOpen.value = !cheatsheetOpen.value; },
+  sidebar: () => ui.toggleSidebar(),
+  manager: () => openManagerPanel(),
+  repaint: () => activeTerm()?.repaintAll(),
+  newProject: () => openNewWorkspace(),
+  pickProject: () => ui.pickProjectThenWelcome(),
+  switchProvider: () => welcomeEl.value?.cycleProvider?.(),
+  unread: jumpToUnread,
+};
+
+// ⌘⇧U across ALL workspaces (Terminal.vue handles the in-workspace case first).
+function jumpToUnread() {
+  for (const [wsId, wsTabs] of Object.entries(tabsStore.tabsByWs)) {
+    const reviewTab = wsTabs.find((t) => t.status === "review");
+    if (reviewTab) {
+      const targetWs = ws.workspaces.find((w) => w.id === Number(wsId));
+      if (targetWs) ws.open(targetWs);
+      tabsStore.activate(Number(wsId), reviewTab.id);
+      return;
+    }
+  }
+}
+
 function onKeydown(e: KeyboardEvent) {
   // Don't let agent-launch shortcuts fire while the user is typing in a text
   // field (chat textarea, rename input, …) unless a ⌘/⌃ modifier is held — a
@@ -389,64 +396,29 @@ function onKeydown(e: KeyboardEvent) {
   // Agent launch shortcuts (user-configured per agent). Checked first so a
   // bound combo wins; defaults use ⌘⇧1-5 to avoid the plain ⌘1-9 ws switch.
   if (!typing || e.metaKey || e.ctrlKey) {
-    for (const a of agents.agents) {
-      if (a.command.trim() && matchesShortcut(e, a.shortcut)) {
+    for (const a of providers.active) {
+      if (a.terminalShortcut && matchesShortcut(e, a.terminalShortcut)) {
         e.preventDefault();
-        activeTerm()?.spawnAgent(agents.commandLine(a));
+        activeTerm()?.spawnAgent(providers.commandLine(a));
         return;
       }
     }
   }
-  // ⌘⇧R — repaint terminals (un-scramble) even when xterm isn't focused.
-  // preventDefault to stop the webview hard-reloading on this combo.
-  if (e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey && (e.key === "R" || e.key === "r")) {
-    e.preventDefault();
-    activeTerm()?.repaintAll();
-    return;
-  }
-  // ⌘⇧O — project picker (Spotlight, scoped to projects) → Welcome composer
-  if (e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey && (e.key === "O" || e.key === "o")) {
-    e.preventDefault();
-    ui.pickProjectThenWelcome();
-    return;
-  }
-  // ⌘⇧U — jump to first unread (review) tab across ALL workspaces
-  if (e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey && e.key === "U") {
-    e.preventDefault();
-    for (const [wsId, wsTabs] of Object.entries(tabsStore.tabsByWs)) {
-      const reviewTab = wsTabs.find((t) => t.status === "review");
-      if (reviewTab) {
-        const targetWs = ws.workspaces.find((w) => w.id === Number(wsId));
-        if (targetWs) ws.open(targetWs);
-        tabsStore.activate(Number(wsId), reviewTab.id);
-        break;
-      }
+  for (const cmd of keys.inScope("app")) {
+    if (KEY_ACTIONS[cmd.id] && matchesShortcut(e, cmd.keys)) {
+      e.preventDefault();
+      KEY_ACTIONS[cmd.id]();
+      return;
     }
+  }
+  // ⌘1-9 project switch — a range, so not part of the rebindable registry.
+  if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+    e.preventDefault();
+    const target = ws.workspaces[parseInt(e.key) - 1];
+    if (target) ws.open(target);
     return;
   }
-  if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-    if (e.key === ",") {
-      e.preventDefault();
-      ui.toggleSettings();
-    } else if (e.key === "p") {
-      e.preventDefault();
-      spotlightRef.value?.show();
-    } else if (e.key === "/") {
-      e.preventDefault();
-      cheatsheetOpen.value = !cheatsheetOpen.value;
-    } else if (e.key === "b") {
-      e.preventDefault();
-      ui.toggleSidebar();
-    } else if (e.key === "j") {
-      e.preventDefault();
-      openManagerPanel();
-    } else if (/^[1-9]$/.test(e.key)) {
-      e.preventDefault();
-      const idx = parseInt(e.key) - 1;
-      const target = ws.workspaces[idx];
-      if (target) ws.open(target);
-    }
-  } else if (e.key === "Escape") {
+  if (e.key === "Escape") {
     if (cheatsheetOpen.value) {
       e.preventDefault();
       cheatsheetOpen.value = false;
@@ -500,6 +472,18 @@ function onKeydown(e: KeyboardEvent) {
   --color-input: var(--border);
   --color-ring: var(--accent);
   --radius: 0.375rem;
+}
+
+/* Window dragging under Wails. Wails reads the *computed* `--wails-draggable`
+   of the mousedown target; custom properties inherit, so the region opts in
+   and interactive descendants opt back out. The markup keeps Tauri's
+   `data-tauri-drag-region` / `[-webkit-app-region:no-drag]` names from the
+   Rust app — these two rules are the whole port. */
+[data-tauri-drag-region] {
+  --wails-draggable: drag;
+}
+[data-tauri-drag-region] :where(button, a, input, textarea, select, [role="button"], [class*="no-drag"]) {
+  --wails-draggable: no-drag;
 }
 
 /* MUST be @layer base, not unlayered: Tailwind v4's utilities live in

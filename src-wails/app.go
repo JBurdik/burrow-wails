@@ -30,7 +30,6 @@ type App struct {
 	httpSrv        *HTTPServer
 	httpSrvRunning bool
 
-	configDirs        *ConfigDirs
 	maxAgents         int
 	burrowMcpMaxDepth int
 }
@@ -166,6 +165,12 @@ func (a *App) startup(ctx context.Context) {
 	a.burrowBinDir = binDir
 	a.sessionDir = filepath.Join(dataDir, "sessions")
 	_ = os.MkdirAll(a.sessionDir, 0o755)
+
+	// Global status hooks: what gives every agent session (not just spawned
+	// ones) a status dot. Idempotent, so running it every launch also repairs
+	// a config the user or another tool edited.
+	installStatusHooks(dataDir)
+	installAgentDocs()
 
 	hookSrv, err := StartHookServer(ctx)
 	if err != nil {

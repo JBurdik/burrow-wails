@@ -2,32 +2,14 @@
   <Teleport to="body">
     <Transition name="spotlight">
       <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[165px]" @mousedown.self="close">
-        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-xl border border-[#2a2a2a] bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.6),0_1px_0_rgba(255,255,255,0.08)] [backdrop-filter:var(--blur-overlay,none)]">
-          <div class="flex h-14 shrink-0 items-center gap-3 border-b border-[#1e1e1e] px-4">
-            <button v-if="browsing" class="shrink-0 text-[#666] hover:text-[#e2e2e2]" title="Back" @click="exitBrowse">
-              <PhArrowLeft :size="16" />
-            </button>
-            <PhTerminal v-else :size="18" color="#ec4899" />
+        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-xl border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.55)] [backdrop-filter:var(--blur-overlay,none)]">
+          <div class="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+            <PhMagnifyingGlass :size="17" class="shrink-0 text-accent" />
             <input
-              v-if="browsing"
-              ref="browseRef"
-              v-model="browsePath"
-              placeholder="~/code/"
-              class="flex-1 border-0 bg-transparent font-mono text-[15px] text-[#e2e2e2] outline-none placeholder:text-[#444] [caret-color:#a78bfa]"
-              spellcheck="false"
-              autocomplete="off"
-              @keydown.esc.prevent="exitBrowse"
-              @keydown.enter.prevent="addProject"
-              @keydown.tab.prevent="completeSelected"
-              @keydown.up.prevent="move(-1)"
-              @keydown.down.prevent="move(1)"
-            />
-            <input
-              v-else
               ref="inputRef"
               v-model="query"
-              placeholder="run claude --"
-              class="flex-1 border-0 bg-transparent font-sans text-[15px] text-[#e2e2e2] outline-none placeholder:text-[#444] [caret-color:#ec4899]"
+              :placeholder="projectOnly ? 'Search projects…' : 'Search projects, agents, commands, files…'"
+              class="min-w-0 flex-1 border-0 bg-transparent font-sans text-[15px] text-foreground outline-none placeholder:text-muted-foreground/50 [caret-color:var(--accent)]"
               spellcheck="false"
               autocomplete="off"
               @keydown.esc.prevent="close"
@@ -35,63 +17,49 @@
               @keydown.up.prevent="move(-1)"
               @keydown.down.prevent="move(1)"
             />
-            <div
-              v-if="browsing"
-              class="shrink-0 cursor-pointer rounded border border-[#a78bfa33] bg-[#17141f] px-2 py-0.5 text-[11px] text-[#a78bfa]"
-              @click="addProject"
-            >Add ↵</div>
-            <div v-else class="shrink-0 rounded border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-0.5 text-[11px] text-[#555]">esc</div>
+            <kbd class="shrink-0 rounded border border-border bg-hover px-2 py-0.5 font-mono text-[11px] text-muted-foreground">esc</kbd>
           </div>
 
-          <div class="s-results flex-1 overflow-y-auto py-1.5">
+          <div ref="resultsRef" class="s-results flex-1 overflow-y-auto py-1.5">
             <template v-for="(section, si) in sections" :key="section.key">
-              <template v-if="section.items.length">
-                <div class="flex h-[26px] items-center px-4 font-sans text-[10px] font-semibold tracking-[0.05em] text-[#3a3a3a]">{{ section.label }}</div>
+              <div class="flex h-[26px] items-center px-4 font-sans text-[10px] font-semibold tracking-[0.06em] text-muted-foreground/60">{{ section.label }}</div>
+              <div
+                v-for="item in section.items"
+                :key="item.id"
+                :data-id="item.id"
+                class="mx-1 flex h-[46px] cursor-pointer items-center gap-3 rounded-md px-3 transition-colors duration-75"
+                :class="selectedId === item.id ? 'bg-selected' : 'hover:bg-hover'"
+                @mouseenter="selectedId = item.id"
+                @click="item.action()"
+              >
                 <div
-                  v-for="item in section.items"
-                  :key="item.id"
-                  class="mx-1 flex h-[46px] cursor-pointer items-center gap-3 rounded-md px-3 transition-colors duration-75"
-                  :style="{ background: selectedId === item.id ? item.iconBg : 'transparent' }"
-                  @mouseenter="selectedId = item.id"
-                  @click="runItem(item)"
+                  class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] border"
+                  :style="{ background: tint(item.color), borderColor: `${item.color}33` }"
                 >
-                  <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] border border-transparent" :style="{ background: item.iconBg, borderColor: item.iconBorder }">
-                    <component :is="item.icon" :size="14" :color="item.iconColor" />
-                  </div>
-                  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span class="truncate font-sans text-[13px] font-medium" :style="{ color: item.dim ? '#999' : '#e8e8e8' }">{{ item.title }}</span>
-                    <span v-if="item.desc" class="truncate font-mono text-[11px] text-[#383838]">{{ item.desc }}</span>
-                  </div>
-                  <div
-                    v-if="item.shortcut"
-                    class="shrink-0 rounded border border-[#222] bg-[#161616] px-2 py-0.5 font-sans text-[11px] text-[#444] transition-all duration-75"
-                    :style="selectedId === item.id && !item.dim
-                      ? { background: item.iconBg, borderColor: item.iconBorder, color: item.iconColor }
-                      : {}"
-                  >{{ item.shortcut }}</div>
+                  <component :is="item.icon" :size="14" :color="item.color" />
                 </div>
-                <div v-if="si < sections.length - 1" class="my-1 h-px bg-[#1a1a1a]" />
-              </template>
+                <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span class="truncate font-sans text-[13px] font-medium text-foreground">{{ item.title }}</span>
+                  <span v-if="item.desc" class="truncate font-mono text-[11px] text-muted-foreground/70">{{ item.desc }}</span>
+                </div>
+                <span v-if="item.badge" class="shrink-0 rounded border border-accent/25 bg-accent/10 px-1.5 py-0.5 font-sans text-[10px] text-accent">{{ item.badge }}</span>
+                <kbd
+                  v-if="item.shortcut"
+                  class="shrink-0 rounded border border-border bg-hover px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                >{{ item.shortcut }}</kbd>
+              </div>
+              <div v-if="si < sections.length - 1" class="my-1 h-px bg-border/60" />
             </template>
+            <div v-if="!sections.length" class="px-4 py-6 text-center font-sans text-[12px] text-muted-foreground/60">
+              No matches
+            </div>
           </div>
 
-          <div v-if="browsing" class="flex h-9 shrink-0 items-center gap-4 border-t border-[#1e1e1e] bg-[#0d0d0d] px-4">
-            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↑↓</span><span>navigate</span></div>
-            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">⇥</span><span>enter dir</span></div>
-            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↵</span><span>add project</span></div>
+          <div class="flex h-9 shrink-0 items-center gap-4 border-t border-border bg-base px-4 text-[11px] text-muted-foreground/70">
+            <span><kbd class="s-key">↑↓</kbd> navigate</span>
+            <span><kbd class="s-key">↵</kbd> run</span>
             <div class="flex-1" />
-            <div class="truncate font-mono text-[11px] text-[#333]">{{ browseError || expanded }}</div>
-          </div>
-          <div v-else class="flex h-9 shrink-0 items-center gap-4 border-t border-[#1e1e1e] bg-[#0d0d0d] px-4">
-            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↑↓</span><span>navigate</span></div>
-            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">↵</span><span>run</span></div>
-            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">⌘↵</span><span>new tab</span></div>
-            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]"><span class="s-key-sm rounded border border-[#252525] bg-[#161616] px-1.5 py-0.5 text-[11px] text-[#555]">⇥</span><span>complete</span></div>
-            <div class="flex-1" />
-            <div class="flex items-center gap-1.5 font-sans text-[11px] text-[#333]">
-              <PhSparkle :size="11" color="#ec4899" />
-              <span>Claude Code</span>
-            </div>
+            <span class="truncate font-mono text-muted-foreground/50">{{ wsStore.active?.name ?? "no project" }}</span>
           </div>
         </div>
       </div>
@@ -104,31 +72,43 @@ import { ref, computed, watch, nextTick } from "vue";
 import {
   PhTerminal, PhSparkle, PhCode, PhGitBranch, PhRobot,
   PhFolderOpen, PhGear, PhPlus, PhColumns, PhPalette, PhKeyboard, PhGlobe, PhPlayCircle,
-  PhFolder, PhArrowLeft, PhArrowUUpLeft, PhFileText, PhMagnifyingGlass,
+  PhFileText, PhMagnifyingGlass, PhArrowsClockwise,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
-import { useAgentsStore } from "@/stores/agents";
+import { useProvidersStore } from "@/stores/providers";
 import { useScriptsStore } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
+import { useKeybindingsStore } from "@/stores/keybindings";
+import { pickDir } from "@/lib/pickPath";
 import type { Component } from "vue";
 
 const emit = defineEmits<{
   launch: [cmd: string];
   newTerminal: [];
-  newWorkspace: [];
-  openSettings: [];
   openProjectConfig: [];
   openBrowser: [];
   repaint: [];
   toggleManager: [];
+  splitTerminal: [];
   openFile: [path: string, line: number];
 }>();
+
+const providers = useProvidersStore();
+const scriptsStore = useScriptsStore();
+const wsStore = useWorkspaceStore();
+const keys = useKeybindingsStore();
+const ui = useUIStore();
 
 const isOpen = ref(false);
 const query = ref("");
 const selectedId = ref("");
 const inputRef = ref<HTMLInputElement | null>(null);
+const resultsRef = ref<HTMLElement | null>(null);
+
+// ⌘⇧O / Sidebar "New chat" open the palette scoped to just projects — pick
+// one, land on the Welcome composer for it instead of jumping into a chat tab.
+const projectOnly = ref(false);
 
 // --- workspace search: rg over the active project, debounced per keystroke.
 // ponytail: no index, no cache — one shell-out is faster than keeping an index
@@ -142,7 +122,7 @@ watch(query, (q) => {
   clearTimeout(searchTimer);
   const term = q.trim();
   const cwd = wsStore.active?.path;
-  if (term.length < 2 || !cwd || browsing.value) return (hits.value = []);
+  if (term.length < 2 || !cwd || projectOnly.value) return (hits.value = []);
   const seq = ++searchSeq;
   searchTimer = window.setTimeout(async () => {
     const found = await invoke<SearchHit[]>("search_files", { cwd, query: term, limit: 24 }).catch(() => []);
@@ -150,101 +130,6 @@ watch(query, (q) => {
     if (seq === searchSeq) hits.value = found;
   }, 140);
 });
-
-function openHit(hit: SearchHit) {
-  emit("openFile", hit.path, hit.line);
-  close();
-}
-
-// --- directory browse mode (t3code-style "Add project" without a native dialog)
-const browsing = ref(false);
-const browsePath = ref("~/");
-const browseRef = ref<HTMLInputElement | null>(null);
-const browseEntries = ref<string[]>([]);
-const browseError = ref("");
-let home = "";
-
-// The input holds a path; everything after the last "/" filters the listing of
-// the dir before it — so typing and navigating are the same gesture.
-const browseDir = computed(() => browsePath.value.slice(0, browsePath.value.lastIndexOf("/") + 1) || "~/");
-const browseFilter = computed(() => browsePath.value.slice(browsePath.value.lastIndexOf("/") + 1).toLowerCase());
-const expanded = computed(() => expand(browsePath.value));
-
-function expand(p: string) {
-  return p.startsWith("~") ? home + p.slice(1) : p;
-}
-
-async function loadDir(dir: string) {
-  browseError.value = "";
-  try {
-    // The Go backend serializes `isDir`; the older Rust payload used `is_dir`.
-    const entries = await invoke<{ name: string; is_dir?: boolean; isDir?: boolean }[]>("read_dir_shallow", { path: expand(dir) });
-    browseEntries.value = entries
-      .filter((e) => (e.is_dir ?? e.isDir) && !e.name.startsWith("."))
-      .map((e) => e.name)
-      .sort((a, b) => a.localeCompare(b));
-  } catch (e) {
-    browseEntries.value = [];
-    browseError.value = String(e);
-  }
-}
-
-watch(browseDir, (dir) => { if (browsing.value) loadDir(dir); });
-
-async function enterBrowse() {
-  if (!home) {
-    // ponytail: no dedicated home-dir binding — derive it from the Claude config dir.
-    const dirs = await invoke<{ claude: string }>("get_config_dirs").catch(() => null);
-    home = dirs?.claude.replace(/\/\.claude\/?$/, "") ?? "";
-  }
-  browsing.value = true;
-  browsePath.value = "~/";
-  await loadDir("~/");
-  nextTick(() => { browseRef.value?.focus(); selectFirst(); });
-}
-
-function exitBrowse() {
-  browsing.value = false;
-  nextTick(() => { inputRef.value?.focus(); selectFirst(); });
-}
-
-function descend(name: string) {
-  browsePath.value = name === ".." ? parentOf(browseDir.value) : browseDir.value + name + "/";
-  nextTick(() => { browseRef.value?.focus(); selectFirst(); });
-}
-
-function parentOf(dir: string) {
-  const trimmed = dir.replace(/\/$/, "");
-  const cut = trimmed.lastIndexOf("/");
-  return cut <= 0 ? "/" : trimmed.slice(0, cut + 1);
-}
-
-function completeSelected() {
-  const item = flatItems.value.find((i) => i.id === selectedId.value);
-  if (item?.id.startsWith("dir-")) descend(item.id.slice(4));
-}
-
-async function addProject() {
-  const path = expand(browsePath.value).replace(/\/$/, "");
-  if (!path) return;
-  const name = path.split("/").filter(Boolean).pop() ?? path;
-  try {
-    const ws = await wsStore.create(name, path);
-    wsStore.open(ws);
-    close();
-  } catch (e) {
-    browseError.value = String(e);
-  }
-}
-
-const agentsStore = useAgentsStore();
-const scriptsStore = useScriptsStore();
-const wsStore = useWorkspaceStore();
-const ui = useUIStore();
-
-// ⌘⇧O / Sidebar "New chat" open the palette scoped to just projects — pick
-// one, land on the Welcome composer for it instead of jumping into a chat tab.
-const projectOnly = ref(false);
 
 const ICON_MAP: Record<string, Component> = {
   sparkle: PhSparkle,
@@ -254,11 +139,10 @@ const ICON_MAP: Record<string, Component> = {
   terminal: PhTerminal,
 };
 
-function hexBg(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgb(${Math.round(r * 0.11)},${Math.round(g * 0.11)},${Math.round(b * 0.11)})`;
+// Icon-chip background: the accent colour at ~11% over the panel.
+function tint(hex: string): string {
+  if (!hex.startsWith("#") || hex.length < 7) return "var(--bg-hover)";
+  return `${hex}1f`;
 }
 
 interface SpotlightItem {
@@ -266,167 +150,125 @@ interface SpotlightItem {
   title: string;
   desc?: string;
   icon: Component;
-  iconColor: string;
-  iconBg: string;
-  iconBorder: string;
+  color: string;
   shortcut?: string;
-  dim: boolean;
+  badge?: string;
   action: () => void;
 }
 
-const sections = computed(() => {
-  if (browsing.value) {
-    const items: SpotlightItem[] = [
-      { name: "..", up: true },
-      ...browseEntries.value.filter((n) => !browseFilter.value || n.toLowerCase().includes(browseFilter.value)).map((n) => ({ name: n, up: false })),
-    ].map(({ name, up }) => ({
-      id: `dir-${name}`,
-      title: name,
-      icon: (up ? PhArrowUUpLeft : PhFolder) as Component,
-      iconColor: "#a78bfa",
-      iconBg: hexBg("#a78bfa"),
-      iconBorder: "#a78bfa33",
-      dim: true,
-      action: () => descend(name),
-    }));
-    return [{ key: "dirs", label: "DIRECTORIES", items }];
-  }
+const MUTED = "#8b8b8b";
+const q = computed(() => query.value.toLowerCase().trim());
+const hasQuery = computed(() => q.value.length > 0);
 
-  const q = query.value.toLowerCase().trim();
+function hit(...fields: (string | undefined)[]) {
+  return !hasQuery.value || fields.some((f) => f?.toLowerCase().includes(q.value));
+}
 
-  if (projectOnly.value) {
-    const items: SpotlightItem[] = [...wsStore.topLevel]
-      .sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))
-      .filter((w) => !q || w.name.toLowerCase().includes(q) || w.path.toLowerCase().includes(q))
-      .map((w) => ({
-        id: `ws-${w.id}`,
-        title: w.name,
-        desc: w.path,
-        icon: PhFolderOpen as Component,
-        iconColor: "#a78bfa",
-        iconBg: hexBg("#a78bfa"),
-        iconBorder: "#a78bfa33",
-        dim: false,
-        action: () => { wsStore.open(w); close(); ui.openWelcome(); },
-      }));
-    return [{ key: "projects", label: "PROJECTS", items }];
-  }
-
-  const agentItems: SpotlightItem[] = agentsStore.agents
-    .filter((a) => !q || a.name.toLowerCase().includes(q) || agentsStore.commandLine(a).includes(q))
-    .map((a, i) => ({
-      id: `agent-${a.id}`,
-      title: `Run ${a.name}`,
-      desc: agentsStore.commandLine(a),
-      icon: ICON_MAP[a.icon] ?? PhRobot,
-      iconColor: a.color,
-      iconBg: hexBg(a.color),
-      iconBorder: `${a.color}33`,
-      shortcut: a.shortcut || undefined,
-      dim: i !== 0,
-      action: () => { emit("launch", agentsStore.commandLine(a)); close(); },
-    }));
-
-  const scriptItems: SpotlightItem[] = scriptsStore.scriptsFor(wsStore.active?.path)
-    .filter((s) => scriptsStore.commandLine(s) && (!q || s.name.toLowerCase().includes(q) || scriptsStore.commandLine(s).toLowerCase().includes(q)))
-    .map((s) => {
-      const color = s.color || "#34d399";
-      return {
-        id: `script-${s.id}`,
-        title: `Run ${s.name}`,
-        desc: scriptsStore.commandLine(s),
-        icon: PhPlayCircle as Component,
-        iconColor: color,
-        iconBg: hexBg(color),
-        iconBorder: `${color}33`,
-        shortcut: undefined,
-        dim: true,
-        action: () => { emit("launch", scriptsStore.commandLine(s)); close(); },
-      };
-    });
-
-  const recentWorkspaces = [...wsStore.workspaces]
-    .sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))
-    .slice(0, 3)
-    .filter((w) => !q || w.name.toLowerCase().includes(q) || w.path.toLowerCase().includes(q));
-
-  const recentItems: SpotlightItem[] = [
-    ...recentWorkspaces.map((w) => ({
+// Projects, most useful first: the active one, then by last opened. The active
+// project heads the list so ⌘⇧O → ↵ starts a thread where you already are.
+const projectItems = computed<SpotlightItem[]>(() => {
+  const activeId = wsStore.active?.id;
+  return [...wsStore.topLevel]
+    .sort((a, b) => {
+      if (a.id === activeId) return -1;
+      if (b.id === activeId) return 1;
+      return (b.last_opened ?? 0) - (a.last_opened ?? 0);
+    })
+    .filter((w) => hit(w.name, w.path))
+    .map((w) => ({
       id: `ws-${w.id}`,
       title: w.name,
       desc: w.path,
       icon: PhFolderOpen as Component,
-      iconColor: "#a78bfa",
-      iconBg: hexBg("#a78bfa"),
-      iconBorder: "#a78bfa33",
-      shortcut: undefined,
-      dim: true,
-      action: () => { wsStore.open(w); close(); },
-    })),
-    ...([
-      { id: "cmd-manager", title: "Toggle Manager", icon: PhSparkle as Component, color: "#ec4899", shortcut: "⌘J", action: () => { emit("toggleManager"); close(); } },
-      { id: "cmd-settings", title: "Settings → Agents", icon: PhGear as Component, color: "#555555", shortcut: undefined, action: () => { emit("openSettings"); close(); } },
-      { id: "cmd-newterm", title: "New Terminal", icon: PhTerminal as Component, color: "#34d399", shortcut: "⌃`", action: () => { emit("newTerminal"); close(); } },
-      { id: "cmd-browser", title: "Open Browser Tab", icon: PhGlobe as Component, color: "#60a5fa", shortcut: undefined, action: () => { emit("openBrowser"); close(); } },
-      { id: "cmd-repaint", title: "Repaint Terminal (un-scramble)", icon: PhTerminal as Component, color: "#fbbf24", shortcut: "⌘⇧R", action: () => { emit("repaint"); close(); } },
-    ] as const)
-      .filter(({ title }) => !q || title.toLowerCase().includes(q))
-      .map((c) => ({
-        id: c.id,
-        title: c.title,
-        icon: c.icon,
-        iconColor: c.color,
-        iconBg: hexBg(c.color),
-        iconBorder: `${c.color}33`,
-        shortcut: c.shortcut,
-        dim: true,
-        action: c.action,
-      })),
-  ];
-
-  const cmdDefs: { id: string; title: string; icon: Component; shortcut?: string; action: () => void }[] = [
-    { id: "cmd-new-ws", title: "New Workspace", icon: PhPlus as Component, action: () => { emit("newWorkspace"); close(); } },
-    { id: "cmd-add-project", title: "Add Project…", icon: PhFolderOpen as Component, action: enterBrowse },
-    { id: "cmd-project-config", title: "Project Settings…", icon: PhGear as Component, action: () => { emit("openProjectConfig"); close(); } },
-    { id: "cmd-split", title: "Split Terminal", icon: PhColumns as Component, shortcut: "⌘\\", action: () => close() },
-    { id: "cmd-theme", title: "Change Theme", icon: PhPalette as Component, action: () => close() },
-    { id: "cmd-keys", title: "Keyboard Shortcuts", icon: PhKeyboard as Component, shortcut: "⌘K ⌘S", action: () => close() },
-  ];
-
-  const commandItems: SpotlightItem[] = cmdDefs
-    .filter((c) => !q || c.title.toLowerCase().includes(q))
-    .map((c) => ({
-      id: c.id,
-      title: c.title,
-      icon: c.icon,
-      iconColor: "#555555",
-      iconBg: "#161616",
-      iconBorder: "#55555533",
-      shortcut: c.shortcut,
-      dim: true,
-      action: c.action,
+      color: "#a78bfa",
+      badge: w.id === activeId ? "current" : undefined,
+      action: () => {
+        wsStore.open(w);
+        close();
+        if (projectOnly.value) ui.openWelcome();
+      },
     }));
+});
 
-  const fileItems: SpotlightItem[] = hits.value.map((h, i) => ({
+const agentItems = computed<SpotlightItem[]>(() =>
+  providers.active
+    .filter((a) => providers.commandLine(a) && hit(a.name, providers.commandLine(a)))
+    .map((a) => ({
+      id: `agent-${a.id}`,
+      title: `Run ${a.name}`,
+      desc: providers.commandLine(a),
+      icon: ICON_MAP[a.icon] ?? PhRobot,
+      color: a.color,
+      shortcut: a.terminalShortcut || undefined,
+      action: () => { emit("launch", providers.commandLine(a)); close(); },
+    })),
+);
+
+const scriptItems = computed<SpotlightItem[]>(() =>
+  scriptsStore.scriptsFor(wsStore.active?.path)
+    .filter((s) => scriptsStore.commandLine(s) && hit(s.name, scriptsStore.commandLine(s)))
+    .map((s) => ({
+      id: `script-${s.id}`,
+      title: `Run ${s.name}`,
+      desc: scriptsStore.commandLine(s),
+      icon: PhPlayCircle as Component,
+      color: s.color || "#34d399",
+      action: () => { emit("launch", scriptsStore.commandLine(s)); close(); },
+    })),
+);
+
+// Commands carry their live binding from the keybindings store, so what the
+// palette prints is always what actually fires (incl. user rebinds).
+const commandItems = computed<SpotlightItem[]>(() => {
+  const defs: { id: string; title: string; icon: Component; color: string; keyId?: string; action: () => void }[] = [
+    { id: "cmd-newterm", title: "New Terminal Tab", icon: PhTerminal as Component, color: "#34d399", keyId: "newTab", action: () => { emit("newTerminal"); close(); } },
+    { id: "cmd-split", title: "Split Terminal", icon: PhColumns as Component, color: "#34d399", keyId: "splitH", action: () => { emit("splitTerminal"); close(); } },
+    { id: "cmd-browser", title: "New Browser Tab", icon: PhGlobe as Component, color: "#60a5fa", action: () => { emit("openBrowser"); close(); } },
+    { id: "cmd-manager", title: "Toggle Manager", icon: PhSparkle as Component, color: "#ec4899", keyId: "manager", action: () => { emit("toggleManager"); close(); } },
+    { id: "cmd-new-project", title: "New Project…", icon: PhPlus as Component, color: "#a78bfa", keyId: "newProject", action: newProject },
+    { id: "cmd-project-config", title: "Project Settings…", icon: PhGear as Component, color: MUTED, action: () => { emit("openProjectConfig"); close(); } },
+    { id: "cmd-settings", title: "Settings", icon: PhGear as Component, color: MUTED, keyId: "settings", action: () => { openSettingsAt("general"); } },
+    { id: "cmd-theme", title: "Change Theme", icon: PhPalette as Component, color: "#fbbf24", action: () => { openSettingsAt("appearance"); } },
+    { id: "cmd-keys", title: "Keyboard Shortcuts", icon: PhKeyboard as Component, color: MUTED, keyId: "cheatsheet", action: () => { openSettingsAt("keybindings"); } },
+    { id: "cmd-repaint", title: "Repaint Terminals (un-scramble)", icon: PhArrowsClockwise as Component, color: "#fbbf24", keyId: "repaint", action: () => { emit("repaint"); close(); } },
+  ];
+  return defs
+    .filter((c) => hit(c.title))
+    .map((c) => ({ ...c, shortcut: c.keyId ? keys.shortcut(c.keyId) || undefined : undefined }));
+});
+
+const fileItems = computed<SpotlightItem[]>(() =>
+  hits.value.map((h, i) => ({
     id: `hit-${i}`,
     title: h.line ? `${h.path}:${h.line}` : h.path,
     desc: h.text || undefined,
     icon: (h.line ? PhMagnifyingGlass : PhFileText) as Component,
-    iconColor: "#60a5fa",
-    iconBg: hexBg("#60a5fa"),
-    iconBorder: "#60a5fa33",
-    shortcut: undefined,
-    dim: true,
-    action: () => openHit(h),
-  }));
+    color: "#60a5fa",
+    action: () => { emit("openFile", h.path, h.line); close(); },
+  })),
+);
 
-  return [
-    { key: "agents", label: "AGENTS", items: agentItems },
-    { key: "scripts", label: "SCRIPTS", items: scriptItems },
-    { key: "recent", label: "RECENT", items: recentItems },
-    { key: "commands", label: "COMMANDS", items: commandItems },
-    { key: "files", label: "IN FILES", items: fileItems },
-  ].filter((s) => s.items.length > 0);
+// Empty query = context only (this project's agents + your projects). Commands,
+// scripts and file hits appear once you type — that's what killed the wall of
+// unrelated rows the palette used to open with.
+const sections = computed(() => {
+  if (projectOnly.value) {
+    return [{ key: "projects", label: "PROJECTS", items: projectItems.value }]
+      .filter((s) => s.items.length);
+  }
+  const all = hasQuery.value
+    ? [
+        { key: "agents", label: "AGENTS", items: agentItems.value },
+        { key: "projects", label: "PROJECTS", items: projectItems.value },
+        { key: "scripts", label: "SCRIPTS", items: scriptItems.value },
+        { key: "commands", label: "COMMANDS", items: commandItems.value },
+        { key: "files", label: "IN FILES", items: fileItems.value },
+      ]
+    : [
+        { key: "agents", label: "RUN AGENT", items: agentItems.value.slice(0, 5) },
+        { key: "projects", label: "PROJECTS", items: projectItems.value.slice(0, 5) },
+      ];
+  return all.filter((s) => s.items.length);
 });
 
 const flatItems = computed(() => sections.value.flatMap((s) => s.items));
@@ -435,26 +277,46 @@ function selectFirst() {
   selectedId.value = flatItems.value[0]?.id ?? "";
 }
 
-watch(query, () => nextTick(selectFirst));
+watch([query, sections], () => {
+  if (!flatItems.value.some((i) => i.id === selectedId.value)) selectFirst();
+});
 
 function move(dir: 1 | -1) {
   const items = flatItems.value;
   const idx = items.findIndex((i) => i.id === selectedId.value);
   const next = Math.max(0, Math.min(items.length - 1, idx + dir));
   selectedId.value = items[next]?.id ?? "";
+  // Keyboard-only: hovering also sets selectedId, and scrolling there would
+  // fight the pointer.
+  nextTick(() => {
+    resultsRef.value
+      ?.querySelector(`[data-id="${CSS.escape(selectedId.value)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  });
 }
 
 function activate() {
   flatItems.value.find((i) => i.id === selectedId.value)?.action();
 }
 
-function runItem(item: SpotlightItem) {
-  item.action();
+function openSettingsAt(section: string) {
+  ui.openSettings(section);
+  close();
+}
+
+// Project creation goes through the in-app directory picker (PathPicker.vue) —
+// no native dialog anywhere, and ⌘↵ in the picker creates the folder first.
+async function newProject() {
+  close();
+  const path = await pickDir({ title: "Add project", start: "~/" });
+  if (!path) return;
+  const name = path.split("/").filter(Boolean).pop() ?? path;
+  const ws = await wsStore.create(name, path);
+  if (ws) wsStore.open(ws);
 }
 
 function show(opts?: { projectOnly?: boolean }) {
   isOpen.value = true;
-  browsing.value = false;
   projectOnly.value = !!opts?.projectOnly;
   query.value = "";
   hits.value = [];
@@ -468,15 +330,25 @@ function close() {
   isOpen.value = false;
 }
 
-defineExpose({ show, close });
+defineExpose({ show, close, newProject });
 </script>
 
 <style scoped>
+.s-key {
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 /* Custom scrollbar (::-webkit-scrollbar has no Tailwind utility) and the
    Vue <Transition> phase classes stay as real CSS. */
 .s-results::-webkit-scrollbar { width: 4px; }
 .s-results::-webkit-scrollbar-track { background: transparent; }
-.s-results::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+.s-results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 .spotlight-enter-active,
 .spotlight-leave-active {

@@ -110,22 +110,6 @@ export namespace main {
 	        this.available = source["available"];
 	    }
 	}
-	export class ConfigDirs {
-	    claude: string;
-	    codex: string;
-	    copilot: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ConfigDirs(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.claude = source["claude"];
-	        this.codex = source["codex"];
-	        this.copilot = source["copilot"];
-	    }
-	}
 	export class DirEntry {
 	    name: string;
 	    isDir: boolean;
@@ -178,6 +162,24 @@ export namespace main {
 	        this.token = source["token"];
 	        this.pairCode = source["pairCode"];
 	        this.pairLocked = source["pairLocked"];
+	    }
+	}
+	export class ProviderProbe {
+	    installed: boolean;
+	    path: string;
+	    version: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderProbe(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.path = source["path"];
+	        this.version = source["version"];
+	        this.error = source["error"];
 	    }
 	}
 	export class SearchHit {

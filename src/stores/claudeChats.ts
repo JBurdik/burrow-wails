@@ -5,7 +5,7 @@ import { createActor } from "xstate";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { agentStatusMachine } from "@/machines/agentStatus";
 import type { AgentStatusEvent } from "@/machines/agentStatus";
-import { useChatAgentsStore, type ChatTransport } from "@/stores/chatAgents";
+import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 export interface ClaudeSession {
@@ -124,7 +124,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     const id = nextId++;
     const agentKind = opts?.agentKind ?? 'claude';
     const transport: ChatTransport =
-      useChatAgentsStore().byId(agentKind)?.transport ?? (agentKind === 'claude' ? 'claude-cli' : 'acp');
+      (() => { const a = useProvidersStore().byId(agentKind); return a ? chatTransportFor(a) : (agentKind === 'claude' ? 'claude-cli' : 'acp'); })();
     const session: ClaudeSession = {
       id,
       workspaceId,

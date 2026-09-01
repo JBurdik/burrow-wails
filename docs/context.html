@@ -138,10 +138,11 @@
     <div class="card">
       <h3>Spotlight (⌘P)</h3>
       <ul>
-        <li>Command palette overlay</li>
-        <li>Launch agent by name</li>
-        <li>Open new terminal / workspace</li>
-        <li>Open settings</li>
+        <li>Command palette overlay, themed via CSS vars (no hardcoded hexes)</li>
+        <li>Empty query = context only: this project's agents + projects (active project first, then last opened)</li>
+        <li>Typing adds scripts, commands and <code>rg</code> file hits</li>
+        <li>Each command prints its live binding from the keybindings store</li>
+        <li>New Project… opens <code>PathPicker.vue</code> (in-app browse, never the native panel)</li>
       </ul>
     </div>
     <div class="card">
@@ -167,7 +168,7 @@
       <ul>
         <li>Agents run <code>burrow spawn claude "…"</code> to open a new tab and delegate work (fire-and-forget)</li>
         <li><code>burrow collect [token…]</code> pulls finished sub-agents' results <strong>without blocking</strong> (consumes each once); <code>burrow sessions</code> lists live tabs; <code>burrow wait</code> is the legacy blocking variant</li>
-        <li>Soft per-workspace cap (Settings → Agents → Max concurrent sub-agents, default 3) the <code>/burrow</code> skill respects</li>
+        <li>Soft per-workspace cap (Settings → Providers → Max concurrent sub-agents, default 3) the <code>/burrow</code> skill respects</li>
         <li>Transport = files in <code>$BURROW_SESSION_DIR</code> (no tty/socket); the app polls for requests</li>
         <li>Subscription-safe: interactive only, never <code>claude -p</code></li>
         <li><a href="burrow.html" style="color:var(--accent)">Full reference →</a></li>
@@ -191,7 +192,7 @@
     </div>
   </div>
 
-  <h2>Default Agents</h2>
+  <h2>Default Providers</h2>
   <div class="card" style="padding:8px 16px;">
     <div class="agent-row">
       <div class="dot" style="background:#a78bfa"></div>
@@ -234,9 +235,12 @@
       <tr><td>src/components/Spotlight.vue</td><td>⌘P command palette overlay</td></tr>
       <tr><td>src/components/Sidebar.vue</td><td>Workspace list; folder picker dialog; create/remove workspaces</td></tr>
       <tr><td>src/components/RightPanel.vue</td><td>Tab panel: file explorer + git status/diff/stage</td></tr>
-      <tr><td>src/components/Settings.vue</td><td>Agent config editor (add/edit/remove/reset agents) + Notifications panel (sound prefs, custom-file picker)</td></tr>
+      <tr><td>src/components/Settings.vue</td><td>Settings shell: nav + every section. Providers hosts <code>ProvidersPanel.vue</code>; the old separate "Agents" and "Claude Profiles" sections are gone</td></tr>
       <tr><td>src/stores/workspace.ts</td><td>Pinia: workspaces list, active, opened — invoke list/create/remove/touch</td></tr>
-      <tr><td>src/stores/agents.ts</td><td>Pinia: agent configs — localStorage persistence, CRUD, commandLine()</td></tr>
+      <tr><td>src/stores/providers.ts</td><td>Pinia: provider instances — one list replacing the old agents / chatAgents / claudeProfiles stores. CRUD, enable toggle, <code>byId</code>/<code>resolve</code> (honours the migration alias map), <code>commandLine()</code>, <code>probe()</code>/<code>probeAll()</code></td></tr>
+      <tr><td>src/lib/providers.ts</td><td>Provider catalog (claude, codex, gemini, opencode, copilot, aider, cursor, custom) + the <code>ProviderInstance</code> shape and its helpers (<code>newInstance</code>, <code>binaryFor</code>, <code>commandLine</code>, <code>chatTransportFor</code>)</td></tr>
+      <tr><td>src/lib/providersMigrate.ts</td><td>One-time fold of <code>agentPresets</code> + <code>chatAgentPresets</code> + <code>claudeProfiles</code> into provider instances. Deterministic, id-preserving, alias-recording — see <code>providersMigrate.test.ts</code></td></tr>
+      <tr><td>src/components/ProvidersPanel.vue</td><td>Settings → Providers: instance rail (version / installed / enable toggle) + Configuration|Models detail and an Advanced block</td></tr>
       <tr><td>src/stores/ui.ts</td><td>Pinia: settings open, font/scale prefs, <strong>color theme</strong>, <strong>notification-sound prefs</strong> — localStorage, applies theme CSS vars to <code>:root</code>, exposes <code>activeTheme</code></td></tr>
       <tr><td>src/lib/sounds.ts</td><td>Notification-sound registry + <code>playSound(kind)</code>: bundled clips in <code>src/assets/sounds/</code>, custom file read via <code>read_file_base64</code> → Blob URL. Fired from <code>Terminal.vue</code> on review (done-while-away) + waiting states</td></tr>
       <tr><td>src/themes.ts</td><td>Theme registry: Dark (default), Light, Monokai, Cobalt2 — each has chrome CSS vars + xterm palette + shiki name. Picked in Settings → Appearance</td></tr>
@@ -273,11 +277,10 @@
       <tr><td>set_max_agents(n)</td><td>Publish the soft sub-agent cap (Settings → Agents) to <code>&lt;app-data&gt;/max_agents</code> for the <code>burrow</code> CLI / <code>/burrow</code> skill</td></tr>
       <tr><td>reinstall_status_hooks()</td><td>Re-merge the <code>burrow hook</code> status hook into Claude/Codex global config (idempotent)</td></tr>
       <tr><td>remove_status_hooks()</td><td>Strip burrow's status hooks back out (leaves other hooks intact)</td></tr>
-      <tr><td>get_config_dirs()</td><td>List the agent config dirs hooks+docs install into (seeded with <code>~/.claude</code>, <code>~/.codex</code> + any <code>CLAUDE_CONFIG_DIR</code>/<code>CODEX_HOME</code> env)</td></tr>
-      <tr><td>set_config_dirs(claude, codex)</td><td>Persist a new config-dir list (to <code>&lt;app-data&gt;/config-dirs.json</code>) and re-install hooks + agent docs into each</td></tr>
+      <tr><td>repair_agent_status()</td><td>One-button repair: reclaim <code>hook.port</code> for the live server + re-install bin &amp; hooks; returns the port</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--muted);font-size:13px">Agent status flows: globally-installed hooks → <code>burrow hook</code> → <code>burrow status</code> → HTTP server → <code>pty-hook-{id}</code> event → <code>XTerm.vue</code>. Hooks+docs install into every dir from <code>get_config_dirs</code> — editable in Settings → Agents → Config directories, for per-project <code>CLAUDE_CONFIG_DIR</code> setups. See <a href="burrow.html">burrow.html</a> for the full mechanism.</p>
+  <p style="color:var(--muted);font-size:13px">Agent status flows: globally-installed hooks → <code>burrow hook</code> → <code>burrow status</code> → HTTP server → <code>pty-hook-{id}</code> event → <code>XTerm.vue</code>. Installed on every launch by <code>installStatusHooks</code> (<code>src-wails/statushooks.go</code>) into <code>~/.claude/settings.json</code>, <code>~/.codex/hooks.json</code>, <code>~/.copilot/hooks/burrow.json</code>, any <code>CLAUDE_CONFIG_DIR</code>/<code>CODEX_HOME</code>/<code>COPILOT_HOME</code> the app inherited, plus every per-instance config dir set in Settings → Providers. Merge is additive + marker-deduped, so other tools' hooks survive. The same pass installs the agent docs (<code>src-wails/agentdocs.go</code>): the <code>/burrow</code> skill wholesale into <code>&lt;dir&gt;/skills/burrow/SKILL.md</code> (Claude + Copilot, the latter also registered in <code>skillDirectories</code>), and a <code>&lt;!-- BURROW:BEGIN/END --&gt;</code> block in <code>~/.claude/CLAUDE.md</code> / <code>~/.codex/AGENTS.md</code>. Doc bodies are markdown files under <code>src-wails/agentdocs/</code>; <code>.claude/skills/burrow</code> in the repo is a symlink to the same source. See <a href="burrow.html">burrow.html</a> for the full mechanism.</p>
 
   <h2>What's New — v2.3.x</h2>
   <div class="grid">
@@ -447,10 +450,34 @@
       <tr><td><span class="kbd">⌘D</span></td><td>Split pane horizontally</td></tr>
       <tr><td><span class="kbd">⌘⇧D</span></td><td>Split pane vertically</td></tr>
       <tr><td><span class="kbd">⌘1–9</span></td><td>Switch project/workspace</td></tr>
+      <tr><td><span class="kbd">⌘B</span></td><td>Toggle sidebar</td></tr>
+      <tr><td><span class="kbd">⌘J</span></td><td>Toggle Manager</td></tr>
+      <tr><td><span class="kbd">⌘/</span></td><td>Shortcut cheatsheet</td></tr>
+      <tr><td><span class="kbd">⌘⇧N</span></td><td>New project (in-app folder browse; ⌘↵ creates the folder)</td></tr>
+      <tr><td><span class="kbd">⌘⇧O</span></td><td>Pick project → Welcome composer</td></tr>
+      <tr><td><span class="kbd">⌘⇧A</span></td><td>Cycle agent provider on the Welcome composer</td></tr>
+      <tr><td><span class="kbd">⌘⇧U</span></td><td>Jump to first unread (review) tab</td></tr>
+      <tr><td><span class="kbd">⌘⇧R</span></td><td>Repaint terminals</td></tr>
       <tr><td><span class="kbd">⌘⇧1–5</span></td><td>Launch agents (default config; per-agent configurable)</td></tr>
     </tbody>
   </table>
+  <h2>PathPicker (in-app file/folder picker)</h2>
+  <p><code>src/components/PathPicker.vue</code> + <code>src/lib/pickPath.ts</code> replace every
+  native <code>NSOpenPanel</code> call in the app. <code>pickDir()</code> browses folders
+  (⌘↵ creates the typed one via the Go <code>CreateDir</code> binding);
+  <code>pickFile({extensions})</code> lists folders + matching files with a preview pane —
+  image thumbnail, or a play button for audio (⌥↵ plays). Only the selected file is read off
+  disk (<code>read_file_base64</code> → data URL, so WKWebView gets an explicit MIME).
+  Used by: add project (Spotlight/Sidebar/WorkspaceScreen/App), worktrees dir, Claude profile
+  config dir, workspace icon, notification sounds, wallpaper. The
+  <code>@tauri-apps/plugin-dialog</code> shim and <code>src-wails/dialog.go</code> stay in the
+  tree unused, for a future multi-select need.</p>
 
+  <p>Everything except the ranges (⌘1–9, ⌃1–9, ⌘⇧1–5) is rebindable: the registry lives in
+  <code>src/lib/keymap.ts</code>, user overrides in <code>config.json</code> under
+  <code>keybindings</code> (hand-editable), edited in Settings → Keybindings. App.vue and
+  Terminal.vue match keydowns through <code>src/stores/keybindings.ts</code>, so the palette,
+  the ⌘/ cheatsheet and Settings all show what actually fires.</p>
 </div>
 </body>
 </html>

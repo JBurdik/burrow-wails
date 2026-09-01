@@ -1,7 +1,6 @@
 <template>
   <div class="claude-chat flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }">
     <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
-    <ChatAgentConfig v-if="agentConfigOpen" :cwd="cwd" @close="agentConfigOpen = false" />
 
     <!-- Permission prompt (Bash / generic tool) -->
     <div v-if="pendingPermission" class="permission-banner perm-slide-in flex flex-shrink-0 items-center gap-2 rounded-[10px] border py-2.5 pl-3.5 pr-3 mx-3 mt-2 mb-0.5 shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: color-mix(in srgb, #f59e0b 12%, var(--bg-panel)); border-color: color-mix(in srgb, #f59e0b 30%, transparent); border-left-width: 3px; border-left-color: #f59e0b;">
@@ -370,7 +369,7 @@
             <button class="toolbar-btn" title="New conversation" @click="clearChat">
               <PhArrowCounterClockwise :size="13" />
             </button>
-            <button class="toolbar-btn" title="Configure agents…" @click="agentConfigOpen = true">
+            <button class="toolbar-btn" title="Configure providers…" @click="openProviderSettings">
               <PhGear :size="13" />
             </button>
             <div v-if="isAcpRuntime && sessionId" class="agent-dropdown relative inline-flex">
@@ -425,11 +424,11 @@
               </Teleport>
             </div>
             <!-- Profile switcher (only shown when more than one profile exists) -->
-            <div v-if="effectiveTransport === 'claude-cli' && profilesStore.profiles.length > 1" class="model-dropdown">
+            <div v-if="effectiveTransport === 'claude-cli' && claudeProfiles.length > 1" class="model-dropdown">
               <button
                 ref="profileBtnEl"
                 class="toolbar-btn toolbar-btn-label"
-                :class="{ 'btn-active': selectedProfileId !== DEFAULT_PROFILE_ID }"
+                :class="{ 'btn-active': selectedProfileId !== defaultProfileId }"
                 :title="selectedProfile?.configDir ? `CLAUDE_CONFIG_DIR: ${selectedProfile.configDir}` : 'Claude profile'"
                 @click="toggleProfileMenu"
               >
@@ -445,7 +444,7 @@
                   :style="{ bottom: profileMenuPos.bottom + 'px', left: profileMenuPos.left + 'px' }"
                 >
                   <button
-                    v-for="p in profilesStore.profiles"
+                    v-for="p in claudeProfiles"
                     :key="p.id"
                     class="floating-menu-item"
                     :class="{ 'floating-menu-item-active': selectedProfileId === p.id }"
@@ -607,13 +606,11 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
 import { normalizeAcpRuntimeEvent, normalizeClaudeStreamEvent, type ProviderRuntimeEvent } from "@/lib/providerRuntime";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
-import { useProfilesStore, DEFAULT_PROFILE_ID } from "@/stores/profiles";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useScriptsStore } from "@/stores/scripts";
-import { useChatAgentsStore, type ChatTransport } from "@/stores/chatAgents";
+import { useProvidersStore, chatTransportFor, binaryFor, type ChatTransport } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
-import ChatAgentConfig from "@/components/ChatAgentConfig.vue";
 import ModelPicker from "@/components/ModelPicker.vue";
 import { modelsFor, learnModels, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -672,7 +669,7 @@ const chats = useClaudeChatsStore();
 const notifStore = useNotificationsStore();
 const uiStore = useUIStore();
 const scriptsStore = useScriptsStore();
-const chatAgents = useChatAgentsStore();
+const chatAgents = useProvidersStore();
 const editorCtx = useEditorContextStore();
 
 // Local mirror of the session's agentKind (a chatAgents id), drives the switcher.
@@ -680,10 +677,10 @@ const agentKind = ref<string>(
   chats.sessions.find((s) => s.id === props.chatId)?.agentKind ?? props.agentKind ?? 'claude'
 );
 // The resolved agent definition from the registry.
-const currentAgent = computed(() => chatAgents.byId(agentKind.value));
+const currentAgent = computed(() => chatAgents.resolve(agentKind.value));
 const currentAgentIcon = computed(() => agentIconComp(currentAgent.value?.icon));
 const effectiveTransport = computed<ChatTransport>(() =>
-  props.transport ?? currentAgent.value?.transport ?? 'claude-cli'
+  props.transport ?? (currentAgent.value ? chatTransportFor(currentAgent.value) : 'claude-cli')
 );
 const usesRpcRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
 // Codex's app-server bridge reports the same modes/configOptions shape, so
@@ -902,14 +899,16 @@ async function resumeAcpSession(sid: string) {
 }
 
 // Agent switcher dropdown.
-const agentConfigOpen = ref(false);
+function openProviderSettings() {
+  uiStore.openSettings("providers", currentAgent.value?.id);
+}
 
 async function selectAgent(id: string) {
   if (id === agentKind.value) return;
   // Stop OLD process before agentKind changes (effectiveTransport depends on it).
   await (usesRpcRuntime.value ? stopRpcRuntime() : invoke('claude_stop', { id: props.chatId })).catch(() => {});
   agentKind.value = id;
-  chats.sync(props.chatId, { agentKind: id, transport: currentAgent.value?.transport ?? 'claude-cli' });
+  chats.sync(props.chatId, { agentKind: id, transport: currentAgent.value ? chatTransportFor(currentAgent.value) : 'claude-cli' });
   await clearChat();
 }
 
@@ -921,8 +920,8 @@ function acpStartPayload(emitHistory = false) {
     emitHistory,
     id: props.chatId,
     cwd: props.cwd,
-    command: a?.command ?? "npx",
-    args: a?.args ?? [],
+    command: a ? binaryFor(a) || "npx" : "npx",
+    args: a?.transportArgs ?? [],
     env: a?.env ?? {},
     kind: a?.kind ?? "custom",
     configDir: proj.claude_config_dir || a?.env?.CLAUDE_CONFIG_DIR || null,
@@ -970,12 +969,13 @@ function shareSelection() {
   nextTick(() => { inputEl.value?.focus(); autoResize(); });
 }
 
-// Profile switcher
-const profilesStore = useProfilesStore();
+// Profile switcher — the Claude provider instances (each one is a config dir).
+const claudeProfiles = computed(() => chatAgents.active.filter((a) => a.providerId === "claude"));
+const defaultProfileId = computed(() => claudeProfiles.value[0]?.id ?? "claude");
 // Legacy per-chat localStorage key prefix (kept only for the one-time migration below).
 function loadProfileId(id: number): string {
   const rec = getConfig<Record<string, string>>("chatProfileSelection", {});
-  return rec[String(id)] ?? DEFAULT_PROFILE_ID;
+  return rec[String(id)] ?? defaultProfileId.value;
 }
 function saveProfileId(id: number, profileId: string) {
   const rec = { ...getConfig<Record<string, string>>("chatProfileSelection", {}) };
@@ -983,7 +983,7 @@ function saveProfileId(id: number, profileId: string) {
   setConfig("chatProfileSelection", rec);
 }
 const selectedProfileId = ref<string>(loadProfileId(props.chatId));
-const selectedProfile = computed(() => profilesStore.get(selectedProfileId.value));
+const selectedProfile = computed(() => chatAgents.byId(selectedProfileId.value) ?? claudeProfiles.value[0]);
 const profileMenuOpen = ref(false);
 const profileBtnEl = ref<HTMLElement | null>(null);
 const profileMenuEl = ref<HTMLElement | null>(null);
@@ -2348,8 +2348,8 @@ async function restartClaude() {
     model: selectedModel.value,
     effort: selectedEffort.value,
     configDir: selectedProfile.value?.configDir || null,
-    profileCommand: selectedProfile.value?.command || null,
-    profileArgs: selectedProfile.value?.args || null,
+    profileCommand: selectedProfile.value?.binary || null,
+    profileArgs: selectedProfile.value?.args.join(" ") || null,
   }).catch(() => {});
   busy.value = false;
   messageQueue.value = [];
@@ -2397,8 +2397,8 @@ async function clearChat() {
     model: selectedModel.value,
     effort: selectedEffort.value,
     configDir: selectedProfile.value?.configDir || projSettings.claude_config_dir || null,
-    profileCommand: selectedProfile.value?.command || null,
-    profileArgs: selectedProfile.value?.args || null,
+    profileCommand: selectedProfile.value?.binary || null,
+    profileArgs: selectedProfile.value?.args.join(" ") || null,
   }).catch(() => {});
   // Switched to a stream-json agent at runtime → ensure the claude-data listener
   // exists (onMounted only attaches it when the chat starts as stream-json).
@@ -2705,8 +2705,8 @@ onMounted(async () => {
     model: selectedModel.value,
     effort: selectedEffort.value,
     configDir: selectedProfile.value?.configDir || null,
-    profileCommand: selectedProfile.value?.command || null,
-    profileArgs: selectedProfile.value?.args || null,
+    profileCommand: selectedProfile.value?.binary || null,
+    profileArgs: selectedProfile.value?.args.join(" ") || null,
   }).catch((e: unknown) => {
     // A swallowed failure here (missing `claude` binary, bad profile) used to
     // look like a chat that simply never answers.

@@ -50,7 +50,11 @@ export function CodexStart(arg1:string,arg2:string,arg3:Record<string, string>,a
 
 export function CodexStop(arg1:string):Promise<void>;
 
+export function ConfigFilePath():Promise<string>;
+
 export function CreateCheckpoint(arg1:string,arg2:string,arg3:string):Promise<main.Checkpoint>;
+
+export function CreateDir(arg1:string):Promise<void>;
 
 export function CreatePty(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
@@ -68,17 +72,19 @@ export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string
 
 export function GetAppVersion():Promise<string>;
 
-export function GetConfigDirs():Promise<main.ConfigDirs>;
-
 export function GetHookServerPort():Promise<number>;
 
 export function GetHttpServerStatus():Promise<main.HttpServerStatus>;
 
 export function GetTailscaleStatus():Promise<main.TailscaleStatus>;
 
+export function HomeDir():Promise<string>;
+
 export function InstallUpdate(arg1:string,arg2:string):Promise<void>;
 
 export function IsPidAlive(arg1:number):Promise<boolean>;
+
+export function KeybindingsFilePath():Promise<string>;
 
 export function KillOrphanSessions(arg1:Array<string>):Promise<number>;
 
@@ -116,6 +122,8 @@ export function PickFile(arg1:string,arg2:Array<string>):Promise<string>;
 
 export function PickFiles(arg1:string,arg2:Array<string>):Promise<Array<string>>;
 
+export function ProbeProvider(arg1:string,arg2:string):Promise<main.ProviderProbe>;
+
 export function ReadClaudeActivity(arg1:string,arg2:string):Promise<string>;
 
 export function ReadClaudeTranscript(arg1:string,arg2:string):Promise<Array<string>>;
@@ -125,6 +133,8 @@ export function ReadConfig():Promise<string>;
 export function ReadDirShallow(arg1:string):Promise<Array<main.DirEntry>>;
 
 export function ReadFileBase64(arg1:string):Promise<string>;
+
+export function ReadKeybindings():Promise<string>;
 
 export function ReadTextFile(arg1:string):Promise<string>;
 
@@ -148,6 +158,10 @@ export function RenameWorkspace(arg1:number,arg2:string):Promise<void>;
 
 export function RepairAgentStatus():Promise<number>;
 
+export function ReinstallStatusHooks():Promise<void>;
+
+export function RemoveStatusHooks():Promise<void>;
+
 export function RequestFloatSnapshot(arg1:string):Promise<void>;
 
 export function ResizePty(arg1:string,arg2:number,arg3:number):Promise<void>;
@@ -169,8 +183,6 @@ export function SearchFiles(arg1:string,arg2:string,arg3:number):Promise<Array<m
 export function SendFloatSnapshot(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
 export function SetBurrowMcpMaxDepth(arg1:number):Promise<void>;
-
-export function SetConfigDirs(arg1:string,arg2:string,arg3:string):Promise<main.ConfigDirs>;
 
 export function SetHttpEnabled(arg1:boolean):Promise<void>;
 
@@ -199,6 +211,8 @@ export function TakeSpawnRequests(arg1:string):Promise<Array<main.SpawnRequest>>
 export function TouchWorkspace(arg1:number):Promise<void>;
 
 export function WriteConfig(arg1:string):Promise<void>;
+
+export function WriteKeybindings(arg1:string):Promise<void>;
 
 export function WritePty(arg1:string,arg2:Array<number>):Promise<void>;
 

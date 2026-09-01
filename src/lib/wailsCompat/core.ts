@@ -81,6 +81,12 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.ReadTextFile(args.path);
     case "read_file_base64":
       return App.ReadFileBase64(args.path);
+    case "home_dir":
+      return App.HomeDir();
+    case "config_file_path":
+      return App.ConfigFilePath();
+    case "create_dir":
+      return App.CreateDir(args.path);
     case "read_dir_shallow":
       return App.ReadDirShallow(args.path);
     case "open_path_in":
@@ -160,6 +166,10 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "lsp_stop":
       return App.LspStop(args.id);
 
+    // Providers
+    case "probe_provider":
+      return App.ProbeProvider(args.binary ?? "", args.cwd ?? "");
+
     // Skills / MCP servers
     case "list_skills":
       return App.ListSkills();
@@ -193,10 +203,6 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     // Misc
     case "system_stats":
       return App.SystemStats();
-    case "get_config_dirs":
-      return App.GetConfigDirs();
-    case "set_config_dirs":
-      return App.SetConfigDirs(args.claude, args.codex, args.copilot);
     case "save_temp_image":
       return App.SaveTempImage(args.b64 ?? args.data, args.ext);
     case "is_pid_alive":
@@ -256,6 +262,10 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.RestartDaemon();
     case "repair_agent_status":
       return App.RepairAgentStatus();
+    case "reinstall_status_hooks":
+      return App.ReinstallStatusHooks();
+    case "remove_status_hooks":
+      return App.RemoveStatusHooks();
     case "format_source":
       return App.FormatSource(args.path, args.content, args.cwd);
 

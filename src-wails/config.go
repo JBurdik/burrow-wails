@@ -16,6 +16,12 @@ func configFilePath() (string, error) {
 	return filepath.Join(dataDir, "config.json"), nil
 }
 
+// ConfigFilePath exposes the on-disk config.json path so the UI can offer
+// "edit this by hand" (Settings → Keybindings).
+func (a *App) ConfigFilePath() (string, error) {
+	return configFilePath()
+}
+
 func (a *App) ReadConfig() (string, error) {
 	path, err := configFilePath()
 	if err != nil {
@@ -33,6 +39,45 @@ func (a *App) ReadConfig() (string, error) {
 
 func (a *App) WriteConfig(content string) error {
 	path, err := configFilePath()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// Keybindings live in their own keybindings.json — config.json is a grab-bag
+// (chat history alone runs to hundreds of KB), and shortcuts are the one part
+// users hand-edit.
+
+func keybindingsFilePath() (string, error) {
+	dataDir, err := appDataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "keybindings.json"), nil
+}
+
+func (a *App) KeybindingsFilePath() (string, error) {
+	return keybindingsFilePath()
+}
+
+func (a *App) ReadKeybindings() (string, error) {
+	path, err := keybindingsFilePath()
+	if err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "{}", nil
+		}
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (a *App) WriteKeybindings(content string) error {
+	path, err := keybindingsFilePath()
 	if err != nil {
 		return err
 	}

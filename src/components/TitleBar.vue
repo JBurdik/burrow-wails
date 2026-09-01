@@ -202,9 +202,6 @@
       >
         <PhSidebarSimple :size="14" />
       </button>
-      <button class="tb-btn" title="Settings (⌘,)" @click="$emit('open-settings')">
-        <PhGear :size="14" />
-      </button>
     </div>
   </div>
 </template>
@@ -212,7 +209,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhHouse, PhGitBranch, PhSidebarSimple, PhFolderOpen, PhGear, PhCaretDown, PhFolderNotchOpen, PhCode, PhLightning, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhPlus, PhSkull, PhCopy } from "@phosphor-icons/vue";
+import { PhHouse, PhGitBranch, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhCode, PhLightning, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhPlus, PhSkull, PhCopy } from "@phosphor-icons/vue";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
@@ -220,7 +217,7 @@ import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?: string; rightPanelVisible?: boolean; sidebarVisible?: boolean }>();
-defineEmits(["back", "toggle-rightpanel", "open-settings", "toggle-sidebar"]);
+defineEmits(["back", "toggle-rightpanel", "toggle-sidebar"]);
 
 const menuOpen = ref(false);
 type OpenInTarget = "finder" | "vscode" | "zed";
