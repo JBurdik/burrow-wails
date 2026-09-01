@@ -164,22 +164,23 @@
       </ul>
     </div>
     <div class="card">
-      <h3>Sub-agent delegation — <code>burrow</code> CLI</h3>
+      <h3>App control — one verb registry, three doors</h3>
       <ul>
-        <li>Agents run <code>burrow spawn claude "…"</code> to open a new tab and delegate work (fire-and-forget)</li>
-        <li><code>burrow collect [token…]</code> pulls finished sub-agents' results <strong>without blocking</strong> (consumes each once); <code>burrow sessions</code> lists live tabs; <code>burrow wait</code> is the legacy blocking variant</li>
-        <li>Soft per-workspace cap (Settings → Providers → Max concurrent sub-agents, default 3) the <code>/burrow</code> skill respects</li>
-        <li>Transport = files in <code>$BURROW_SESSION_DIR</code> (no tty/socket); the app polls for requests</li>
-        <li>Subscription-safe: interactive only, never <code>claude -p</code></li>
+        <li>Every app action an agent may take is a verb in <code>src-wails/internal/control</code>: delegation + supervision (<code>spawn</code>, <code>agent_status</code>, <code>tab_output</code>, <code>send_to_tab</code>, <code>wait_result</code>, <code>collect_results</code>), navigation, worktrees, git reads, PRs</li>
+        <li>Reachable as <code>burrow &lt;verb&gt; [--arg v]</code> (loopback HTTP + <code>control.token</code>), as MCP tools via <code>burrow-mcp</code>, and from the UI — one implementation, so they can't drift</li>
+        <li><code>spawn</code> takes a <strong>task</strong>, not a command line; the frontend builds the command from Settings → Providers. Subscription-safe: interactive only, never <code>claude -p</code></li>
+        <li>UI-only verbs emit <code>control:action</code> and block for the frontend's ack, so <code>spawn</code> returns the new tab's <code>pty_id</code> (this replaced the 1 Hz request-dir poll)</li>
+        <li>Verbs are local-only unless they opt into <code>ScopeRemote</code> — a phone can read and navigate, not spawn</li>
         <li><a href="burrow.html" style="color:var(--accent)">Full reference →</a></li>
       </ul>
     </div>
     <div class="card">
-      <h3>Manager — floating per-repo orchestrator</h3>
+      <h3>Manager — per-repo orchestrator</h3>
       <ul>
-        <li><code>FloatChat.vue</code>: a persistent Mission-Control chat (round launcher → compact card, bottom-right) that drives the app and git/GitHub via the <code>burrow</code> CLI (never the Agents SDK / <code>claude -p</code>)</li>
-        <li>Keyed by the <strong>root repo id</strong> (climbs <code>parent_id</code>), so the same Manager session stays alive when you switch between a repo's worktrees instead of showing an empty one per worktree. Its hidden session is flagged <code>control:true</code> and excluded from the Sidebar chat list</li>
-        <li>Capabilities (in <code>MC_PRIMER</code>): create/remove worktrees, spawn agents into them, and manage PRs (<code>pr-create</code>/<code>list</code>/<code>view</code>/<code>merge</code>) — destructive actions (worktree-remove, pr-merge) require user confirmation first</li>
+        <li><code>ManagerPanel.vue</code> in the right panel: a persistent chat that orchestrates and never implements. Message stream, composer, permission gates and model picker come from <code>AgentChat</code>; the panel owns only the thread and the primer</li>
+        <li>Keyed by the <strong>root repo id</strong> (climbs <code>parent_id</code>), so one Manager survives hopping between a repo and its worktrees. Threads stay mounted per engaged repo and toggle with <code>v-show</code>, so a busy Manager keeps streaming while you look elsewhere. Its session is flagged <code>control:true</code> and excluded from the Sidebar chat list</li>
+        <li>Its primer is <strong>generated from the verb registry</strong> (<code>control_verbs</code>) plus the worktree-isolation toggle and the project's <code>.burrow/manager.md</code> — it can't advertise a tool that doesn't exist. Any configured agent can be the Manager: MCP tools when it has them, <code>burrow &lt;verb&gt;</code> otherwise</li>
+        <li>Destructive verbs (<code>worktree_remove</code>, <code>pr_merge</code>, <code>tab_close</code>) require user confirmation first</li>
       </ul>
     </div>
     <div class="card">
@@ -272,7 +273,8 @@
       <tr><td>list_terminal_tabs(workspaceId)</td><td>Load persisted tab list for workspace</td></tr>
       <tr><td>save_terminal_tabs(workspaceId, tabs)</td><td>Persist tab list</td></tr>
       <tr><td>get_pty_foreground(id)</td><td>Foreground process name (poll → tab title; never fabricates agent busy)</td></tr>
-      <tr><td>take_spawn_requests(cwd)</td><td>Claim <code>burrow spawn</code> request dirs routed to this workspace</td></tr>
+      <tr><td>control_verbs()</td><td>The control verb registry (name, summary, args) — drives the Manager's primer and the MCP tool schemas</td></tr>
+      <tr><td>ack_control_action(id, resultJson, errMsg)</td><td>Frontend's reply to a <code>control:action</code> event; unblocks the waiting verb</td></tr>
       <tr><td>get_hook_server_port()</td><td>Port of the local status-hook HTTP server</td></tr>
       <tr><td>set_max_agents(n)</td><td>Publish the soft sub-agent cap (Settings → Agents) to <code>&lt;app-data&gt;/max_agents</code> for the <code>burrow</code> CLI / <code>/burrow</code> skill</td></tr>
       <tr><td>reinstall_status_hooks()</td><td>Re-merge the <code>burrow hook</code> status hook into Claude/Codex global config (idempotent)</td></tr>
@@ -312,7 +314,7 @@
       <p>Shells (zsh, bash, fish) emit <code>OSC 7;file://host/path</code> on every directory change.
       <code>XTerm.vue</code> now parses this sequence and emits a <code>cwd</code> event;
       <code>Terminal.vue</code> updates <code>leaf.cwd</code> immediately — no polling required.
-      This keeps <code>burrow spawn --cwd</code> routing accurate when an agent <code>cd</code>s into
+      This keeps <code>spawn --cwd</code> accurate when an agent <code>cd</code>s into
       a sub-directory mid-session.</p>
     </div>
     <div class="card">
