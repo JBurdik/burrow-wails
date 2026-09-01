@@ -110,6 +110,59 @@ export namespace main {
 	        this.available = source["available"];
 	    }
 	}
+	export class ControlVerbArg {
+	    name: string;
+	    type: string;
+	    desc: string;
+	    required: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ControlVerbArg(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.desc = source["desc"];
+	        this.required = source["required"];
+	    }
+	}
+	export class ControlVerb {
+	    name: string;
+	    summary: string;
+	    args: ControlVerbArg[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ControlVerb(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.summary = source["summary"];
+	        this.args = this.convertValues(source["args"], ControlVerbArg);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class DirEntry {
 	    name: string;
 	    isDir: boolean;
@@ -212,36 +265,6 @@ export namespace main {
 	        this.dir = source["dir"];
 	        this.name = source["name"];
 	        this.enabled = source["enabled"];
-	    }
-	}
-	export class SpawnRequest {
-	    kind: string;
-	    cmd: string;
-	    token: string;
-	    cwd: string;
-	    branch: string;
-	    base: string;
-	    tmuxWin: string;
-	    wsid: string;
-	    tabid: string;
-	    content: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new SpawnRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.kind = source["kind"];
-	        this.cmd = source["cmd"];
-	        this.token = source["token"];
-	        this.cwd = source["cwd"];
-	        this.branch = source["branch"];
-	        this.base = source["base"];
-	        this.tmuxWin = source["tmuxWin"];
-	        this.wsid = source["wsid"];
-	        this.tabid = source["tabid"];
-	        this.content = source["content"];
 	    }
 	}
 	export class SystemStats {
