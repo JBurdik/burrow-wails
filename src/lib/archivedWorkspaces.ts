@@ -1,10 +1,10 @@
 import { ref } from "vue";
 import { configReady, getConfig, setConfig } from "./config";
 
-// Workspaces the user archived out of the sidebar's main list. Repos drop into
-// the collapsed "Archived" section; worktrees hide behind their repo group's
-// "+N archived" toggle. Nothing is deleted — this is a view flag, so repos and
-// worktrees share one id list.
+// Workspaces the user archived. Purely a project-list view flag: archived repos
+// sink to the bottom of the sidebar's project picker. It deliberately does NOT
+// touch the thread feed — hiding an open project's threads (including the
+// active one) was the "active chat is in Snoozed" bug.
 // ponytail: config array, not a DB column — same shape as pinnedWorkspaces.
 const KEY = "sidebarArchived";
 

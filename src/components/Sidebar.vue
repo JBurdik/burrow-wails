@@ -24,10 +24,13 @@
             All projects
           </button>
           <button
-            v-for="repo in store.topLevel"
+            v-for="repo in filterRepos"
             :key="repo.id"
             class="flex w-full items-center gap-[7px] rounded-md border-0 bg-transparent px-2 py-1.5 text-left font-ui text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground"
-            :class="filterProjectId === repo.id && 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] text-foreground'"
+            :class="[
+              filterProjectId === repo.id && 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] text-foreground',
+              isArchived(repo.id) && 'opacity-50',
+            ]"
             @click="pickProject(repo)"
             @contextmenu.prevent.stop="openRowMenu(repo, null, $event)"
           >
@@ -180,15 +183,15 @@
         </template>
       </template>
 
-      <!-- Archived chats: the current workspace's chats closed by the user — no
-           open tab, process stopped, reversible by clicking to reopen. -->
+      <!-- Archived: the current workspace's chats closed by the user — no open
+           tab, process stopped, reversible by clicking to reopen. -->
       <template v-if="active && archivedChats.length">
-        <button class="section-header" @click="toggleSection('archivedChats')">
-          <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('archivedChats') && '-rotate-90'" />
-          Archived chats
+        <button class="section-header" @click="toggleSection('archived')">
+          <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('archived') && '-rotate-90'" />
+          Archived
           <span class="opacity-60">{{ archivedChats.length }}</span>
         </button>
-        <template v-if="!collapsed.includes('archivedChats')">
+        <template v-if="!collapsed.includes('archived')">
           <div
             v-for="s in archivedChats"
             :key="s.id"
@@ -205,40 +208,6 @@
               @click.stop="deletePermanently(s.id)"
             />
           </div>
-        </template>
-      </template>
-
-      <!-- Snoozed: tabs of archived projects / worktrees, or individually snoozed -->
-      <template v-if="feed.snoozed.length">
-        <button class="section-header" @click="toggleSection('snoozed')">
-          <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('snoozed') && '-rotate-90'" />
-          Snoozed
-          <span class="opacity-60">{{ feed.snoozed.length }}</span>
-        </button>
-        <template v-if="!collapsed.includes('snoozed')">
-          <div
-            v-for="row in snoozedVisible"
-            :key="rowKey(row)"
-            class="flex cursor-pointer items-center gap-1.5 px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
-            @click="selectTab(row)"
-            @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
-          >
-            <PhChatCenteredText v-if="row.tab.isChat" :size="10" class="shrink-0" />
-            <PhRobot v-else-if="row.tab.isAgent" :size="10" class="shrink-0" />
-            <PhTerminal v-else :size="10" class="shrink-0" />
-            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
-            <span v-if="git.prByWs[row.ws.id]" class="shrink-0 font-mono text-[9px]">#{{ git.prByWs[row.ws.id]!.number }}</span>
-            <PhMoon v-if="isSnoozed(row.ws.id, row.tab.id)" :size="9" weight="fill" class="shrink-0" title="Snoozed — wakes when the agent moves" />
-            <span class="shrink-0 text-[10px] tabular-nums">{{ ago(row.ts) }}</span>
-          </div>
-          <button
-            v-if="feed.snoozed.length > snoozedLimit"
-            class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
-            @click="snoozedLimit += 25"
-          >
-            <PhPlus :size="10" />
-            Show {{ feed.snoozed.length - snoozedLimit }} more
-          </button>
         </template>
       </template>
 
@@ -308,13 +277,11 @@
     >
       <template v-if="rowMenu.tab">
         <button class="menu-item" @click="withMenu((ws, tab) => startTabRename(ws.id, tab!))">Rename tab…</button>
-        <button class="menu-item" @click="withMenu((ws, tab) => toggleSnooze(ws.id, tab!.id))">
-          {{ isSnoozed(rowMenu.ws.id, rowMenu.tab?.id ?? -1) ? "Wake" : "Snooze" }}
-        </button>
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
           {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
         </button>
         <button class="menu-item" @click="withMenu((ws, tab) => termTabs.close(ws.id, tab!.id))">Close tab</button>
+        <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws, tab) => deleteThread(ws.id, tab!))">Delete thread…</button>
         <div class="menu-sep" />
       </template>
       <button class="menu-item" @click="withMenu(newChatSession)">New chat</button>
@@ -472,7 +439,6 @@ import {
   PhPlus,
   PhGitBranch,
   PhChatCenteredText,
-  PhMoon,
   PhGear,
   PhSquaresFour,
   PhPlayCircle,
@@ -495,9 +461,8 @@ import {
 } from "@/lib/terminalStatus";
 import { useGitStore, type PrInfo } from "@/stores/git";
 import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
-import { archivedIds, isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
+import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
 import { buildActivityRows, type ActivityRow } from "@/lib/sidebarGroups";
-import { snoozedKeys, isSnoozed, toggleSnooze } from "@/lib/snoozedTabs";
 import { toggleTabSettled } from "@/lib/settledTabs";
 import { getProjectSettings } from "@/lib/projectSettings";
 
@@ -549,22 +514,21 @@ watch(filterOpen, (open) => {
   }
 });
 
+const filterRepos = computed(() =>
+  [...store.topLevel].sort((a, b) => Number(isArchived(a.id)) - Number(isArchived(b.id))),
+);
+
 const feed = computed(() =>
   buildActivityRows({
     openedWorkspaces: store.opened,
     tabsByWs: termTabs.tabsByWs,
     activityAt: termTabs.activityAt,
-    archivedIds: archivedIds.value,
-    snoozedKeys: snoozedKeys.value,
     filterProjectId: filterProjectId.value,
   }),
 );
 
 const settledChatsLimit = ref(12);
 const settledChatsVisible = computed(() => feed.value.settledChats.slice(0, settledChatsLimit.value));
-const snoozedLimit = ref(12);
-const snoozedVisible = computed(() => feed.value.snoozed.slice(0, snoozedLimit.value));
-
 const archivedChats = computed(() => (active.value ? chats.archivedSessionsForWs(active.value.id) : []));
 
 function unarchiveAndOpen(chatId: number) {
@@ -574,6 +538,14 @@ function unarchiveAndOpen(chatId: number) {
 function deletePermanently(chatId: number) {
   if (!window.confirm("Delete this chat permanently? This cannot be undone.")) return;
   chats.remove(chatId);
+}
+// Last step of a thread's life: settled → archived → gone. A chat row is a
+// stored session, so it needs the store's hard delete; a plain terminal tab
+// only exists as long as its PTY, so closing it *is* the delete.
+function deleteThread(wsId: number, tab: TabSummary) {
+  if (!window.confirm(`Delete “${tab.title}” permanently? This cannot be undone.`)) return;
+  termTabs.close(wsId, tab.id);
+  if (tab.isChat && tab.chatId != null) chats.remove(tab.chatId);
 }
 function toggleSettled(tab: TabSummary, wsId: number) {
   if (tab.isChat) {
@@ -585,8 +557,8 @@ function toggleSettled(tab: TabSummary, wsId: number) {
   }
 }
 
-type SectionKey = "settled" | "snoozed" | "archivedChats";
-const collapsed = ref<SectionKey[]>(["settled", "snoozed", "archivedChats"]);
+type SectionKey = "settled" | "archived";
+const collapsed = ref<SectionKey[]>(["settled", "archived"]);
 function toggleSection(key: SectionKey) {
   collapsed.value = collapsed.value.includes(key)
     ? collapsed.value.filter((k) => k !== key)

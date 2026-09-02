@@ -1,7 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import type { TermStatus } from "@/lib/terminalStatus";
-import { snoozeKey, wake } from "@/lib/snoozedTabs";
 
 // Lightweight mirror of each workspace's terminal tabs so the Sidebar can render
 // them nested under its project. The Terminal component remains the source of
@@ -110,23 +109,13 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     const prevTabs = new Map((tabsByWs.value[wsId] ?? []).map((tab) => [tab.id, tab]));
     const stamps = { ...(activityByWs.value[wsId] ?? {}) };
     const now = Date.now();
-    // A snoozed tab wakes on its own as soon as the agent moves — that (and the
-    // tab going away) is the only thing that clears a snooze automatically.
-    const toWake: string[] = [];
     for (const tab of tabs) {
       const before = prevTabs.get(tab.id);
       if (shouldRestamp(before, tab, stamps[tab.id] != null)) stamps[tab.id] = now;
-      if (before && before.status !== tab.status && tab.status !== "idle") {
-        toWake.push(snoozeKey(wsId, tab.id));
-      }
     }
     for (const key of Object.keys(stamps)) {
-      if (!currentIds.has(Number(key))) {
-        toWake.push(snoozeKey(wsId, Number(key)));
-        delete stamps[Number(key)];
-      }
+      if (!currentIds.has(Number(key))) delete stamps[Number(key)];
     }
-    if (toWake.length) wake(toWake);
     activityByWs.value[wsId] = stamps;
     saveActivity();
 

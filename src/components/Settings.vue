@@ -623,6 +623,10 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Theme</span>
+            <span class="text-xs text-muted-foreground/70">
+              The last dark and light theme you pick here become the targets of the
+              “Toggle Dark/Light Mode” command in the ⌘P palette.
+            </span>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
               <button
                 v-for="t in THEMES"

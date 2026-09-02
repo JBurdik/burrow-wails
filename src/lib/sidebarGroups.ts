@@ -16,46 +16,36 @@ export interface ActivityInput {
   openedWorkspaces: Workspace[];
   tabsByWs: Record<number, TabSummary[]>;
   activityAt: (wsId: number, tabId: number) => number;
-  archivedIds: number[];
-  /** `wsId:tabId` keys the user snoozed — see lib/snoozedTabs.ts */
-  snoozedKeys?: string[];
   /** repo id to restrict to, or null for all */
   filterProjectId: number | null;
 }
 
 /**
  * Flatten every open workspace's tabs into one recency-sorted feed, splitting
- * off tabs whose workspace (or whose parent repo) the user archived, plus the
- * individual tabs they snoozed, into `snoozed`. Of what's left, any tab the
- * user (or, for chats, claudeChats.isSettled()'s auto-settle) marked settled
- * goes to `settledChats` instead of `live` — distinct from `snoozed`, which is
- * about workspace/tab dormancy, not "done, no attention needed".
+ * off the ones marked settled (done, no attention needed — by the user or by
+ * claudeChats.isSettled()'s auto-settle). Those are the only two states a
+ * *live* thread has; archiving is a per-chat thing (claudeChats.archive) and
+ * after that the only step left is deletion.
+ * ponytail: archiving a *project* deliberately does not touch this — it's a
+ * project-list view flag. Hiding an open project's threads (incl. the active
+ * one) out of the feed was the "active chat is in Snoozed" bug.
  */
 export function buildActivityRows(
   input: ActivityInput,
-): { live: ActivityRow[]; settledChats: ActivityRow[]; snoozed: ActivityRow[] } {
-  const archived = new Set(input.archivedIds);
-  const snoozedKeys = new Set(input.snoozedKeys ?? []);
+): { live: ActivityRow[]; settledChats: ActivityRow[] } {
   const live: ActivityRow[] = [];
   const settledChats: ActivityRow[] = [];
-  const snoozed: ActivityRow[] = [];
 
   for (const ws of input.openedWorkspaces) {
     const repoId = ws.parent_id ?? ws.id;
     if (input.filterProjectId != null && repoId !== input.filterProjectId) continue;
-    const isWsSnoozed = archived.has(ws.id) || archived.has(repoId);
     for (const tab of input.tabsByWs[ws.id] || []) {
       const row: ActivityRow = { ws, tab, ts: input.activityAt(ws.id, tab.id) };
-      if (isWsSnoozed || snoozedKeys.has(`${ws.id}:${tab.id}`)) snoozed.push(row);
-      else if (tab.settled) settledChats.push(row);
+      if (tab.settled) settledChats.push(row);
       else live.push(row);
     }
   }
 
   const byRecency = (a: ActivityRow, b: ActivityRow) => b.ts - a.ts || b.tab.id - a.tab.id;
-  return {
-    live: live.sort(byRecency),
-    settledChats: settledChats.sort(byRecency),
-    snoozed: snoozed.sort(byRecency),
-  };
+  return { live: live.sort(byRecency), settledChats: settledChats.sort(byRecency) };
 }

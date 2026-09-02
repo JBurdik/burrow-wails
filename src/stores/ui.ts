@@ -48,6 +48,8 @@ interface Prefs {
   swapPanels: boolean;
   rightPanelVisible: boolean;
   theme: string;
+  preferredDarkTheme: string; // toggle target for "Toggle Dark/Light Mode"
+  preferredLightTheme: string;
   soundEnabled: boolean;
   soundDoneEnabled: boolean;
   soundWaitingEnabled: boolean;
@@ -130,6 +132,8 @@ const DEFAULT_PREFS: Prefs = {
   swapPanels: false,
   rightPanelVisible: true,
   theme: DEFAULT_THEME_KEY,
+  preferredDarkTheme: "dark",
+  preferredLightTheme: "light",
   soundEnabled: true,
   soundDoneEnabled: true,
   soundWaitingEnabled: true,
@@ -193,6 +197,8 @@ export const useUIStore = defineStore("ui", () => {
   const swapPanels = ref(loaded.swapPanels);
   const rightPanelVisible = ref(loaded.rightPanelVisible);
   const theme = ref(loaded.theme);
+  const preferredDarkTheme = ref(loaded.preferredDarkTheme);
+  const preferredLightTheme = ref(loaded.preferredLightTheme);
   const soundEnabled = ref(loaded.soundEnabled);
   const soundDoneEnabled = ref(loaded.soundDoneEnabled);
   const soundWaitingEnabled = ref(loaded.soundWaitingEnabled);
@@ -255,6 +261,8 @@ export const useUIStore = defineStore("ui", () => {
     swapPanels.value = p.swapPanels;
     rightPanelVisible.value = p.rightPanelVisible;
     theme.value = p.theme;
+    preferredDarkTheme.value = p.preferredDarkTheme;
+    preferredLightTheme.value = p.preferredLightTheme;
     soundEnabled.value = p.soundEnabled;
     soundDoneEnabled.value = p.soundDoneEnabled;
     soundWaitingEnabled.value = p.soundWaitingEnabled;
@@ -410,6 +418,8 @@ export const useUIStore = defineStore("ui", () => {
         swapPanels: swapPanels.value,
         rightPanelVisible: rightPanelVisible.value,
         theme: theme.value,
+        preferredDarkTheme: preferredDarkTheme.value,
+        preferredLightTheme: preferredLightTheme.value,
         soundEnabled: soundEnabled.value,
         soundDoneEnabled: soundDoneEnabled.value,
         soundWaitingEnabled: soundWaitingEnabled.value,
@@ -460,6 +470,7 @@ export const useUIStore = defineStore("ui", () => {
   // Persist + apply UI font, base font size and overall scale (zoom).
   watch(
     [uiFont, uiFontSize, uiScale, terminalFont, terminalFontSize, swapPanels, theme,
+     preferredDarkTheme, preferredLightTheme,
      soundEnabled, soundDoneEnabled, soundWaitingEnabled, soundDoneId, soundDoneCustomPath,
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
@@ -518,6 +529,17 @@ export const useUIStore = defineStore("ui", () => {
 
   function setTheme(key: string) {
     theme.value = key;
+    // Remember the pick as the preferred theme for its mode, so the
+    // dark/light toggle returns to it.
+    if (findTheme(key).isDark) preferredDarkTheme.value = key;
+    else preferredLightTheme.value = key;
+  }
+
+  // Spotlight "Toggle Dark/Light Mode": jump to the preferred theme of the
+  // other mode. Doesn't rewrite the preferences — only setTheme (an explicit
+  // pick) does.
+  function toggleDarkLight() {
+    theme.value = activeTheme.value.isDark ? preferredLightTheme.value : preferredDarkTheme.value;
   }
 
   function setMode(m: "terminal" | "claude" | "dashboard") {
@@ -583,6 +605,9 @@ export const useUIStore = defineStore("ui", () => {
     activeTheme,
     themes: THEMES,
     setTheme,
+    preferredDarkTheme,
+    preferredLightTheme,
+    toggleDarkLight,
     soundEnabled,
     soundDoneEnabled,
     soundWaitingEnabled,

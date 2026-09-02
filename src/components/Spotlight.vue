@@ -73,7 +73,7 @@ import { ref, computed, watch, nextTick } from "vue";
 import {
   PhTerminal, PhSparkle, PhCode, PhGitBranch, PhRobot,
   PhFolderOpen, PhGear, PhPlus, PhColumns, PhPalette, PhKeyboard, PhGlobe, PhPlayCircle,
-  PhFileText, PhMagnifyingGlass, PhArrowsClockwise,
+  PhFileText, PhMagnifyingGlass, PhArrowsClockwise, PhMoonStars,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useProvidersStore } from "@/stores/providers";
@@ -233,6 +233,7 @@ const commandItems = computed<SpotlightItem[]>(() => {
     { id: "cmd-project-config", title: "Project Settings…", icon: PhGear as Component, color: MUTED, action: () => { emit("openProjectConfig"); close(); } },
     { id: "cmd-settings", title: "Settings", icon: PhGear as Component, color: MUTED, keyId: "settings", action: () => { openSettingsAt("general"); } },
     { id: "cmd-theme", title: "Change Theme", icon: PhPalette as Component, color: "#fbbf24", action: () => { openSettingsAt("appearance"); } },
+    { id: "cmd-darklight", title: "Toggle Dark/Light Mode", icon: PhMoonStars as Component, color: "#a78bfa", action: () => { ui.toggleDarkLight(); close(); } },
     { id: "cmd-keys", title: "Keyboard Shortcuts", icon: PhKeyboard as Component, color: MUTED, keyId: "cheatsheet", action: () => { openSettingsAt("keybindings"); } },
     { id: "cmd-repaint", title: "Repaint Terminals (un-scramble)", icon: PhArrowsClockwise as Component, color: "#fbbf24", keyId: "repaint", action: () => { emit("repaint"); close(); } },
   ];

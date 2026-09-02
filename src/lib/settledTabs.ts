@@ -2,7 +2,7 @@ import { ref } from "vue";
 import { configReady, getConfig, setConfig } from "./config";
 
 // Manual "settled" flag for non-chat tabs (terminal/agent), keyed like
-// snoozedTabs.ts. Chat tabs keep their own settle logic in claudeChats.ts
+// archivedWorkspaces.ts. Chat tabs keep their own settle logic in claudeChats.ts
 // (which also auto-settles after days of inactivity) — this module only
 // covers the tabs that have no such store to carry the flag.
 const KEY = "sidebarSettledTabs";
