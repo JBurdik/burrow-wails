@@ -2,16 +2,16 @@
   <div ref="rootEl" class="relative flex shrink-0 [-webkit-app-region:no-drag]">
     <button
       class="flex items-center gap-1 rounded-l-md border border-r-0 border-border/70 bg-transparent px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-secondary-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:border-border/70 disabled:hover:bg-transparent"
-      :disabled="primaryDisabled"
-      :title="primaryTitle"
+      :disabled="primaryDisabled || busy"
+      :title="busyTitle || primaryTitle"
       @click="commitAndPush"
     >
-      <PhArrowUp :size="11" :class="git.pushing && 'animate-spin'" />
-      Commit &amp; push
+      <PhArrowUp :size="11" :class="busy && 'animate-spin'" />
+      {{ busyTitle || "Commit & push" }}
     </button>
     <button
       class="flex items-center rounded-r-md border border-border/70 bg-transparent px-1 py-0.5 text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-secondary-foreground disabled:cursor-default disabled:opacity-40"
-      :disabled="git.pushing"
+      :disabled="busy"
       title="More git actions"
       @click.stop="open = !open"
     >
@@ -24,20 +24,21 @@
     >
       <button
         class="menu-item"
-        :disabled="commitDisabled"
+        :disabled="commitDisabled || busy"
         title="Commit staged changes"
         @click="doCommit"
       >
-        <PhGitCommit :size="13" /> Commit
+        <PhGitCommit :size="13" :class="(git.committing || git.generating) && 'animate-spin'" />
+        {{ git.generating ? "Generating…" : git.committing ? "Committing…" : "Commit" }}
       </button>
       <button
         class="menu-item"
-        :disabled="pushDisabled"
+        :disabled="pushDisabled || busy"
         :title="git.hasUpstream ? 'git push' : 'git push -u origin ' + git.branch"
         @click="doPush"
       >
         <PhArrowUp :size="13" :class="git.pushing && 'animate-spin'" />
-        {{ git.hasUpstream ? "Push" : "Publish branch" }}
+        {{ git.pushing ? "Pushing…" : git.hasUpstream ? "Push" : "Publish branch" }}
       </button>
       <button
         class="menu-item"
@@ -75,6 +76,10 @@ const prDisabled = computed(() => !git.hasUpstream || pr.actionLoading.value);
 
 const primaryTitle = computed(() =>
   commitDisabled.value ? "No changes to commit" : "Stage all changes, commit (auto-message if empty), then push"
+);
+const busy = computed(() => git.generating || git.committing || git.pushing);
+const busyTitle = computed(() =>
+  git.generating ? "Generating message…" : git.committing ? "Committing…" : git.pushing ? "Pushing…" : ""
 );
 
 async function commitAndPush() {

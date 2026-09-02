@@ -102,6 +102,7 @@ export const useGitStore = defineStore("git", () => {
   const pulling = ref(false);
   const generating = ref(false);
   const generateError = ref<string | null>(null);
+  const committing = ref(false);
   const log = ref<GitCommit[]>([]);
   const logLoading = ref(false);
   const branches = ref<string[]>([]);
@@ -325,17 +326,23 @@ export const useGitStore = defineStore("git", () => {
   // message check): Commit doesn't require you to type anything first — an
   // empty box gets auto-generated right before the commit.
   async function commit(model?: string) {
-    await stageAllIfNeeded();
-    if (staged.value.length === 0) return;
-    if (!commitMsg.value.trim()) {
-      await generateCommitMessage(model);
-      if (!commitMsg.value.trim()) return;
+    if (committing.value) return;
+    committing.value = true;
+    try {
+      await stageAllIfNeeded();
+      if (staged.value.length === 0) return;
+      if (!commitMsg.value.trim()) {
+        await generateCommitMessage(model);
+        if (!commitMsg.value.trim()) return;
+      }
+      await runGit(cwd.value, ["commit", "-m", commitMsg.value.trim()]);
+      commitMsg.value = "";
+      diff.value = "";
+      diffFile.value = null;
+      await refresh();
+    } finally {
+      committing.value = false;
     }
-    await runGit(cwd.value, ["commit", "-m", commitMsg.value.trim()]);
-    commitMsg.value = "";
-    diff.value = "";
-    diffFile.value = null;
-    await refresh();
   }
 
   async function showDiff(path: string, isStagedFile: boolean) {
@@ -426,7 +433,7 @@ export const useGitStore = defineStore("git", () => {
     cwd, branch, staged, unstaged, untracked,
     diff, diffFile, diffStaged,
     loading, error, commitMsg,
-    ahead, behind, hasUpstream, pushing, pulling, generating, generateError, hasWorkingTreeChanges, log, logLoading,
+    ahead, behind, hasUpstream, pushing, pulling, generating, generateError, committing, hasWorkingTreeChanges, log, logLoading,
     setCwd, refresh, stageFile, unstageFile, unstageAll, stageAll, commit, showDiff, clearDiff, fetchAllDiff, gitInit,
     push, pull, refreshLog, generateCommitMessage,
     branches, fetching, fetchBranches, switchBranch, createBranch, fetch, discardFile,

@@ -94,10 +94,10 @@
       </div>
     </template>
 
-    <!-- Push/pull progress bar -->
-    <div v-if="git.pushing || git.pulling" class="flex shrink-0 items-center gap-2.5 border-b border-border px-3 py-1">
+    <!-- Push/pull/commit/generate progress bar -->
+    <div v-if="gitBusy || git.pulling" class="flex shrink-0 items-center gap-2.5 border-b border-border px-3 py-1">
       <div class="gp-progress-bar relative h-0.5 flex-1 overflow-hidden rounded-sm bg-border" />
-      <span class="text-[11px] text-muted-foreground">{{ git.pushing ? "Pushing…" : "Pulling…" }}</span>
+      <span class="text-[11px] text-muted-foreground">{{ git.generating ? "Generating message…" : git.committing ? "Committing…" : git.pushing ? "Pushing…" : "Pulling…" }}</span>
     </div>
 
     <!-- No repo error -->
@@ -233,18 +233,20 @@
             <div class="flex gap-1.5">
               <button
                 class="flex flex-1 items-center justify-center gap-1 rounded border border-border bg-hover px-2 py-[5px] font-sans text-[11px] font-medium text-secondary-foreground transition-colors hover:bg-[color-mix(in_srgb,var(--border)_60%,var(--bg-hover))] hover:text-foreground disabled:cursor-default disabled:opacity-30"
-                :disabled="!git.hasWorkingTreeChanges"
+                :disabled="!git.hasWorkingTreeChanges || gitBusy"
                 @click="git.commit(ui.commitMessageModel)"
                 title="⌘↵ (auto-generates a message if the box is empty)"
               >
-                <PhGitCommit :size="12" /> Commit
+                <PhGitCommit :size="12" :class="(git.generating || git.committing) && 'animate-spin'" />
+                {{ git.generating ? "Generating…" : git.committing ? "Committing…" : "Commit" }}
               </button>
               <button
                 class="flex flex-1 items-center justify-center gap-1 rounded border border-transparent bg-accent/80 px-2 py-[5px] font-sans text-[11px] font-medium text-white transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-30"
-                :disabled="!git.hasWorkingTreeChanges || git.pushing"
+                :disabled="!git.hasWorkingTreeChanges || gitBusy"
                 @click="commitAndPush()"
               >
-                <PhArrowUp :size="12" /> Commit & Push
+                <PhArrowUp :size="12" :class="(git.generating || git.committing || git.pushing) && 'animate-spin'" />
+                {{ git.generating ? "Generating…" : git.committing ? "Committing…" : git.pushing ? "Pushing…" : "Commit & Push" }}
               </button>
             </div>
           </div>
@@ -331,6 +333,7 @@ const git = useGitStore();
 const wsStore = useWorkspaceStore();
 const ui = useUIStore();
 const isPopout = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label === "gitpanel";
+const gitBusy = computed(() => git.generating || git.committing || git.pushing);
 
 async function popout() {
   await invoke("open_git_panel_window");
