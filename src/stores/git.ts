@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface GitFile {
@@ -267,12 +267,13 @@ export const useGitStore = defineStore("git", () => {
     }
   }
 
-  async function generateCommitMessage() {
-    if (!cwd.value || staged.value.length === 0 || generating.value) return;
+  async function generateCommitMessage(model?: string) {
+    if (!cwd.value || !hasWorkingTreeChanges.value || generating.value) return;
     generating.value = true;
     generateError.value = null;
     try {
-      const out = await invoke<GitOutput>("generate_commit_message", { cwd: cwd.value });
+      await stageAllIfNeeded();
+      const out = await invoke<GitOutput>("generate_commit_message", { cwd: cwd.value, model });
       if (out.code !== 0) throw new Error(out.stderr || "commit message generation failed");
       commitMsg.value = out.stdout.trim();
     } catch (e: unknown) {
@@ -306,8 +307,30 @@ export const useGitStore = defineStore("git", () => {
     await refresh();
   }
 
-  async function commit() {
-    if (!commitMsg.value.trim()) return;
+  // Like t3code (GitVcsDriverCore.prepareCommitContext): commit/generate act
+  // on the whole working tree, not just what's manually staged — `git add -A`
+  // first when nothing's staged yet but there are working-tree changes.
+  const hasWorkingTreeChanges = computed(
+    () => staged.value.length > 0 || unstaged.value.length > 0 || untracked.value.length > 0,
+  );
+
+  async function stageAllIfNeeded() {
+    if (staged.value.length > 0) return;
+    if (unstaged.value.length === 0 && untracked.value.length === 0) return;
+    await runGit(cwd.value, ["add", "-A"]);
+    await refresh(true);
+  }
+
+  // Like t3code (GitActionsControl.logic.ts: `canCommit = hasChanges`, no
+  // message check): Commit doesn't require you to type anything first — an
+  // empty box gets auto-generated right before the commit.
+  async function commit(model?: string) {
+    await stageAllIfNeeded();
+    if (staged.value.length === 0) return;
+    if (!commitMsg.value.trim()) {
+      await generateCommitMessage(model);
+      if (!commitMsg.value.trim()) return;
+    }
     await runGit(cwd.value, ["commit", "-m", commitMsg.value.trim()]);
     commitMsg.value = "";
     diff.value = "";
@@ -403,7 +426,7 @@ export const useGitStore = defineStore("git", () => {
     cwd, branch, staged, unstaged, untracked,
     diff, diffFile, diffStaged,
     loading, error, commitMsg,
-    ahead, behind, hasUpstream, pushing, pulling, generating, generateError, log, logLoading,
+    ahead, behind, hasUpstream, pushing, pulling, generating, generateError, hasWorkingTreeChanges, log, logLoading,
     setCwd, refresh, stageFile, unstageFile, unstageAll, stageAll, commit, showDiff, clearDiff, fetchAllDiff, gitInit,
     push, pull, refreshLog, generateCommitMessage,
     branches, fetching, fetchBranches, switchBranch, createBranch, fetch, discardFile,

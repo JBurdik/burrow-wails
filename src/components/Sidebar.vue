@@ -72,7 +72,15 @@
           <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-3 w-3 shrink-0 rounded-[3px] object-cover" />
           <PhFolder v-else :size="11" weight="fill" class="shrink-0 text-accent/80" />
           <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[10.5px] text-muted-foreground">{{ repoName(row.ws) }}</span>
-          <span class="shrink-0 text-[10px] tabular-nums" :class="statusClass(row.tab.status)">{{ statusText(row) }}</span>
+          <span class="shrink-0 text-[10px] tabular-nums group-hover:hidden" :class="statusClass(row.tab.status)">{{ statusText(row) }}</span>
+          <button
+            class="hidden shrink-0 items-center gap-[3px] rounded px-1 py-0.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-hover hover:text-[#4ade80] group-hover:flex"
+            title="Settle"
+            @click.stop="toggleSettled(row.tab, row.ws.id)"
+          >
+            <PhCheck :size="11" weight="bold" />
+            Settle
+          </button>
         </div>
 
         <!-- line 2: thread title -->
@@ -94,13 +102,6 @@
             class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-foreground"
             @dblclick.stop="startTabRename(row.ws.id, row.tab)"
           >{{ row.tab.title }}</span>
-          <PhCheck
-            :size="13"
-            weight="bold"
-            class="shrink-0 rounded-sm p-px text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:!text-[#4ade80]"
-            title="Settle"
-            @click.stop="toggleSettled(row.tab, row.ws.id)"
-          />
           <PhX
             :size="10"
             weight="bold"

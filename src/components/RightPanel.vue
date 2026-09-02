@@ -325,6 +325,10 @@
          switching to Changes and back doesn't reload the page being previewed. -->
     <BrowserPane v-if="browserOpened" v-show="activeTab === 'browser'" class="min-h-0 flex-1" />
 
+    <!-- Terminal: same kept-mounted treatment so the shell survives switching surfaces. -->
+    <XTerm v-if="terminalOpened && props.cwd" v-show="activeTab === 'terminal'" :pty-id="terminalPtyId" :cwd="props.cwd" class="min-h-0 flex-1" />
+    <div v-else-if="activeTab === 'terminal'" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
+
     <!-- Restore confirm — overwrites files on disk, so it always asks first -->
     <Teleport to="body">
       <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="restoreTarget" @click.self="restoreTarget = null">
@@ -359,7 +363,7 @@ import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight,
-  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe,
+  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe, PhTerminal,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
@@ -372,6 +376,8 @@ import ManagerPanel from "./ManagerPanel.vue";
 import DiffView from "./DiffView.vue";
 import CommitPushMenu from "./CommitPushMenu.vue";
 import BrowserPane from "./BrowserPane.vue";
+import XTerm from "./XTerm.vue";
+import { nextPtyId } from "@/lib/ptyId";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
@@ -415,11 +421,14 @@ const tabs = computed(() => {
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
     { id: "manager", label: "Manager", icon: PhSparkle, description: "Plan and coordinate agent work for this project." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
+    { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
   return all;
 });
 
 const browserOpened = computed(() => openedTabIds.value.includes("browser"));
+const terminalOpened = computed(() => openedTabIds.value.includes("terminal"));
+const terminalPtyId = nextPtyId();
 
 const openedTabs = computed(() => openedTabIds.value
   .map((id) => tabs.value.find((tab) => tab.id === id))

@@ -199,7 +199,7 @@ import { useKeybindingsStore } from "@/stores/keybindings";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useGitStore } from "@/stores/git";
-import { isTabSettled } from "@/lib/settledTabs";
+import { isTabSettled, settledTabKeys } from "@/lib/settledTabs";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
 const props = defineProps<{ cwd: string; workspaceId: number }>();
@@ -1345,6 +1345,14 @@ function syncStore() {
 }
 
 watch([tabs, activeTabId, focusedLeafId], syncStore, { deep: true });
+// Settle is toggled outside this component's own reactive tree (localStorage-
+// backed ref for terminal/agent tabs, settledOverride for chats) — neither
+// mutates `tabs`, so the sidebar mirror needs its own trigger or it only
+// updates on the next unrelated tab change.
+watch(
+  () => [settledTabKeys.value.join(","), chatsStore.sessions.map((s) => `${s.id}:${s.settledOverride ?? ""}`).join(",")],
+  syncStore,
+);
 
 watch(activeTabId, (id) => {
   const tab = tabs.value.find((candidate) => candidate.id === id);

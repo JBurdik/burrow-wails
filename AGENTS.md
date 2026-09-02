@@ -1,3 +1,6 @@
+# Dictionary
+- RP = Right pannel
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

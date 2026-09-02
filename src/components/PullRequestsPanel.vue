@@ -58,7 +58,7 @@ function postComment() { const body = comment.value.trim(); if (!body || !pr.sel
           <span class="text-[10px]" :class="item.isDraft ? 'text-warning' : 'text-success'">{{ item.isDraft ? 'Draft' : item.reviewDecision || 'Open' }}</span>
         </span>
         <span class="font-semibold leading-snug text-foreground">{{ item.title }}</span>
-        <span class="truncate text-muted-foreground">{{ item.repository?.nameWithOwner }}<template v-if="item.headRefName"> · {{ item.headRefName }}</template></span>
+        <span v-if="item.headRefName" class="truncate text-muted-foreground">{{ item.headRefName }}</span>
       </button>
     </template>
 

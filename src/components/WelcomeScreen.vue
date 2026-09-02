@@ -215,7 +215,6 @@ function cycleProvider() {
   onModelSelect(next.id, next.kind === "claude" ? getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id) : "");
 }
 
-defineExpose({ focus: () => inputEl.value?.focus(), cycleProvider });
 const pendingImages = ref<string[]>([]);
 
 function attachImages(files: Iterable<File>) {
@@ -336,6 +335,13 @@ const target = computed<Workspace | null>(
   () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
 );
 function pick(repo: Workspace) { override.value = repo; }
+
+// Exposed so App.vue can point the titlebar/right-panel git surfaces at
+// whatever project this screen is targeting — picking a project here doesn't
+// touch ws.active (sending the first message does, via store.open() below),
+// so without this the branch/commit UI kept showing the previous real
+// workspace instead of the one visibly selected in the picker.
+defineExpose({ focus: () => inputEl.value?.focus(), cycleProvider, target });
 
 type WorktreeMode = "current" | "new";
 const worktreeMode = shallowRef<WorktreeMode>("current");

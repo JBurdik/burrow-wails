@@ -8,7 +8,7 @@ interface GhOutput { stdout: string; stderr: string; code: number }
 export interface PullRequest {
   number: number; title: string; body: string; url: string; state: string; isDraft: boolean;
   headRefName: string; baseRefName: string; updatedAt: string; additions: number; deletions: number;
-  author?: { login: string } | null; repository?: { nameWithOwner: string } | null;
+  author?: { login: string } | null;
   reviewDecision?: string | null; mergeStateStatus?: string | null;
   statusCheckRollup?: Array<{ name?: string; status?: string; conclusion?: string }>;
   comments?: Array<{ author?: { login: string }; body: string; createdAt: string }>;
@@ -21,9 +21,10 @@ async function gh(cwd: string, args: string[]) {
   return out.stdout;
 }
 
-// `gh search prs` deliberately exposes fewer fields than `gh pr view`.
+// `gh pr list`/`gh pr view` don't expose a "repository" field (unlike `gh search prs`) —
+// they're already scoped to the repo at cwd, so the list is implicitly single-repo.
 // Fetch the richer branch/review/check data only after the user opens a row.
-const listFields = "number,title,url,state,isDraft,author,repository,updatedAt";
+const listFields = "number,title,url,state,isDraft,author,headRefName,updatedAt";
 const detailFields = `${listFields},body,baseRefName,additions,deletions,statusCheckRollup,comments,files`;
 
 export function usePullRequests(cwd: () => string) {
@@ -39,14 +40,15 @@ export function usePullRequests(cwd: () => string) {
   const visibleItems = computed(() => {
     const needle = query.value.trim().toLowerCase();
     if (!needle) return items.value;
-    return items.value.filter((pr) => `${pr.number} ${pr.title} ${pr.repository?.nameWithOwner ?? ""} ${pr.headRefName}`.toLowerCase().includes(needle));
+    return items.value.filter((pr) => `${pr.number} ${pr.title} ${pr.headRefName}`.toLowerCase().includes(needle));
   });
 
   async function refresh() {
     if (!cwd()) return;
     loading.value = true; error.value = "";
     try {
-      const args = ["search", "prs", "--state", "open", "--json", listFields, "--limit", "100"];
+      // `gh pr list` (unlike `search prs`) is scoped to the repo at cwd.
+      const args = ["pr", "list", "--state", "open", "--json", listFields, "--limit", "100"];
       if (scope.value === "assigned") args.push("--assignee", "@me");
       if (scope.value === "created") args.push("--author", "@me");
       items.value = JSON.parse(await gh(cwd(), args)) as PullRequest[];

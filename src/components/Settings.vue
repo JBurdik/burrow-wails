@@ -88,6 +88,13 @@
               </div>
               <Select v-model="ui.spawnMode" class="min-w-[200px]" :options="SPAWN_MODE_OPTIONS" />
             </div>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Commit message model</span>
+                <span class="text-[11px] text-muted-foreground">Model the GitPanel sparkle button uses to draft a commit message from your staged diff. Kept cheap by default.</span>
+              </div>
+              <Select v-model="ui.commitMessageModel" class="min-w-[200px]" :options="commitMessageModelOptions" />
+            </div>
           </div>
 
           <div class="flex flex-col gap-2.5">
@@ -996,6 +1003,7 @@ import { soundsForKind, playSound, type SoundKind } from "@/lib/sounds";
 import { eventToShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
+import { MODELS_BY_AGENT } from "@/lib/chatModels";
 
 defineEmits<{ close: [] }>();
 
@@ -1030,6 +1038,7 @@ const SPAWN_MODE_OPTIONS = [
   { value: "terminal", label: "Terminal tab" },
   { value: "chat", label: "Chat" },
 ];
+const commitMessageModelOptions = MODELS_BY_AGENT.claude.map((m) => ({ value: m.id, label: m.label }));
 const FLOAT_CORNER_OPTIONS = [
   { value: "top-right", label: "Top right" },
   { value: "top-left", label: "Top left" },

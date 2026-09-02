@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"os/exec"
 	"strings"
@@ -46,9 +47,14 @@ func (a *App) RunGh(cwd string, args []string) GitOutput {
 }
 
 // GenerateCommitMessage drafts a commit message from the staged diff via a
-// one-shot, non-interactive `claude -p` call — no PTY, no session, just
-// stdout capture like RunGit/RunGh above.
-func (a *App) GenerateCommitMessage(cwd string) GitOutput {
+// one-shot, non-interactive `claude -p` call — no PTY, no session. Follows
+// t3code's approach (apps/server/src/textGeneration/ClaudeTextGeneration.ts):
+// prompt goes over stdin (no arg-length limit, no shell-escaping headaches),
+// `--output-format json --json-schema` gets a structured {subject, body}
+// response back instead of parsing free-form text.
+const commitMessageSchema = `{"type":"object","properties":{"subject":{"type":"string"},"body":{"type":"string"}},"required":["subject","body"],"additionalProperties":false}`
+
+func (a *App) GenerateCommitMessage(cwd string, model string) GitOutput {
 	diffOut := runCmd("git", cwd, []string{"diff", "--staged"})
 	if !diffOut.Success {
 		return diffOut
@@ -57,24 +63,77 @@ func (a *App) GenerateCommitMessage(cwd string) GitOutput {
 	if diff == "" {
 		return GitOutput{Stderr: "nothing staged", Code: 1}
 	}
-	const maxDiffChars = 6000
+	const maxDiffChars = 40000
 	if len(diff) > maxDiffChars {
-		diff = diff[:maxDiffChars] + "\n… (truncated)"
+		diff = diff[:maxDiffChars] + "\n\n[truncated]"
 	}
+	statOut := runCmd("git", cwd, []string{"diff", "--staged", "--stat"})
+
+	prompt := strings.Join([]string{
+		"You write concise git commit messages.",
+		"Return a JSON object with keys: subject, body.",
+		"Rules:",
+		"- subject must be imperative, <= 72 chars, and no trailing period",
+		"- body can be an empty string or short bullet points",
+		"- capture the primary user-visible or developer-visible change",
+		"",
+		"Staged files:",
+		strings.TrimSpace(statOut.Stdout),
+		"",
+		"Staged patch:",
+		diff,
+	}, "\n")
 
 	bin := "claude"
 	if resolved := resolveAgentBin("claude", ""); resolved != "" {
 		bin = resolved
 	}
-	prompt := "Write a concise git commit message for this staged diff. " +
-		"One line, conventional-commits style (e.g. \"fix: ...\", \"feat: ...\"), " +
-		"under 72 characters, no body, no quotes, no markdown. Output ONLY the commit message.\n\n" +
-		diff
-	out := runCmd(bin, cwd, []string{"-p", prompt})
-	if out.Success {
-		out.Stdout = strings.Trim(strings.TrimSpace(out.Stdout), "\"'")
+	args := []string{"-p", "--output-format", "json", "--json-schema", commitMessageSchema}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
-	return out
+	c := exec.Command(bin, args...)
+	c.Dir = cwd
+	c.Stdin = strings.NewReader(prompt)
+	stdout, err := c.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return GitOutput{Stderr: string(ee.Stderr), Code: ee.ExitCode()}
+		}
+		return GitOutput{Stderr: err.Error(), Code: -1}
+	}
+
+	var envelope struct {
+		StructuredOutput struct {
+			Subject string `json:"subject"`
+			Body    string `json:"body"`
+		} `json:"structured_output"`
+	}
+	if err := json.Unmarshal(stdout, &envelope); err != nil {
+		return GitOutput{Stderr: "claude returned unexpected output format", Code: -1}
+	}
+
+	msg := sanitizeCommitSubject(envelope.StructuredOutput.Subject)
+	if body := strings.TrimSpace(envelope.StructuredOutput.Body); body != "" {
+		msg += "\n\n" + body
+	}
+	return GitOutput{Stdout: msg, Success: true}
+}
+
+// sanitizeCommitSubject mirrors t3code's TextGenerationUtils.sanitizeCommitSubject.
+func sanitizeCommitSubject(raw string) string {
+	line := strings.TrimSpace(raw)
+	if idx := strings.IndexAny(line, "\r\n"); idx >= 0 {
+		line = line[:idx]
+	}
+	line = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(line), "."))
+	if line == "" {
+		return "Update project files"
+	}
+	if len(line) > 72 {
+		line = strings.TrimSpace(line[:72])
+	}
+	return line
 }
 
 // --- worktrees ---

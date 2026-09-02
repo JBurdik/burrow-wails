@@ -91,6 +91,7 @@ interface Prefs {
   toastPosition: ToastPosition; // screen anchor for toast notifications
   defaultChatAgent: string; // default agent for new chat sessions (chatAgents store id)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
+  commitMessageModel: string; // Claude model id used for GitPanel's "generate commit message" (cheap by default)
 }
 
 // Screen anchor for the toast stack (ToastStack.vue).
@@ -167,6 +168,7 @@ const DEFAULT_PREFS: Prefs = {
   toastPosition: "bottom-left",
   defaultChatAgent: "claude",
   spawnMode: "terminal",
+  commitMessageModel: "claude-haiku-4-5-20251001",
 };
 
 function normalize(parsed: unknown): Prefs {
@@ -229,13 +231,16 @@ export const useUIStore = defineStore("ui", () => {
 
   // Compose ("What should we build in X?") screen, shown over the terminal host.
   // Session-only — a reload lands you back on your threads, not the composer.
-  const welcomeOpen = ref(false);
+  // Tri-state: true = pinned open, false = explicitly dismissed, null = auto
+  // (App.vue decides from whether the workspace has any live, unsettled tab).
+  const welcomeOpen = ref<boolean | null>(null);
   const sidebarVisible = ref(loaded.sidebarVisible ?? false);
   const sidebarWidth = ref(loaded.sidebarWidth ?? 220);
   const rightPanelWidth = ref(loaded.rightPanelWidth ?? 300);
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "bottom-left");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
+  const commitMessageModel = ref<string>(loaded.commitMessageModel ?? "claude-haiku-4-5-20251001");
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
 
@@ -288,6 +293,7 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition.value = p.toastPosition ?? "bottom-left";
     defaultChatAgent.value = p.defaultChatAgent ?? "claude";
     spawnMode.value = p.spawnMode ?? "terminal";
+    commitMessageModel.value = p.commitMessageModel ?? "claude-haiku-4-5-20251001";
   });
 
   // Publish the soft sub-agent cap to a file the `burrow` CLI can read (it can't
@@ -442,6 +448,7 @@ export const useUIStore = defineStore("ui", () => {
         toastPosition: toastPosition.value,
         defaultChatAgent: defaultChatAgent.value,
         spawnMode: spawnMode.value,
+        commitMessageModel: commitMessageModel.value,
       } satisfies Prefs,
     );
   }
@@ -457,7 +464,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, commitMessageModel],
     () => {
       savePrefs();
       applyTheme();
@@ -629,5 +636,6 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition,
     defaultChatAgent,
     spawnMode,
+    commitMessageModel,
   };
 });

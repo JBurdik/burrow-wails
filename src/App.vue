@@ -1,9 +1,9 @@
 <template>
   <div class="ide-root">
     <TitleBar
-      :workspace-name="ws.active?.name"
-      :branch="git.cwd === ws.active?.path ? git.branch : ''"
-      :folder-path="ws.active?.path"
+      :workspace-name="displayWs?.name"
+      :branch="git.cwd === displayWs?.path ? git.branch : ''"
+      :folder-path="displayWs?.path"
       :right-panel-visible="ui.rightPanelVisible"
       :sidebar-visible="ui.sidebarVisible"
       @toggle-sidebar="ui.toggleSidebar()"
@@ -37,9 +37,9 @@
         ref="rightPanelRef"
         class="panel-right"
         :open="ui.rightPanelVisible"
-        :cwd="ws.active?.path ?? ''"
-        :workspace-id="ws.active?.id"
-        :is-git="ws.active?.is_git !== false"
+        :cwd="displayWs?.path ?? ''"
+        :workspace-id="displayWs?.id"
+        :is-git="displayWs?.is_git !== false"
         @open-panel="ui.rightPanelVisible = true"
         @close-panel="ui.rightPanelVisible = false"
         @manager-open="ui.rightPanelWidth = Math.max(ui.rightPanelWidth, 440)"
@@ -109,7 +109,7 @@ import UpdateBanner from "@/components/UpdateBanner.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
-import { useWorkspaceStore } from "@/stores/workspace";
+import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useGitStore } from "@/stores/git";
 import { useProvidersStore } from "@/stores/providers";
@@ -147,14 +147,30 @@ const keys = useKeybindingsStore();
 const update = useUpdateStore();
 const tabsStore = useTerminalTabsStore();
 
-// No active workspace, or the active one has no tabs open yet.
-const showWelcome = computed(() =>
-  ui.welcomeOpen || !ws.active || (tabsStore.tabsByWs[ws.active.id]?.length ?? 0) === 0,
-);
+// Tabs of the active workspace, and of those the ones still wanting attention.
+// Restore reopens EVERY saved chat thread (the sessions are the threads — the
+// Sidebar's shelves read them from here), so "has tabs" is not "has live work":
+// a startup with only settled/old threads must still land on the composer.
+const allTabs = computed(() => (ws.active ? tabsStore.tabsByWs[ws.active.id] ?? [] : []));
+const liveTabs = computed(() => allTabs.value.filter((t) => !t.settled).length);
+
+// welcomeOpen is tri-state: true/false = explicitly opened/dismissed, null = auto.
+const showWelcome = computed(() => !ws.active || (ui.welcomeOpen ?? liveTabs.value === 0));
+
+// Back to auto once the workspace is empty, so closing the last tab brings the
+// composer back after an earlier dismissal.
+watch(() => allTabs.value.length, (n) => { if (n === 0) ui.welcomeOpen = null; });
 
 // Screen stays mounted behind v-show, so re-focus its composer each time it shows.
-const welcomeEl = useTemplateRef<{ focus: () => void; cycleProvider: () => void }>("welcomeEl");
+const welcomeEl = useTemplateRef<{ focus: () => void; cycleProvider: () => void; target: Workspace | null }>("welcomeEl");
 watch(showWelcome, (on) => { if (on) nextTick(() => welcomeEl.value?.focus()); });
+
+// While the welcome screen is up, the titlebar/right-panel git surfaces follow
+// whatever project it's targeting (its own project picker, not ws.active —
+// picking there doesn't open the workspace until the first message is sent).
+const displayWs = computed<Workspace | null>(() =>
+  showWelcome.value ? (welcomeEl.value?.target ?? ws.active) : ws.active,
+);
 
 const panelStyles = computed(() => ({
   '--sidebar-width': ui.sidebarWidth + 'px',

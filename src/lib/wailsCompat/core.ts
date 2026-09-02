@@ -66,7 +66,7 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "run_gh":
       return App.RunGh(args.cwd, args.args ?? []);
     case "generate_commit_message":
-      return App.GenerateCommitMessage(args.cwd);
+      return App.GenerateCommitMessage(args.cwd, args.model ?? "");
 
     // Checkpoints — pre-turn worktree snapshots (src-wails/checkpoints.go)
     case "create_checkpoint":

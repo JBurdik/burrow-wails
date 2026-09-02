@@ -56,32 +56,36 @@
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { PhArrowUp, PhCaretDown, PhGitCommit, PhGitPullRequest } from "@phosphor-icons/vue";
 import { useGitStore } from "@/stores/git";
+import { useUIStore } from "@/stores/ui";
 import { usePullRequests } from "@/composables/usePullRequests";
 
 const git = useGitStore();
+const ui = useUIStore();
 const pr = usePullRequests(() => git.cwd);
 const open = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
 
-const commitDisabled = computed(() => !git.commitMsg.trim() || git.staged.length === 0);
+// Like t3code: enabled purely on "anything changed", no message required —
+// an empty box gets auto-generated right before the commit (git.commit()).
+const commitDisabled = computed(() => !git.hasWorkingTreeChanges);
 const pushDisabled = computed(() => git.pushing || (git.hasUpstream && git.ahead === 0));
 const primaryDisabled = computed(() => commitDisabled.value || git.pushing);
 // ponytail: PR gate is "has upstream" only — doesn't check gh auth/repo host, gh itself reports that on failure via pr.error.
 const prDisabled = computed(() => !git.hasUpstream || pr.actionLoading.value);
 
 const primaryTitle = computed(() =>
-  commitDisabled.value ? "Type a commit message and stage changes" : "Commit staged changes, then push"
+  commitDisabled.value ? "No changes to commit" : "Stage all changes, commit (auto-message if empty), then push"
 );
 
 async function commitAndPush() {
   if (primaryDisabled.value) return;
-  await git.commit();
+  await git.commit(ui.commitMessageModel);
   await git.push();
 }
 
 async function doCommit() {
   open.value = false;
-  if (!commitDisabled.value) await git.commit();
+  if (!commitDisabled.value) await git.commit(ui.commitMessageModel);
 }
 
 async function doPush() {

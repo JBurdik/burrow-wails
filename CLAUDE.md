@@ -12,6 +12,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > unmodified `src/` Vue frontend is wired to it. Progress/remaining-gaps status:
 > `~/.claude/plans/ahoj-pros-mt-el-by-distributed-glade.md`.
 
+# Dictionary
+- RP = Right pannel
+
+
 ## What this is
 
 **Burrow** — a desktop app (macOS-first) that wraps real PTYs in a multi-workspace IDE shell, designed to run AI coding agents (Claude Code, Aider, Codex, etc.) side-by-side in terminal tabs. The product name is **Burrow**; the repo/package name is `agentic-ide`.

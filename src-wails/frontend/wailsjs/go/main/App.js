@@ -146,8 +146,8 @@ export function FormatSource(arg1, arg2, arg3) {
   return window['go']['main']['App']['FormatSource'](arg1, arg2, arg3);
 }
 
-export function GenerateCommitMessage(arg1) {
-  return window['go']['main']['App']['GenerateCommitMessage'](arg1);
+export function GenerateCommitMessage(arg1, arg2) {
+  return window['go']['main']['App']['GenerateCommitMessage'](arg1, arg2);
 }
 
 export function GetAppVersion() {

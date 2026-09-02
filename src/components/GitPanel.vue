@@ -208,14 +208,14 @@
                 class="gp-commit-input box-border w-full resize-none rounded border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 pr-6 font-sans text-xs leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/55"
                 placeholder="Commit message…"
                 rows="3"
-                @keydown.ctrl.enter="git.commit()"
-                @keydown.meta.enter="git.commit()"
+                @keydown.ctrl.enter="git.commit(ui.commitMessageModel)"
+                @keydown.meta.enter="git.commit(ui.commitMessageModel)"
               />
               <button
                 class="absolute right-1 top-1 rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-accent disabled:cursor-default disabled:opacity-30"
-                :disabled="git.staged.length === 0 || git.generating"
-                title="Generate commit message from staged diff"
-                @click="git.generateCommitMessage()"
+                :disabled="!git.hasWorkingTreeChanges || git.generating"
+                title="Generate commit message (stages all changes first if needed)"
+                @click="git.generateCommitMessage(ui.commitMessageModel)"
               >
                 <PhSparkle :size="12" :class="git.generating && 'animate-pulse'" />
               </button>
@@ -233,15 +233,15 @@
             <div class="flex gap-1.5">
               <button
                 class="flex flex-1 items-center justify-center gap-1 rounded border border-border bg-hover px-2 py-[5px] font-sans text-[11px] font-medium text-secondary-foreground transition-colors hover:bg-[color-mix(in_srgb,var(--border)_60%,var(--bg-hover))] hover:text-foreground disabled:cursor-default disabled:opacity-30"
-                :disabled="!git.commitMsg.trim() || git.staged.length === 0"
-                @click="git.commit()"
-                title="⌘↵"
+                :disabled="!git.hasWorkingTreeChanges"
+                @click="git.commit(ui.commitMessageModel)"
+                title="⌘↵ (auto-generates a message if the box is empty)"
               >
                 <PhGitCommit :size="12" /> Commit
               </button>
               <button
                 class="flex flex-1 items-center justify-center gap-1 rounded border border-transparent bg-accent/80 px-2 py-[5px] font-sans text-[11px] font-medium text-white transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-30"
-                :disabled="!git.commitMsg.trim() || git.staged.length === 0 || git.pushing"
+                :disabled="!git.hasWorkingTreeChanges || git.pushing"
                 @click="commitAndPush()"
               >
                 <PhArrowUp :size="12" /> Commit & Push
@@ -320,6 +320,7 @@ import {
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { useUIStore } from "@/stores/ui";
 import DiffView from "./DiffView.vue";
 import { Select } from "@/components/ui/select";
 
@@ -328,6 +329,7 @@ const props = withDefaults(defineProps<{ size?: "sm" | "lg" }>(), { size: "sm" }
 
 const git = useGitStore();
 const wsStore = useWorkspaceStore();
+const ui = useUIStore();
 const isPopout = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label === "gitpanel";
 
 async function popout() {
@@ -417,7 +419,7 @@ function applyType(t: string) {
 }
 
 async function commitAndPush() {
-  await git.commit();
+  await git.commit(ui.commitMessageModel);
   await git.push();
 }
 
