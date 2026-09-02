@@ -155,8 +155,12 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     baseRef: string | null,
     path: string,
   ): Promise<Workspace> {
+    const parent = workspaces.value.find((workspace) => workspace.id === parentId);
+    if (!parent) throw new Error("The worktree's parent workspace is no longer available");
     const ws = await invoke<Workspace>("create_worktree", {
       parentId,
+      repoPath: parent.path,
+      name: branch,
       branch,
       baseRef: baseRef || null,
       path,

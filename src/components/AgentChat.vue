@@ -304,6 +304,7 @@
 
     <!-- New-style input bar -->
     <div v-if="!hideComposer" class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
+      <div class="mx-auto w-full max-w-[560px]">
       <!-- Queued messages panel (Zed-style) -->
       <div v-if="messageQueue.length > 0" class="border-b border-border bg-[color-mix(in_srgb,var(--chat-accent)_5%,transparent)]">
         <div class="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 hover:bg-hover" @click="queueExpanded = !queueExpanded">
@@ -376,7 +377,7 @@
           @input="onInput"
           @paste="onPaste"
         />
-        <div class="flex items-center justify-between gap-1.5 px-2 pb-2 pt-1.5">
+          <div class="flex items-center justify-between gap-1.5 px-2 pb-2 pt-1.5">
           <!-- Left: share selection, model dropdown, perm mode -->
           <div class="flex items-center gap-1">
             <img v-if="avatarSrc" :src="avatarSrc" class="toolbar-avatar mr-0.5 h-[22px] w-[22px] flex-shrink-0 rounded-full border border-border object-cover [object-position:center_18%]" alt="Manager" />
@@ -551,6 +552,14 @@
           </div>
         </div>
       </div>
+      <WorkspaceTargetPicker
+        :mode="chatWorkspace?.parent_id ? 'new' : 'current'"
+        :current-branch="chatBranch"
+        :detail="chatWorkspace?.worktree_branch || undefined"
+        appearance="attached"
+        readonly
+      />
+      </div>
 
       <!-- Context usage bar -->
       <div v-if="contextUsageRatio > 0" class="h-0.5 overflow-hidden bg-hover" :title="`${turnStats?.inputTokens.toLocaleString()} / ${CONTEXT_MAX.toLocaleString()} tokens`">
@@ -582,9 +591,12 @@ import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useScriptsStore } from "@/stores/scripts";
+import { useGitStore } from "@/stores/git";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { useProvidersStore, chatTransportFor, binaryFor, type ChatTransport } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import ModelPicker from "@/components/ModelPicker.vue";
+import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import { modelsFor, learnModels, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { playSound } from "@/lib/sounds";
@@ -639,11 +651,15 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "prompt-sent"): void }>();
 
 const chats = useClaudeChatsStore();
+const workspaces = useWorkspaceStore();
+const git = useGitStore();
 const notifStore = useNotificationsStore();
 const uiStore = useUIStore();
 const scriptsStore = useScriptsStore();
 const chatAgents = useProvidersStore();
 const editorCtx = useEditorContextStore();
+const chatWorkspace = computed(() => workspaces.workspaces.find((workspace) => workspace.id === props.workspaceId));
+const chatBranch = computed(() => chatWorkspace.value?.worktree_branch || git.branchByWs[props.workspaceId] || "HEAD");
 
 // Local mirror of the session's agentKind (a chatAgents id), drives the switcher.
 const agentKind = ref<string>(
@@ -3337,6 +3353,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 55%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, #ec4899) 14%, transparent);
 }
+
+.chat-input-box { position: relative; z-index: 1; }
 
 /* Empty-state avatar: soft halo instead of a flat icon tile. */
 .chat-empty-avatar {
