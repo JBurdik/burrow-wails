@@ -25,7 +25,7 @@ const model = defineModel<string | undefined>();
     </SelectTrigger>
     <SelectPortal>
       <SelectContent
-        class="z-50 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md"
+        class="z-[1100] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md"
         position="popper"
         :side-offset="4"
       >
