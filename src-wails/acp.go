@@ -286,7 +286,38 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		}
 		emitAll(a.ctx, "acp-data-"+chatID, string(line))
 	}
+	// `turn/start` is acknowledged with an ordinary JSON-RPC response.  A
+	// rejection therefore has no `method`, and used to be silently discarded by
+	// this bridge.  The UI had already set busy=true, so it then spun until the
+	// silence watchdog fired.  Only an error settles a pending turn here: a
+	// successful response merely means the turn is now running and its terminal
+	// notification remains authoritative.
+	if method == "" {
+		if failure := codexRPCErrorMessage(msg); failure != "" {
+			a.finishCodexTurn(chatID, sess, emit, failure)
+		}
+		return
+	}
 	switch method {
+	case "item/started":
+		if toolCallID, title, input, ok := codexToolCall(mapOf(params["item"])); ok {
+			update := map[string]any{"sessionUpdate": "tool_call", "toolCallId": toolCallID, "title": title, "input": input}
+			emit(map[string]any{"method": "session/update", "params": map[string]any{"update": update}})
+		}
+	case "item/completed":
+		if toolCallID, _, _, ok := codexToolCall(mapOf(params["item"])); ok {
+			item := mapOf(params["item"])
+			failed := codexToolFailed(item)
+			status := "completed"
+			if failed {
+				status = "failed"
+			}
+			update := map[string]any{
+				"sessionUpdate": "tool_call_update", "toolCallId": toolCallID, "status": status,
+				"content": []any{map[string]any{"content": map[string]any{"type": "text", "text": codexToolOutput(item)}}},
+			}
+			emit(map[string]any{"method": "session/update", "params": map[string]any{"update": update}})
+		}
 	case "item/agentMessage/delta":
 		delta, _ := params["delta"].(string)
 		if delta == "" {
@@ -333,13 +364,77 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		// optimistically clear the prompt before the app-server accepted it.
 		emit(map[string]any{"method": method, "params": params})
 	default:
-		if _, hasID := msg["id"]; hasID && method != "" {
+		if _, hasID := msg["id"]; hasID {
 			line, err := json.Marshal(msg)
 			if err == nil {
 				emitAll(a.ctx, "acp-req-"+chatID, string(line))
 			}
 		}
 	}
+}
+
+// codexToolCall turns the app-server's heterogeneous thread items into the
+// compact tool cards the ACP chat renderer already understands.
+func codexToolCall(item map[string]any) (id, title string, input map[string]any, ok bool) {
+	id, _ = item["id"].(string)
+	if id == "" {
+		return "", "", nil, false
+	}
+	switch item["type"] {
+	case "commandExecution":
+		command, _ := item["command"].(string)
+		return id, "Run: " + command, map[string]any{"command": command, "cwd": item["cwd"]}, true
+	case "fileChange":
+		return id, "Apply file changes", map[string]any{"changes": item["changes"]}, true
+	case "mcpToolCall":
+		server, _ := item["server"].(string)
+		tool, _ := item["tool"].(string)
+		return id, server + ": " + tool, map[string]any{"arguments": item["arguments"]}, true
+	case "dynamicToolCall":
+		tool, _ := item["tool"].(string)
+		return id, tool, map[string]any{"arguments": item["arguments"]}, true
+	case "webSearch":
+		query, _ := item["query"].(string)
+		return id, "Web search", map[string]any{"query": query}, true
+	default:
+		return "", "", nil, false
+	}
+}
+
+func codexToolFailed(item map[string]any) bool {
+	status, _ := item["status"].(string)
+	if status == "failed" || status == "error" {
+		return true
+	}
+	return mapOf(item["error"])["message"] != nil
+}
+
+func codexToolOutput(item map[string]any) string {
+	for _, key := range []string{"aggregatedOutput", "result"} {
+		if text, ok := item[key].(string); ok && text != "" {
+			return text
+		}
+	}
+	if err := mapOf(item["error"]); err != nil {
+		if text, _ := err["message"].(string); text != "" {
+			return text
+		}
+	}
+	if out, err := json.Marshal(item); err == nil {
+		return string(out)
+	}
+	return ""
+}
+
+func codexRPCErrorMessage(msg map[string]any) string {
+	err := mapOf(msg["error"])
+	if err == nil {
+		return ""
+	}
+	if message, _ := err["message"].(string); message != "" {
+		return message
+	}
+	return "The Codex app-server rejected the request without an error message."
 }
 
 // finishCodexTurn turns a terminal Codex notification into the prompt response

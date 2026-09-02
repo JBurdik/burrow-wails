@@ -3,13 +3,16 @@ import { ChevronDown } from "lucide-vue-next";
 import { SelectContent, SelectIcon, SelectItem, SelectItemText, SelectPortal, SelectRoot, SelectTrigger, SelectValue, SelectViewport } from "reka-ui";
 import { cn } from "@/lib/utils";
 
-defineProps<{ options: { value: string; label: string }[]; placeholder?: string; class?: string }>();
-const model = defineModel<string>();
+defineProps<{ options: { value: string; label: string }[]; placeholder?: string; class?: string; ariaLabel?: string; title?: string; triggerStyle?: Record<string, string> }>();
+const model = defineModel<string | undefined>();
 </script>
 
 <template>
   <SelectRoot v-model="model">
     <SelectTrigger
+      :aria-label="ariaLabel"
+      :title="title"
+      :style="triggerStyle"
       :class="
         cn(
           'flex h-8 items-center justify-between gap-2 rounded-md border border-border bg-panel px-2.5 text-sm text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-accent',

@@ -94,6 +94,13 @@
             class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-foreground"
             @dblclick.stop="startTabRename(row.ws.id, row.tab)"
           >{{ row.tab.title }}</span>
+          <PhCheck
+            :size="13"
+            weight="bold"
+            class="shrink-0 rounded-sm p-px text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:!text-[#4ade80]"
+            title="Settle"
+            @click.stop="toggleSettled(row.tab, row.ws.id)"
+          />
           <PhX
             :size="10"
             weight="bold"
@@ -155,7 +162,7 @@
             <button
               class="hidden shrink-0 items-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground group-hover:flex"
               title="Move back to active"
-              @click.stop="toggleSettled(row.tab)"
+              @click.stop="toggleSettled(row.tab, row.ws.id)"
             >
               <PhArrowCounterClockwise :size="11" weight="bold" />
             </button>
@@ -303,7 +310,7 @@
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSnooze(ws.id, tab!.id))">
           {{ isSnoozed(rowMenu.ws.id, rowMenu.tab?.id ?? -1) ? "Wake" : "Snooze" }}
         </button>
-        <button v-if="rowMenu.tab.isChat" class="menu-item" @click="withMenu((_ws, tab) => toggleSettled(tab!))">
+        <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
           {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
         </button>
         <button class="menu-item" @click="withMenu((ws, tab) => termTabs.close(ws.id, tab!.id))">Close tab</button>
@@ -318,6 +325,7 @@
         {{ isPinned(rowMenu.ws.id) ? "Unpin" : "Pin to top" }}
       </button>
       <button class="menu-item" @click="withMenu((ws) => toggleArchived(ws.id))">
+        <PhArchive :size="15" class="mr-1.5 shrink-0" />
         {{ isArchived(rowMenu.ws.id) ? "Unarchive" : "Archive" }}
       </button>
       <button v-if="isOpened(rowMenu.ws.id)" class="menu-item" @click="withMenu((ws) => store.closeWorkspace(ws.id))">Close project</button>
@@ -468,6 +476,8 @@ import {
   PhSquaresFour,
   PhPlayCircle,
   PhTrash,
+  PhCheck,
+  PhArchive,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
 import { pickDir } from "@/lib/pickPath";
@@ -487,6 +497,7 @@ import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
 import { archivedIds, isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
 import { buildActivityRows, type ActivityRow } from "@/lib/sidebarGroups";
 import { snoozedKeys, isSnoozed, toggleSnooze } from "@/lib/snoozedTabs";
+import { toggleTabSettled } from "@/lib/settledTabs";
 import { getProjectSettings } from "@/lib/projectSettings";
 
 import { useScriptsStore, type Script } from "@/stores/scripts";
@@ -563,10 +574,14 @@ function deletePermanently(chatId: number) {
   if (!window.confirm("Delete this chat permanently? This cannot be undone.")) return;
   chats.remove(chatId);
 }
-function toggleSettled(tab: TabSummary) {
-  if (tab.chatId == null) return;
-  if (tab.settled) chats.unsettle(tab.chatId);
-  else chats.settle(tab.chatId);
+function toggleSettled(tab: TabSummary, wsId: number) {
+  if (tab.isChat) {
+    if (tab.chatId == null) return;
+    if (tab.settled) chats.unsettle(tab.chatId);
+    else chats.settle(tab.chatId);
+  } else {
+    toggleTabSettled(wsId, tab.id);
+  }
 }
 
 type SectionKey = "settled" | "snoozed" | "archivedChats";

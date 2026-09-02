@@ -9,13 +9,12 @@
         :title="rootCwd"
       >{{ rootName }}</span>
 
-      <select
+      <Select
         v-model="newThreadAgent"
+        :options="agentOptions"
         class="h-6 max-w-[110px] rounded border border-border bg-hover px-1 text-[10px] text-foreground outline-none hover:border-muted-foreground"
         title="Agent used for the next Manager thread"
-      >
-        <option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option>
-      </select>
+      />
 
       <button
         class="flex h-6 items-center gap-1 rounded border px-1.5 text-[10px] transition-colors"
@@ -82,6 +81,7 @@ import { ref, computed, watch, onMounted } from "vue";
 import { PhSparkle, PhGitBranch, PhPlus } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import AgentChat from "./AgentChat.vue";
+import { Select } from "@/components/ui/select";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useProvidersStore } from "@/stores/providers";
@@ -119,6 +119,7 @@ type Thread = { repoId: number; sessionId: number; cwd: string; agentKind: strin
 const threads = ref<Thread[]>([]);
 
 const agents = computed(() => providers.chatAgents);
+const agentOptions = computed(() => agents.value.map((agent) => ({ value: agent.id, label: agent.name })));
 const newThreadAgent = ref("claude");
 watch(newThreadAgent, (v) => setConfig(AGENT_KEY, v));
 

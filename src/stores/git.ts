@@ -100,6 +100,8 @@ export const useGitStore = defineStore("git", () => {
   const hasUpstream = ref(false);
   const pushing = ref(false);
   const pulling = ref(false);
+  const generating = ref(false);
+  const generateError = ref<string | null>(null);
   const log = ref<GitCommit[]>([]);
   const logLoading = ref(false);
   const branches = ref<string[]>([]);
@@ -265,6 +267,21 @@ export const useGitStore = defineStore("git", () => {
     }
   }
 
+  async function generateCommitMessage() {
+    if (!cwd.value || staged.value.length === 0 || generating.value) return;
+    generating.value = true;
+    generateError.value = null;
+    try {
+      const out = await invoke<GitOutput>("generate_commit_message", { cwd: cwd.value });
+      if (out.code !== 0) throw new Error(out.stderr || "commit message generation failed");
+      commitMsg.value = out.stdout.trim();
+    } catch (e: unknown) {
+      generateError.value = e instanceof Error ? e.message : "commit message generation failed";
+    } finally {
+      generating.value = false;
+    }
+  }
+
   function setCwd(path: string) {
     if (path === cwd.value) return;
     cwd.value = path;
@@ -386,9 +403,9 @@ export const useGitStore = defineStore("git", () => {
     cwd, branch, staged, unstaged, untracked,
     diff, diffFile, diffStaged,
     loading, error, commitMsg,
-    ahead, behind, hasUpstream, pushing, pulling, log, logLoading,
+    ahead, behind, hasUpstream, pushing, pulling, generating, generateError, log, logLoading,
     setCwd, refresh, stageFile, unstageFile, unstageAll, stageAll, commit, showDiff, clearDiff, fetchAllDiff, gitInit,
-    push, pull, refreshLog,
+    push, pull, refreshLog, generateCommitMessage,
     branches, fetching, fetchBranches, switchBranch, createBranch, fetch, discardFile,
     prByWs, branchByWs, fetchPr, fetchPrs,
   };

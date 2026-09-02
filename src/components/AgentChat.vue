@@ -3,8 +3,8 @@
     <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
 
     <!-- Permission prompt (Bash / generic tool) -->
-    <div v-if="pendingPermission" class="permission-banner perm-slide-in flex flex-shrink-0 items-center gap-2 rounded-[10px] border py-2.5 pl-3.5 pr-3 mx-3 mt-2 mb-0.5 shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: color-mix(in srgb, #f59e0b 12%, var(--bg-panel)); border-color: color-mix(in srgb, #f59e0b 30%, transparent); border-left-width: 3px; border-left-color: #f59e0b;">
-      <PhShieldWarning :size="14" class="perm-icon flex-shrink-0 text-[#f59e0b]" />
+    <div v-if="pendingPermission" class="status-banner status-banner--warn perm-slide-in flex flex-shrink-0 items-center gap-2 py-2.5 pl-3.5 pr-3 mx-3 mt-2 mb-0.5">
+      <PhShieldWarning :size="14" class="perm-icon flex-shrink-0" />
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <span class="perm-title text-[11px] font-semibold text-foreground">{{ pendingPermission.toolName }} wants to run</span>
         <code class="perm-detail max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground">{{ permissionDetail }}</code>
@@ -14,10 +14,10 @@
           <button class="perm-btn perm-allow rounded-l-md rounded-r-none" :disabled="nativeControlResponsePending" @click="respondPermission(true)" title="Allow once (Y)">
             Allow <kbd class="perm-kbd">Y</kbd>
           </button>
-          <button class="perm-btn perm-allow !rounded-l-none !rounded-r-md border-l border-white/[0.12] !px-[5px]" :disabled="nativeControlResponsePending" @click="permDropdownOpen = !permDropdownOpen" title="More options">
+          <button class="perm-btn perm-allow !rounded-l-none !rounded-r-md border-l border-black/[0.15] !px-[5px]" :disabled="nativeControlResponsePending" @click="permDropdownOpen = !permDropdownOpen" title="More options">
             <PhCaretDown :size="9" weight="bold" />
           </button>
-          <div v-if="permDropdownOpen" class="absolute bottom-[calc(100%+4px)] right-0 z-[100] min-w-[200px] rounded-lg border border-white/[0.12] bg-[#1e1e2e] p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
+          <div v-if="permDropdownOpen" class="absolute bottom-[calc(100%+4px)] right-0 z-[100] min-w-[200px] rounded-lg border border-[var(--chat-border)] bg-[var(--chat-dropdown)] p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
             <button class="perm-dropdown-item" @click="permDropdownOpen = false; respondPermission(true)">
               Allow once
             </button>
@@ -44,9 +44,9 @@
     </div>
 
     <!-- File edit: diff preview with Accept / Reject -->
-    <div v-if="pendingDiff && diffPreview" class="diff-banner perm-slide-in mx-3 mt-2 mb-0.5 flex-shrink-0 overflow-hidden rounded-[10px] border shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: var(--bg-panel); border-color: color-mix(in srgb, #6366f1 28%, transparent); border-left-width: 3px; border-left-color: #6366f1;">
+    <div v-if="pendingDiff && diffPreview" class="status-banner status-banner--info diff-banner perm-slide-in mx-3 mt-2 mb-0.5 flex-shrink-0 overflow-hidden">
       <div class="flex items-center gap-2 px-3 py-2">
-        <PhGitDiff :size="13" class="perm-icon flex-shrink-0 text-[#818cf8]" />
+        <PhGitDiff :size="13" class="perm-icon flex-shrink-0" />
         <span class="perm-title text-[11px] font-semibold text-foreground">{{ pendingDiff.toolName }}</span>
         <code class="perm-detail max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground" :title="diffPreview.path">{{ diffPreview.path }}</code>
         <span class="flex-1" />
@@ -62,16 +62,16 @@
     </div>
 
     <!-- ExitPlanMode: plan approval -->
-    <div v-if="pendingPlan" class="plan-banner perm-slide-in mx-3 mt-2 mb-0.5 flex-shrink-0 rounded-[10px] border px-[13px] py-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.28)]" style="background: color-mix(in srgb, #10b981 10%, var(--bg-panel)); border-color: color-mix(in srgb, #10b981 28%, transparent); border-left-width: 3px; border-left-color: #10b981;">
+    <div v-if="pendingPlan" class="status-banner status-banner--success plan-banner perm-slide-in mx-3 mt-2 mb-0.5 flex-shrink-0 px-[13px] py-[11px]">
       <div class="mb-1.5 flex items-center gap-[7px]">
-        <PhListChecks :size="14" class="perm-icon text-[#10b981]" />
+        <PhListChecks :size="14" class="perm-icon" />
         <span class="perm-title text-[11px] font-semibold text-foreground">Claude proposed a plan</span>
       </div>
       <!-- eslint-disable-next-line vue/no-v-html -->
       <div class="plan-body md-body max-h-[260px] overflow-auto text-xs text-foreground" v-html="planMd" />
       <textarea
         v-model="planFeedback"
-        class="my-2 box-border w-full resize-y rounded-[5px] border border-white/10 bg-base px-2 py-1.5 font-sans text-[11px] text-foreground"
+        class="my-2 box-border w-full resize-y rounded-[5px] border border-border bg-base px-2 py-1.5 font-sans text-[11px] text-foreground"
         rows="1"
         placeholder="Optional feedback if you keep planning…"
       />
@@ -84,16 +84,19 @@
     <!-- ACP permission request — renders the adapter's real option set -->
     <div
       v-if="acpPermReq"
-      class="permission-banner acp-perm-banner perm-slide-in mx-3 mt-2 mb-0.5 flex flex-shrink-0 flex-col items-stretch gap-2 rounded-[10px] border py-2.5 pl-3.5 pr-3 shadow-[0_6px_20px_rgba(0,0,0,0.28)]"
-      :class="{ 'acp-perm-plan': acpPermPlan, 'acp-perm-diff': acpPermDiff && !acpPermPlan }"
-      :style="acpPermPlan
-        ? 'background: color-mix(in srgb, #10b981 10%, var(--bg-panel)); border-color: color-mix(in srgb, #10b981 28%, transparent); border-left-width: 3px; border-left-color: #10b981;'
-        : (acpPermDiff ? 'background: var(--bg-panel); border-color: color-mix(in srgb, #6366f1 28%, transparent); border-left-width: 3px; border-left-color: #6366f1;' : 'background: color-mix(in srgb, #f59e0b 12%, var(--bg-panel)); border-color: color-mix(in srgb, #f59e0b 30%, transparent); border-left-width: 3px; border-left-color: #f59e0b;')"
+      class="status-banner permission-banner acp-perm-banner perm-slide-in mx-3 mt-2 mb-0.5 flex flex-shrink-0 flex-col items-stretch gap-2 py-2.5 pl-3.5 pr-3"
+      :class="{
+        'acp-perm-plan': acpPermPlan,
+        'acp-perm-diff': acpPermDiff && !acpPermPlan,
+        'status-banner--success': acpPermPlan,
+        'status-banner--info': acpPermDiff && !acpPermPlan,
+        'status-banner--warn': !acpPermPlan && !acpPermDiff,
+      }"
     >
       <div class="flex min-w-0 items-center gap-[7px]">
-        <PhListChecks v-if="acpPermPlan" :size="14" class="perm-icon text-[#10b981]" />
-        <PhGitDiff v-else-if="acpPermDiff" :size="14" class="perm-icon text-[#818cf8]" />
-        <PhShieldWarning v-else :size="14" class="perm-icon text-[#f59e0b]" />
+        <PhListChecks v-if="acpPermPlan" :size="14" class="perm-icon" />
+        <PhGitDiff v-else-if="acpPermDiff" :size="14" class="perm-icon" />
+        <PhShieldWarning v-else :size="14" class="perm-icon" />
         <span class="perm-title text-[11px] font-semibold text-foreground">{{ acpPermPlan ? 'Review plan' : acpPermReq.title }}</span>
         <code v-if="acpPermDiff" class="perm-detail overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground" :title="acpPermDiff.path">{{ acpPermDiff.path }}</code>
       </div>
@@ -127,7 +130,7 @@
       </div>
 
       <div
-        v-for="msg in displayItems"
+        v-for="(msg, msgIdx) in displayItems"
         :key="msg.id"
         class="chat-message"
         :class="[`role-${msg.role}`, { partial: msg.partial }]"
@@ -148,7 +151,7 @@
 
         <!-- User message -->
         <template v-else-if="msg.role === 'user'">
-          <div class="group flex items-end justify-end gap-2 px-4 py-[3px]">
+          <div class="group flex items-end justify-end gap-1.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
             <div class="bubble-user max-w-[72%] rounded-[16px_16px_5px_16px] border px-3.5 py-2.5 text-[13px] leading-[1.55] shadow-[0_2px_10px_rgba(0,0,0,0.22)]" style="background: var(--chat-user-bg, #1e1b2e); border-color: var(--chat-user-border, rgba(124,58,237,0.35)); color: var(--chat-text, rgba(255,255,255,0.88));">
               <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
                 <img
@@ -161,11 +164,8 @@
               </div>
               <template v-for="(p, i) in msgParts(msg.text)" :key="i"><span v-if="p.mention" class="mention-pill"><PhFile :size="10" class="mention-pill-icon" />{{ p.v.slice(1) }}</span><template v-else>{{ p.v }}</template></template>
             </div>
-            <button class="message-copy-btn" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
-              <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
-              <PhCopy v-else :size="13" />
-            </button>
-            <div class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-[11px] font-bold text-white/70">U</div>
+            <div v-if="isLastOfRun(msgIdx)" class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-border bg-hover text-[11px] font-bold text-secondary-foreground">U</div>
+            <div v-else class="w-[26px] flex-shrink-0" />
           </div>
         </template>
 
@@ -201,18 +201,18 @@
         <!-- System info marker (permission requested, plan ready, etc.) -->
         <template v-else-if="msg.role === 'system-info'">
           <div class="flex justify-center px-4 py-1">
-            <span class="rounded-[20px] border border-white/[0.08] bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-white/35">{{ msg.text }}</span>
+            <span class="rounded-[20px] border border-border bg-hover px-2.5 py-0.5 text-[11px] text-muted-foreground">{{ msg.text }}</span>
           </div>
         </template>
 
         <!-- Queued message placeholder -->
         <template v-else-if="msg.role === 'queued'">
           <div class="flex items-end justify-end gap-2 px-4 py-[3px]">
-            <div class="inline-flex max-w-[min(460px,85%)] items-center gap-1.5 rounded-[14px] border border-dashed border-white/[0.12] bg-white/[0.04] px-3 py-2 text-right text-[13px] text-white/30">
-              <PhClock :size="11" class="flex-shrink-0 text-white/25" />
+            <div class="inline-flex max-w-[min(460px,85%)] items-center gap-1.5 rounded-[14px] border border-dashed border-border bg-hover px-3 py-2 text-right text-[13px] text-muted-foreground opacity-70">
+              <PhClock :size="11" class="flex-shrink-0" />
               {{ msg.text }}
             </div>
-            <div class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-[11px] font-bold text-white/70 opacity-35">U</div>
+            <div class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-border bg-hover text-[11px] font-bold text-secondary-foreground opacity-35">U</div>
           </div>
         </template>
 
@@ -230,8 +230,8 @@
         <template v-else-if="msg.role === 'thinking'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
             <div class="w-[26px] flex-shrink-0" />
-            <details class="max-w-[90%] rounded-lg border border-dashed border-white/[0.12] px-2.5 py-1 font-mono text-[11px] text-muted-foreground opacity-75">
-              <summary class="cursor-pointer select-none italic text-muted-foreground hover:text-white/70">Thinking…</summary>
+            <details class="max-w-[90%] rounded-lg border border-dashed border-border px-2.5 py-1 font-mono text-[11px] text-muted-foreground opacity-75">
+              <summary class="cursor-pointer select-none italic text-muted-foreground hover:text-foreground">Thinking…</summary>
               <pre class="thinking-body">{{ msg.text }}</pre>
             </details>
           </div>
@@ -239,10 +239,11 @@
 
         <!-- Assistant message -->
         <template v-else>
-          <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="agent-avatar mt-0.5 flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-white shadow-[0_2px_6px_color-mix(in_srgb,var(--agent-accent,#ec4899)_28%,transparent)]">
+          <div class="flex items-start gap-2.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
+            <div v-if="isFirstOfRun(msgIdx)" class="agent-avatar mt-0.5 flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-white shadow-[0_2px_6px_color-mix(in_srgb,var(--agent-accent,#ec4899)_28%,transparent)]">
               <component :is="currentAgentIcon" :size="14" :style="{ color: '#fff' }" />
             </div>
+            <div v-else class="mt-0.5 w-[26px] flex-shrink-0" />
             <div class="min-w-0 flex-1 pt-1 text-[13px] leading-[1.65] text-foreground">
               <!-- eslint-disable-next-line vue/no-v-html -->
               <div class="md-body" v-html="renderMd(msg.text)" />
@@ -264,37 +265,37 @@
     </div>
 
     <!-- Command suggestions dropdown -->
-    <div v-if="suggestions.length > 0" ref="suggestionsEl" class="max-h-[200px] flex-shrink-0 overflow-y-auto border-t border-white/[0.07] bg-panel">
+    <div v-if="suggestions.length > 0" ref="suggestionsEl" class="max-h-[200px] flex-shrink-0 overflow-y-auto border-t border-border bg-panel">
       <div
         v-for="(s, i) in suggestions"
         :key="s.name"
-        class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-white/5"
-        :class="{ '!bg-white/5': i === suggestionIdx }"
+        class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-hover"
+        :class="{ '!bg-hover': i === suggestionIdx }"
         @mousedown.prevent="applySuggestion(s.name)"
       >
-        <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-[#f472b6]">/{{ s.name }}</span>
-        <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-white/38">{{ s.description }}</span>
+        <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-[var(--chat-accent)]">/{{ s.name }}</span>
+        <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ s.description }}</span>
       </div>
     </div>
 
     <!-- @-mention file suggestions dropdown -->
-    <div v-if="atSuggestions.length > 0" class="max-h-[200px] flex-shrink-0 overflow-y-auto border-t border-white/[0.07] bg-panel">
+    <div v-if="atSuggestions.length > 0" class="max-h-[200px] flex-shrink-0 overflow-y-auto border-t border-border bg-panel">
       <div
         v-for="(p, i) in atSuggestions"
         :key="p"
-        class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-white/5"
-        :class="{ '!bg-white/5': i === atIdx }"
+        class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-hover"
+        :class="{ '!bg-hover': i === atIdx }"
         @mousedown.prevent="applyAtSuggestion(p)"
       >
-        <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-[#f472b6]">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
-        <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-white/38">{{ p }}</span>
+        <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-[var(--chat-accent)]">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
+        <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ p }}</span>
       </div>
     </div>
 
     <!-- Image previews above input -->
     <div v-if="pendingImages.length > 0" class="flex flex-shrink-0 flex-wrap gap-1.5 px-3.5 pt-1.5">
       <div v-for="(img, i) in pendingImages" :key="i" class="relative flex-shrink-0">
-        <img :src="img" class="block h-[72px] w-[72px] rounded-md border border-white/10 object-cover" :alt="`Image ${i + 1}`" />
+        <img :src="img" class="block h-[72px] w-[72px] rounded-md border border-border object-cover" :alt="`Image ${i + 1}`" />
         <button class="pending-img-remove" @click="pendingImages.splice(i, 1)" title="Remove">
           <PhX :size="9" weight="bold" />
         </button>
@@ -304,32 +305,32 @@
     <!-- New-style input bar -->
     <div v-if="!hideComposer" class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
       <!-- Queued messages panel (Zed-style) -->
-      <div v-if="messageQueue.length > 0" class="border-b border-white/[0.07] bg-[rgba(124,58,237,0.04)]">
-        <div class="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 hover:bg-white/[0.03]" @click="queueExpanded = !queueExpanded">
-          <PhCaretDown :size="10" class="text-white/40 transition-transform" :class="{ '-rotate-90': !queueExpanded }" />
-          <span class="flex-1 text-[11px] text-white/45">{{ messageQueue.length }} Queued {{ messageQueue.length === 1 ? 'Message' : 'Messages' }}</span>
-          <button class="border-none bg-transparent px-1 py-px text-[10px] text-white/30 hover:text-white/60" @click.stop="clearQueue" title="Clear All">Clear All</button>
+      <div v-if="messageQueue.length > 0" class="border-b border-border bg-[color-mix(in_srgb,var(--chat-accent)_5%,transparent)]">
+        <div class="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 hover:bg-hover" @click="queueExpanded = !queueExpanded">
+          <PhCaretDown :size="10" class="text-muted-foreground transition-transform" :class="{ '-rotate-90': !queueExpanded }" />
+          <span class="flex-1 text-[11px] text-muted-foreground">{{ messageQueue.length }} Queued {{ messageQueue.length === 1 ? 'Message' : 'Messages' }}</span>
+          <button class="border-none bg-transparent px-1 py-px text-[10px] text-muted-foreground hover:text-foreground" @click.stop="clearQueue" title="Clear All">Clear All</button>
         </div>
         <div v-if="queueExpanded" class="flex flex-col gap-[3px] px-2.5 pb-1.5">
           <div v-for="(msg, i) in messageQueue" :key="i" class="flex items-center gap-1.5 py-[3px]">
-            <span class="flex-shrink-0 text-xs text-[rgba(124,58,237,0.7)]">•</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-white/50">{{ msg }}</span>
+            <span class="flex-shrink-0 text-xs text-[var(--chat-accent)]">•</span>
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-secondary-foreground">{{ msg }}</span>
             <button class="queue-item-btn" @click="removeQueued(i)" title="Remove"><PhX :size="10" /></button>
-            <button class="queue-item-btn !text-[rgba(124,58,237,0.8)] !border-[rgba(124,58,237,0.3)] hover:!text-[rgba(124,58,237,1)] hover:!border-[rgba(124,58,237,0.6)]" @click="sendQueuedNow(i)" title="Send Now">Send Now <kbd>↵</kbd></button>
+            <button class="queue-item-btn !text-[var(--chat-accent)] !border-[color-mix(in_srgb,var(--chat-accent)_35%,transparent)] hover:!border-[color-mix(in_srgb,var(--chat-accent)_65%,transparent)]" @click="sendQueuedNow(i)" title="Send Now">Send Now <kbd>↵</kbd></button>
           </div>
         </div>
       </div>
       <!-- Working indicator — sits above the textarea, only when busy -->
-      <div v-if="busy" class="flex items-center gap-1.5 border-b border-white/5 px-3 pb-1 pt-1.5">
+      <div v-if="busy" class="flex items-center gap-1.5 border-b border-border px-3 pb-1 pt-1.5">
         <span class="working-dot" /><span class="working-dot" /><span class="working-dot" />
-        <span class="text-[11px] italic text-white/35">{{ currentActivity }}</span>
+        <span class="text-[11px] italic text-muted-foreground">{{ currentActivity }}</span>
       </div>
-      <div class="chat-input-box overflow-hidden rounded-[10px] border border-white/10 transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));">
+      <div class="chat-input-box overflow-hidden rounded-[10px] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));">
         <!-- AskUserQuestion: one question at a time, stepped, above the textarea -->
-        <div v-if="pendingQuestion && activeQuestion" class="question-panel perm-slide-in border-b border-white/10 bg-white/[0.03] px-3.5 py-3">
+        <div v-if="pendingQuestion && activeQuestion" class="question-panel perm-slide-in border-b border-border bg-[color-mix(in_srgb,var(--chat-info)_4%,transparent)] px-3.5 py-3">
           <div class="mb-2 flex items-center gap-2">
-            <span v-if="activeQuestion.header" class="rounded bg-[color-mix(in_srgb,#3b82f6_22%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.04em] text-[#93c5fd]">{{ activeQuestion.header }}</span>
-            <span v-if="questionSpecs.length > 1" class="ml-auto flex h-5 flex-shrink-0 items-center rounded-md bg-white/10 px-1.5 text-[10px] font-medium tabular-nums text-secondary-foreground">{{ activeQuestionIndex + 1 }}/{{ questionSpecs.length }}</span>
+            <span v-if="activeQuestion.header" class="rounded bg-[color-mix(in_srgb,var(--chat-info)_22%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.04em] text-[var(--chat-info)]">{{ activeQuestion.header }}</span>
+            <span v-if="questionSpecs.length > 1" class="ml-auto flex h-5 flex-shrink-0 items-center rounded-md bg-hover px-1.5 text-[10px] font-medium tabular-nums text-secondary-foreground">{{ activeQuestionIndex + 1 }}/{{ questionSpecs.length }}</span>
           </div>
           <p class="mb-1 text-[13px] font-semibold text-foreground">{{ activeQuestion.question }}</p>
           <p v-if="activeQuestion.multiSelect" class="mb-1.5 text-[10.5px] text-secondary-foreground/70">Select one or more options.</p>
@@ -340,8 +341,8 @@
               type="button"
               class="question-opt flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-[7px] text-left transition-colors"
               :class="isPicked(activeQuestion.question, opt.label)
-                ? 'border-[#3b82f6] bg-[color-mix(in_srgb,#3b82f6_16%,var(--bg-base))]'
-                : 'border-white/[0.12] bg-base hover:border-[color-mix(in_srgb,#3b82f6_55%,transparent)]'"
+                ? 'border-[var(--chat-info)] bg-[color-mix(in_srgb,var(--chat-info)_16%,var(--bg-base))]'
+                : 'border-border bg-base hover:border-[color-mix(in_srgb,var(--chat-info)_55%,transparent)]'"
               :disabled="nativeControlResponsePending"
               @click="selectQuestionOption(opt.label)"
             >
@@ -349,8 +350,8 @@
                 <span class="text-xs font-semibold text-foreground">{{ opt.label }}</span>
                 <span v-if="opt.description" class="text-[10px] text-secondary-foreground">{{ opt.description }}</span>
               </span>
-              <PhCheck v-if="isPicked(activeQuestion.question, opt.label)" :size="13" weight="bold" class="flex-shrink-0 text-[#3b82f6]" />
-              <kbd v-else-if="oi < 9" class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-white/15 text-[10px] text-secondary-foreground/60">{{ oi + 1 }}</kbd>
+              <PhCheck v-if="isPicked(activeQuestion.question, opt.label)" :size="13" weight="bold" class="flex-shrink-0 text-[var(--chat-info)]" />
+              <kbd v-else-if="oi < 9" class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-border text-[10px] text-secondary-foreground/60">{{ oi + 1 }}</kbd>
             </button>
           </div>
           <div class="mt-2.5 flex items-center justify-between gap-2">
@@ -368,7 +369,7 @@
         <textarea
           ref="inputEl"
           v-model="inputText"
-          class="chat-input composer-input box-border block max-h-40 min-h-10 w-full resize-none border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-white/88 outline-none placeholder:text-white/30"
+          class="chat-input composer-input box-border block max-h-40 min-h-10 w-full resize-none border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground outline-none placeholder:text-muted-foreground"
           :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
           rows="1"
           @keydown="onKeydown"
@@ -532,7 +533,7 @@
 
           <!-- Right: cost badge + abort/send -->
           <div class="flex items-center gap-1.5">
-            <span v-if="sessionCost > 0 && !busy" class="px-1 font-mono text-[10px] text-white/30">${{ sessionCost.toFixed(4) }}</span>
+            <span v-if="sessionCost > 0 && !busy" class="px-1 font-mono text-[10px] text-muted-foreground">${{ sessionCost.toFixed(4) }}</span>
             <button v-if="busy" class="send-btn send-btn-abort" title="Abort (Esc)" @click="abortTurn">
               <PhStop :size="14" weight="bold" />
             </button>
@@ -552,15 +553,15 @@
       </div>
 
       <!-- Context usage bar -->
-      <div v-if="contextUsageRatio > 0" class="h-0.5 overflow-hidden bg-white/[0.06]" :title="`${turnStats?.inputTokens.toLocaleString()} / ${CONTEXT_MAX.toLocaleString()} tokens`">
+      <div v-if="contextUsageRatio > 0" class="h-0.5 overflow-hidden bg-hover" :title="`${turnStats?.inputTokens.toLocaleString()} / ${CONTEXT_MAX.toLocaleString()} tokens`">
         <div class="ctx-usage-bar h-full rounded-[1px] transition-[width]" :class="contextUsageClass" :style="{ width: (contextUsageRatio * 100) + '%' }" />
       </div>
 
       <!-- Status line below input — hidden when nothing to show -->
-      <div v-show="fiveHourWindow" class="relative z-[1] flex flex-shrink-0 items-center gap-2 border-t border-white/[0.06] px-2.5 py-[3px] min-h-[22px]">
-        <span v-if="fiveHourWindow" class="whitespace-nowrap font-mono text-[10px] text-white/38" :title="'5h usage window'">5h: {{ fiveHourWindow }}</span>
+      <div v-show="fiveHourWindow" class="relative z-[1] flex flex-shrink-0 items-center gap-2 border-t border-border px-2.5 py-[3px] min-h-[22px]">
+        <span v-if="fiveHourWindow" class="whitespace-nowrap font-mono text-[10px] text-muted-foreground" :title="'5h usage window'">5h: {{ fiveHourWindow }}</span>
         <span class="flex-1" />
-        <span v-if="turnStats" class="whitespace-nowrap font-mono text-[10px] text-white/28">
+        <span v-if="turnStats" class="whitespace-nowrap font-mono text-[10px] text-muted-foreground opacity-70">
           {{ turnStats.inputTokens.toLocaleString() }}↑ {{ turnStats.outputTokens.toLocaleString() }}↓
         </span>
       </div>
@@ -1166,6 +1167,19 @@ const grouping = computed(() => {
   return { display, groupIdByMsgId, groupsById };
 });
 const displayItems = computed(() => grouping.value.display);
+// Consecutive same-role bubbles (user asking two things in a row, or an
+// assistant reply split across messages) read as one grouped turn: only the
+// edge message of the run carries an avatar + extra spacing, same-role
+// neighbors sit tight against each other. Keeps the message list from
+// reading as one flat avatar-per-line log.
+function isFirstOfRun(idx: number): boolean {
+  const items = displayItems.value;
+  return items[idx - 1]?.role !== items[idx].role;
+}
+function isLastOfRun(idx: number): boolean {
+  const items = displayItems.value;
+  return items[idx + 1]?.role !== items[idx].role;
+}
 function groupIdOf(msgId: number): string | undefined {
   return grouping.value.groupIdByMsgId.get(msgId);
 }
@@ -2838,16 +2852,27 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 <style scoped>
 .claude-chat {
   /* Inherit the app theme (set as :root vars by the ui store); fall back to the
-     original dark palette when a var is absent. */
+     original dark palette when a var is absent. Every color used below reads
+     through one of these, so the chat re-skins with the active theme (and the
+     per-agent accent) instead of carrying its own fixed dark palette. */
   --chat-bg: var(--bg-base, #0f0f11);
   --chat-surface: var(--bg-panel, #18181c);
+  --chat-dropdown: var(--bg-dropdown, #1a1726);
   --chat-border: var(--border, rgba(255,255,255,0.08));
   --chat-accent: var(--accent, #ec4899);
   --chat-accent-dim: var(--accent-dim, #6d28d9);
   --chat-text: var(--text-primary, rgba(255,255,255,0.88));
+  --chat-text-secondary: var(--text-secondary, rgba(255,255,255,0.6));
   --chat-muted: var(--text-muted, rgba(255,255,255,0.42));
   --chat-user-bg: color-mix(in srgb, var(--chat-accent) 14%, var(--chat-bg));
   --chat-user-border: color-mix(in srgb, var(--chat-accent) 35%, transparent);
+  /* Semantic status hues for gate banners — warn/success ride the theme's own
+     yellow/green so they shift with it; info has no theme slot (diff preview
+     and question prompts aren't a themed surface color) so it stays a fixed,
+     deliberately neutral blue across every theme. */
+  --chat-warn: var(--yellow, #f59e0b);
+  --chat-success: var(--green, #10b981);
+  --chat-info: #3b82f6;
 }
 
 .diff-line { line-height: 1.5; }
@@ -2860,8 +2885,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   box-shadow: 0 0 7px color-mix(in srgb, var(--success, #22c55e) 75%, transparent);
 }
 
-.btn-danger-active { color: #ef4444 !important; background: rgba(239,68,68,0.15) !important; }
-.btn-active { color: #f472b6 !important; background: rgba(124,58,237,0.15) !important; }
+.btn-danger-active { color: var(--red, #ef4444) !important; background: color-mix(in srgb, var(--red, #ef4444) 15%, transparent) !important; }
+.btn-active { color: var(--chat-accent) !important; background: color-mix(in srgb, var(--chat-accent) 15%, transparent) !important; }
 
 /* Permission-mode dropdown */
 .perm-mode-dropdown { position: relative; display: flex; }
@@ -2873,8 +2898,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: #1e1e26;
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--chat-dropdown);
+  border: 1px solid var(--chat-border);
   border-radius: 8px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
@@ -2887,27 +2912,52 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   background: none;
   border: none;
   border-radius: 5px;
-  color: rgba(255,255,255,0.8);
+  color: var(--chat-text-secondary);
   font-size: 11px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: color .12s, background .12s;
+  transition: color .12s ease-out, background .12s ease-out;
 }
-.perm-mode-item:hover { background: rgba(255,255,255,0.06); }
-.perm-mode-item-active { color: #f472b6; background: rgba(124,58,237,0.12); }
-.perm-mode-item-danger { color: #ef4444; }
-.perm-mode-item-danger:hover { background: rgba(239,68,68,0.12); }
-.perm-mode-item-danger.perm-mode-item-active { color: #ef4444; background: rgba(239,68,68,0.12); }
+.perm-mode-item:hover { background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
+.perm-mode-item-active { color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 14%, transparent); }
+.perm-mode-item-danger { color: var(--red, #ef4444); }
+.perm-mode-item-danger:hover { background: color-mix(in srgb, var(--red, #ef4444) 12%, transparent); }
+.perm-mode-item-danger.perm-mode-item-active { color: var(--red, #ef4444); background: color-mix(in srgb, var(--red, #ef4444) 14%, transparent); }
 .perm-mode-label { font-size: 10px; font-weight: 600; }
 .perm-mode-caret { opacity: .6; margin-left: -1px; }
 
 /* Permission-gate banners: shared animation */
-.perm-slide-in { animation: perm-slide-in 0.15s ease-out; }
+.perm-slide-in { animation: perm-slide-in 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
 @keyframes perm-slide-in {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Status banners (permission / diff / plan / ACP) — one shared color system
+   instead of each banner carrying its own inline hex + a decorative
+   border-left stripe. A full tinted border replaces the stripe. */
+.status-banner {
+  border-radius: 10px;
+  border: 1px solid var(--_sb-border);
+  background: var(--_sb-bg);
+  box-shadow: 0 8px 24px -6px rgba(0,0,0,0.3);
+}
+.status-banner--warn {
+  --_sb-border: color-mix(in srgb, var(--chat-warn) 34%, transparent);
+  --_sb-bg: color-mix(in srgb, var(--chat-warn) 10%, var(--chat-surface));
+}
+.status-banner--success {
+  --_sb-border: color-mix(in srgb, var(--chat-success) 30%, transparent);
+  --_sb-bg: color-mix(in srgb, var(--chat-success) 9%, var(--chat-surface));
+}
+.status-banner--info {
+  --_sb-border: color-mix(in srgb, var(--chat-info) 30%, transparent);
+  --_sb-bg: var(--chat-surface);
+}
+.status-banner--warn .perm-icon { color: var(--chat-warn); }
+.status-banner--success .perm-icon { color: var(--chat-success); }
+.status-banner--info .perm-icon { color: var(--chat-info); }
 
 /* Shared perm-btn design system, reused across every permission/diff/plan/
    question/ACP banner — kept as real classes rather than repeating these
@@ -2952,27 +3002,28 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   border: none;
   border-radius: 5px;
   font-size: 12px;
-  color: rgba(255,255,255,0.7);
+  color: var(--chat-text-secondary);
   cursor: pointer;
   text-align: left;
+  transition: background .1s ease-out, color .1s ease-out;
 }
-.perm-dropdown-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
+.perm-dropdown-item:hover { background: color-mix(in srgb, var(--chat-text) 7%, transparent); color: var(--chat-text); }
 .perm-pattern {
   font-size: 10px;
-  color: rgba(255,255,255,0.45);
-  background: rgba(255,255,255,0.07);
+  color: var(--chat-muted);
+  background: color-mix(in srgb, var(--chat-text) 7%, transparent);
   border-radius: 3px;
   padding: 1px 4px;
 }
 
-/* ACP permission banner variants (plan / diff icon+border tint) */
-.acp-perm-plan .perm-icon { color: #10b981; }
-.acp-perm-diff .perm-icon { color: #818cf8; }
+/* ACP permission banner: plan body just needs the taller scroll area; color
+   now comes from the shared .status-banner--success/--info modifiers. */
 .acp-perm-plan .plan-body { max-height: 320px; overflow: auto; }
 
 /* Avatars */
 .agent-avatar {
   background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--agent-accent, #ec4899) 80%, #fff) 0%, var(--agent-accent, #ec4899) 60%, color-mix(in srgb, var(--agent-accent, #ec4899) 55%, #000) 100%);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.18);
 }
 
 .mention-pill {
@@ -2981,13 +3032,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   gap: 3px;
   padding: 1px 6px;
   margin: 0 1px;
-  background: rgba(124,58,237,0.18);
-  border: 1px solid rgba(124,58,237,0.35);
+  background: color-mix(in srgb, var(--chat-info) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chat-info) 32%, transparent);
   border-radius: 10px;
   font-size: 0.92em;
   vertical-align: baseline;
 }
-.mention-pill-icon { color: rgba(167,139,250,0.95); flex-shrink: 0; }
+.mention-pill-icon { color: var(--chat-info); flex-shrink: 0; }
 
 /* Tool row — quiet activity-log line, expandable */
 .tool-row {
@@ -3066,10 +3117,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: rgba(124,58,237,0.7);
+  background: color-mix(in srgb, var(--chat-accent) 75%, transparent);
   animation: thinking 1.2s ease-in-out infinite;
 }
-.thinking-dot { width: 5px; height: 5px; background: rgba(124,58,237,0.6); }
+.thinking-dot { width: 5px; height: 5px; background: color-mix(in srgb, var(--chat-accent) 65%, transparent); }
 .working-dot:nth-child(2), .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
 .working-dot:nth-child(3), .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
 @keyframes thinking { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
@@ -3088,9 +3139,9 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 /* Queue item action buttons */
 .queue-item-btn {
   font-size: 10px;
-  color: rgba(255,255,255,0.3);
+  color: var(--chat-muted);
   background: none;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid var(--chat-border);
   border-radius: 4px;
   padding: 1px 5px;
   cursor: pointer;
@@ -3098,13 +3149,14 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
+  transition: color .12s ease-out, border-color .12s ease-out;
 }
-.queue-item-btn:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.25); }
+.queue-item-btn:hover { color: var(--chat-text); border-color: color-mix(in srgb, var(--chat-text) 25%, transparent); }
 
 /* Context usage bar fill colors */
-.ctx-usage-bar.ctx-ok { background: rgba(124,58,237,0.5); }
-.ctx-usage-bar.ctx-warning { background: rgba(234,179,8,0.7); }
-.ctx-usage-bar.ctx-exceeded { background: rgba(239,68,68,0.8); }
+.ctx-usage-bar.ctx-ok { background: color-mix(in srgb, var(--chat-accent) 55%, transparent); }
+.ctx-usage-bar.ctx-warning { background: color-mix(in srgb, var(--chat-warn) 75%, transparent); }
+.ctx-usage-bar.ctx-exceeded { background: color-mix(in srgb, var(--red, #ef4444) 80%, transparent); }
 
 /* Permission log bubble */
 .bubble-permission {
@@ -3120,14 +3172,14 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   white-space: nowrap;
 }
 .bubble-permission.perm-granted {
-  background: rgba(22,163,74,0.12);
-  border: 1px solid rgba(22,163,74,0.3);
-  color: #4ade80;
+  background: color-mix(in srgb, var(--chat-success) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chat-success) 32%, transparent);
+  color: var(--chat-success);
 }
 .bubble-permission.perm-rejected {
-  background: rgba(185,28,28,0.12);
-  border: 1px solid rgba(185,28,28,0.3);
-  color: #f87171;
+  background: color-mix(in srgb, var(--red, #ef4444) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red, #ef4444) 32%, transparent);
+  color: var(--red, #ef4444);
 }
 
 .message-copy-btn {
@@ -3150,13 +3202,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .message-copy-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 /* Command suggestions */
-.cmd-suggestion.selected { background: rgba(255,255,255,0.05); }
+.cmd-suggestion.selected { background: color-mix(in srgb, var(--chat-text) 5%, transparent); }
 
 /* Input toolbar buttons */
 .toolbar-btn {
   background: none;
   border: none;
-  color: rgba(255,255,255,0.45);
+  color: var(--chat-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -3165,9 +3217,9 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   border-radius: 7px;
   font-size: 11px;
   font-family: var(--font-ui);
-  transition: color .12s, background .12s;
+  transition: color .12s ease-out, background .12s ease-out;
 }
-.toolbar-btn:hover { color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.06); }
+.toolbar-btn:hover { color: var(--chat-text); background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
 .toolbar-btn-label { font-weight: 500; }
 .btn-caret { opacity: 0.6; }
 
@@ -3182,8 +3234,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: #1e1e26;
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--chat-dropdown);
+  border: 1px solid var(--chat-border);
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
@@ -3196,20 +3248,20 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   background: none;
   border: none;
   border-radius: 7px;
-  color: rgba(255,255,255,0.8);
+  color: var(--chat-text-secondary);
   font-size: 12px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: background .1s;
+  transition: background .1s ease-out;
   gap: 6px;
 }
-.floating-menu-item:hover { background: rgba(255,255,255,0.06); }
-.floating-menu-item-active { color: #f472b6; background: rgba(124,58,237,0.12); }
+.floating-menu-item:hover { background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
+.floating-menu-item-active { color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 14%, transparent); }
 .model-id-hint {
   font-size: 9px;
   font-family: var(--font-mono);
-  color: rgba(255,255,255,0.3);
+  color: var(--chat-muted);
   margin-left: 6px;
 }
 .floating-menu-item > .model-id-hint { margin-left: auto; }
@@ -3229,13 +3281,14 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   width: 30px;
   height: 30px;
   flex-shrink: 0;
-  transition: background .12s, opacity .12s, box-shadow .12s, transform .12s;
+  transition: background .12s ease-out, opacity .12s ease-out, box-shadow .12s ease-out, transform .15s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 0 2px 10px color-mix(in srgb, var(--agent-accent, #ec4899) 40%, transparent);
 }
 .send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--agent-accent, #ec4899) 80%, #000); transform: translateY(-1px); }
+.send-btn:active:not(:disabled) { transform: translateY(0); }
 .send-btn:disabled { opacity: 0.35; cursor: default; }
-.send-btn-abort { background: #dc2626; }
-.send-btn-abort:hover:not(:disabled) { background: #b91c1c; }
+.send-btn-abort { background: var(--red, #dc2626); }
+.send-btn-abort:hover:not(:disabled) { background: color-mix(in srgb, var(--red, #dc2626) 80%, #000); }
 
 .pending-img-remove {
   position: absolute;
@@ -3243,18 +3296,18 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   right: -5px;
   width: 16px;
   height: 16px;
-  background: #1e1e26;
-  border: 1px solid rgba(255,255,255,0.15);
+  background: var(--chat-dropdown);
+  border: 1px solid var(--chat-border);
   border-radius: 50%;
-  color: rgba(255,255,255,0.5);
+  color: var(--chat-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  transition: color .1s, background .1s;
+  transition: color .1s ease-out, background .1s ease-out;
 }
-.pending-img-remove:hover { color: #f87171; background: rgba(185,28,28,0.2); }
+.pending-img-remove:hover { color: var(--red, #f87171); background: color-mix(in srgb, var(--red, #f87171) 18%, transparent); }
 
 /* Markdown body inside assistant messages — v-html content, needs real
    selectors (:deep) since these elements aren't authored in this SFC. */
@@ -3262,17 +3315,39 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .md-body :deep(p:last-child) { margin-bottom: 0; }
 .md-body :deep(ul), .md-body :deep(ol) { margin: 4px 0 10px; padding-left: 20px; }
 .md-body :deep(li) { margin: 3px 0; }
-.md-body :deep(code) { font-family: var(--font-mono); font-size: 11px; background: rgba(124,58,237,0.14); color: #c4b5fd; padding: 1px 5px; border-radius: 4px; }
-.md-body :deep(pre) { background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 8px 0; }
-.md-body :deep(pre code) { background: none; padding: 0; font-size: 11px; color: rgba(255,255,255,0.75); }
-.md-body :deep(blockquote) { border-left: 3px solid rgba(124,58,237,0.6); margin: 6px 0; padding-left: 12px; color: rgba(255,255,255,0.55); }
-.md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3) { font-weight: 700; margin: 14px 0 6px; color: rgba(255,255,255,0.95); }
+.md-body :deep(code) { font-family: var(--font-mono); font-size: 11px; background: color-mix(in srgb, var(--chat-accent) 14%, transparent); color: color-mix(in srgb, var(--chat-accent) 55%, var(--chat-text)); padding: 1px 5px; border-radius: 4px; }
+.md-body :deep(pre) { background: color-mix(in srgb, var(--chat-bg) 55%, black); border: 1px solid var(--chat-border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 8px 0; }
+.md-body :deep(pre code) { background: none; padding: 0; font-size: 11px; color: var(--chat-text-secondary); }
+/* Quote-indent rule is the standard blockquote convention, not a decorative
+   card stripe — kept, recolored to the theme accent. */
+.md-body :deep(blockquote) { border-left: 3px solid color-mix(in srgb, var(--chat-accent) 55%, transparent); margin: 6px 0; padding-left: 12px; color: var(--chat-text-secondary); }
+.md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3) { font-weight: 700; margin: 14px 0 6px; color: var(--chat-text); }
 .md-body :deep(h1) { font-size: 16px; }
 .md-body :deep(h2) { font-size: 14px; }
 .md-body :deep(h3) { font-size: 13px; }
-.md-body :deep(a) { color: #f472b6; text-decoration: underline; }
-.md-body :deep(hr) { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0; }
+.md-body :deep(a) { color: var(--chat-accent); text-decoration: underline; text-underline-offset: 2px; }
+.md-body :deep(hr) { border: none; border-top: 1px solid var(--chat-border); margin: 10px 0; }
 .md-body :deep(table) { border-collapse: collapse; font-size: 12px; margin: 8px 0; }
-.md-body :deep(th), .md-body :deep(td) { border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; }
-.md-body :deep(th) { background: rgba(255,255,255,0.05); font-weight: 600; }
+.md-body :deep(th), .md-body :deep(td) { border: 1px solid var(--chat-border); padding: 5px 10px; }
+.md-body :deep(th) { background: color-mix(in srgb, var(--chat-text) 5%, transparent); font-weight: 600; }
+
+/* Chat input box: quiet by default, agent-accent ring on focus so the active
+   composer is unambiguous without a heavy persistent border. */
+.chat-input-box:focus-within {
+  border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, #ec4899) 14%, transparent);
+}
+
+/* Empty-state avatar: soft halo instead of a flat icon tile. */
+.chat-empty-avatar {
+  position: relative;
+}
+.chat-empty-avatar::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 16px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--agent-accent, #ec4899) 22%, transparent) 0%, transparent 70%);
+  z-index: -1;
+}
 </style>

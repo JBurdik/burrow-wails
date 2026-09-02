@@ -2,7 +2,7 @@
   <div class="ide-root">
     <TitleBar
       :workspace-name="ws.active?.name"
-      :branch="ws.active?.is_git === false ? '' : git.branch"
+      :branch="git.cwd === ws.active?.path ? git.branch : ''"
       :folder-path="ws.active?.path"
       :right-panel-visible="ui.rightPanelVisible"
       :sidebar-visible="ui.sidebarVisible"

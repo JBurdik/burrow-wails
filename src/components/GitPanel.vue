@@ -6,14 +6,9 @@
       <span class="shrink-0 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground opacity-70">Git</span>
 
       <!-- Workspace selector -->
-      <div class="relative flex h-6 items-center gap-1 rounded border border-border bg-[color-mix(in_srgb,var(--border)_25%,var(--bg-panel))] py-0 pl-[7px] pr-1.5">
+      <div class="flex h-6 items-center gap-1 rounded border border-border bg-[color-mix(in_srgb,var(--border)_25%,var(--bg-panel))] py-0 pl-[7px] pr-1.5">
         <PhFolder :size="11" class="shrink-0 text-muted-foreground" />
-        <select v-model="selectedWsId" class="cursor-pointer appearance-none border-0 bg-transparent py-0 pr-3.5 font-sans text-[11px] text-secondary-foreground outline-none focus:text-foreground">
-          <option v-for="w in wsStore.topLevel" :key="w.id" :value="w.id">
-            {{ w.name }}
-          </option>
-        </select>
-        <PhCaretDown :size="9" class="pointer-events-none absolute right-[5px] text-muted-foreground" />
+        <Select v-model="selectedWsIdModel" :options="workspaceOptions" class="h-5 min-w-0 border-0 bg-transparent px-0 py-0 font-sans text-[11px] text-secondary-foreground" />
       </div>
 
       <!-- Branch chip -->
@@ -207,14 +202,25 @@
 
           <!-- Commit area (pinned to bottom of left column) -->
           <div class="flex shrink-0 flex-col gap-1.5 border-t border-border bg-panel px-3 py-[9px]">
-            <textarea
-              v-model="git.commitMsg"
-              class="gp-commit-input box-border w-full resize-none rounded border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 font-sans text-xs leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/55"
-              placeholder="Commit message…"
-              rows="3"
-              @keydown.ctrl.enter="git.commit()"
-              @keydown.meta.enter="git.commit()"
-            />
+            <div class="relative">
+              <textarea
+                v-model="git.commitMsg"
+                class="gp-commit-input box-border w-full resize-none rounded border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 pr-6 font-sans text-xs leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/55"
+                placeholder="Commit message…"
+                rows="3"
+                @keydown.ctrl.enter="git.commit()"
+                @keydown.meta.enter="git.commit()"
+              />
+              <button
+                class="absolute right-1 top-1 rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-accent disabled:cursor-default disabled:opacity-30"
+                :disabled="git.staged.length === 0 || git.generating"
+                title="Generate commit message from staged diff"
+                @click="git.generateCommitMessage()"
+              >
+                <PhSparkle :size="12" :class="git.generating && 'animate-pulse'" />
+              </button>
+            </div>
+            <div v-if="git.generateError" class="text-[10px] text-destructive">{{ git.generateError }}</div>
             <div class="flex flex-wrap gap-[3px]">
               <button
                 v-for="t in COMMIT_TYPES"
@@ -310,11 +316,12 @@ import {
   PhArrowUp, PhArrowDown, PhArrowLeft, PhArrowClockwise, PhArrowsClockwise,
   PhArrowSquareOut,
   PhCaretDown, PhCaretRight,
-  PhWarning, PhX, PhCheck, PhPlus,
+  PhWarning, PhX, PhCheck, PhPlus, PhSparkle,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
 import DiffView from "./DiffView.vue";
+import { Select } from "@/components/ui/select";
 
 // "lg" is the full-screen Git dialog; the default is the narrow right panel.
 const props = withDefaults(defineProps<{ size?: "sm" | "lg" }>(), { size: "sm" });
@@ -327,6 +334,8 @@ async function popout() {
   await invoke("open_git_panel_window");
 }
 const selectedWsId = ref<number | null>(wsStore.active?.id ?? null);
+const selectedWsIdModel = computed<string | undefined>({ get: () => selectedWsId.value?.toString(), set: (id) => { selectedWsId.value = id ? Number(id) : null; } });
+const workspaceOptions = computed(() => wsStore.topLevel.map((workspace) => ({ value: String(workspace.id), label: workspace.name })));
 const showBranchDropdown = ref(false);
 const newBranchMode = ref(false);
 const newBranchName = ref("");

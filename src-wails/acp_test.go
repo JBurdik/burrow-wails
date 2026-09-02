@@ -70,6 +70,44 @@ func TestCodexTurnTerminalFailure(t *testing.T) {
 	}
 }
 
+func TestCodexToolCall(t *testing.T) {
+	id, title, input, ok := codexToolCall(map[string]any{
+		"id": "cmd-1", "type": "commandExecution", "command": "rg TODO", "cwd": "/repo",
+	})
+	if !ok || id != "cmd-1" || title != "Run: rg TODO" || input["cwd"] != "/repo" {
+		t.Fatalf("bad command tool call: id=%q title=%q input=%v ok=%t", id, title, input, ok)
+	}
+
+	_, title, input, ok = codexToolCall(map[string]any{
+		"id": "mcp-1", "type": "mcpToolCall", "server": "github", "tool": "search", "arguments": map[string]any{"q": "bug"},
+	})
+	if !ok || title != "github: search" || mapOf(input["arguments"])["q"] != "bug" {
+		t.Fatalf("bad MCP tool call: title=%q input=%v ok=%t", title, input, ok)
+	}
+
+	if _, _, _, ok := codexToolCall(map[string]any{"id": "msg-1", "type": "agentMessage"}); ok {
+		t.Fatal("agent messages must not render as tool calls")
+	}
+}
+
+func TestCodexToolOutputAndFailure(t *testing.T) {
+	item := map[string]any{
+		"type": "commandExecution", "status": "failed", "aggregatedOutput": "permission denied",
+	}
+	if !codexToolFailed(item) || codexToolOutput(item) != "permission denied" {
+		t.Fatalf("bad failed tool conversion: failed=%t output=%q", codexToolFailed(item), codexToolOutput(item))
+	}
+}
+
+func TestCodexRPCErrorMessage(t *testing.T) {
+	if got := codexRPCErrorMessage(map[string]any{"error": map[string]any{"message": "invalid params"}}); got != "invalid params" {
+		t.Fatalf("error message = %q", got)
+	}
+	if got := codexRPCErrorMessage(map[string]any{"result": map[string]any{}}); got != "" {
+		t.Fatalf("successful response must not be an error: %q", got)
+	}
+}
+
 func TestCodexModeSettings(t *testing.T) {
 	cases := map[string]struct {
 		approval string

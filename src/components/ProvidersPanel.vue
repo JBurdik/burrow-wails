@@ -223,12 +223,7 @@
             </div>
 
             <SettingField label="Chat transport" hint="How the embedded chat talks to this provider. “None” makes it terminal-only.">
-              <select v-model="inst.transport" class="w-full rounded-lg border border-border bg-base px-2.5 py-1.5 text-xs text-foreground focus:border-accent/60 focus:outline-none">
-                <option value="none">None — terminal launches only</option>
-                <option value="claude-cli">Native Claude CLI (stream-json)</option>
-                <option value="codex-app-server">Native Codex app-server (JSON-RPC)</option>
-                <option value="acp">ACP (any ACP CLI)</option>
-              </select>
+              <Select v-model="inst.transport" :options="transportOptions" class="h-auto w-full rounded-lg py-1.5 text-xs" />
             </SettingField>
 
             <template v-if="inst.transport === 'acp'">
@@ -236,12 +231,7 @@
                 <input :value="inst.transportArgs.join(' ')" type="text" class="w-full rounded-lg border border-border bg-base px-2.5 py-1.5 font-mono text-xs text-foreground focus:border-accent/60 focus:outline-none" @input="setTransportArgs" />
               </SettingField>
               <SettingField label="Env injection kind" hint="Which provider-specific env the backend injects (auth, executable overrides).">
-                <select v-model="inst.kind" class="w-full rounded-lg border border-border bg-base px-2.5 py-1.5 text-xs text-foreground focus:border-accent/60 focus:outline-none">
-                  <option value="custom">custom (no special env)</option>
-                  <option value="claude">claude (CLAUDE_CODE_EXECUTABLE, OAuth)</option>
-                  <option value="gemini">gemini</option>
-                  <option value="codex">codex (forward API keys)</option>
-                </select>
+                <Select v-model="inst.kind" :options="environmentOptions" class="h-auto w-full rounded-lg py-1.5 text-xs" />
               </SettingField>
             </template>
 
@@ -271,6 +261,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { PhPlus, PhX, PhTrash, PhArrowsClockwise, PhArrowCounterClockwise, PhCaretRight, PhStar, PhFolderOpen } from "@phosphor-icons/vue";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Select } from "@/components/ui/select";
 import SettingField from "@/components/SettingField.vue";
 import ShortcutRecorder from "@/components/ShortcutRecorder.vue";
 import { useProvidersStore, type ProviderInstance } from "@/stores/providers";
@@ -282,6 +273,8 @@ import { flushConfig } from "@/lib/config";
 import { invoke } from "@tauri-apps/api/core";
 
 const props = defineProps<{ focusId?: string }>();
+const transportOptions = [{ value: "none", label: "None — terminal launches only" }, { value: "claude-cli", label: "Native Claude CLI (stream-json)" }, { value: "codex-app-server", label: "Native Codex app-server (JSON-RPC)" }, { value: "acp", label: "ACP (any ACP CLI)" }];
+const environmentOptions = [{ value: "custom", label: "custom (no special env)" }, { value: "claude", label: "claude (CLAUDE_CODE_EXECUTABLE, OAuth)" }, { value: "gemini", label: "gemini" }, { value: "codex", label: "codex (forward API keys)" }];
 
 // A per-instance CLAUDE_CONFIG_DIR is also a dir Burrow installs its status
 // hooks into, and the backend reads that list from config.json — so on close,

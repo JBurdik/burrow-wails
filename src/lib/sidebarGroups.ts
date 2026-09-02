@@ -26,10 +26,10 @@ export interface ActivityInput {
 /**
  * Flatten every open workspace's tabs into one recency-sorted feed, splitting
  * off tabs whose workspace (or whose parent repo) the user archived, plus the
- * individual tabs they snoozed, into `snoozed`. Of what's left, a chat tab the
- * agent has finished with (see claudeChats.isSettled()) goes to `settledChats`
- * instead of `live` — distinct from `snoozed`, which is about workspace/tab
- * dormancy, not per-chat attention.
+ * individual tabs they snoozed, into `snoozed`. Of what's left, any tab the
+ * user (or, for chats, claudeChats.isSettled()'s auto-settle) marked settled
+ * goes to `settledChats` instead of `live` — distinct from `snoozed`, which is
+ * about workspace/tab dormancy, not "done, no attention needed".
  */
 export function buildActivityRows(
   input: ActivityInput,
@@ -47,7 +47,7 @@ export function buildActivityRows(
     for (const tab of input.tabsByWs[ws.id] || []) {
       const row: ActivityRow = { ws, tab, ts: input.activityAt(ws.id, tab.id) };
       if (isWsSnoozed || snoozedKeys.has(`${ws.id}:${tab.id}`)) snoozed.push(row);
-      else if (tab.isChat && tab.settled) settledChats.push(row);
+      else if (tab.settled) settledChats.push(row);
       else live.push(row);
     }
   }

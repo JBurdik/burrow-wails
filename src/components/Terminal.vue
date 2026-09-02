@@ -199,6 +199,7 @@ import { useKeybindingsStore } from "@/stores/keybindings";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useGitStore } from "@/stores/git";
+import { isTabSettled } from "@/lib/settledTabs";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
 const props = defineProps<{ cwd: string; workspaceId: number }>();
@@ -1337,7 +1338,7 @@ function syncStore() {
       chatId: tabIsChat(t) ? (t.root as Leaf).chatId : undefined,
       settled: tabIsChat(t)
         ? chatsStore.isSettled(chatsStore.sessions.find((s) => s.id === (t.root as Leaf).chatId))
-        : false,
+        : isTabSettled(props.workspaceId, t.id),
     })),
   );
   tabsStore.setActive(props.workspaceId, activeTabId.value);

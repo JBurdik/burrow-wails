@@ -74,6 +74,8 @@ export function DeleteWorkspace(arg1:number):Promise<void>;
 
 export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function GenerateCommitMessage(arg1:string):Promise<main.GitOutput>;
+
 export function GetAppVersion():Promise<string>;
 
 export function GetHookServerPort():Promise<number>;

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os/exec"
+	"strings"
 )
 
 // GitOutput mirrors the Rust struct returned by run_git/run_gh.
@@ -42,6 +43,38 @@ func (a *App) RunGh(cwd string, args []string) GitOutput {
 		bin = resolved
 	}
 	return runCmd(bin, cwd, args)
+}
+
+// GenerateCommitMessage drafts a commit message from the staged diff via a
+// one-shot, non-interactive `claude -p` call — no PTY, no session, just
+// stdout capture like RunGit/RunGh above.
+func (a *App) GenerateCommitMessage(cwd string) GitOutput {
+	diffOut := runCmd("git", cwd, []string{"diff", "--staged"})
+	if !diffOut.Success {
+		return diffOut
+	}
+	diff := strings.TrimSpace(diffOut.Stdout)
+	if diff == "" {
+		return GitOutput{Stderr: "nothing staged", Code: 1}
+	}
+	const maxDiffChars = 6000
+	if len(diff) > maxDiffChars {
+		diff = diff[:maxDiffChars] + "\n… (truncated)"
+	}
+
+	bin := "claude"
+	if resolved := resolveAgentBin("claude", ""); resolved != "" {
+		bin = resolved
+	}
+	prompt := "Write a concise git commit message for this staged diff. " +
+		"One line, conventional-commits style (e.g. \"fix: ...\", \"feat: ...\"), " +
+		"under 72 characters, no body, no quotes, no markdown. Output ONLY the commit message.\n\n" +
+		diff
+	out := runCmd(bin, cwd, []string{"-p", prompt})
+	if out.Success {
+		out.Stdout = strings.Trim(strings.TrimSpace(out.Stdout), "\"'")
+	}
+	return out
 }
 
 // --- worktrees ---

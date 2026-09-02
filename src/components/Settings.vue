@@ -201,23 +201,7 @@
                 <span class="text-[13px] font-medium text-foreground">UI font</span>
                 <span class="text-[11px] text-muted-foreground">Font used across the app interface</span>
               </div>
-              <select
-                class="h-8 min-w-[200px] cursor-pointer rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
-                :value="ui.uiFont"
-                :style="{ fontFamily: ui.uiFont }"
-                @change="ui.uiFont = val($event)"
-              >
-                <optgroup label="Presets">
-                  <option v-for="f in UI_FONTS" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
-                    {{ f.label }}
-                  </option>
-                </optgroup>
-                <optgroup v-if="installedUiFonts.length" label="Installed">
-                  <option v-for="f in installedUiFonts" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
-                    {{ f.label }}
-                  </option>
-                </optgroup>
-              </select>
+              <Select v-model="ui.uiFont" :options="uiFontOptions" :trigger-style="{ fontFamily: ui.uiFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
             </div>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
@@ -252,23 +236,7 @@
                 <span class="text-[13px] font-medium text-foreground">Terminal font</span>
                 <span class="text-[11px] text-muted-foreground">Monospace font for terminal panes</span>
               </div>
-              <select
-                class="h-8 min-w-[200px] cursor-pointer rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
-                :value="ui.terminalFont"
-                :style="{ fontFamily: ui.terminalFont }"
-                @change="ui.terminalFont = val($event)"
-              >
-                <optgroup label="Presets">
-                  <option v-for="f in TERMINAL_FONTS" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
-                    {{ f.label }}
-                  </option>
-                </optgroup>
-                <optgroup v-if="installedMonoFonts.length" label="Installed">
-                  <option v-for="f in installedMonoFonts" :key="f.value" :value="f.value" :style="{ fontFamily: f.value }">
-                    {{ f.label }}
-                  </option>
-                </optgroup>
-              </select>
+              <Select v-model="ui.terminalFont" :options="terminalFontOptions" :trigger-style="{ fontFamily: ui.terminalFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
             </div>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
@@ -1047,6 +1015,8 @@ const installedUiFonts = computed(() =>
 const installedMonoFonts = computed(() =>
   systemFonts.value.filter((f) => !presetLabels.has(f) && isMonospace(f)).map((f) => toPreset(f, "monospace"))
 );
+const uiFontOptions = computed(() => [...UI_FONTS, ...installedUiFonts.value.map((font) => ({ ...font, label: `Installed · ${font.label}` }))]);
+const terminalFontOptions = computed(() => [...TERMINAL_FONTS, ...installedMonoFonts.value.map((font) => ({ ...font, label: `Installed · ${font.label}` }))]);
 
 const ui = useUIStore();
 const providers = useProvidersStore();

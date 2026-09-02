@@ -54,14 +54,8 @@
           <span class="text-[11px] font-semibold text-secondary-foreground">Composer default</span>
           <p class="m-0 text-[11px] text-muted-foreground">Which agent and model a new thread in this project starts on. Empty = the app-wide default.</p>
           <div class="flex gap-2">
-            <select v-model="agentDraft" class="flex-1 rounded-md border border-border bg-base px-2 py-[7px] text-[13px] text-foreground outline-none focus:border-accent" @change="commitDefaults">
-              <option value="">Default ({{ chatAgents.resolve(ui.defaultChatAgent).name }})</option>
-              <option v-for="a in chatAgents.chatAgents" :key="a.id" :value="a.id">{{ a.name }}</option>
-            </select>
-            <select v-model="modelDraft" class="flex-1 rounded-md border border-border bg-base px-2 py-[7px] text-[13px] text-foreground outline-none focus:border-accent" @change="commitDefaults">
-              <option value="">Default model</option>
-              <option v-for="m in modelOptions" :key="m.id" :value="m.id">{{ m.label }}</option>
-            </select>
+            <Select v-model="agentDraft" :options="agentOptions" class="h-auto flex-1 py-[7px] text-[13px]" @update:model-value="commitDefaults" />
+            <Select v-model="modelDraft" :options="modelSelectOptions" class="h-auto flex-1 py-[7px] text-[13px]" @update:model-value="commitDefaults" />
           </div>
         </div>
 
@@ -201,6 +195,7 @@ import { modelsFor } from '@/lib/chatModels'
 import { getProjectSettings, setProjectSettings } from '@/lib/projectSettings'
 import { isPinned, togglePin } from '@/lib/pinnedWorkspaces'
 import { isArchived, toggleArchived } from '@/lib/archivedWorkspaces'
+import { Select } from '@/components/ui/select'
 
 const props = defineProps<{ workspaceId: number }>()
 const emit = defineEmits<{ close: [] }>()
@@ -224,6 +219,8 @@ const worktreesDraft = ref(saved.worktreesDir ?? '')
 const confirmDelete = ref(false)
 
 const modelOptions = computed(() => modelsFor(chatAgents.resolve(agentDraft.value || ui.defaultChatAgent).kind))
+const agentOptions = computed(() => [{ value: '', label: `Default (${chatAgents.resolve(ui.defaultChatAgent).name})` }, ...chatAgents.chatAgents.map((agent) => ({ value: agent.id, label: agent.name }))])
+const modelSelectOptions = computed(() => [{ value: '', label: 'Default model' }, ...modelOptions.value.map((model) => ({ value: model.id, label: model.label }))])
 
 // Per-project agent env, stored in the project's own .burrow/config.toml.
 const proj = computed<ProjectSettings>(() => scriptsStore.settingsFor(workspacePath.value))

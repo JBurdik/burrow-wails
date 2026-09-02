@@ -2,6 +2,7 @@
 import { computed, shallowRef, watch } from "vue";
 import { PhCaretDown, PhCaretRight, PhCheck, PhListChecks, PhPlus, PhTrash } from "@phosphor-icons/vue";
 import { useAgentPlansStore, type PlanStepStatus } from "@/stores/agentPlans";
+import { Select } from "@/components/ui/select";
 
 const props = defineProps<{ ptyId: number; agentTitle?: string }>();
 
@@ -12,6 +13,7 @@ const plan = computed(() => store.getPlan(props.ptyId));
 const steps = computed(() => plan.value?.steps ?? []);
 const completedCount = computed(() => steps.value.filter((step) => step.status === "completed").length);
 const progressLabel = computed(() => steps.value.length ? `${completedCount.value}/${steps.value.length}` : "No plan");
+const statusOptions = [{ value: "pending", label: "Pending" }, { value: "in_progress", label: "Active" }, { value: "completed", label: "Done" }];
 
 function syncDraft() {
   draft.value = steps.value.map((step) => step.text).join("\n");
@@ -27,8 +29,8 @@ function addStep() {
   saveDraft();
 }
 
-function updateStatus(id: number, event: Event) {
-  store.setStepStatus(props.ptyId, id, (event.target as HTMLSelectElement).value as PlanStepStatus);
+function updateStatus(id: number, status: string | undefined) {
+  if (status) store.setStepStatus(props.ptyId, id, status as PlanStepStatus);
 }
 
 function updateText(id: number, event: Event) {
@@ -65,16 +67,13 @@ watch(() => props.ptyId, syncDraft, { immediate: true });
             :class="step.status === 'completed' && 'text-muted-foreground line-through'"
             @change="updateText(step.id, $event)"
           />
-          <select
-            :value="step.status"
+          <Select
+            :model-value="step.status"
+            :options="statusOptions"
             class="w-[70px] rounded border border-border bg-base font-sans text-[9px] text-muted-foreground"
             :aria-label="`Status for ${step.text}`"
-            @change="updateStatus(step.id, $event)"
-          >
-            <option value="pending">Pending</option>
-            <option value="in_progress">Active</option>
-            <option value="completed">Done</option>
-          </select>
+            @update:model-value="updateStatus(step.id, $event)"
+          />
           <button class="grid place-items-center rounded border-0 bg-transparent p-0.5 text-muted-foreground opacity-50 hover:bg-destructive/12 hover:text-destructive hover:opacity-100" title="Remove step" @click="store.removeStep(ptyId, step.id)">
             <PhTrash :size="12" />
           </button>

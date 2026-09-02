@@ -331,6 +331,14 @@ function saveAcp(field: keyof AcpChatSettings, value: string) {
   setConfig("chatAcpLast", rec);
 }
 
+// Active workspace, else the most recently opened one, unless the user picked
+// a different one from the dropdown.
+const override = ref<Workspace | null>(null);
+const target = computed<Workspace | null>(
+  () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
+);
+function pick(repo: Workspace) { override.value = repo; }
+
 // The catalog is what knows the efforts, and it is only fetched lazily — ask for
 // it up front so the pill is there before the user opens the model picker.
 watch([selectedAgentId, () => target.value?.path], () => {
@@ -360,14 +368,6 @@ type LaunchMode = "chat" | "terminal";
 const launchMode = ref<LaunchMode>(getConfig<LaunchMode>("welcomeLaunchMode", "chat") === "terminal" ? "terminal" : "chat");
 function pickMode(m: LaunchMode) { launchMode.value = m; setConfig("welcomeLaunchMode", m); }
 const terminalProgram = computed(() => terminalProgramFor({ kind: selectedAgent.value.kind, command: binaryFor(selectedAgent.value) }));
-
-// Active workspace, else the most recently opened one, unless the user picked
-// a different one from the dropdown.
-const override = ref<Workspace | null>(null);
-const target = computed<Workspace | null>(
-  () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
-);
-function pick(repo: Workspace) { override.value = repo; }
 
 // A project can pin its own agent/model (Project Settings → General); the
 // app-wide default only applies where it hasn't.
