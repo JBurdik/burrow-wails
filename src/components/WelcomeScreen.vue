@@ -49,11 +49,6 @@
         <template #toolbar>
         <div class="welcome-toolbar">
           <div class="welcome-pillbar">
-            <input ref="imageInput" class="sr-only" type="file" accept="image/*" multiple @change="onImageSelect" />
-            <button class="welcome-pill" type="button" title="Attach images" @click="imageInput?.click()">
-              <PhPaperclip :size="12" weight="bold" />
-              Attach
-            </button>
             <ModelPicker :agent-id="selectedAgentId" :model-id="selectedModel" :cwd="target.path" @select="onModelSelect" />
             <template v-if="isClaude">
               <DropdownMenuRoot>
@@ -159,6 +154,15 @@
         </div>
         </template>
       </ComposerBox>
+      <WorkspaceTargetPicker
+        :mode="worktreeMode"
+        :current-branch="currentBranch"
+        :base-branch="worktreeMode === 'new' ? currentBranch || 'HEAD' : undefined"
+        appearance="attached"
+        :disabled="worktreeBusy"
+        :error="worktreeError"
+        @select-mode="selectWorktreeMode"
+      />
     </template>
     <template v-else>
       <PhFolderOpen :size="32" weight="thin" />
@@ -169,8 +173,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, useTemplateRef } from "vue";
-import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhPaperclip, PhX } from "@phosphor-icons/vue";
+import { ref, shallowRef, computed, watch, nextTick } from "vue";
+import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhX } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
@@ -184,6 +188,7 @@ import ComposerBox from "@/components/ComposerBox.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
 import { getProjectSettings } from "@/lib/projectSettings";
+import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 
 const emit = defineEmits<{ (e: "open-folder"): void }>();
 
@@ -211,7 +216,6 @@ function cycleProvider() {
 }
 
 defineExpose({ focus: () => inputEl.value?.focus(), cycleProvider });
-const imageInput = useTemplateRef<HTMLInputElement>("imageInput");
 const pendingImages = ref<string[]>([]);
 
 function attachImages(files: Iterable<File>) {
@@ -233,12 +237,6 @@ function onPaste(event: ClipboardEvent) {
   if (!files.length) return;
   event.preventDefault();
   attachImages(files);
-}
-
-function onImageSelect(event: Event) {
-  const input = event.target as HTMLInputElement;
-  if (input.files) attachImages(input.files);
-  input.value = "";
 }
 
 async function persistTerminalImages(images: string[]): Promise<string[]> {
@@ -339,6 +337,50 @@ const target = computed<Workspace | null>(
 );
 function pick(repo: Workspace) { override.value = repo; }
 
+type WorktreeMode = "current" | "new";
+const worktreeMode = shallowRef<WorktreeMode>("current");
+const worktreeBranch = shallowRef("");
+const currentBranch = shallowRef("");
+const worktreeBusy = shallowRef(false);
+const worktreeError = shallowRef("");
+
+function generatedWorktreeBranch(): string {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  return `t3code/${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function selectWorktreeMode(mode: WorktreeMode) {
+  worktreeMode.value = mode;
+  worktreeError.value = "";
+  if (mode === "new" && !worktreeBranch.value) worktreeBranch.value = generatedWorktreeBranch();
+}
+
+async function refreshCurrentBranch(workspace: Workspace | null) {
+  if (!workspace) {
+    currentBranch.value = "";
+    return;
+  }
+  if (workspace.worktree_branch) {
+    currentBranch.value = workspace.worktree_branch;
+    return;
+  }
+  try {
+    const out = await invoke<{ stdout: string; code: number }>("run_git", { cwd: workspace.path, args: ["branch", "--show-current"] });
+    currentBranch.value = out.code === 0 ? out.stdout.trim() : "";
+  } catch {
+    currentBranch.value = "";
+  }
+}
+
+function worktreePath(workspace: Workspace, branch: string): string {
+  const repo = workspace.path.split("/").filter(Boolean).pop() || "repo";
+  const root = getProjectSettings(workspace.parent_id ?? workspace.id).worktreesDir || ui.worktreesDir;
+  return `${root}/${repo}/${branch.replaceAll("/", "-")}`;
+}
+
+watch(target, (workspace) => { void refreshCurrentBranch(workspace); }, { immediate: true });
+
 // The catalog is what knows the efforts, and it is only fetched lazily — ask for
 // it up front so the pill is there before the user opens the model picker.
 watch([selectedAgentId, () => target.value?.path], () => {
@@ -381,8 +423,22 @@ watch(target, (t) => {
 
 async function submit() {
   const prompt = text.value.trim();
-  const t = target.value;
+  let t = target.value;
   if (!prompt || !t) return;
+  if (worktreeMode.value === "new") {
+    const branch = worktreeBranch.value.trim();
+    if (!branch) return;
+    worktreeBusy.value = true;
+    worktreeError.value = "";
+    try {
+      t = await store.createWorktree(t.id, branch, currentBranch.value || null, worktreePath(t, branch));
+    } catch (err) {
+      worktreeError.value = err instanceof Error ? err.message : String(err);
+      return;
+    } finally {
+      worktreeBusy.value = false;
+    }
+  }
   const images = [...pendingImages.value];
   const terminalPrompt = launchMode.value === "terminal" && images.length > 0
     ? promptWithImagePaths(prompt, await persistTerminalImages(images))
@@ -399,6 +455,8 @@ async function submit() {
   wasOpen ? open() : nextTick(open); // freshly-mounted Terminal needs a tick to attach its request watcher
   text.value = "";
   pendingImages.value = [];
+  worktreeMode.value = "current";
+  worktreeBranch.value = "";
   ui.closeWelcome();
 }
 </script>
@@ -473,6 +531,7 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  z-index: 1;
 }
 
 .welcome-input {

@@ -80,6 +80,10 @@ func (a *App) GenerateCommitMessage(cwd string) GitOutput {
 // --- worktrees ---
 
 func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef string) (Workspace, error) {
+	var parentID int64
+	if err := a.db.QueryRow(`SELECT id FROM workspaces WHERE path = ?`, repoPath).Scan(&parentID); err != nil {
+		return Workspace{}, err
+	}
 	if baseRef == "" {
 		baseRef = "HEAD"
 	}
@@ -95,7 +99,10 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 	if err != nil {
 		return ws, err
 	}
-	_, err = a.db.Exec(`UPDATE workspaces SET worktree_branch = ?, is_git = 1 WHERE id = ?`, branch, ws.ID)
+	_, err = a.db.Exec(`UPDATE workspaces SET parent_id = ?, worktree_branch = ?, is_git = 1 WHERE id = ?`, parentID, branch, ws.ID)
+	ws.ParentID = &parentID
+	ws.WorktreeBranch = &branch
+	ws.IsGit = true
 	return ws, err
 }
 
