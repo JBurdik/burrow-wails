@@ -67,7 +67,7 @@
         ]"
         @click="selectTab(row)"
         @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
-        @mouseenter="scheduleHoverCard(row, $event)"
+        @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
         @mouseleave="cancelHoverCard"
       >
         <span v-if="isActiveRow(row)" class="absolute inset-y-0 left-0 w-[2px] bg-accent" />
@@ -173,6 +173,8 @@
             class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
             @click="selectTab(row)"
             @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+            @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
+            @mouseleave="cancelHoverCard"
           >
             <div class="flex items-center gap-1.5">
               <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : PhChatCenteredText" :size="10" class="shrink-0" />
@@ -219,18 +221,27 @@
           <div
             v-for="s in archivedChats"
             :key="s.id"
-            class="group flex cursor-pointer items-center gap-1.5 px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
+            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
             @click="unarchiveAndOpen(s.id)"
+            @mouseenter="active && scheduleHoverCard(hoverInfoFromArchived(s, active), $event)"
+            @mouseleave="cancelHoverCard"
           >
-            <PhChatCenteredText :size="10" class="shrink-0" />
-            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ s.title }}</span>
-            <span class="shrink-0 text-[10px] tabular-nums">{{ ago(s.archivedAt!) }}</span>
-            <PhTrash
-              :size="10"
-              class="shrink-0 rounded-sm p-px opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:!text-destructive"
-              title="Delete permanently"
-              @click.stop="deletePermanently(s.id)"
-            />
+            <div class="flex items-center gap-1.5">
+              <PhChatCenteredText :size="10" class="shrink-0" />
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ s.title }}</span>
+              <span class="shrink-0 text-[10px] tabular-nums">{{ ago(s.archivedAt!) }}</span>
+              <PhTrash
+                :size="10"
+                class="shrink-0 rounded-sm p-px opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:!text-destructive"
+                title="Delete permanently"
+                @click.stop="deletePermanently(s.id)"
+              />
+            </div>
+            <div v-if="active" class="mt-[2px] flex items-center gap-1.5 pl-[15px]">
+              <img v-if="repoIcon(active)" :src="repoIcon(active)!" class="h-2.5 w-2.5 shrink-0 rounded-[2px] object-cover" />
+              <PhFolder v-else :size="9" weight="fill" class="shrink-0 text-accent/80" />
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] opacity-70" :title="active.name">{{ repoName(active) }}</span>
+            </div>
           </div>
         </template>
       </template>
@@ -292,55 +303,56 @@
         No scripts. Add some in Settings → Scripts.
       </div>
     </div>
-    <!-- Row hover card: full thread details, shown after a short hover delay -->
+    <!-- Row hover card: full thread details, shown after a short hover delay.
+         Shared by live/settled/archived rows via hoverInfoFrom{Row,Archived}. -->
     <div
-      v-if="hoverRow"
+      v-if="hoverInfo"
       class="pointer-events-none fixed z-[900] w-64 max-w-[calc(100vw-16px)] rounded-lg border border-border bg-panel p-2.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
       :style="hoverStyle"
     >
-      <div class="mb-1.5 wrap-break-word text-[11px] font-semibold leading-[1.4] text-foreground">{{ hoverRow.tab.title }}</div>
+      <div class="mb-1.5 wrap-break-word text-[11px] font-semibold leading-[1.4] text-foreground">{{ hoverInfo.title }}</div>
       <div class="grid gap-1 text-[10.5px] text-muted-foreground">
         <div class="flex min-w-0 items-center gap-1.5">
-          <img v-if="repoIcon(hoverRow.ws)" :src="repoIcon(hoverRow.ws)!" class="h-3 w-3 shrink-0 rounded-[3px] object-cover" />
+          <img v-if="repoIcon(hoverInfo.ws)" :src="repoIcon(hoverInfo.ws)!" class="h-3 w-3 shrink-0 rounded-[3px] object-cover" />
           <PhFolder v-else :size="11" weight="fill" class="shrink-0 text-accent/80" />
-          <span class="min-w-0 truncate text-foreground/80">{{ repoName(hoverRow.ws) }}</span>
+          <span class="min-w-0 truncate text-foreground/80">{{ repoName(hoverInfo.ws) }}</span>
         </div>
-        <div class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverRow.ws.path">{{ hoverRow.ws.path }}</div>
-        <div v-if="branchOf(hoverRow.ws)" class="flex min-w-0 items-center gap-1.5">
+        <div class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverInfo.ws.path">{{ hoverInfo.ws.path }}</div>
+        <div v-if="branchOf(hoverInfo.ws)" class="flex min-w-0 items-center gap-1.5">
           <PhGitBranch :size="11" class="shrink-0" />
-          <span class="min-w-0 truncate font-mono text-foreground/80">{{ branchOf(hoverRow.ws) }}</span>
+          <span class="min-w-0 truncate font-mono text-foreground/80">{{ branchOf(hoverInfo.ws) }}</span>
         </div>
-        <div v-if="hoverRow.tab.model" class="flex min-w-0 items-center gap-1.5">
+        <div v-if="hoverInfo.model" class="flex min-w-0 items-center gap-1.5">
           <PhRobot :size="11" class="shrink-0" />
-          <span class="min-w-0 truncate text-foreground/80">{{ hoverRow.tab.model }}</span>
+          <span class="min-w-0 truncate text-foreground/80">{{ hoverInfo.model }}</span>
         </div>
-        <div v-if="(hoverRow.tab.leafCount ?? 1) > 1" class="flex min-w-0 items-center gap-1.5">
+        <div v-if="(hoverInfo.leafCount ?? 1) > 1" class="flex min-w-0 items-center gap-1.5">
           <PhTerminal :size="11" class="shrink-0" />
-          <span class="truncate text-foreground/80">{{ hoverRow.tab.leafCount }} panes running</span>
+          <span class="truncate text-foreground/80">{{ hoverInfo.leafCount }} panes running</span>
         </div>
-        <div v-if="hoverRow.tab.isAgent && (hoverRow.tab.round ?? 0) > 0" class="flex min-w-0 items-center gap-1.5">
+        <div v-if="(hoverInfo.round ?? 0) > 0" class="flex min-w-0 items-center gap-1.5">
           <PhArrowCounterClockwise :size="11" class="shrink-0" />
-          <span class="truncate text-foreground/80">{{ hoverRow.tab.round }} {{ hoverRow.tab.round === 1 ? "turn" : "turns" }} sent</span>
+          <span class="truncate text-foreground/80">{{ hoverInfo.round }} {{ hoverInfo.round === 1 ? "turn" : "turns" }} sent</span>
         </div>
         <div class="flex min-w-0 items-center gap-1.5">
-          <span class="truncate">Last activity {{ ago(hoverRow.ts) }}</span>
+          <span class="truncate">Last activity {{ ago(hoverInfo.ts) }}</span>
         </div>
-        <div v-if="hoverRow.tab.sessionId" class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverRow.tab.sessionId">{{ hoverRow.tab.sessionId }}</div>
+        <div v-if="hoverInfo.sessionId" class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverInfo.sessionId">{{ hoverInfo.sessionId }}</div>
         <div
-          v-if="git.prByWs[hoverRow.ws.id]"
+          v-if="git.prByWs[hoverInfo.ws.id]"
           class="flex min-w-0 items-center gap-1.5"
-          :class="prClass(git.prByWs[hoverRow.ws.id]!)"
+          :class="prClass(git.prByWs[hoverInfo.ws.id]!)"
         >
           <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
-          <span class="truncate">{{ prTitle(git.prByWs[hoverRow.ws.id]!) }}</span>
+          <span class="truncate">{{ prTitle(git.prByWs[hoverInfo.ws.id]!) }}</span>
         </div>
         <div
-          v-if="hoverRow.tab.status && hoverRow.tab.status !== 'idle'"
+          v-if="hoverInfo.status && hoverInfo.status !== 'idle'"
           class="flex min-w-0 items-center gap-1.5"
-          :class="statusClass(hoverRow.tab.status)"
+          :class="statusClass(hoverInfo.status)"
         >
-          <span class="status-dot" :class="`status-${hoverRow.tab.status}`" />
-          <span class="truncate">{{ attentionLabel(attentionState(hoverRow)) }}</span>
+          <span class="status-dot" :class="`status-${hoverInfo.status}`" />
+          <span class="truncate">{{ statusLabel(hoverInfo.status) }}</span>
         </div>
       </div>
     </div>
@@ -376,6 +388,19 @@
       <button v-if="isOpened(rowMenu.ws.id)" class="menu-item" @click="withMenu((ws) => store.closeWorkspace(ws.id))">Close project</button>
       <div class="menu-sep" />
       <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws) => (deleteTarget = ws))">Delete…</button>
+    </div>
+
+    <!-- Generic destructive confirm — window.confirm() is a silent no-op in the
+         Wails webview (no native dialog delegate wired up), so any delete that
+         needs a confirmation must go through this instead. -->
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="confirmDialog" @click.self="confirmDialog = null">
+      <div class="flex w-[380px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-5">
+        <p class="text-[12.5px] leading-[1.6] text-foreground">{{ confirmDialog.message }}</p>
+        <div class="flex justify-end gap-2">
+          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="confirmDialog = null">Cancel</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" @click="runConfirm">Delete</button>
+        </div>
+      </div>
     </div>
 
     <!-- Delete confirm — destructive: a worktree delete removes files from disk -->
@@ -528,7 +553,7 @@ import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore, type TabSummary } from "@/stores/terminalTabs";
-import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
 import { useUIStore } from "@/stores/ui";
 import { spinnerFrame } from "@/lib/spinner";
 import { agentIconComp } from "@/lib/agentIcons";
@@ -619,17 +644,28 @@ function unarchiveAndOpen(chatId: number) {
   if (!active.value) return;
   termTabs.openChat(active.value.id, chatId);
 }
+const confirmDialog = ref<{ message: string; onConfirm: () => void } | null>(null);
+function runConfirm() {
+  confirmDialog.value?.onConfirm();
+  confirmDialog.value = null;
+}
 function deletePermanently(chatId: number) {
-  if (!window.confirm("Delete this chat permanently? This cannot be undone.")) return;
-  chats.remove(chatId);
+  confirmDialog.value = {
+    message: "Delete this chat permanently? This cannot be undone.",
+    onConfirm: () => chats.remove(chatId),
+  };
 }
 // Last step of a thread's life: settled → archived → gone. A chat row is a
 // stored session, so it needs the store's hard delete; a plain terminal tab
 // only exists as long as its PTY, so closing it *is* the delete.
 function deleteThread(wsId: number, tab: TabSummary) {
-  if (!window.confirm(`Delete “${tab.title}” permanently? This cannot be undone.`)) return;
-  termTabs.close(wsId, tab.id);
-  if (tab.isChat && tab.chatId != null) chats.remove(tab.chatId);
+  confirmDialog.value = {
+    message: `Delete “${tab.title}” permanently? This cannot be undone.`,
+    onConfirm: () => {
+      termTabs.close(wsId, tab.id);
+      if (tab.isChat && tab.chatId != null) chats.remove(tab.chatId);
+    },
+  };
 }
 function toggleSettled(tab: TabSummary, wsId: number) {
   if (tab.isChat) {
@@ -652,12 +688,60 @@ function toggleSection(key: SectionKey) {
 // ── row hover card ───────────────────────────────────────────────────────────
 // Stolen from pingdotgg/t3code's SidebarThreadTooltip: a short delay before
 // showing (so a fast mouse pass doesn't flash it) but instant on leave.
+// Generic shape so live/settled rows (ActivityRow) and archived sessions
+// (ClaudeSession, no live tab) can share one card.
+interface HoverInfo {
+  title: string;
+  ws: Workspace;
+  model?: string;
+  leafCount?: number;
+  round?: number;
+  sessionId?: string;
+  status?: TermStatus;
+  ts: number;
+}
+
 const HOVER_DELAY_MS = 150;
-const hoverRow = ref<ActivityRow | null>(null);
+const hoverInfo = ref<HoverInfo | null>(null);
 const hoverStyle = ref<Record<string, string>>({});
 let hoverTimer: number | undefined;
 
-function scheduleHoverCard(row: ActivityRow, e: MouseEvent) {
+function hoverInfoFromRow(row: ActivityRow): HoverInfo {
+  return {
+    title: row.tab.title,
+    ws: row.ws,
+    model: row.tab.model,
+    leafCount: row.tab.leafCount,
+    round: row.tab.isAgent ? row.tab.round : undefined,
+    sessionId: row.tab.sessionId,
+    status: row.tab.status,
+    ts: row.ts,
+  };
+}
+
+function hoverInfoFromArchived(s: ClaudeSession, ws: Workspace): HoverInfo {
+  return {
+    title: s.title,
+    ws,
+    model: s.model,
+    round: s.messageCount,
+    sessionId: s.claudeSessionId,
+    ts: s.archivedAt ?? Date.now(),
+  };
+}
+
+function statusLabel(status: TermStatus): string {
+  switch (status) {
+    case "running": return "Working";
+    case "permission": return "Needs input";
+    case "waiting": return "Waiting";
+    case "error": return "Error";
+    case "review": return "Done";
+    default: return "Idle";
+  }
+}
+
+function scheduleHoverCard(info: HoverInfo, e: MouseEvent) {
   cancelHoverCard();
   const el = e.currentTarget as HTMLElement;
   hoverTimer = window.setTimeout(() => {
@@ -666,13 +750,13 @@ function scheduleHoverCard(row: ActivityRow, e: MouseEvent) {
       left: `${r.right + 6}px`,
       top: `${Math.min(r.top, window.innerHeight - 160)}px`,
     };
-    hoverRow.value = row;
+    hoverInfo.value = info;
   }, HOVER_DELAY_MS);
 }
 function cancelHoverCard() {
   if (hoverTimer) clearTimeout(hoverTimer);
   hoverTimer = undefined;
-  hoverRow.value = null;
+  hoverInfo.value = null;
 }
 
 function rowKey(row: ActivityRow): string {
