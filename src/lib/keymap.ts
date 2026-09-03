@@ -23,7 +23,7 @@ export const KEY_COMMANDS: KeyCommand[] = [
   { id: "settings", label: "Settings", group: "Global", def: "⌘,", scope: "app" },
   { id: "cheatsheet", label: "Keyboard shortcuts cheatsheet", group: "Global", def: "⌘/", scope: "app" },
   { id: "sidebar", label: "Toggle sidebar", group: "Global", def: "⌘B", scope: "app" },
-  { id: "manager", label: "Toggle Manager", group: "Global", def: "⌘J", scope: "app" },
+  { id: "manager", label: "Toggle Manager", group: "Global", def: "⌘⇧J", scope: "app" },
   { id: "unread", label: "Jump to first unread tab", group: "Global", def: "⌘⇧U", scope: "app" },
 
   // ── Projects ──
@@ -36,6 +36,7 @@ export const KEY_COMMANDS: KeyCommand[] = [
   { id: "closePane", label: "Close pane", group: "Tabs & panes", def: "⌘W", scope: "terminal" },
   { id: "splitH", label: "Split pane horizontally", group: "Tabs & panes", def: "⌘D", scope: "terminal" },
   { id: "splitV", label: "Split pane vertically", group: "Tabs & panes", def: "⌘⇧D", scope: "terminal" },
+  { id: "bottomPanel", label: "Toggle bottom terminal panel", group: "Tabs & panes", def: "⌘J", scope: "terminal" },
   { id: "repaint", label: "Repaint terminals (un-scramble)", group: "Tabs & panes", def: "⌘⇧R", scope: "app" },
 ];
 

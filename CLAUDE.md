@@ -222,7 +222,7 @@ Feature plans and implementation notes live in `docs/plans/`. Read the relevant 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **burrow** (4442 symbols, 8263 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **burrow-wails** (6314 symbols, 11895 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -245,10 +245,10 @@ This project is indexed by GitNexus as **burrow** (4442 symbols, 8263 relationsh
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/burrow/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/burrow/clusters` | All functional areas |
-| `gitnexus://repo/burrow/processes` | All execution flows |
-| `gitnexus://repo/burrow/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/burrow-wails/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/burrow-wails/clusters` | All functional areas |
+| `gitnexus://repo/burrow-wails/processes` | All execution flows |
+| `gitnexus://repo/burrow-wails/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 

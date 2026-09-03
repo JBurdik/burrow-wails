@@ -4,7 +4,9 @@
     class="flex h-full shrink-0 grow-0 overflow-hidden bg-panel text-xs [backdrop-filter:var(--blur-panels,none)]"
     :class="props.open ? 'w-[var(--right-panel-width,300px)] basis-[var(--right-panel-width,300px)] border-l border-border' : 'w-0 basis-0'"
   >
-    <div v-if="props.open" class="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <!-- v-show, not v-if: closing the panel must keep XTerm/BrowserPane mounted,
+         or reopening respawns a fresh shell over the still-running old one. -->
+    <div v-show="props.open" class="flex min-w-0 flex-1 flex-col overflow-hidden">
       <div class="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 hide-scrollbar">
         <button
           v-for="tab in openedTabs"
@@ -321,13 +323,27 @@
         </button>
       </div>
     </div>
-    <!-- Browser: outside the v-if chain and kept mounted while its tab is open, so
-         switching to Changes and back doesn't reload the page being previewed. -->
-    <BrowserPane v-if="browserOpened" v-show="activeTab === 'browser'" class="min-h-0 flex-1" />
+    <!-- Browser: one per workspace, outside the v-if chain and kept mounted, so
+         switching to Changes (or another project) and back doesn't reload the
+         page being previewed. -->
+    <BrowserPane
+      v-for="id in browserWsIds"
+      :key="id"
+      v-show="id === wsKey && activeTab === 'browser'"
+      class="min-h-0 flex-1"
+    />
 
-    <!-- Terminal: same kept-mounted treatment so the shell survives switching surfaces. -->
-    <XTerm v-if="terminalOpened && props.cwd" v-show="activeTab === 'terminal'" :pty-id="terminalPtyId" :cwd="props.cwd" class="min-h-0 flex-1" />
-    <div v-else-if="activeTab === 'terminal'" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
+    <!-- Terminal: same kept-mounted treatment, one per workspace, so an app running
+         in it keeps running when you switch projects and back. -->
+    <XTerm
+      v-for="id in terminalWsIds"
+      :key="id"
+      v-show="id === wsKey && activeTab === 'terminal'"
+      :pty-id="terminalPtyByWs[id]"
+      :cwd="terminalCwdByWs[id]"
+      class="min-h-0 flex-1"
+    />
+    <div v-if="activeTab === 'terminal' && !terminalWsIds.includes(wsKey)" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
 
     <!-- Restore confirm — overwrites files on disk, so it always asks first -->
     <Teleport to="body">
@@ -357,7 +373,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, inject, onMounted, onBeforeUnmount } from "vue";
+import { ref, reactive, computed, watch, inject, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   PhFiles, PhGitBranch, PhGitCommit,
@@ -383,8 +399,25 @@ const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGi
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
 const git = useGitStore();
 const fileTree = useFileTreeStore();
-const activeTab = ref<string | null>(null);
-const openedTabIds = ref<string[]>([]);
+// RightPanel is one shared instance across all workspaces (App.vue doesn't
+// key it per workspace), so which surfaces are open / which tab is active
+// must be tracked per workspace, not as one global ref — otherwise switching
+// projects shows the other project's open tabs.
+const NO_WS = -1;
+interface WsUiState { openedTabIds: string[]; activeTab: string | null }
+const wsUiStates = reactive<Record<number, WsUiState>>({});
+const wsKey = computed(() => props.workspaceId ?? NO_WS);
+function wsUi(id: number): WsUiState {
+  return (wsUiStates[id] ??= { openedTabIds: [], activeTab: null });
+}
+const activeTab = computed<string | null>({
+  get: () => wsUi(wsKey.value).activeTab,
+  set: (v) => { wsUi(wsKey.value).activeTab = v; },
+});
+const openedTabIds = computed<string[]>({
+  get: () => wsUi(wsKey.value).openedTabIds,
+  set: (v) => { wsUi(wsKey.value).openedTabIds = v; },
+});
 const workspaceDiff = ref("");
 const workspaceDiffLoading = ref(false);
 const showHistory = ref(false);
@@ -426,9 +459,25 @@ const tabs = computed(() => {
   return all;
 });
 
-const browserOpened = computed(() => openedTabIds.value.includes("browser"));
-const terminalOpened = computed(() => openedTabIds.value.includes("terminal"));
-const terminalPtyId = nextPtyId();
+// One scratch terminal (and its cwd) per workspace, kept mounted forever once
+// opened — like the main Terminal.vue leaves — so an app running in it keeps
+// running when you switch to another project and back.
+const terminalPtyByWs = reactive<Record<number, number>>({});
+const terminalCwdByWs = reactive<Record<number, string>>({});
+const terminalWsIds = computed(() => Object.keys(terminalPtyByWs).map(Number));
+function ensureTerminalPty(id: number) {
+  if (!(id in terminalPtyByWs)) {
+    terminalPtyByWs[id] = nextPtyId();
+    terminalCwdByWs[id] = props.cwd;
+  }
+}
+
+// Same idea for the browser preview: one BrowserPane per workspace, kept
+// mounted so its URL/history survives switching projects.
+const browserWsIds = ref<number[]>([]);
+function ensureBrowserPane(id: number) {
+  if (!browserWsIds.value.includes(id)) browserWsIds.value.push(id);
+}
 
 const openedTabs = computed(() => openedTabIds.value
   .map((id) => tabs.value.find((tab) => tab.id === id))
@@ -437,6 +486,8 @@ const openedTabs = computed(() => openedTabIds.value
 function openSurface(id: string) {
   if (!openedTabIds.value.includes(id)) openedTabIds.value.push(id);
   activeTab.value = id;
+  if (id === "terminal") ensureTerminalPty(wsKey.value);
+  if (id === "browser") ensureBrowserPane(wsKey.value);
   if (!props.open) emit("openPanel");
   if (id === "manager") emit("managerOpen");
 }

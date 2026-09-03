@@ -11,6 +11,13 @@
       @toggle-rightpanel="ui.toggleRightPanel()"
     />
     <Settings v-if="ui.settingsOpen" @close="ui.closeSettings()" />
+    <Onboarding v-if="onboardingOpen" @complete="completeOnboarding" @skip="completeOnboarding" />
+    <DocsScreen
+      v-if="docsOpen"
+      @close="docsOpen = false"
+      @onboarding="openOnboarding"
+      @shortcuts="openShortcutsFromDocs"
+    />
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
       <Sidebar v-show="ui.sidebarVisible" class="panel-sidebar" />
       <div v-show="ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
@@ -109,6 +116,8 @@ import UpdateBanner from "@/components/UpdateBanner.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
+import Onboarding from "@/components/Onboarding.vue";
+import DocsScreen from "@/components/DocsScreen.vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useGitStore } from "@/stores/git";
@@ -124,6 +133,7 @@ import { installControlBridge } from "@/lib/controlBridge";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import DiagramModal from "@/components/DiagramModal.vue";
 import { useDiagram } from "@/composables/useDiagram";
+import { configReady, getConfig, setConfig } from "@/lib/config";
 
 let resizing: 'left' | 'right' | null = null;
 let resizeStartX = 0;
@@ -146,6 +156,26 @@ const providers = useProvidersStore();
 const keys = useKeybindingsStore();
 const update = useUpdateStore();
 const tabsStore = useTerminalTabsStore();
+const onboardingOpen = ref(false);
+const docsOpen = ref(false);
+const ONBOARDING_CONFIG_KEY = "onboardingComplete";
+
+configReady.then(() => {
+  onboardingOpen.value = !getConfig<boolean>(ONBOARDING_CONFIG_KEY, false);
+});
+
+function completeOnboarding() {
+  onboardingOpen.value = false;
+  setConfig(ONBOARDING_CONFIG_KEY, true);
+}
+function openOnboarding() {
+  docsOpen.value = false;
+  onboardingOpen.value = true;
+}
+function openShortcutsFromDocs() {
+  docsOpen.value = false;
+  cheatsheetOpen.value = true;
+}
 
 // Tabs of the active workspace, and of those the ones still wanting attention.
 // Restore reopens EVERY saved chat thread (the sessions are the threads — the
@@ -311,6 +341,9 @@ async function openNewWorkspace() {
 // browser-only dev (no Tauri) are swallowed.
 let updateTimer: number | undefined;
 let unlistenMenuUpdate: UnlistenFn | null = null;
+let unlistenMenuDocs: UnlistenFn | null = null;
+let unlistenMenuOnboarding: UnlistenFn | null = null;
+let unlistenMenuShortcuts: UnlistenFn | null = null;
 let unlistenControl: (() => void) | undefined;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
 
@@ -359,6 +392,9 @@ onMounted(async () => {
   unlistenMenuUpdate = await listen("menu-check-update", () => {
     update.check({ silent: false });
   });
+  unlistenMenuDocs = await listen("menu-open-docs", () => { docsOpen.value = true; });
+  unlistenMenuOnboarding = await listen("menu-show-onboarding", () => { onboardingOpen.value = true; });
+  unlistenMenuShortcuts = await listen("menu-show-shortcuts", () => { cheatsheetOpen.value = true; });
 
   unlistenWorkspacesChanged = await listen("workspaces-changed", () => {
     ws.load();
@@ -374,6 +410,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', onResizeUp);
   if (updateTimer) clearInterval(updateTimer);
   unlistenMenuUpdate?.();
+  unlistenMenuDocs?.();
+  unlistenMenuOnboarding?.();
+  unlistenMenuShortcuts?.();
   unlistenWorkspacesChanged?.();
   unlistenControl?.();
 });

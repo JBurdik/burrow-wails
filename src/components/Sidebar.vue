@@ -75,15 +75,19 @@
           <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-3 w-3 shrink-0 rounded-[3px] object-cover" />
           <PhFolder v-else :size="11" weight="fill" class="shrink-0 text-accent/80" />
           <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[10.5px] text-muted-foreground">{{ repoName(row.ws) }}</span>
-          <span class="shrink-0 text-[10px] tabular-nums group-hover:hidden" :class="statusClass(row.tab.status)">{{ statusText(row) }}</span>
-          <button
-            class="hidden shrink-0 items-center gap-[3px] rounded px-1 py-0.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-hover hover:text-[#4ade80] group-hover:flex"
-            title="Settle"
-            @click.stop="toggleSettled(row.tab, row.ws.id)"
-          >
-            <PhCheck :size="11" weight="bold" />
-            Settle
-          </button>
+          <!-- Status ↔ Settle swap via visibility in one grid cell — display
+               swapping resized the row and made it jump on hover. -->
+          <span class="grid shrink-0 justify-items-end">
+            <span class="[grid-area:1/1] text-[10px] tabular-nums group-hover:invisible" :class="statusClass(row.tab.status)">{{ statusText(row) }}</span>
+            <button
+              class="invisible flex items-center gap-[3px] self-center rounded px-1 text-[10px] font-semibold leading-none text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-[#4ade80] group-hover:visible"
+              title="Settle"
+              @click.stop="toggleSettled(row.tab, row.ws.id)"
+            >
+              <PhCheck :size="11" weight="bold" />
+              Settle
+            </button>
+          </span>
         </div>
 
         <!-- line 2: thread title -->
@@ -162,15 +166,19 @@
           >
             <PhChatCenteredText :size="10" class="shrink-0" />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
+            <span class="shrink-0 truncate max-w-[80px] text-[9.5px] opacity-70" :title="row.ws.name">{{ row.ws.name }}</span>
             <span v-if="git.prByWs[row.ws.id]" class="shrink-0 font-mono text-[9px]">#{{ git.prByWs[row.ws.id]!.number }}</span>
-            <button
-              class="hidden shrink-0 items-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground group-hover:flex"
-              title="Move back to active"
-              @click.stop="toggleSettled(row.tab, row.ws.id)"
-            >
-              <PhArrowCounterClockwise :size="11" weight="bold" />
-            </button>
-            <span class="shrink-0 text-[10px] tabular-nums group-hover:hidden">{{ ago(row.ts) }}</span>
+            <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
+            <span class="grid shrink-0 justify-items-end">
+              <span class="[grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
+              <button
+                class="invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
+                title="Move back to active"
+                @click.stop="toggleSettled(row.tab, row.ws.id)"
+              >
+                <PhArrowCounterClockwise :size="11" weight="bold" />
+              </button>
+            </span>
           </div>
           <button
             v-if="feed.settledChats.length > settledChatsLimit"

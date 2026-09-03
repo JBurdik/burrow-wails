@@ -28,16 +28,54 @@
         </DropdownMenuRoot>?
       </h1>
       <ComposerBox class="welcome-compose">
-        <ComposerTextInput
-          ref="inputEl"
-          v-model="text"
-          class="welcome-input composer-input"
-          placeholder="Ask for changes, send follow-ups, or attach images"
-          rows="3"
-          autofocus
-          @keydown.enter.exact.prevent="submit"
-          @paste="onPaste"
-        />
+        <div class="relative">
+          <!-- Highlight backdrop: same metrics as .welcome-input, renders /skill tokens as pills. -->
+          <div
+            v-if="hasSkillPill"
+            ref="hlEl"
+            aria-hidden="true"
+            class="welcome-input pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap [overflow-wrap:break-word]"
+          ><template v-for="(p, i) in skillParts" :key="i"><span v-if="p.pill" class="skill-pill">{{ p.v }}</span><template v-else>{{ p.v }}</template></template></div>
+          <ComposerTextInput
+            ref="inputEl"
+            v-model="text"
+            class="welcome-input composer-input block w-full"
+            :class="hasSkillPill && 'composer-ghost'"
+            placeholder="Ask for changes, send follow-ups, or attach images"
+            rows="3"
+            autofocus
+            @input="onComposerInput"
+            @keydown="onComposerKeydown"
+            @paste="onPaste"
+            @scroll="syncHighlightScroll"
+          />
+        </div>
+        <!-- $skill suggestions (inserts /name — same invocation AgentChat uses) -->
+        <div v-if="skillSuggestions.length > 0" class="max-h-[200px] overflow-y-auto border-t border-border">
+          <div
+            v-for="(s, i) in skillSuggestions"
+            :key="s.name"
+            class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-hover"
+            :class="{ '!bg-hover': i === skillIdx }"
+            @mousedown.prevent="applySkillSuggestion(s.name)"
+          >
+            <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-accent">/{{ s.name }}</span>
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ s.description }}</span>
+          </div>
+        </div>
+        <!-- @-mention file suggestions -->
+        <div v-if="atSuggestions.length > 0" class="max-h-[200px] overflow-y-auto border-t border-border">
+          <div
+            v-for="(p, i) in atSuggestions"
+            :key="p"
+            class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-hover"
+            :class="{ '!bg-hover': i === atIdx }"
+            @mousedown.prevent="applyAtSuggestion(p)"
+          >
+            <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-accent">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ p }}</span>
+          </div>
+        </div>
         <div v-if="pendingImages.length" class="welcome-image-previews">
           <div v-for="(image, index) in pendingImages" :key="image" class="welcome-image-preview">
             <img :src="image" :alt="'Attached image ' + (index + 1)" />
@@ -187,6 +225,7 @@ import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
+import { splitSkillTokens } from "@/lib/skillTokens";
 import { getProjectSettings } from "@/lib/projectSettings";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 
@@ -213,6 +252,146 @@ function cycleProvider() {
   // Empty model = let the new provider pick its own default (ClaudeChat.vue
   // resolves it once the session exists).
   onModelSelect(next.id, next.kind === "claude" ? getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id) : "");
+}
+
+// ── @file / $skill completion — mirrors AgentChat.vue's composer ────────────
+// `@` completes repo paths (git ls-files, lazy, per target repo); `$` completes
+// installed skills and inserts `/name` (the invocation Claude understands).
+const fileList = ref<string[]>([]);
+let fileListFor = ""; // path the cached list was loaded for
+const atSuggestions = ref<string[]>([]);
+const atIdx = ref(0);
+interface SkillCmd { name: string; description: string }
+const skillList = ref<SkillCmd[]>([]);
+let skillsLoaded = false;
+const skillSuggestions = ref<SkillCmd[]>([]);
+const skillIdx = ref(0);
+
+// Skill pills: backdrop re-render of the input with /skill tokens highlighted
+// (see composer.css .skill-pill / .composer-ghost).
+const hlEl = ref<HTMLElement | null>(null);
+const skillParts = computed(() => splitSkillTokens(text.value, skillList.value.map((s) => s.name)));
+const hasSkillPill = computed(() => skillParts.value.some((p) => p.pill));
+function syncHighlightScroll() {
+  const el = inputEl.value?.element;
+  if (hlEl.value && el) hlEl.value.scrollTop = el.scrollTop;
+}
+
+function caretPos(): number {
+  return inputEl.value?.element?.selectionStart ?? text.value.length;
+}
+
+async function ensureFileList() {
+  const path = target.value?.path ?? "";
+  if (!path || fileListFor === path) return;
+  fileListFor = path;
+  try {
+    const out = await invoke<{ stdout: string }>("run_git", {
+      cwd: path,
+      args: ["ls-files", "--cached", "--others", "--exclude-standard"],
+    });
+    fileList.value = out.stdout.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 20000);
+  } catch { fileList.value = []; }
+}
+
+async function ensureSkills() {
+  if (skillsLoaded) return;
+  skillsLoaded = true;
+  try {
+    const skills = await invoke<{ name: string; description: string; enabled: boolean }[]>("list_skills");
+    skillList.value = skills
+      .filter((s) => s.enabled)
+      .map((s) => ({ name: s.name, description: s.description || `/${s.name} skill` }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch { skillList.value = []; }
+}
+
+function atQueryBeforeCursor(): string | null {
+  const m = text.value.slice(0, caretPos()).match(/(?:^|\s)@([^\s@]*)$/);
+  return m ? m[1] : null;
+}
+
+function skillQueryBeforeCursor(): string | null {
+  const m = text.value.slice(0, caretPos()).match(/(?:^|\s)\$([^\s/$]*)$/);
+  return m ? m[1] : null;
+}
+
+async function onComposerInput() {
+  nextTick(syncHighlightScroll);
+  const q = atQueryBeforeCursor();
+  if (q === null) { atSuggestions.value = []; }
+  else {
+    await ensureFileList();
+    if (atQueryBeforeCursor() === q) {
+      const ql = q.toLowerCase();
+      atSuggestions.value = fileList.value
+        .filter((p) => p.toLowerCase().includes(ql))
+        .sort((a, b) => {
+          const ab = a.slice(a.lastIndexOf("/") + 1).toLowerCase();
+          const bb = b.slice(b.lastIndexOf("/") + 1).toLowerCase();
+          return (Number(!ab.startsWith(ql)) - Number(!bb.startsWith(ql))) || a.length - b.length;
+        })
+        .slice(0, 8);
+      atIdx.value = 0;
+    }
+  }
+  const s = skillQueryBeforeCursor();
+  if (s === null) { skillSuggestions.value = []; }
+  else {
+    await ensureSkills();
+    if (skillQueryBeforeCursor() === s) {
+      const sl = s.toLowerCase();
+      skillSuggestions.value = skillList.value.filter((c) => c.name.toLowerCase().startsWith(sl)).slice(0, 8);
+      skillIdx.value = 0;
+    }
+  }
+}
+
+// Replace the trigger token before the cursor with `replacement` + a space.
+function replaceToken(tokenRe: RegExp, replacement: string) {
+  const pos = caretPos();
+  const upto = text.value.slice(0, pos);
+  const after = text.value.slice(pos);
+  const m = upto.match(tokenRe);
+  if (!m) return;
+  const base = upto.slice(0, upto.length - m[0].length);
+  const sep = after.startsWith(" ") ? "" : " ";
+  text.value = `${base}${replacement}${sep}${after}`;
+  nextTick(() => {
+    const el = inputEl.value?.element;
+    if (el) { el.focus(); const c = base.length + replacement.length + sep.length; el.selectionStart = el.selectionEnd = c; }
+  });
+}
+
+function applyAtSuggestion(path: string) {
+  replaceToken(/@([^\s@]*)$/, `@${path}`);
+  atSuggestions.value = [];
+}
+
+function applySkillSuggestion(name: string) {
+  replaceToken(/\$([^\s/$]*)$/, `/${name}`);
+  skillSuggestions.value = [];
+}
+
+function onComposerKeydown(e: KeyboardEvent) {
+  const open = atSuggestions.value.length > 0 ? "at" : skillSuggestions.value.length > 0 ? "skill" : null;
+  if (open) {
+    const idx = open === "at" ? atIdx : skillIdx;
+    const len = open === "at" ? atSuggestions.value.length : skillSuggestions.value.length;
+    if (e.key === "ArrowDown") { e.preventDefault(); idx.value = Math.min(idx.value + 1, len - 1); return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); idx.value = Math.max(idx.value - 1, 0); return; }
+    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+      e.preventDefault();
+      if (open === "at") applyAtSuggestion(atSuggestions.value[atIdx.value]);
+      else applySkillSuggestion(skillSuggestions.value[skillIdx.value].name);
+      return;
+    }
+    if (e.key === "Escape") { atSuggestions.value = []; skillSuggestions.value = []; return; }
+  }
+  if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
+    e.preventDefault();
+    submit();
+  }
 }
 
 const pendingImages = ref<string[]>([]);

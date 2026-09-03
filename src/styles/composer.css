@@ -35,6 +35,23 @@ textarea {
   background-clip: padding-box;
 }
 
+/* Skill pill rendering in composers: a highlight backdrop div sits behind the
+   textarea and re-renders its text with `/skill` tokens wrapped in .skill-pill.
+   While a pill is present the textarea's own text goes transparent
+   (.composer-ghost) so only the backdrop shows — the pill must therefore never
+   change text metrics (no padding/margin/font-weight), only color. */
+.composer-ghost {
+  /* !important: must beat the scoped .welcome-input / utility color rules. */
+  color: transparent !important;
+  caret-color: var(--text-primary) !important;
+}
+.skill-pill {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+  border-radius: 4px;
+  color: var(--accent);
+}
+
 /* Dropdown panels: keep them scrollable, drop the grey bar (macOS "Show scroll
    bars: Always" would otherwise draw one inside every menu). */
 .hide-scrollbar {

@@ -119,7 +119,8 @@
       </div>
     </div>
 
-    <div ref="scrollEl" class="chat-messages flex flex-1 flex-col gap-0.5 overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
+    <div ref="scrollEl" class="chat-messages flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
+      <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
         <div class="chat-empty-avatar mb-2 flex h-11 w-11 items-center justify-center rounded-[11px] text-white shadow-[0_0_0_1px_color-mix(in_srgb,var(--agent-accent,#ec4899)_36%,transparent)]" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 72%, #16161a);" aria-hidden="true">
           <component :is="currentAgentIcon" :size="28" :style="{ color: '#fff' }" />
@@ -143,7 +144,7 @@
               <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': isGroupExpanded(msg.groupId) }" />
               <component :is="groupIcon(msg.items)" :size="12" class="tool-icon" />
               <span class="font-medium">{{ groupLabel(msg.items) }}</span>
-              <PhCircleNotch v-if="groupIsRunning(msg.items)" :size="10" class="tool-status-icon tool-spin flex-shrink-0" />
+              <span v-if="groupIsRunning(msg.items)" class="tool-status-icon tool-pulse-dot flex-shrink-0" aria-hidden="true" />
               <PhWarningCircle v-else-if="groupHasFailure(msg.items)" :size="10" class="tool-status-icon flex-shrink-0 text-destructive" />
             </div>
           </div>
@@ -162,7 +163,7 @@
                   :alt="`Image ${i + 1}`"
                 />
               </div>
-              <template v-for="(p, i) in msgParts(msg.text)" :key="i"><span v-if="p.mention" class="mention-pill"><PhFile :size="10" class="mention-pill-icon" />{{ p.v.slice(1) }}</span><template v-else>{{ p.v }}</template></template>
+              <div class="md-body" v-html="renderUserMd(msg.text)" />
             </div>
             <div v-if="isLastOfRun(msgIdx)" class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-border bg-hover text-[11px] font-bold text-secondary-foreground">U</div>
             <div v-else class="w-[26px] flex-shrink-0" />
@@ -178,7 +179,7 @@
                 <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': msg.toolExpanded }" />
                 <component :is="toolIconFor(msg)" :size="12" class="tool-icon" />
                 <span class="overflow-hidden text-ellipsis whitespace-nowrap" :class="{ 'font-mono': toolMonospace(msg) }">{{ toolSummaryFor(msg) }}</span>
-                <PhCircleNotch v-if="toolStatus(msg) === 'running'" :size="10" class="tool-status-icon tool-spin flex-shrink-0" />
+                <span v-if="toolStatus(msg) === 'running'" class="tool-status-icon tool-pulse-dot flex-shrink-0" aria-hidden="true" />
                 <PhWarningCircle v-else-if="toolStatus(msg) === 'failed'" :size="10" class="tool-status-icon flex-shrink-0 text-destructive" />
                 <span v-if="msg.toolOutput && !msg.toolExpanded" class="max-w-[220px] flex-shrink overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">{{ msg.toolOutput.split('\n')[0].slice(0, 60) }}</span>
               </div>
@@ -230,10 +231,13 @@
         <template v-else-if="msg.role === 'thinking'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
             <div class="w-[26px] flex-shrink-0" />
-            <details class="max-w-[90%] rounded-lg border border-dashed border-border px-2.5 py-1 font-mono text-[11px] text-muted-foreground opacity-75">
-              <summary class="cursor-pointer select-none italic text-muted-foreground hover:text-foreground">Thinking…</summary>
-              <pre class="thinking-body">{{ msg.text }}</pre>
-            </details>
+            <div class="max-w-[90%]">
+              <div class="tool-row" @click="thinkingExpanded[msg.id] = !thinkingExpanded[msg.id]">
+                <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': thinkingExpanded[msg.id] }" />
+                <span class="italic">Thinking…</span>
+              </div>
+              <pre v-if="thinkingExpanded[msg.id]" class="thinking-body">{{ msg.text }}</pre>
+            </div>
           </div>
         </template>
 
@@ -261,6 +265,7 @@
           <component :is="currentAgentIcon" :size="12" :style="{ color: '#fff' }" />
         </div>
         <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
+      </div>
       </div>
     </div>
 
@@ -292,41 +297,32 @@
       </div>
     </div>
 
-    <!-- Image previews above input -->
-    <div v-if="pendingImages.length > 0" class="flex flex-shrink-0 flex-wrap gap-1.5 px-3.5 pt-1.5">
-      <div v-for="(img, i) in pendingImages" :key="i" class="relative flex-shrink-0">
-        <img :src="img" class="block h-[72px] w-[72px] rounded-md border border-border object-cover" :alt="`Image ${i + 1}`" />
-        <button class="pending-img-remove" @click="pendingImages.splice(i, 1)" title="Remove">
-          <PhX :size="9" weight="bold" />
-        </button>
-      </div>
-    </div>
 
     <!-- New-style input bar -->
     <div v-if="!hideComposer" class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
-      <div class="mx-auto w-full max-w-[560px]">
-      <!-- Queued messages panel (Zed-style) -->
-      <div v-if="messageQueue.length > 0" class="border-b border-border bg-[color-mix(in_srgb,var(--chat-accent)_5%,transparent)]">
-        <div class="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 hover:bg-hover" @click="queueExpanded = !queueExpanded">
-          <PhCaretDown :size="10" class="text-muted-foreground transition-transform" :class="{ '-rotate-90': !queueExpanded }" />
-          <span class="flex-1 text-[11px] text-muted-foreground">{{ messageQueue.length }} Queued {{ messageQueue.length === 1 ? 'Message' : 'Messages' }}</span>
-          <button class="border-none bg-transparent px-1 py-px text-[10px] text-muted-foreground hover:text-foreground" @click.stop="clearQueue" title="Clear All">Clear All</button>
-        </div>
-        <div v-if="queueExpanded" class="flex flex-col gap-[3px] px-2.5 pb-1.5">
-          <div v-for="(msg, i) in messageQueue" :key="i" class="flex items-center gap-1.5 py-[3px]">
-            <span class="flex-shrink-0 text-xs text-[var(--chat-accent)]">•</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-secondary-foreground">{{ msg }}</span>
-            <button class="queue-item-btn" @click="removeQueued(i)" title="Remove"><PhX :size="10" /></button>
-            <button class="queue-item-btn !text-[var(--chat-accent)] !border-[color-mix(in_srgb,var(--chat-accent)_35%,transparent)] hover:!border-[color-mix(in_srgb,var(--chat-accent)_65%,transparent)]" @click="sendQueuedNow(i)" title="Send Now">Send Now <kbd>↵</kbd></button>
+      <div class="mx-auto w-full max-w-[760px]">
+      <div class="chat-input-box overflow-hidden rounded-xl border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));">
+        <!-- Queued messages panel (Zed-style) -->
+        <div v-if="messageQueue.length > 0" class="border-b border-border bg-[color-mix(in_srgb,var(--chat-accent)_5%,transparent)]">
+          <div class="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 hover:bg-hover" @click="queueExpanded = !queueExpanded">
+            <PhCaretDown :size="10" class="text-muted-foreground transition-transform" :class="{ '-rotate-90': !queueExpanded }" />
+            <span class="flex-1 text-[11px] text-muted-foreground">{{ messageQueue.length }} Queued {{ messageQueue.length === 1 ? 'Message' : 'Messages' }}</span>
+            <button class="border-none bg-transparent px-1 py-px text-[10px] text-muted-foreground hover:text-foreground" @click.stop="clearQueue" title="Clear All">Clear All</button>
+          </div>
+          <div v-if="queueExpanded" class="flex flex-col gap-[3px] px-2.5 pb-1.5">
+            <div v-for="(msg, i) in messageQueue" :key="i" class="flex items-center gap-1.5 py-[3px]">
+              <span class="flex-shrink-0 text-xs text-[var(--chat-accent)]">•</span>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-secondary-foreground">{{ msg }}</span>
+              <button class="queue-item-btn" @click="removeQueued(i)" title="Remove"><PhX :size="10" /></button>
+              <button class="queue-item-btn !text-[var(--chat-accent)] !border-[color-mix(in_srgb,var(--chat-accent)_35%,transparent)] hover:!border-[color-mix(in_srgb,var(--chat-accent)_65%,transparent)]" @click="sendQueuedNow(i)" title="Send Now">Send Now <kbd>↵</kbd></button>
+            </div>
           </div>
         </div>
-      </div>
-      <!-- Working indicator — sits above the textarea, only when busy -->
-      <div v-if="busy" class="flex items-center gap-1.5 border-b border-border px-3 pb-1 pt-1.5">
-        <span class="working-dot" /><span class="working-dot" /><span class="working-dot" />
-        <span class="text-[11px] italic text-muted-foreground">{{ currentActivity }}</span>
-      </div>
-      <div class="chat-input-box overflow-hidden rounded-[10px] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));">
+        <!-- Working indicator — sits above the textarea, only when busy -->
+        <div v-if="busy" class="flex items-center gap-1.5 border-b border-border px-3 pb-1 pt-1.5">
+          <span class="working-dot" /><span class="working-dot" /><span class="working-dot" />
+          <span class="text-[11px] italic text-muted-foreground">{{ currentActivity }}</span>
+        </div>
         <!-- AskUserQuestion: one question at a time, stepped, above the textarea -->
         <div v-if="pendingQuestion && activeQuestion" class="question-panel perm-slide-in border-b border-border bg-[color-mix(in_srgb,var(--chat-info)_4%,transparent)] px-3.5 py-3">
           <div class="mb-2 flex items-center gap-2">
@@ -354,6 +350,15 @@
               <PhCheck v-if="isPicked(activeQuestion.question, opt.label)" :size="13" weight="bold" class="flex-shrink-0 text-[var(--chat-info)]" />
               <kbd v-else-if="oi < 9" class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-border text-[10px] text-secondary-foreground/60">{{ oi + 1 }}</kbd>
             </button>
+            <input
+              type="text"
+              class="question-opt-other w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-[color-mix(in_srgb,var(--chat-info)_55%,transparent)]"
+              placeholder="Or write your own answer…"
+              :value="questionCustomAnswers[activeQuestion.question] ?? ''"
+              :disabled="nativeControlResponsePending"
+              @input="setCustomAnswer(activeQuestion.question, ($event.target as HTMLInputElement).value)"
+              @keydown.enter="canAdvanceQuestion && advanceQuestion()"
+            />
           </div>
           <div class="mt-2.5 flex items-center justify-between gap-2">
             <button class="perm-btn perm-deny !px-2 !py-1 text-[11px]" :disabled="nativeControlResponsePending" @click="cancelQuestion" title="Dismiss (Esc)">Skip</button>
@@ -367,16 +372,35 @@
             </div>
           </div>
         </div>
-        <textarea
-          ref="inputEl"
-          v-model="inputText"
-          class="chat-input composer-input box-border block max-h-40 min-h-10 w-full resize-none border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground outline-none placeholder:text-muted-foreground"
-          :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
-          rows="1"
-          @keydown="onKeydown"
-          @input="onInput"
-          @paste="onPaste"
-        />
+        <div class="relative">
+          <!-- Highlight backdrop: same metrics as the textarea, renders /skill tokens as pills. -->
+          <div
+            v-if="hasSkillPill"
+            ref="hlEl"
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-0 box-border overflow-hidden whitespace-pre-wrap [overflow-wrap:break-word] px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground"
+          ><template v-for="(p, i) in skillParts" :key="i"><span v-if="p.pill" class="skill-pill">{{ p.v }}</span><template v-else>{{ p.v }}</template></template></div>
+          <textarea
+            ref="inputEl"
+            v-model="inputText"
+            class="chat-input composer-input box-border block max-h-40 min-h-10 w-full resize-none border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground outline-none placeholder:text-muted-foreground"
+            :class="hasSkillPill && 'composer-ghost'"
+            :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
+            rows="1"
+            @keydown="onKeydown"
+            @input="onInput"
+            @paste="onPaste"
+            @scroll="syncHighlightScroll"
+          /></div>
+          <!-- Image previews, matching welcome-image-preview sizing/placement -->
+          <div v-if="pendingImages.length > 0" class="flex flex-wrap gap-1.5 px-3 pb-1.5">
+            <div v-for="(img, i) in pendingImages" :key="i" class="relative h-16 w-16 flex-shrink-0">
+              <img :src="img" class="block h-full w-full rounded-[7px] border border-border object-cover" :alt="`Image ${i + 1}`" />
+              <button class="pending-img-remove" @click="pendingImages.splice(i, 1)" :aria-label="'Remove attached image ' + (i + 1)" title="Remove">
+                <PhX :size="9" weight="bold" />
+              </button>
+            </div>
+          </div>
           <div class="flex items-center justify-between gap-1.5 px-2 pb-2 pt-1.5">
           <!-- Left: share selection, model dropdown, perm mode -->
           <div class="flex items-center gap-1">
@@ -535,7 +559,13 @@
           <!-- Right: cost badge + abort/send -->
           <div class="flex items-center gap-1.5">
             <span v-if="sessionCost > 0 && !busy" class="px-1 font-mono text-[10px] text-muted-foreground">${{ sessionCost.toFixed(4) }}</span>
-            <button v-if="busy" class="send-btn send-btn-abort" title="Abort (Esc)" @click="abortTurn">
+            <button
+              v-if="busy"
+              class="send-btn send-btn-abort"
+              :class="{ 'send-btn-stalled': stalled }"
+              :title="stalled ? 'No response for a while — looks stuck. Click to restart (Esc)' : 'Abort (Esc)'"
+              @click="abortTurn"
+            >
               <PhStop :size="14" weight="bold" />
             </button>
             <button
@@ -557,6 +587,7 @@
         :current-branch="chatBranch"
         :detail="chatWorkspace?.worktree_branch || undefined"
         appearance="attached"
+        wide
         readonly
       />
       </div>
@@ -582,7 +613,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
-import { PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhFile, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCircleNotch, PhCopy, PhCheck } from "@phosphor-icons/vue";
+import { PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
@@ -600,6 +631,9 @@ import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import { modelsFor, learnModels, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { playSound } from "@/lib/sounds";
+import { splitSkillTokens } from "@/lib/skillTokens";
+import { chatSettingKey } from "@/lib/chatSettings";
+import { splitMentions } from "@/lib/mentionTokens";
 import { notifyNtfy } from "@/lib/ntfy";
 import { useUIStore, type NtfyEvent } from "@/stores/ui";
 import { marked } from "marked";
@@ -608,6 +642,51 @@ import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/li
 
 function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string);
+}
+
+// A sent message is rendered through markdown, exactly like an assistant one —
+// it used to be interpolated as flat text, so every list, fence and even plain
+// line break the user typed collapsed into one blob. `breaks` is on because in
+// a chat composer Enter means "new line", not "same paragraph" (t3code renders
+// every message, whatever the role, through the same markdown formatter).
+function renderUserMd(text: string): string {
+  const html = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }) as string);
+  return pillifyMentions(html);
+}
+
+// `@path` → pill. Done as a DOM walk over the ALREADY-sanitized output instead
+// of a regex over the HTML string: a regex would also rewrite text inside
+// attributes and code fences. Skipping pre/code/a leaves a literal `@foo` in a
+// code block alone, which is what someone quoting code means.
+const MENTION_SKIP = new Set(["PRE", "CODE", "A"]);
+function pillifyMentions(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const targets: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const node = n as Text;
+    if (!node.data.includes("@")) continue;
+    let el: HTMLElement | null = node.parentElement;
+    let skip = false;
+    for (; el && el !== doc.body; el = el.parentElement) {
+      if (MENTION_SKIP.has(el.tagName)) { skip = true; break; }
+    }
+    if (!skip) targets.push(node);
+  }
+  for (const node of targets) {
+    const parts = splitMentions(node.data);
+    if (!parts.some((p) => p.mention)) continue;
+    const frag = doc.createDocumentFragment();
+    for (const part of parts) {
+      if (!part.mention) { frag.append(doc.createTextNode(part.v)); continue; }
+      const pill = doc.createElement("span");
+      pill.className = "mention-pill";
+      pill.textContent = part.v.slice(1); // drop the leading @ — the pill icon says "file"
+      frag.append(pill);
+    }
+    node.replaceWith(frag);
+  }
+  return doc.body.innerHTML;
 }
 
 const props = defineProps<{
@@ -793,43 +872,47 @@ function onAcpMenuOutside(e: MouseEvent) {
   if (acpModelMenuOpen.value && !acpModelBtnEl.value?.contains(t) && !acpModelMenuEl.value?.contains(t)) acpModelMenuOpen.value = false;
   if (acpEffortMenuOpen.value && !acpEffortBtnEl.value?.contains(t) && !acpEffortMenuEl.value?.contains(t)) acpEffortMenuOpen.value = false;
 }
-// What we last pushed back after an adapter reset its own selectors. An adapter
-// that refuses a value would otherwise ping-pong with us forever; a user pick
-// clears this, so the next legitimate reset is pushed again.
-let acpRestored: AcpChatSettings = {};
+// Request ids of OUR OWN restore pushes. The reply to a restore carries the
+// adapter's selector set again, so re-restoring from it is what would ping-pong
+// forever — skipping just those replies breaks the loop, while every OTHER
+// reset (session start, or the reply to a user's mode/effort/model pick) still
+// gets repaired. The old "remember the value we last pushed" guard skipped the
+// SECOND reset too, which silently flipped the model back to the adapter's
+// default after a permission-mode or effort switch.
+const acpRestorePushIds = new Set<number>();
 
 async function acpSelectMode(modeId: string, userPick = true) {
-  if (userPick) acpRestored = {};
   acpModeMenuOpen.value = false;
   if (acpModes.value) acpModes.value.currentModeId = modeId;
   setAcpSetting(props.chatId, "mode", modeId);
   try {
     const rid = await invoke<number>("acp_set_mode", { id: props.chatId, modeId });
     acpControlIds.add(rid);
+    if (!userPick) acpRestorePushIds.add(rid);
   } catch (e) {
     messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set mode: ${e}` });
   }
 }
 async function acpSelectModel(value: string, userPick = true) {
-  if (userPick) acpRestored = {};
   acpModelMenuOpen.value = false;
   if (acpModelOption.value) acpModelOption.value.currentValue = value;
   setAcpSetting(props.chatId, "model", value);
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "model", value });
     acpControlIds.add(rid);
+    if (!userPick) acpRestorePushIds.add(rid);
   } catch (e) {
     messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set model: ${e}` });
   }
 }
 async function acpSelectEffort(value: string, userPick = true) {
-  if (userPick) acpRestored = {};
   acpEffortMenuOpen.value = false;
   if (acpEffortOption.value) acpEffortOption.value.currentValue = value;
   setAcpSetting(props.chatId, "effort", value);
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "effort", value });
     acpControlIds.add(rid);
+    if (!userPick) acpRestorePushIds.add(rid);
   } catch (e) {
     messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set effort: ${e}` });
   }
@@ -839,24 +922,23 @@ async function acpSelectEffort(value: string, userPick = true) {
 // selectors to defaults on (re)start AND in the reply to a model switch, which
 // is what used to silently drop the effort and permission mode the user picked.
 function restoreAcpSelections() {
-  const savedModel = getAcpSetting(props.chatId, "model")
-    ?? getConfig<Record<string, string>>("chatAcpLastModel", {})[agentKind.value];
-  if (savedModel && acpModelOption.value && acpModelOption.value.currentValue !== savedModel && acpRestored.model !== savedModel) {
-    acpRestored.model = savedModel;
+  // Fallback is the per-agent-kind memory setAcpSetting writes ("chatAcpLast");
+  // the old code read a "chatAcpLastModel" key that nothing ever wrote.
+  const savedModel = getAcpSetting(props.chatId, "model") ?? lastAcpSetting("model");
+  const modelOffered = acpModelOption.value?.options.some((o) => o.value === savedModel);
+  if (savedModel && modelOffered && acpModelOption.value && acpModelOption.value.currentValue !== savedModel) {
     acpSelectModel(savedModel, false);
   }
   const savedMode = getAcpSetting(props.chatId, "mode") ?? lastAcpSetting("mode");
   const modeOffered = acpModes.value?.availableModes.some((m) => m.id === savedMode);
-  if (savedMode && modeOffered && acpModes.value && acpModes.value.currentModeId !== savedMode && acpRestored.mode !== savedMode) {
-    acpRestored.mode = savedMode;
+  if (savedMode && modeOffered && acpModes.value && acpModes.value.currentModeId !== savedMode) {
     acpSelectMode(savedMode, false);
   }
   // Only push a value the adapter actually offers — a saved effort can be stale
   // after a model switch (Codex publishes its efforts per model).
   const savedEffort = getAcpSetting(props.chatId, "effort") ?? lastAcpSetting("effort");
   const effortOffered = acpEffortOption.value?.options.some((o) => o.value === savedEffort);
-  if (savedEffort && effortOffered && acpEffortOption.value && acpEffortOption.value.currentValue !== savedEffort && acpRestored.effort !== savedEffort) {
-    acpRestored.effort = savedEffort;
+  if (savedEffort && effortOffered && acpEffortOption.value && acpEffortOption.value.currentValue !== savedEffort) {
     acpSelectEffort(savedEffort, false);
   }
 }
@@ -995,7 +1077,23 @@ const MODEL_KEY = props.modelKey ?? "burrow.claude.model";
 // behavior) so a future caller passing modelKey still gets an isolated selection;
 // with no modelKey it collapses to the single global "chatLastUsedModel" key.
 const MODEL_CONFIG_KEY = props.modelKey ? `chatLastUsedModel:${props.modelKey}` : "chatLastUsedModel";
+// Per-chat model, keyed by chatId (same shape as chatPermissionMode.byChat).
+// A chat's model is resolved ONCE — on first mount, from the last-used /
+// default — and then belongs to that chat: another chat picking a different
+// model, or a default appearing later, must never move it. Without this the
+// only store was the shared last-used key, so remounting a chat (workspace
+// reopen, app restart) silently re-seeded it from whatever was picked last.
+const MODEL_BY_CHAT_KEY = "chatModelByChat";
+const chatSettingId = computed(() => chatSettingKey(props.chatId, props.modelKey));
+function storedChatModel(): ClaudeModelId | null {
+  const v = getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {})[chatSettingId.value];
+  return CLAUDE_MODELS.some((m) => m.id === v) ? (v as ClaudeModelId) : null;
+}
+/** The model this chat starts with: its own pick, else last-used, else the
+ *  caller's default, else the catalog head. */
 function loadModel(): ClaudeModelId {
+  const own = storedChatModel();
+  if (own) return own;
   const v = getConfig<string | null>(MODEL_CONFIG_KEY, null);
   if (CLAUDE_MODELS.some((m) => m.id === v)) return v as ClaudeModelId;
   if (props.defaultModel && CLAUDE_MODELS.some((m) => m.id === props.defaultModel)) {
@@ -1003,11 +1101,17 @@ function loadModel(): ClaudeModelId {
   }
   return CLAUDE_MODELS[0].id;
 }
+function saveChatModel(id: ClaudeModelId) {
+  const rec = { ...getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {}) };
+  rec[chatSettingId.value] = id;
+  setConfig(MODEL_BY_CHAT_KEY, rec);
+}
 const selectedModel = ref<ClaudeModelId>(loadModel());
 async function selectModel(id: ClaudeModelId) {
   if (id === selectedModel.value) return;
   selectedModel.value = id;
-  setConfig(MODEL_CONFIG_KEY, id);
+  saveChatModel(id);
+  setConfig(MODEL_CONFIG_KEY, id); // seed for the NEXT new chat only
   await restartClaude();
 }
 
@@ -1020,9 +1124,26 @@ const CLAUDE_EFFORTS = [
 ] as const;
 type ClaudeEffort = typeof CLAUDE_EFFORTS[number]["id"];
 const EFFORT_CONFIG_KEY = props.modelKey ? `chatClaudeEffort:${props.modelKey}` : "chatClaudeEffort";
+// Per-chat effort, keyed like the model (see MODEL_BY_CHAT_KEY): resolved once
+// from the last-used value, then owned by this chat.
+const EFFORT_BY_CHAT_KEY = "chatEffortByChat";
+function isEffort(v: unknown): v is ClaudeEffort {
+  return CLAUDE_EFFORTS.some((option) => option.id === v);
+}
+function storedChatEffort(): ClaudeEffort | null {
+  const v = getConfig<Record<string, string>>(EFFORT_BY_CHAT_KEY, {})[chatSettingId.value];
+  return isEffort(v) ? v : null;
+}
 function loadEffort(): ClaudeEffort {
+  const own = storedChatEffort();
+  if (own) return own;
   const saved = getConfig<string | null>(EFFORT_CONFIG_KEY, null);
-  return CLAUDE_EFFORTS.some((option) => option.id === saved) ? saved as ClaudeEffort : "high";
+  return isEffort(saved) ? saved : "high";
+}
+function saveChatEffort(effort: ClaudeEffort) {
+  const rec = { ...getConfig<Record<string, string>>(EFFORT_BY_CHAT_KEY, {}) };
+  rec[chatSettingId.value] = effort;
+  setConfig(EFFORT_BY_CHAT_KEY, rec);
 }
 const selectedEffort = ref<ClaudeEffort>(loadEffort());
 const selectedEffortLabel = computed(() => CLAUDE_EFFORTS.find((option) => option.id === selectedEffort.value)?.label ?? "High effort");
@@ -1047,7 +1168,8 @@ async function selectEffort(effort: ClaudeEffort) {
   effortMenuOpen.value = false;
   if (effort === selectedEffort.value) return;
   selectedEffort.value = effort;
-  setConfig(EFFORT_CONFIG_KEY, effort);
+  saveChatEffort(effort);
+  setConfig(EFFORT_CONFIG_KEY, effort); // seed for the NEXT new chat only
   await restartClaude();
 }
 
@@ -1128,6 +1250,18 @@ function toolStatus(msg: ChatMessage): ToolStatus {
   if (msg.toolOutput !== undefined) return "done";
   return "running";
 }
+// Safety net for a turn ending (normally or via a dead adapter process) while a
+// tool row never got its matching update — a dropped/unparseable status line
+// otherwise leaves the spinner running forever. `failed` marks stuck rows as
+// failed instead of done when the turn ended abnormally.
+function finalizeStuckTools(failed = false) {
+  for (const m of messages.value) {
+    if (m.role === "tool" && m.toolOutput === undefined) {
+      m.toolOutput = "";
+      if (failed) m.toolFailed = true;
+    }
+  }
+}
 
 // Collapsed "Ran N commands" / "Used N tools" pill grouping — folds consecutive
 // finished tool calls (2+) between two non-tool messages into one header.
@@ -1140,6 +1274,7 @@ interface ToolGroupHeader {
   partial?: false;
 }
 const toolGroupExpanded = reactive<Record<string, boolean>>({});
+const thinkingExpanded = reactive<Record<number, boolean>>({});
 function isBashTool(msg: ChatMessage): boolean {
   return toolIconFor(msg) === PhTerminalWindow;
 }
@@ -1224,6 +1359,17 @@ const BUILTIN_COMMANDS: Command[] = [
 ];
 
 const allCommands = ref<Command[]>([...BUILTIN_COMMANDS]);
+const skillCommands = ref<Command[]>([]); // installed skills, completed via `$`
+
+// Skill pills in the composer: backdrop re-render of the input with /skill
+// tokens highlighted (see composer.css .skill-pill / .composer-ghost).
+const hlEl = ref<HTMLElement | null>(null);
+const skillNames = computed(() => skillCommands.value.map((c) => c.name));
+const skillParts = computed(() => splitSkillTokens(inputText.value, skillNames.value));
+const hasSkillPill = computed(() => skillParts.value.some((p) => p.pill));
+function syncHighlightScroll() {
+  if (hlEl.value && inputEl.value) hlEl.value.scrollTop = inputEl.value.scrollTop;
+}
 const suggestions = ref<Command[]>([]);
 const suggestionIdx = ref(0);
 
@@ -1289,6 +1435,20 @@ watch(inputText, (val) => {
   }
 });
 const busy = ref(false);
+// Stall watchdog: while busy, any incoming acp-data/claude-data line bumps this.
+// If nothing arrives for a while, the adapter is probably wedged (hung tool call,
+// dropped final response) rather than genuinely still working — surface a hint
+// on the abort button instead of leaving the user staring at a spinner forever.
+// ponytail: blind idle timer, not a real liveness check — false positive on a
+// legitimately silent long-running tool call. Upgrade path: have the Go side
+// report process liveness so this can confirm instead of guess.
+const lastActivityAt = ref(Date.now());
+const nowTick = ref(Date.now());
+const STALL_MS = 90_000;
+const stalled = computed(() => busy.value && nowTick.value - lastActivityAt.value > STALL_MS);
+let stallTimer: ReturnType<typeof setInterval> | null = null;
+stallTimer = setInterval(() => { nowTick.value = Date.now(); }, 5_000);
+watch(busy, (val) => { if (val) lastActivityAt.value = Date.now(); });
 const copiedMessageId = ref<number | null>(null);
 let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 const messageQueue = ref<string[]>([]);
@@ -1526,21 +1686,6 @@ async function sendQueuedNow(i: number) {
   else { messageQueue.value.unshift(text); messages.value.unshift({ id: nextMsgId++, role: "queued", text }); }
 }
 
-// Split a user message into plain text + @path mention tokens for pill rendering.
-function msgParts(text: string): { mention: boolean; v: string }[] {
-  const parts: { mention: boolean; v: string }[] = [];
-  const re = /(^|\s)(@[^\s@]+)/g;
-  let last = 0, m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    const start = m.index + m[1].length;
-    if (start > last) parts.push({ mention: false, v: text.slice(last, start) });
-    parts.push({ mention: true, v: m[2] });
-    last = start + m[2].length;
-  }
-  if (last < text.length) parts.push({ mention: false, v: text.slice(last) });
-  return parts;
-}
-
 // Context usage bar — 200k for all current models
 const CONTEXT_MAX = 200_000;
 const contextUsageRatio = computed(() => {
@@ -1569,6 +1714,9 @@ const currentActivity = computed(() => {
 
 // AskUserQuestion working selection: question text → chosen option label(s).
 const questionAnswers = ref<Record<string, string[]>>({});
+// AskUserQuestion free-text override ("Other") — non-empty wins over picked options,
+// mirroring t3code's customAnswer (they can write one, so should we).
+const questionCustomAnswers = ref<Record<string, string>>({});
 // ExitPlanMode "keep planning" feedback.
 const planFeedback = ref("");
 
@@ -1597,8 +1745,12 @@ const planMd = computed(() => {
 interface QuestionSpec { question: string; header?: string; multiSelect?: boolean; options: Array<{ label: string; description?: string }> }
 const questionSpecs = computed<QuestionSpec[]>(() =>
   ((pendingQuestion.value?.input?.questions ?? []) as QuestionSpec[]));
+function hasAnswer(question: string) {
+  return (questionCustomAnswers.value[question] ?? "").trim().length > 0
+    || (questionAnswers.value[question] ?? []).length > 0;
+}
 const canSubmitQuestion = computed(() =>
-  questionSpecs.value.every((q) => (questionAnswers.value[q.question] ?? []).length > 0));
+  questionSpecs.value.every((q) => hasAnswer(q.question)));
 
 // Stepped AskUserQuestion — one question shown at a time, mirroring t3code's
 // ComposerPendingUserInputPanel (index reset whenever a new request arrives).
@@ -1607,7 +1759,7 @@ const activeQuestion = computed(() => questionSpecs.value[activeQuestionIndex.va
 const isLastQuestion = computed(() => activeQuestionIndex.value >= questionSpecs.value.length - 1);
 const canAdvanceQuestion = computed(() => {
   const q = activeQuestion.value;
-  return !!q && (questionAnswers.value[q.question] ?? []).length > 0;
+  return !!q && hasAnswer(q.question);
 });
 let questionAutoAdvanceTimer: number | null = null;
 function clearQuestionAutoAdvance() {
@@ -1651,6 +1803,7 @@ function onQuestionKeydown(event: KeyboardEvent) {
 watch(pendingQuestion, (cr) => {
   clearQuestionAutoAdvance();
   activeQuestionIndex.value = 0;
+  questionCustomAnswers.value = {};
   if (cr) document.addEventListener("keydown", onQuestionKeydown);
   else document.removeEventListener("keydown", onQuestionKeydown);
 });
@@ -1784,6 +1937,7 @@ function onLine(line: string) {
   let event: Record<string, unknown>;
   try { event = JSON.parse(line) as Record<string, unknown>; }
   catch { return; }
+  lastActivityAt.value = Date.now();
 
   const type = event.type as string;
 
@@ -1900,6 +2054,7 @@ function onLine(line: string) {
     // Un-partial ALL messages — tool messages are pushed after assistant text,
     // so checking only `last` would leave the assistant text bubble still partial.
     for (const m of messages.value) { if (m.partial) m.partial = false; }
+    finalizeStuckTools();
     // Capture usage/cost from result event
     if (type === "result") {
       const usage = event.usage as Record<string, number> | undefined;
@@ -1942,7 +2097,8 @@ function onLine(line: string) {
 // responses (turn done) + the {_burrow:"exit"} EOF marker.
 function onAcpData(raw: string) {
   let msg: Record<string, unknown>;
-  try { msg = JSON.parse(raw); } catch { return; }
+  try { msg = JSON.parse(raw); } catch { console.warn(`[chat-diag] unparseable acp-data line, dropped (len=${raw.length})`); return; }
+  lastActivityAt.value = Date.now();
 
   // The app-server resolves requests asynchronously. Keep the approval visible
   // until this acknowledgement arrives, so a failed response can be retried
@@ -1972,10 +2128,10 @@ function onAcpData(raw: string) {
     // for a load) and persist the restored history.
     if (messages.value.some((m) => m.partial)) {
       for (const m of messages.value) m.partial = false;
+      finalizeStuckTools();
       saveMessages(props.chatId, messages.value);
       scrollToBottom();
     }
-    acpRestored = {};
     restoreAcpSelections();
     return;
   }
@@ -1987,18 +2143,22 @@ function onAcpData(raw: string) {
     const rid = msg.id as number;
     if (acpControlIds.has(rid)) {
       acpControlIds.delete(rid);
+      // Reply to a restore push we sent ourselves: apply it, but do NOT restore
+      // from it — that is the ping-pong the guard exists for.
+      const wasRestorePush = acpRestorePushIds.delete(rid);
       const result = msg.result as { configOptions?: AcpConfigOption[]; modes?: AcpModes } | undefined;
       if (result?.configOptions) acpConfigOptions.value = result.configOptions;
       if (result?.modes) acpModes.value = result.modes;
-      // A model switch comes back with the adapter's whole selector set, effort
-      // and permission mode reset to its defaults — put the user's picks back.
-      if (result?.configOptions || result?.modes) restoreAcpSelections();
+      // A model / mode / effort switch comes back with the adapter's whole
+      // selector set reset to its defaults — put the user's picks back.
+      if (!wasRestorePush && (result?.configOptions || result?.modes)) restoreAcpSelections();
       return;
     }
     if (acpPromptRpcId.value === null || rid !== acpPromptRpcId.value) return;
     acpPromptRpcId.value = null;
     busy.value = false;
     for (const m of messages.value) { if (m.partial) m.partial = false; }
+    finalizeStuckTools();
     saveMessages(props.chatId, messages.value);
     syncStore();
     scrollToBottom();
@@ -2024,6 +2184,7 @@ function onAcpData(raw: string) {
     if (busy.value) {
       busy.value = false;
       for (const m of messages.value) { if (m.partial) m.partial = false; }
+      finalizeStuckTools(true);
       syncStore();
     }
     return;
@@ -2260,6 +2421,9 @@ async function resolveClaudePrompt(
   } catch (e) {
     messages.value.push({ id: nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
     saveMessages(props.chatId, messages.value);
+    // respondControl throws before RESUME fires — clear anyway so status doesn't stay stuck on waiting/permission.
+    clearPrompt();
+    chats.sendStatusEvent(props.chatId, { type: "RESUME" });
   } finally {
     nativeControlResponsePending.value = false;
     syncStore();
@@ -2321,6 +2485,7 @@ async function respondPermission(allow: boolean, opts?: { always?: boolean; upda
 }
 
 function toggleOption(question: string, label: string, multi: boolean) {
+  questionCustomAnswers.value[question] = "";
   const cur = questionAnswers.value[question] ?? [];
   if (multi) {
     questionAnswers.value[question] = cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label];
@@ -2330,6 +2495,12 @@ function toggleOption(question: string, label: string, multi: boolean) {
 }
 function isPicked(question: string, label: string) {
   return (questionAnswers.value[question] ?? []).includes(label);
+}
+// Typing an "Other" answer clears picked options — the two are mutually exclusive,
+// same as t3code's setPendingUserInputCustomAnswer.
+function setCustomAnswer(question: string, text: string) {
+  questionCustomAnswers.value[question] = text;
+  if (text.trim().length > 0) questionAnswers.value[question] = [];
 }
 
 async function submitQuestion() {
@@ -2341,6 +2512,8 @@ async function submitQuestion() {
   // look permanently stuck after Submit.
   const answers: Record<string, string | string[]> = {};
   for (const q of questionSpecs.value) {
+    const custom = (questionCustomAnswers.value[q.question] ?? "").trim();
+    if (custom) { answers[q.question] = custom; continue; }
     const labels = questionAnswers.value[q.question] ?? [];
     if (!labels.length) continue;
     answers[q.question] = q.multiSelect ? labels : labels[0];
@@ -2499,21 +2672,24 @@ async function clearChat() {
   if (!unlisten) unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
 }
 
-// `/cmd` token immediately before the cursor — at line start OR after whitespace,
-// so command help works mid-message, not only when the input starts with `/`.
-function slashQueryBeforeCursor(): { lead: string; q: string; full: string } | null {
+// `/cmd` or `$skill` token immediately before the cursor — at line start OR after
+// whitespace, so command help works mid-message, not only when the input starts
+// with the trigger. `/` completes built-in commands, `$` completes skills; both
+// insert `/name` (the invocation Claude understands — `$` is only the menu trigger).
+function slashQueryBeforeCursor(): { lead: string; q: string; full: string; trigger: string } | null {
   const el = inputEl.value;
   const pos = el?.selectionStart ?? inputText.value.length;
   const upto = inputText.value.slice(0, pos);
-  const m = upto.match(/(^|\s)\/([^\s/]*)$/);
-  return m ? { lead: m[1], q: m[2], full: m[0] } : null;
+  const m = upto.match(/(^|\s)([/$])([^\s/$]*)$/);
+  return m ? { lead: m[1], trigger: m[2], q: m[3], full: m[0] } : null;
 }
 
 function updateSuggestions() {
   const m = slashQueryBeforeCursor();
   if (!m) { suggestions.value = []; return; }
   const q = m.q.toLowerCase();
-  suggestions.value = allCommands.value.filter(
+  const source = m.trigger === "$" ? skillCommands.value : allCommands.value;
+  suggestions.value = source.filter(
     (c) => c.name.toLowerCase().startsWith(q)
   );
   suggestionIdx.value = 0;
@@ -2640,6 +2816,7 @@ function onInput() {
   autoResize();
   updateSuggestions();
   updateAtSuggestions();
+  nextTick(syncHighlightScroll);
 }
 
 function onPaste(e: ClipboardEvent) {
@@ -2766,7 +2943,11 @@ onMounted(async () => {
   messages.value = loadMessages(props.chatId);
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
+  // Pin the resolved model to this chat on first mount, so it survives a
+  // remount even if the shared last-used key moves on in the meantime.
+  if (!storedChatModel()) saveChatModel(selectedModel.value);
   selectedEffort.value = loadEffort();
+  if (!storedChatEffort()) saveChatEffort(selectedEffort.value);
   permMode.value = loadPermMode(props.chatId);
 
   chats.markSeen(props.chatId);
@@ -2815,21 +2996,21 @@ onMounted(async () => {
     .then((info) => { accountInfo.value = info; })
     .catch(() => {});
 
-  // Load installed skills and merge with built-ins. Skills override same-named built-ins.
+  // Load installed skills into the `$` completion list (`/` stays built-ins only).
   // Map-based dedup ensures no duplicates regardless of list_skills returning overlaps.
   try {
     const skills = await invoke<{ name: string; description: string; enabled: boolean }[]>("list_skills");
     const merged = new Map<string, Command>();
-    for (const c of BUILTIN_COMMANDS) merged.set(c.name, c);
     for (const s of skills) {
       if (s.enabled) merged.set(s.name, { name: s.name, description: s.description || `/${s.name} skill` });
     }
-    allCommands.value = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+    skillCommands.value = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   } catch { /* browser-only dev without Tauri */ }
 });
 
 onBeforeUnmount(() => {
   if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
+  if (stallTimer) clearInterval(stallTimer);
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("mousedown", onPermMenuOutside);
   window.removeEventListener("mousedown", onEffortMenuOutside);
@@ -3054,7 +3235,30 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   font-size: 0.92em;
   vertical-align: baseline;
 }
-.mention-pill-icon { color: var(--chat-info); flex-shrink: 0; }
+/* Icon as a mask instead of an <svg> child: the pill is now built by
+   pillifyMentions() into an HTML string, where a Vue icon component can't go.
+   Path is phosphor "file", regular weight. */
+.mention-pill::before {
+  content: "";
+  width: 0.85em;
+  height: 0.85em;
+  flex-shrink: 0;
+  background: var(--chat-info);
+  -webkit-mask: var(--mention-pill-icon) center / contain no-repeat;
+  mask: var(--mention-pill-icon) center / contain no-repeat;
+}
+.mention-pill {
+  --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></svg>');
+}
+
+/* A user bubble already sits on the accent surface, so the assistant's dark
+   code-block fill would fight it — quiet the fences down inside the bubble. */
+.bubble-user .md-body :deep(pre) {
+  background: rgba(0, 0, 0, 0.28);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.bubble-user .md-body :deep(code) { background: rgba(0, 0, 0, 0.25); color: inherit; }
+.bubble-user .md-body :deep(a) { color: inherit; }
 
 /* Tool row — quiet activity-log line, expandable */
 .tool-row {
@@ -3077,7 +3281,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   background: color-mix(in srgb, var(--agent-accent, #ec4899) 13%, transparent);
   color: var(--text-primary);
 }
-.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 32%, transparent); }
+.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 20%, transparent); }
 .tool-row-failed {
   background: color-mix(in srgb, var(--destructive, #ef4444) 8%, transparent);
   border-color: color-mix(in srgb, var(--destructive, #ef4444) 30%, transparent);
@@ -3091,8 +3295,17 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .tool-icon { color: var(--agent-accent, #ec4899); flex-shrink: 0; }
 .tool-row-failed .tool-icon { color: var(--destructive, #ef4444); }
 .tool-status-icon { flex-shrink: 0; }
-.tool-spin { animation: tool-spin 0.9s linear infinite; color: var(--agent-accent, #ec4899); }
-@keyframes tool-spin { to { transform: rotate(360deg); } }
+.tool-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--agent-accent, #ec4899);
+  animation: tool-pulse 1.4s ease-in-out infinite;
+}
+@keyframes tool-pulse {
+  0%, 100% { opacity: 0.32; transform: scale(0.7); }
+  50% { opacity: 0.9; transform: scale(1); }
+}
 .tool-args {
   margin: 0;
   padding: 8px 12px;
@@ -3305,13 +3518,18 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .send-btn:disabled { opacity: 0.35; cursor: default; }
 .send-btn-abort { background: var(--red, #dc2626); }
 .send-btn-abort:hover:not(:disabled) { background: color-mix(in srgb, var(--red, #dc2626) 80%, #000); }
+.send-btn-stalled { animation: send-btn-stalled-pulse 1.6s ease-in-out infinite; }
+@keyframes send-btn-stalled-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red, #dc2626) 55%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--red, #dc2626) 0%, transparent); }
+}
 
 .pending-img-remove {
   position: absolute;
   top: -5px;
   right: -5px;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   background: var(--chat-dropdown);
   border: 1px solid var(--chat-border);
   border-radius: 50%;

@@ -7,6 +7,7 @@ import { agentStatusMachine } from "@/machines/agentStatus";
 import type { AgentStatusEvent } from "@/machines/agentStatus";
 import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { forgetChatSettings } from "@/lib/chatSettings";
 
 export interface ClaudeSession {
   id: number;
@@ -184,6 +185,10 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     actors.delete(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
     sessions.value = sessions.value.filter((x) => x.id !== id);
+    // Hard delete — drop this chat's per-chat model / effort / permission mode /
+    // ACP selections too, so config.json doesn't accumulate dead ids. (archive()
+    // deliberately does NOT: an archived chat can be unarchived with its picks.)
+    forgetChatSettings(id);
     // If removed was active, fall back to first remaining for that ws.
     if (activeByWs.value[s.workspaceId] === id) {
       const remaining = sessionsForWs(s.workspaceId);
