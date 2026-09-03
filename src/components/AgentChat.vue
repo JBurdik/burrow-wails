@@ -619,6 +619,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
 import { normalizeAcpRuntimeEvent, normalizeClaudeStreamEvent, type ProviderRuntimeEvent } from "@/lib/providerRuntime";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { useSubagentsStore } from "@/stores/subagents";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useScriptsStore } from "@/stores/scripts";
@@ -730,6 +731,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "prompt-sent"): void }>();
 
 const chats = useClaudeChatsStore();
+const subagents = useSubagentsStore();
 const workspaces = useWorkspaceStore();
 const git = useGitStore();
 const notifStore = useNotificationsStore();
@@ -1866,12 +1868,47 @@ function smartTitle(text: string): string {
 function isDefaultTitle(title: string): boolean {
   return /^Chat(\s+\d+)?$/.test(title.trim());
 }
+// Upgrade the heuristic title with a model-written one (headless `claude -p`,
+// same cheap model as the commit-message button). Fire-and-forget: the
+// heuristic title is already on screen, so a failure or a slow answer costs
+// nothing. Bails if anything better claimed the title meanwhile.
+async function refineTitle(text: string) {
+  const heuristic = smartTitle(text);
+  let title = "";
+  try {
+    title = await invoke<string>("generate_chat_title", {
+      cwd: props.cwd,
+      model: uiStore.commitMessageModel,
+      text,
+    });
+  } catch {
+    return;
+  }
+  if (!title || claudeGeneratedTitle.value) return;
+  const session = chats.sessions.find((s) => s.id === props.chatId);
+  if (!session || session.pinnedTitle || session.title !== heuristic) return;
+  chats.sync(props.chatId, { title });
+}
+
 // Once Claude sends us a generated title, prefer it and stop overwriting.
 const claudeGeneratedTitle = ref(false);
 function applyClaudeTitle(raw: unknown) {
   if (typeof raw !== "string" || !raw.trim()) return;
   claudeGeneratedTitle.value = true;
   chats.sync(props.chatId, { title: raw.trim().slice(0, 60) });
+}
+
+// A turn does not always start with a user send: Claude resumes the same
+// session on its own after a background task finishes or an interim Stop, and
+// nothing had marked the thread running — so it worked with no dot and no
+// "Working" in the Sidebar. Assistant output while we think it's idle IS a turn.
+// ponytail: claude-cli only. ACP replays history through the same feed on
+// session/load with no turn-done, so marking active there sticks running.
+function markAgentActive() {
+  if (busy.value) return;
+  busy.value = true;
+  chats.sendStatusEvent(props.chatId, { type: "START" });
+  syncStore();
 }
 
 function syncStore() {
@@ -1919,6 +1956,7 @@ function applyRuntimeEvent(event: ProviderRuntimeEvent) {
     }
     case "tool.started":
       messages.value.push({ id: nextMsgId++, role: "tool", text: event.name, toolInput: event.input ?? {}, toolUseId: event.toolCallId, toolExpanded: false, toolRawName: Boolean(event.input) });
+      if (event.name === "Task") subagents.started(props.chatId, event.toolCallId, event.input);
       scrollToBottom();
       return;
     case "tool.completed": {
@@ -1927,6 +1965,7 @@ function applyRuntimeEvent(event: ProviderRuntimeEvent) {
         toolMsg.toolOutput = event.output ? event.output.slice(0, 2000) : "";
         toolMsg.toolFailed = event.failed === true;
       }
+      subagents.completed(event.toolCallId, event.failed === true);
       scrollToBottom();
       return;
     }
@@ -2017,6 +2056,7 @@ function onLine(line: string) {
   }
 
   if (type === "assistant") {
+    markAgentActive();
     const content = ((event.message as Record<string, unknown>)?.content ?? []) as Array<Record<string, unknown>>;
     const thinkingParts = content.filter((b) => b.type === "thinking").map((b) => b.thinking as string).join("");
 
@@ -2369,6 +2409,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     const session = chats.sessions.find((s) => s.id === props.chatId);
     if (session && isDefaultTitle(session.title)) {
       chats.sync(props.chatId, { title: smartTitle(text) });
+      void refineTitle(text);
     }
   }
 

@@ -109,6 +109,7 @@ export interface Leaf {
   chatId?: number;    // set when leafType === "chat"
   initialPrompt?: string; // chat: first message to auto-send once its runtime is up
   initialImages?: string[]; // chat: images paired with the initial prompt
+  initialModel?: string; // chat: model id to start this (brand-new) chat with
 }
 
 export interface SplitNode {

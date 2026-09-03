@@ -36,6 +36,8 @@ type TabRequest = {
   initialPrompt?: string;
   /** Images paired with the first chat prompt (data URIs). */
   initialImages?: string[];
+  /** Model id to start a new chat with (action: "openChat"); ignored when reopening an existing chatId. */
+  model?: string;
   /** Optional command to run in a newly-added tab (action: "add"). */
   cmd?: string;
   /** Working dir for a newly-added tab; defaults to the workspace's own. */
@@ -104,6 +106,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     for (const tabId of Object.keys(seen)) {
       if (!currentIds.has(Number(tabId))) delete seen[Number(tabId)];
     }
+    // eslint-disable-next-line no-console
+    console.log("[UNREAD-DEBUG] setTabs", wsId, tabs.map((t) => ({ id: t.id, status: t.status, prev: previous.get(t.id) })), "seenBefore", seenCompletionsByWs.value[wsId], "seenAfter", seen);
     seenCompletionsByWs.value[wsId] = seen;
 
     const prevTabs = new Map((tabsByWs.value[wsId] ?? []).map((tab) => [tab.id, tab]));
@@ -146,6 +150,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   }
 
   function markCompletionSeen(wsId: number, tabId: number) {
+    // eslint-disable-next-line no-console
+    console.log("[UNREAD-DEBUG] markCompletionSeen", wsId, tabId, new Error().stack);
     seenCompletionsByWs.value[wsId] = {
       ...(seenCompletionsByWs.value[wsId] ?? {}),
       [tabId]: true,
@@ -192,8 +198,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   function reorder(wsId: number, fromIdx: number, toIdx: number) {
     request.value = { wsId, action: "reorder", fromIdx, toIdx, nonce: ++nonce };
   }
-  function openChat(wsId: number, chatId?: number, agentId?: string, initialPrompt?: string, initialImages?: string[]) {
-    request.value = { wsId, action: "openChat", chatId, agentId, initialPrompt, initialImages, nonce: ++nonce };
+  function openChat(wsId: number, chatId?: number, agentId?: string, initialPrompt?: string, initialImages?: string[], model?: string) {
+    request.value = { wsId, action: "openChat", chatId, agentId, initialPrompt, initialImages, model, nonce: ++nonce };
   }
   /** Open the full git manager as a tab in that workspace's Terminal. */
   function openGit(wsId: number) {

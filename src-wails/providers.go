@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -72,4 +74,47 @@ func (a *App) ProbeProvider(binary string, cwd string) ProviderProbe {
 	}
 	probe.Version = parseProviderVersion(string(out))
 	return probe
+}
+
+// ProviderLatest reports the latest published version of a provider's npm
+// package, for comparison against the installed ProviderProbe.Version.
+type ProviderLatest struct {
+	Version string `json:"version"`
+	Error   string `json:"error"`
+}
+
+// LatestNpmVersion queries the npm registry's "latest" dist-tag for pkg.
+// Same timeout budget as ProbeProvider — an on-demand check, not a poller.
+func (a *App) LatestNpmVersion(pkg string) ProviderLatest {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return ProviderLatest{Error: "no package configured"}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://registry.npmjs.org/"+pkg+"/latest", nil)
+	if err != nil {
+		return ProviderLatest{Error: err.Error()}
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ProviderLatest{Error: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ProviderLatest{Error: "registry returned " + resp.Status}
+	}
+
+	var body struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return ProviderLatest{Error: err.Error()}
+	}
+	if body.Version == "" {
+		return ProviderLatest{Error: "no version in registry response"}
+	}
+	return ProviderLatest{Version: body.Version}
 }

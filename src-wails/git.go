@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // GitOutput mirrors the Rust struct returned by run_git/run_gh.
@@ -186,4 +188,78 @@ func gitErr(out GitOutput) error {
 		return errors.New("git command failed")
 	}
 	return errors.New(out.Stderr)
+}
+
+// --- chat titles ---
+
+const chatTitleSchema = `{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false}`
+
+// GenerateChatTitle names a chat thread from its first user message, the same
+// headless-claude trick GenerateCommitMessage uses (t3code's
+// TextGenerationModel). Best-effort: any failure returns "" and the caller
+// keeps the heuristic title it already showed.
+func (a *App) GenerateChatTitle(cwd string, model string, text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	const maxPromptChars = 4000
+	if len(text) > maxPromptChars {
+		text = text[:maxPromptChars] + "\n\n[truncated]"
+	}
+
+	prompt := strings.Join([]string{
+		"You name chat threads.",
+		"Return a JSON object with key: title.",
+		"Rules:",
+		"- at most 5 words, no quotes, no trailing period",
+		"- name the task, not the conversation (\"Fix PTY status dots\", not \"User asks about dots\")",
+		"- Title Case is not required; sentence case is fine",
+		"",
+		"First message:",
+		text,
+	}, "\n")
+
+	bin := "claude"
+	if resolved := resolveAgentBin("claude", cwd); resolved != "" {
+		bin = resolved
+	}
+	args := []string{"-p", "--output-format", "json", "--json-schema", chatTitleSchema}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, bin, args...)
+	c.Dir = cwd
+	c.Stdin = strings.NewReader(prompt)
+	stdout, err := c.Output()
+	if err != nil {
+		return ""
+	}
+
+	var envelope struct {
+		StructuredOutput struct {
+			Title string `json:"title"`
+		} `json:"structured_output"`
+	}
+	if err := json.Unmarshal(stdout, &envelope); err != nil {
+		return ""
+	}
+	return sanitizeChatTitle(envelope.StructuredOutput.Title)
+}
+
+// sanitizeChatTitle trims the model's answer to one short line. Empty in, empty
+// out — an empty title must never overwrite the heuristic one.
+func sanitizeChatTitle(raw string) string {
+	line := strings.TrimSpace(raw)
+	if idx := strings.IndexAny(line, "\r\n"); idx >= 0 {
+		line = line[:idx]
+	}
+	line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), `"'`))
+	line = strings.TrimRight(line, ".")
+	if len(line) > 60 {
+		line = strings.TrimSpace(line[:60])
+	}
+	return line
 }

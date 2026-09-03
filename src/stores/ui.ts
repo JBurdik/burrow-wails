@@ -48,6 +48,7 @@ interface Prefs {
   swapPanels: boolean;
   rightPanelVisible: boolean;
   theme: string;
+  themeMode: "system" | "light" | "dark"; // quick-switch mode; resolves to one of the themes below
   preferredDarkTheme: string; // toggle target for "Toggle Dark/Light Mode"
   preferredLightTheme: string;
   soundEnabled: boolean;
@@ -132,6 +133,7 @@ const DEFAULT_PREFS: Prefs = {
   swapPanels: false,
   rightPanelVisible: true,
   theme: DEFAULT_THEME_KEY,
+  themeMode: "dark",
   preferredDarkTheme: "dark",
   preferredLightTheme: "light",
   soundEnabled: true,
@@ -180,6 +182,11 @@ function normalize(parsed: unknown): Prefs {
     const stored = { ...DEFAULT_PREFS, ...(parsed as Partial<Prefs>) };
     // Migrate installs saved below the current default up to it.
     if (stored.uiFontSize < DEFAULT_PREFS.uiFontSize) stored.uiFontSize = DEFAULT_PREFS.uiFontSize;
+    // Installs saved before themeMode existed: infer it from their theme
+    // pick rather than defaulting to "system", so nobody's theme changes underneath them.
+    if (!(parsed as Partial<Prefs>).themeMode) {
+      stored.themeMode = findTheme(stored.theme).isDark ? "dark" : "light";
+    }
     return stored;
   }
   return { ...DEFAULT_PREFS };
@@ -197,6 +204,7 @@ export const useUIStore = defineStore("ui", () => {
   const swapPanels = ref(loaded.swapPanels);
   const rightPanelVisible = ref(loaded.rightPanelVisible);
   const theme = ref(loaded.theme);
+  const themeMode = ref<"system" | "light" | "dark">(loaded.themeMode);
   const preferredDarkTheme = ref(loaded.preferredDarkTheme);
   const preferredLightTheme = ref(loaded.preferredLightTheme);
   const soundEnabled = ref(loaded.soundEnabled);
@@ -261,8 +269,12 @@ export const useUIStore = defineStore("ui", () => {
     swapPanels.value = p.swapPanels;
     rightPanelVisible.value = p.rightPanelVisible;
     theme.value = p.theme;
+    themeMode.value = p.themeMode;
     preferredDarkTheme.value = p.preferredDarkTheme;
     preferredLightTheme.value = p.preferredLightTheme;
+    // "system" mode's applied theme depends on the OS setting at load time,
+    // not just whatever was last persisted — resolve it fresh.
+    if (themeMode.value === "system") resolveThemeMode();
     soundEnabled.value = p.soundEnabled;
     soundDoneEnabled.value = p.soundDoneEnabled;
     soundWaitingEnabled.value = p.soundWaitingEnabled;
@@ -418,6 +430,7 @@ export const useUIStore = defineStore("ui", () => {
         swapPanels: swapPanels.value,
         rightPanelVisible: rightPanelVisible.value,
         theme: theme.value,
+        themeMode: themeMode.value,
         preferredDarkTheme: preferredDarkTheme.value,
         preferredLightTheme: preferredLightTheme.value,
         soundEnabled: soundEnabled.value,
@@ -469,7 +482,7 @@ export const useUIStore = defineStore("ui", () => {
 
   // Persist + apply UI font, base font size and overall scale (zoom).
   watch(
-    [uiFont, uiFontSize, uiScale, terminalFont, terminalFontSize, swapPanels, theme,
+    [uiFont, uiFontSize, uiScale, terminalFont, terminalFontSize, swapPanels, theme, themeMode,
      preferredDarkTheme, preferredLightTheme,
      soundEnabled, soundDoneEnabled, soundWaitingEnabled, soundDoneId, soundDoneCustomPath,
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode,
@@ -530,16 +543,48 @@ export const useUIStore = defineStore("ui", () => {
   function setTheme(key: string) {
     theme.value = key;
     // Remember the pick as the preferred theme for its mode, so the
-    // dark/light toggle returns to it.
-    if (findTheme(key).isDark) preferredDarkTheme.value = key;
-    else preferredLightTheme.value = key;
+    // dark/light toggle and "system" mode return to it. Picking a concrete
+    // theme is an explicit choice, so it also settles themeMode off "system".
+    if (findTheme(key).isDark) {
+      preferredDarkTheme.value = key;
+      themeMode.value = "dark";
+    } else {
+      preferredLightTheme.value = key;
+      themeMode.value = "light";
+    }
+  }
+
+  // Resolve the active theme from themeMode: "system" follows the OS setting
+  // (falling back to the preferred dark/light theme), "dark"/"light" just
+  // apply their preferred theme directly.
+  function resolveThemeMode() {
+    if (themeMode.value === "system") {
+      const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
+      theme.value = prefersDark ? preferredDarkTheme.value : preferredLightTheme.value;
+    } else if (themeMode.value === "dark") {
+      theme.value = preferredDarkTheme.value;
+    } else {
+      theme.value = preferredLightTheme.value;
+    }
+  }
+
+  function setThemeMode(mode: "system" | "light" | "dark") {
+    themeMode.value = mode;
+    resolveThemeMode();
+  }
+
+  // Follow OS theme changes live while in "system" mode.
+  if (typeof window !== "undefined" && window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (themeMode.value === "system") resolveThemeMode();
+    });
   }
 
   // Spotlight "Toggle Dark/Light Mode": jump to the preferred theme of the
   // other mode. Doesn't rewrite the preferences — only setTheme (an explicit
   // pick) does.
   function toggleDarkLight() {
-    theme.value = activeTheme.value.isDark ? preferredLightTheme.value : preferredDarkTheme.value;
+    setThemeMode(activeTheme.value.isDark ? "light" : "dark");
   }
 
   function setMode(m: "terminal" | "claude" | "dashboard") {
@@ -602,6 +647,8 @@ export const useUIStore = defineStore("ui", () => {
     rightPanelVisible,
     toggleRightPanel,
     theme,
+    themeMode,
+    setThemeMode,
     activeTheme,
     themes: THEMES,
     setTheme,

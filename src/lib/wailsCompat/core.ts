@@ -67,6 +67,8 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.RunGh(args.cwd, args.args ?? []);
     case "generate_commit_message":
       return App.GenerateCommitMessage(args.cwd, args.model ?? "");
+    case "generate_chat_title":
+      return App.GenerateChatTitle(args.cwd ?? "", args.model ?? "", args.text ?? "");
 
     // Checkpoints — pre-turn worktree snapshots (src-wails/checkpoints.go)
     case "create_checkpoint":
@@ -178,6 +180,8 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     // Providers
     case "probe_provider":
       return App.ProbeProvider(args.binary ?? "", args.cwd ?? "");
+    case "latest_npm_version":
+      return App.LatestNpmVersion(args.pkg ?? "");
 
     // Skills / MCP servers
     case "list_skills":

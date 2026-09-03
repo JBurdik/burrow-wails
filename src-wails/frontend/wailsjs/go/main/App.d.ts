@@ -76,6 +76,8 @@ export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string
 
 export function GenerateCommitMessage(arg1:string,arg2:string):Promise<main.GitOutput>;
 
+export function GenerateChatTitle(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function GetAppVersion():Promise<string>;
 
 export function GetHookServerPort():Promise<number>;
@@ -131,6 +133,8 @@ export function PickDirectory():Promise<string>;
 export function PickFile(arg1:string,arg2:Array<string>):Promise<string>;
 
 export function PickFiles(arg1:string,arg2:Array<string>):Promise<Array<string>>;
+
+export function LatestNpmVersion(arg1:string):Promise<main.ProviderLatest>;
 
 export function ProbeProvider(arg1:string,arg2:string):Promise<main.ProviderProbe>;
 

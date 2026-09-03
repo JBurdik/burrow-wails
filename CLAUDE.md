@@ -25,22 +25,22 @@ Stack: Vue 3 + Pinia + xterm.js frontend, Go/Wails v2 backend (`src-wails/`), SQ
 ## Commands
 
 ```bash
-# Frontend-only dev (browser, no Tauri)
+# Frontend-only dev (browser, no Wails window)
 pnpm dev
 
-# Full Tauri dev (native window, hot-reload)
-pnpm tauri:dev
+# Full native dev (Wails window, hot-reload)
+just dev            # cd src-wails && wails dev
 
 # Type-check + production build
 pnpm build          # vue-tsc + vite build
-pnpm tauri:build    # full native bundle
+just build          # full native bundle (frontend + wails build)
 
-# Rust only
-cd src-tauri && cargo check
-cd src-tauri && cargo build
+# Go only
+cd src-wails && go build ./...
+cd src-wails && go test ./...
 ```
 
-Tests: `pnpm test` (vitest, no DOM env). Currently covers only `src/machines/agentStatus.ts` — the status state machine. **Pin vitest to v2**: v3+ requires vite ≥6, and vite is held at 5 for Tauri.
+Tests: `pnpm test` (vitest, no DOM env). Currently covers only `src/machines/agentStatus.ts` — the status state machine. `just` (Justfile task runner, `brew install just`) drives dev/build/release; see `justfile`.
 
 ## Architecture
 
@@ -50,7 +50,7 @@ Tests: `pnpm test` (vitest, no DOM env). Currently covers only `src/machines/age
 
 | Store | Owns |
 |-------|------|
-| `workspace` | List of workspaces (SQLite-backed via Tauri invoke), which one is active, which are "opened" (PTYs kept alive) |
+| `workspace` | List of workspaces (SQLite-backed via Wails bindings), which one is active, which are "opened" (PTYs kept alive) |
 | `terminalTabs` | Lightweight mirror of each workspace's tab list for the Sidebar; the real Terminal component is source of truth |
 | `agents` | Configurable agent presets (command, args, shortcut, color) persisted to `localStorage` |
 | `ui` | Settings panel open/close, font + scale preferences (persisted to `localStorage`) |
@@ -67,7 +67,7 @@ App.vue
   [resize handle]
   Terminal             ← one per opened workspace (kept mounted, hidden when inactive)
     TerminalSplitView  ← manages split panes
-      XTerm.vue        ← wraps xterm.js, owns PTY lifecycle via Tauri invoke
+      XTerm.vue        ← wraps xterm.js, owns PTY lifecycle via Wails bindings
   [resize handle]
   RightPanel           ← file tree + git panel
   Spotlight            ← ⌘P command palette
@@ -77,10 +77,10 @@ App.vue
 
 ### PTY / Agent state machine (`XTerm.vue`)
 
-Each `XTerm` creates a native PTY in Rust (`create_pty`), streams bytes via a Tauri event `pty-data-{id}`, and sends input back via `write_pty`.
+Each `XTerm` creates a native PTY in Go (`CreatePty`), streams bytes via a Wails event `pty-data-{id}`, and sends input back via `WritePty`.
 
 Agent state (running / waiting for input / done) is detected two ways:
-1. **Global persistent hooks (primary)** — at startup `install_status_hooks` (`lib.rs`) merges a status hook into each agent's own global config: Claude `~/.claude/settings.json`, Codex `~/.codex/hooks.json` (same schema). The hook command is `[ -n "$BURROW_PTY_ID" ] && '<app-data>/bin/burrow' hook || true` — a **no-op outside Burrow** (BURROW_PTY_ID unset). Inside a Burrow PTY, `burrow hook` reads the hook JSON on stdin, maps `hook_event_name` → state (`UserPromptSubmit`/`PostToolUse`→running; `PreToolUse`→**waiting** for the blocking tools `AskUserQuestion`/`ExitPlanMode`, else running; `PermissionRequest`→**permission** (agent needs an allow/deny decision); `Stop`→done, **except** a Stop carrying still-running `background_tasks`→running (interim stop — Claude auto-resumes the same session, so reporting done here was the premature-completion bug; the `background_tasks` status check is scoped to that array slice, so an unrelated `"status":"running"` elsewhere in the JSON can't false-positive); `SessionStart`→**session** (forwards `model`/`source`/`session_title` as metadata to label the tab); `StopFailure`→**error** (turn ended on an API error; `error_type` passed through as `detail` — e.g. `billing_error`); `Notification`→refined by its `type` field (`permission_prompt`→permission, `idle_prompt`→waiting, else no-op — blanket no-op only for unknown types now); `SubagentStop`/`SessionEnd`→no-op telemetry, not a turn boundary) and `burrow status <state> [--detail/--model/--source/--title]` POSTs `{ptyId,state,…}` to a local `tiny_http` server (`start_hook_server`). The server re-emits Tauri event `pty-hook-{id}` — bare state string for the legacy states, object `{state,detail?|model?|source?|title?}` for `error`/`session`; `XTerm.vue` listens → emits ONE semantic `agentState` (`running`/`waiting`/`permission`/`done`) which `Terminal.vue`'s `onAgentState` turns into a clean status transition (a single event has no ordering hazard, so a trailing `waiting` can't clobber a fresh `done`). **Because the hooks are global + env-driven, status works for every agent session — launched-by-button, typed by hand, or reattached after restart.** The merge is non-destructive (appends, dedupes by marker, writes a `.burrow-bak`). Port survives restart: `burrow status` reads `<BURROW_HOME_DIR>/hook.port` (authoritative — rewritten each launch) else `BURROW_HOOK_PORT`.
+1. **Global persistent hooks (primary)** — at startup `installStatusHooks` (`statushooks.go`) merges a status hook into each agent's own global config: Claude `~/.claude/settings.json`, Codex `~/.codex/hooks.json` (same schema). The hook command is `[ -n "$BURROW_PTY_ID" ] && '<app-data>/bin/burrow' hook || true` — a **no-op outside Burrow** (BURROW_PTY_ID unset). Inside a Burrow PTY, `burrow hook` reads the hook JSON on stdin, maps `hook_event_name` → state (`UserPromptSubmit`/`PostToolUse`→running; `PreToolUse`→**waiting** for the blocking tools `AskUserQuestion`/`ExitPlanMode`, else running; `PermissionRequest`→**permission** (agent needs an allow/deny decision); `Stop`→done, **except** a Stop carrying still-running `background_tasks`→running (interim stop — Claude auto-resumes the same session, so reporting done here was the premature-completion bug; the `background_tasks` status check is scoped to that array slice, so an unrelated `"status":"running"` elsewhere in the JSON can't false-positive); `SessionStart`→**session** (forwards `model`/`source`/`session_title` as metadata to label the tab); `StopFailure`→**error** (turn ended on an API error; `error_type` passed through as `detail` — e.g. `billing_error`); `Notification`→refined by its `type` field (`permission_prompt`→permission, `idle_prompt`→waiting, else no-op — blanket no-op only for unknown types now); `SubagentStop`/`SessionEnd`→no-op telemetry, not a turn boundary) and `burrow status <state> [--detail/--model/--source/--title]` POSTs `{ptyId,state,…}` to a local Go HTTP server (`StartHookServer`, `hookserver.go`). The server re-emits Wails event `pty-hook-{id}` — bare state string for the legacy states, object `{state,detail?|model?|source?|title?}` for `error`/`session`; `XTerm.vue` listens → emits ONE semantic `agentState` (`running`/`waiting`/`permission`/`done`) which `Terminal.vue`'s `onAgentState` turns into a clean status transition (a single event has no ordering hazard, so a trailing `waiting` can't clobber a fresh `done`). **Because the hooks are global + env-driven, status works for every agent session — launched-by-button, typed by hand, or reattached after restart.** The merge is non-destructive (appends, dedupes by marker, writes a `.burrow-bak`). Port survives restart: `burrow status` reads `<BURROW_HOME_DIR>/hook.port` (authoritative — rewritten each launch) else `BURROW_HOOK_PORT`.
    - Per-tab result capture (`burrow wait`) still needs a per-launch `--settings` with a `Stop→burrow capture <token>` hook, since the token is unique to a spawned sub-agent. That's the **only** remaining per-launch injection.
 2. **Polling fallback** — every 2 s, `get_pty_foreground` → title only for agent processes. For an agent foreground proc the poll **never fabricates `busy`** (an agent stays foreground whether thinking or idle at its prompt — equating presence with busy was the old stuck-orange bug). It drives `busy` only for plain commands (`npm test`, `vim`), and clears state when the shell returns to foreground (rescues a Ctrl+C'd agent with no `done` hook). **Dead-PTY watchdog**: if an agent leaf is still in-flight (per its last hook: running/waiting/permission) but `get_pty_foreground` returns empty for ≥3 consecutive polls, the poll confirms the PTY is actually dead via `list_pty_sessions` (`alive=false`) and only then emits `interrupt` to settle the stuck dot — covers an agent killed/crashed with no `Stop`. A single empty read is a transient daemon race and is ignored.
 
@@ -166,13 +166,13 @@ Claude/Copilot get the `burrow` skill (`agentdocs/skills/burrow/SKILL.md`) plus 
 always-in-context rule in `~/.claude/CLAUDE.md` (so Claude reaches for
 `burrow spawn` before its own `Agent` tool); Codex gets the same content as a
 managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md`.
-### Backend (`src-tauri/src/lib.rs`)
+### Backend (`src-wails/*.go`, bound as `App` methods)
 
-All Tauri commands are in `lib.rs`. Key areas:
-- **PTY management** — `create_pty`, `write_pty`, `resize_pty`, `kill_pty`, `get_pty_foreground` using `portable-pty`
-- **SQLite** (`rusqlite`, bundled) — `workspaces` and `terminal_tabs` tables; DB lives in `<app-data>/workspaces.db`
-- **Git** — `run_git` wraps the system git binary (checks known paths)
-- **FS** — `read_dir_shallow`, `write_text_file`
+Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem:
+- **PTY management** (`app.go`) — `CreatePty`, `WritePty`, `ResizePty`, `KillPty`, `ListPtySessions`
+- **SQLite** (`db.go`, `mattn/go-sqlite3`) — `workspaces` and `terminal_tabs` tables; DB lives in `<app-data>/workspaces.db`
+- **Git** (`git.go`) — `RunGit` wraps the system git binary (checks known paths)
+- **FS** (`fs.go`) — `ReadDirShallow`, `WriteTextFile`
 
 ### OSC escape sequence protocol
 
@@ -202,7 +202,7 @@ Standalone HTML reference pages (no build step — open directly in a browser). 
 
 | File | Covers | Update when |
 |------|--------|-------------|
-| `docs/context.html` | Whole-project overview: architecture, features, key files, Tauri commands, shortcuts | Adding/removing a component, store, Tauri command, agent, or shortcut |
+| `docs/context.html` | Whole-project overview: architecture, features, key files, Go/Wails bindings, shortcuts | Adding/removing a component, store, Go binding, agent, or shortcut |
 | `docs/burrow.html` | The control API + `burrow` CLI: verb registry, transports, spawn/supervise/collect, result capture, agent-docs install | Adding or changing a verb, the `burrow` script, or `installAgentDocs` |
 | `docs/superset-concept/index.html` | Concept study: how superset-sh/superset detects terminal/agent status (HTTP lifecycle hooks vs Burrow's OSC 9998 channel) | Reference only — reverse-engineered comparison, update if porting the hook model into Burrow |
 

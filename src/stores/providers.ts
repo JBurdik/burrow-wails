@@ -9,6 +9,7 @@ import {
   seedInstances,
   binaryFor,
   commandLine,
+  versionLessThan,
   type ProviderInstance,
 } from "../lib/providers";
 import { migrateLegacyConfigs, type LegacyConfigs } from "../lib/providersMigrate";
@@ -19,6 +20,7 @@ export { transportLabel, providerFor, binaryFor, commandLine, chatTransportFor }
 const CONFIG_KEY = "providers";
 const ALIAS_KEY = "providerAliases";
 const STATUS_KEY = "providerStatus";
+const LATEST_KEY = "providerLatest";
 
 /** Legacy config keys, read once by the migration and then left alone. */
 const LEGACY_KEYS = {
@@ -33,6 +35,12 @@ export interface ProviderStatus {
   path: string;
   version: string;
   error: string;
+  checkedAt: number;
+}
+
+/** Latest published npm version for a provider (catalog id, not instance id). */
+export interface ProviderLatestVersion {
+  version: string;
   checkedAt: number;
 }
 
@@ -62,6 +70,8 @@ export const useProvidersStore = defineStore("providers", () => {
   /** legacy id (old agent / chat-agent / profile id) → current instance id. */
   const aliases = ref<Record<string, string>>({});
   const status = ref<Record<string, ProviderStatus>>({});
+  /** Keyed by catalog provider id (not instance id) — a package is shared by all its instances. */
+  const latest = ref<Record<string, ProviderLatestVersion>>({});
   const ready = ref(false);
 
   configReady.then(() => {
@@ -83,11 +93,13 @@ export const useProvidersStore = defineStore("providers", () => {
       setConfig(ALIAS_KEY, result.aliases);
     }
     status.value = getConfig<Record<string, ProviderStatus>>(STATUS_KEY, {});
+    latest.value = getConfig<Record<string, ProviderLatestVersion>>(LATEST_KEY, {});
     ready.value = true;
   });
 
   watch(instances, (v) => ready.value && setConfig(CONFIG_KEY, v), { deep: true });
   watch(status, (v) => ready.value && setConfig(STATUS_KEY, v), { deep: true });
+  watch(latest, (v) => ready.value && setConfig(LATEST_KEY, v), { deep: true });
 
   /** Instances the rest of the app may use — disabled ones are invisible. */
   const active = computed(() => instances.value.filter((a) => a.enabled));
@@ -175,9 +187,35 @@ export const useProvidersStore = defineStore("providers", () => {
     }
   }
 
+  /** Query the latest npm version for every distinct provider package in use, once each. */
+  async function checkLatest() {
+    const providerIds = new Set(instances.value.map((a) => a.providerId));
+    await Promise.all(
+      [...providerIds].map(async (id) => {
+        const pkg = providerFor(id).npmPackage;
+        if (!pkg) return;
+        try {
+          const r = await invoke<{ version: string; error: string }>("latest_npm_version", { pkg });
+          if (r.version) latest.value = { ...latest.value, [id]: { version: r.version, checkedAt: Date.now() } };
+        } catch {
+          // Best-effort — leave any previously cached value in place.
+        }
+      }),
+    );
+  }
+
+  /** Enabled, installed instances whose version trails the latest published npm release. */
+  const outdated = computed(() =>
+    active.value.filter((a) => {
+      const s = status.value[a.id];
+      const l = latest.value[a.providerId];
+      return s?.installed && s.version && l?.version && versionLessThan(s.version, l.version);
+    }),
+  );
+
   return {
-    instances, aliases, status, ready, probing, active, chatAgents,
-    byId, resolve, add, update, remove, reset, move, setStatus, probe, probeAll,
+    instances, aliases, status, latest, ready, probing, active, chatAgents, outdated,
+    byId, resolve, add, update, remove, reset, move, setStatus, probe, probeAll, checkLatest,
     binaryFor, commandLine,
     catalog: PROVIDER_CATALOG,
   };

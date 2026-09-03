@@ -636,7 +636,7 @@ async function submit() {
         { kind: selectedAgent.value.kind, command: binaryFor(selectedAgent.value), model: selectedModel.value, permMode: selectedPermMode.value },
         terminalPrompt,
       ))
-    : () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt, images);
+    : () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt, images, selectedModel.value);
   wasOpen ? open() : nextTick(open); // freshly-mounted Terminal needs a tick to attach its request watcher
   text.value = "";
   pendingImages.value = [];

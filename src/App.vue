@@ -72,6 +72,7 @@
     <PathPicker />
     <ToastStack />
     <UpdateBanner />
+    <ProviderUpdateBanner />
     <DiagramModal v-if="diagramContent !== null" />
     <Teleport to="body"><PetOverlay v-if="ui.petsEnabled" /></Teleport>
 
@@ -113,6 +114,7 @@ import Settings from "@/components/Settings.vue";
 import Spotlight from "@/components/Spotlight.vue";
 import ToastStack from "@/components/ToastStack.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
+import ProviderUpdateBanner from "@/components/ProviderUpdateBanner.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
@@ -388,6 +390,7 @@ onMounted(async () => {
   window.addEventListener('mouseup', onResizeUp);
   setTimeout(() => update.check({ silent: true }), 3000);
   updateTimer = window.setInterval(() => update.check({ silent: true }), 6 * 60 * 60 * 1000);
+  setTimeout(() => providers.probeAll().then(() => providers.checkLatest()), 3000);
 
   unlistenMenuUpdate = await listen("menu-check-update", () => {
     update.check({ silent: false });

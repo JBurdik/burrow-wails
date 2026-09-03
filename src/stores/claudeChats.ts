@@ -76,6 +76,8 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   function spawnActor(session: ClaudeSession): SessionActor {
     const actor = createActor(agentStatusMachine, { input: {} }).start();
     actor.subscribe((snapshot) => {
+      // eslint-disable-next-line no-console
+      if (session.status !== snapshot.value) console.log("[UNREAD-DEBUG] session status", session.id, session.status, "->", snapshot.value);
       session.status = snapshot.value as TermStatus;
     });
     actors.set(session.id, actor);
@@ -300,6 +302,8 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   }
 
   function markSeen(id: number) {
+    // eslint-disable-next-line no-console
+    console.log("[UNREAD-DEBUG] chatsStore.markSeen", id, new Error().stack);
     actors.get(id)?.send({ type: "MARK_SEEN" });
   }
 

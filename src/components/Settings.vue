@@ -90,8 +90,8 @@
             </div>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="text-[13px] font-medium text-foreground">Commit message model</span>
-                <span class="text-[11px] text-muted-foreground">Model the GitPanel sparkle button uses to draft a commit message from your staged diff. Kept cheap by default.</span>
+                <span class="text-[13px] font-medium text-foreground">Text generation model</span>
+                <span class="text-[11px] text-muted-foreground">Model used for small background writing jobs — the GitPanel sparkle button's commit message, and chat titles. Kept cheap by default.</span>
               </div>
               <Select v-model="ui.commitMessageModel" class="min-w-[200px]" :options="commitMessageModelOptions" />
             </div>
@@ -196,7 +196,7 @@
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
               <h2 class="text-[15px] font-semibold text-foreground">General</h2>
-              <span class="text-xs text-muted-foreground">Fonts &amp; appearance</span>
+              <span class="text-xs text-muted-foreground">Interface &amp; layout</span>
             </div>
           </div>
           <div class="h-px bg-border" />
@@ -205,65 +205,10 @@
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface</span>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="text-[13px] font-medium text-foreground">UI font</span>
-                <span class="text-[11px] text-muted-foreground">Font used across the app interface</span>
-              </div>
-              <Select v-model="ui.uiFont" :options="uiFontOptions" :trigger-style="{ fontFamily: ui.uiFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
-            </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
-              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="text-[13px] font-medium text-foreground">UI font size</span>
-                <span class="text-[11px] text-muted-foreground">Base interface text size (10–20)</span>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <input
-                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
-                  type="number"
-                  min="10"
-                  max="20"
-                  :value="ui.uiFontSize"
-                  @input="ui.uiFontSize = clampRange(val($event), 10, 20, 13)"
-                />
-                <span class="text-xs text-muted-foreground/70">px</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
-              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">UI scale</span>
                 <span class="text-[11px] text-muted-foreground">Zoom the entire interface</span>
               </div>
               <Select v-model="uiScaleModel" class="min-w-[200px]" :options="UI_SCALE_OPTIONS" />
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Terminal</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
-              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="text-[13px] font-medium text-foreground">Terminal font</span>
-                <span class="text-[11px] text-muted-foreground">Monospace font for terminal panes</span>
-              </div>
-              <Select v-model="ui.terminalFont" :options="terminalFontOptions" :trigger-style="{ fontFamily: ui.terminalFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
-            </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
-              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="text-[13px] font-medium text-foreground">Terminal font size</span>
-                <span class="text-[11px] text-muted-foreground">Size in pixels (8–24)</span>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <input
-                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
-                  type="number"
-                  min="8"
-                  max="24"
-                  :value="ui.terminalFontSize"
-                  @input="ui.terminalFontSize = clampRange(val($event), 8, 24, 13)"
-                />
-                <span class="text-xs text-muted-foreground/70">px</span>
-              </div>
-            </div>
-            <div class="rounded-md border border-border bg-base px-3.5 py-3 leading-snug text-foreground/90" :style="{ fontFamily: ui.terminalFont, fontSize: ui.terminalFontSize + 'px' }">
-              <span class="text-success">~/agentic-ide $</span> claude --resume
             </div>
           </div>
 
@@ -287,12 +232,6 @@
               </div>
               <Switch :checked="ui.debugOverlay" @update:checked="(v: boolean) => ui.debugOverlay = v" />
             </div>
-          </div>
-
-          <div class="mt-2 flex items-center gap-2.5">
-            <Button variant="outline" size="sm" @click="ui.resetFonts()">
-              <PhArrowCounterClockwise :size="12" /> Reset fonts
-            </Button>
           </div>
         </section>
 
@@ -616,16 +555,36 @@
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
               <h2 class="text-[15px] font-semibold text-foreground">Appearance</h2>
-              <span class="text-xs text-muted-foreground">Color theme</span>
+              <span class="text-xs text-muted-foreground">Color theme &amp; typography</span>
             </div>
           </div>
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Color scheme</span>
+            <div class="grid grid-cols-3 gap-3">
+              <button
+                v-for="m in THEME_MODES"
+                :key="m.id"
+                class="flex flex-col items-center gap-2 rounded-lg border border-border bg-base px-3 py-4 transition-[border-color,box-shadow] duration-[120ms] hover:border-muted-foreground"
+                :class="ui.themeMode === m.id && 'border-accent shadow-[0_0_0_1px_var(--accent)]'"
+                @click="ui.setThemeMode(m.id)"
+              >
+                <component :is="m.icon" :size="20" :class="ui.themeMode === m.id ? 'text-accent' : 'text-muted-foreground'" />
+                <span class="flex items-center gap-1 text-xs text-foreground">
+                  {{ m.label }}
+                  <PhCheck v-if="ui.themeMode === m.id" :size="12" class="text-accent" />
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Theme</span>
             <span class="text-xs text-muted-foreground/70">
-              The last dark and light theme you pick here become the targets of the
-              “Toggle Dark/Light Mode” command in the ⌘P palette.
+              Picking a theme here sets it as the preferred theme for its mode (dark
+              or light) — what “Dark”/“System” above, and the ⌘P “Toggle Dark/Light
+              Mode” command, resolve to.
             </span>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
               <button
@@ -656,6 +615,74 @@
                 </div>
               </button>
             </div>
+          </div>
+
+          <div class="h-px bg-border" />
+
+          <!-- Typography -->
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface font</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">UI font</span>
+                <span class="text-[11px] text-muted-foreground">Font used across the app interface</span>
+              </div>
+              <Select v-model="ui.uiFont" :options="uiFontOptions" :trigger-style="{ fontFamily: ui.uiFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
+            </div>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">UI font size</span>
+                <span class="text-[11px] text-muted-foreground">Base interface text size (10–20)</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <input
+                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
+                  type="number"
+                  min="10"
+                  max="20"
+                  :value="ui.uiFontSize"
+                  @input="ui.uiFontSize = clampRange(val($event), 10, 20, 13)"
+                />
+                <span class="text-xs text-muted-foreground/70">px</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Terminal font</span>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Terminal font</span>
+                <span class="text-[11px] text-muted-foreground">Monospace font for terminal panes</span>
+              </div>
+              <Select v-model="ui.terminalFont" :options="terminalFontOptions" :trigger-style="{ fontFamily: ui.terminalFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
+            </div>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Terminal font size</span>
+                <span class="text-[11px] text-muted-foreground">Size in pixels (8–24)</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <input
+                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
+                  type="number"
+                  min="8"
+                  max="24"
+                  :value="ui.terminalFontSize"
+                  @input="ui.terminalFontSize = clampRange(val($event), 8, 24, 13)"
+                />
+                <span class="text-xs text-muted-foreground/70">px</span>
+              </div>
+            </div>
+            <div class="rounded-md border border-border bg-base px-3.5 py-3 leading-snug text-foreground/90" :style="{ fontFamily: ui.terminalFont, fontSize: ui.terminalFontSize + 'px' }">
+              <span class="text-success">~/agentic-ide $</span> claude --resume
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2.5">
+            <Button variant="outline" size="sm" @click="ui.resetFonts()">
+              <PhArrowCounterClockwise :size="12" /> Reset fonts
+            </Button>
           </div>
 
           <div class="h-px bg-border" />
@@ -987,6 +1014,7 @@ import {
   PhArrowClockwise, PhDownloadSimple, PhTerminalWindow,
   PhPlugsConnected, PhBrowser, PhToggleLeft, PhToggleRight, PhArrowSquareOut, PhImage,
   PhPaperPlaneTilt, PhPawPrint, PhPlayCircle, PhArrowUp, PhArrowDown,
+  PhDesktop, PhSun, PhMoon,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { pickDir, pickFile, AUDIO_EXTS, IMAGE_EXTS } from "@/lib/pickPath";
@@ -1029,6 +1057,12 @@ const installedMonoFonts = computed(() =>
 );
 const uiFontOptions = computed(() => [...UI_FONTS, ...installedUiFonts.value.map((font) => ({ ...font, label: `Installed · ${font.label}` }))]);
 const terminalFontOptions = computed(() => [...TERMINAL_FONTS, ...installedMonoFonts.value.map((font) => ({ ...font, label: `Installed · ${font.label}` }))]);
+
+const THEME_MODES: { id: "system" | "light" | "dark"; label: string; icon: Component }[] = [
+  { id: "system", label: "System", icon: PhDesktop as Component },
+  { id: "light", label: "Light", icon: PhSun as Component },
+  { id: "dark", label: "Dark", icon: PhMoon as Component },
+];
 
 const ui = useUIStore();
 const providers = useProvidersStore();

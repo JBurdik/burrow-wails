@@ -39,14 +39,16 @@ export interface ProviderCatalogEntry {
   transportArgs: string[];
   /** Whether the instance editor offers a config-dir field (CLAUDE_CONFIG_DIR). */
   supportsConfigDir: boolean;
+  /** npm package to check for updates against; unset for CLIs not installed via npm. */
+  npmPackage?: string;
 }
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
-  { id: "claude", label: "Claude Code", binary: "claude", icon: "claude", color: "#d97757", kind: "claude", transport: "claude-cli", transportArgs: [], supportsConfigDir: true },
-  { id: "codex", label: "Codex", binary: "codex", icon: "openai", color: "#74aa9c", kind: "codex", transport: "codex-app-server", transportArgs: ["app-server"], supportsConfigDir: false },
-  { id: "gemini", label: "Gemini", binary: "gemini", icon: "gemini", color: "#1a73e8", kind: "gemini", transport: "acp", transportArgs: ["--acp"], supportsConfigDir: false },
-  { id: "opencode", label: "opencode", binary: "opencode", icon: "terminal", color: "#f59e0b", kind: "custom", transport: "acp", transportArgs: ["acp"], supportsConfigDir: false },
-  { id: "copilot", label: "GitHub Copilot", binary: "copilot", icon: "copilot", color: "#8957e5", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false },
+  { id: "claude", label: "Claude Code", binary: "claude", icon: "claude", color: "#d97757", kind: "claude", transport: "claude-cli", transportArgs: [], supportsConfigDir: true, npmPackage: "@anthropic-ai/claude-code" },
+  { id: "codex", label: "Codex", binary: "codex", icon: "openai", color: "#74aa9c", kind: "codex", transport: "codex-app-server", transportArgs: ["app-server"], supportsConfigDir: false, npmPackage: "@openai/codex" },
+  { id: "gemini", label: "Gemini", binary: "gemini", icon: "gemini", color: "#1a73e8", kind: "gemini", transport: "acp", transportArgs: ["--acp"], supportsConfigDir: false, npmPackage: "@google/gemini-cli" },
+  { id: "opencode", label: "opencode", binary: "opencode", icon: "terminal", color: "#f59e0b", kind: "custom", transport: "acp", transportArgs: ["acp"], supportsConfigDir: false, npmPackage: "opencode-ai" },
+  { id: "copilot", label: "GitHub Copilot", binary: "copilot", icon: "copilot", color: "#8957e5", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false, npmPackage: "@github/copilot" },
   { id: "aider", label: "Aider", binary: "aider", icon: "robot", color: "#fbbf24", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false },
   { id: "cursor", label: "Cursor AI", binary: "cursor-agent", icon: "terminal", color: "#f472b6", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false },
   { id: "custom", label: "Custom", binary: "", icon: "robot", color: "#9ca3af", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false },
@@ -159,4 +161,15 @@ export function commandLine(a: ProviderInstance): string {
 export function chatTransportFor(a: Pick<ProviderInstance, "transport" | "kind">): ChatTransport {
   if (a.transport !== "none") return a.transport;
   return a.kind === "claude" ? "claude-cli" : "acp";
+}
+
+/** Dotted-numeric version compare (ignores any -pre/+build suffix). true if `a` < `b`. */
+export function versionLessThan(a: string, b: string): boolean {
+  const pa = a.split(/[-+]/)[0].split(".").map(Number);
+  const pb = b.split(/[-+]/)[0].split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0, y = pb[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
 }

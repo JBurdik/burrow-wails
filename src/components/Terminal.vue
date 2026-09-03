@@ -104,6 +104,7 @@
             :is-watching="isWatching(tab)"
             :initial-prompt="pane.leaf.initialPrompt"
             :initial-images="pane.leaf.initialImages"
+            :default-model="pane.leaf.initialModel"
             @prompt-sent="pane.leaf.initialPrompt = undefined"
           />
           <BrowserPane
@@ -743,6 +744,8 @@ function isWatching(tab: Tab): boolean {
 // the local ones left a chat stuck on "Done" forever — nothing else ever sent
 // it MARK_SEEN after ClaudeChat's mount.
 function markTabSeen(tab: Tab) {
+  // eslint-disable-next-line no-console
+  console.log("[UNREAD-DEBUG] markTabSeen", tab.id, getAllLeaves(tab.root).map((l) => ({ id: l.id, type: l.leafType, chatId: l.chatId, status: l.status })), new Error().stack);
   for (const leaf of getAllLeaves(tab.root)) {
     // MARK_SEEN is only handled in done/review/error — a no-op elsewhere.
     if (leaf.leafType === "chat" && leaf.chatId != null) chatsStore.markSeen(leaf.chatId);
@@ -942,7 +945,7 @@ function activateTab(id: number) {
   nextTick(() => xtermRefs.get(leaf.id)?.focus());
 }
 
-function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[]) {
+function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[], model?: string) {
   let session: import("@/stores/claudeChats").ClaudeSession;
   if (chatId != null) {
     session = chatsStore.sessions.find((s) => s.id === chatId) ?? chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
@@ -970,6 +973,7 @@ function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initial
     leafType: "chat",
     chatId: session.id,
     cwd: cwd || undefined,
+    initialModel: chatId == null ? model : undefined,
   };
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
@@ -1507,7 +1511,7 @@ function applyTabRequest(req: typeof tabsStore.request) {
     reorderTabs(req.fromIdx, req.toIdx);
   }
   else if (req.action === "openGit") openGitTab();
-  else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId, undefined, req.initialPrompt, req.initialImages);
+  else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId, undefined, req.initialPrompt, req.initialImages, req.model);
   else if (req.action === "rename" && req.tabId != null && req.title != null) {
     const tab = tabs.value.find((t) => t.id === req.tabId);
     if (tab) getAllLeaves(tab.root).forEach((l) => { l.title = req.title!; });

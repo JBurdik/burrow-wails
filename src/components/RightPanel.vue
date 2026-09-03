@@ -290,6 +290,38 @@
       Open a project to start a Manager thread.
     </div>
 
+    <!-- Sub-agents tab: Task-tool invocations from this workspace's chats, newest first -->
+    <div v-else-if="activeTab === 'agents'" class="flex flex-1 flex-col overflow-y-auto">
+      <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
+        <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sub-agents</span>
+      </div>
+
+      <div v-if="!subagentList.length" class="m-2 rounded-lg border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
+        No sub-agents spawned yet.<br />Shows up when a chat uses the Task tool.
+      </div>
+
+      <div
+        v-for="entry in subagentList"
+        :key="entry.toolUseId"
+        class="flex cursor-pointer items-start gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
+        @click="openSubagentChat(entry.chatId)"
+      >
+        <PhRobot :size="12" class="mt-[1px] shrink-0 text-muted-foreground" />
+        <div class="flex min-w-0 flex-1 flex-col">
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ entry.description }}</span>
+          <span class="font-mono text-[9.5px] text-muted-foreground">{{ chatTitle(entry.chatId) }}{{ entry.subagentType ? ` · ${entry.subagentType}` : "" }} · {{ subagentTime(entry.startedAt) }}</span>
+        </div>
+        <span
+          class="mt-0.5 shrink-0 rounded-full px-1.5 py-[1px] text-[9px] font-medium"
+          :class="{
+            'bg-accent/15 text-accent': entry.status === 'running',
+            'bg-emerald-500/15 text-emerald-500': entry.status === 'done',
+            'bg-destructive/15 text-destructive': entry.status === 'failed',
+          }"
+        >{{ entry.status }}</span>
+      </div>
+    </div>
+
     <!-- History tab: pre-turn worktree snapshots, newest first -->
     <div v-else-if="activeTab === 'history'" class="flex flex-1 flex-col overflow-y-auto">
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
@@ -379,10 +411,13 @@ import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight,
-  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe, PhTerminal,
+  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe, PhTerminal, PhRobot,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
+import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { useSubagentsStore } from "@/stores/subagents";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import FileTreeNode from "./FileTreeNode.vue";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useContainerQuery } from "@/composables/useContainerQuery";
@@ -399,6 +434,9 @@ const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGi
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
 const git = useGitStore();
 const fileTree = useFileTreeStore();
+const chats = useClaudeChatsStore();
+const subagents = useSubagentsStore();
+const terminalTabs = useTerminalTabsStore();
 // RightPanel is one shared instance across all workspaces (App.vue doesn't
 // key it per workspace), so which surfaces are open / which tab is active
 // must be tracked per workspace, not as one global ref — otherwise switching
@@ -407,6 +445,22 @@ const NO_WS = -1;
 interface WsUiState { openedTabIds: string[]; activeTab: string | null }
 const wsUiStates = reactive<Record<number, WsUiState>>({});
 const wsKey = computed(() => props.workspaceId ?? NO_WS);
+
+const subagentList = computed(() => {
+  if (!props.workspaceId) return [];
+  const chatIds = chats.sessions.filter((s) => s.workspaceId === props.workspaceId).map((s) => s.id);
+  return subagents.forChats(chatIds);
+});
+function chatTitle(chatId: number): string {
+  return chats.sessions.find((s) => s.id === chatId)?.title ?? `Chat ${chatId}`;
+}
+function openSubagentChat(chatId: number) {
+  if (!props.workspaceId) return;
+  terminalTabs.openChat(props.workspaceId, chatId);
+}
+function subagentTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 function wsUi(id: number): WsUiState {
   return (wsUiStates[id] ??= { openedTabIds: [], activeTab: null });
 }
@@ -453,6 +507,7 @@ const tabs = computed(() => {
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
     { id: "manager", label: "Manager", icon: PhSparkle, description: "Plan and coordinate agent work for this project." },
+    { id: "agents", label: "Sub-agents", icon: PhRobot, description: "See sub-agents spawned by chats in this workspace." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
