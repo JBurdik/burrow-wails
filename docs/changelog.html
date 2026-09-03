@@ -79,11 +79,59 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.1 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.1</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">září 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Codex: vlastní otázky a přehlednější oprávnění</div>
+      <ul>
+        <li><strong>Codex se umí zeptat</strong> — nový <code>CodexUserInputPanel</code> zobrazuje strukturované otázky (<code>item/tool/requestUserInput</code>) přímo v chatu s výběrem z možností nebo volnou odpovědí, místo aby Codex čekal na požadavek, kterému UI nerozumělo.</li>
+        <li><strong>Neznámé blokující požadavky už nezavěsí vlákno</strong> — dřív šel každý neznámý JSON-RPC požadavek do schvalovací UI, která umí jen approvaly; <code>rejectUnsupportedCodexRequest</code> teď pošle explicitní chybu, takže turn selže se srozumitelnou hláškou místo nekonečného čekání.</li>
+        <li><strong>Přejmenované a doplněné režimy oprávnění</strong> — „Supervised“, „Auto-accept edits“, „Auto“ (rutinní akce automaticky posoudí Codexův vlastní reviewer, rizikové se ptají), „Don't ask“ a „Full access“ nahrazují dřívější dvojici <em>Read only / Auto</em>.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Sidebar: přehled vlákna na hover a lepší řádky</div>
+      <ul>
+        <li><strong>Hover karta sdílená pro všechny řádky</strong> — najetí na aktivní, uklizené i archivované vlákno teď ukáže stejnou kartu s repem, větví, modelem, počtem panelů/turnů a stavem PR (<code>hoverInfoFromRow</code> / <code>hoverInfoFromArchived</code>).</li>
+        <li><strong>Ikona agenta a model přímo v řádku</strong> — řádek vlákna zobrazuje ikonu konkrétního agenta a zkratku použitého modelu, uklizené a archivované chaty navíc ukazují ikonu a jméno repa.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Víc poskytovatelů pro generovaný text</div>
+      <ul>
+        <li><strong>Commit zprávy a názvy chatů umí i jiné CLI</strong> — <code>generateTextJSON</code> vedle Claude podporuje Codex, Gemini a OpenCode; volba poskytovatele a modelu se ukládá jako <code>kind::provider::model</code>, starší uložené preference se automaticky migrují.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Motivy jako páry světlý/tmavý</div>
+      <ul>
+        <li><strong>Přepínání motivu drží zvolený design</strong> — motivy se teď volí jako rodina (<code>THEME_FAMILIES</code>) s vlastní světlou i tmavou variantou, takže „Toggle Dark/Light Mode“ i režim „system“ zůstanou v rámci designu, který si uživatel vybral, místo aby skočily na výchozí.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Potvrzovací dialogy fungují i v natívním okně</div>
+      <ul>
+        <li><strong><code>window.confirm()</code> je ve Wails webview tichý no-op</strong> — chybí napojení na nativní dialog, takže potvrzení se nikdy nezobrazilo a mazání proběhlo rovnou. Smazání chatu i celého vlákna teď jde přes vlastní <code>confirmDialog</code> komponentu v Sidebaru.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.2.6 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.2.6</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">srpen 2026</span>
     </div>
 
