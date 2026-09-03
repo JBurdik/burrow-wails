@@ -21,6 +21,10 @@ export interface TabSummary {
   chatId?: number;
   /** Chat-only: no attention needed right now — see claudeChats.isSettled(). */
   settled?: boolean;
+  /** Icon key of the agent driving this tab (see lib/agentIcons). */
+  agentIcon?: string;
+  /** Model id the agent is running (chat picker / SessionStart metadata). */
+  model?: string;
 }
 
 type TabRequest = {

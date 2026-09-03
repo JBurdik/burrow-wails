@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -49,7 +51,7 @@ func (a *App) RunGh(cwd string, args []string) GitOutput {
 }
 
 // GenerateCommitMessage drafts a commit message from the staged diff via a
-// one-shot, non-interactive `claude -p` call — no PTY, no session. Follows
+// one-shot, non-interactive provider call — no PTY, no session. Follows
 // t3code's approach (apps/server/src/textGeneration/ClaudeTextGeneration.ts):
 // prompt goes over stdin (no arg-length limit, no shell-escaping headaches),
 // `--output-format json --json-schema` gets a structured {subject, body}
@@ -86,40 +88,162 @@ func (a *App) GenerateCommitMessage(cwd string, model string) GitOutput {
 		diff,
 	}, "\n")
 
-	bin := "claude"
-	if resolved := resolveAgentBin("claude", ""); resolved != "" {
-		bin = resolved
-	}
-	args := []string{"-p", "--output-format", "json", "--json-schema", commitMessageSchema}
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-	c := exec.Command(bin, args...)
-	c.Dir = cwd
-	c.Stdin = strings.NewReader(prompt)
-	stdout, err := c.Output()
+	jsonOutput, err := generateTextJSON(cwd, model, prompt, commitMessageSchema)
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return GitOutput{Stderr: string(ee.Stderr), Code: ee.ExitCode()}
-		}
 		return GitOutput{Stderr: err.Error(), Code: -1}
 	}
-
-	var envelope struct {
-		StructuredOutput struct {
-			Subject string `json:"subject"`
-			Body    string `json:"body"`
-		} `json:"structured_output"`
+	var result struct {
+		Subject string `json:"subject"`
+		Body    string `json:"body"`
 	}
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		return GitOutput{Stderr: "claude returned unexpected output format", Code: -1}
+	if err := json.Unmarshal(jsonOutput, &result); err != nil {
+		return GitOutput{Stderr: "text generation provider returned unexpected JSON", Code: -1}
 	}
 
-	msg := sanitizeCommitSubject(envelope.StructuredOutput.Subject)
-	if body := strings.TrimSpace(envelope.StructuredOutput.Body); body != "" {
+	msg := sanitizeCommitSubject(result.Subject)
+	if body := strings.TrimSpace(result.Body); body != "" {
 		msg += "\n\n" + body
 	}
 	return GitOutput{Stdout: msg, Success: true}
+}
+
+// generateTextJSON runs a provider selected by the persisted "kind::model"
+// preference. Older bare model ids remain Claude selections for compatibility.
+// Both CLIs are asked for the same JSON contract, leaving callers provider-free.
+func generateTextJSON(cwd, selection, prompt, schema string) ([]byte, error) {
+	return generateTextJSONContext(context.Background(), cwd, selection, prompt, schema)
+}
+
+func generateTextJSONContext(ctx context.Context, cwd, selection, prompt, schema string) ([]byte, error) {
+	provider, model := parseTextGenerationSelection(selection)
+	switch provider {
+	case "claude":
+		bin := "claude"
+		if resolved := resolveAgentBin("claude", cwd); resolved != "" {
+			bin = resolved
+		}
+		args := []string{"-p", "--output-format", "json", "--json-schema", schema}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
+		c := exec.CommandContext(ctx, bin, args...)
+		c.Dir = cwd
+		c.Stdin = strings.NewReader(prompt)
+		out, err := c.Output()
+		if err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				return nil, errors.New(strings.TrimSpace(string(ee.Stderr)))
+			}
+			return nil, err
+		}
+		var envelope struct {
+			StructuredOutput json.RawMessage `json:"structured_output"`
+		}
+		if err := json.Unmarshal(out, &envelope); err != nil || len(envelope.StructuredOutput) == 0 {
+			return nil, errors.New("claude returned unexpected output format")
+		}
+		return envelope.StructuredOutput, nil
+	case "codex":
+		bin := "codex"
+		if resolved := resolveAgentBin("codex", cwd); resolved != "" {
+			bin = resolved
+		}
+		lastMessage, err := os.CreateTemp("", "burrow-codex-text-*.json")
+		if err != nil {
+			return nil, err
+		}
+		path := lastMessage.Name()
+		lastMessage.Close()
+		defer os.Remove(path)
+		args := []string{"exec", "--skip-git-repo-check", "--output-last-message", path}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
+		args = append(args, prompt)
+		c := exec.CommandContext(ctx, bin, args...)
+		c.Dir = cwd
+		if out, err := c.CombinedOutput(); err != nil {
+			return nil, errors.New(strings.TrimSpace(string(out)))
+		}
+		out, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
+	case "gemini":
+		bin := "gemini"
+		if resolved := resolveAgentBin("gemini", cwd); resolved != "" {
+			bin = resolved
+		}
+		args := []string{"--prompt", prompt, "--output-format", "json"}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
+		c := exec.CommandContext(ctx, bin, args...)
+		c.Dir = cwd
+		out, err := c.Output()
+		if err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				return nil, errors.New(strings.TrimSpace(string(ee.Stderr)))
+			}
+			return nil, err
+		}
+		return extractGeneratedJSON(out)
+	case "opencode":
+		bin := "opencode"
+		if resolved := resolveAgentBin("opencode", cwd); resolved != "" {
+			bin = resolved
+		}
+		args := []string{"run"}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
+		args = append(args, prompt)
+		c := exec.CommandContext(ctx, bin, args...)
+		c.Dir = cwd
+		out, err := c.CombinedOutput()
+		if err != nil {
+			return nil, errors.New(strings.TrimSpace(string(out)))
+		}
+		return extractGeneratedJSON(out)
+	default:
+		return nil, errors.New("selected provider does not support background text generation")
+	}
+}
+
+// extractGeneratedJSON accepts the direct JSON requested in the prompt and
+// Gemini's JSON envelope, whose response field contains the final text.
+func extractGeneratedJSON(out []byte) ([]byte, error) {
+	trimmed := bytes.TrimSpace(out)
+	if json.Valid(trimmed) {
+		var envelope struct {
+			Response string `json:"response"`
+		}
+		if json.Unmarshal(trimmed, &envelope) == nil && envelope.Response != "" {
+			trimmed = []byte(envelope.Response)
+		} else {
+			return trimmed, nil
+		}
+	}
+	start, end := bytes.IndexByte(trimmed, '{'), bytes.LastIndexByte(trimmed, '}')
+	if start >= 0 && end > start {
+		candidate := trimmed[start : end+1]
+		if json.Valid(candidate) {
+			return candidate, nil
+		}
+	}
+	return nil, errors.New("provider did not return the requested JSON object")
+}
+
+func parseTextGenerationSelection(selection string) (provider, model string) {
+	parts := strings.Split(selection, "::")
+	if len(parts) >= 3 {
+		return parts[1], strings.Join(parts[2:], "::")
+	}
+	if len(parts) == 2 && (parts[0] == "claude" || parts[0] == "codex") {
+		return parts[0], parts[1]
+	}
+	return "claude", selection
 }
 
 // sanitizeCommitSubject mirrors t3code's TextGenerationUtils.sanitizeCommitSubject.
@@ -220,33 +344,20 @@ func (a *App) GenerateChatTitle(cwd string, model string, text string) string {
 		text,
 	}, "\n")
 
-	bin := "claude"
-	if resolved := resolveAgentBin("claude", cwd); resolved != "" {
-		bin = resolved
-	}
-	args := []string{"-p", "--output-format", "json", "--json-schema", chatTitleSchema}
-	if model != "" {
-		args = append(args, "--model", model)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	c := exec.CommandContext(ctx, bin, args...)
-	c.Dir = cwd
-	c.Stdin = strings.NewReader(prompt)
-	stdout, err := c.Output()
+	jsonOutput, err := generateTextJSONContext(ctx, cwd, model, prompt, chatTitleSchema)
 	if err != nil {
 		return ""
 	}
 
-	var envelope struct {
-		StructuredOutput struct {
-			Title string `json:"title"`
-		} `json:"structured_output"`
+	var result struct {
+		Title string `json:"title"`
 	}
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
+	if err := json.Unmarshal(jsonOutput, &result); err != nil {
 		return ""
 	}
-	return sanitizeChatTitle(envelope.StructuredOutput.Title)
+	return sanitizeChatTitle(result.Title)
 }
 
 // sanitizeChatTitle trims the model's answer to one short line. Empty in, empty

@@ -63,6 +63,32 @@ const STONKS_BG =
   ) +
   "\")";
 
+
+// Daylight edition of the Stonks wallpaper, for its light variant: same tiled
+// emoji + hype text, dark ink on a pale pink sky.
+const STONKS_LIGHT_BG =
+  "url(\"data:image/svg+xml," +
+  encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='340' height='240'>
+      <defs>
+        <linearGradient id='gl' x1='0' y1='0' x2='1' y2='1'>
+          <stop offset='0' stop-color='#fff2f9'/>
+          <stop offset='1' stop-color='#ffe6f4'/>
+        </linearGradient>
+      </defs>
+      <rect width='340' height='240' fill='url(#gl)'/>
+      <text x='14' y='52' font-size='40' opacity='0.16'>🚀</text>
+      <text x='250' y='44' font-size='40' opacity='0.16'>💎</text>
+      <text x='150' y='150' font-size='44' opacity='0.16'>🐕</text>
+      <text x='40' y='200' font-size='40' opacity='0.16'>🔥</text>
+      <text x='270' y='210' font-size='40' opacity='0.16'>💸</text>
+      <text x='80' y='110' font-family='Impact, sans-serif' font-size='26' fill='#0f8f2a' opacity='0.16' transform='rotate(-12 80 110)'>STONKS</text>
+      <text x='180' y='90' font-family='Impact, sans-serif' font-size='20' fill='#d1006b' opacity='0.16' transform='rotate(8 180 90)'>MUCH WOW</text>
+      <text x='30' y='230' font-family='Impact, sans-serif' font-size='18' fill='#0090a8' opacity='0.16'>TO THE MOON</text>
+    </svg>`,
+  ) +
+  "\")";
+
 export const THEMES: Theme[] = [
   {
     key: "dark",
@@ -691,10 +717,513 @@ export const THEMES: Theme[] = [
     },
     shiki: "github-dark",
   },
+  // ---------------------------------------------------------------------------
+  // Counterpart variants. Every entry below exists so a THEME_FAMILY (see below)
+  // can offer both a light and a dark side — they are not standalone designs,
+  // they are the missing half of an existing theme.
+  // ---------------------------------------------------------------------------
+  {
+    key: "ps-gray-dark",
+    label: "Photoshop Gray Dark",
+    isDark: true,
+    // Photoshop CS6+ dark chrome: the same neutral grays, inverted.
+    vars: {
+      "bg-base": "#1e1e1e",
+      "bg-panel": "#2b2b2b",
+      "bg-hover": "#373737",
+      "bg-selected": "#1f4f8f",
+      border: "#3f3f3f",
+      "text-primary": "#e8e8e8",
+      "text-secondary": "#b4b4b4",
+      "text-muted": "#828282",
+      accent: "#4a90d9",
+      "accent-dim": "#2f6fb3",
+      green: "#5bb75b",
+      yellow: "#d9a13a",
+      red: "#d95c5c",
+    },
+    xterm: {
+      background: "#1e1e1e",
+      foreground: "#e8e8e8",
+      cursor: "#4a90d9",
+      cursorAccent: "#1e1e1e",
+      selectionBackground: "#1f4f8f",
+      black: "#2b2b2b",
+      red: "#d95c5c",
+      green: "#5bb75b",
+      yellow: "#d9a13a",
+      blue: "#4a90d9",
+      magenta: "#a97bc4",
+      cyan: "#4aacb8",
+      white: "#c8c8c8",
+      brightBlack: "#828282",
+      brightRed: "#e87878",
+      brightGreen: "#79c979",
+      brightYellow: "#e8b657",
+      brightBlue: "#6fa8e6",
+      brightMagenta: "#c095d6",
+      brightCyan: "#6bc3cd",
+      brightWhite: "#f2f2f2",
+    },
+    shiki: "github-dark",
+  },
+  {
+    key: "monokai-light",
+    label: "Monokai Light",
+    isDark: false,
+    // Monokai's hues (pink/green/orange/violet) on the warm off-white paper the
+    // Monokai Pro Light variants use.
+    vars: {
+      "bg-base": "#fdfcf6",
+      "bg-panel": "#f5f3ea",
+      "bg-hover": "#eae7da",
+      "bg-selected": "#ded9c6",
+      border: "#dcd7c6",
+      "text-primary": "#2c2a25",
+      "text-secondary": "#5b574c",
+      "text-muted": "#8b8577",
+      accent: "#d5187c",
+      "accent-dim": "#a81161",
+      green: "#5c9c14",
+      yellow: "#b58900",
+      red: "#d7301f",
+    },
+    xterm: {
+      background: "#fdfcf6",
+      foreground: "#2c2a25",
+      cursor: "#d5187c",
+      cursorAccent: "#fdfcf6",
+      selectionBackground: "#ded9c6",
+      black: "#2c2a25",
+      red: "#d7301f",
+      green: "#5c9c14",
+      yellow: "#b58900",
+      blue: "#2b7fbd",
+      magenta: "#8c53c6",
+      cyan: "#0f8f96",
+      white: "#8b8577",
+      brightBlack: "#6b6659",
+      brightRed: "#ef4b39",
+      brightGreen: "#74b52a",
+      brightYellow: "#d3a017",
+      brightBlue: "#4a9bd6",
+      brightMagenta: "#a570dd",
+      brightCyan: "#26a8af",
+      brightWhite: "#1b1a16",
+    },
+    shiki: "github-light",
+  },
+  {
+    key: "cobalt2-light",
+    label: "Cobalt2 Light",
+    isDark: false,
+    // Cobalt2's signature orange/yellow on a pale blue-tinted paper.
+    vars: {
+      "bg-base": "#f7fbff",
+      "bg-panel": "#e9f2fb",
+      "bg-hover": "#dae8f6",
+      "bg-selected": "#bcd9f2",
+      border: "#c5daee",
+      "text-primary": "#0b2b45",
+      "text-secondary": "#345a7a",
+      "text-muted": "#6b89a3",
+      accent: "#e6841a",
+      "accent-dim": "#b8620c",
+      green: "#2f8f4e",
+      yellow: "#c08b00",
+      red: "#d33a2c",
+    },
+    xterm: {
+      background: "#f7fbff",
+      foreground: "#0b2b45",
+      cursor: "#e6841a",
+      cursorAccent: "#f7fbff",
+      selectionBackground: "#bcd9f2",
+      black: "#0b2b45",
+      red: "#d33a2c",
+      green: "#2f8f4e",
+      yellow: "#c08b00",
+      blue: "#1266b3",
+      magenta: "#9a4bb8",
+      cyan: "#0f8b9e",
+      white: "#6b89a3",
+      brightBlack: "#4c6c88",
+      brightRed: "#e8574a",
+      brightGreen: "#43a862",
+      brightYellow: "#dda413",
+      brightBlue: "#2f86d4",
+      brightMagenta: "#b268cd",
+      brightCyan: "#25a4b6",
+      brightWhite: "#04203a",
+    },
+    shiki: "github-light",
+  },
+  {
+    key: "solarized-dark",
+    label: "Solarized Dark",
+    isDark: true,
+    // Ethan Schoonover's canonical base03 palette.
+    vars: {
+      "bg-base": "#002b36",
+      "bg-panel": "#073642",
+      "bg-hover": "#0c4855",
+      "bg-selected": "#125666",
+      border: "#0e4a58",
+      "text-primary": "#eee8d5",
+      "text-secondary": "#93a1a1",
+      "text-muted": "#657b83",
+      accent: "#268bd2",
+      "accent-dim": "#1d6fa8",
+      green: "#859900",
+      yellow: "#b58900",
+      red: "#dc322f",
+    },
+    xterm: {
+      background: "#002b36",
+      foreground: "#eee8d5",
+      cursor: "#268bd2",
+      cursorAccent: "#002b36",
+      selectionBackground: "#125666",
+      black: "#073642",
+      red: "#dc322f",
+      green: "#859900",
+      yellow: "#b58900",
+      blue: "#268bd2",
+      magenta: "#d33682",
+      cyan: "#2aa198",
+      white: "#eee8d5",
+      brightBlack: "#586e75",
+      brightRed: "#cb4b16",
+      brightGreen: "#93a1a1",
+      brightYellow: "#657b83",
+      brightBlue: "#839496",
+      brightMagenta: "#6c71c4",
+      brightCyan: "#93a1a1",
+      brightWhite: "#fdf6e3",
+    },
+    shiki: "solarized-dark",
+  },
+  {
+    key: "alucard",
+    label: "Alucard (Dracula Light)",
+    isDark: false,
+    // Dracula's official light counterpart: the same accents on warm cream.
+    vars: {
+      "bg-base": "#fffbeb",
+      "bg-panel": "#f5f1de",
+      "bg-hover": "#ebe6d0",
+      "bg-selected": "#dcd7bf",
+      border: "#e0dac2",
+      "text-primary": "#1f1f1f",
+      "text-secondary": "#4c4f5a",
+      "text-muted": "#7b7f8b",
+      accent: "#a34d9c",
+      "accent-dim": "#7f3b7a",
+      green: "#14710a",
+      yellow: "#a3701a",
+      red: "#cb3a2a",
+    },
+    xterm: {
+      background: "#fffbeb",
+      foreground: "#1f1f1f",
+      cursor: "#a34d9c",
+      cursorAccent: "#fffbeb",
+      selectionBackground: "#dcd7bf",
+      black: "#1f1f1f",
+      red: "#cb3a2a",
+      green: "#14710a",
+      yellow: "#a3701a",
+      blue: "#0552a8",
+      magenta: "#a34d9c",
+      cyan: "#036a96",
+      white: "#7b7f8b",
+      brightBlack: "#5c606b",
+      brightRed: "#e05a48",
+      brightGreen: "#2b8c1f",
+      brightYellow: "#c08a2b",
+      brightBlue: "#2a72c4",
+      brightMagenta: "#bd68b6",
+      brightCyan: "#1b87b3",
+      brightWhite: "#0d0d0d",
+    },
+    shiki: "github-light",
+  },
+  {
+    key: "tokyo-night-light",
+    label: "Tokyo Night Light",
+    isDark: false,
+    // The upstream "Tokyo Night Light" variant: #d5d6db paper, #343b58 ink.
+    vars: {
+      "bg-base": "#e1e2e7",
+      "bg-panel": "#d5d6db",
+      "bg-hover": "#c8c9ce",
+      "bg-selected": "#b7c1e3",
+      border: "#c4c8da",
+      "text-primary": "#343b58",
+      "text-secondary": "#4c505e",
+      "text-muted": "#787c99",
+      accent: "#34548a",
+      "accent-dim": "#2a4372",
+      green: "#385f0d",
+      yellow: "#8f5e15",
+      red: "#8c4351",
+    },
+    xterm: {
+      background: "#e1e2e7",
+      foreground: "#343b58",
+      cursor: "#34548a",
+      cursorAccent: "#e1e2e7",
+      selectionBackground: "#b7c1e3",
+      black: "#343b58",
+      red: "#8c4351",
+      green: "#385f0d",
+      yellow: "#8f5e15",
+      blue: "#34548a",
+      magenta: "#5a3e8e",
+      cyan: "#0f4b6e",
+      white: "#787c99",
+      brightBlack: "#5a5f75",
+      brightRed: "#a4535f",
+      brightGreen: "#4d7a1d",
+      brightYellow: "#ab7723",
+      brightBlue: "#466aa8",
+      brightMagenta: "#7256ab",
+      brightCyan: "#1d6a91",
+      brightWhite: "#252838",
+    },
+    shiki: "github-light",
+  },
+  {
+    key: "caffeine-light",
+    label: "Caffeine Light",
+    isDark: false,
+    // Latte, not espresso: the same roasted browns on steamed-milk paper.
+    vars: {
+      "bg-base": "#faf4ec",
+      "bg-panel": "#f1e7d9",
+      "bg-hover": "#e6d8c5",
+      "bg-selected": "#dcc7ab",
+      border: "#dfd0bb",
+      "text-primary": "#33261a",
+      "text-secondary": "#5e4a37",
+      "text-muted": "#8b7460",
+      accent: "#a2561d",
+      "accent-dim": "#7d4114",
+      green: "#5b7d16",
+      yellow: "#a5791b",
+      red: "#b2402b",
+    },
+    xterm: {
+      background: "#faf4ec",
+      foreground: "#33261a",
+      cursor: "#a2561d",
+      cursorAccent: "#faf4ec",
+      selectionBackground: "#dcc7ab",
+      black: "#33261a",
+      red: "#b2402b",
+      green: "#5b7d16",
+      yellow: "#a5791b",
+      blue: "#3d6a95",
+      magenta: "#8a4c86",
+      cyan: "#2c7f80",
+      white: "#8b7460",
+      brightBlack: "#6b5643",
+      brightRed: "#c85a41",
+      brightGreen: "#729a28",
+      brightYellow: "#bf922f",
+      brightBlue: "#5484ad",
+      brightMagenta: "#a4649f",
+      brightCyan: "#3f9899",
+      brightWhite: "#241a11",
+    },
+    shiki: "github-light",
+  },
+  {
+    key: "stonks-light",
+    label: "Stonks ☀️ (meme)",
+    isDark: false,
+    // Same meme wallpaper, daylight edition: neon on paper. Still crazy.
+    vars: {
+      "bg-base": "#fff6fb",
+      "bg-panel": "#ffe9f5",
+      "bg-hover": "#ffd9ee",
+      "bg-selected": "#ffc2e3",
+      border: "#f6c8e2",
+      "text-primary": "#2a0a1c",
+      "text-secondary": "#6b2049",
+      "text-muted": "#a1668a",
+      accent: "#d1006b",
+      "accent-dim": "#a30053",
+      green: "#0f8f2a",
+      yellow: "#b57c00",
+      red: "#d81b2f",
+    },
+    xterm: {
+      background: "#fff6fb",
+      foreground: "#2a0a1c",
+      cursor: "#d1006b",
+      cursorAccent: "#fff6fb",
+      selectionBackground: "#ffc2e3",
+      black: "#2a0a1c",
+      red: "#d81b2f",
+      green: "#0f8f2a",
+      yellow: "#b57c00",
+      blue: "#0f6fd1",
+      magenta: "#d1006b",
+      cyan: "#0090a8",
+      white: "#a1668a",
+      brightBlack: "#7c3f63",
+      brightRed: "#f0405a",
+      brightGreen: "#2eab48",
+      brightYellow: "#d29a16",
+      brightBlue: "#3a8ee0",
+      brightMagenta: "#ec2f8f",
+      brightCyan: "#16adc4",
+      brightWhite: "#1b0512",
+    },
+    shiki: "github-light",
+    bgImage: STONKS_LIGHT_BG,
+  },
+  {
+    key: "lime-glow",
+    label: "Lime Glow 🟢",
+    isDark: false,
+    // The lime accent kept, the void swapped for daylight.
+    vars: {
+      "bg-base": "#f7fdf4",
+      "bg-panel": "#ecf8e6",
+      "bg-hover": "#ddf0d3",
+      "bg-selected": "#c7e6b7",
+      border: "#d3e9c8",
+      "text-primary": "#12240c",
+      "text-secondary": "#3a5230",
+      "text-muted": "#6d855f",
+      accent: "#3f8f0c",
+      "accent-dim": "#2f6d09",
+      green: "#2f8f2a",
+      yellow: "#9c8309",
+      red: "#c0392b",
+    },
+    xterm: {
+      background: "#f7fdf4",
+      foreground: "#12240c",
+      cursor: "#3f8f0c",
+      cursorAccent: "#f7fdf4",
+      selectionBackground: "#c7e6b7",
+      black: "#12240c",
+      red: "#c0392b",
+      green: "#2f8f2a",
+      yellow: "#9c8309",
+      blue: "#2e6fa8",
+      magenta: "#8a4a9c",
+      cyan: "#1f8285",
+      white: "#6d855f",
+      brightBlack: "#4d6541",
+      brightRed: "#d8503f",
+      brightGreen: "#46a83f",
+      brightYellow: "#b89b1c",
+      brightBlue: "#4587c0",
+      brightMagenta: "#a463b5",
+      brightCyan: "#33999c",
+      brightWhite: "#091905",
+    },
+    shiki: "github-light",
+  },
+  {
+    key: "nebula-light",
+    label: "Nebula Light",
+    isDark: false,
+    // Daytime nebula: the violet/cyan accents over a cool lilac-white sky.
+    vars: {
+      "bg-base": "#faf8ff",
+      "bg-panel": "#f0ecfb",
+      "bg-hover": "#e4ddf6",
+      "bg-selected": "#d2c6ef",
+      border: "#ded6f2",
+      "text-primary": "#1b1630",
+      "text-secondary": "#463c68",
+      "text-muted": "#776d95",
+      accent: "#6d3ecb",
+      "accent-dim": "#5229a5",
+      green: "#0f8a63",
+      yellow: "#a37a10",
+      red: "#cb3355",
+    },
+    xterm: {
+      background: "#faf8ff",
+      foreground: "#1b1630",
+      cursor: "#6d3ecb",
+      cursorAccent: "#faf8ff",
+      selectionBackground: "#d2c6ef",
+      black: "#1b1630",
+      red: "#cb3355",
+      green: "#0f8a63",
+      yellow: "#a37a10",
+      blue: "#3a5ecb",
+      magenta: "#6d3ecb",
+      cyan: "#10829b",
+      white: "#776d95",
+      brightBlack: "#564c78",
+      brightRed: "#e14e6e",
+      brightGreen: "#28a37c",
+      brightYellow: "#bf9524",
+      brightBlue: "#5878e0",
+      brightMagenta: "#8a5ee0",
+      brightCyan: "#26a0ba",
+      brightWhite: "#100c20",
+    },
+    shiki: "github-light",
+  },
 ];
 
 export const DEFAULT_THEME_KEY = "dark";
 
 export function findTheme(key: string): Theme {
   return THEMES.find((t) => t.key === key) ?? THEMES[0];
+}
+
+// A theme FAMILY is a light/dark pair of the variants above — what the user
+// picks in Settings. The app never applies a family directly: the color-scheme
+// mode (system/light/dark) chooses which half of the pair is live, so one pick
+// covers both schemes and switching mode never lands on an unrelated theme.
+export interface ThemeFamily {
+  key: string;
+  label: string;
+  light: string; // variant key applied when the scheme resolves to light
+  dark: string; //  variant key applied when the scheme resolves to dark
+}
+
+export const THEME_FAMILIES: ThemeFamily[] = [
+  { key: "burrow", label: "Burrow", light: "light", dark: "dark" },
+  { key: "ps-gray", label: "Photoshop Gray", light: "ps-gray", dark: "ps-gray-dark" },
+  { key: "monokai", label: "Monokai", light: "monokai-light", dark: "monokai" },
+  { key: "cobalt2", label: "Cobalt2", light: "cobalt2-light", dark: "cobalt2" },
+  { key: "solarized", label: "Solarized", light: "solarized-light", dark: "solarized-dark" },
+  { key: "dracula", label: "Dracula", light: "alucard", dark: "dracula" },
+  { key: "tokyo-night", label: "Tokyo Night", light: "tokyo-night-light", dark: "tokyo-night" },
+  { key: "caffeine", label: "Caffeine", light: "caffeine-light", dark: "caffeine" },
+  { key: "tide", label: "Tide", light: "tide-light", dark: "tide" },
+  { key: "nebula", label: "Nebula", light: "nebula-light", dark: "nebula" },
+  { key: "lime-void", label: "Lime Void 🟢", light: "lime-glow", dark: "lime-void" },
+  { key: "stonks", label: "Stonks 🚀 (meme)", light: "stonks-light", dark: "stonks" },
+];
+
+export const DEFAULT_FAMILY_KEY = "burrow";
+
+export function findFamily(key: string): ThemeFamily {
+  return THEME_FAMILIES.find((f) => f.key === key) ?? THEME_FAMILIES[0];
+}
+
+// Which family a variant key belongs to — used to highlight the right card and
+// to migrate installs that stored a bare variant key as their theme pick.
+export function familyOf(variantKey: string): ThemeFamily {
+  return (
+    THEME_FAMILIES.find((f) => f.light === variantKey || f.dark === variantKey) ??
+    THEME_FAMILIES[0]
+  );
+}
+
+// The variant of `family` for a resolved scheme.
+export function variantFor(family: ThemeFamily, scheme: "light" | "dark"): Theme {
+  return findTheme(scheme === "dark" ? family.dark : family.light);
 }

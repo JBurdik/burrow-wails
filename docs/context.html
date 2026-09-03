@@ -244,7 +244,7 @@
       <tr><td>src/components/ProvidersPanel.vue</td><td>Settings → Providers: instance rail (version / installed / enable toggle) + Configuration|Models detail and an Advanced block</td></tr>
       <tr><td>src/stores/ui.ts</td><td>Pinia: settings open, font/scale prefs, <strong>color theme</strong>, <strong>notification-sound prefs</strong> — localStorage, applies theme CSS vars to <code>:root</code>, exposes <code>activeTheme</code></td></tr>
       <tr><td>src/lib/sounds.ts</td><td>Notification-sound registry + <code>playSound(kind)</code>: bundled clips in <code>src/assets/sounds/</code>, custom file read via <code>read_file_base64</code> → Blob URL. Fired from <code>Terminal.vue</code> on review (done-while-away) + waiting states</td></tr>
-      <tr><td>src/themes.ts</td><td>Theme registry: Dark (default), Light, Monokai, Cobalt2 — each has chrome CSS vars + xterm palette + shiki name. Picked in Settings → Appearance</td></tr>
+      <tr><td>src/themes.ts</td><td>Theme registry: 24 variants (chrome CSS vars + xterm palette + shiki name each), grouped into 12 <strong>families</strong> (<code>THEME_FAMILIES</code>) — a light/dark pair like Burrow, Solarized, Dracula. Settings → Appearance assigns a family per scheme (sun/moon) or to both; the color-scheme mode (system/light/dark) picks which half is live</td></tr>
       <tr><td>src/stores/terminal.ts</td><td>Pinia: terminal tab state</td></tr>
       <tr><td>src/stores/fileTree.ts</td><td>Pinia: file tree for explorer panel</td></tr>
       <tr><td>src/stores/git.ts</td><td>Pinia: git status, branch, stage/unstage, diff, git init</td></tr>

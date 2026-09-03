@@ -88,6 +88,22 @@ export function modelLabel(agentId: string, modelId: string): string {
   return modelsFor(agentId).find((m) => m.id === modelId)?.label ?? modelId ?? "Default";
 }
 
+// Text-generation preferences predate provider instances and stored just a
+// Claude model id.  Keep accepting that format, but persist new choices with
+// their runtime so a Codex model can never accidentally be passed to Claude.
+const TEXT_GENERATION_SEPARATOR = "::";
+
+export function textGenerationValue(kind: string, providerId: string, modelId: string): string {
+  return `${kind}${TEXT_GENERATION_SEPARATOR}${providerId}${TEXT_GENERATION_SEPARATOR}${modelId}`;
+}
+
+export function parseTextGenerationValue(value: string): { kind: string; providerId: string; modelId: string } {
+  const parts = value.split(TEXT_GENERATION_SEPARATOR);
+  if (parts.length >= 3) return { kind: parts[0], providerId: parts[1], modelId: parts.slice(2).join(TEXT_GENERATION_SEPARATOR) };
+  if (parts.length === 2) return { kind: parts[0], providerId: parts[0], modelId: parts[1] };
+  return { kind: "claude", providerId: "claude", modelId: value }; // saved legacy preference
+}
+
 // --- Favourites -------------------------------------------------------------
 // Flat ordered list of "<agentId>/<modelId>" keys; order drives the ⌘1-9 hints.
 const FAV_KEY = "chatFavoriteModels";

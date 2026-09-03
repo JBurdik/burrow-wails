@@ -1,7 +1,16 @@
 import { ref, computed, watch } from "vue";
 import { defineStore } from "pinia";
 import { invoke } from "@tauri-apps/api/core";
-import { THEMES, DEFAULT_THEME_KEY, findTheme } from "@/themes";
+import {
+  THEMES,
+  THEME_FAMILIES,
+  DEFAULT_THEME_KEY,
+  DEFAULT_FAMILY_KEY,
+  findTheme,
+  findFamily,
+  familyOf,
+  variantFor,
+} from "@/themes";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -48,8 +57,11 @@ interface Prefs {
   swapPanels: boolean;
   rightPanelVisible: boolean;
   theme: string;
-  themeMode: "system" | "light" | "dark"; // quick-switch mode; resolves to one of the themes below
-  preferredDarkTheme: string; // toggle target for "Toggle Dark/Light Mode"
+  themeMode: "system" | "light" | "dark"; // which half of the theme pair is live
+  // Theme FAMILY keys (see themes.ts). The live variant is the one this family
+  // provides for the resolved scheme, so "Toggle Dark/Light Mode" and "system"
+  // stay inside the user's chosen designs.
+  preferredDarkTheme: string;
   preferredLightTheme: string;
   soundEnabled: boolean;
   soundDoneEnabled: boolean;
@@ -134,8 +146,8 @@ const DEFAULT_PREFS: Prefs = {
   rightPanelVisible: true,
   theme: DEFAULT_THEME_KEY,
   themeMode: "dark",
-  preferredDarkTheme: "dark",
-  preferredLightTheme: "light",
+  preferredDarkTheme: DEFAULT_FAMILY_KEY,
+  preferredLightTheme: DEFAULT_FAMILY_KEY,
   soundEnabled: true,
   soundDoneEnabled: true,
   soundWaitingEnabled: true,
@@ -174,12 +186,21 @@ const DEFAULT_PREFS: Prefs = {
   toastPosition: "bottom-left",
   defaultChatAgent: "claude",
   spawnMode: "terminal",
-  commitMessageModel: "claude-haiku-4-5-20251001",
+  commitMessageModel: "claude::claude::claude-haiku-4-5-20251001",
 };
 
 function normalize(parsed: unknown): Prefs {
   if (parsed && typeof parsed === "object") {
     const stored = { ...DEFAULT_PREFS, ...(parsed as Partial<Prefs>) };
+    // Until provider-aware text generation landed this held a bare Claude
+    // model id. Keep existing preferences working and make them selectable.
+    if (!stored.commitMessageModel.includes("::")) {
+      stored.commitMessageModel = `claude::claude::${stored.commitMessageModel}`;
+    } else if (stored.commitMessageModel.split("::").length === 2) {
+      // Short-lived first provider-aware format: kind::model.
+      const [kind, model] = stored.commitMessageModel.split("::");
+      stored.commitMessageModel = `${kind}::${kind}::${model}`;
+    }
     // Migrate installs saved below the current default up to it.
     if (stored.uiFontSize < DEFAULT_PREFS.uiFontSize) stored.uiFontSize = DEFAULT_PREFS.uiFontSize;
     // Installs saved before themeMode existed: infer it from their theme
@@ -187,6 +208,15 @@ function normalize(parsed: unknown): Prefs {
     if (!(parsed as Partial<Prefs>).themeMode) {
       stored.themeMode = findTheme(stored.theme).isDark ? "dark" : "light";
     }
+    // The preferred-theme slots used to hold single variant keys ("tide-light");
+    // they now hold family keys ("tide"). Map anything that isn't a known family
+    // through familyOf, so an upgrade keeps the user's design on both sides.
+    const toFamily = (k: string, fallback: string) =>
+      THEME_FAMILIES.some((f) => f.key === k)
+        ? k
+        : (THEMES.some((t) => t.key === k) ? familyOf(k).key : fallback);
+    stored.preferredDarkTheme = toFamily(stored.preferredDarkTheme, DEFAULT_FAMILY_KEY);
+    stored.preferredLightTheme = toFamily(stored.preferredLightTheme, DEFAULT_FAMILY_KEY);
     return stored;
   }
   return { ...DEFAULT_PREFS };
@@ -254,7 +284,7 @@ export const useUIStore = defineStore("ui", () => {
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "bottom-left");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
-  const commitMessageModel = ref<string>(loaded.commitMessageModel ?? "claude-haiku-4-5-20251001");
+  const commitMessageModel = ref<string>(loaded.commitMessageModel ?? "claude::claude::claude-haiku-4-5-20251001");
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
 
@@ -272,9 +302,10 @@ export const useUIStore = defineStore("ui", () => {
     themeMode.value = p.themeMode;
     preferredDarkTheme.value = p.preferredDarkTheme;
     preferredLightTheme.value = p.preferredLightTheme;
-    // "system" mode's applied theme depends on the OS setting at load time,
-    // not just whatever was last persisted — resolve it fresh.
-    if (themeMode.value === "system") resolveThemeMode();
+    // The live variant always follows (family × scheme), and "system" depends on
+    // the OS setting at load time — so resolve it fresh rather than trusting the
+    // persisted `theme`.
+    resolveThemeMode();
     soundEnabled.value = p.soundEnabled;
     soundDoneEnabled.value = p.soundDoneEnabled;
     soundWaitingEnabled.value = p.soundWaitingEnabled;
@@ -313,7 +344,7 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition.value = p.toastPosition ?? "bottom-left";
     defaultChatAgent.value = p.defaultChatAgent ?? "claude";
     spawnMode.value = p.spawnMode ?? "terminal";
-    commitMessageModel.value = p.commitMessageModel ?? "claude-haiku-4-5-20251001";
+    commitMessageModel.value = p.commitMessageModel ?? "claude::claude::claude-haiku-4-5-20251001";
   });
 
   // Publish the soft sub-agent cap to a file the `burrow` CLI can read (it can't
@@ -540,32 +571,49 @@ export const useUIStore = defineStore("ui", () => {
     rightPanelVisible.value = !rightPanelVisible.value;
   }
 
-  function setTheme(key: string) {
-    theme.value = key;
-    // Remember the pick as the preferred theme for its mode, so the
-    // dark/light toggle and "system" mode return to it. Picking a concrete
-    // theme is an explicit choice, so it also settles themeMode off "system".
-    if (findTheme(key).isDark) {
-      preferredDarkTheme.value = key;
-      themeMode.value = "dark";
-    } else {
-      preferredLightTheme.value = key;
-      themeMode.value = "light";
-    }
+  // The scheme currently in force: "system" asks the OS, the other modes are
+  // themselves.
+  const resolvedScheme = computed<"light" | "dark">(() => {
+    if (themeMode.value !== "system") return themeMode.value;
+    return (window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true) ? "dark" : "light";
+  });
+
+  // The families assigned to each scheme, and the one that is live now.
+  const lightFamily = computed(() => findFamily(preferredLightTheme.value));
+  const darkFamily = computed(() => findFamily(preferredDarkTheme.value));
+  const activeFamily = computed(() =>
+    resolvedScheme.value === "dark" ? darkFamily.value : lightFamily.value,
+  );
+
+  // Assign a family to one scheme (Settings' sun/moon buttons). Assigning to the
+  // scheme that is live repaints immediately; the other side waits its turn.
+  function setThemeFamilyFor(scheme: "light" | "dark", familyKey: string) {
+    const key = findFamily(familyKey).key;
+    if (scheme === "dark") preferredDarkTheme.value = key;
+    else preferredLightTheme.value = key;
+    resolveThemeMode();
   }
 
-  // Resolve the active theme from themeMode: "system" follows the OS setting
-  // (falling back to the preferred dark/light theme), "dark"/"light" just
-  // apply their preferred theme directly.
+  // Use one family for both schemes (t3code's "use for both light and dark").
+  function setThemeFamily(familyKey: string) {
+    const key = findFamily(familyKey).key;
+    preferredLightTheme.value = key;
+    preferredDarkTheme.value = key;
+    resolveThemeMode();
+  }
+
+  // Picking a concrete VARIANT (Onboarding, Spotlight): adopt its family for the
+  // scheme that variant belongs to, and settle themeMode there so it shows now.
+  function setTheme(key: string) {
+    const scheme = findTheme(key).isDark ? "dark" : "light";
+    setThemeFamilyFor(scheme, familyOf(key).key);
+    themeMode.value = scheme;
+    resolveThemeMode();
+  }
+
+  // Apply the live family's variant for the resolved scheme.
   function resolveThemeMode() {
-    if (themeMode.value === "system") {
-      const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
-      theme.value = prefersDark ? preferredDarkTheme.value : preferredLightTheme.value;
-    } else if (themeMode.value === "dark") {
-      theme.value = preferredDarkTheme.value;
-    } else {
-      theme.value = preferredLightTheme.value;
-    }
+    theme.value = variantFor(activeFamily.value, resolvedScheme.value).key;
   }
 
   function setThemeMode(mode: "system" | "light" | "dark") {
@@ -580,11 +628,10 @@ export const useUIStore = defineStore("ui", () => {
     });
   }
 
-  // Spotlight "Toggle Dark/Light Mode": jump to the preferred theme of the
-  // other mode. Doesn't rewrite the preferences — only setTheme (an explicit
-  // pick) does.
+  // Spotlight "Toggle Dark/Light Mode": flip the scheme; the theme follows from
+  // whichever family that scheme is assigned. Doesn't rewrite the assignments.
   function toggleDarkLight() {
-    setThemeMode(activeTheme.value.isDark ? "light" : "dark");
+    setThemeMode(resolvedScheme.value === "dark" ? "light" : "dark");
   }
 
   function setMode(m: "terminal" | "claude" | "dashboard") {
@@ -651,7 +698,14 @@ export const useUIStore = defineStore("ui", () => {
     setThemeMode,
     activeTheme,
     themes: THEMES,
+    families: THEME_FAMILIES,
+    resolvedScheme,
+    lightFamily,
+    darkFamily,
+    activeFamily,
     setTheme,
+    setThemeFamily,
+    setThemeFamilyFor,
     preferredDarkTheme,
     preferredLightTheme,
     toggleDarkLight,

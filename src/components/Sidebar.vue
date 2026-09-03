@@ -55,7 +55,7 @@
       <button v-if="activeRepo" class="flex shrink-0 items-center rounded-md border border-border/65 p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-foreground active:scale-90" title="New worktree" @click="openWtDialog(activeRepo)"><PhGitBranch :size="13" /></button>
     </div>
 
-    <div class="flex-1 overflow-y-auto pb-2">
+    <div class="flex-1 overflow-y-auto pb-2" @scroll="cancelHoverCard">
       <!-- Live feed: every open project's tabs, newest activity first -->
       <div
         v-for="row in feed.live"
@@ -67,6 +67,8 @@
         ]"
         @click="selectTab(row)"
         @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+        @mouseenter="scheduleHoverCard(row, $event)"
+        @mouseleave="cancelHoverCard"
       >
         <span v-if="isActiveRow(row)" class="absolute inset-y-0 left-0 w-[2px] bg-accent" />
 
@@ -92,7 +94,14 @@
 
         <!-- line 2: thread title -->
         <div class="mt-[3px] flex items-center gap-1.5">
-          <PhChatCenteredText v-if="row.tab.isChat" :size="11" class="shrink-0 text-[#d97706]" />
+          <component
+            v-if="row.tab.agentIcon"
+            :is="agentIconComp(row.tab.agentIcon)"
+            :size="11"
+            class="shrink-0"
+            :class="[row.tab.isChat ? 'text-[#d97706]' : 'ws-term-icon-agent text-accent']"
+          />
+          <PhChatCenteredText v-else-if="row.tab.isChat" :size="11" class="shrink-0 text-[#d97706]" />
           <PhRobot v-else-if="row.tab.isAgent" :size="11" class="ws-term-icon-agent shrink-0 text-accent" />
           <PhTerminal v-else :size="11" class="shrink-0 text-muted-foreground" />
           <input
@@ -123,6 +132,7 @@
           <PhGitBranch v-if="row.ws.parent_id" :size="9" class="shrink-0 text-[#a78bfa]" />
           <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ branchOf(row.ws) }}</span>
           <span class="ml-auto flex shrink-0 items-center gap-1">
+            <span v-if="row.tab.model" class="rounded bg-white/[0.06] px-1 text-[9px] leading-[1.5] opacity-70" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
             <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-white/[0.08] px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
             <span v-if="row.tab.isAgent && (row.tab.round ?? 0) > 1" class="text-[9px] font-semibold opacity-70" :title="`${row.tab.round} messages sent this session`">↺{{ row.tab.round }}</span>
             <span
@@ -160,25 +170,31 @@
           <div
             v-for="row in settledChatsVisible"
             :key="rowKey(row)"
-            class="group flex cursor-pointer items-center gap-1.5 px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
+            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
             @click="selectTab(row)"
             @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
           >
-            <PhChatCenteredText :size="10" class="shrink-0" />
-            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
-            <span class="shrink-0 truncate max-w-[80px] text-[9.5px] opacity-70" :title="row.ws.name">{{ row.ws.name }}</span>
-            <span v-if="git.prByWs[row.ws.id]" class="shrink-0 font-mono text-[9px]">#{{ git.prByWs[row.ws.id]!.number }}</span>
-            <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
-            <span class="grid shrink-0 justify-items-end">
-              <span class="[grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
-              <button
-                class="invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
-                title="Move back to active"
-                @click.stop="toggleSettled(row.tab, row.ws.id)"
-              >
-                <PhArrowCounterClockwise :size="11" weight="bold" />
-              </button>
-            </span>
+            <div class="flex items-center gap-1.5">
+              <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : PhChatCenteredText" :size="10" class="shrink-0" />
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
+              <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
+              <span class="grid shrink-0 justify-items-end">
+                <span class="[grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
+                <button
+                  class="invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
+                  title="Move back to active"
+                  @click.stop="toggleSettled(row.tab, row.ws.id)"
+                >
+                  <PhArrowCounterClockwise :size="11" weight="bold" />
+                </button>
+              </span>
+            </div>
+            <div class="mt-[2px] flex items-center gap-1.5 pl-[15px]">
+              <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-2.5 w-2.5 shrink-0 rounded-[2px] object-cover" />
+              <PhFolder v-else :size="9" weight="fill" class="shrink-0 text-accent/80" />
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] opacity-70" :title="row.ws.name">{{ repoName(row.ws) }}</span>
+              <span v-if="git.prByWs[row.ws.id]" class="shrink-0 font-mono text-[9px]">#{{ git.prByWs[row.ws.id]!.number }}</span>
+            </div>
           </div>
           <button
             v-if="feed.settledChats.length > settledChatsLimit"
@@ -276,6 +292,59 @@
         No scripts. Add some in Settings → Scripts.
       </div>
     </div>
+    <!-- Row hover card: full thread details, shown after a short hover delay -->
+    <div
+      v-if="hoverRow"
+      class="pointer-events-none fixed z-[900] w-64 max-w-[calc(100vw-16px)] rounded-lg border border-border bg-panel p-2.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+      :style="hoverStyle"
+    >
+      <div class="mb-1.5 wrap-break-word text-[11px] font-semibold leading-[1.4] text-foreground">{{ hoverRow.tab.title }}</div>
+      <div class="grid gap-1 text-[10.5px] text-muted-foreground">
+        <div class="flex min-w-0 items-center gap-1.5">
+          <img v-if="repoIcon(hoverRow.ws)" :src="repoIcon(hoverRow.ws)!" class="h-3 w-3 shrink-0 rounded-[3px] object-cover" />
+          <PhFolder v-else :size="11" weight="fill" class="shrink-0 text-accent/80" />
+          <span class="min-w-0 truncate text-foreground/80">{{ repoName(hoverRow.ws) }}</span>
+        </div>
+        <div class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverRow.ws.path">{{ hoverRow.ws.path }}</div>
+        <div v-if="branchOf(hoverRow.ws)" class="flex min-w-0 items-center gap-1.5">
+          <PhGitBranch :size="11" class="shrink-0" />
+          <span class="min-w-0 truncate font-mono text-foreground/80">{{ branchOf(hoverRow.ws) }}</span>
+        </div>
+        <div v-if="hoverRow.tab.model" class="flex min-w-0 items-center gap-1.5">
+          <PhRobot :size="11" class="shrink-0" />
+          <span class="min-w-0 truncate text-foreground/80">{{ hoverRow.tab.model }}</span>
+        </div>
+        <div v-if="(hoverRow.tab.leafCount ?? 1) > 1" class="flex min-w-0 items-center gap-1.5">
+          <PhTerminal :size="11" class="shrink-0" />
+          <span class="truncate text-foreground/80">{{ hoverRow.tab.leafCount }} panes running</span>
+        </div>
+        <div v-if="hoverRow.tab.isAgent && (hoverRow.tab.round ?? 0) > 0" class="flex min-w-0 items-center gap-1.5">
+          <PhArrowCounterClockwise :size="11" class="shrink-0" />
+          <span class="truncate text-foreground/80">{{ hoverRow.tab.round }} {{ hoverRow.tab.round === 1 ? "turn" : "turns" }} sent</span>
+        </div>
+        <div class="flex min-w-0 items-center gap-1.5">
+          <span class="truncate">Last activity {{ ago(hoverRow.ts) }}</span>
+        </div>
+        <div v-if="hoverRow.tab.sessionId" class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverRow.tab.sessionId">{{ hoverRow.tab.sessionId }}</div>
+        <div
+          v-if="git.prByWs[hoverRow.ws.id]"
+          class="flex min-w-0 items-center gap-1.5"
+          :class="prClass(git.prByWs[hoverRow.ws.id]!)"
+        >
+          <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+          <span class="truncate">{{ prTitle(git.prByWs[hoverRow.ws.id]!) }}</span>
+        </div>
+        <div
+          v-if="hoverRow.tab.status && hoverRow.tab.status !== 'idle'"
+          class="flex min-w-0 items-center gap-1.5"
+          :class="statusClass(hoverRow.tab.status)"
+        >
+          <span class="status-dot" :class="`status-${hoverRow.tab.status}`" />
+          <span class="truncate">{{ attentionLabel(attentionState(hoverRow)) }}</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Row context menu -->
     <div
       v-if="rowMenu"
@@ -462,6 +531,7 @@ import { useTerminalTabsStore, type TabSummary } from "@/stores/terminalTabs";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useUIStore } from "@/stores/ui";
 import { spinnerFrame } from "@/lib/spinner";
+import { agentIconComp } from "@/lib/agentIcons";
 import {
   getAgentAttentionState,
   type AgentAttentionState,
@@ -473,6 +543,12 @@ import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorksp
 import { buildActivityRows, type ActivityRow } from "@/lib/sidebarGroups";
 import { toggleTabSettled } from "@/lib/settledTabs";
 import { getProjectSettings } from "@/lib/projectSettings";
+
+/** "claude-opus-4-8" → "opus-4-8"; drops the vendor prefix + date suffix so the
+ *  badge stays one short token. */
+function shortModel(id: string): string {
+  return id.replace(/^(claude|gpt|gemini)-/, "").replace(/-\d{8}$/, "");
+}
 
 import { useScriptsStore, type Script } from "@/stores/scripts";
 
@@ -571,6 +647,32 @@ function toggleSection(key: SectionKey) {
   collapsed.value = collapsed.value.includes(key)
     ? collapsed.value.filter((k) => k !== key)
     : [...collapsed.value, key];
+}
+
+// ── row hover card ───────────────────────────────────────────────────────────
+// Stolen from pingdotgg/t3code's SidebarThreadTooltip: a short delay before
+// showing (so a fast mouse pass doesn't flash it) but instant on leave.
+const HOVER_DELAY_MS = 150;
+const hoverRow = ref<ActivityRow | null>(null);
+const hoverStyle = ref<Record<string, string>>({});
+let hoverTimer: number | undefined;
+
+function scheduleHoverCard(row: ActivityRow, e: MouseEvent) {
+  cancelHoverCard();
+  const el = e.currentTarget as HTMLElement;
+  hoverTimer = window.setTimeout(() => {
+    const r = el.getBoundingClientRect();
+    hoverStyle.value = {
+      left: `${r.right + 6}px`,
+      top: `${Math.min(r.top, window.innerHeight - 160)}px`,
+    };
+    hoverRow.value = row;
+  }, HOVER_DELAY_MS);
+}
+function cancelHoverCard() {
+  if (hoverTimer) clearTimeout(hoverTimer);
+  hoverTimer = undefined;
+  hoverRow.value = null;
 }
 
 function rowKey(row: ActivityRow): string {
@@ -789,7 +891,7 @@ function mountSections() {
   for (const wt of store.worktreesByParent[parent] || []) store.ensureOpen(wt);
 }
 
-function onDocClick() { filterOpen.value = false; rowMenu.value = null; scriptsOpen.value = false; }
+function onDocClick() { filterOpen.value = false; rowMenu.value = null; scriptsOpen.value = false; cancelHoverCard(); }
 
 // ── scripts (bottom bar) ─────────────────────────────────────────────────────
 const scriptsOpen = ref(false);
@@ -837,6 +939,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (prTimer) clearInterval(prTimer);
   if (clock) clearInterval(clock);
+  if (hoverTimer) clearTimeout(hoverTimer);
   document.removeEventListener("click", onDocClick);
   document.removeEventListener("keydown", onKeydown);
 });

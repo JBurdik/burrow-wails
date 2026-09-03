@@ -363,13 +363,40 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		// input request) is no longer pending. Forward it so the UI does not
 		// optimistically clear the prompt before the app-server accepted it.
 		emit(map[string]any{"method": method, "params": params})
+	case "item/tool/requestUserInput":
+		// Unlike an approval this request has a structured answers response.  Keep
+		// it on the request channel so the dedicated Codex input panel can respond.
+		line, err := json.Marshal(msg)
+		if err == nil {
+			emitAll(a.ctx, "acp-req-"+chatID, string(line))
+		}
 	default:
 		if _, hasID := msg["id"]; hasID {
-			line, err := json.Marshal(msg)
-			if err == nil {
-				emitAll(a.ctx, "acp-req-"+chatID, string(line))
-			}
+			// A JSON-RPC server request is blocking.  Previously we forwarded every
+			// unknown request to the ACP permission UI, which only understands
+			// approvals.  Requests such as item/tool/call and requestUserInput were
+			// then ignored by the UI and Codex waited for a response forever.
+			// Explicitly reject unsupported request types so the turn can fail with a
+			// useful error instead of stranding an agent on a tool call.  The known
+			// approval requests still travel through acp-req above this default.
+			a.rejectUnsupportedCodexRequest(sess, msg, method)
 		}
+	}
+}
+
+// rejectUnsupportedCodexRequest completes a server-initiated JSON-RPC request
+// that Burrow cannot safely fulfill yet.  A response is mandatory: omitting it
+// leaves the Codex app-server blocked indefinitely.
+func (a *App) rejectUnsupportedCodexRequest(sess *acpSession, msg map[string]any, method string) {
+	if err := sess.write(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      msg["id"],
+		"error": map[string]any{
+			"code":    -32601,
+			"message": "Burrow does not support the blocking Codex request " + method,
+		},
+	}); err != nil {
+		return
 	}
 }
 
@@ -734,18 +761,18 @@ func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID 
 	}
 	configOptions := codexConfigOptions(entries)
 
-	// Codex only sends its approval RPCs to the client when the client is the
-	// reviewer.  Be explicit here instead of relying on a config default: an
-	// auto-reviewer can otherwise decide a request before the chat UI sees it.
+	// A fresh Codex thread starts in T3-style Auto: routine requests go through
+	// Codex's own risk-based reviewer, while risky ones still surface to the user.
+	// Other picker choices replace this with their explicit reviewer on update.
 	startParams := map[string]any{
-		"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "workspace-write",
+		"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
 	}
 	var resp map[string]any
 	if tid := strings.TrimSpace(resumeSessionID); tid != "" {
 		if err := sess.write(map[string]any{
 			"jsonrpc": "2.0", "id": next, "method": "thread/resume",
 			"params": map[string]any{
-				"threadId": tid, "cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "workspace-write",
+				"threadId": tid, "cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
 			},
 		}); err != nil {
 			return fail(err)
@@ -934,7 +961,7 @@ func (a *App) AcpSetMode(id, modeID string) (int64, error) {
 	}
 	rpc := sess.rpcID()
 	if sess.proto == protoCodexAppServer {
-		approvalPolicy, sandbox, ok := codexModeSettings(modeID)
+		approvalPolicy, sandbox, reviewer, ok := codexModeSettings(modeID)
 		if !ok {
 			return 0, fmt.Errorf("unsupported Codex permission mode %q", modeID)
 		}
@@ -946,7 +973,7 @@ func (a *App) AcpSetMode(id, modeID string) (int64, error) {
 			"jsonrpc": "2.0", "id": rpc, "method": "thread/settings/update",
 			"params": map[string]any{
 				"threadId": sess.sessionID, "approvalPolicy": approvalPolicy,
-				"approvalsReviewer": "user", "sandboxPolicy": map[string]any{"type": sandbox},
+				"approvalsReviewer": reviewer, "sandboxPolicy": map[string]any{"type": sandbox},
 			},
 		})
 	}
@@ -965,10 +992,11 @@ func codexModes() map[string]any {
 	return map[string]any{
 		"currentModeId": "auto",
 		"availableModes": []map[string]any{
-			{"id": "read-only", "name": "Read only", "description": "Codex may read files, but every command and edit needs approval."},
-			{"id": "auto", "name": "Auto", "description": "Codex edits inside the workspace and asks before anything outside it."},
+			{"id": "read-only", "name": "Supervised", "description": "Ask before commands and file changes."},
+			{"id": "auto-accept-edits", "name": "Auto-accept edits", "description": "Auto-approve edits, ask before other actions."},
+			{"id": "auto", "name": "Auto", "description": "Codex reviews routine actions automatically; risky actions still ask."},
 			{"id": "dontAsk", "name": "Don't ask", "description": "No approval prompts, still confined to the workspace."},
-			{"id": "full-access", "name": "Full access", "description": "No prompts and no sandbox — Codex can touch anything this user can."},
+			{"id": "full-access", "name": "Full access", "description": "Allow commands and edits without prompts."},
 		},
 	}
 }
@@ -976,18 +1004,20 @@ func codexModes() map[string]any {
 // codexModeSettings translates Burrow's shared mode ids to the settings the
 // Codex app-server accepts.  Keep the aliases: ACP agents may expose the
 // descriptive Codex names while the legacy Claude dropdown uses its own ids.
-func codexModeSettings(modeID string) (approvalPolicy, sandbox string, ok bool) {
+func codexModeSettings(modeID string) (approvalPolicy, sandbox, reviewer string, ok bool) {
 	switch modeID {
 	case "default", "ask", "approval-required", "plan", "read-only":
-		return "untrusted", "readOnly", true
-	case "auto", "acceptEdits", "auto-accept-edits":
-		return "on-request", "workspaceWrite", true
+		return "untrusted", "readOnly", "user", true
+	case "acceptEdits", "auto-accept-edits":
+		return "on-request", "workspaceWrite", "user", true
+	case "auto", "auto-review":
+		return "on-request", "workspaceWrite", "auto_review", true
 	case "dontAsk":
-		return "never", "workspaceWrite", true
+		return "never", "workspaceWrite", "user", true
 	case "bypassPermissions", "full-access", "danger-full-access":
-		return "never", "dangerFullAccess", true
+		return "never", "dangerFullAccess", "user", true
 	default:
-		return "", "", false
+		return "", "", "", false
 	}
 }
 

@@ -8,7 +8,7 @@ export function AcpListSessions(arg1:string,arg2:string):Promise<number>;
 
 export function AcpRespondPermission(arg1:string,arg2:number,arg3:string):Promise<void>;
 
-export function AcpRespondUserInput(arg1:string,arg2:number,arg3:string):Promise<void>;
+export function AcpRespondUserInput(arg1:string,arg2:number,arg3:Record<string, Array<string>>):Promise<void>;
 
 export function AcpSend(arg1:string,arg2:string,arg3:Array<string>):Promise<number>;
 
@@ -74,9 +74,9 @@ export function DeleteWorkspace(arg1:number):Promise<void>;
 
 export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function GenerateCommitMessage(arg1:string,arg2:string):Promise<main.GitOutput>;
-
 export function GenerateChatTitle(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function GenerateCommitMessage(arg1:string,arg2:string):Promise<main.GitOutput>;
 
 export function GetAppVersion():Promise<string>;
 
@@ -97,6 +97,8 @@ export function KeybindingsFilePath():Promise<string>;
 export function KillOrphanSessions(arg1:Array<string>):Promise<number>;
 
 export function KillPty(arg1:string):Promise<void>;
+
+export function LatestNpmVersion(arg1:string):Promise<main.ProviderLatest>;
 
 export function ListCheckpoints(arg1:string,arg2:number):Promise<Array<main.Checkpoint>>;
 
@@ -133,8 +135,6 @@ export function PickDirectory():Promise<string>;
 export function PickFile(arg1:string,arg2:Array<string>):Promise<string>;
 
 export function PickFiles(arg1:string,arg2:Array<string>):Promise<Array<string>>;
-
-export function LatestNpmVersion(arg1:string):Promise<main.ProviderLatest>;
 
 export function ProbeProvider(arg1:string,arg2:string):Promise<main.ProviderProbe>;
 

@@ -28,6 +28,9 @@ export interface ClaudeSession {
   agentKind?: string;
   // Native provider runtime or a generic Agent Client Protocol adapter.
   transport?: ChatTransport;
+  // Model id this chat is currently running (mirrored from the composer's
+  // picker) — badged in the Sidebar next to the agent icon.
+  model?: string;
   // Set when the chat was archived (soft-hidden, process stopped, reversible via
   // unarchive). null/undefined means it's a normal, listed session.
   archivedAt?: number | null;
@@ -297,6 +300,15 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     }
   }
 
+  // Mirror the chat's live model id for the Sidebar badge. Deliberately NOT
+  // sync() — a model mirror is not activity and must not bump lastActivityAt.
+  function setModel(id: number, model: string) {
+    const s = sessions.value.find((x) => x.id === id);
+    if (!s || s.model === model) return;
+    s.model = model;
+    persist();
+  }
+
   function sendStatusEvent(id: number, event: AgentStatusEvent) {
     actors.get(id)?.send(event);
   }
@@ -333,6 +345,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     unsettle,
     isSettled,
     sync,
+    setModel,
     permissionRules,
     addPermissionRule,
     hasPermissionRule,

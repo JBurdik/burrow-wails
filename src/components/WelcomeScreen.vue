@@ -109,19 +109,25 @@
               <DropdownMenuRoot>
                 <DropdownMenuTrigger as-child>
                   <button class="welcome-pill" type="button">
-                    <PhShieldCheck :size="12" weight="bold" />
+                    <PhShieldCheck :size="14" weight="bold" />
                     {{ permMeta.label }}
                     <PhCaretDown :size="9" weight="bold" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top" class="min-w-[170px]">
+                <DropdownMenuContent align="start" side="top" class="permission-menu min-w-[280px]">
                   <DropdownMenuItem
                     v-for="m in PERM_MODES"
                     :key="m"
-                    class="text-[11.5px]"
+                    class="permission-menu-item"
                     :class="{ 'text-foreground bg-accent/10': m === selectedPermMode }"
                     @select="pickPermMode(m)"
-                  >{{ PERM_META[m].label }}</DropdownMenuItem>
+                  >
+                    <component :is="PERM_ICON[m]" :size="17" weight="bold" class="permission-menu-icon" />
+                    <span class="permission-menu-copy">
+                      <span>{{ PERM_META[m].label }}</span>
+                      <span>{{ PERM_META[m].description }}</span>
+                    </span>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenuRoot>
             </template>
@@ -146,19 +152,25 @@
               <DropdownMenuRoot>
                 <DropdownMenuTrigger as-child>
                   <button class="welcome-pill" type="button">
-                    <PhShieldCheck :size="12" weight="bold" />
+                    <PhShieldCheck :size="14" weight="bold" />
                     {{ codexPermLabel }}
                     <PhCaretDown :size="9" weight="bold" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top" class="min-w-[170px]">
+                <DropdownMenuContent align="start" side="top" class="permission-menu min-w-[280px]">
                   <DropdownMenuItem
                     v-for="m in CODEX_PERM_MODES"
                     :key="m.id"
-                    class="text-[11.5px]"
+                    class="permission-menu-item"
                     :class="{ 'text-foreground bg-accent/10': m.id === codexPermMode }"
                     @select="pickCodexPermMode(m.id)"
-                  >{{ m.label }}</DropdownMenuItem>
+                  >
+                    <component :is="m.icon" :size="17" weight="bold" class="permission-menu-icon" />
+                    <span class="permission-menu-copy">
+                      <span>{{ m.label }}</span>
+                      <span>{{ m.description }}</span>
+                    </span>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenuRoot>
             </template>
@@ -212,7 +224,7 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch, nextTick } from "vue";
-import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhX } from "@phosphor-icons/vue";
+import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhX, PhSparkle, PhPencilSimple, PhListChecks, PhFastForward, PhShieldWarning } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
@@ -469,13 +481,21 @@ function pickEffort(id: string) { selectedEffort.value = id; setConfig("chatClau
 
 type PermMode = "default" | "auto" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions";
 const PERM_MODES: PermMode[] = ["default", "auto", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
-const PERM_META: Record<PermMode, { label: string }> = {
-  default: { label: "Ask" },
-  auto: { label: "Auto" },
-  acceptEdits: { label: "Accept Edits" },
-  plan: { label: "Plan Mode" },
-  dontAsk: { label: "Don't Ask" },
-  bypassPermissions: { label: "Bypass" },
+const PERM_META: Record<PermMode, { label: string; description: string }> = {
+  default: { label: "Supervised", description: "Ask before commands and file changes." },
+  auto: { label: "Auto", description: "Claude decides which routine actions can proceed." },
+  acceptEdits: { label: "Auto-accept edits", description: "Auto-approve edits, ask before other actions." },
+  plan: { label: "Plan mode", description: "Plan only until you approve implementation." },
+  dontAsk: { label: "Don't ask", description: "Run edits and commands without routine prompts." },
+  bypassPermissions: { label: "Full access", description: "Skip all permission checks." },
+};
+const PERM_ICON: Record<PermMode, unknown> = {
+  default: PhShieldCheck,
+  auto: PhSparkle,
+  acceptEdits: PhPencilSimple,
+  plan: PhListChecks,
+  dontAsk: PhFastForward,
+  bypassPermissions: PhShieldWarning,
 };
 interface ChatPermissionModeConfig { byChat: Record<string, string>; last?: string; dangerousByChat: Record<string, boolean> }
 const selectedPermMode = ref<PermMode>((() => {
@@ -580,10 +600,11 @@ function pickCodexEffort(id: string) { saveAcp("effort", id); }
 
 // Mirrors codexModes() in src-wails/acp.go — keep the ids in sync.
 const CODEX_PERM_MODES = [
-  { id: "read-only", label: "Read only" },
-  { id: "auto", label: "Auto" },
-  { id: "dontAsk", label: "Don't Ask" },
-  { id: "full-access", label: "Full access" },
+  { id: "read-only", label: "Supervised", description: "Ask before commands and file changes.", icon: PhShieldCheck },
+  { id: "auto-accept-edits", label: "Auto-accept edits", description: "Auto-approve edits, ask before other actions.", icon: PhPencilSimple },
+  { id: "auto", label: "Auto", description: "Codex reviews routine actions automatically; risky actions still ask.", icon: PhSparkle },
+  { id: "dontAsk", label: "Don't ask", description: "No approval prompts, still confined to the workspace.", icon: PhFastForward },
+  { id: "full-access", label: "Full access", description: "Allow commands and edits without prompts.", icon: PhShieldWarning },
 ] as const;
 const codexPermMode = computed(() => lastAcp("mode") ?? "auto");
 const codexPermLabel = computed(() => CODEX_PERM_MODES.find((m) => m.id === codexPermMode.value)?.label ?? "Auto");
@@ -788,18 +809,47 @@ async function submit() {
 .welcome-pill {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   white-space: nowrap;
   background: none;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 5px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
   border-radius: 6px;
 }
 .welcome-pill:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+:deep(.permission-menu) {
+  padding: 5px;
+  background: var(--bg-panel);
+  border-color: var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+.permission-menu-item {
+  height: auto;
+  min-height: 60px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  white-space: normal;
+}
+.permission-menu-icon { flex: 0 0 auto; margin-top: 1px; color: var(--text-muted); }
+.permission-menu-copy { display: grid; gap: 3px; min-width: 0; font-size: 13.5px; font-weight: 550; line-height: 1.2; }
+.permission-menu-copy > span:last-child { color: var(--text-muted); font-size: 11.5px; font-weight: 400; line-height: 1.35; }
+.permission-menu-item:hover,
+.permission-menu-item[data-highlighted],
+.permission-menu-item:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-hover) !important;
+  outline: none;
+}
+.permission-menu-item[data-highlighted] .permission-menu-icon,
+.permission-menu-item.text-foreground .permission-menu-icon { color: var(--accent); }
 
 .welcome-sendgroup {
   flex-shrink: 0;

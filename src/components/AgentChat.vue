@@ -119,6 +119,14 @@
       </div>
     </div>
 
+    <CodexUserInputPanel
+      v-if="codexUserInput"
+      :questions="codexUserInput.questions"
+      :submitting="codexUserInputPending"
+      @submit="respondCodexUserInput"
+      @cancel="cancelCodexUserInput"
+    />
+
     <div ref="scrollEl" class="chat-messages flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
@@ -146,6 +154,36 @@
               <span class="font-medium">{{ groupLabel(msg.items) }}</span>
               <span v-if="groupIsRunning(msg.items)" class="tool-status-icon tool-pulse-dot flex-shrink-0" aria-hidden="true" />
               <PhWarningCircle v-else-if="groupHasFailure(msg.items)" :size="10" class="tool-status-icon flex-shrink-0 text-destructive" />
+            </div>
+          </div>
+        </template>
+
+        <!-- Settled turn: its thinking/tool rows fold behind this one row -->
+        <template v-else-if="msg.role === 'turn-fold'">
+          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+            <div class="w-[26px] flex-shrink-0" />
+            <div class="tool-row" @click="foldedTurns[msg.turnKey] = !msg.folded">
+              <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': !msg.folded }" />
+              <PhClock :size="11" class="tool-icon" />
+              <span>{{ msg.label }}</span>
+            </div>
+          </div>
+        </template>
+
+        <!-- Changed files this turn touched, with a +/- diffstat -->
+        <template v-else-if="msg.role === 'changed-files'">
+          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+            <div class="w-[26px] flex-shrink-0" />
+            <div class="changed-files max-w-[min(560px,90%)]">
+              <div class="changed-files-head">
+                <PhGitDiff :size="11" class="flex-shrink-0" />
+                <span>Changed files ({{ msg.files.length }})</span>
+                <span class="ml-auto flex-shrink-0 font-mono text-[10px]"><span class="diff-add">+{{ msg.added }}</span> <span class="diff-del">−{{ msg.removed }}</span></span>
+              </div>
+              <div v-for="f in msg.files" :key="f.path" class="changed-files-row" :title="f.path">
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ basename(f.path) }}</span>
+                <span class="ml-auto flex-shrink-0 font-mono text-[10px]"><span class="diff-add">+{{ f.added }}</span> <span class="diff-del">−{{ f.removed }}</span></span>
+              </div>
             </div>
           </div>
         </template>
@@ -260,11 +298,12 @@
         </template>
       </div>
 
-      <div v-if="busy && !hasPartialAssistant" class="flex items-center gap-1.5 px-4 py-1.5">
+      <div v-if="busy" class="flex items-center gap-1.5 px-4 py-1.5">
         <div class="agent-avatar flex h-[22px] w-[22px] items-center justify-center rounded-full text-white shadow-[0_2px_6px_color-mix(in_srgb,var(--agent-accent,#ec4899)_28%,transparent)]">
           <component :is="currentAgentIcon" :size="12" :style="{ color: '#fff' }" />
         </div>
         <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
+        <span class="ml-1 text-[11px] italic text-muted-foreground tabular-nums">Working for {{ workingElapsed }}</span>
       </div>
       </div>
     </div>
@@ -318,8 +357,9 @@
             </div>
           </div>
         </div>
-        <!-- Working indicator — sits above the textarea, only when busy -->
-        <div v-if="busy" class="flex items-center gap-1.5 border-b border-border px-3 pb-1 pt-1.5">
+        <!-- Working indicator — sits above the textarea, only for tool activity.
+             Thinking has its own bubble in the chat body, so it's not duplicated here. -->
+        <div v-if="currentActivity" class="flex items-center gap-1.5 border-b border-border px-3 pb-1 pt-1.5">
           <span class="working-dot" /><span class="working-dot" /><span class="working-dot" />
           <span class="text-[11px] italic text-muted-foreground">{{ currentActivity }}</span>
         </div>
@@ -483,7 +523,7 @@
                 :title="permMeta.title"
                 @click="togglePermMenu"
               >
-                <component :is="PERM_ICON[permMode]" :size="13" weight="bold" />
+                <component :is="PERM_ICON[permMode]" :size="15" weight="bold" />
                 <span class="perm-mode-label">{{ permMeta.label }}</span>
                 <PhCaretDown :size="9" weight="bold" class="perm-mode-caret" />
               </button>
@@ -503,8 +543,11 @@
                     :title="PERM_META[m].title"
                     @click="selectPermMode(m)"
                   >
-                    <component :is="PERM_ICON[m]" :size="13" weight="bold" />
-                    <span>{{ PERM_META[m].label }}</span>
+                    <component :is="PERM_ICON[m]" :size="16" weight="bold" />
+                    <span class="perm-mode-copy">
+                      <span>{{ PERM_META[m].label }}</span>
+                      <span>{{ PERM_META[m].description }}</span>
+                    </span>
                   </button>
                 </div>
               </Teleport>
@@ -535,21 +578,25 @@
             <!-- ACP permission-mode switcher (driven by the adapter's session modes) -->
             <div v-if="isAcpRuntime && acpModes" class="perm-mode-dropdown">
               <button ref="acpModeBtnEl" class="toolbar-btn" :title="`Permission mode: ${acpModeLabel}`" @click="openAcpMenu('mode')">
-                <PhShieldCheck :size="13" weight="bold" />
+                <PhShieldCheck :size="15" weight="bold" />
                 <span class="perm-mode-label">{{ acpModeLabel }}</span>
                 <PhCaretDown :size="9" weight="bold" class="perm-mode-caret" />
               </button>
               <Teleport to="body">
-                <div v-if="acpModeMenuOpen" ref="acpModeMenuEl" class="floating-menu" :style="{ top: acpModeMenuPos.top + 'px', left: acpModeMenuPos.left + 'px' }">
+                <div v-if="acpModeMenuOpen" ref="acpModeMenuEl" class="perm-mode-menu" :style="{ top: acpModeMenuPos.top + 'px', left: acpModeMenuPos.left + 'px' }">
                   <button
                     v-for="m in acpModes.availableModes"
                     :key="m.id"
-                    class="floating-menu-item"
+                    class="perm-mode-item"
                     :class="{ 'floating-menu-item-active': acpModes.currentModeId === m.id }"
                     :title="m.description"
                     @click="acpSelectMode(m.id)"
                   >
-                    {{ m.name }}
+                    <component :is="acpModeIcon(m.id)" :size="16" weight="bold" />
+                    <span class="perm-mode-copy">
+                      <span>{{ m.name }}</span>
+                      <span>{{ m.description }}</span>
+                    </span>
                   </button>
                 </div>
               </Teleport>
@@ -613,7 +660,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
-import { PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck } from "@phosphor-icons/vue";
+import { PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
@@ -629,12 +676,14 @@ import { useProvidersStore, chatTransportFor, binaryFor, type ChatTransport } fr
 import { agentIconComp } from "@/lib/agentIcons";
 import ModelPicker from "@/components/ModelPicker.vue";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
+import CodexUserInputPanel, { type CodexUserInputQuestion } from "@/components/CodexUserInputPanel.vue";
 import { modelsFor, learnModels, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { playSound } from "@/lib/sounds";
 import { splitSkillTokens } from "@/lib/skillTokens";
 import { chatSettingKey } from "@/lib/chatSettings";
 import { splitMentions } from "@/lib/mentionTokens";
+import { editOf, fmtDuration, mergeEdits, type FileEdit } from "@/lib/chatTurns";
 import { notifyNtfy } from "@/lib/ntfy";
 import { useUIStore, type NtfyEvent } from "@/stores/ui";
 import { marked } from "marked";
@@ -779,6 +828,8 @@ interface AcpPermReq {
 const acpPermReq = ref<AcpPermReq | null>(null);
 const acpPermMsgId = ref<number | null>(null);
 const permissionResponsePending = ref(false);
+const codexUserInput = ref<{ rpcId: number; questions: CodexUserInputQuestion[] } | null>(null);
+const codexUserInputPending = ref(false);
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
   const p = acpPermReq.value?.rawInput?.plan;
@@ -862,9 +913,10 @@ function openAcpMenu(which: "mode" | "model" | "effort") {
   const openRef = which === "mode" ? acpModeMenuOpen : which === "effort" ? acpEffortMenuOpen : acpModelMenuOpen;
   const posRef = which === "mode" ? acpModeMenuPos : which === "effort" ? acpEffortMenuPos : acpModelMenuPos;
   const count = which === "mode" ? (acpModes.value?.availableModes.length ?? 0) : which === "effort" ? (acpEffortOption.value?.options.length ?? 0) : (acpModelOption.value?.options.length ?? 0);
+  const rowHeight = which === "mode" ? 64 : 36;
   if (!openRef.value && btn) {
     const r = btn.getBoundingClientRect();
-    posRef.value = { top: Math.round(r.top - (count * 36 + 12) - 6), left: Math.round(r.left) };
+    posRef.value = { top: Math.max(8, Math.round(r.top - (count * rowHeight + 12) - 6)), left: Math.round(r.left) };
   }
   openRef.value = !openRef.value;
 }
@@ -1117,6 +1169,14 @@ async function selectModel(id: ClaudeModelId) {
   await restartClaude();
 }
 
+// Mirror the live model into the session so the Sidebar can badge the thread
+// with what's actually running it.
+watch(
+  () => (effectiveTransport.value === "claude-cli" ? selectedModel.value : acpActiveModelId.value),
+  (m) => { if (m) chats.setModel(props.chatId, m); },
+  { immediate: true },
+);
+
 const CLAUDE_EFFORTS = [
   { id: "low", label: "Low effort" },
   { id: "medium", label: "Medium effort" },
@@ -1187,6 +1247,7 @@ interface ChatMessage {
   toolExpanded?: boolean;
   toolFailed?: boolean; // tool_result came back is_error
   toolRawName?: boolean; // true when `text` is a raw tool name (native transport) vs already-human ACP title
+  turnMs?: number;      // on a user message: how long the turn it opened took (persisted with the message)
   _acpMsgId?: string;   // ACP messageId — identity for incremental chunk append
 }
 
@@ -1199,7 +1260,11 @@ const TOOL_ICONS: Record<string, unknown> = {
 function toolIcon(name: string): unknown {
   return TOOL_ICONS[name] ?? PhWrench;
 }
+const IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
 function toolIconFor(msg: ChatMessage): unknown {
+  // "Agent looked at an image" reads as its own thing, whatever tool did it.
+  const fp = msg.toolInput?.file_path ?? msg.toolInput?.path;
+  if (typeof fp === "string" && IMAGE_PATH_RE.test(fp)) return PhImage;
   if (msg.toolRawName) return toolIcon(msg.text);
   const t = msg.text.toLowerCase();
   if (t.startsWith("read")) return PhFileText;
@@ -1319,7 +1384,65 @@ const grouping = computed(() => {
   }
   return { display, groupIdByMsgId, groupsById };
 });
-const displayItems = computed(() => grouping.value.display);
+// Turn fold + per-turn changed-files summary. A turn starts at a user message
+// and ends at the next one (or at the end of an idle chat). Once it's settled,
+// its thinking/tool rows collapse behind one "Worked for Xs" row and the files
+// it touched are summed into a diffstat card — the transcript stays readable
+// when scrolling back over a long session.
+interface TurnFoldRow { role: "turn-fold"; id: string; turnKey: number; label: string; folded: boolean; partial?: false }
+interface ChangedFilesRow { role: "changed-files"; id: string; files: FileEdit[]; added: number; removed: number; partial?: false }
+type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow;
+
+const WORK_ROLES = new Set(["thinking", "tool", "tool-group-header"]);
+const foldedTurns = reactive<Record<number, boolean>>({});
+
+const displayItems = computed<DisplayRow[]>(() => {
+  const src = grouping.value.display;
+  const out: DisplayRow[] = [];
+  let i = 0;
+  while (i < src.length) {
+    const row = src[i];
+    if (row.role !== "user") { out.push(row); i++; continue; }
+    const user = row as ChatMessage;
+    out.push(user);
+    i++;
+    const turnRows: (ChatMessage | ToolGroupHeader)[] = [];
+    while (i < src.length && src[i].role !== "user") { turnRows.push(src[i]); i++; }
+    const hasLaterTurn = i < src.length;
+    // The last turn is settled only once the chat is idle; earlier ones always are.
+    const settled = hasLaterTurn || !busy.value;
+    const folded = settled && (foldedTurns[user.id] ?? hasLaterTurn);
+    const label = user.turnMs ? `Worked for ${fmtDuration(user.turnMs)}` : "Worked";
+
+    const edits: FileEdit[] = [];
+    let foldEmitted = false;
+    for (const r of turnRows) {
+      if (r.role === "tool") {
+        const e = editOf((r as ChatMessage).toolInput);
+        if (e) edits.push(e);
+      }
+      if (settled && WORK_ROLES.has(r.role)) {
+        if (!foldEmitted) {
+          out.push({ role: "turn-fold", id: `fold-${user.id}`, turnKey: user.id, label, folded });
+          foldEmitted = true;
+        }
+        if (folded) continue;
+      }
+      out.push(r);
+    }
+    if (settled && edits.length > 0) {
+      const files = mergeEdits(edits);
+      out.push({
+        role: "changed-files",
+        id: `cf-${user.id}`,
+        files,
+        added: files.reduce((n, f) => n + f.added, 0),
+        removed: files.reduce((n, f) => n + f.removed, 0),
+      });
+    }
+  }
+  return out;
+});
 // Consecutive same-role bubbles (user asking two things in a row, or an
 // assistant reply split across messages) read as one grouped turn: only the
 // edge message of the run carries an avatar + extra spacing, same-role
@@ -1449,8 +1572,30 @@ const nowTick = ref(Date.now());
 const STALL_MS = 90_000;
 const stalled = computed(() => busy.value && nowTick.value - lastActivityAt.value > STALL_MS);
 let stallTimer: ReturnType<typeof setInterval> | null = null;
-stallTimer = setInterval(() => { nowTick.value = Date.now(); }, 5_000);
-watch(busy, (val) => { if (val) lastActivityAt.value = Date.now(); });
+// 1 Hz so the "Working for Xs" label ticks, but only while busy — an idle chat
+// shouldn't re-render once a second.
+stallTimer = setInterval(() => { if (busy.value) nowTick.value = Date.now(); }, 1_000);
+
+// Turn clock: live elapsed while busy, stamped onto the user message that
+// opened the turn when it settles (so it persists with the history and the
+// fold row can say "Worked for 26s" after a reload).
+const turnStartedAt = ref(0);
+const workingElapsed = computed(() =>
+  turnStartedAt.value ? fmtDuration(nowTick.value - turnStartedAt.value) : "0s"
+);
+watch(busy, (val) => {
+  if (val) {
+    lastActivityAt.value = Date.now();
+    nowTick.value = Date.now();
+    turnStartedAt.value = Date.now();
+    return;
+  }
+  if (turnStartedAt.value) {
+    const lastUser = [...messages.value].reverse().find((m) => m.role === "user");
+    if (lastUser) lastUser.turnMs = Date.now() - turnStartedAt.value;
+    turnStartedAt.value = 0;
+  }
+}, { flush: "sync" });
 const copiedMessageId = ref<number | null>(null);
 let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 const messageQueue = ref<string[]>([]);
@@ -1508,13 +1653,13 @@ function savePermMode(id: number, mode: PermMode) {
   setConfig("chatPermissionMode", cfg);
 }
 const permMode = ref<PermMode>(loadPermMode(props.chatId));
-const PERM_META: Record<PermMode, { label: string; title: string; danger?: boolean }> = {
-  default: { label: "Ask", title: "Ask before edits & commands (click to change)" },
-  auto: { label: "Auto", title: "Claude decides when to ask (click to change)" },
-  acceptEdits: { label: "Accept Edits", title: "Auto-accept file edits; still ask for other tools (click to change)" },
-  plan: { label: "Plan Mode", title: "Plan only — no edits or commands until you approve (click to change)" },
-  dontAsk: { label: "Don't Ask", title: "Run edits & commands without asking; still blocks dangerous ops (click to change)" },
-  bypassPermissions: { label: "Bypass", title: "Skip ALL permission checks (click to change)", danger: true },
+const PERM_META: Record<PermMode, { label: string; description: string; title: string; danger?: boolean }> = {
+  default: { label: "Supervised", description: "Ask before commands and file changes.", title: "Ask before edits & commands (click to change)" },
+  auto: { label: "Auto", description: "Claude decides which routine actions can proceed.", title: "Claude decides when to ask (click to change)" },
+  acceptEdits: { label: "Auto-accept edits", description: "Auto-approve edits, ask before other actions.", title: "Auto-accept file edits; still ask for other tools (click to change)" },
+  plan: { label: "Plan mode", description: "Plan only until you approve implementation.", title: "Plan only — no edits or commands until you approve (click to change)" },
+  dontAsk: { label: "Don't ask", description: "Run edits and commands without routine prompts.", title: "Run edits & commands without asking; still blocks dangerous ops (click to change)" },
+  bypassPermissions: { label: "Full access", description: "Skip all permission checks.", title: "Skip ALL permission checks (click to change)", danger: true },
 };
 const permMeta = computed(() => PERM_META[permMode.value]);
 const PERM_MODES: PermMode[] = PERM_VALUES;
@@ -1526,6 +1671,14 @@ const PERM_ICON: Record<PermMode, unknown> = {
   dontAsk: PhFastForward,
   bypassPermissions: PhShieldWarning,
 };
+const ACP_MODE_ICON: Record<string, unknown> = {
+  "read-only": PhShieldCheck,
+  "auto-accept-edits": PhPencilSimple,
+  auto: PhSparkle,
+  dontAsk: PhFastForward,
+  "full-access": PhShieldWarning,
+};
+function acpModeIcon(id: string): unknown { return ACP_MODE_ICON[id] ?? PhShieldCheck; }
 const permMenuOpen = ref(false);
 const permBtnEl = ref<HTMLElement | null>(null);
 const permMenuEl = ref<HTMLElement | null>(null);
@@ -1534,8 +1687,8 @@ const permMenuPos = ref({ top: 0, left: 0 });
 function togglePermMenu() {
   if (!permMenuOpen.value && permBtnEl.value) {
     const r = permBtnEl.value.getBoundingClientRect();
-    const menuH = PERM_MODES.length * 36 + 12;
-    permMenuPos.value = { top: Math.round(r.top - menuH - 6), left: Math.round(r.left) };
+    const menuH = PERM_MODES.length * 64 + 12;
+    permMenuPos.value = { top: Math.max(8, Math.round(r.top - menuH - 6)), left: Math.round(r.left) };
   }
   permMenuOpen.value = !permMenuOpen.value;
 }
@@ -1709,9 +1862,11 @@ const currentActivity = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const m = messages.value[i];
     if (m.role === "tool") return `Running ${m.text}…`;
-    if (m.role === "assistant" || m.role === "thinking") return "Thinking…";
+    // Thinking/assistant text streams into the chat body itself — no need
+    // to mirror it in the composer bar above the input.
+    if (m.role === "assistant" || m.role === "thinking") return "";
   }
-  return "Thinking…";
+  return "";
 });
 
 // AskUserQuestion working selection: question text → chosen option label(s).
@@ -1845,10 +2000,6 @@ const cwdDisplay = computed(() => {
   const parts = props.cwd.replace(/^\/Users\/[^/]+/, "~").split("/");
   return parts.slice(-2).join("/") || props.cwd;
 });
-
-const hasPartialAssistant = computed(() =>
-  messages.value.some((m) => (m.role === "assistant" || m.role === "thinking") && m.partial)
-);
 
 function scrollToBottom() {
   nextTick(() => {
@@ -2270,6 +2421,27 @@ function onAcpData(raw: string) {
 function onAcpReq(raw: string) {
   let msg: Record<string, unknown>;
   try { msg = JSON.parse(raw); } catch { return; }
+  if (msg.method === "item/tool/requestUserInput") {
+    const params = (msg.params ?? {}) as Record<string, unknown>;
+    const questions = ((params.questions ?? []) as Array<Record<string, unknown>>)
+      .filter((question) => typeof question.id === "string" && typeof question.question === "string")
+      .map((question) => ({
+        id: question.id as string,
+        header: typeof question.header === "string" ? question.header : "Question",
+        question: question.question as string,
+        isOther: question.isOther === true,
+        isSecret: question.isSecret === true,
+        options: ((question.options ?? []) as Array<Record<string, unknown>>)
+          .filter((option) => typeof option.label === "string")
+          .map((option) => ({ label: option.label as string, ...(typeof option.description === "string" ? { description: option.description } : {}) })),
+      }));
+    if (typeof msg.id !== "number" || questions.length === 0) return;
+    codexUserInput.value = { rpcId: msg.id, questions };
+    codexUserInputPending.value = false;
+    chats.sendStatusEvent(props.chatId, { type: "WAIT" });
+    syncStore();
+    return;
+  }
   const perm = parseAcpPermRequest(msg);
   if (!perm) return;
 
@@ -2293,6 +2465,29 @@ function onAcpReq(raw: string) {
   notifyPermission({ requestId: String(perm.rpcId), toolName: perm.title, input: perm.rawInput, suggestions: [] } as CanUseToolReq);
   syncStore();
   scrollToBottom();
+}
+
+async function respondCodexUserInput(answers: Record<string, string[]>) {
+  const request = codexUserInput.value;
+  if (!request || codexUserInputPending.value) return;
+  codexUserInputPending.value = true;
+  try {
+    await invoke("acp_respond_user_input", { id: props.chatId, rpcId: request.rpcId, answers });
+    codexUserInput.value = null;
+    chats.sendStatusEvent(props.chatId, { type: "RESUME" });
+  } catch (error) {
+    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Unable to submit Codex input: ${error}` });
+    codexUserInputPending.value = false;
+  } finally {
+    syncStore();
+  }
+}
+
+function cancelCodexUserInput() {
+  const request = codexUserInput.value;
+  if (!request) return;
+  const answers = Object.fromEntries(request.questions.map((question) => [question.id, [] as string[]]));
+  void respondCodexUserInput(answers);
 }
 
 // Reply to a rich ACP permission request with the chosen adapter optionId.
@@ -3131,38 +3326,55 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .perm-mode-menu {
   position: fixed;
   z-index: 1000;
-  min-width: 150px;
-  padding: 4px;
+  min-width: 330px;
+  padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--chat-dropdown);
-  border: 1px solid var(--chat-border);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  /* Match the provider/model picker: all composer popovers share one surface. */
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
 }
 .perm-mode-item {
   display: flex;
-  align-items: center;
-  gap: 7px;
+  align-items: flex-start;
+  gap: 10px;
   width: 100%;
-  padding: 6px 8px;
+  min-height: 58px;
+  padding: 9px 10px;
   background: none;
   border: none;
-  border-radius: 5px;
+  border-radius: 8px;
   color: var(--chat-text-secondary);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 13.5px;
+  font-weight: 550;
   text-align: left;
   cursor: pointer;
-  transition: color .12s ease-out, background .12s ease-out;
+  transition: color .12s ease-out, background-color .12s ease-out;
 }
-.perm-mode-item:hover { background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
-.perm-mode-item-active { color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 14%, transparent); }
+.perm-mode-item > svg { flex: 0 0 auto; margin-top: 1px; color: var(--chat-muted); }
+.perm-mode-item:hover,
+.perm-mode-item:focus-visible {
+  color: var(--chat-text);
+  background: var(--bg-hover) !important;
+  outline: none;
+}
+.perm-mode-item:hover > svg { color: var(--chat-accent); }
+.perm-mode-item-active { color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 12%, transparent); }
+.perm-mode-item-active > svg { color: var(--chat-accent); }
 .perm-mode-item-danger { color: var(--red, #ef4444); }
-.perm-mode-item-danger:hover { background: color-mix(in srgb, var(--red, #ef4444) 12%, transparent); }
+.perm-mode-item-danger:hover,
+.perm-mode-item-danger:focus-visible {
+  background: var(--bg-hover) !important;
+}
 .perm-mode-item-danger.perm-mode-item-active { color: var(--red, #ef4444); background: color-mix(in srgb, var(--red, #ef4444) 14%, transparent); }
-.perm-mode-label { font-size: 10px; font-weight: 600; }
+.perm-mode-copy { display: grid; gap: 3px; min-width: 0; text-align: left; }
+.perm-mode-copy > span:last-child { color: var(--chat-muted); font-size: 11.5px; font-weight: 400; line-height: 1.35; }
+.perm-mode-item:hover .perm-mode-copy > span:last-child,
+.perm-mode-item-active .perm-mode-copy > span:last-child { color: color-mix(in srgb, currentColor 68%, var(--chat-muted)); }
+.perm-mode-label { font-size: 12px; font-weight: 650; }
 .perm-mode-caret { opacity: .6; margin-left: -1px; }
 
 /* Permission-gate banners: shared animation */
@@ -3327,6 +3539,30 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   background: color-mix(in srgb, var(--destructive, #ef4444) 8%, transparent);
   border-color: color-mix(in srgb, var(--destructive, #ef4444) 30%, transparent);
 }
+.changed-files {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-secondary, rgba(255,255,255,0.55));
+}
+.changed-files-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  background: color-mix(in srgb, var(--agent-accent, #ec4899) 6%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.changed-files-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font-family: var(--font-mono, monospace);
+}
+.changed-files-row + .changed-files-row { border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
 .tool-caret {
   flex-shrink: 0;
   color: var(--agent-accent, #ec4899);
@@ -3504,10 +3740,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--chat-dropdown);
-  border: 1px solid var(--chat-border);
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
 }
 .floating-menu-item {
   display: flex;
@@ -3517,17 +3753,22 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   padding: 7px 10px;
   background: none;
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--chat-text-secondary);
   font-size: 12px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: background .1s ease-out;
+  transition: color .12s ease-out, background-color .12s ease-out;
   gap: 6px;
 }
-.floating-menu-item:hover { background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
-.floating-menu-item-active { color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 14%, transparent); }
+.floating-menu-item:hover,
+.floating-menu-item:focus-visible {
+  color: var(--chat-text);
+  background: var(--bg-hover) !important;
+  outline: none;
+}
+.floating-menu-item-active { color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 12%, transparent); }
 .model-id-hint {
   font-size: 9px;
   font-family: var(--font-mono);

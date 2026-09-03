@@ -211,7 +211,7 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "acp_respond_permission":
       return App.AcpRespondPermission(String(args.id), args.rpcId ?? args.rpc_id, args.optionId ?? args.option_id);
     case "acp_respond_user_input":
-      return App.AcpRespondUserInput(String(args.id), args.rpcId ?? args.rpc_id, args.text);
+      return App.AcpRespondUserInput(String(args.id), args.rpcId ?? args.rpc_id, args.answers);
 
     // Misc
     case "system_stats":

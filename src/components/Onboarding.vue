@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef } from "vue";
 import { PhArrowLeft, PhArrowRight, PhCheck, PhCommand, PhPaintBrush, PhRobot } from "@phosphor-icons/vue";
-import { THEMES } from "@/themes";
+import { THEME_FAMILIES, findTheme } from "@/themes";
 import { useUIStore } from "@/stores/ui";
 import { useProvidersStore } from "@/stores/providers";
 
@@ -11,7 +11,16 @@ const providers = useProvidersStore();
 const step = shallowRef(0);
 const selectedAgent = shallowRef(ui.defaultChatAgent);
 const steps = ["Welcome", "Default agent", "Appearance", "Ready"];
-const availableThemes = computed(() => THEMES.filter((theme) => !theme.key.startsWith("stonks")));
+// One entry per theme family (the meme one stays out of onboarding). Picking
+// here sets the family for both light and dark — the pair is the product.
+const availableThemes = computed(() =>
+  THEME_FAMILIES.filter((f) => f.key !== "stonks").map((f) => ({
+    key: f.key,
+    label: f.label,
+    light: findTheme(f.light),
+    dark: findTheme(f.dark),
+  })),
+);
 
 function next() {
   if (step.value < steps.length - 1) step.value++;
@@ -69,8 +78,11 @@ function finish() {
         <h1>Pick a theme</h1>
         <p class="onboarding-copy">This changes the entire workspace, including terminals and diffs.</p>
         <div class="theme-grid">
-          <button v-for="theme in availableThemes" :key="theme.key" class="theme-option" :class="{ selected: ui.theme === theme.key }" type="button" @click="ui.setTheme(theme.key)">
-            <span class="theme-swatch" :style="{ background: theme.vars['bg-panel'], borderColor: theme.vars.border }"><i :style="{ background: theme.vars.accent }" /></span>
+          <button v-for="theme in availableThemes" :key="theme.key" class="theme-option" :class="{ selected: ui.activeFamily.key === theme.key }" type="button" @click="ui.setThemeFamily(theme.key)">
+            <span class="theme-pair">
+              <span class="theme-swatch" :style="{ background: theme.light.vars['bg-panel'], borderColor: theme.light.vars.border }"><i :style="{ background: theme.light.vars.accent }" /></span>
+              <span class="theme-swatch" :style="{ background: theme.dark.vars['bg-panel'], borderColor: theme.dark.vars.border }"><i :style="{ background: theme.dark.vars.accent }" /></span>
+            </span>
             {{ theme.label }}
           </button>
         </div>
@@ -105,7 +117,7 @@ function finish() {
 .onboarding-kicker { margin: 0 0 9px; color: var(--accent); font-size: 12px; font-weight: 600; }.onboarding-page h1 { margin: 0; font-size: 30px; letter-spacing: -0.04em; }.onboarding-copy { max-width: 58ch; margin: 14px 0 0; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
 .onboarding-facts { display: flex; gap: 30px; margin-top: 34px; color: var(--text-secondary); font-size: 12px; }.onboarding-facts span { display: flex; align-items: center; gap: 8px; }
 .onboarding-options { display: grid; gap: 8px; margin-top: 28px; }.onboarding-option { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text-primary); cursor: pointer; padding: 10px 12px; text-align: left; }.onboarding-option:hover { background: var(--bg-hover); }.onboarding-option.selected { border-color: var(--accent); }.option-dot { display: grid; width: 31px; height: 31px; place-items: center; border-radius: 6px; background: var(--bg-hover); color: var(--accent); }.onboarding-option strong, .onboarding-option small { display: block; }.onboarding-option strong { font-size: 13px; }.onboarding-option small { margin-top: 2px; color: var(--text-muted); font-size: 11px; }.option-check { margin-left: auto; color: var(--accent); }.onboarding-empty { color: var(--text-muted); font-size: 13px; }
-.theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 28px; }.theme-option { display: grid; gap: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text-secondary); cursor: pointer; padding: 10px; font: inherit; font-size: 12px; text-align: left; }.theme-option:hover { background: var(--bg-hover); }.theme-option.selected { border-color: var(--accent); color: var(--text-primary); }.theme-swatch { position: relative; display: block; height: 38px; border: 1px solid; border-radius: 4px; }.theme-swatch i { position: absolute; right: 7px; bottom: 7px; width: 10px; height: 10px; border-radius: 50%; }
+.theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 28px; }.theme-option { display: grid; gap: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text-secondary); cursor: pointer; padding: 10px; font: inherit; font-size: 12px; text-align: left; }.theme-option:hover { background: var(--bg-hover); }.theme-option.selected { border-color: var(--accent); color: var(--text-primary); }.theme-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }.theme-swatch { position: relative; display: block; height: 38px; border: 1px solid; border-radius: 4px; }.theme-swatch i { position: absolute; right: 7px; bottom: 7px; width: 10px; height: 10px; border-radius: 50%; }
 .onboarding-footer { display: flex; justify-content: space-between; border-top: 1px solid var(--border); padding: 18px 28px; }.onboarding-footer button { display: inline-flex; align-items: center; gap: 7px; border-radius: 6px; padding: 8px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }.onboarding-back { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); }.onboarding-back:disabled { opacity: 0; pointer-events: none; }.onboarding-next { border: 1px solid var(--accent); background: var(--accent); color: var(--bg-base); }.onboarding-next:hover { filter: brightness(1.08); }
 @media (max-width: 680px) { .onboarding { grid-template-columns: 1fr; }.onboarding-rail { display: none; }.theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

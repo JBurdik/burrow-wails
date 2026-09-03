@@ -237,6 +237,20 @@ export namespace main {
 	        this.icon = source["icon"];
 	    }
 	}
+	export class ProviderLatest {
+	    version: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderLatest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.error = source["error"];
+	    }
+	}
 	export class ProviderProbe {
 	    installed: boolean;
 	    path: string;
@@ -251,20 +265,6 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.installed = source["installed"];
 	        this.path = source["path"];
-	        this.version = source["version"];
-	        this.error = source["error"];
-	    }
-	}
-	export class ProviderLatest {
-	    version: string;
-	    error: string;
-
-	    static createFrom(source: any = {}) {
-	        return new ProviderLatest(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
 	        this.error = source["error"];
 	    }

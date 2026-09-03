@@ -188,6 +188,8 @@ import { createActor, type Actor } from "xstate";
 import { agentStatusMachine, isBusyStatus } from "@/machines/agentStatus";
 import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe } from "@phosphor-icons/vue";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { useProvidersStore } from "@/stores/providers";
+import { providerIdForCommand } from "@/lib/providers";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import XTerm from "./XTerm.vue";
@@ -226,6 +228,7 @@ const props = defineProps<{ cwd: string; workspaceId: number }>();
 const wsStore = useWorkspaceStore();
 const uiStore = useUIStore();
 const chatsStore = useClaudeChatsStore();
+const providersStore = useProvidersStore();
 const tabsStore = useTerminalTabsStore();
 const keys = useKeybindingsStore();
 const notifStore = useNotificationsStore();
@@ -1400,6 +1403,20 @@ watch(
 // Push tab summaries to the shared store so the Sidebar can list terminals
 // nested under this workspace, and react to clicks coming back from it.
 
+function chatSessionOf(t: Tab) {
+  return tabIsChat(t) ? chatsStore.sessions.find((s) => s.id === (t.root as Leaf).chatId) : undefined;
+}
+
+/** Icon key for the agent behind a tab: the chat's provider, else the provider
+ *  matched from a launched agent's command. Undefined = plain terminal. */
+function tabAgentIcon(t: Tab): string | undefined {
+  const chat = chatSessionOf(t);
+  if (chat) return providersStore.byId(chat.agentKind)?.icon;
+  if (!tabIsAgent(t)) return undefined;
+  const cmd = getAllLeaves(t.root)[0]?.initialCmd ?? "";
+  return cmd ? providersStore.byId(providerIdForCommand(cmd))?.icon : undefined;
+}
+
 function syncStore() {
   tabsStore.setTabs(
     props.workspaceId,
@@ -1417,6 +1434,8 @@ function syncStore() {
       settled: tabIsChat(t)
         ? chatsStore.isSettled(chatsStore.sessions.find((s) => s.id === (t.root as Leaf).chatId))
         : isTabSettled(props.workspaceId, t.id),
+      agentIcon: tabAgentIcon(t),
+      model: chatSessionOf(t)?.model ?? getAllLeaves(t.root)[0]?.model,
     })),
   );
   tabsStore.setActive(props.workspaceId, activeTabId.value);

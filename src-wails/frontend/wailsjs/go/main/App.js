@@ -146,12 +146,12 @@ export function FormatSource(arg1, arg2, arg3) {
   return window['go']['main']['App']['FormatSource'](arg1, arg2, arg3);
 }
 
-export function GenerateCommitMessage(arg1, arg2) {
-  return window['go']['main']['App']['GenerateCommitMessage'](arg1, arg2);
-}
-
 export function GenerateChatTitle(arg1, arg2, arg3) {
   return window['go']['main']['App']['GenerateChatTitle'](arg1, arg2, arg3);
+}
+
+export function GenerateCommitMessage(arg1, arg2) {
+  return window['go']['main']['App']['GenerateCommitMessage'](arg1, arg2);
 }
 
 export function GetAppVersion() {
@@ -192,6 +192,10 @@ export function KillOrphanSessions(arg1) {
 
 export function KillPty(arg1) {
   return window['go']['main']['App']['KillPty'](arg1);
+}
+
+export function LatestNpmVersion(arg1) {
+  return window['go']['main']['App']['LatestNpmVersion'](arg1);
 }
 
 export function ListCheckpoints(arg1, arg2) {
@@ -268,10 +272,6 @@ export function PickFiles(arg1, arg2) {
 
 export function ProbeProvider(arg1, arg2) {
   return window['go']['main']['App']['ProbeProvider'](arg1, arg2);
-}
-
-export function LatestNpmVersion(arg1) {
-  return window['go']['main']['App']['LatestNpmVersion'](arg1);
 }
 
 export function ReadClaudeActivity(arg1, arg2) {

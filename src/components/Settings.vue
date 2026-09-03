@@ -580,40 +580,59 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Theme</span>
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Themes</span>
             <span class="text-xs text-muted-foreground/70">
-              Picking a theme here sets it as the preferred theme for its mode (dark
-              or light) — what “Dark”/“System” above, and the ⌘P “Toggle Dark/Light
-              Mode” command, resolve to.
+              Each theme comes as a light/dark pair. Click a preview to use that
+              side for its scheme, or “Use for both” to keep one theme whichever
+              way “System” and the ⌘P “Toggle Dark/Light Mode” command resolve.
             </span>
-            <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
-              <button
-                v-for="t in THEMES"
-                :key="t.key"
-                class="flex flex-col gap-2 rounded-lg border border-border bg-base p-2 text-left transition-[border-color,box-shadow] duration-[120ms] hover:border-muted-foreground"
-                :class="ui.theme === t.key && 'border-accent shadow-[0_0_0_1px_var(--accent)]'"
-                @click="ui.setTheme(t.key)"
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+              <div
+                v-for="card in themeFamilyCards"
+                :key="card.family.key"
+                class="group flex flex-col gap-2 rounded-lg border border-border bg-base p-2 transition-[border-color,box-shadow] duration-[120ms]"
+                :class="(ui.lightFamily.key === card.family.key || ui.darkFamily.key === card.family.key) && 'border-accent shadow-[0_0_0_1px_var(--accent)]'"
               >
-                <div
-                  class="relative h-16 overflow-hidden rounded-md border"
-                  :style="{ background: t.vars['bg-base'], borderColor: t.vars.border }"
-                >
-                  <div class="absolute left-2 top-2 flex h-[calc(100%-16px)] w-[46%] flex-col gap-[5px] rounded p-[7px]" :style="{ background: t.vars['bg-panel'] }">
-                    <span class="h-1 w-4/5 rounded-sm opacity-90" :style="{ background: t.vars['text-primary'] }" />
-                    <span class="h-1 w-1/2 rounded-sm opacity-60" :style="{ background: t.vars['text-secondary'] }" />
-                  </div>
-                  <div class="absolute bottom-[9px] right-[9px] flex gap-[5px]">
-                    <span class="h-[9px] w-[9px] rounded-full" :style="{ background: t.vars.accent }" />
-                    <span class="h-[9px] w-[9px] rounded-full" :style="{ background: t.vars.green }" />
-                    <span class="h-[9px] w-[9px] rounded-full" :style="{ background: t.vars.yellow }" />
-                    <span class="h-[9px] w-[9px] rounded-full" :style="{ background: t.vars.red }" />
-                  </div>
+                <div class="flex gap-2">
+                  <button
+                    v-for="side in card.sides"
+                    :key="side.scheme"
+                    class="relative h-16 flex-1 overflow-hidden rounded-md border transition-[outline] duration-[120ms]"
+                    :style="{ background: side.theme.vars['bg-base'], borderColor: side.theme.vars.border }"
+                    :class="assignedFamily(side.scheme) === card.family.key && 'outline outline-2 outline-offset-1 outline-[var(--accent)]'"
+                    :title="`Use ${card.family.label} for ${side.scheme} mode`"
+                    @click="ui.setThemeFamilyFor(side.scheme, card.family.key)"
+                  >
+                    <div class="absolute left-1.5 top-1.5 flex h-[calc(100%-12px)] w-[46%] flex-col gap-[5px] rounded p-[5px]" :style="{ background: side.theme.vars['bg-panel'] }">
+                      <span class="h-1 w-4/5 rounded-sm opacity-90" :style="{ background: side.theme.vars['text-primary'] }" />
+                      <span class="h-1 w-1/2 rounded-sm opacity-60" :style="{ background: side.theme.vars['text-secondary'] }" />
+                    </div>
+                    <div class="absolute bottom-1.5 right-1.5 flex gap-[4px]">
+                      <span class="h-[8px] w-[8px] rounded-full" :style="{ background: side.theme.vars.accent }" />
+                      <span class="h-[8px] w-[8px] rounded-full" :style="{ background: side.theme.vars.green }" />
+                      <span class="h-[8px] w-[8px] rounded-full" :style="{ background: side.theme.vars.red }" />
+                    </div>
+                    <!-- Badge marks the theme this scheme is currently set to. -->
+                    <span
+                      v-if="assignedFamily(side.scheme) === card.family.key"
+                      class="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-accent text-[var(--bg-base)]"
+                    >
+                      <component :is="side.scheme === 'dark' ? PhMoon : PhSun" :size="10" weight="fill" />
+                    </span>
+                  </button>
                 </div>
-                <div class="flex items-center justify-between px-0.5">
-                  <span class="text-xs text-foreground">{{ t.label }}</span>
-                  <PhCheck v-if="ui.theme === t.key" :size="13" class="text-accent" />
+                <div class="flex items-center justify-between gap-2 px-0.5">
+                  <span class="truncate text-xs text-foreground">{{ card.family.label }}</span>
+                  <button
+                    class="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity duration-[120ms] hover:border-accent hover:text-accent group-hover:opacity-100"
+                    :class="ui.lightFamily.key === card.family.key && ui.darkFamily.key === card.family.key && 'opacity-100 border-accent text-accent'"
+                    title="Use for both light and dark"
+                    @click="ui.setThemeFamily(card.family.key)"
+                  >
+                    Both
+                  </button>
                 </div>
-              </button>
+              </div>
             </div>
           </div>
 
@@ -1030,12 +1049,12 @@ import { useProvidersStore, transportLabel } from "@/stores/providers";
 import ProvidersPanel from "@/components/ProvidersPanel.vue";
 import { testNtfy } from "@/lib/ntfy";
 import { useUpdateStore } from "@/stores/update";
-import { THEMES } from "@/themes";
+import { THEME_FAMILIES, findTheme } from "@/themes";
 import { soundsForKind, playSound, type SoundKind } from "@/lib/sounds";
 import { eventToShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
-import { MODELS_BY_AGENT } from "@/lib/chatModels";
+import { ensureModels, modelsFor, textGenerationValue } from "@/lib/chatModels";
 
 defineEmits<{ close: [] }>();
 
@@ -1064,7 +1083,22 @@ const THEME_MODES: { id: "system" | "light" | "dark"; label: string; icon: Compo
   { id: "dark", label: "Dark", icon: PhMoon as Component },
 ];
 
+// One card per theme family, with both halves of the pair previewed.
+const themeFamilyCards = computed(() =>
+  THEME_FAMILIES.map((family) => ({
+    family,
+    sides: [
+      { scheme: "light" as const, theme: findTheme(family.light) },
+      { scheme: "dark" as const, theme: findTheme(family.dark) },
+    ],
+  })),
+);
+
 const ui = useUIStore();
+
+function assignedFamily(scheme: "light" | "dark") {
+  return scheme === "dark" ? ui.darkFamily.key : ui.lightFamily.key;
+}
 const providers = useProvidersStore();
 const update = useUpdateStore();
 
@@ -1076,7 +1110,28 @@ const SPAWN_MODE_OPTIONS = [
   { value: "terminal", label: "Terminal tab" },
   { value: "chat", label: "Chat" },
 ];
-const commitMessageModelOptions = MODELS_BY_AGENT.claude.map((m) => ({ value: m.id, label: m.label }));
+// Show each enabled built-in provider with a native one-shot CLI contract.
+// Codex's catalog is loaded from the locally logged-in CLI instead of guessed;
+// providers without discovery still offer their own Default selection.
+const textGenerationAgents = computed(() =>
+  providers.active.filter((a) => ["claude", "codex", "gemini", "opencode"].includes(a.providerId)),
+);
+const commitMessageModelOptions = computed(() =>
+  textGenerationAgents.value.flatMap((agent) =>
+    modelsFor(agent.id)
+      .map((model) => ({
+        value: textGenerationValue(agent.kind, agent.providerId, model.id),
+        label: `${agent.name} · ${model.label}`,
+      })),
+  ),
+);
+watch(
+  textGenerationAgents,
+  (agents) => {
+    for (const agent of agents) void ensureModels(agent.id, agent.kind, "");
+  },
+  { immediate: true },
+);
 const FLOAT_CORNER_OPTIONS = [
   { value: "top-right", label: "Top right" },
   { value: "top-left", label: "Top left" },

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"testing"
 )
 
@@ -108,23 +110,61 @@ func TestCodexRPCErrorMessage(t *testing.T) {
 	}
 }
 
+func TestRejectUnsupportedCodexRequestRepliesWithJSONRPCError(t *testing.T) {
+	var stdin bytes.Buffer
+	sess := &acpSession{stdin: nopWriteCloser{Writer: &stdin}}
+	(&App{}).rejectUnsupportedCodexRequest(sess, map[string]any{"id": float64(17)}, "item/tool/call")
+
+	var reply map[string]any
+	if err := json.Unmarshal(stdin.Bytes(), &reply); err != nil {
+		t.Fatalf("invalid JSON-RPC response: %v", err)
+	}
+	if reply["id"] != float64(17) || mapOf(reply["error"])["code"] != float64(-32601) {
+		t.Fatalf("unexpected unsupported-request response: %#v", reply)
+	}
+}
+
+func TestCodexUserInputResponseUsesStructuredAnswers(t *testing.T) {
+	var stdin bytes.Buffer
+	sess := &acpSession{stdin: nopWriteCloser{Writer: &stdin}, proto: protoCodexAppServer}
+	app := &App{acpSessions: &acpRegistry{live: map[string]*acpSession{"chat": sess}}}
+	if err := app.AcpRespondUserInput("chat", 18, map[string][]string{"language": {"Go"}}); err != nil {
+		t.Fatal(err)
+	}
+	var reply map[string]any
+	if err := json.Unmarshal(stdin.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	answers := mapOf(mapOf(reply["result"])["answers"])
+	values, _ := mapOf(answers["language"])["answers"].([]any)
+	if reply["id"] != float64(18) || len(values) != 1 || values[0] != "Go" {
+		t.Fatalf("unexpected Codex user-input response: %#v", reply)
+	}
+}
+
+type nopWriteCloser struct{ io.Writer }
+
+func (nopWriteCloser) Close() error { return nil }
+
 func TestCodexModeSettings(t *testing.T) {
 	cases := map[string]struct {
 		approval string
 		sandbox  string
+		reviewer string
 	}{
-		"default":           {"untrusted", "readOnly"},
-		"acceptEdits":       {"on-request", "workspaceWrite"},
-		"plan":              {"untrusted", "readOnly"},
-		"bypassPermissions": {"never", "dangerFullAccess"},
+		"default":           {"untrusted", "readOnly", "user"},
+		"acceptEdits":       {"on-request", "workspaceWrite", "user"},
+		"auto":              {"on-request", "workspaceWrite", "auto_review"},
+		"plan":              {"untrusted", "readOnly", "user"},
+		"bypassPermissions": {"never", "dangerFullAccess", "user"},
 	}
 	for mode, want := range cases {
-		approval, sandbox, ok := codexModeSettings(mode)
-		if !ok || approval != want.approval || sandbox != want.sandbox {
-			t.Fatalf("mode %q: got (%q, %q, %t), want (%q, %q, true)", mode, approval, sandbox, ok, want.approval, want.sandbox)
+		approval, sandbox, reviewer, ok := codexModeSettings(mode)
+		if !ok || approval != want.approval || sandbox != want.sandbox || reviewer != want.reviewer {
+			t.Fatalf("mode %q: got (%q, %q, %q, %t), want (%q, %q, %q, true)", mode, approval, sandbox, reviewer, ok, want.approval, want.sandbox, want.reviewer)
 		}
 	}
-	if _, _, ok := codexModeSettings("not-a-mode"); ok {
+	if _, _, _, ok := codexModeSettings("not-a-mode"); ok {
 		t.Fatal("unknown mode must not silently change Codex settings")
 	}
 }

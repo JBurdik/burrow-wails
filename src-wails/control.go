@@ -58,11 +58,27 @@ func (a *App) AcpRespondPermission(id string, rpcID int64, optionID string) erro
 	})
 }
 
-// AcpRespondUserInput answers a tool's request for free-text user input.
-func (a *App) AcpRespondUserInput(id string, rpcID int64, text string) error {
+// AcpRespondUserInput answers a tool's request for structured user input.
+// Codex maps every question id to {answers: [...]}; ACP adapters retain their
+// legacy single-content response until they expose the same contract.
+func (a *App) AcpRespondUserInput(id string, rpcID int64, answers map[string][]string) error {
 	sess, ok := a.acpReg().get(id)
 	if !ok {
 		return fmt.Errorf("acp adapter not running")
+	}
+	if sess.proto == protoCodexAppServer {
+		out := map[string]any{}
+		for questionID, values := range answers {
+			out[questionID] = map[string]any{"answers": values}
+		}
+		return sess.write(map[string]any{"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"answers": out}})
+	}
+	text := ""
+	for _, values := range answers {
+		if len(values) > 0 {
+			text = values[0]
+			break
+		}
 	}
 	return sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"content": text},
