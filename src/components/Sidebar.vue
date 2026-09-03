@@ -46,7 +46,7 @@
     <div v-if="active" class="flex shrink-0 items-center gap-1 px-1.5 pb-1.5">
       <button
         class="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-border/65 bg-transparent px-2 py-1.5 text-[11px] font-medium text-secondary-foreground transition-colors hover:border-border hover:bg-hover hover:text-foreground active:scale-[0.985]"
-        :class="ui.welcomeOpen && 'border-accent/45 bg-accent/[0.08] text-foreground'"
+        :class="ui.welcomeVisible && 'border-accent/45 bg-accent/[0.08] text-foreground'"
         @click="ui.openWelcome()"
       >
         <PhPlus :size="12" class="text-accent" />

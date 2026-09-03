@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -168,6 +169,14 @@ func generateTextJSONContext(ctx context.Context, cwd, selection, prompt, schema
 		out, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
+		}
+		// Codex answers in prose as often as in JSON — a ```json fence or a
+		// leading sentence used to fail the caller's Unmarshal and silently drop
+		// the whole generation. Dig the object out when there is one; hand the
+		// raw text back when there isn't, so a bare title still reaches callers
+		// that can use it.
+		if extracted, err := extractGeneratedJSON(out); err == nil {
+			return extracted, nil
 		}
 		return out, nil
 	case "gemini":
@@ -344,20 +353,36 @@ func (a *App) GenerateChatTitle(cwd string, model string, text string) string {
 		text,
 	}, "\n")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// 30 s was tight for a reasoning model on a cold start; a title that lands
+	// late is still better than the heuristic one.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	jsonOutput, err := generateTextJSONContext(ctx, cwd, model, prompt, chatTitleSchema)
 	if err != nil {
+		// The caller swallows a "" and keeps the heuristic title, which made a
+		// broken provider selection indistinguishable from "the model was slow".
+		log.Printf("chat title generation failed (%s): %v", model, err)
 		return ""
 	}
 
+	return chatTitleFromOutput(jsonOutput)
+}
+
+// chatTitleFromOutput reads the title out of whatever the provider produced:
+// the requested JSON object, or — when it ignored the contract and just wrote
+// the name — the bare line itself. Throwing prose away was the whole reason
+// codex-backed titles silently never replaced the heuristic one.
+func chatTitleFromOutput(out []byte) string {
+	if extracted, err := extractGeneratedJSON(out); err == nil {
+		out = extracted
+	}
 	var result struct {
 		Title string `json:"title"`
 	}
-	if err := json.Unmarshal(jsonOutput, &result); err != nil {
-		return ""
+	if err := json.Unmarshal(out, &result); err == nil {
+		return sanitizeChatTitle(result.Title)
 	}
-	return sanitizeChatTitle(result.Title)
+	return sanitizeChatTitle(string(out))
 }
 
 // sanitizeChatTitle trims the model's answer to one short line. Empty in, empty

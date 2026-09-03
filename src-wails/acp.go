@@ -95,6 +95,17 @@ func (r *acpRegistry) drop(id string) *acpSession {
 	return s
 }
 
+// ids snapshots the live session ids (shutdown cleanup iterates these).
+func (r *acpRegistry) ids() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.live))
+	for id := range r.live {
+		out = append(out, id)
+	}
+	return out
+}
+
 func (a *App) acpReg() *acpRegistry {
 	if a.acpSessions == nil {
 		a.acpSessions = &acpRegistry{live: map[string]*acpSession{}}

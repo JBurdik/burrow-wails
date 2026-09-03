@@ -68,6 +68,8 @@ export function CreateWorktree(arg1:string,arg2:string,arg3:string,arg4:string,a
 
 export function DaemonStats():Promise<Record<string, any>>;
 
+export function DeleteChatMessages(arg1:number):Promise<void>;
+
 export function DeleteSkill(arg1:string):Promise<void>;
 
 export function DeleteWorkspace(arg1:number):Promise<void>;
@@ -117,6 +119,8 @@ export function ListSkills():Promise<Array<main.SkillInfo>>;
 export function ListTerminalTabs(arg1:number):Promise<Array<main.TerminalTab>>;
 
 export function ListWorkspaces():Promise<Array<main.Workspace>>;
+
+export function LoadChatMessages(arg1:number):Promise<string>;
 
 export function LspSend(arg1:string,arg2:string):Promise<void>;
 
@@ -187,6 +191,8 @@ export function RestoreCheckpoint(arg1:string,arg2:string):Promise<main.Checkpoi
 export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
+
+export function SaveChatMessages(arg1:number,arg2:string):Promise<void>;
 
 export function SaveTempImage(arg1:string,arg2:string):Promise<string>;
 

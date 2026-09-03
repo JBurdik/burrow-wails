@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 type Manager struct {
@@ -25,6 +26,11 @@ type Session struct {
 	stdin  io.WriteCloser
 	onLine func(line string)
 	onExit func()
+
+	// lastSeen is the last time this session did anything: a prompt written to
+	// stdin, or a line streamed back. Both matter — a long turn writes no stdin
+	// but streams constantly, so tracking only writes would reap a working agent.
+	lastSeen time.Time
 }
 
 func NewManager() *Manager {
@@ -56,7 +62,7 @@ func (m *Manager) Start(id, command string, args []string, cwd string, env []str
 		return err
 	}
 
-	sess := &Session{ID: id, cmd: c, stdin: stdin, onLine: onLine, onExit: onExit}
+	sess := &Session{ID: id, cmd: c, stdin: stdin, onLine: onLine, onExit: onExit, lastSeen: time.Now()}
 	m.mu.Lock()
 	m.sessions[id] = sess
 	m.mu.Unlock()
@@ -65,6 +71,7 @@ func (m *Manager) Start(id, command string, args []string, cwd string, env []str
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 		for scanner.Scan() {
+			m.touch(sess)
 			onLine(scanner.Text())
 		}
 		c.Wait()
@@ -80,8 +87,46 @@ func (m *Manager) Send(id string, data string) error {
 	if !ok {
 		return fmt.Errorf("unknown agent session: %s", id)
 	}
+	m.touch(sess)
 	_, err := io.WriteString(sess.stdin, data)
 	return err
+}
+
+func (m *Manager) touch(sess *Session) {
+	m.mu.Lock()
+	sess.lastSeen = time.Now()
+	m.mu.Unlock()
+}
+
+// ReapIdle stops every session that has been silent for longer than `idle` and
+// returns their ids. An agent CLI holds ~150 MB even doing nothing, so a chat
+// nobody has touched in half an hour should give the memory back; the transcript
+// is on disk and the next prompt resumes the session.
+//
+// Silence is the only signal needed: a live turn streams output continuously, so
+// an in-flight agent can never look idle (no separate "is a turn running" check,
+// which the frontend would have to keep in sync).
+func (m *Manager) ReapIdle(idle time.Duration) []string {
+	cutoff := time.Now().Add(-idle)
+	m.mu.Lock()
+	var stale []*Session
+	for id, sess := range m.sessions {
+		if sess.lastSeen.Before(cutoff) {
+			stale = append(stale, sess)
+			delete(m.sessions, id)
+		}
+	}
+	m.mu.Unlock()
+
+	ids := make([]string, 0, len(stale))
+	for _, sess := range stale {
+		sess.stdin.Close()
+		if sess.cmd.Process != nil {
+			_ = sess.cmd.Process.Kill()
+		}
+		ids = append(ids, sess.ID)
+	}
+	return ids
 }
 
 // Alive reports whether a session is currently running under this id.
@@ -134,5 +179,23 @@ func (m *Manager) removeIfCurrent(id string, sess *Session) {
 	defer m.mu.Unlock()
 	if m.sessions[id] == sess {
 		delete(m.sessions, id)
+	}
+}
+
+// StopAll kills every live session. Used on app shutdown so agent CLIs don't
+// outlive the app as orphans.
+func (m *Manager) StopAll() {
+	m.mu.Lock()
+	sessions := make([]*Session, 0, len(m.sessions))
+	for id, s := range m.sessions {
+		sessions = append(sessions, s)
+		delete(m.sessions, id)
+	}
+	m.mu.Unlock()
+	for _, sess := range sessions {
+		sess.stdin.Close()
+		if sess.cmd.Process != nil {
+			_ = sess.cmd.Process.Kill()
+		}
 	}
 }

@@ -49,6 +49,7 @@ func main() {
 		OnDomReady:       app.restoreWindowState,
 		OnBeforeClose: func(ctx context.Context) bool {
 			app.saveWindowState(ctx)
+			app.cleanupOnShutdown()
 			return false
 		},
 		Bind: []interface{}{

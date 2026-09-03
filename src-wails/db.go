@@ -97,6 +97,7 @@ func migrate(db *sql.DB) error {
 			created_at INTEGER NOT NULL
 		)`,
 	}
+	stmts = append(stmts, chatMessagesSchema()...)
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return err

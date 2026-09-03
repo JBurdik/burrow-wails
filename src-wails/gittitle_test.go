@@ -51,3 +51,17 @@ func TestSanitizeChatTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestChatTitleFromOutput(t *testing.T) {
+	cases := map[string]string{
+		`{"title":"Fix status dots"}`:            "Fix status dots",
+		"```json\n{\"title\":\"Fix dots\"}\n```": "Fix dots",        // codex fences its JSON
+		"Fix status dots":                        "Fix status dots", // …or skips JSON entirely
+		"":                                       "",
+	}
+	for in, want := range cases {
+		if got := chatTitleFromOutput([]byte(in)); got != want {
+			t.Errorf("chatTitleFromOutput(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

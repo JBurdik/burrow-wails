@@ -14,10 +14,18 @@ describe("shouldRestamp", () => {
     expect(shouldRestamp(undefined, tab, true)).toBe(false);
   });
 
-  it("stamps on a real change", () => {
-    expect(shouldRestamp({ ...tab, status: "running" }, tab, true)).toBe(true);
-    expect(shouldRestamp({ ...tab, title: "old" }, tab, true)).toBe(true);
-    expect(shouldRestamp({ ...tab, round: 1 }, tab, true)).toBe(true);
+  it("stamps when a turn starts", () => {
+    const running = { ...tab, status: "running" as const };
+    expect(shouldRestamp(tab, running, true)).toBe(true);
+  });
+
+  it("does not stamp mid-turn or on the way out of a turn", () => {
+    const running = { ...tab, status: "running" as const };
+    // status churn inside one turn, and the turn ending, both leave order alone
+    expect(shouldRestamp(running, { ...tab, status: "waiting" }, true)).toBe(false);
+    expect(shouldRestamp(running, { ...tab, status: "running", round: 2 }, true)).toBe(false);
+    expect(shouldRestamp(running, { ...tab, status: "review" }, true)).toBe(false);
+    expect(shouldRestamp({ ...tab, title: "old" }, tab, true)).toBe(false);
   });
 
   it("ignores a sync that changed nothing", () => {

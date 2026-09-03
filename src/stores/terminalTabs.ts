@@ -65,11 +65,15 @@ function loadActivity(): Record<number, Record<number, number>> {
 }
 
 /**
- * Whether a tab's recency stamp should be reset to now. A tab we have never
- * synced before (`before` undefined) is NOT automatically new — after a restart
- * every tab looks that way, and restamping them all would flatten the order the
- * persisted stamps exist to preserve. Only a genuine change, or a tab with no
- * stamp at all, moves it.
+ * Whether a tab's recency stamp should be reset to now. Modelled on t3code's
+ * `threadSort` (sort by *latest user message*, not by every write): only the
+ * start of a turn — the transition into `running`, i.e. a submitted prompt —
+ * moves a thread. Restamping on any status/title/round change is what made the
+ * feed reshuffle by itself while agents worked.
+ * A tab we have never synced before (`before` undefined) is NOT automatically
+ * new — after a restart every tab looks that way, and restamping them all
+ * would flatten the order the persisted stamps exist to preserve. Only a tab
+ * with no stamp at all moves.
  */
 export function shouldRestamp(
   before: Pick<TabSummary, "status" | "title" | "round"> | undefined,
@@ -78,7 +82,7 @@ export function shouldRestamp(
 ): boolean {
   if (!hasStamp) return true;
   if (!before) return false;
-  return before.status !== tab.status || before.title !== tab.title || before.round !== tab.round;
+  return tab.status === "running" && before.status !== "running";
 }
 
 export const useTerminalTabsStore = defineStore("terminalTabs", () => {
@@ -87,9 +91,9 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   // A `review` status is terminal-owned and persists until Terminal receives
   // MARK_SEEN. Keep the sidebar responsive while that hand-off completes.
   const seenCompletionsByWs = ref<Record<number, Record<number, true>>>({});
-  // Last time each tab did something worth sorting on (created, status change,
-  // retitled, another agent round) — deliberately NOT activation, which would
-  // reshuffle the feed under the cursor. The sidebar lists tabs from every open
+  // Last time each tab started a turn (created, or a new prompt submitted) —
+  // deliberately NOT activation or mid-turn status churn, which would reshuffle
+  // the feed under the cursor. The sidebar lists tabs from every open
   // project in one flat feed, so it needs a recency key per tab.
   const activityByWs = ref<Record<number, Record<number, number>>>(loadActivity());
   const request = ref<TabRequest | null>(null);

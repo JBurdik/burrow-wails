@@ -42,7 +42,10 @@ func (a *App) WriteConfig(content string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(content), 0o644)
+	// Atomic: config.json is one grab-bag of every preference, and a plain
+	// truncate-and-write left it corrupt (losing all settings) if the app died
+	// mid-save.
+	return writeFileAtomic(path, []byte(content))
 }
 
 // Keybindings live in their own keybindings.json — config.json is a grab-bag

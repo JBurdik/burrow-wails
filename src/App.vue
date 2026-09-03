@@ -179,15 +179,14 @@ function openShortcutsFromDocs() {
   cheatsheetOpen.value = true;
 }
 
-// Tabs of the active workspace, and of those the ones still wanting attention.
-// Restore reopens EVERY saved chat thread (the sessions are the threads — the
-// Sidebar's shelves read them from here), so "has tabs" is not "has live work":
-// a startup with only settled/old threads must still land on the composer.
+// Tabs of the active workspace (the Sidebar's shelves read them from here).
 const allTabs = computed(() => (ws.active ? tabsStore.tabsByWs[ws.active.id] ?? [] : []));
-const liveTabs = computed(() => allTabs.value.filter((t) => !t.settled).length);
 
-// welcomeOpen is tri-state: true/false = explicitly opened/dismissed, null = auto.
-const showWelcome = computed(() => !ws.active || (ui.welcomeOpen ?? liveTabs.value === 0));
+// The view state lives in the ui store, not here: Terminal.vue's watched/seen
+// logic has to agree with what's on screen, and a computed local to App.vue
+// was invisible to it — hence a tab hidden behind the composer counting as
+// watched. See `welcomeVisible` / `viewingTabs` in stores/ui.ts.
+const showWelcome = computed(() => ui.welcomeVisible);
 
 // Back to auto once the workspace is empty, so closing the last tab brings the
 // composer back after an earlier dismissal.

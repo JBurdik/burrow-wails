@@ -12,6 +12,8 @@ import {
   variantFor,
 } from "@/themes";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { useWorkspaceStore } from "@/stores/workspace";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace("#", "");
@@ -222,6 +224,17 @@ function normalize(parsed: unknown): Prefs {
   return { ...DEFAULT_PREFS };
 }
 
+// Tri-state welcomeOpen resolved against the workspace's live tabs. Pure so the
+// rule ("no live work → land on the composer") is testable without a Pinia app.
+// Restore reopens EVERY saved chat thread, so "has tabs" is not "has live work":
+// a startup with only settled/old threads must still show the composer.
+export function resolveWelcomeVisible(
+  welcomeOpen: boolean | null,
+  liveTabCount: number,
+): boolean {
+  return welcomeOpen ?? liveTabCount === 0;
+}
+
 export const useUIStore = defineStore("ui", () => {
   const settingsOpen = ref(false);
 
@@ -276,7 +289,8 @@ export const useUIStore = defineStore("ui", () => {
   // Compose ("What should we build in X?") screen, shown over the terminal host.
   // Session-only — a reload lands you back on your threads, not the composer.
   // Tri-state: true = pinned open, false = explicitly dismissed, null = auto
-  // (App.vue decides from whether the workspace has any live, unsettled tab).
+  // (resolved by welcomeVisible below from whether the workspace has any live,
+  // unsettled tab).
   const welcomeOpen = ref<boolean | null>(null);
   const sidebarVisible = ref(loaded.sidebarVisible ?? false);
   const sidebarWidth = ref(loaded.sidebarWidth ?? 220);
@@ -662,6 +676,25 @@ export const useUIStore = defineStore("ui", () => {
     floatChatOpen.value = !floatChatOpen.value;
   }
 
+  // ── the active view ────────────────────────────────────────────────────────
+  // Which surface the terminal host is actually showing, and the single source
+  // of truth for "is the user looking at this tab". Everything that decides
+  // watched/seen derives from `viewingTabs`, so a tab sitting behind the
+  // welcome composer can never count as watched — that was the bug where a
+  // turn finishing while you composed a new thread reported a transient `done`
+  // instead of a persistent `review`, and window focus cleared its badge
+  // unseen. t3code gets this for free (the composer is its own route, so
+  // ChatView is simply unmounted); our terminals must stay mounted to keep the
+  // PTY stream and the chat event listeners alive, so the state is explicit
+  // instead of implied by the DOM.
+  const welcomeVisible = computed(() => {
+    const wsStore = useWorkspaceStore();
+    if (!wsStore.active) return true;
+    const all = useTerminalTabsStore().tabsByWs[wsStore.active.id] ?? [];
+    return resolveWelcomeVisible(welcomeOpen.value, all.filter((t) => !t.settled).length);
+  });
+  const viewingTabs = computed(() => mode.value === "terminal" && !welcomeVisible.value);
+
   function openWelcome() {
     welcomeOpen.value = true;
     mode.value = "terminal"; // composer lives in the terminal host
@@ -751,6 +784,8 @@ export const useUIStore = defineStore("ui", () => {
     floatChatOpen,
     toggleFloatChat,
     welcomeOpen,
+    welcomeVisible,
+    viewingTabs,
     openWelcome,
     closeWelcome,
     registerSpotlightApi,

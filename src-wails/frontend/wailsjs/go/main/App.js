@@ -134,6 +134,10 @@ export function DaemonStats() {
   return window['go']['main']['App']['DaemonStats']();
 }
 
+export function DeleteChatMessages(arg1) {
+  return window['go']['main']['App']['DeleteChatMessages'](arg1);
+}
+
 export function DeleteSkill(arg1) {
   return window['go']['main']['App']['DeleteSkill'](arg1);
 }
@@ -232,6 +236,10 @@ export function ListTerminalTabs(arg1) {
 
 export function ListWorkspaces() {
   return window['go']['main']['App']['ListWorkspaces']();
+}
+
+export function LoadChatMessages(arg1) {
+  return window['go']['main']['App']['LoadChatMessages'](arg1);
 }
 
 export function LspSend(arg1, arg2) {
@@ -372,6 +380,10 @@ export function RunGh(arg1, arg2) {
 
 export function RunGit(arg1, arg2) {
   return window['go']['main']['App']['RunGit'](arg1, arg2);
+}
+
+export function SaveChatMessages(arg1, arg2) {
+  return window['go']['main']['App']['SaveChatMessages'](arg1, arg2);
 }
 
 export function SaveTempImage(arg1, arg2) {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"burrow/internal/agentproc"
 	"burrow/internal/control"
@@ -157,6 +158,10 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.db = db
 
+	// Chat transcripts used to live in config.json; move them into SQLite before
+	// the frontend reads either store.
+	a.migrateChatHistoryToSQLite()
+
 	a.daemon = NewDaemonClient(ctx, filepath.Join(dataDir, "daemon.sock"))
 	if err := a.daemon.Ensure(); err != nil {
 		log.Printf("daemon: %v", err)
@@ -178,6 +183,8 @@ func (a *App) startup(ctx context.Context) {
 
 	// Warm the font list so the Settings pickers don't pay the ~1 s scan.
 	go ListFonts()
+
+	go a.reapIdleAgents()
 
 	a.initControl(dataDir)
 
@@ -256,4 +263,42 @@ func (a *App) KillPty(id string) error {
 
 func (a *App) ListPtySessions() ([]string, error) {
 	return a.daemon.List()
+}
+
+// Idle-agent reaping, modelled on t3code's ProviderSessionReaper (same
+// thresholds): a chat's CLI is only worth its ~150 MB while something is
+// happening on it. Killing it emits the usual exit event, so the frontend marks
+// the chat cold and the next prompt spawns a replacement with --resume.
+const (
+	agentIdleThreshold = 30 * time.Minute
+	agentSweepInterval = 5 * time.Minute
+)
+
+func (a *App) reapIdleAgents() {
+	for range time.Tick(agentSweepInterval) {
+		if a.claudeAgents == nil {
+			continue
+		}
+		if reaped := a.claudeAgents.ReapIdle(agentIdleThreshold); len(reaped) > 0 {
+			log.Printf("reaped %d idle agent session(s): %v", len(reaped), reaped)
+		}
+	}
+}
+
+// cleanupOnShutdown kills every agent CLI subprocess we started. Without it
+// each chat session's `claude`/adapter process outlives the app as an orphan
+// (AgentChat.vue deliberately does not stop the proc on unmount, so nothing
+// else does it either) and they pile up across launches.
+//
+// ponytail: PTYs are deliberately NOT touched — the daemon owns them and
+// keeping them alive across a restart is the reattach feature.
+func (a *App) cleanupOnShutdown() {
+	if a.claudeAgents != nil {
+		a.claudeAgents.StopAll()
+	}
+	if a.acpSessions != nil {
+		for _, id := range a.acpSessions.ids() {
+			_ = a.AcpStop(id)
+		}
+	}
 }

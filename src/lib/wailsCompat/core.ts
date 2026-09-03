@@ -229,6 +229,14 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "set_burrow_mcp_max_depth":
       return App.SetBurrowMcpMaxDepth(args.n ?? args.depth);
 
+    // Chat transcripts (SQLite — they outgrew config.json)
+    case "load_chat_messages":
+      return App.LoadChatMessages(args.chatId ?? args.chat_id);
+    case "save_chat_messages":
+      return App.SaveChatMessages(args.chatId ?? args.chat_id, args.messages);
+    case "delete_chat_messages":
+      return App.DeleteChatMessages(args.chatId ?? args.chat_id);
+
     // App config file
     case "read_config":
       return App.ReadConfig();

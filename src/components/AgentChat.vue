@@ -127,7 +127,7 @@
       @cancel="cancelCodexUserInput"
     />
 
-    <div ref="scrollEl" class="chat-messages flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
+    <div ref="scrollEl" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
         <div class="chat-empty-avatar mb-2 flex h-11 w-11 items-center justify-center rounded-[11px] text-white shadow-[0_0_0_1px_color-mix(in_srgb,var(--agent-accent,#ec4899)_36%,transparent)]" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 72%, #16161a);" aria-hidden="true">
@@ -306,6 +306,18 @@
         <span class="ml-1 text-[11px] italic text-muted-foreground tabular-nums">Working for {{ workingElapsed }}</span>
       </div>
       </div>
+    </div>
+
+    <!-- Jump back to live: only while scrolled up (autoscroll paused) -->
+    <div class="relative h-0">
+      <button
+        v-if="!atBottom"
+        class="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] text-secondary-foreground shadow-md transition-colors hover:bg-hover"
+        title="Jump to latest"
+        @click="scrollToBottom(true)"
+      >
+        <PhArrowDown :size="12" weight="bold" /> Latest
+      </button>
     </div>
 
     <!-- Command suggestions dropdown -->
@@ -660,7 +672,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
-import { PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
@@ -1528,28 +1540,36 @@ interface AccountInfo {
 
 // Legacy per-chat localStorage key prefix (kept only for the one-time migration below).
 
-function loadMessages(chatId: number): ChatMessage[] {
-  const rec = getConfig<Record<string, unknown>>("chatMessageHistory", {});
-  const raw = rec[String(chatId)];
-  return Array.isArray(raw) ? (raw as ChatMessage[]) : [];
+// Transcripts live in SQLite (chat_messages), not config.json: one row per
+// message means saving a turn writes that turn, where the old config-backed
+// version re-serialised every chat's history — 5.6 MB per saved message once a
+// few dozen chats had accumulated. Migration of existing histories happens once
+// in Go at startup.
+async function loadMessages(chatId: number): Promise<ChatMessage[]> {
+  try {
+    const raw = await invoke<string>("load_chat_messages", { chatId });
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ChatMessage[]) : [];
+  } catch {
+    return [];
+  }
 }
 
+// Fire-and-forget so the 12 call sites stay synchronous — a lost transcript
+// write is not worth blocking the stream over, and the next save rewrites it.
 function saveMessages(chatId: number, msgs: ChatMessage[]) {
-  // Only persist non-partial messages, cap at 200 to bound storage
-  const toSave = msgs.filter((m) => !m.partial).slice(-200);
-  const rec = { ...getConfig<Record<string, unknown>>("chatMessageHistory", {}) };
-  rec[String(chatId)] = toSave;
-  setConfig("chatMessageHistory", rec);
+  // Partial messages are mid-stream and get re-sent; the cap only guards against
+  // a pathological chat, not storage (a row per message is cheap now).
+  const toSave = msgs.filter((m) => !m.partial).slice(-2000);
+  void invoke("save_chat_messages", { chatId, messages: JSON.stringify(toSave) }).catch(() => {});
 }
 
 function clearMessageHistory(chatId: number) {
-  const rec = { ...getConfig<Record<string, unknown>>("chatMessageHistory", {}) };
-  delete rec[String(chatId)];
-  setConfig("chatMessageHistory", rec);
+  void invoke("delete_chat_messages", { chatId }).catch(() => {});
 }
 
 let nextMsgId = 0;
-const messages = ref<ChatMessage[]>(loadMessages(props.chatId));
+const messages = ref<ChatMessage[]>([]);
 const DRAFT_KEY = computed(() => `burrow.draft.chat.${props.chatId}`);
 const inputText = ref(localStorage.getItem(DRAFT_KEY.value) ?? "");
 watch(inputText, (val) => {
@@ -2001,9 +2021,17 @@ const cwdDisplay = computed(() => {
   return parts.slice(-2).join("/") || props.cwd;
 });
 
-function scrollToBottom() {
+// ponytail: 64px slop so a smooth-scroll in flight still counts as "at bottom"
+const atBottom = ref(true);
+function onScroll() {
+  const el = scrollEl.value;
+  if (el) atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+}
+function scrollToBottom(force = false) {
+  if (!force && !atBottom.value) return;
   nextTick(() => {
     if (scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight;
+    atBottom.value = true;
   });
 }
 
@@ -2241,6 +2269,10 @@ function onLine(line: string) {
   }
 
   if (type === "result" || type === "exit") {
+    // `exit` means the process is gone (idle-reaped by agentproc's sweeper, or
+    // it crashed) — the next send must spawn a replacement, not write to a dead
+    // pipe. `result` is only a turn boundary; the proc stays up.
+    if (type === "exit") runtimeStarted.value = false;
     busy.value = false;
     // Un-partial ALL messages — tool messages are pushed after assistant text,
     // so checking only `last` would leave the assistant text bubble still partial.
@@ -2369,6 +2401,7 @@ function onAcpData(raw: string) {
 
   // EOF from the Rust reader thread.
   if (msg._burrow === "exit") {
+    runtimeStarted.value = false;
     // DIAG (remove later): adapter process ended. If this fires mid-turn with no
     // unmount log, the ACP/CLI subprocess died server-side — check acp-debug.log.
     console.warn(`[chat-diag] adapter EXIT chatId=${props.chatId} busy=${busy.value}`);
@@ -2556,6 +2589,8 @@ async function sendInitialPrompt(prompt: string, images?: string[]) {
 async function sendMessage(forcedText?: string, extraImages?: string[]) {
   let text = (forcedText ?? inputText.value).trim();
   if (!text) return;
+  // A cold chat (never opened this launch) has no process yet — start it now.
+  if (await ensureRuntime()) return;
   if (extraImages?.length) pendingImages.value.push(...extraImages);
   // While busy: queue the message instead of sending immediately. ACP adapters
   // support promptQueueing (the agent queues it itself), so send concurrently —
@@ -2566,7 +2601,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     inputText.value = "";
     await nextTick();
     autoResize();
-    scrollToBottom();
+    scrollToBottom(true);
     return;
   }
   if (!forcedText) {
@@ -2610,7 +2645,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
 
   saveMessages(props.chatId, messages.value);
   syncStore();
-  scrollToBottom();
+  scrollToBottom(true);
   if (usesRpcRuntime.value) {
     try {
       const images = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
@@ -2854,6 +2889,7 @@ async function restartClaude() {
     profileCommand: selectedProfile.value?.binary || null,
     profileArgs: selectedProfile.value?.args.join(" ") || null,
   }).catch(() => {});
+  runtimeStarted.value = true;
   busy.value = false;
   messageQueue.value = [];
   messages.value = messages.value.filter((m) => m.role !== "queued");
@@ -2903,6 +2939,7 @@ async function clearChat() {
     profileCommand: selectedProfile.value?.binary || null,
     profileArgs: selectedProfile.value?.args.join(" ") || null,
   }).catch(() => {});
+  runtimeStarted.value = true;
   // Switched to a stream-json agent at runtime → ensure the claude-data listener
   // exists (onMounted only attaches it when the chat starts as stream-json).
   if (!unlisten) unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
@@ -3093,19 +3130,25 @@ function onWindowKeydown(e: KeyboardEvent) {
 function migrateLegacyChatConfig() {
   const MISSING = Symbol("missing");
 
-  // chatMessageHistory: burrow.claude.msgs.<id>
-  if (getConfig<unknown>("chatMessageHistory", MISSING) === MISSING) {
+  // Legacy per-chat transcripts: burrow.claude.msgs.<id>. These now go straight
+  // to SQLite — routing them through config.json's chatMessageHistory would drop
+  // them silently, since Go's config→SQLite migration has already run by the
+  // time this executes and nothing reads that key any more.
+  {
     const re = /^burrow\.claude\.msgs\.(\d+)$/;
-    const rec: Record<string, unknown> = {};
     const keys = Object.keys(localStorage).filter((k) => re.test(k));
     for (const k of keys) {
-      const id = k.match(re)![1];
+      const id = Number(k.match(re)![1]);
       const raw = localStorage.getItem(k);
       if (raw === null) continue;
-      try { rec[id] = JSON.parse(raw); } catch { /* skip malformed entry */ continue; }
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) continue;
+        void invoke("save_chat_messages", { chatId: id, messages: JSON.stringify(parsed) })
+          .then(() => localStorage.removeItem(k))
+          .catch(() => { /* keep the key so the next launch retries */ });
+      } catch { /* skip malformed entry */ }
     }
-    setConfig("chatMessageHistory", rec);
-    for (const k of keys) localStorage.removeItem(k);
   }
 
   // chatAcpSettings: burrow.acpMode.<id> / burrow.acpModel.<id> / burrow.acpEffort.<id>
@@ -3171,12 +3214,73 @@ function migrateLegacyChatConfig() {
   }
 }
 
+// --- Lazy runtime start -----------------------------------------------------
+// A chat's CLI is expensive (each idle `claude` holds ~150 MB), and Terminal.vue
+// keeps EVERY chat of every opened workspace mounted. Starting a process per
+// mount meant 40 persisted chats = 40 live CLIs = multi-GB at launch for chats
+// the user never opened. So the process is started on demand instead: on send,
+// or up front only for a chat spawned with a prompt to deliver. agentproc's
+// sweeper takes it back once the chat goes quiet.
+const runtimeStarted = ref(false);
+let runtimeStarting: Promise<unknown> | null = null;
+
+// Only a chat spawned with a prompt still to deliver warms itself up. Merely
+// looking at a chat does not need a process — the transcript is on disk.
+function shouldAutoStart(): boolean {
+  return props.initialPrompt !== undefined;
+}
+
+// Starts the backing process once. Returns a truthy error if the start failed
+// (the message is already surfaced in the feed), falsy on success.
+async function ensureRuntime(): Promise<unknown> {
+  if (runtimeStarted.value) return null;
+  if (runtimeStarting) return runtimeStarting;
+  runtimeStarting = (async (): Promise<unknown> => {
+    const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? sessionId.value ?? "";
+    if (usesRpcRuntime.value) {
+      await scriptsStore.loadForPath(props.cwd);
+      const startErr = await startRpcRuntime().catch((e: unknown) => e);
+      if (startErr) {
+        messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
+        return startErr;
+      }
+      runtimeStarted.value = true;
+      return null;
+    }
+    const startErr = await invoke("claude_start", {
+      id: props.chatId,
+      cwd: props.cwd,
+      resumeSessionId: stored || null,
+      permissionMode: permMode.value,
+      appendSystemPrompt: props.appendSystemPrompt || null,
+      model: selectedModel.value,
+      effort: selectedEffort.value,
+      configDir: selectedProfile.value?.configDir || null,
+      profileCommand: selectedProfile.value?.binary || null,
+      profileArgs: selectedProfile.value?.args.join(" ") || null,
+    }).catch((e: unknown) => {
+      // A swallowed failure here (missing `claude` binary, bad profile) used to
+      // look like a chat that simply never answers.
+      messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to start Claude CLI: ${e}` });
+      return e;
+    });
+    if (!unlisten) unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
+    if (!startErr) runtimeStarted.value = true;
+    return startErr ?? null;
+  })();
+  try {
+    return await runtimeStarting;
+  } finally {
+    runtimeStarting = null;
+  }
+}
+
 onMounted(async () => {
   // Config must be loaded (and legacy localStorage migrated) before any of the
   // config-backed refs below are trusted — reload them here once configReady settles.
   await configReady;
   migrateLegacyChatConfig();
-  messages.value = loadMessages(props.chatId);
+  messages.value = await loadMessages(props.chatId);
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
   // Pin the resolved model to this chat on first mount, so it survives a
@@ -3199,33 +3303,16 @@ onMounted(async () => {
   const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
   if (stored) sessionId.value = stored;
   publishRemoteChat();
-  if (usesRpcRuntime.value) {
-    await scriptsStore.loadForPath(props.cwd);
-    const startErr = await startRpcRuntime().catch((e: unknown) => e);
-    if (startErr) messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
-    else if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
-    return;
+  // The stream-json listener is JS-only and free — attach it even when the
+  // runtime is still cold, so a later ensureRuntime() streams immediately.
+  if (!usesRpcRuntime.value && !unlisten) {
+    unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
   }
-  let startErr: unknown = null;
-  await invoke("claude_start", {
-    id: props.chatId,
-    cwd: props.cwd,
-    resumeSessionId: stored || null,
-    permissionMode: permMode.value,
-    appendSystemPrompt: props.appendSystemPrompt || null,
-    model: selectedModel.value,
-    effort: selectedEffort.value,
-    configDir: selectedProfile.value?.configDir || null,
-    profileCommand: selectedProfile.value?.binary || null,
-    profileArgs: selectedProfile.value?.args.join(" ") || null,
-  }).catch((e: unknown) => {
-    // A swallowed failure here (missing `claude` binary, bad profile) used to
-    // look like a chat that simply never answers.
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to start Claude CLI: ${e}` });
-    return e;
-  }).then((e) => { startErr = e; });
-  unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
-  if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
+  if (shouldAutoStart()) {
+    const startErr = await ensureRuntime();
+    if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
+    if (usesRpcRuntime.value) return;
+  }
 
   // Load account info (plan, 5h window) — non-blocking.
   invoke<AccountInfo>("claude_get_account", { cwd: props.cwd })
@@ -3268,7 +3355,7 @@ watch(() => props.chatId, () => nextTick(() => inputEl.value?.focus()));
 
 // Scroll to bottom when this chat becomes the active one (user clicked it in sidebar).
 watch(() => chats.activeByWs[props.workspaceId], (activeId) => {
-  if (activeId === props.chatId) nextTick(() => scrollToBottom());
+  if (activeId === props.chatId) nextTick(() => scrollToBottom(true));
 });
 
 // Exposed for host shells (e.g. the Manager bar) that drive this chat from an

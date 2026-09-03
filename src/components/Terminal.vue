@@ -730,11 +730,12 @@ function onLeafBusy(id: number, busy: boolean) {
   );
 }
 
-// True when the user is actively looking at this tab: its workspace is the
+// True when the user is actively looking at this tab: the terminal host is
+// showing tabs (not the welcome composer — `viewingTabs`), its workspace is the
 // visible one, this tab is the active tab, and the window has OS focus.
 function isWatching(tab: Tab): boolean {
   return (
-    uiStore.mode === "terminal" &&
+    uiStore.viewingTabs &&
     wsStore.active?.id === props.workspaceId &&
     activeTabId.value === tab.id &&
     document.hasFocus()
@@ -1481,27 +1482,20 @@ watch(
   { deep: true },
 );
 
-// When the user switches TO this workspace (with the window focused), treat its
-// active tab as seen so a "review" badge earned while it was hidden clears.
-watch(
-  () => wsStore.active?.id,
-  (id) => {
-    if (id !== props.workspaceId || !document.hasFocus()) return;
-    const tab = tabs.value.find((t) => t.id === activeTabId.value);
-    if (tab) markTabSeen(tab);
-  },
-);
+// Seeing the active tab again clears any "review" badge it earned while hidden.
+// Both triggers route through `seeActiveTab`, which re-checks the full view
+// state — switching workspace, or coming back to the tabs from the dashboard or
+// the welcome composer. Gating on `uiStore.viewingTabs` (not just the mode) is
+// what keeps a tab behind the composer from being marked seen unseen.
+function seeActiveTab() {
+  if (!uiStore.viewingTabs || wsStore.active?.id !== props.workspaceId) return;
+  if (!document.hasFocus()) return;
+  const tab = tabs.value.find((t) => t.id === activeTabId.value);
+  if (tab) markTabSeen(tab);
+}
 
-// Returning to terminal mode (from dashboard/git) counts as seeing the
-// active tab — clear any "review" badge it earned while a non-terminal mode was up.
-watch(
-  () => uiStore.mode,
-  (m) => {
-    if (m !== "terminal" || wsStore.active?.id !== props.workspaceId || !document.hasFocus()) return;
-    const tab = tabs.value.find((t) => t.id === activeTabId.value);
-    if (tab) markTabSeen(tab);
-  },
-);
+watch(() => wsStore.active?.id, seeActiveTab);
+watch(() => uiStore.viewingTabs, seeActiveTab);
 
 // Requests arrive through a single shared slot. A workspace the sidebar just
 // switched to has no mounted Terminal yet (or is still restoring), so the watch
@@ -1544,9 +1538,7 @@ watch(() => tabsStore.request, applyTabRequest);
 // until the user clicked away and back — the ws/mode watchers below only fire on
 // a switch, and returning to an already-active tab is neither.
 function onWindowFocus() {
-  if (uiStore.mode !== "terminal" || wsStore.active?.id !== props.workspaceId) return;
-  const tab = tabs.value.find((t) => t.id === activeTabId.value);
-  if (tab) markTabSeen(tab);
+  seeActiveTab();
 }
 
 onMounted(async () => {
