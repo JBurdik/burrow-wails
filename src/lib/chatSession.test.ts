@@ -1,0 +1,209 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const invoke = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
+
+import { chatSession, dropChatSession, liveChatSessionIds, replayChatStream } from "./chatSession";
+
+// The eviction rule is the whole point of the registry: an idle chat may be
+// forgotten when nobody is looking at it, a busy one may not — that is what
+// keeps a turn alive behind an unmounted view.
+describe("chat session eviction", () => {
+  it("forgets an idle chat once the last view releases it", () => {
+    const s = chatSession(1);
+    s.retain();
+    s.release();
+    expect(liveChatSessionIds()).not.toContain(1);
+    // A later mount gets a fresh session, not the evicted one.
+    expect(chatSession(1)).not.toBe(s);
+    dropChatSession(1);
+  });
+
+  it("keeps a busy chat after release, and the same state is there on remount", () => {
+    const s = chatSession(2);
+    s.retain();
+    s.busy.value = true;
+    s.messages.value.push({ id: 0, role: "assistant", text: "mid-turn" });
+    s.release();
+
+    expect(liveChatSessionIds()).toContain(2);
+    const again = chatSession(2);
+    expect(again).toBe(s);
+    expect(again.messages.value).toHaveLength(1);
+    dropChatSession(2);
+  });
+
+  it("keeps a chat that is blocked on the user, even when idle", () => {
+    const s = chatSession(3);
+    s.retain();
+    s.pendingQuestion.value = { requestId: "r1", toolName: "AskUserQuestion", input: {}, suggestions: [] };
+    s.release();
+    expect(liveChatSessionIds()).toContain(3);
+
+    // Answering it makes the session evictable again.
+    s.pendingQuestion.value = null;
+    s.retain();
+    s.release();
+    expect(liveChatSessionIds()).not.toContain(3);
+  });
+
+  it("release is not driven negative by extra unmounts", () => {
+    const s = chatSession(4);
+    s.retain();
+    s.retain();
+    s.release();
+    expect(liveChatSessionIds()).toContain(4); // one view still holds it
+    s.release();
+    expect(liveChatSessionIds()).not.toContain(4);
+  });
+});
+
+describe("replay after restart", () => {
+  beforeEach(() => invoke.mockReset());
+
+  it("replays domain events, not raw lines", () => {
+    // Raw would also re-open permission requests that were answered before the
+    // restart; a replay should rebuild the transcript and nothing else.
+    const s = chatSession(10);
+    const seen: string[] = [];
+    s.setHandlers({ onEvents: (b) => seen.push(...b.events.map((e) => e.type)) });
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_folded_ord") return 4;
+      return [
+        { ord: 4, events: [{ type: "text.delta", messageId: "c1", text: "a" }] },
+        { ord: 6, events: [{ type: "tool.started", toolCallId: "t1", name: "Bash" }, { type: "turn.completed" }] },
+      ];
+    });
+
+    return replayChatStream(10).then(async () => {
+      expect(seen).toEqual(["text.delta", "tool.started", "turn.completed"]);
+      expect(invoke).toHaveBeenCalledWith("load_chat_events_since", { chatId: 10, since: 4 });
+      // The replayed batches count as folded on the next save.
+      expect(s.lastOrd).toBe(6);
+
+      // Idempotent: a second mount must not double-feed.
+      await replayChatStream(10);
+      expect(seen).toHaveLength(3);
+      dropChatSession(10);
+    });
+  });
+
+  it("does nothing for a chat with no folded mark", async () => {
+    const s = chatSession(11);
+    const seen: string[] = [];
+    s.setHandlers({ onEvents: (b) => seen.push(...b.events.map((e) => e.type)) });
+    // folded_ord 0 means "nothing folded" — replaying from 0 would duplicate a
+    // history that chat_messages already holds.
+    invoke.mockImplementation(async () => 0);
+    await replayChatStream(11);
+    expect(seen).toEqual([]);
+    dropChatSession(11);
+  });
+});
+
+describe("who counts as watching", () => {
+  it("is nobody once the last view releases a busy chat", () => {
+    // The component cannot answer this from its own props: an unmounted
+    // component's props are frozen, so a turn finishing behind a closed view
+    // would report itself watched and settle to a transient `done` that clears
+    // itself — losing the "agent finished while you were away" dot.
+    const s = chatSession(20);
+    s.retain();
+    expect(s.isWatched()).toBe(true);
+    s.busy.value = true; // keeps the session alive past release()
+    s.release();
+    expect(s.isWatched()).toBe(false);
+    dropChatSession(20);
+  });
+
+  it("stays watched while a second view still holds it", () => {
+    const s = chatSession(21);
+    s.retain();
+    s.retain();
+    s.release();
+    expect(s.isWatched()).toBe(true);
+    s.release();
+    dropChatSession(21);
+  });
+});
+
+describe("eviction after a turn ends behind a closed view", () => {
+  it("keeps a busy session on release, then drops it once it settles", () => {
+    // release() cannot be the only decision point: a busy session is kept on
+    // purpose, and if nothing looks again it sits in the registry with its
+    // listeners and transcript until the chat itself is closed.
+    vi.useFakeTimers();
+    const s = chatSession(30);
+    s.retain();
+    s.busy.value = true;
+    s.release();
+    expect(liveChatSessionIds()).toContain(30);
+
+    s.busy.value = false;
+    s.maybeEvict();
+    expect(liveChatSessionIds()).toContain(30); // deferred, not immediate
+    vi.runAllTimers();
+    expect(liveChatSessionIds()).not.toContain(30);
+    vi.useRealTimers();
+  });
+
+  it("does not evict while a queued message is still waiting to be sent", () => {
+    // finishTurn flushes the queue a nextTick later; evicting in between would
+    // hand that send a detached session while the next mount built a fresh one.
+    vi.useFakeTimers();
+    const s = chatSession(31);
+    s.retain();
+    s.release();
+    // release() already dropped it (idle, unwatched) — take a fresh one.
+    const s2 = chatSession(31);
+    s2.retain();
+    s2.busy.value = true;
+    s2.release();
+    s2.busy.value = false;
+    s2.enqueueMessage("next one");
+    s2.maybeEvict();
+    vi.runAllTimers();
+    expect(liveChatSessionIds()).toContain(31);
+    vi.useRealTimers();
+    dropChatSession(31);
+  });
+
+  it("keeps a session someone is still watching", () => {
+    vi.useFakeTimers();
+    const s = chatSession(32);
+    s.retain();
+    s.maybeEvict();
+    vi.runAllTimers();
+    expect(liveChatSessionIds()).toContain(32);
+    vi.useRealTimers();
+    dropChatSession(32);
+  });
+});
+
+describe("queued follow-ups", () => {
+  it("keeps duplicate prompts distinct and preserves their images", () => {
+    const s = chatSession(40);
+    const first = s.enqueueMessage("run tests", ["data:image/png;base64,first"]);
+    const second = s.enqueueMessage("run tests", ["data:image/png;base64,second"]);
+
+    s.removeQueuedMessage(first.id);
+    expect(s.messageQueue.value).toEqual([second]);
+    expect(s.messages.value).toEqual([{ id: second.id, role: "queued", text: "run tests", images: second.images }]);
+    dropChatSession(40);
+  });
+
+  it("restores persisted queue markers in FIFO order", () => {
+    const s = chatSession(41);
+    s.messages.value = [
+      { id: 4, role: "queued", text: "first" },
+      { id: 5, role: "assistant", text: "working" },
+      { id: 6, role: "queued", text: "second", images: ["data:image/png;base64,x"] },
+    ];
+
+    s.restoreQueuedMessages();
+    expect(s.takeNextQueuedMessage()).toEqual({ id: 4, text: "first" });
+    expect(s.takeNextQueuedMessage()).toEqual({ id: 6, text: "second", images: ["data:image/png;base64,x"] });
+    dropChatSession(41);
+  });
+});

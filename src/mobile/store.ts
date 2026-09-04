@@ -2,13 +2,14 @@ import { defineStore } from "pinia";
 import { reactive, ref } from "vue";
 import { BurrowWsClient } from "./api";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import type { TermStatus } from "@/lib/terminalStatus";
 
 const URL_LEGACY_KEY = "burrow-mobile-url";
 const TOKEN_LEGACY_KEY = "burrow-mobile-token";
 const URL_CONFIG_KEY = "mobileBaseUrl";
 const TOKEN_CONFIG_KEY = "mobileToken";
 
-export type TabStatus = "idle" | "running" | "waiting" | "permission" | "done";
+export type TabStatus = TermStatus;
 
 export interface Tab {
   ptyId: number;
@@ -35,6 +36,26 @@ export interface RemoteMessage {
   partial?: boolean;
   toolInput?: Record<string, unknown>;
   toolOutput?: string;
+  // Set from tool.started / tool.completed so a result can find its call —
+  // the remote client renders the same tool cards the desktop does.
+  toolUseId?: string;
+  toolFailed?: boolean;
+}
+
+export interface PendingPermission {
+  requestId?: string; // Claude control_request id
+  rpcId?: number;      // ACP JSON-RPC id
+  toolName: string;
+  detail: string;
+  // ACP/Codex option ids the response must pick from — Codex's raw JSON-RPC
+  // carries no options array, so those are fabricated (mirrors
+  // src/lib/acpParser.ts's parseAcpPermRequest); generic ACP's are read
+  // verbatim from params.options since they're provider-defined.
+  options: { optionId: string; kind: string }[];
+  // The tool's original arguments (Claude only) — must be echoed back verbatim
+  // on allow, since the protocol executes the tool with whatever
+  // `updatedInput` the response carries (see respondChatPermission).
+  input?: Record<string, unknown>;
 }
 
 export interface RemoteChat {
@@ -49,6 +70,13 @@ export interface RemoteChat {
   workspaceName?: string;
   workspacePath?: string;
   messages: RemoteMessage[];
+  // Set when a turn finished while this chat was not the open one — cleared
+  // by markChatSeen(). Mirrors desktop's "review" persisting until the tab
+  // is seen (Terminal.vue's settleDone()).
+  unseen?: "review" | "error";
+  // Set when the agent is blocked on an allow/deny decision — mirrors
+  // desktop's "permission" status. Cleared by respondChatPermission().
+  pendingPermission?: PendingPermission | null;
 }
 
 export type View = "connect" | "dashboard" | "chats" | "chat" | "sessions" | "terminal";
@@ -75,11 +103,27 @@ export const useRemoteStore = defineStore("remote", () => {
   const chats = ref<RemoteChat[]>([]);
   const activeChat = ref<RemoteChat | null>(null);
 
+  const reconnecting = ref(false);
+  let reconnectAttempt = 0;
+  let reconnectTimer: number | undefined;
+  // Bumped on every connect() call and on disconnect(), so an in-flight
+  // connect() (its healthCheck/WS handshake can each take seconds) can tell,
+  // right before it commits success, whether a newer connect() or an
+  // explicit disconnect() superseded it in the meantime.
+  let connectGeneration = 0;
+
   let client: BurrowWsClient | null = null;
   const doneTimers = new Map<number, number>();
 
   function statusFor(ptyId: number): TabStatus {
     return statuses.get(ptyId) ?? "idle";
+  }
+
+  function chatStatus(chat: RemoteChat): TabStatus {
+    if (chat.pendingPermission) return "permission";
+    if (chat.busy) return "running";
+    if (chat.unseen) return chat.unseen;
+    return "idle";
   }
 
   function watchTabStatus(ptyId: number) {
@@ -90,10 +134,19 @@ export const useRemoteStore = defineStore("remote", () => {
         const t = doneTimers.get(ptyId);
         if (t !== undefined) { window.clearTimeout(t); doneTimers.delete(ptyId); }
         statuses.set(ptyId, state);
+      } else if (state === "error") {
+        const t = doneTimers.get(ptyId);
+        if (t !== undefined) { window.clearTimeout(t); doneTimers.delete(ptyId); }
+        statuses.set(ptyId, "error"); // persists until markTabSeen, like desktop
       } else if (state === "done") {
-        statuses.set(ptyId, "done");
-        const t = window.setTimeout(() => statuses.set(ptyId, "idle"), 4000);
-        doneTimers.set(ptyId, t);
+        const watching = view.value === "terminal" && activeTab.value?.ptyId === ptyId;
+        if (watching) {
+          statuses.set(ptyId, "done");
+          const t = window.setTimeout(() => statuses.set(ptyId, "idle"), 4000);
+          doneTimers.set(ptyId, t);
+        } else {
+          statuses.set(ptyId, "review");
+        }
       }
     });
   }
@@ -107,6 +160,7 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   async function connect(url: string, tok: string): Promise<void> {
+    const myGeneration = ++connectGeneration;
     connecting.value = true;
     connectError.value = "";
     const normalized = url.replace(/\/$/, "");
@@ -119,7 +173,12 @@ export const useRemoteStore = defineStore("remote", () => {
       c.onClose = () => {
         connected.value = false;
         if (view.value === "terminal") view.value = "dashboard";
+        scheduleReconnect();
       };
+      // A newer connect() call or an explicit disconnect() ran while the
+      // above awaits were in flight — don't resurrect state disconnect()
+      // just tore down, and don't leak the socket we just opened.
+      if (myGeneration !== connectGeneration) { c.close(); return; }
       client = c;
       connected.value = true;
       baseUrl.value = normalized;
@@ -129,15 +188,44 @@ export const useRemoteStore = defineStore("remote", () => {
       view.value = "dashboard";
       await Promise.all([loadSessions(), loadChats()]);
     } catch (e: any) {
-      connectError.value = e?.message ?? "Connection failed";
-      connected.value = false;
+      // Only clobber shared state if this is still the current attempt — a
+      // stale call failing after a newer one already succeeded must not
+      // flip a live connection back to disconnected/error.
+      if (myGeneration === connectGeneration) {
+        connectError.value = e?.message ?? "Connection failed";
+        connected.value = false;
+      }
       throw e;
     } finally {
-      connecting.value = false;
+      // Same guard: a superseded call's finally must not clear the
+      // "connecting" indicator while a newer call is still in flight.
+      if (myGeneration === connectGeneration) connecting.value = false;
     }
   }
 
+  function scheduleReconnect() {
+    if (reconnectTimer !== undefined || view.value === "connect") return;
+    reconnecting.value = true;
+    const delay = Math.min(1000 * 2 ** reconnectAttempt, 30000);
+    reconnectTimer = window.setTimeout(async () => {
+      reconnectTimer = undefined;
+      if (!baseUrl.value || !token.value) { reconnecting.value = false; return; }
+      try {
+        await connect(baseUrl.value, token.value);
+        reconnectAttempt = 0;
+        reconnecting.value = false;
+      } catch {
+        reconnectAttempt++;
+        scheduleReconnect();
+      }
+    }, delay);
+  }
+
   function disconnect() {
+    connectGeneration++;
+    if (reconnectTimer !== undefined) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
+    reconnectAttempt = 0;
+    reconnecting.value = false;
     client?.close();
     client = null;
     connected.value = false;
@@ -215,37 +303,62 @@ export const useRemoteStore = defineStore("remote", () => {
     else chat.messages.push({ id: Date.now() + chat.messages.length, role, text, partial });
   }
 
-  function handleClaudeData(chat: RemoteChat, raw: unknown) {
-    const event = typeof raw === "string" ? safeJson(raw) : raw;
-    if (!event || typeof event !== "object") return;
-    const data = event as Record<string, any>;
-    if (data.type === "assistant") {
-      for (const block of data.message?.content ?? []) {
-        if (block.type === "text") appendRemoteText(chat, "assistant", block.text ?? "");
-        if (block.type === "thinking") appendRemoteText(chat, "thinking", block.thinking ?? "");
-        if (block.type === "tool_use") chat.messages.push({ id: Date.now() + chat.messages.length, role: "tool", text: block.name ?? "Tool", toolInput: block.input ?? {} });
+  // One applier for both runtimes. The wire formats are read on the Go side
+  // (src-wails/providerruntime.go) and arrive as provider-neutral events, so a
+  // remote client no longer re-implements stream-json and ACP to its own,
+  // shallower depth than the desktop.
+  function applyEvent(chat: RemoteChat, event: Record<string, any>) {
+    // Only these events happen strictly during an active turn — a chat
+    // driven from the desktop (or another remote client) never runs sendChat
+    // on this client, so chat.busy would otherwise stay false the whole time
+    // and the chat would look idle (and get hidden by the settled-chats
+    // declutter) while it is actually streaming. tool.completed is excluded:
+    // it can arrive after the fact and says nothing about whether a turn is
+    // currently running.
+    if (["text.delta", "thinking.delta", "tool.started"].includes(event.type) && !chat.busy) chat.busy = true;
+    switch (event.type) {
+      case "text.delta":
+        appendRemoteText(chat, "assistant", event.text ?? "");
+        return;
+      case "thinking.delta":
+        appendRemoteText(chat, "thinking", event.text ?? "");
+        return;
+      case "tool.started":
+        chat.messages.push({
+          id: Date.now() + chat.messages.length,
+          role: "tool",
+          text: event.name ?? "Tool",
+          toolInput: event.input ?? {},
+          toolUseId: event.toolCallId,
+        });
+        return;
+      case "tool.completed": {
+        const tool = [...chat.messages].reverse().find((m) => m.toolUseId === event.toolCallId);
+        if (tool) {
+          tool.toolOutput = event.output ?? "";
+          tool.toolFailed = event.failed === true;
+        }
+        return;
       }
+      case "turn.completed":
+      case "turn.failed": {
+        // A turn ending is the one event guaranteed to mean "whatever was
+        // pending is no longer pending" — regardless of whether mobile,
+        // desktop, or nobody resolved it. Without this, a permission the
+        // desktop answered (or one bypassed by the turn otherwise moving on)
+        // would stay stuck forever, pinning this chat to the top of the list
+        // and permanently disabling its composer.
+        chat.pendingPermission = null;
+        chat.busy = false;
+        chat.messages.forEach((message) => { message.partial = false; });
+        const watching = view.value === "chat" && activeChat.value?.id === chat.id;
+        if (!watching) chat.unseen = event.type === "turn.failed" ? "error" : "review";
+        return;
+      }
+      case "session.id":
+        if (typeof event.sessionId === "string") chat.claudeSessionId = event.sessionId;
+        return;
     }
-    if (data.type === "result" || data.type === "exit") {
-      chat.busy = false;
-      chat.messages.forEach((message) => { message.partial = false; });
-    }
-  }
-
-  function handleAcpData(chat: RemoteChat, raw: unknown) {
-    const event = typeof raw === "string" ? safeJson(raw) : raw;
-    if (!event || typeof event !== "object") return;
-    const data = event as Record<string, any>;
-    if (data._burrow === "session" && typeof data.sessionId === "string") chat.claudeSessionId = data.sessionId;
-    if (data._burrow === "exit" || ("id" in data && !("method" in data))) {
-      chat.busy = false;
-      chat.messages.forEach((message) => { message.partial = false; });
-    }
-    const update = data.params?.update;
-    if (data.method !== "session/update" || !update) return;
-    const text = update.content?.text ?? "";
-    if (update.sessionUpdate === "agent_message_chunk") appendRemoteText(chat, "assistant", text);
-    if (update.sessionUpdate === "agent_thought_chunk") appendRemoteText(chat, "thinking", text);
   }
 
   function safeJson(raw: string): unknown {
@@ -253,8 +366,103 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   function watchChat(chat: RemoteChat) {
-    client?.subscribe(`claude-data-${chat.id}`, (payload) => handleClaudeData(chat, payload));
-    client?.subscribe(`acp-data-${chat.id}`, (payload) => handleAcpData(chat, payload));
+    const id = chat.id;
+    client?.subscribe(`chat-event-${id}`, (payload) => {
+      const batch = (typeof payload === "string" ? safeJson(payload) : payload) as
+        { events?: Array<Record<string, any>> } | null;
+      // Mutate the array's reactive element, not the plain object this
+      // closure captured at subscribe time — the latter never goes through
+      // Pinia's proxy, so busy/messages/unseen do change but Vue's render
+      // effect never reruns (the DOM silently stops matching the data).
+      // This is what made "agent pracuje" spin forever despite the turn
+      // completing normally on the backend.
+      const live = chatFor(id) ?? chat;
+      for (const event of batch?.events ?? []) applyEvent(live, event);
+    });
+  }
+
+  // Codex's raw JSON-RPC approval requests carry no options array — the
+  // desktop's src/lib/acpParser.ts (parseAcpPermRequest) fabricates this
+  // fixed 3-item set and Go's AcpRespondPermission (control.go) only
+  // recognizes these exact optionId strings for a Codex session. Mirrored
+  // here rather than reinvented so mobile answers the same way desktop does.
+  const CODEX_APPROVAL_METHODS = [
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+  ];
+  const CODEX_APPROVAL_OPTIONS = [
+    { optionId: "codex:accept", kind: "allow_once" },
+    { optionId: "codex:acceptForSession", kind: "allow_always" },
+    { optionId: "codex:decline", kind: "reject_once" },
+  ];
+
+  // Narrow reader: only recognizes a can_use_tool control_request (Claude), a
+  // Codex requestApproval, or a generic session/request_permission (ACP) —
+  // everything else on this raw channel is ignored on purpose (see spec's
+  // "Non-goals": no full protocol parsing on mobile, only enough to unblock
+  // a turn).
+  function watchChatPermissions(chat: RemoteChat) {
+    const id = chat.id;
+    const transport = chat.transport;
+    const rawEvent = transport === "claude-cli" ? `claude-data-${id}` : `acp-req-${id}`;
+    client?.subscribe(rawEvent, (payload) => {
+      // The WS payload is the ChatStreamLine envelope emitted by Go's
+      // emitChatLine ({ord, kind, line}) — `line` is a STRING holding the
+      // actual raw protocol JSON, not the message itself. Unwrap it before
+      // reading msg.type/.request/.id/.method, or every field below reads
+      // undefined and no permission is ever detected.
+      const envelope = (typeof payload === "string" ? safeJson(payload) : payload) as { line?: string } | null;
+      const parsed = typeof envelope?.line === "string" ? safeJson(envelope.line) : null;
+      if (!parsed || typeof parsed !== "object") return;
+      const msg = parsed as Record<string, any>;
+      // Same reactivity requirement as watchChat: write through the array's
+      // proxy element, not the plain object captured when this subscription
+      // was created, or the banner never appears despite pendingPermission
+      // actually being set.
+      const live = chatFor(id) ?? chat;
+
+      if (transport === "claude-cli") {
+        if (msg.type !== "control_request" || msg.request?.subtype !== "can_use_tool") return;
+        const input = msg.request.input ?? {};
+        const detail = input.command ?? input.file_path ?? input.path ?? "";
+        live.pendingPermission = {
+          requestId: msg.request_id,
+          toolName: msg.request.tool_name ?? "Tool",
+          detail: String(detail),
+          options: [],
+          input,
+        };
+        return;
+      }
+
+      // ACP: server->client REQUEST has both method and id.
+      if (typeof msg.id !== "number" || !msg.method) return;
+
+      if (CODEX_APPROVAL_METHODS.includes(msg.method)) {
+        const p = msg.params ?? {};
+        const command = typeof p.command === "string" ? p.command : "";
+        const toolName = msg.method.includes("commandExecution") ? "Run command"
+          : msg.method.includes("fileChange") ? "Apply file changes"
+          : "Grant additional permission";
+        live.pendingPermission = {
+          rpcId: msg.id,
+          toolName,
+          detail: command,
+          options: CODEX_APPROVAL_OPTIONS,
+        };
+        return;
+      }
+
+      if (msg.method !== "session/request_permission") return;
+      const options = (msg.params?.options ?? []).map((o: any) => ({ optionId: o.optionId, kind: o.kind }));
+      live.pendingPermission = {
+        rpcId: msg.id,
+        toolName: msg.params?.toolCall?.title ?? msg.params?.title ?? "Tool",
+        detail: "",
+        options,
+      };
+    });
   }
 
   async function loadChats() {
@@ -262,14 +470,14 @@ export const useRemoteStore = defineStore("remote", () => {
     try {
       const next = await client.call("remote_list_chats") as RemoteChat[];
       chats.value = next.map((chat) => ({ ...chat, messages: Array.isArray(chat.messages) ? chat.messages : [] }));
-      for (const chat of chats.value) watchChat(chat);
+      for (const chat of chats.value) { watchChat(chat); watchChatPermissions(chat); }
       client.subscribe("remote-chats", (payload) => {
         const change = typeof payload === "string" ? safeJson(payload) : payload;
         const incoming = (change as any)?.chat as RemoteChat | undefined;
         if (!incoming) return;
         const existing = chatFor(incoming.id);
         if (existing) Object.assign(existing, incoming);
-        else { chats.value.push(incoming); watchChat(incoming); }
+        else { chats.value.push(incoming); watchChat(incoming); watchChatPermissions(incoming); }
       });
     } catch (e: any) {
       listError.value = e?.message ?? "Failed to load chats";
@@ -279,6 +487,12 @@ export const useRemoteStore = defineStore("remote", () => {
   function openChat(chat: RemoteChat) {
     activeChat.value = chat;
     view.value = "chat";
+    markChatSeen(chat.id);
+  }
+
+  function markChatSeen(chatId: number) {
+    const chat = chatFor(chatId);
+    if (chat) chat.unseen = undefined;
   }
 
   function closeChat() {
@@ -293,9 +507,12 @@ export const useRemoteStore = defineStore("remote", () => {
     chat.busy = true;
     try {
       if (chat.transport === "claude-cli") {
-        await client.call("claude_send", { id: chat.id, text: text.trim(), sessionId: chat.claudeSessionId || null });
+        // Go's wsArgs.ID is string-typed — an un-stringified numeric id
+        // silently fails to decode and the call hangs with no reply (same
+        // bug class Task 1 fixed for pty ids).
+        await client.call("claude_send", { id: String(chat.id), text: text.trim(), sessionId: chat.claudeSessionId || null });
       } else {
-        await client.call("acp_send", { id: chat.id, text: text.trim() });
+        await client.call("acp_send", { id: String(chat.id), text: text.trim() });
       }
     } catch (e: any) {
       chat.busy = false;
@@ -308,12 +525,61 @@ export const useRemoteStore = defineStore("remote", () => {
     const chat = await client.call("remote_create_chat", { workspaceId, agentKind }) as RemoteChat;
     chats.value.push(chat);
     watchChat(chat);
+    watchChatPermissions(chat);
     openChat(chat);
+  }
+
+  async function respondChatPermission(chatId: number, allow: boolean) {
+    const chat = chatFor(chatId);
+    const pending = chat?.pendingPermission;
+    if (!client || !chat || !pending) return;
+    chat.pendingPermission = null;
+    try {
+      if (pending.requestId) {
+        await client.call("claude_respond_control", {
+          id: String(chat.id),
+          requestId: pending.requestId,
+          response: allow
+            // Echo the tool's original arguments — the protocol executes the
+            // tool with whatever updatedInput is sent, so sending {} would
+            // silently strip the command/file_path/etc the user was shown
+            // and approved (mirrors AgentChat.vue's opts?.updatedInput ?? cr.input).
+            ? { behavior: "allow", updatedInput: pending.input ?? {} }
+            : { behavior: "deny", message: "User denied this action." },
+        });
+      } else if (pending.rpcId !== undefined) {
+        // optionIds are agent-defined — pick the matching one by kind from
+        // the request's own options (NOT a hardcoded string), same as
+        // AgentChat.vue's respondPermission. Only fall back to a bare
+        // "allow_once"/"reject_once" string if options came up empty.
+        const pick = (...kinds: string[]) => {
+          for (const k of kinds) {
+            const o = pending.options.find((x) => x.kind === k);
+            if (o) return o.optionId;
+          }
+          return pending.options[0]?.optionId ?? (allow ? "allow_once" : "reject_once");
+        };
+        const optionId = allow ? pick("allow_once", "allow_always") : pick("reject_once", "reject_always");
+        await client.call("acp_respond_permission", {
+          id: String(chat.id),
+          rpcId: pending.rpcId,
+          optionId,
+        });
+      }
+    } catch (e: any) {
+      chat.messages.push({ id: Date.now(), role: "assistant", text: `Odpověď na povolení selhala: ${e?.message ?? e}` });
+    }
   }
 
   function openTerminal(tab: Tab) {
     activeTab.value = tab;
     view.value = "terminal";
+    markTabSeen(tab.ptyId);
+  }
+
+  function markTabSeen(ptyId: number) {
+    const s = statuses.get(ptyId);
+    if (s === "review" || s === "error") statuses.set(ptyId, "idle");
   }
 
   function showDashboard() {
@@ -345,5 +611,6 @@ export const useRemoteStore = defineStore("remote", () => {
     chats, activeChat,
     pair, connect, disconnect, loadSessions, loadChats, openTerminal, closeTerminal, showDashboard, showSessions, showChats, openChat, closeChat, sendChat, createChat,
     statusFor, getClient,
+    markTabSeen, markChatSeen, chatStatus, respondChatPermission, reconnecting,
   };
 });

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // Chat transcript storage. Modelled on t3code's `projection_thread_messages`:
@@ -70,7 +71,14 @@ func (a *App) LoadChatMessages(chatID int) (string, error) {
 // bounded by one chat's length; tracking dirty rows in the component would be
 // real bookkeeping for a save that is now sub-millisecond. If a very long chat
 // ever shows up in a profile, upsert by ord and delete the tail instead.
-func (a *App) SaveChatMessages(chatID int, messagesJSON string) error {
+//
+// foldedOrd says how far into chat_stream this transcript accounts for (the
+// first ord NOT folded in). It is written in the same transaction as the
+// messages, so the stream trim can never be told that lines are safe to drop
+// before the rendered copy of them is actually committed. Pass -1 when the
+// caller does not track ords (mobile clients, the config.json migration) and
+// the existing mark is left alone.
+func (a *App) SaveChatMessages(chatID int, messagesJSON string, foldedOrd int64) error {
 	if a.db == nil {
 		return fmt.Errorf("db not open")
 	}
@@ -96,6 +104,15 @@ func (a *App) SaveChatMessages(chatID int, messagesJSON string) error {
 			return err
 		}
 	}
+	if foldedOrd >= 0 {
+		if _, err := tx.Exec(
+			`INSERT INTO chat_stream_state (chat_id, folded_ord) VALUES (?, ?)
+			 ON CONFLICT(chat_id) DO UPDATE SET folded_ord = MAX(folded_ord, excluded.folded_ord)`,
+			strconv.Itoa(chatID), foldedOrd,
+		); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -103,8 +120,10 @@ func (a *App) DeleteChatMessages(chatID int) error {
 	if a.db == nil {
 		return nil
 	}
-	_, err := a.db.Exec(`DELETE FROM chat_messages WHERE chat_id = ?`, chatID)
-	return err
+	if _, err := a.db.Exec(`DELETE FROM chat_messages WHERE chat_id = ?`, chatID); err != nil {
+		return err
+	}
+	return a.deleteChatStream(strconv.Itoa(chatID))
 }
 
 // migrateChatHistoryToSQLite moves an existing config.json `chatMessageHistory`
@@ -155,7 +174,7 @@ func (a *App) migrateChatHistoryFrom(path string) {
 		if _, err := fmt.Sscanf(chatID, "%d", &id); err != nil {
 			continue
 		}
-		if err := a.SaveChatMessages(id, string(msgs)); err != nil {
+		if err := a.SaveChatMessages(id, string(msgs), -1); err != nil {
 			// Leave the config key in place so the next launch retries rather
 			// than silently dropping this chat's transcript.
 			log.Printf("chat history migration: chat %d failed, keeping config.json: %v", id, err)

@@ -182,8 +182,8 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 	// status hook stays a no-op for it.
 
 	return a.claudeMgr().Start(id, bin, args, cwd, env,
-		func(line string) { emitAll(a.ctx, "claude-data-"+id, line) },
-		func() { emitAll(a.ctx, "claude-data-"+id, `{"type":"exit"}`) },
+		func(line string) { a.emitChatLine(id, "claude-data", line) },
+		func() { a.emitChatLine(id, "claude-data", `{"type":"exit"}`) },
 	)
 }
 

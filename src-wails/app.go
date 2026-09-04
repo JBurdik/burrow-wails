@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"burrow/internal/agentproc"
@@ -20,6 +21,9 @@ type App struct {
 	ctx    context.Context
 	db     *sql.DB
 	daemon *DaemonClient
+
+	streamOnce sync.Once
+	streamW    *chatStreamWriter
 
 	claudeAgents *agentproc.Manager
 	acpSessions  *acpRegistry
@@ -37,6 +41,14 @@ type App struct {
 
 	maxAgents         int
 	burrowMcpMaxDepth int
+
+	// Guards RemoteCreateChat's read-modify-write of config.json end to end
+	// (through the ClaudeStart call) so two concurrent remote callers (two
+	// phones, or a rapid double-tap) can't interleave their own reads and
+	// writes and corrupt each other's chatIdCounter bump. It does NOT protect
+	// against a concurrent desktop setConfig save — see RemoteCreateChat's
+	// comment in remote.go for that risk, which this mutex does not close.
+	remoteCreateMu sync.Mutex
 }
 
 const httpServerPort = 37892
@@ -263,6 +275,23 @@ func (a *App) KillPty(id string) error {
 
 func (a *App) ListPtySessions() ([]string, error) {
 	return a.daemon.List()
+}
+
+// GetPtyForeground names the command in the foreground of a PTY. It is the
+// second of the two channels that decide a status dot (`XTerm.vue`): the agent
+// hooks are authoritative for an agent, and this poll covers everything they
+// cannot see — a plain `npm test` that has no hooks, and an agent that was
+// Ctrl-C'd without emitting a Stop.
+//
+// A failure is reported as an empty name, not an error: the caller polls this
+// every 2 s and already treats "" as "nothing to say", whereas a rejected
+// promise would spam the console on every teardown race.
+func (a *App) GetPtyForeground(id string) string {
+	name, err := a.daemon.Foreground(id)
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 // Idle-agent reaping, modelled on t3code's ProviderSessionReaper (same

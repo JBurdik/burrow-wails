@@ -181,3 +181,60 @@ func TestRandomPairCodeIsSixDigits(t *testing.T) {
 		t.Fatalf("only %d distinct codes in 50 draws — not random enough", len(seen))
 	}
 }
+
+// A numeric id (what you get from JSON.stringify-ing a JS number, e.g.
+// tab.ptyId in src/mobile/store.ts) makes the WHOLE wsCall fail to decode —
+// not just the id field — so the command is silently dropped by the
+// `if json.Unmarshal(...) != nil { continue }` guard in handleWS. Every
+// mobile call site must therefore send ids as strings. This test exists so
+// nobody "fixes" wsArgs.ID to accept numbers instead of fixing the caller.
+func TestWsArgsRejectsNumericID(t *testing.T) {
+	var c wsCall
+	err := json.Unmarshal([]byte(`{"id":1,"command":"write_pty","args":{"id":42,"data":[1]}}`), &c)
+	if err == nil {
+		t.Fatal("expected a decode error for a numeric id — if this now passes, handleWS's silent-drop guard must be revisited too")
+	}
+}
+
+// New write-path commands must decode their args and reach dispatch — this
+// only checks the allow-list + arg shape, not the App call itself (that
+// needs a live claudeMgr/acpReg, covered by claudechat_test.go/acp_test.go
+// patterns instead).
+func TestDispatchKnowsWritePathCommands(t *testing.T) {
+	s := &HTTPServer{app: &App{}}
+	for _, cmd := range []string{"claude_send", "acp_send", "claude_respond_control", "acp_respond_permission", "remote_create_chat"} {
+		_, err := s.dispatch(wsCall{Command: cmd, Args: wsArgs{ID: "1"}})
+		if err != nil && strings.Contains(err.Error(), "unknown command") {
+			t.Errorf("%s: still not in the dispatch allow-list", cmd)
+		}
+	}
+}
+
+func TestWsArgsDecodesWritePathFields(t *testing.T) {
+	var c wsCall
+	raw := `{"id":1,"command":"claude_send","args":{"id":"3","text":"hi","sessionId":"abc"}}`
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Args.Text != "hi" || c.Args.SessionId != "abc" {
+		t.Fatalf("bad decode: %+v", c.Args)
+	}
+
+	var rc wsCall
+	raw = `{"id":2,"command":"claude_respond_control","args":{"id":"3","requestId":"r1","response":{"behavior":"allow"}}}`
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatal(err)
+	}
+	if rc.Args.RequestId != "r1" || rc.Args.Response["behavior"] != "allow" {
+		t.Fatalf("bad decode: %+v", rc.Args)
+	}
+
+	var ap wsCall
+	raw = `{"id":3,"command":"acp_respond_permission","args":{"id":"3","rpcId":42,"optionId":"allow_once"}}`
+	if err := json.Unmarshal([]byte(raw), &ap); err != nil {
+		t.Fatal(err)
+	}
+	if ap.Args.RpcId != 42 || ap.Args.OptionId != "allow_once" {
+		t.Fatalf("bad decode: %+v", ap.Args)
+	}
+}

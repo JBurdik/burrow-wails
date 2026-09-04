@@ -1,0 +1,24 @@
+{
+  "apiVersion": 1,
+  "id": "hello-burrow",
+  "name": "Hello Burrow",
+  "version": "0.1.0",
+  "description": "The smallest runnable Burrow extension.",
+  "permissions": ["workspace.read"],
+  "commands": [
+    {
+      "id": "greet",
+      "title": "Say hello",
+      "command": "node",
+      "args": ["index.mjs"]
+    }
+  ],
+  "surfaces": [
+    {
+      "id": "workspace-pulse",
+      "title": "Workspace Pulse",
+      "description": "A compact live summary of this repository.",
+      "kind": "workspace-pulse"
+    }
+  ]
+}

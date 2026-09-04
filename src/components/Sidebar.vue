@@ -130,7 +130,7 @@
         <!-- line 3: branch + badges -->
         <div class="mt-[3px] flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <PhGitBranch v-if="row.ws.parent_id" :size="9" class="shrink-0 text-[#a78bfa]" />
-          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ branchOf(row.ws) }}</span>
+          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ row.tab.branch || branchOf(row.ws) }}</span>
           <span class="ml-auto flex shrink-0 items-center gap-1">
             <span v-if="row.tab.model" class="rounded bg-white/[0.06] px-1 text-[9px] leading-[1.5] opacity-70" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
             <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-white/[0.08] px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
@@ -318,9 +318,9 @@
           <span class="min-w-0 truncate text-foreground/80">{{ repoName(hoverInfo.ws) }}</span>
         </div>
         <div class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverInfo.ws.path">{{ hoverInfo.ws.path }}</div>
-        <div v-if="branchOf(hoverInfo.ws)" class="flex min-w-0 items-center gap-1.5">
+        <div v-if="hoverInfo.branch || branchOf(hoverInfo.ws)" class="flex min-w-0 items-center gap-1.5">
           <PhGitBranch :size="11" class="shrink-0" />
-          <span class="min-w-0 truncate font-mono text-foreground/80">{{ branchOf(hoverInfo.ws) }}</span>
+          <span class="min-w-0 truncate font-mono text-foreground/80">{{ hoverInfo.branch || branchOf(hoverInfo.ws) }}</span>
         </div>
         <div v-if="hoverInfo.model" class="flex min-w-0 items-center gap-1.5">
           <PhRobot :size="11" class="shrink-0" />
@@ -555,6 +555,7 @@ import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore, type TabSummary } from "@/stores/terminalTabs";
 import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
 import { useUIStore } from "@/stores/ui";
+import { router } from "@/router";
 import { spinnerFrame } from "@/lib/spinner";
 import { agentIconComp } from "@/lib/agentIcons";
 import {
@@ -693,6 +694,7 @@ function toggleSection(key: SectionKey) {
 interface HoverInfo {
   title: string;
   ws: Workspace;
+  branch?: string;
   model?: string;
   leafCount?: number;
   round?: number;
@@ -710,6 +712,7 @@ function hoverInfoFromRow(row: ActivityRow): HoverInfo {
   return {
     title: row.tab.title,
     ws: row.ws,
+    branch: row.tab.branch,
     model: row.tab.model,
     leafCount: row.tab.leafCount,
     round: row.tab.isAgent ? row.tab.round : undefined,
@@ -839,23 +842,27 @@ function prTitle(info: PrInfo): string {
 function pickProject(repo: Workspace) {
   filterProjectId.value = repo.id;
   filterOpen.value = false;
-  selectWs(repo);
-  ui.openWelcome();
+  store.open(repo);
+  const parent = repo.parent_id ?? repo.id;
+  for (const wt of store.worktreesByParent[parent] || []) store.ensureOpen(wt);
+  ui.openWelcome(); // picking a project is an explicit "compose something new"
 }
 
 function selectWs(ws: Workspace) {
-  if (ui.mode !== "terminal") ui.setMode("terminal");
   store.open(ws);
   // Keep the repo's worktrees mounted so their rows stay in the feed.
   const parent = ws.parent_id ?? ws.id;
   for (const wt of store.worktreesByParent[parent] || []) store.ensureOpen(wt);
+  // Navigate last: showTabs() reads the now-active workspace and lands on the
+  // composer instead when that workspace has nothing live to show.
+  ui.showTabs();
 }
 
 function selectTab(row: ActivityRow) {
-  if (ui.mode !== "terminal") ui.setMode("terminal");
-  ui.closeWelcome();
   if (store.active?.id !== row.ws.id) store.open(row.ws);
-  nextTick(() => termTabs.activate(row.ws.id, row.tab.id));
+  // The tab is part of the address, so this one navigation replaces the old
+  // setMode + closeWelcome + activate dance — and a deep link to it works.
+  void router.push(`/ws/${row.ws.id}/tab/${row.tab.id}`);
 }
 
 // "New chat" opens the project picker (⌘⇧O's Spotlight mode) rather than a

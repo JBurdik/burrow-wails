@@ -361,11 +361,11 @@
             <button class="border-none bg-transparent px-1 py-px text-[10px] text-muted-foreground hover:text-foreground" @click.stop="clearQueue" title="Clear All">Clear All</button>
           </div>
           <div v-if="queueExpanded" class="flex flex-col gap-[3px] px-2.5 pb-1.5">
-            <div v-for="(msg, i) in messageQueue" :key="i" class="flex items-center gap-1.5 py-[3px]">
+            <div v-for="msg in messageQueue" :key="msg.id" class="flex items-center gap-1.5 py-[3px]">
               <span class="flex-shrink-0 text-xs text-[var(--chat-accent)]">•</span>
-              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-secondary-foreground">{{ msg }}</span>
-              <button class="queue-item-btn" @click="removeQueued(i)" title="Remove"><PhX :size="10" /></button>
-              <button class="queue-item-btn !text-[var(--chat-accent)] !border-[color-mix(in_srgb,var(--chat-accent)_35%,transparent)] hover:!border-[color-mix(in_srgb,var(--chat-accent)_65%,transparent)]" @click="sendQueuedNow(i)" title="Send Now">Send Now <kbd>↵</kbd></button>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-secondary-foreground">{{ msg.text }}</span>
+              <button class="queue-item-btn" @click="removeQueued(msg.id)" title="Remove"><PhX :size="10" /></button>
+              <button class="queue-item-btn !text-[var(--chat-accent)] !border-[color-mix(in_srgb,var(--chat-accent)_35%,transparent)] hover:!border-[color-mix(in_srgb,var(--chat-accent)_65%,transparent)]" @click="sendQueuedNext(msg.id)" title="Run after the active turn">Send Next</button>
             </div>
           </div>
         </div>
@@ -674,9 +674,11 @@
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { parseAcpUpdate, parseAcpPermRequest } from "@/lib/acpParser";
-import { normalizeAcpRuntimeEvent, normalizeClaudeStreamEvent, type ProviderRuntimeEvent } from "@/lib/providerRuntime";
+import { parseAcpPermRequest } from "@/lib/acpParser";
+import {
+  applyChatEvent, isProjectedEvent, settleTranscript,
+  type ChatEventBatch, type ChatProjectionState,
+} from "@/lib/chatProjection";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
 import { useNotificationsStore } from "@/stores/notifications";
@@ -689,6 +691,8 @@ import { agentIconComp } from "@/lib/agentIcons";
 import ModelPicker from "@/components/ModelPicker.vue";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import CodexUserInputPanel, { type CodexUserInputQuestion } from "@/components/CodexUserInputPanel.vue";
+import { chatSession, replayChatStream } from "@/lib/chatSession";
+import type { AcpConfigOption, AcpModes, CanUseToolReq, ChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { playSound } from "@/lib/sounds";
@@ -824,21 +828,23 @@ const runtimeLabel = computed(() =>
 const agentAccentColor = computed(() =>
   agentKind.value === 'claude' ? 'var(--chat-accent)' : (currentAgent.value?.color ?? 'var(--chat-accent)'),
 );
-// ACP permission: JSON-RPC id of the agent's blocking request_permission.
-const acpPermRpcId = ref<number | null>(null);
 // Rich ACP permission request — carries the adapter's own option list (allow/
 // reject variants, or ExitPlanMode's auto/acceptEdits/manual/keep-planning) so
 // we render the REAL choices instead of collapsing everything to Allow/Deny.
-interface AcpPermReq {
-  rpcId: number;
-  toolCallId: string;
-  title: string;
-  kind: string;
-  options: Array<{ optionId: string; name: string; kind: string }>;
-  rawInput: Record<string, unknown>;
-}
-const acpPermReq = ref<AcpPermReq | null>(null);
-const acpPermMsgId = ref<number | null>(null);
+// The chat's stream and everything the stream mutates live in the session, not
+// in this component — so a running turn keeps arriving while nobody is looking
+// at it. See lib/chatSession.ts. Parents key <AgentChat> by chatId, so this
+// handle stays correct for the component's whole life.
+const S = chatSession(props.chatId);
+const {
+  messages, busy, lastActivityAt, turnStartedAt, messageQueue, suppressNextDone,
+  sessionId, turnStats, sessionCost, runtimeStarted,
+  pendingPermission, pendingQuestion, pendingPlan, pendingDiff,
+  pendingPermissionMsgId, pendingQuestionMsgId, pendingPlanMsgId, pendingDiffMsgId,
+  settledControlRequestIds,
+  acpPermReq, acpPermRpcId, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
+  enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext, takeNextQueuedMessage, restoreQueuedMessages,
+} = S;
 const permissionResponsePending = ref(false);
 const codexUserInput = ref<{ rpcId: number; questions: CodexUserInputQuestion[] } | null>(null);
 const codexUserInputPending = ref(false);
@@ -872,16 +878,8 @@ function acpOptClass(kind: string) {
 }
 
 // ── ACP session state (model + permission mode + resume) ──────────────────────
-interface AcpMode { id: string; name: string; description?: string }
-interface AcpModes { currentModeId: string; availableModes: AcpMode[] }
-interface AcpConfigChoice { value: string; name: string; description?: string }
-interface AcpConfigOption { id: string; name: string; type: string; currentValue: string; options: AcpConfigChoice[] }
 // JSON-RPC id of the in-flight session/prompt — correlates the turn-done response.
-const acpPromptRpcId = ref<number | null>(null);
 // rpc ids of in-flight control calls (set_mode/set_config/list) → refresh UI on reply.
-const acpControlIds = new Set<number>();
-const acpModes = ref<AcpModes | null>(null);
-const acpConfigOptions = ref<AcpConfigOption[]>([]);
 // Legacy per-chat localStorage key prefixes (kept only for the one-time migration below).
 type AcpChatSettings = { mode?: string; model?: string; effort?: string };
 function getAcpSetting(cid: number, field: keyof AcpChatSettings): string | undefined {
@@ -956,7 +954,7 @@ async function acpSelectMode(modeId: string, userPick = true) {
     acpControlIds.add(rid);
     if (!userPick) acpRestorePushIds.add(rid);
   } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set mode: ${e}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set mode: ${e}` });
   }
 }
 async function acpSelectModel(value: string, userPick = true) {
@@ -968,7 +966,7 @@ async function acpSelectModel(value: string, userPick = true) {
     acpControlIds.add(rid);
     if (!userPick) acpRestorePushIds.add(rid);
   } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set model: ${e}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set model: ${e}` });
   }
 }
 async function acpSelectEffort(value: string, userPick = true) {
@@ -980,7 +978,7 @@ async function acpSelectEffort(value: string, userPick = true) {
     acpControlIds.add(rid);
     if (!userPick) acpRestorePushIds.add(rid);
   } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to set effort: ${e}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set effort: ${e}` });
   }
 }
 
@@ -1247,21 +1245,6 @@ async function selectEffort(effort: ClaudeEffort) {
   await restartClaude();
 }
 
-interface ChatMessage {
-  id: number;
-  role: "user" | "assistant" | "tool" | "thinking" | "permission" | "system-info" | "queued";
-  text: string;
-  images?: string[]; // data URIs for user messages with attached images
-  partial?: boolean;
-  toolInput?: Record<string, unknown>; // full tool args for expandable tool calls
-  toolOutput?: string;  // captured tool result (first 2000 chars)
-  toolUseId?: string;   // matches tool_result blocks back to tool cards
-  toolExpanded?: boolean;
-  toolFailed?: boolean; // tool_result came back is_error
-  toolRawName?: boolean; // true when `text` is a raw tool name (native transport) vs already-human ACP title
-  turnMs?: number;      // on a user message: how long the turn it opened took (persisted with the message)
-  _acpMsgId?: string;   // ACP messageId — identity for incremental chunk append
-}
 
 // Per-tool icon + one-line human summary for the compact tool-call row.
 const TOOL_ICONS: Record<string, unknown> = {
@@ -1528,7 +1511,6 @@ async function ensureFileList() {
   } catch { fileList.value = []; }
 }
 
-interface TurnStats { inputTokens: number; outputTokens: number; costUsd: number }
 
 interface AccountInfo {
   email: string;
@@ -1561,15 +1543,17 @@ function saveMessages(chatId: number, msgs: ChatMessage[]) {
   // Partial messages are mid-stream and get re-sent; the cap only guards against
   // a pathological chat, not storage (a row per message is cheap now).
   const toSave = msgs.filter((m) => !m.partial).slice(-2000);
-  void invoke("save_chat_messages", { chatId, messages: JSON.stringify(toSave) }).catch(() => {});
+  // foldedOrd tells the backend this transcript already accounts for every
+  // stream line up to S.lastOrd, which is what makes the chat_stream trim safe
+  // (chatstream.go). -1 while nothing has streamed yet: "don't move the mark".
+  const foldedOrd = S.lastOrd >= 0 ? S.lastOrd + 1 : -1;
+  void invoke("save_chat_messages", { chatId, messages: JSON.stringify(toSave), foldedOrd }).catch(() => {});
 }
 
 function clearMessageHistory(chatId: number) {
   void invoke("delete_chat_messages", { chatId }).catch(() => {});
 }
 
-let nextMsgId = 0;
-const messages = ref<ChatMessage[]>([]);
 const DRAFT_KEY = computed(() => `burrow.draft.chat.${props.chatId}`);
 const inputText = ref(localStorage.getItem(DRAFT_KEY.value) ?? "");
 watch(inputText, (val) => {
@@ -1579,7 +1563,6 @@ watch(inputText, (val) => {
     localStorage.removeItem(DRAFT_KEY.value);
   }
 });
-const busy = ref(false);
 // Stall watchdog: while busy, any incoming acp-data/claude-data line bumps this.
 // If nothing arrives for a while, the adapter is probably wedged (hung tool call,
 // dropped final response) rather than genuinely still working — surface a hint
@@ -1587,7 +1570,6 @@ const busy = ref(false);
 // ponytail: blind idle timer, not a real liveness check — false positive on a
 // legitimately silent long-running tool call. Upgrade path: have the Go side
 // report process liveness so this can confirm instead of guess.
-const lastActivityAt = ref(Date.now());
 const nowTick = ref(Date.now());
 const STALL_MS = 90_000;
 const stalled = computed(() => busy.value && nowTick.value - lastActivityAt.value > STALL_MS);
@@ -1599,7 +1581,6 @@ stallTimer = setInterval(() => { if (busy.value) nowTick.value = Date.now(); }, 
 // Turn clock: live elapsed while busy, stamped onto the user message that
 // opened the turn when it settles (so it persists with the history and the
 // fold row can say "Worked for 26s" after a reload).
-const turnStartedAt = ref(0);
 const workingElapsed = computed(() =>
   turnStartedAt.value ? fmtDuration(nowTick.value - turnStartedAt.value) : "0s"
 );
@@ -1618,29 +1599,17 @@ watch(busy, (val) => {
 }, { flush: "sync" });
 const copiedMessageId = ref<number | null>(null);
 let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
-const messageQueue = ref<string[]>([]);
 // Set before an INTENTIONAL claude restart (mode switch / abort) so the `exit`
 // event that teardown emits doesn't fire a spurious "Claude finished" toast.
-const suppressNextDone = ref(false);
 const pendingImages = ref<string[]>([]); // data URIs
-const sessionId = ref("");
-const turnStats = ref<TurnStats | null>(null);
-const sessionCost = ref(0);
 const scrollEl = ref<HTMLElement | null>(null);
 const inputEl = ref<HTMLTextAreaElement | null>(null);
 const suggestionsEl = ref<HTMLElement | null>(null);
-let unlisten: UnlistenFn | null = null;
-let acpDataUL: UnlistenFn | null = null;
-let acpReqUL: UnlistenFn | null = null;
-
 // Attach the acp-data/acp-req listeners if not already. onMounted only attaches
 // them when the chat STARTS as an ACP agent; switching to an ACP agent at runtime
 // (selectAgent → clearChat → acp_start) must attach them too, or every adapter
 // event (model/config + the whole turn) is dropped → no model, stuck "thinking".
-async function ensureAcpListeners() {
-  if (!acpDataUL) acpDataUL = await listen<string>(`acp-data-${props.chatId}`, (e) => onAcpData(e.payload));
-  if (!acpReqUL) acpReqUL = await listen<string>(`acp-req-${props.chatId}`, (e) => onAcpReq(e.payload));
-}
+const ensureAcpListeners = () => S.listenAcp();
 
 // Permission mode (per-chat, persisted). Mirrors `claude --permission-mode`:
 // default | auto | acceptEdits | plan | dontAsk | bypassPermissions.
@@ -1732,8 +1701,13 @@ function maybeNtfy(event: NtfyEvent, message: string) {
 }
 
 // Is the user actually looking at this chat right now?
+//
+// Asks the SESSION, not our own props: a chat leaf unmounts when it leaves the
+// screen (Terminal.isChatVisible) and an unmounted component's props are frozen
+// at their last value — so `props.isWatching` would still claim `true` for a
+// turn that finished after the user walked away.
 function watchingNow(): boolean {
-  return (props.isWatching ?? false) && document.hasFocus();
+  return S.isWatched() && document.hasFocus();
 }
 
 async function notifyDone() {
@@ -1768,29 +1742,12 @@ async function notifyPermission(cr: CanUseToolReq) {
 
 // A `can_use_tool` control_request from claude. Every blocking surface (permission,
 // ExitPlanMode, AskUserQuestion, file edits) arrives on this one channel; we route by toolName.
-interface CanUseToolReq {
-  requestId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-  description?: string;
-  suggestions: Array<Record<string, unknown>>;
-  toolUseId?: string;
-}
-const pendingPermission = ref<CanUseToolReq | null>(null); // Bash / generic tool
-const pendingQuestion = ref<CanUseToolReq | null>(null);   // AskUserQuestion
-const pendingPlan = ref<CanUseToolReq | null>(null);       // ExitPlanMode
-const pendingDiff = ref<CanUseToolReq | null>(null);       // Edit / Write / MultiEdit / NotebookEdit
 // Feed marker message IDs — removed when permission is resolved
-const pendingPermissionMsgId = ref<number | null>(null);
-const pendingQuestionMsgId = ref<number | null>(null);
-const pendingPlanMsgId = ref<number | null>(null);
-const pendingDiffMsgId = ref<number | null>(null);
 // Keep native Claude prompts mounted until the control JSON was accepted by
 // stdin. This prevents a failed write from looking like an automatic denial.
 const nativeControlResponsePending = ref(false);
 // Claude may replay an in-flight control request after a reconnect. Keep a
 // small settled-id ledger so an already answered question cannot re-open.
-const settledControlRequestIds = new Set<string>();
 
 function settleControlRequest(requestId: string) {
   if (!requestId) return;
@@ -1843,22 +1800,18 @@ function removeFeedMarker(id: number | null) {
 // Queue panel
 const queueExpanded = ref(true);
 function clearQueue() {
-  messageQueue.value = [];
-  messages.value = messages.value.filter((m) => m.role !== "queued");
+  clearQueuedMessages();
+  saveMessages(props.chatId, messages.value);
 }
-function removeQueued(i: number) {
-  const text = messageQueue.value[i];
-  messageQueue.value.splice(i, 1);
-  const qIdx = messages.value.findIndex((m) => m.role === "queued" && m.text === text);
-  if (qIdx !== -1) messages.value.splice(qIdx, 1);
+function removeQueued(id: number) {
+  removeQueuedMessage(id);
+  saveMessages(props.chatId, messages.value);
 }
-async function sendQueuedNow(i: number) {
-  const text = messageQueue.value.splice(i, 1)[0];
-  const qIdx = messages.value.findIndex((m) => m.role === "queued" && m.text === text);
-  if (qIdx !== -1) messages.value.splice(qIdx, 1);
-  // ACP supports promptQueueing → send now even mid-turn; stream-json must wait.
-  if (!busy.value || effectiveTransport.value === "acp") await sendMessage(text);
-  else { messageQueue.value.unshift(text); messages.value.unshift({ id: nextMsgId++, role: "queued", text }); }
+function sendQueuedNext(id: number) {
+  // This deliberately reorders instead of steering. A follow-up has to remain
+  // its own turn for every provider, including Codex and generic ACP adapters.
+  moveQueuedMessageNext(id);
+  saveMessages(props.chatId, messages.value);
 }
 
 // Context usage bar — 200k for all current models
@@ -2013,9 +1966,6 @@ const fiveHourWindow = computed(() => {
   return m ? m[1].trim() : "";
 });
 
-// Seed nextMsgId from loaded messages
-nextMsgId = messages.value.reduce((max, m) => Math.max(max, m.id + 1), 0);
-
 const cwdDisplay = computed(() => {
   const parts = props.cwd.replace(/^\/Users\/[^/]+/, "~").split("/");
   return parts.slice(-2).join("/") || props.cwd;
@@ -2057,7 +2007,8 @@ async function refineTitle(text: string) {
   try {
     title = await invoke<string>("generate_chat_title", {
       cwd: props.cwd,
-      model: uiStore.commitMessageModel,
+      model: uiStore.textGenerationModel,
+      policy: uiStore.textGenerationPolicy,
       text,
     });
   } catch {
@@ -2121,34 +2072,104 @@ function publishRemoteChat() {
 
 // This is the shared renderer boundary: Claude's stream-json protocol and every
 // ACP adapter (including the locally logged-in Codex CLI) update the same feed.
-function applyRuntimeEvent(event: ProviderRuntimeEvent) {
-  switch (event.type) {
-    case "text.delta": {
-      const isAcp = event.messageId.startsWith("acp:");
-      const last = isAcp
-        ? messages.value.filter((m) => m.role === "assistant" && m.partial && m._acpMsgId === event.messageId).pop()
-        : messages.value[messages.value.length - 1];
-      if (last?.role === "assistant" && last.partial) last.text += event.text;
-      else messages.value.push({ id: nextMsgId++, role: "assistant", text: event.text, partial: true, ...(isAcp ? { _acpMsgId: event.messageId } : {}) });
-      scrollToBottom();
-      return;
-    }
-    case "tool.started":
-      messages.value.push({ id: nextMsgId++, role: "tool", text: event.name, toolInput: event.input ?? {}, toolUseId: event.toolCallId, toolExpanded: false, toolRawName: Boolean(event.input) });
-      if (event.name === "Task") subagents.started(props.chatId, event.toolCallId, event.input);
-      scrollToBottom();
-      return;
-    case "tool.completed": {
-      const toolMsg = [...messages.value].reverse().find((m) => m.role === "tool" && m.toolUseId === event.toolCallId);
-      if (toolMsg) {
-        toolMsg.toolOutput = event.output ? event.output.slice(0, 2000) : "";
-        toolMsg.toolFailed = event.failed === true;
+// Provider-neutral events from `chat-event-{chatId}`. The wire formats are read
+// in Go (src-wails/providerruntime.go) and the transcript rules live in
+// lib/chatProjection.ts, so what is left here is what only a mounted view can
+// do: scroll, notify, account for the turn.
+// The projection mutates a plain {messages, nextMsgId}; the session keeps the
+// first as a ref and the second as a field. This adapter is the whole bridge,
+// and it keeps lib/chatProjection.ts free of Vue.
+const projection: ChatProjectionState = {
+  get messages() { return messages.value; },
+  get nextMsgId() { return S.nextMsgId; },
+  set nextMsgId(v: number) { S.nextMsgId = v; },
+};
+
+function onEvents(batch: ChatEventBatch) {
+  for (const event of batch.events) {
+    if (isProjectedEvent(event.type)) {
+      // Native transport only, per markAgentActive's own caveat: an ACP
+      // session/load replays its whole history through this same feed with no
+      // turn-done at the end, so marking active there would stick on "running".
+      if (!usesRpcRuntime.value) markAgentActive();
+      if (applyChatEvent(projection, event)) scrollToBottom();
+      // Sub-agent bookkeeping is the view's, not the transcript's.
+      if (event.type === "tool.started" && event.name === "Task" && event.toolCallId) {
+        subagents.started(props.chatId, event.toolCallId, event.input);
       }
-      subagents.completed(event.toolCallId, event.failed === true);
-      scrollToBottom();
-      return;
+      if (event.type === "tool.completed" && event.toolCallId) {
+        subagents.completed(event.toolCallId, event.failed === true);
+      }
+      continue;
+    }
+
+    switch (event.type) {
+      case "turn.completed":
+      case "turn.failed":
+        if (event.type === "turn.completed" && (event.inputTokens || event.outputTokens)) {
+          const inp = event.inputTokens ?? 0;
+          const out = event.outputTokens ?? 0;
+          turnStats.value = { inputTokens: inp, outputTokens: out, costUsd: event.costUsd ?? 0 };
+          sessionCost.value += event.costUsd ?? 0;
+          chats.recordTurn(inp, out);
+        }
+        finishTurn();
+        break;
+      case "session.title":
+        // Once Claude has named the thread, a later result repeating the title
+        // must not re-sync it — the user may have renamed the tab since.
+        if (!claudeGeneratedTitle.value) applyClaudeTitle(event.title);
+        break;
+      case "session.exited":
+        // The process is gone, so the next send must spawn a replacement rather
+        // than write to a dead pipe.
+        runtimeStarted.value = false;
+        if (busy.value) {
+          // Died mid-turn with no boundary of its own — settle it here or the
+          // spinner runs forever.
+          busy.value = false;
+          settleTranscript(projection);
+          finalizeStuckTools(true);
+          syncStore();
+        }
+        S.maybeEvict();
+        break;
     }
   }
+}
+
+// Everything a finished turn does beyond the transcript. Shared by the native
+// boundary (a turn.completed event) and the ACP one (the response to our own
+// session/prompt, which only the sender can correlate).
+function finishTurn() {
+  busy.value = false;
+  settleTranscript(projection);
+  finalizeStuckTools();
+  saveMessages(props.chatId, messages.value);
+  syncStore();
+  scrollToBottom();
+  // An `exit` from an intentional restart (mode switch / abort) is not a real
+  // turn boundary — skip the "finished" toast/notification once.
+  if (suppressNextDone.value) {
+    suppressNextDone.value = false;
+  } else {
+    chats.sendStatusEvent(props.chatId, { type: "STOP", watching: watchingNow() });
+    notifyDone();
+  }
+  drainQueuedMessage();
+  // The session outlives this component while a turn is running; now that the
+  // turn is over it is only worth keeping if someone is still watching.
+  S.maybeEvict();
+}
+
+function drainQueuedMessage() {
+  if (busy.value) return;
+  const next = takeNextQueuedMessage();
+  if (!next) return;
+  saveMessages(props.chatId, messages.value);
+  // Finish handlers first: the next prompt starts only after the prior turn
+  // has fully settled its transcript, status and provider correlation.
+  nextTick(() => sendMessage(next.text, next.images));
 }
 
 function onLine(line: string) {
@@ -2183,7 +2204,7 @@ function onLine(line: string) {
     // Auto-allow when an "always" rule matches — no UI.
     if (chats.hasPermissionRule(ruleKeys(cr.toolName, cr.input))) {
       void respondControl(cr.requestId, { behavior: "allow", updatedInput: cr.input }).catch((e) => {
-        messages.value.push({ id: nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
+        messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
         saveMessages(props.chatId, messages.value);
       });
       return;
@@ -2192,27 +2213,27 @@ function onLine(line: string) {
       questionAnswers.value = {};
       pendingQuestion.value = cr;
       const qText = ((cr.input.questions as Array<{question: string}>)?.[0]?.question ?? "Question").slice(0, 80);
-      const qMid = nextMsgId++;
+      const qMid = S.nextMsgId++;
       pendingQuestionMsgId.value = qMid;
       messages.value.push({ id: qMid, role: "system-info", text: `❓ ${qText}` });
       chats.sendStatusEvent(props.chatId, { type: "WAIT" });
     } else if (cr.toolName === "ExitPlanMode") {
       planFeedback.value = "";
       pendingPlan.value = cr;
-      const pMid = nextMsgId++;
+      const pMid = S.nextMsgId++;
       pendingPlanMsgId.value = pMid;
       messages.value.push({ id: pMid, role: "system-info", text: `📋 Plan ready for review` });
       chats.sendStatusEvent(props.chatId, { type: "WAIT" });
     } else if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(cr.toolName)) {
       pendingDiff.value = cr;
       const filePath = ((cr.input.file_path ?? cr.input.path ?? "") as string);
-      const dMid = nextMsgId++;
+      const dMid = S.nextMsgId++;
       pendingDiffMsgId.value = dMid;
       messages.value.push({ id: dMid, role: "system-info", text: `✏️ ${cr.toolName}: ${filePath.split("/").slice(-2).join("/")}` });
       chats.sendStatusEvent(props.chatId, { type: "PERMISSION_REQUEST" });
     } else {
       pendingPermission.value = cr;
-      const pmMid = nextMsgId++;
+      const pmMid = S.nextMsgId++;
       pendingPermissionMsgId.value = pmMid;
       messages.value.push({ id: pmMid, role: "system-info", text: `⚡ ${cr.toolName} wants permission` });
       chats.sendStatusEvent(props.chatId, { type: "PERMISSION_REQUEST" });
@@ -2230,89 +2251,16 @@ function onLine(line: string) {
       sessionId.value = sid;
       chats.sync(props.chatId, { claudeSessionId: sid });
     }
-    if (sub === "session_title") applyClaudeTitle(event.title);
+    // session_title arrives as a `session.title` event; not read twice here.
     if (sub === "hook_started" || sub === "hook_response") return;
   }
 
-  if (type === "assistant") {
-    markAgentActive();
-    const content = ((event.message as Record<string, unknown>)?.content ?? []) as Array<Record<string, unknown>>;
-    const thinkingParts = content.filter((b) => b.type === "thinking").map((b) => b.thinking as string).join("");
-
-    if (thinkingParts) {
-      const last = messages.value[messages.value.length - 1];
-      if (last?.role === "thinking" && last.partial) {
-        last.text += thinkingParts;
-      } else {
-        messages.value.push({ id: nextMsgId++, role: "thinking", text: thinkingParts, partial: true });
-      }
-    }
-    for (const runtimeEvent of normalizeClaudeStreamEvent(event)) applyRuntimeEvent(runtimeEvent);
-    scrollToBottom();
-    return;
-  }
-
-  if (type === "user") {
-    const content = ((event.message as Record<string, unknown>)?.content ?? []) as Array<Record<string, unknown>>;
-    for (const block of content) {
-      if (block.type !== "tool_result") continue;
-      const toolUseId = block.tool_use_id as string;
-      const rc = block.content as Array<Record<string, unknown>> | string | undefined;
-      let out = typeof rc === "string" ? rc : (Array.isArray(rc) ? rc.filter((b) => b.type === "text").map((b) => b.text as string).join("\n") : "");
-      const toolMsg = [...messages.value].reverse().find((m) => m.role === "tool" && m.toolUseId === toolUseId);
-      if (toolMsg) {
-        toolMsg.toolOutput = out ? out.slice(0, 2000) : "";
-        toolMsg.toolFailed = block.is_error === true;
-      }
-    }
-    return;
-  }
-
-  if (type === "result" || type === "exit") {
-    // `exit` means the process is gone (idle-reaped by agentproc's sweeper, or
-    // it crashed) — the next send must spawn a replacement, not write to a dead
-    // pipe. `result` is only a turn boundary; the proc stays up.
-    if (type === "exit") runtimeStarted.value = false;
-    busy.value = false;
-    // Un-partial ALL messages — tool messages are pushed after assistant text,
-    // so checking only `last` would leave the assistant text bubble still partial.
-    for (const m of messages.value) { if (m.partial) m.partial = false; }
-    finalizeStuckTools();
-    // Capture usage/cost from result event
-    if (type === "result") {
-      const usage = event.usage as Record<string, number> | undefined;
-      const cost = (event.cost_usd as number) ?? 0;
-      if (usage) {
-        const inp = usage.input_tokens ?? 0;
-        const out = usage.output_tokens ?? 0;
-        turnStats.value = { inputTokens: inp, outputTokens: out, costUsd: cost };
-        sessionCost.value += cost;
-        chats.recordTurn(inp, out);
-      }
-      // Claude Code ≥1.x emits session_title in the result event after generating one
-      if (!claudeGeneratedTitle.value) applyClaudeTitle(event.session_title);
-    }
-    saveMessages(props.chatId, messages.value);
-    syncStore();
-    scrollToBottom();
-    // An `exit` from an intentional restart (mode switch / abort) is not a real
-    // turn boundary — skip the "finished" toast/notification once.
-    if ((type === "exit" || type === "result") && suppressNextDone.value) {
-      suppressNextDone.value = false;
-    } else {
-      chats.sendStatusEvent(props.chatId, { type: "STOP", watching: props.isWatching ?? document.hasFocus() });
-      notifyDone();
-    }
-    // Flush one queued message (next turn will flush the next one).
-    if (messageQueue.value.length > 0) {
-      const next = messageQueue.value.shift()!;
-      // Remove its greyed-out placeholder from the feed
-      const qIdx = messages.value.findIndex((m) => m.role === "queued" && m.text === next);
-      if (qIdx !== -1) messages.value.splice(qIdx, 1);
-      nextTick(() => sendMessage(next));
-    }
-    return;
-  }
+  // NOTE: `assistant`, `user` (tool results) and `result`/`exit` are NOT read
+  // here any more. They arrive as domain events on `chat-event-{chatId}`,
+  // parsed once in Go (src-wails/providerruntime.go) and applied by onEvents.
+  // What stays on this raw channel is only what has no domain event: the
+  // control (permission) protocol and the CLI's own bookkeeping, both of which
+  // are decisions for a UI rather than transcript.
 }
 
 // ── ACP transport ──────────────────────────────────────────────────────────
@@ -2350,7 +2298,7 @@ function onAcpData(raw: string) {
     // Finalize any messages rendered from a session/load replay (no turn-done fires
     // for a load) and persist the restored history.
     if (messages.value.some((m) => m.partial)) {
-      for (const m of messages.value) m.partial = false;
+      settleTranscript(projection);
       finalizeStuckTools();
       saveMessages(props.chatId, messages.value);
       scrollToBottom();
@@ -2377,77 +2325,23 @@ function onAcpData(raw: string) {
       if (!wasRestorePush && (result?.configOptions || result?.modes)) restoreAcpSelections();
       return;
     }
+    // The turn is settled by the response to OUR session/prompt, and only the
+    // sender can correlate that — which is why this one boundary stays on the
+    // raw channel instead of becoming an event.
     if (acpPromptRpcId.value === null || rid !== acpPromptRpcId.value) return;
     acpPromptRpcId.value = null;
-    busy.value = false;
-    for (const m of messages.value) { if (m.partial) m.partial = false; }
-    finalizeStuckTools();
-    saveMessages(props.chatId, messages.value);
-    syncStore();
-    scrollToBottom();
-    if (!suppressNextDone.value) {
-      chats.sendStatusEvent(props.chatId, { type: "STOP", watching: props.isWatching ?? document.hasFocus() });
-      notifyDone();
-    }
-    suppressNextDone.value = false;
-    if (messageQueue.value.length > 0) {
-      const next = messageQueue.value.shift()!;
-      const qIdx = messages.value.findIndex((m) => m.role === "queued" && m.text === next);
-      if (qIdx !== -1) messages.value.splice(qIdx, 1);
-      nextTick(() => sendMessage(next));
-    }
+    finishTurn();
     return;
   }
 
-  // EOF from the Rust reader thread.
-  if (msg._burrow === "exit") {
-    runtimeStarted.value = false;
-    // DIAG (remove later): adapter process ended. If this fires mid-turn with no
-    // unmount log, the ACP/CLI subprocess died server-side — check acp-debug.log.
-    console.warn(`[chat-diag] adapter EXIT chatId=${props.chatId} busy=${busy.value}`);
-    if (busy.value) {
-      busy.value = false;
-      for (const m of messages.value) { if (m.partial) m.partial = false; }
-      finalizeStuckTools(true);
-      syncStore();
-    }
-    return;
-  }
+  // The {_burrow:"exit"} EOF arrives as a `session.exited` event; onEvents owns
+  // it, so both transports settle a dead runtime the same way.
 
   if (msg.method !== "session/update") return;
 
-  // Replayed user turns (session/load history) — render as user bubbles.
-  const u = (msg.params as { update?: Record<string, unknown> })?.update;
-  if (u?.sessionUpdate === "user_message_chunk") {
-    const text = ((u.content as Record<string, unknown>)?.text as string) ?? "";
-    const mid = (u.messageId as string) ?? "u";
-    const last = messages.value.filter((m) => m.role === "user" && m._acpMsgId === mid).pop();
-    if (last) last.text += text;
-    else if (text) messages.value.push({ id: nextMsgId++, role: "user", text, _acpMsgId: mid });
-    scrollToBottom();
-    return;
-  }
-
-  const event = parseAcpUpdate(msg.params);
-  if (!event) return;
-
-  switch (event.kind) {
-    case "thinking_chunk": {
-      const last = messages.value[messages.value.length - 1];
-      if (last?.role === "thinking" && last.partial) {
-        last.text += event.text;
-      } else {
-        messages.value.push({ id: nextMsgId++, role: "thinking", text: event.text, partial: true });
-      }
-      scrollToBottom();
-      break;
-    }
-    case "text_chunk":
-    case "tool_call":
-    case "tool_output":
-      for (const runtimeEvent of normalizeAcpRuntimeEvent(event)) applyRuntimeEvent(runtimeEvent);
-      break;
-  }
+  // session/update notifications — message chunks, thoughts, tool calls and
+  // the user turns a session/load replays — are read in Go and applied by
+  // onEvents. Nothing on this channel needs them.
 }
 
 // Lines from acp-req-{chatId}: blocking session/request_permission requests.
@@ -2491,7 +2385,7 @@ function onAcpReq(raw: string) {
   };
 
   const isPlan = typeof perm.rawInput?.plan === "string";
-  const pmMid = nextMsgId++;
+  const pmMid = S.nextMsgId++;
   acpPermMsgId.value = pmMid;
   messages.value.push({ id: pmMid, role: "system-info", text: isPlan ? "📋 Plan ready for review" : `⚡ Permission: ${perm.title}` });
   chats.sendStatusEvent(props.chatId, { type: "PERMISSION_REQUEST" });
@@ -2509,7 +2403,7 @@ async function respondCodexUserInput(answers: Record<string, string[]>) {
     codexUserInput.value = null;
     chats.sendStatusEvent(props.chatId, { type: "RESUME" });
   } catch (error) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Unable to submit Codex input: ${error}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Unable to submit Codex input: ${error}` });
     codexUserInputPending.value = false;
   } finally {
     syncStore();
@@ -2531,11 +2425,11 @@ async function acpRespond(optionId: string, optName: string, kind: string) {
   const reject = kind.startsWith("reject");
   try {
     await invoke("acp_respond_permission", { id: props.chatId, rpcId: r.rpcId, optionId });
-    messages.value.push({ id: nextMsgId++, role: "permission", text: `${reject ? "✗" : "✓"} ${optName}: ${r.title}` });
+    messages.value.push({ id: S.nextMsgId++, role: "permission", text: `${reject ? "✗" : "✓"} ${optName}: ${r.title}` });
     saveMessages(props.chatId, messages.value);
     // serverRequest/resolved closes the prompt and updates the Sidebar state.
   } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
     saveMessages(props.chatId, messages.value);
     permissionResponsePending.value = false;
   }
@@ -2565,7 +2459,7 @@ async function copyMessage(msg: ChatMessage) {
       copyFeedbackTimer = null;
     }, 1_200);
   } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Could not copy message: ${e}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Could not copy message: ${e}` });
     saveMessages(props.chatId, messages.value);
   }
 }
@@ -2591,14 +2485,15 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   if (!text) return;
   // A cold chat (never opened this launch) has no process yet — start it now.
   if (await ensureRuntime()) return;
-  if (extraImages?.length) pendingImages.value.push(...extraImages);
-  // While busy: queue the message instead of sending immediately. ACP adapters
-  // support promptQueueing (the agent queues it itself), so send concurrently —
-  // pressing Enter force-sends now instead of waiting for the turn to finish.
-  if (busy.value && !forcedText && !isAcpRuntime.value) {
-    messageQueue.value.push(text);
-    messages.value.push({ id: nextMsgId++, role: "queued", text });
+  const images = [...pendingImages.value, ...(extraImages ?? [])];
+  // A follow-up is always a separate turn.  In particular, do not rely on an
+  // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
+  // as steering, and generic adapters have no negotiated queue capability.
+  if (busy.value) {
+    enqueueMessage(text, images);
+    pendingImages.value = [];
     inputText.value = "";
+    saveMessages(props.chatId, messages.value);
     await nextTick();
     autoResize();
     scrollToBottom(true);
@@ -2617,13 +2512,13 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
       const diff = await invoke<{ stdout: string }>("run_git", { cwd: props.cwd, args: ["diff", "HEAD~1", "--no-color"] });
       text = `Write a PR description for these changes:\n\n${stat.stdout}\n\`\`\`diff\n${diff.stdout.slice(0, 8000)}\n\`\`\``;
     } catch (e) {
-      messages.value.push({ id: nextMsgId++, role: "assistant", text: `Error reading git diff: ${e}` });
+      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error reading git diff: ${e}` });
       return;
     }
   }
 
-  const msgImages = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
-  messages.value.push({ id: nextMsgId++, role: "user", text, images: msgImages });
+  const msgImages = images.length > 0 ? images : undefined;
+  messages.value.push({ id: S.nextMsgId++, role: "user", text, images: msgImages });
   // Snapshot the worktree before the turn so it is revertable from the History
   // panel. Best-effort, and a no-op outside a git repo.
   invoke("create_checkpoint", {
@@ -2648,11 +2543,10 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   scrollToBottom(true);
   if (usesRpcRuntime.value) {
     try {
-      const images = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
       pendingImages.value = [];
-      acpPromptRpcId.value = await sendRpcRuntime(text, images);
+      acpPromptRpcId.value = await sendRpcRuntime(text, msgImages);
     } catch (e) {
-      messages.value.push({ id: nextMsgId++, role: "assistant", text: `Error: ${e}` });
+      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
       busy.value = false;
       chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
       syncStore();
@@ -2660,11 +2554,10 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     return;
   }
   try {
-    const images = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
     pendingImages.value = [];
-    await invoke("claude_send", { id: props.chatId, text, sessionId: sessionId.value || null, images });
+    await invoke("claude_send", { id: props.chatId, text, sessionId: sessionId.value || null, images: msgImages });
   } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Error: ${e}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
     busy.value = false;
     chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
     syncStore();
@@ -2690,7 +2583,7 @@ async function resolveClaudePrompt(
     await respondControl(cr.requestId, response);
     clearPrompt();
   } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
     saveMessages(props.chatId, messages.value);
     // respondControl throws before RESUME fires — clear anyway so status doesn't stay stuck on waiting/permission.
     clearPrompt();
@@ -2717,10 +2610,10 @@ async function respondPermission(allow: boolean, opts?: { always?: boolean; upda
     const optionId = allow
       ? (opts?.always ? pick("allow_always", "allow_once") : pick("allow_once", "allow_always"))
       : pick("reject_once", "reject_always");
-    messages.value.push({ id: nextMsgId++, role: "permission", text: `${allow ? "✓ Allowed" : "✗ Denied"}: ${cr.toolName}` });
+    messages.value.push({ id: S.nextMsgId++, role: "permission", text: `${allow ? "✓ Allowed" : "✗ Denied"}: ${cr.toolName}` });
     saveMessages(props.chatId, messages.value);
     invoke("acp_respond_permission", { id: props.chatId, rpcId: acpPermRpcId.value, optionId }).catch((e) => {
-      messages.value.push({ id: nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
+      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
     });
     acpPermRpcId.value = null;
     chats.sendStatusEvent(props.chatId, { type: "RESUME" });
@@ -2744,10 +2637,10 @@ async function respondPermission(allow: boolean, opts?: { always?: boolean; upda
       chats.addPermissionRule(keys[keys.length - 1]);
     }
     const label = allow ? (opts?.always ? "✓ Always allowed" : "✓ Allowed") : "✗ Denied";
-    messages.value.push({ id: nextMsgId++, role: "permission", text: `${label}: ${cr.toolName}${detailStr}` });
+    messages.value.push({ id: S.nextMsgId++, role: "permission", text: `${label}: ${cr.toolName}${detailStr}` });
     saveMessages(props.chatId, messages.value);
   } catch (e) {
-    messages.value.push({ id: nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
     saveMessages(props.chatId, messages.value);
   } finally {
     nativeControlResponsePending.value = false;
@@ -2840,7 +2733,7 @@ async function selectPermMode(mode: PermMode) {
       permMode.value = previousMode;
       savePermMode(props.chatId, previousMode);
       messages.value.push({
-        id: nextMsgId++,
+        id: S.nextMsgId++,
         role: "assistant",
         text: `Couldn't update the permission mode: ${String(err)}`,
       });
@@ -2866,12 +2759,11 @@ async function restartClaude() {
     removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
     acpPermReq.value = null; acpPermRpcId.value = null;
     busy.value = false;
-    messageQueue.value = [];
-    messages.value = messages.value.filter((m) => m.role !== "queued");
     const lastAcp = messages.value[messages.value.length - 1];
     if (lastAcp?.partial) lastAcp.partial = false;
     chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
     syncStore();
+    drainQueuedMessage();
     return;
   }
   // claude_stop removes the proc from the map so the subsequent claude_start actually spawns.
@@ -2891,8 +2783,6 @@ async function restartClaude() {
   }).catch(() => {});
   runtimeStarted.value = true;
   busy.value = false;
-  messageQueue.value = [];
-  messages.value = messages.value.filter((m) => m.role !== "queued");
   // Drop any in-flight permission/question/plan prompts — the proc backing them is gone.
   pendingPermission.value = null;
   pendingDiff.value = null;
@@ -2902,6 +2792,7 @@ async function restartClaude() {
   if (last?.partial) last.partial = false;
   chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
   syncStore();
+  drainQueuedMessage();
 }
 
 async function abortTurn() {
@@ -2914,7 +2805,7 @@ async function clearChat() {
   messages.value = [];
   sessionId.value = "";
   busy.value = false;
-  messageQueue.value = [];
+  clearQueuedMessages();
   pendingImages.value = [];
   turnStats.value = null;
   sessionCost.value = 0;
@@ -2925,7 +2816,7 @@ async function clearChat() {
   const projSettings = scriptsStore.settingsFor(props.cwd);
   if (rpc) {
     const startErr = await startRpcRuntime().catch((e: unknown) => e);
-    if (startErr) messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
+    if (startErr) messages.value.push({ id: S.nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
     return;
   }
   await invoke("claude_start", {
@@ -2942,7 +2833,7 @@ async function clearChat() {
   runtimeStarted.value = true;
   // Switched to a stream-json agent at runtime → ensure the claude-data listener
   // exists (onMounted only attaches it when the chat starts as stream-json).
-  if (!unlisten) unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
+  await S.listenClaude();
 }
 
 // `/cmd` or `$skill` token immediately before the cursor — at line start OR after
@@ -3221,7 +3112,6 @@ function migrateLegacyChatConfig() {
 // the user never opened. So the process is started on demand instead: on send,
 // or up front only for a chat spawned with a prompt to deliver. agentproc's
 // sweeper takes it back once the chat goes quiet.
-const runtimeStarted = ref(false);
 let runtimeStarting: Promise<unknown> | null = null;
 
 // Only a chat spawned with a prompt still to deliver warms itself up. Merely
@@ -3241,7 +3131,7 @@ async function ensureRuntime(): Promise<unknown> {
       await scriptsStore.loadForPath(props.cwd);
       const startErr = await startRpcRuntime().catch((e: unknown) => e);
       if (startErr) {
-        messages.value.push({ id: nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
+        messages.value.push({ id: S.nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
         return startErr;
       }
       runtimeStarted.value = true;
@@ -3261,10 +3151,10 @@ async function ensureRuntime(): Promise<unknown> {
     }).catch((e: unknown) => {
       // A swallowed failure here (missing `claude` binary, bad profile) used to
       // look like a chat that simply never answers.
-      messages.value.push({ id: nextMsgId++, role: "assistant", text: `Failed to start Claude CLI: ${e}` });
+      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to start Claude CLI: ${e}` });
       return e;
     });
-    if (!unlisten) unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
+    await S.listenClaude();
     if (!startErr) runtimeStarted.value = true;
     return startErr ?? null;
   })();
@@ -3276,11 +3166,39 @@ async function ensureRuntime(): Promise<unknown> {
 }
 
 onMounted(async () => {
+  // Install this mount's reducers into the session and take a reference. The
+  // session already holds the listeners; setHandlers just points them at the
+  // live view, so no stream is ever torn down and re-attached on a remount.
+  S.setHandlers({ onEvents, onLine, onAcpData, onAcpReq });
+  // The transcript arrives on this channel for BOTH transports, so it is
+  // attached unconditionally — unlike the raw ones, which are per-runtime.
+  await S.listenEvents();
+  S.retain();
   // Config must be loaded (and legacy localStorage migrated) before any of the
   // config-backed refs below are trusted — reload them here once configReady settles.
   await configReady;
   migrateLegacyChatConfig();
-  messages.value = await loadMessages(props.chatId);
+  // Only read the transcript back from SQLite when the session has none. A
+  // non-empty session is the LIVE copy — it kept receiving while this view was
+  // unmounted, so it is ahead of the DB, and assigning over it would throw the
+  // newer part away (exactly the hole this plan is about).
+  if (messages.value.length === 0) {
+    messages.value = await loadMessages(props.chatId);
+    // Queue markers are persisted with the transcript. Rebuild the in-memory
+    // scheduler after a relaunch before any runtime can dispatch a follow-up.
+    restoreQueuedMessages();
+    // Ids must continue past the loaded history, or new messages collide with
+    // old ones on the same `:key`.
+    S.nextMsgId = messages.value.reduce((max, m) => Math.max(max, m.id + 1), 0);
+    // Catch up on anything the agent said after that transcript was written —
+    // i.e. a turn that was in flight when the app was last closed or crashed.
+    await replayChatStream(props.chatId);
+  }
+  // A remount is how you come back to a chat now (fáze 3 unmounts hidden chat
+  // leaves), so land on the newest message. The activeByWs watcher below cannot
+  // do it: the active id is already this chat before the fresh instance mounts,
+  // so it never fires and the view opened scrolled to the top of the history.
+  scrollToBottom(true);
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
   // Pin the resolved model to this chat on first mount, so it survives a
@@ -3290,7 +3208,10 @@ onMounted(async () => {
   if (!storedChatEffort()) saveChatEffort(selectedEffort.value);
   permMode.value = loadPermMode(props.chatId);
 
-  chats.markSeen(props.chatId);
+  // Mounted normally means visible (Terminal.isChatVisible), but a chat spawned
+  // with a prompt can mount unwatched — marking that one seen would clear a dot
+  // nobody looked at.
+  if (props.isWatching ?? true) chats.markSeen(props.chatId);
   window.addEventListener("keydown", onWindowKeydown);
   window.addEventListener("mousedown", onPermMenuOutside);
   window.addEventListener("mousedown", onEffortMenuOutside);
@@ -3305,12 +3226,13 @@ onMounted(async () => {
   publishRemoteChat();
   // The stream-json listener is JS-only and free — attach it even when the
   // runtime is still cold, so a later ensureRuntime() streams immediately.
-  if (!usesRpcRuntime.value && !unlisten) {
-    unlisten = await listen<string>(`claude-data-${props.chatId}`, (ev) => onLine(ev.payload));
+  if (!usesRpcRuntime.value) {
+    await S.listenClaude();
   }
   if (shouldAutoStart()) {
     const startErr = await ensureRuntime();
     if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
+    else if (!startErr) drainQueuedMessage();
     if (usesRpcRuntime.value) return;
   }
 
@@ -3339,9 +3261,11 @@ onBeforeUnmount(() => {
   window.removeEventListener("mousedown", onEffortMenuOutside);
   window.removeEventListener("mousedown", onProfileMenuOutside);
   window.removeEventListener("mousedown", onAcpMenuOutside);
-  unlisten?.();
-  acpDataUL?.();
-  acpReqUL?.();
+  // Hand the session back instead of unsubscribing: it drops its listeners only
+  // when nothing is in flight (lib/chatSession.ts). A turn running in a tab the
+  // user navigated away from keeps streaming into the session and is simply
+  // there on the next mount.
+  S.release();
   // NOTE: deliberately do NOT stop the adapter/CLI here. The backend process
   // lifetime is tied to the SESSION, not this component's mount — a background
   // chat gets unmounted whenever its host tears down (FloatChat when ws.active

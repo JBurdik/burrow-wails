@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 // Events is how the manager reports PTY activity to its host (the app
@@ -140,4 +141,50 @@ func (m *Manager) get(id string) (*session, bool) {
 	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
 	return s, ok
+}
+
+// Foreground returns the command name of the process group currently in the
+// foreground of this PTY — the answer to "what is the user actually running in
+// that tab". Empty when the pty is unknown, already dead, or has no foreground
+// group at all.
+//
+// This is the terminal's own notion of foreground (TIOCGPGRP on the master fd,
+// i.e. tcgetpgrp), not a guess from the process tree: it is exactly what the
+// kernel would deliver a Ctrl-C to, so it flips the moment a command starts or
+// exits. The shell IS reported by name when it is in the foreground — that is
+// how the caller learns a command or agent has exited and it is back at the
+// prompt (XTerm.vue's SHELL_RE branch).
+//
+// ponytail: `p_comm` from sysctl rather than shelling out to `ps`. The poll
+// runs every 2 s per terminal, and the name is all any caller matches on
+// (`/^claude$/`, `/^zsh$/`). p_comm is truncated to 16 chars by the kernel,
+// which no command name we match comes close to.
+func (m *Manager) Foreground(id string) (string, error) {
+	sess, ok := m.get(id)
+	if !ok {
+		return "", errUnknown(id)
+	}
+	pgid, err := unix.IoctlGetInt(int(sess.file.Fd()), unix.TIOCGPGRP)
+	if err != nil || pgid <= 0 {
+		// No foreground group: the session is being torn down. Not an error the
+		// caller can act on — a poll that reports nothing is the truthful answer.
+		return "", nil
+	}
+	return processName(pgid), nil
+}
+
+func processName(pid int) string {
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil || kp == nil {
+		return "" // exited between the ioctl and the lookup
+	}
+	comm := kp.Proc.P_comm
+	buf := make([]byte, 0, len(comm))
+	for _, c := range comm {
+		if c == 0 {
+			break
+		}
+		buf = append(buf, byte(c))
+	}
+	return string(buf)
 }

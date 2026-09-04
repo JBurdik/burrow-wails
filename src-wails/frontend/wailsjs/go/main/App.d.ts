@@ -22,6 +22,8 @@ export function AcpStop(arg1:string):Promise<void>;
 
 export function AddMcpServer(arg1:string,arg2:Record<string, any>):Promise<void>;
 
+export function ChatFoldedOrd(arg1:string):Promise<number>;
+
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
 export function CheckpointDiff(arg1:string,arg2:string):Promise<string>;
@@ -74,21 +76,33 @@ export function DeleteSkill(arg1:string):Promise<void>;
 
 export function DeleteWorkspace(arg1:number):Promise<void>;
 
+export function ExtensionsDirectory():Promise<string>;
+
 export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function GenerateChatTitle(arg1:string,arg2:string,arg3:string):Promise<string>;
+export function GenerateBranchName(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
-export function GenerateCommitMessage(arg1:string,arg2:string):Promise<main.GitOutput>;
+export function GenerateChatTitle(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
+export function GenerateCommitMessage(arg1:string,arg2:string,arg3:string):Promise<main.GitOutput>;
+
+export function GeneratePrContent(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Record<string, string>>;
 
 export function GetAppVersion():Promise<string>;
+
+export function GetExtensionSettings(arg1:string):Promise<Record<string, string>>;
 
 export function GetHookServerPort():Promise<number>;
 
 export function GetHttpServerStatus():Promise<main.HttpServerStatus>;
 
+export function GetPtyForeground(arg1:string):Promise<string>;
+
 export function GetTailscaleStatus():Promise<main.TailscaleStatus>;
 
 export function HomeDir():Promise<string>;
+
+export function InstallExtension(arg1:string):Promise<void>;
 
 export function InstallUpdate(arg1:string,arg2:string):Promise<void>;
 
@@ -106,6 +120,8 @@ export function ListCheckpoints(arg1:string,arg2:number):Promise<Array<main.Chec
 
 export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSessionInfo>>;
 
+export function ListExtensions():Promise<Array<main.ExtensionInfo>>;
+
 export function ListFonts():Promise<Array<string>>;
 
 export function ListMcpServers():Promise<Record<string, any>>;
@@ -120,7 +136,11 @@ export function ListTerminalTabs(arg1:number):Promise<Array<main.TerminalTab>>;
 
 export function ListWorkspaces():Promise<Array<main.Workspace>>;
 
+export function LoadChatEventsSince(arg1:string,arg2:number):Promise<Array<main.ChatEventBatch>>;
+
 export function LoadChatMessages(arg1:number):Promise<string>;
+
+export function LoadChatStreamSince(arg1:string,arg2:number):Promise<Array<main.ChatStreamLine>>;
 
 export function LspSend(arg1:string,arg2:string):Promise<void>;
 
@@ -164,7 +184,7 @@ export function ReinstallStatusHooks():Promise<void>;
 
 export function RelaunchApp():Promise<void>;
 
-export function RemoteCreateChat(arg1:string):Promise<Record<string, any>>;
+export function RemoteCreateChat(arg1:number,arg2:string):Promise<Record<string, any>>;
 
 export function RemoteListChats():Promise<Array<Record<string, any>>>;
 
@@ -188,11 +208,15 @@ export function RestartDaemon():Promise<void>;
 
 export function RestoreCheckpoint(arg1:string,arg2:string):Promise<main.Checkpoint>;
 
+export function RunExtensionCommand(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
-export function SaveChatMessages(arg1:number,arg2:string):Promise<void>;
+export function SaveChatMessages(arg1:number,arg2:string,arg3:number):Promise<void>;
+
+export function SaveExtensionSettings(arg1:string,arg2:Record<string, string>):Promise<void>;
 
 export function SaveTempImage(arg1:string,arg2:string):Promise<string>;
 
@@ -203,6 +227,8 @@ export function SearchFiles(arg1:string,arg2:string,arg3:number):Promise<Array<m
 export function SendFloatSnapshot(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
 export function SetBurrowMcpMaxDepth(arg1:number):Promise<void>;
+
+export function SetExtensionEnabled(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetHttpEnabled(arg1:boolean):Promise<void>;
 

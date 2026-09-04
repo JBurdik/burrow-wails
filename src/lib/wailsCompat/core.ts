@@ -24,6 +24,20 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.ResizePty(String(args.id), args.cols, args.rows);
     case "kill_pty":
       return App.KillPty(String(args.id));
+    // No-op, and deliberately NOT left to fall through to the default: the
+    // default throws, and XTerm.onBeforeUnmount awaits this call before
+    // disposing — so the throw skipped renderAddon.dispose() + term.dispose()
+    // and leaked an xterm instance (with its WebGL context) on every closed
+    // terminal.
+    //
+    // There is nothing to detach. The Rust backend closed a per-client stream;
+    // the Go daemon broadcasts frames to every attached client and a closed
+    // XTerm simply stops listening, while the PTY keeps running for the next
+    // reattach — which is exactly what the caller wants to happen.
+    case "detach_pty":
+      return Promise.resolve();
+    case "get_pty_foreground":
+      return App.GetPtyForeground(String(args.id));
     case "list_pty_sessions":
       // The daemon binding exposes live IDs (`string[]`), while the legacy
       // Tauri UI contract expects session records. Normalize here so restored
@@ -66,9 +80,13 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "run_gh":
       return App.RunGh(args.cwd, args.args ?? []);
     case "generate_commit_message":
-      return App.GenerateCommitMessage(args.cwd, args.model ?? "");
+      return App.GenerateCommitMessage(args.cwd, args.model ?? "", args.policy ?? "");
     case "generate_chat_title":
-      return App.GenerateChatTitle(args.cwd ?? "", args.model ?? "", args.text ?? "");
+      return App.GenerateChatTitle(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.text ?? "");
+    case "generate_branch_name":
+      return App.GenerateBranchName(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.message ?? "");
+    case "generate_pr_content":
+      return App.GeneratePrContent(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.baseBranch ?? args.base_branch ?? "", args.headBranch ?? args.head_branch ?? "");
 
     // Checkpoints — pre-turn worktree snapshots (src-wails/checkpoints.go)
     case "create_checkpoint":
@@ -197,6 +215,22 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "remove_mcp_server":
       return App.RemoveMcpServer(args.name);
 
+    // Local extensions (manifest registry + explicit user-run commands).
+    case "list_extensions":
+      return App.ListExtensions();
+    case "set_extension_enabled":
+      return App.SetExtensionEnabled(args.id, !!args.enabled);
+    case "extensions_directory":
+      return App.ExtensionsDirectory();
+    case "get_extension_settings":
+      return App.GetExtensionSettings(args.extensionId);
+    case "install_extension":
+      return App.InstallExtension(args.source);
+    case "save_extension_settings":
+      return App.SaveExtensionSettings(args.extensionId, args.values ?? {});
+    case "run_extension_command":
+      return App.RunExtensionCommand(args.extensionId, args.commandId, args.cwd ?? "");
+
     // Claude session reading
     case "list_claude_sessions":
       return App.ListClaudeSessions(args.cwd);
@@ -223,7 +257,7 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "is_pid_alive":
       return App.IsPidAlive(args.pid);
     case "set_tab_live_status":
-      return App.SetTabLiveStatus(args.ptyId ?? args.pty_id, args.status);
+      return App.SetTabLiveStatus(String(args.ptyId ?? args.pty_id), args.status);
     case "set_max_agents":
       return App.SetMaxAgents(args.n ?? args.max);
     case "set_burrow_mcp_max_depth":
@@ -233,7 +267,15 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "load_chat_messages":
       return App.LoadChatMessages(args.chatId ?? args.chat_id);
     case "save_chat_messages":
-      return App.SaveChatMessages(args.chatId ?? args.chat_id, args.messages);
+      // foldedOrd: how far into chat_stream this transcript accounts for.
+      // -1 = "don't know", which leaves the existing mark alone (see chatstore.go).
+      return App.SaveChatMessages(args.chatId ?? args.chat_id, args.messages, args.foldedOrd ?? -1);
+    case "chat_folded_ord":
+      return App.ChatFoldedOrd(String(args.chatId ?? args.chat_id));
+    case "load_chat_events_since":
+      return App.LoadChatEventsSince(String(args.chatId ?? args.chat_id), args.since ?? 0);
+    case "load_chat_stream_since":
+      return App.LoadChatStreamSince(String(args.chatId ?? args.chat_id), args.since ?? 0);
     case "delete_chat_messages":
       return App.DeleteChatMessages(args.chatId ?? args.chat_id);
 
@@ -247,16 +289,22 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     // support; see plan). request_float_snapshot/send_float_snapshot/
     // notify_float_grid stay — TaskLiveTerm.vue's task live-view reuses
     // the same event protocol and isn't a float window.
+    // Wails bindings are typed, and these take the pty id as a STRING (Go
+    // builds an event topic out of it: "float-grid-"+ptyID). Callers pass the
+    // numeric leaf id, which the bridge rejected outright with
+    // `json: cannot unmarshal number into Go value of type string` on every
+    // terminal resize. Stringify here — the topic the frontend listens on is
+    // built by the same coercion, so the names still match.
     case "request_float_snapshot":
-      return App.RequestFloatSnapshot(args.ptyId ?? args.pty_id);
+      return App.RequestFloatSnapshot(String(args.ptyId ?? args.pty_id));
     case "send_float_snapshot":
-      return App.SendFloatSnapshot(args.ptyId ?? args.pty_id, args.data, args.cols, args.rows);
+      return App.SendFloatSnapshot(String(args.ptyId ?? args.pty_id), args.data, args.cols, args.rows);
     case "notify_float_grid":
-      return App.NotifyFloatGrid(args.ptyId ?? args.pty_id, args.cols, args.rows);
+      return App.NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows);
     case "open_git_panel_window":
       return App.OpenGitPanelWindow();
     case "register_tmux_win":
-      return App.RegisterTmuxWin(args.winId ?? args.win_id, args.ptyId ?? args.pty_id);
+      return App.RegisterTmuxWin(String(args.winId ?? args.win_id), String(args.ptyId ?? args.pty_id));
 
     // Claude account/usage (stubbed — "unavailable" until reverse-engineered)
     case "claude_get_account":
@@ -272,7 +320,7 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "remote_list_chats":
       return App.RemoteListChats();
     case "remote_create_chat":
-      return App.RemoteCreateChat(args.cwd);
+      return App.RemoteCreateChat(args.workspaceId ?? args.workspace_id ?? 0, args.cwd ?? "");
 
     // Daemon admin (stubbed)
     case "daemon_stats":

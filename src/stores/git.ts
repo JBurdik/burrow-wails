@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useUIStore } from "./ui";
 
 export interface GitFile {
   path: string;
@@ -268,13 +269,21 @@ export const useGitStore = defineStore("git", () => {
     }
   }
 
-  async function generateCommitMessage(model?: string) {
+  // Which model writes the app's generated text — and in whose house style — is
+  // a preference, not something each call site should thread through as an
+  // argument (they all forgot the policy the moment it existed).
+  function textGenPrefs() {
+    const ui = useUIStore();
+    return { model: ui.textGenerationModel, policy: ui.textGenerationPolicy };
+  }
+
+  async function generateCommitMessage() {
     if (!cwd.value || !hasWorkingTreeChanges.value || generating.value) return;
     generating.value = true;
     generateError.value = null;
     try {
       await stageAllIfNeeded();
-      const out = await invoke<GitOutput>("generate_commit_message", { cwd: cwd.value, model });
+      const out = await invoke<GitOutput>("generate_commit_message", { cwd: cwd.value, ...textGenPrefs() });
       if (out.code !== 0) throw new Error(out.stderr || "commit message generation failed");
       commitMsg.value = out.stdout.trim();
     } catch (e: unknown) {
@@ -325,14 +334,14 @@ export const useGitStore = defineStore("git", () => {
   // Like t3code (GitActionsControl.logic.ts: `canCommit = hasChanges`, no
   // message check): Commit doesn't require you to type anything first — an
   // empty box gets auto-generated right before the commit.
-  async function commit(model?: string) {
+  async function commit() {
     if (committing.value) return;
     committing.value = true;
     try {
       await stageAllIfNeeded();
       if (staged.value.length === 0) return;
       if (!commitMsg.value.trim()) {
-        await generateCommitMessage(model);
+        await generateCommitMessage();
         if (!commitMsg.value.trim()) return;
       }
       await runGit(cwd.value, ["commit", "-m", commitMsg.value.trim()]);

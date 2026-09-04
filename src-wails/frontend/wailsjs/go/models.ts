@@ -50,6 +50,92 @@ export namespace main {
 	        this.defaultEffort = source["defaultEffort"];
 	    }
 	}
+	export class ProviderRuntimeEvent {
+	    type: string;
+	    messageId?: string;
+	    text?: string;
+	    toolCallId?: string;
+	    name?: string;
+	    input?: Record<string, any>;
+	    output?: string;
+	    failed?: boolean;
+	    inputTokens?: number;
+	    outputTokens?: number;
+	    costUsd?: number;
+	    message?: string;
+	    title?: string;
+	    sessionId?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderRuntimeEvent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.messageId = source["messageId"];
+	        this.text = source["text"];
+	        this.toolCallId = source["toolCallId"];
+	        this.name = source["name"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.failed = source["failed"];
+	        this.inputTokens = source["inputTokens"];
+	        this.outputTokens = source["outputTokens"];
+	        this.costUsd = source["costUsd"];
+	        this.message = source["message"];
+	        this.title = source["title"];
+	        this.sessionId = source["sessionId"];
+	    }
+	}
+	export class ChatEventBatch {
+	    ord: number;
+	    events: ProviderRuntimeEvent[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatEventBatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ord = source["ord"];
+	        this.events = this.convertValues(source["events"], ProviderRuntimeEvent);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ChatStreamLine {
+	    ord: number;
+	    kind: string;
+	    line: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatStreamLine(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ord = source["ord"];
+	        this.kind = source["kind"];
+	        this.line = source["line"];
+	    }
+	}
 	export class Checkpoint {
 	    id: number;
 	    cwd: string;
@@ -181,6 +267,116 @@ export namespace main {
 	        this.isDir = source["isDir"];
 	    }
 	}
+	export class ExtensionSetting {
+	    id: string;
+	    title: string;
+	    description?: string;
+	    placeholder?: string;
+	    type: string;
+	    required?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtensionSetting(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.placeholder = source["placeholder"];
+	        this.type = source["type"];
+	        this.required = source["required"];
+	    }
+	}
+	export class ExtensionSurface {
+	    id: string;
+	    title: string;
+	    description: string;
+	    kind: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtensionSurface(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.kind = source["kind"];
+	    }
+	}
+	export class ExtensionCommand {
+	    id: string;
+	    title: string;
+	    command: string;
+	    args?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtensionCommand(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	    }
+	}
+	export class ExtensionInfo {
+	    apiVersion: number;
+	    id: string;
+	    name: string;
+	    version: string;
+	    description: string;
+	    permissions?: string[];
+	    commands?: ExtensionCommand[];
+	    surfaces?: ExtensionSurface[];
+	    settings?: ExtensionSetting[];
+	    dir: string;
+	    enabled: boolean;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtensionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.apiVersion = source["apiVersion"];
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.version = source["version"];
+	        this.description = source["description"];
+	        this.permissions = source["permissions"];
+	        this.commands = this.convertValues(source["commands"], ExtensionCommand);
+	        this.surfaces = this.convertValues(source["surfaces"], ExtensionSurface);
+	        this.settings = this.convertValues(source["settings"], ExtensionSetting);
+	        this.dir = source["dir"];
+	        this.enabled = source["enabled"];
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class GitOutput {
 	    stdout: string;
 	    stderr: string;
@@ -269,6 +465,7 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	
 	export class SearchHit {
 	    path: string;
 	    line: number;
@@ -347,6 +544,7 @@ export namespace main {
 	    cwd?: string;
 	    default_title?: string;
 	    session_id?: string;
+	    branch?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TerminalTab(source);
@@ -363,6 +561,7 @@ export namespace main {
 	        this.cwd = source["cwd"];
 	        this.default_title = source["default_title"];
 	        this.session_id = source["session_id"];
+	        this.branch = source["branch"];
 	    }
 	}
 	export class UpdateInfo {

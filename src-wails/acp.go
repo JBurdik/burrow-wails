@@ -87,6 +87,16 @@ func (r *acpRegistry) put(id string, s *acpSession) {
 	r.live[id] = s
 }
 
+// dropIf forgets the session only while it is still the live one for that id, so
+// a reader goroutine finishing after a restart cannot evict its replacement.
+func (r *acpRegistry) dropIf(id string, s *acpSession) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.live[id] == s {
+		delete(r.live, id)
+	}
+}
+
 func (r *acpRegistry) drop(id string) *acpSession {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -272,13 +282,18 @@ func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 		// (session/request_permission); everything else is data.
 		_, hasMethod := msg["method"]
 		_, hasID := msg["id"]
-		topic := "acp-data-" + chatID
+		kind := "acp-data"
 		if hasMethod && hasID {
-			topic = "acp-req-" + chatID
+			kind = "acp-req"
 		}
-		emitAll(a.ctx, topic, raw)
+		a.emitChatLine(chatID, kind, raw)
 	}
-	emitAll(a.ctx, "acp-data-"+chatID, `{"_burrow":"exit"}`)
+	// The child is gone: forget it BEFORE announcing the exit. AcpStart and
+	// CodexStart both short-circuit on "a session for this id is already live",
+	// so a dead session left in the registry made the next send write into a
+	// closed stdin (`write |1: broken pipe`) instead of spawning a replacement.
+	a.acpReg().dropIf(chatID, sess)
+	a.emitChatLine(chatID, "acp-data", `{"_burrow":"exit"}`)
 }
 
 // pumpCodexLine translates Codex app-server notifications into the ACP
@@ -295,7 +310,7 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		if err != nil {
 			return
 		}
-		emitAll(a.ctx, "acp-data-"+chatID, string(line))
+		a.emitChatLine(chatID, "acp-data", string(line))
 	}
 	// `turn/start` is acknowledged with an ordinary JSON-RPC response.  A
 	// rejection therefore has no `method`, and used to be silently discarded by
@@ -374,12 +389,21 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		// input request) is no longer pending. Forward it so the UI does not
 		// optimistically clear the prompt before the app-server accepted it.
 		emit(map[string]any{"method": method, "params": params})
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
+		// Blocking approval requests. `parseAcpPermRequest` understands exactly
+		// these three method names, so they belong on the request channel — the
+		// default branch below was rejecting every Codex approval as unsupported,
+		// which is why a Supervised turn died with "the environment rejected the
+		// command approval request".
+		if line, err := json.Marshal(msg); err == nil {
+			a.emitChatLine(chatID, "acp-req", string(line))
+		}
 	case "item/tool/requestUserInput":
 		// Unlike an approval this request has a structured answers response.  Keep
 		// it on the request channel so the dedicated Codex input panel can respond.
 		line, err := json.Marshal(msg)
 		if err == nil {
-			emitAll(a.ctx, "acp-req-"+chatID, string(line))
+			a.emitChatLine(chatID, "acp-req", string(line))
 		}
 	default:
 		if _, hasID := msg["id"]; hasID {
@@ -516,7 +540,7 @@ func (a *App) resetCodexTurnWatchdog(chatID string, sess *acpSession) {
 		a.finishCodexTurn(chatID, sess, func(v any) {
 			line, err := json.Marshal(v)
 			if err == nil {
-				emitAll(a.ctx, "acp-data-"+chatID, string(line))
+				a.emitChatLine(chatID, "acp-data", string(line))
 			}
 		}, "The Codex app-server produced no events for 10 minutes. Stop and retry the turn.")
 	})
@@ -555,7 +579,7 @@ func (a *App) emitSession(chatID, sessionID string, modes any, configOptions any
 	if err != nil {
 		return
 	}
-	emitAll(a.ctx, "acp-data-"+chatID, string(line))
+	a.emitChatLine(chatID, "acp-data", string(line))
 }
 
 // AcpStart spawns an ACP adapter for chat opts.ID and completes its handshake.
@@ -681,7 +705,7 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 		// the history rendered (picker resume).
 		resp, err := reader.await(1, func(raw string, msg map[string]any) {
 			if m, _ := msg["method"].(string); m == "session/update" && opts.EmitHistory {
-				emitAll(a.ctx, "acp-data-"+opts.ID, raw)
+				a.emitChatLine(opts.ID, "acp-data", raw)
 			}
 		})
 		if err != nil {

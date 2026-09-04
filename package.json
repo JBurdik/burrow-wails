@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "build:sdk": "tsc -p packages/sdk/tsconfig.json",
     "build:mobile": "vue-tsc --noEmit && VITE_TARGET=mobile vite build",
     "preview": "vite preview",
     "test": "vitest run"

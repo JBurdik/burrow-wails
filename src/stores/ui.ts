@@ -13,6 +13,7 @@ import {
 } from "@/themes";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { router, tabsOrWelcome, workspaceRoute } from "@/router";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -108,8 +109,20 @@ interface Prefs {
   toastPosition: ToastPosition; // screen anchor for toast notifications
   defaultChatAgent: string; // default agent for new chat sessions (chatAgents store id)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
-  commitMessageModel: string; // Claude model id used for GitPanel's "generate commit message" (cheap by default)
+  // Background text generation (commit messages, PR content, branch names,
+  // chat titles) — "kind::provider::model::effort", effort optional.
+  textGenerationModel: string;
+  textGenerationPolicy: TextGenerationPolicy; // house style folded into every generation prompt
 }
+
+// t3code's TextGenerationPolicyKind, minus "custom" — that one needs per-op
+// instruction text, and nothing asks for it yet.
+export type TextGenerationPolicy = "default" | "conventional_commits" | "repo_conventions";
+export const TEXT_GENERATION_POLICIES: { id: TextGenerationPolicy; label: string; description: string }[] = [
+  { id: "default", label: "Default", description: "Plain imperative subjects, no house style imposed." },
+  { id: "conventional_commits", label: "Conventional Commits", description: "feat/fix/chore prefixes, scope only when the diff makes it obvious." },
+  { id: "repo_conventions", label: "Match this repository", description: "Shows the model your last 20 commit subjects and asks it to follow them." },
+];
 
 // Screen anchor for the toast stack (ToastStack.vue).
 export type ToastPosition =
@@ -137,6 +150,11 @@ export const NTFY_EVENTS: { id: NtfyEvent; label: string }[] = [
 // the whole UI relative to it, so the default uiFontSize being above the
 // baseline makes the default UI render slightly larger.
 const BASE_FONT_SIZE = 13;
+
+// Haiku is the cheap default t3code picks too (their
+// DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER), and it publishes no reasoning
+// efforts, so the selection stays three-part.
+export const DEFAULT_TEXT_GENERATION_MODEL = "claude::claude::claude-haiku-4-5-20251001";
 
 const DEFAULT_PREFS: Prefs = {
   uiFont: UI_FONTS[0].value,
@@ -188,20 +206,27 @@ const DEFAULT_PREFS: Prefs = {
   toastPosition: "bottom-left",
   defaultChatAgent: "claude",
   spawnMode: "terminal",
-  commitMessageModel: "claude::claude::claude-haiku-4-5-20251001",
+  textGenerationModel: DEFAULT_TEXT_GENERATION_MODEL,
+  textGenerationPolicy: "default",
 };
 
 function normalize(parsed: unknown): Prefs {
   if (parsed && typeof parsed === "object") {
     const stored = { ...DEFAULT_PREFS, ...(parsed as Partial<Prefs>) };
+    // The pref was `commitMessageModel` while commit messages were the only
+    // thing generated; it now covers every background writing job.
+    const legacyModel = (parsed as { commitMessageModel?: string }).commitMessageModel;
+    if (legacyModel && !(parsed as Partial<Prefs>).textGenerationModel) {
+      stored.textGenerationModel = legacyModel;
+    }
     // Until provider-aware text generation landed this held a bare Claude
     // model id. Keep existing preferences working and make them selectable.
-    if (!stored.commitMessageModel.includes("::")) {
-      stored.commitMessageModel = `claude::claude::${stored.commitMessageModel}`;
-    } else if (stored.commitMessageModel.split("::").length === 2) {
+    if (!stored.textGenerationModel.includes("::")) {
+      stored.textGenerationModel = `claude::claude::${stored.textGenerationModel}`;
+    } else if (stored.textGenerationModel.split("::").length === 2) {
       // Short-lived first provider-aware format: kind::model.
-      const [kind, model] = stored.commitMessageModel.split("::");
-      stored.commitMessageModel = `${kind}::${kind}::${model}`;
+      const [kind, model] = stored.textGenerationModel.split("::");
+      stored.textGenerationModel = `${kind}::${kind}::${model}`;
     }
     // Migrate installs saved below the current default up to it.
     if (stored.uiFontSize < DEFAULT_PREFS.uiFontSize) stored.uiFontSize = DEFAULT_PREFS.uiFontSize;
@@ -222,17 +247,6 @@ function normalize(parsed: unknown): Prefs {
     return stored;
   }
   return { ...DEFAULT_PREFS };
-}
-
-// Tri-state welcomeOpen resolved against the workspace's live tabs. Pure so the
-// rule ("no live work → land on the composer") is testable without a Pinia app.
-// Restore reopens EVERY saved chat thread, so "has tabs" is not "has live work":
-// a startup with only settled/old threads must still show the composer.
-export function resolveWelcomeVisible(
-  welcomeOpen: boolean | null,
-  liveTabCount: number,
-): boolean {
-  return welcomeOpen ?? liveTabCount === 0;
 }
 
 export const useUIStore = defineStore("ui", () => {
@@ -263,10 +277,16 @@ export const useUIStore = defineStore("ui", () => {
   const debugOverlay = ref(loaded.debugOverlay);
   const floatCorner = ref(loaded.floatCorner);
   const worktreesDir = ref(loaded.worktreesDir);
-  // A pref saved before git became a tab can still say "git" — fall back to terminal.
-  const mode = ref<"terminal" | "claude" | "dashboard">(
-    (loaded.mode as string) === "git" ? "terminal" : loaded.mode,
+  // Which main surface is showing. Derived from the route, never assigned —
+  // the URL is the view state (fáze 4, docs/plans/003-view-state-routes.md), so
+  // this cannot drift from what is on screen the way a second ref could.
+  // Still persisted, only so a restart reopens on the surface you left.
+  const mode = computed<"terminal" | "claude" | "dashboard">(() =>
+    router.currentRoute.value.name === "dashboard" ? "dashboard" : "terminal",
   );
+  // A pref saved before git became a tab can still say "git" — fall back to terminal.
+  const startupMode: "terminal" | "dashboard" =
+    (loaded.mode as string) === "dashboard" ? "dashboard" : "terminal";
   const bgImagePath = ref(loaded.bgImagePath);
   const bgOpacity = ref(loaded.bgOpacity);
   const blurPanels = ref(loaded.blurPanels);
@@ -286,19 +306,16 @@ export const useUIStore = defineStore("ui", () => {
   const floatChatEnabled = ref(loaded.floatChatEnabled);
   const floatChatOpen = ref(loaded.floatChatOpen);
 
-  // Compose ("What should we build in X?") screen, shown over the terminal host.
-  // Session-only — a reload lands you back on your threads, not the composer.
-  // Tri-state: true = pinned open, false = explicitly dismissed, null = auto
-  // (resolved by welcomeVisible below from whether the workspace has any live,
-  // unsettled tab).
-  const welcomeOpen = ref<boolean | null>(null);
+  // The compose screen is its own route now (`/`), so "is the composer up" is
+  // not a ref anyone can forget to clear — see welcomeVisible below.
   const sidebarVisible = ref(loaded.sidebarVisible ?? false);
   const sidebarWidth = ref(loaded.sidebarWidth ?? 220);
   const rightPanelWidth = ref(loaded.rightPanelWidth ?? 300);
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "bottom-left");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
-  const commitMessageModel = ref<string>(loaded.commitMessageModel ?? "claude::claude::claude-haiku-4-5-20251001");
+  const textGenerationModel = ref<string>(loaded.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL);
+  const textGenerationPolicy = ref<TextGenerationPolicy>(loaded.textGenerationPolicy ?? "default");
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
 
@@ -333,7 +350,6 @@ export const useUIStore = defineStore("ui", () => {
     debugOverlay.value = p.debugOverlay;
     floatCorner.value = p.floatCorner;
     worktreesDir.value = p.worktreesDir;
-    mode.value = (p.mode as string) === "mission" ? "terminal" : p.mode; // "mission" was the removed Mission Control pane
     bgImagePath.value = p.bgImagePath;
     bgOpacity.value = p.bgOpacity;
     blurPanels.value = p.blurPanels;
@@ -358,7 +374,8 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition.value = p.toastPosition ?? "bottom-left";
     defaultChatAgent.value = p.defaultChatAgent ?? "claude";
     spawnMode.value = p.spawnMode ?? "terminal";
-    commitMessageModel.value = p.commitMessageModel ?? "claude::claude::claude-haiku-4-5-20251001";
+    textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
+    textGenerationPolicy.value = p.textGenerationPolicy ?? "default";
   });
 
   // Publish the soft sub-agent cap to a file the `burrow` CLI can read (it can't
@@ -516,7 +533,8 @@ export const useUIStore = defineStore("ui", () => {
         toastPosition: toastPosition.value,
         defaultChatAgent: defaultChatAgent.value,
         spawnMode: spawnMode.value,
-        commitMessageModel: commitMessageModel.value,
+        textGenerationModel: textGenerationModel.value,
+        textGenerationPolicy: textGenerationPolicy.value,
       } satisfies Prefs,
     );
   }
@@ -533,7 +551,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, commitMessageModel],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, textGenerationModel, textGenerationPolicy],
     () => {
       savePrefs();
       applyTheme();
@@ -587,9 +605,12 @@ export const useUIStore = defineStore("ui", () => {
 
   // The scheme currently in force: "system" asks the OS, the other modes are
   // themselves.
+  // Reactive mirror of the OS scheme — a bare matchMedia() read inside a computed
+  // has no reactive dep, so the cache never invalidates when the OS flips.
+  const systemDark = ref(window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true);
   const resolvedScheme = computed<"light" | "dark">(() => {
     if (themeMode.value !== "system") return themeMode.value;
-    return (window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true) ? "dark" : "light";
+    return systemDark.value ? "dark" : "light";
   });
 
   // The families assigned to each scheme, and the one that is live now.
@@ -637,7 +658,8 @@ export const useUIStore = defineStore("ui", () => {
 
   // Follow OS theme changes live while in "system" mode.
   if (typeof window !== "undefined" && window.matchMedia) {
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+      systemDark.value = e.matches;
       if (themeMode.value === "system") resolveThemeMode();
     });
   }
@@ -648,12 +670,18 @@ export const useUIStore = defineStore("ui", () => {
     setThemeMode(resolvedScheme.value === "dark" ? "light" : "dark");
   }
 
+  // Route for a workspace's tabs, or the composer when there is no workspace
+  // to show. One place decides that, so "go back to the tabs" is unambiguous.
+  function tabsRoute(): string {
+    return workspaceRoute(useWorkspaceStore().active?.id);
+  }
+
   function setMode(m: "terminal" | "claude" | "dashboard") {
-    mode.value = m;
+    void router.push(m === "dashboard" ? "/dashboard" : tabsRoute());
   }
 
   function toggleDashboard() {
-    mode.value = mode.value === "dashboard" ? "terminal" : "dashboard";
+    void router.push(mode.value === "dashboard" ? tabsRoute() : "/dashboard");
   }
 
   function toggleSidebar() {
@@ -687,20 +715,38 @@ export const useUIStore = defineStore("ui", () => {
   // ChatView is simply unmounted); our terminals must stay mounted to keep the
   // PTY stream and the chat event listeners alive, so the state is explicit
   // instead of implied by the DOM.
-  const welcomeVisible = computed(() => {
-    const wsStore = useWorkspaceStore();
-    if (!wsStore.active) return true;
-    const all = useTerminalTabsStore().tabsByWs[wsStore.active.id] ?? [];
-    return resolveWelcomeVisible(welcomeOpen.value, all.filter((t) => !t.settled).length);
+  const welcomeVisible = computed(() => router.currentRoute.value.name === "welcome");
+  const viewingTabs = computed(() => {
+    const name = router.currentRoute.value.name;
+    return name === "workspace" || name === "tab";
   });
-  const viewingTabs = computed(() => mode.value === "terminal" && !welcomeVisible.value);
+
+  /** Number of the active workspace's tabs that still count as live. */
+  function liveTabCount(): number {
+    const wsStore = useWorkspaceStore();
+    if (!wsStore.active) return 0;
+    const all = useTerminalTabsStore().tabsByWs[wsStore.active.id] ?? [];
+    return all.filter((t) => !t.settled).length;
+  }
+
+  /**
+   * Go to a workspace's tabs — unless it has none live, in which case the
+   * composer is the honest destination. This is the old tri-state `welcomeOpen`
+   * auto branch, kept as a navigation decision instead of a stored one.
+   */
+  function showTabs() {
+    void router.push(tabsOrWelcome(useWorkspaceStore().active?.id, liveTabCount()));
+  }
 
   function openWelcome() {
-    welcomeOpen.value = true;
-    mode.value = "terminal"; // composer lives in the terminal host
+    void router.push("/");
   }
+  // Dismissing the composer is an explicit "show me the tabs", so it goes there
+  // even when the workspace has nothing live yet — a tab being opened in the
+  // same breath (a script, a new thread) has not reached the store yet, and
+  // bouncing back to the composer would swallow it.
   function closeWelcome() {
-    welcomeOpen.value = false;
+    void router.push(tabsRoute());
   }
 
   // Spotlight lives in App.vue's tree, so callers elsewhere (Sidebar's "New
@@ -783,7 +829,8 @@ export const useUIStore = defineStore("ui", () => {
     floatChatEnabled,
     floatChatOpen,
     toggleFloatChat,
-    welcomeOpen,
+    showTabs,
+    startupMode,
     welcomeVisible,
     viewingTabs,
     openWelcome,
@@ -797,6 +844,7 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition,
     defaultChatAgent,
     spawnMode,
-    commitMessageModel,
+    textGenerationModel,
+    textGenerationPolicy,
   };
 });

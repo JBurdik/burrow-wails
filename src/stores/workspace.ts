@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 export interface Workspace {
   id: number;
@@ -104,24 +105,23 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   // `opened` is what keeps a workspace's Terminal mounted, and the sidebar only
   // lists threads of mounted workspaces. Without restoring it, every thread
   // looks lost after a restart even though its rows are still in SQLite.
+  // Lives in config.json, not localStorage — a webview storage reset (e.g. a
+  // `wails dev` rebuild relaunching the app) would otherwise silently drop it
+  // even though every workspace/chat row survived untouched on disk.
   const SESSION_KEY = "burrow.open_workspaces";
   let sessionRestored = false;
 
   function saveSession() {
-    try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify({
-        ids: opened.value.map((w) => w.id),
-        activeId: active.value?.id ?? null,
-      }));
-    } catch {}
+    setConfig(SESSION_KEY, {
+      ids: opened.value.map((w) => w.id),
+      activeId: active.value?.id ?? null,
+    });
   }
 
   function restoreSession() {
-    let saved: { ids: number[]; activeId: number | null };
-    try {
-      saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "");
-    } catch { return; }
-    if (!Array.isArray(saved?.ids)) return;
+    migrateFromLocalStorage(SESSION_KEY, SESSION_KEY);
+    const saved = getConfig<{ ids: number[]; activeId: number | null }>(SESSION_KEY, { ids: [], activeId: null });
+    if (!Array.isArray(saved.ids)) return;
     for (const id of saved.ids) {
       const ws = workspaces.value.find((w) => w.id === id);
       if (ws && !opened.value.some((w) => w.id === id)) opened.value.push(ws);
@@ -139,6 +139,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     // re-opening workspaces the user has since closed would be wrong.
     if (!sessionRestored) {
       sessionRestored = true;
+      await configReady;
       restoreSession();
     }
   }

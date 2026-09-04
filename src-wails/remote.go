@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Remote (mobile) read surface.
@@ -12,10 +13,10 @@ import (
 // in SQLite. So these commands are plain readers — no new persistence, no
 // second source of truth.
 //
-// Writing is deliberately absent. The desktop rewrites config.json wholesale
-// on every setConfig, so a concurrent write from here would be silently
-// clobbered on the next save. The desktop stays the single writer; remote
-// mutations go through it (see RemoteCreateChat in stubs.go).
+// Writing is deliberately rare. The desktop rewrites config.json wholesale
+// on every setConfig, so a concurrent write from here can be clobbered on
+// the next save — RemoteCreateChat below accepts that risk for the one
+// mutation the phone needs (see its comment for why).
 
 // remoteConfig is the slice of config.json the phone cares about. Keys match
 // claudeChats.ts's SESSIONS_KEY / HISTORY_KEY exactly.
@@ -86,6 +87,145 @@ func remoteChatsFromConfig(raw string) ([]map[string]any, error) {
 		out = append(out, chat)
 	}
 	return out, nil
+}
+
+// remoteCreateChatSession mutates cfg (config.json already decoded into a
+// generic map — NOT the narrow remoteConfig struct, which would drop every
+// other settings key on write-back) in place: bumps chatIdCounter, appends a
+// new session row in the exact shape src/stores/claudeChats.ts#create()
+// builds client-side, and seeds an empty transcript. Pure function so the
+// id-allocation and shape logic is testable without a real app data dir.
+func remoteCreateChatSession(cfg map[string]any, workspaceID int64, agentKind string) (map[string]any, int64) {
+	// claudeChats.ts's nextId is post-increment (`const id = nextId++`), so
+	// the persisted counter always equals (max used id) + 1 — mirror that
+	// invariant exactly rather than reserving extra headroom against a race
+	// that RemoteCreateChat's own doc comment already accepts as-is.
+	counter := int64(1)
+	if v, ok := cfg["chatIdCounter"].(float64); ok {
+		counter = int64(v)
+	}
+	id := counter
+	cfg["chatIdCounter"] = float64(id + 1)
+
+	sessions, _ := cfg["chatSessions"].([]any)
+	countForWs := 0
+	for _, raw := range sessions {
+		if s, ok := raw.(map[string]any); ok {
+			if wsID, ok := numericID(s["workspaceId"]); ok && wsID == workspaceID {
+				countForWs++
+			}
+		}
+	}
+
+	transport := "claude-cli"
+	if agentKind != "claude" {
+		transport = "acp"
+	}
+	session := map[string]any{
+		"id":              float64(id),
+		"workspaceId":     float64(workspaceID),
+		"claudeSessionId": "",
+		"title":           fmt.Sprintf("Chat %d", countForWs+1),
+		"busy":            false,
+		"messageCount":    0,
+		"agentKind":       agentKind,
+		"transport":       transport,
+		"lastActivityAt":  float64(time.Now().UnixMilli()),
+	}
+	cfg["chatSessions"] = append(sessions, session)
+
+	history, _ := cfg["chatMessageHistory"].(map[string]any)
+	if history == nil {
+		history = map[string]any{}
+	}
+	history[fmt.Sprint(id)] = []any{}
+	cfg["chatMessageHistory"] = history
+
+	return session, id
+}
+
+// resolveWorkspaceCwd fails closed on an unknown workspace id — a request
+// naming a workspace the app doesn't know about must error instead of
+// silently resolving to cwd="" and letting ClaudeStart spawn the CLI in an
+// empty working directory (the spec's Error Handling section names this
+// case explicitly). Split out as a pure function so it can be unit-tested
+// without going through workspaceLabels()/ListWorkspaces(), which need a
+// live DB.
+func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, error) {
+	cwd, ok := paths[workspaceID]
+	if !ok || cwd == "" {
+		return "", fmt.Errorf("unknown workspace %d", workspaceID)
+	}
+	return cwd, nil
+}
+
+// RemoteCreateChat is the one write RemoteListChats's read-only comment
+// above deliberately excluded. The risk here is broader than "one HTTP round
+// trip": the desktop frontend caches the whole of config.json in memory and
+// rewrites it wholesale on every setConfig, so ANY desktop write during this
+// read-modify-write — a font preference change, a panel resize, anything,
+// not just another chat mutation — can silently revert this call's new
+// session row and its chatIdCounter bump. In the worst case a
+// subsequently-created desktop chat reuses the id this call just "took" (the
+// counter reverted to its pre-bump value), silently attaching the desktop's
+// new chat UI to this call's still-running CLI process. remoteCreateMu below
+// only serializes concurrent RemoteCreateChat calls against each other
+// (e.g. two phones, or a rapid double-tap) — it does nothing to prevent the
+// desktop-side staleness, which needs the desktop frontend to reload chat
+// state after a remote-triggered creation (a larger change, tracked as a
+// follow-up, not attempted here).
+//
+// Claude-only for now: an ACP/Codex session needs command/args/configDir
+// resolved from provider config that today only exists in
+// AgentChat.vue's acpStartPayload() — porting that is future work, not
+// wired here.
+func (a *App) RemoteCreateChat(workspaceID int64, agentKind string) (map[string]any, error) {
+	if agentKind != "claude" {
+		return nil, fmt.Errorf("remote chat creation only supports Claude for now (got %q)", agentKind)
+	}
+
+	a.remoteCreateMu.Lock()
+	defer a.remoteCreateMu.Unlock()
+
+	// Resolve and validate the workspace BEFORE touching config.json, so an
+	// invalid request never mutates it.
+	names, paths := a.workspaceLabels()
+	cwd, err := resolveWorkspaceCwd(paths, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	raw, err := a.ReadConfig()
+	if err != nil {
+		return nil, err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil, fmt.Errorf("parse config.json: %w", err)
+	}
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+
+	session, id := remoteCreateChatSession(cfg, workspaceID, agentKind)
+
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.WriteConfig(string(out)); err != nil {
+		return nil, err
+	}
+
+	chatID := fmt.Sprint(id)
+	if err := a.ClaudeStart(chatID, cwd, "", "default", "", "", "", "", "", ""); err != nil {
+		return nil, fmt.Errorf("start claude: %w", err)
+	}
+
+	session["messages"] = []map[string]any{}
+	session["workspaceName"] = names[workspaceID]
+	session["workspacePath"] = cwd
+	return session, nil
 }
 
 // numericID copes with JSON numbers arriving as float64.

@@ -6,8 +6,11 @@ import type { TermStatus } from "@/lib/terminalStatus";
 import { agentStatusMachine } from "@/machines/agentStatus";
 import type { AgentStatusEvent } from "@/machines/agentStatus";
 import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
+import { useWorkspaceStore } from "@/stores/workspace";
+import { useGitStore } from "@/stores/git";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import { forgetChatSettings } from "@/lib/chatSettings";
+import { dropChatSession } from "@/lib/chatSession";
 
 export interface ClaudeSession {
   id: number;
@@ -41,6 +44,8 @@ export interface ClaudeSession {
   // Last time anything happened on this chat (message, status/title change) —
   // the reference point for the days-of-inactivity auto-settle threshold.
   lastActivityAt?: number;
+  // Branch checked out when the chat was created — a snapshot, not live.
+  branch?: string;
 }
 
 const SESSIONS_KEY = "chatSessions";
@@ -78,9 +83,13 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
 
   function spawnActor(session: ClaudeSession): SessionActor {
     const actor = createActor(agentStatusMachine, { input: {} }).start();
+    // The actor's own state is authoritative from here on. Adopt it
+    // immediately: `status` is persisted with the session, so an app closed
+    // mid-turn comes back claiming `running` with no process behind it, and
+    // subscribe() only fires on later transitions — leaving that stale dot
+    // spinning forever.
+    session.status = actor.getSnapshot().value as TermStatus;
     actor.subscribe((snapshot) => {
-      // eslint-disable-next-line no-console
-      if (session.status !== snapshot.value) console.log("[UNREAD-DEBUG] session status", session.id, session.status, "->", snapshot.value);
       session.status = snapshot.value as TermStatus;
     });
     actors.set(session.id, actor);
@@ -147,6 +156,8 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     const agentKind = opts?.agentKind ?? 'claude';
     const transport: ChatTransport =
       (() => { const a = useProvidersStore().byId(agentKind); return a ? chatTransportFor(a) : (agentKind === 'claude' ? 'claude-cli' : 'acp'); })();
+    const ws = useWorkspaceStore().workspaces.find((w) => w.id === workspaceId);
+    const branch = ws?.worktree_branch || useGitStore().branchByWs[workspaceId] || undefined;
     const session: ClaudeSession = {
       id,
       workspaceId,
@@ -157,6 +168,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
       agentKind,
       transport,
       lastActivityAt: Date.now(),
+      branch,
     };
     sessions.value.push(session);
     // Pass the REACTIVE array element (not the raw `session`) so the actor's
@@ -188,6 +200,9 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     if (!s) return;
     actors.get(id)?.stop();
     actors.delete(id);
+    // The chat is gone, so its stream session must go with it — otherwise its
+    // listeners outlive it (they are deliberately kept across an unmount).
+    dropChatSession(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
     sessions.value = sessions.value.filter((x) => x.id !== id);
     // Hard delete — drop this chat's per-chat model / effort / permission mode /
@@ -313,9 +328,9 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     actors.get(id)?.send(event);
   }
 
+  // Called by AgentChat on mount — which now only happens when the chat is
+  // actually displayed (Terminal.isChatVisible), so "seen" means seen.
   function markSeen(id: number) {
-    // eslint-disable-next-line no-console
-    console.log("[UNREAD-DEBUG] chatsStore.markSeen", id, new Error().stack);
     actors.get(id)?.send({ type: "MARK_SEEN" });
   }
 

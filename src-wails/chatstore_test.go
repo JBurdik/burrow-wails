@@ -21,7 +21,7 @@ func newTestApp(t *testing.T) *App {
 func TestSaveAndLoadChatMessagesRoundTrip(t *testing.T) {
 	a := newTestApp(t)
 	in := `[{"id":1,"role":"user","text":"ahoj"},{"id":2,"role":"assistant","text":"zdar"}]`
-	if err := a.SaveChatMessages(7, in); err != nil {
+	if err := a.SaveChatMessages(7, in, -1); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	out, err := a.LoadChatMessages(7)
@@ -41,10 +41,10 @@ func TestSaveAndLoadChatMessagesRoundTrip(t *testing.T) {
 // A save must replace the transcript, not append to the previous one.
 func TestSaveChatMessagesReplacesPrevious(t *testing.T) {
 	a := newTestApp(t)
-	if err := a.SaveChatMessages(1, `[{"id":1},{"id":2},{"id":3}]`); err != nil {
+	if err := a.SaveChatMessages(1, `[{"id":1},{"id":2},{"id":3}]`, -1); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if err := a.SaveChatMessages(1, `[{"id":9}]`); err != nil {
+	if err := a.SaveChatMessages(1, `[{"id":9}]`, -1); err != nil {
 		t.Fatalf("resave: %v", err)
 	}
 	out, _ := a.LoadChatMessages(1)
@@ -59,9 +59,9 @@ func TestSaveChatMessagesReplacesPrevious(t *testing.T) {
 // single-blob config.json behind.
 func TestSaveChatMessagesIsScopedToOneChat(t *testing.T) {
 	a := newTestApp(t)
-	_ = a.SaveChatMessages(1, `[{"id":1,"text":"keep"}]`)
-	_ = a.SaveChatMessages(2, `[{"id":2,"text":"other"}]`)
-	_ = a.SaveChatMessages(2, `[]`)
+	_ = a.SaveChatMessages(1, `[{"id":1,"text":"keep"}]`, -1)
+	_ = a.SaveChatMessages(2, `[{"id":2,"text":"other"}]`, -1)
+	_ = a.SaveChatMessages(2, `[]`, -1)
 
 	out, _ := a.LoadChatMessages(1)
 	var got []map[string]any

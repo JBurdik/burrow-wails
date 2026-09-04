@@ -113,10 +113,12 @@ type TerminalTab struct {
 	Cwd          *string `json:"cwd"`
 	DefaultTitle *string `json:"default_title"`
 	SessionID    *string `json:"session_id"`
+	// Branch checked out when the tab was created — a snapshot, not live.
+	Branch *string `json:"branch"`
 }
 
 func (a *App) ListTerminalTabs(workspaceID int64) ([]TerminalTab, error) {
-	rows, err := a.db.Query(`SELECT id, workspace_id, ord, title, initial_cmd, pty_id, cwd, default_title, session_id
+	rows, err := a.db.Query(`SELECT id, workspace_id, ord, title, initial_cmd, pty_id, cwd, default_title, session_id, branch
 		FROM terminal_tabs WHERE workspace_id = ? ORDER BY ord`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -126,7 +128,7 @@ func (a *App) ListTerminalTabs(workspaceID int64) ([]TerminalTab, error) {
 	out := []TerminalTab{}
 	for rows.Next() {
 		var t TerminalTab
-		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Ord, &t.Title, &t.InitialCmd, &t.PtyID, &t.Cwd, &t.DefaultTitle, &t.SessionID); err != nil {
+		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Ord, &t.Title, &t.InitialCmd, &t.PtyID, &t.Cwd, &t.DefaultTitle, &t.SessionID, &t.Branch); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -144,8 +146,8 @@ func (a *App) SaveTerminalTabs(workspaceID int64, tabs []TerminalTab) error {
 		return err
 	}
 	for i, t := range tabs {
-		if _, err := tx.Exec(`INSERT INTO terminal_tabs (workspace_id, ord, title, initial_cmd, pty_id, cwd, default_title, session_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, workspaceID, i, t.Title, t.InitialCmd, t.PtyID, t.Cwd, t.DefaultTitle, t.SessionID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO terminal_tabs (workspace_id, ord, title, initial_cmd, pty_id, cwd, default_title, session_id, branch)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, workspaceID, i, t.Title, t.InitialCmd, t.PtyID, t.Cwd, t.DefaultTitle, t.SessionID, t.Branch); err != nil {
 			tx.Rollback()
 			return err
 		}
