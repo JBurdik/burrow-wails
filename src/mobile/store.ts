@@ -366,10 +366,18 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   function watchChat(chat: RemoteChat) {
-    client?.subscribe(`chat-event-${chat.id}`, (payload) => {
+    const id = chat.id;
+    client?.subscribe(`chat-event-${id}`, (payload) => {
       const batch = (typeof payload === "string" ? safeJson(payload) : payload) as
         { events?: Array<Record<string, any>> } | null;
-      for (const event of batch?.events ?? []) applyEvent(chat, event);
+      // Mutate the array's reactive element, not the plain object this
+      // closure captured at subscribe time — the latter never goes through
+      // Pinia's proxy, so busy/messages/unseen do change but Vue's render
+      // effect never reruns (the DOM silently stops matching the data).
+      // This is what made "agent pracuje" spin forever despite the turn
+      // completing normally on the backend.
+      const live = chatFor(id) ?? chat;
+      for (const event of batch?.events ?? []) applyEvent(live, event);
     });
   }
 
@@ -395,7 +403,9 @@ export const useRemoteStore = defineStore("remote", () => {
   // "Non-goals": no full protocol parsing on mobile, only enough to unblock
   // a turn).
   function watchChatPermissions(chat: RemoteChat) {
-    const rawEvent = chat.transport === "claude-cli" ? `claude-data-${chat.id}` : `acp-req-${chat.id}`;
+    const id = chat.id;
+    const transport = chat.transport;
+    const rawEvent = transport === "claude-cli" ? `claude-data-${id}` : `acp-req-${id}`;
     client?.subscribe(rawEvent, (payload) => {
       // The WS payload is the ChatStreamLine envelope emitted by Go's
       // emitChatLine ({ord, kind, line}) — `line` is a STRING holding the
@@ -406,12 +416,17 @@ export const useRemoteStore = defineStore("remote", () => {
       const parsed = typeof envelope?.line === "string" ? safeJson(envelope.line) : null;
       if (!parsed || typeof parsed !== "object") return;
       const msg = parsed as Record<string, any>;
+      // Same reactivity requirement as watchChat: write through the array's
+      // proxy element, not the plain object captured when this subscription
+      // was created, or the banner never appears despite pendingPermission
+      // actually being set.
+      const live = chatFor(id) ?? chat;
 
-      if (chat.transport === "claude-cli") {
+      if (transport === "claude-cli") {
         if (msg.type !== "control_request" || msg.request?.subtype !== "can_use_tool") return;
         const input = msg.request.input ?? {};
         const detail = input.command ?? input.file_path ?? input.path ?? "";
-        chat.pendingPermission = {
+        live.pendingPermission = {
           requestId: msg.request_id,
           toolName: msg.request.tool_name ?? "Tool",
           detail: String(detail),
@@ -430,7 +445,7 @@ export const useRemoteStore = defineStore("remote", () => {
         const toolName = msg.method.includes("commandExecution") ? "Run command"
           : msg.method.includes("fileChange") ? "Apply file changes"
           : "Grant additional permission";
-        chat.pendingPermission = {
+        live.pendingPermission = {
           rpcId: msg.id,
           toolName,
           detail: command,
@@ -441,7 +456,7 @@ export const useRemoteStore = defineStore("remote", () => {
 
       if (msg.method !== "session/request_permission") return;
       const options = (msg.params?.options ?? []).map((o: any) => ({ optionId: o.optionId, kind: o.kind }));
-      chat.pendingPermission = {
+      live.pendingPermission = {
         rpcId: msg.id,
         toolName: msg.params?.toolCall?.title ?? msg.params?.title ?? "Tool",
         detail: "",
