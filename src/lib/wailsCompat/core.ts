@@ -80,9 +80,13 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "run_gh":
       return App.RunGh(args.cwd, args.args ?? []);
     case "generate_commit_message":
-      return App.GenerateCommitMessage(args.cwd, args.model ?? "");
+      return App.GenerateCommitMessage(args.cwd, args.model ?? "", args.policy ?? "");
     case "generate_chat_title":
-      return App.GenerateChatTitle(args.cwd ?? "", args.model ?? "", args.text ?? "");
+      return App.GenerateChatTitle(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.text ?? "");
+    case "generate_branch_name":
+      return App.GenerateBranchName(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.message ?? "");
+    case "generate_pr_content":
+      return App.GeneratePrContent(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.baseBranch ?? args.base_branch ?? "", args.headBranch ?? args.head_branch ?? "");
 
     // Checkpoints — pre-turn worktree snapshots (src-wails/checkpoints.go)
     case "create_checkpoint":

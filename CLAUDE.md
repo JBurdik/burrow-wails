@@ -242,7 +242,43 @@ Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem
 - **Chat transcripts** (`chatstore.go`) — `chat_messages`, `SaveChatMessages(chatID, json, foldedOrd)` / `LoadChatMessages`
 - **Chat stream log** (`chatstream.go`) — append-only `chat_stream` + `chat_stream_state`; `emitChatLine` is the single door for agent output (persist, then emit), used by both `claudechat.go` and `acp.go`
 - **Git** (`git.go`) — `RunGit` wraps the system git binary (checks known paths)
+- **Text generation** (`textgen.go`) — `GenerateCommitMessage`, `GeneratePrContent`, `GenerateBranchName`, `GenerateChatTitle` (see below)
 - **FS** (`fs.go`) — `ReadDirShallow`, `WriteTextFile`
+
+### Background text generation (`src-wails/textgen.go`)
+
+The small writing jobs the app does *for* the user — commit messages, PR title
+and body, worktree branch names, chat titles — are one-shot non-interactive CLI
+calls: no PTY, no session, prompt over stdin, a JSON schema on the way out.
+Ported from t3code's `apps/server/src/textGeneration/*`, so the prompts, the
+per-section truncation (`limitSection`) and the sanitizers are theirs; what
+differs is that they resolve a provider instance through an Effect registry
+while we switch on one persisted selection string.
+
+**One preference drives all four.** `ui.textGenerationModel` is
+`"kind::provider::model::effort"` (effort optional — every earlier shape,
+including a bare Claude model id, still parses). `ui.textGenerationPolicy` is
+t3code's `TextGenerationPolicyKind`: `default` · `conventional_commits` ·
+`repo_conventions` (the last one shows the model `git log -20 --format=%s`, which
+is what makes their "follow the repo's style **when examples are available**"
+preset actually have examples). Both live in Settings → General; **`src/stores/git.ts`
+reads them itself** (`textGenPrefs()`) rather than having each call site pass
+them, because the model *was* an argument and every new generated-text feature
+forgot the policy the moment it existed.
+
+**Per-provider CLI contracts** (`generateTextJSONContext`), 180 s budget each
+(t3code's `CLAUDE_TIMEOUT_MS`/`CODEX_TIMEOUT_MS`):
+- **Claude** — `-p --output-format json --json-schema <inline> [--model] [--effort]`, answer read from the envelope's `structured_output`. `claudeCliEffort` mirrors their `normalizeClaudeCliEffort`: `ultracode`→`xhigh` (it is a settings flag), `ultrathink` dropped (it is a prompt-prefix mode) — neither is a `--effort` value.
+- **Codex** — `exec --ephemeral --skip-git-repo-check -s read-only --config model_reasoning_effort="…" --output-schema <file> --output-last-message <file> -`. **`--output-schema` is what makes Codex answer in JSON at all**; without it it replies in prose as often as not, and scraping an object out of that silently dropped whole generations. Effort defaults to `low` (their `CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT`) rather than whatever the user's `config.toml` says.
+- **Gemini / OpenCode** — prose-tolerant: `extractGeneratedJSON` digs the object out of a fenced or prefixed answer, and a bare title still reaches a caller that can use one.
+
+Every generated string passes a sanitizer before it reaches git or the UI
+(`sanitizeCommitSubject`, `sanitizePrTitle`, `sanitizeChatTitle`,
+`sanitizeBranchFragment`) — "the model followed the rules" is not something to
+rely on when the output goes straight into `git worktree add -b`. The two
+best-effort generators (branch name, chat title) return `""` on any failure so
+the caller keeps the name it already showed; `gh pr create` falls back to
+`--fill` the same way.
 
 ### OSC escape sequence protocol
 

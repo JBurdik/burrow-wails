@@ -569,6 +569,23 @@ function generatedWorktreeBranch(): string {
   return `t3code/${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
+// A worktree branch named after the task instead of four random bytes, the way
+// t3code names its own (generateBranchName). Best-effort: the random name is
+// already in hand, so a missing model or a slow answer just keeps it.
+async function namedWorktreeBranch(workspace: Workspace, message: string): Promise<string> {
+  try {
+    const slug = await invoke<string>("generate_branch_name", {
+      cwd: workspace.path,
+      model: ui.textGenerationModel,
+      policy: ui.textGenerationPolicy,
+      message,
+    });
+    return slug ? `t3code/${slug}` : "";
+  } catch {
+    return "";
+  }
+}
+
 function selectWorktreeMode(mode: WorktreeMode) {
   worktreeMode.value = mode;
   worktreeError.value = "";
@@ -657,11 +674,12 @@ async function submit() {
   let t = target.value;
   if (!prompt || !t) return;
   if (worktreeMode.value === "new") {
-    const branch = worktreeBranch.value.trim();
+    let branch = worktreeBranch.value.trim();
     if (!branch) return;
     worktreeBusy.value = true;
     worktreeError.value = "";
     try {
+      branch = (await namedWorktreeBranch(t, prompt)) || branch;
       t = await store.createWorktree(t.id, branch, currentBranch.value || null, worktreePath(t, branch));
     } catch (err) {
       worktreeError.value = err instanceof Error ? err.message : String(err);

@@ -67,11 +67,9 @@
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { PhArrowUp, PhArrowDown, PhCaretDown, PhCheck, PhGitCommit, PhGitPullRequest } from "@phosphor-icons/vue";
 import { useGitStore } from "@/stores/git";
-import { useUIStore } from "@/stores/ui";
 import { usePullRequests } from "@/composables/usePullRequests";
 
 const git = useGitStore();
-const ui = useUIStore();
 const pr = usePullRequests(() => git.cwd);
 const open = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
@@ -119,13 +117,13 @@ async function runPrimary() {
   if (primaryDisabled.value) return;
   if (primaryMode.value === "pull") return void (await git.pull());
   if (primaryMode.value === "push") return void (await git.push());
-  await git.commit(ui.commitMessageModel);
+  await git.commit();
   await git.push();
 }
 
 async function doCommit() {
   open.value = false;
-  if (!commitDisabled.value) await git.commit(ui.commitMessageModel);
+  if (!commitDisabled.value) await git.commit();
 }
 
 async function doPush() {

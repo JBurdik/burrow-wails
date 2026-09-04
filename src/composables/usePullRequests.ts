@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useUIStore } from "@/stores/ui";
 
 export type PrScope = "assigned" | "created" | "all";
 export type PrTab = "summary" | "timeline" | "code";
@@ -71,10 +72,37 @@ export function usePullRequests(cwd: () => string) {
     finally { actionLoading.value = false; }
   }
 
+  // The title and body a model writes from the branch's commits and diff, or
+  // null so the caller falls back to `--fill` (which just reuses the last
+  // commit message). Best-effort by design: a missing model, an offline CLI or
+  // a slow answer must not stop the user from opening a PR.
+  async function generatedContent(): Promise<{ title: string; body: string } | null> {
+    const ui = useUIStore();
+    try {
+      const head = (await invoke<GhOutput>("run_git", { cwd: cwd(), args: ["branch", "--show-current"] })).stdout.trim();
+      const base = JSON.parse(await gh(cwd(), ["repo", "view", "--json", "defaultBranchRef"])).defaultBranchRef?.name;
+      if (!head || !base || head === base) return null;
+      const out = await invoke<Record<string, string>>("generate_pr_content", {
+        cwd: cwd(),
+        model: ui.textGenerationModel,
+        policy: ui.textGenerationPolicy,
+        baseBranch: base,
+        headBranch: head,
+      });
+      return out.title ? { title: out.title, body: out.body ?? "" } : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function create() {
     actionLoading.value = true; error.value = "";
     try {
-      const url = (await gh(cwd(), ["pr", "create", "--fill"])).trim();
+      const content = await generatedContent();
+      const args = content
+        ? ["pr", "create", "--title", content.title, "--body", content.body]
+        : ["pr", "create", "--fill"];
+      const url = (await gh(cwd(), args)).trim();
       await refresh();
       const created = items.value.find((pr) => pr.url === url);
       if (created) await select(created);

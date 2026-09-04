@@ -2010,7 +2010,8 @@ async function refineTitle(text: string) {
   try {
     title = await invoke<string>("generate_chat_title", {
       cwd: props.cwd,
-      model: uiStore.commitMessageModel,
+      model: uiStore.textGenerationModel,
+      policy: uiStore.textGenerationPolicy,
       text,
     });
   } catch {

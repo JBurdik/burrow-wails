@@ -78,9 +78,13 @@ export function DeleteWorkspace(arg1:number):Promise<void>;
 
 export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function GenerateChatTitle(arg1:string,arg2:string,arg3:string):Promise<string>;
+export function GenerateBranchName(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
-export function GenerateCommitMessage(arg1:string,arg2:string):Promise<main.GitOutput>;
+export function GenerateChatTitle(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
+export function GenerateCommitMessage(arg1:string,arg2:string,arg3:string):Promise<main.GitOutput>;
+
+export function GeneratePrContent(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Record<string, string>>;
 
 export function GetAppVersion():Promise<string>;
 
