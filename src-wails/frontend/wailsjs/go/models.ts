@@ -434,6 +434,7 @@ export namespace main {
 	    cwd?: string;
 	    default_title?: string;
 	    session_id?: string;
+	    branch?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TerminalTab(source);
@@ -450,6 +451,7 @@ export namespace main {
 	        this.cwd = source["cwd"];
 	        this.default_title = source["default_title"];
 	        this.session_id = source["session_id"];
+	        this.branch = source["branch"];
 	    }
 	}
 	export class UpdateInfo {

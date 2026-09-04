@@ -87,6 +87,16 @@ func (r *acpRegistry) put(id string, s *acpSession) {
 	r.live[id] = s
 }
 
+// dropIf forgets the session only while it is still the live one for that id, so
+// a reader goroutine finishing after a restart cannot evict its replacement.
+func (r *acpRegistry) dropIf(id string, s *acpSession) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.live[id] == s {
+		delete(r.live, id)
+	}
+}
+
 func (r *acpRegistry) drop(id string) *acpSession {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -278,6 +288,11 @@ func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 		}
 		a.emitChatLine(chatID, kind, raw)
 	}
+	// The child is gone: forget it BEFORE announcing the exit. AcpStart and
+	// CodexStart both short-circuit on "a session for this id is already live",
+	// so a dead session left in the registry made the next send write into a
+	// closed stdin (`write |1: broken pipe`) instead of spawning a replacement.
+	a.acpReg().dropIf(chatID, sess)
 	a.emitChatLine(chatID, "acp-data", `{"_burrow":"exit"}`)
 }
 
@@ -374,6 +389,15 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		// input request) is no longer pending. Forward it so the UI does not
 		// optimistically clear the prompt before the app-server accepted it.
 		emit(map[string]any{"method": method, "params": params})
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
+		// Blocking approval requests. `parseAcpPermRequest` understands exactly
+		// these three method names, so they belong on the request channel — the
+		// default branch below was rejecting every Codex approval as unsupported,
+		// which is why a Supervised turn died with "the environment rejected the
+		// command approval request".
+		if line, err := json.Marshal(msg); err == nil {
+			a.emitChatLine(chatID, "acp-req", string(line))
+		}
 	case "item/tool/requestUserInput":
 		// Unlike an approval this request has a structured answers response.  Keep
 		// it on the request channel so the dedicated Codex input panel can respond.

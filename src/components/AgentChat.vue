@@ -828,8 +828,6 @@ const runtimeLabel = computed(() =>
 const agentAccentColor = computed(() =>
   agentKind.value === 'claude' ? 'var(--chat-accent)' : (currentAgent.value?.color ?? 'var(--chat-accent)'),
 );
-// ACP permission: JSON-RPC id of the agent's blocking request_permission.
-const acpPermRpcId = ref<number | null>(null);
 // Rich ACP permission request — carries the adapter's own option list (allow/
 // reject variants, or ExitPlanMode's auto/acceptEdits/manual/keep-planning) so
 // we render the REAL choices instead of collapsing everything to Allow/Deny.
@@ -844,7 +842,7 @@ const {
   pendingPermission, pendingQuestion, pendingPlan, pendingDiff,
   pendingPermissionMsgId, pendingQuestionMsgId, pendingPlanMsgId, pendingDiffMsgId,
   settledControlRequestIds,
-  acpPermReq, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
+  acpPermReq, acpPermRpcId, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
 } = S;
 const permissionResponsePending = ref(false);
 const codexUserInput = ref<{ rpcId: number; questions: CodexUserInputQuestion[] } | null>(null);
@@ -3195,6 +3193,11 @@ onMounted(async () => {
     // i.e. a turn that was in flight when the app was last closed or crashed.
     await replayChatStream(props.chatId);
   }
+  // A remount is how you come back to a chat now (fáze 3 unmounts hidden chat
+  // leaves), so land on the newest message. The activeByWs watcher below cannot
+  // do it: the active id is already this chat before the fresh instance mounts,
+  // so it never fires and the view opened scrolled to the top of the history.
+  scrollToBottom(true);
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
   // Pin the resolved model to this chat on first mount, so it survives a

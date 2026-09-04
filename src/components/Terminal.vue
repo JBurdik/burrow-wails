@@ -252,6 +252,8 @@ interface PersistedTab {
   pty_id: number | null;
   cwd: string | null;
   session_id: string | null;
+  /** Branch checked out when the tab was created — a snapshot, not live. */
+  branch: string | null;
 }
 
 interface LogEntry {
@@ -1424,6 +1426,7 @@ function persist() {
     pty_id: l.id,
     cwd: l.cwd ?? null,
     session_id: l.sessionId ?? null,
+    branch: branchSnapshotFor(l.id) ?? null,
   }));
   invoke("save_terminal_tabs", { workspaceId: props.workspaceId, tabs: payload });
 }
@@ -1485,7 +1488,10 @@ function syncStore() {
         : isTabSettled(props.workspaceId, t.id),
       agentIcon: tabAgentIcon(t),
       model: chatSessionOf(t)?.model ?? getAllLeaves(t.root)[0]?.model,
-      branch: branchSnapshotFor(t.id),
+      // Chat threads snapshot their own branch at creation (persisted in
+      // config.json with the session — see claudeChats.create); plain
+      // terminal/agent tabs use the per-tab cache backed by SQLite.
+      branch: chatSessionOf(t)?.branch ?? branchSnapshotFor(t.id),
     })),
   );
   tabsStore.setActive(props.workspaceId, activeTabId.value);
@@ -1598,8 +1604,14 @@ onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("focus", onWindowFocus);
 
+  // Both calls tolerate failure: an unhandled rejection here aborts the whole
+  // hook, and everything below it — including the chat-thread restore and the
+  // sidebar sync — silently never runs. That is how a single flaky bridge call
+  // (a `wails dev` reload racing the runtime websocket) made every thread in
+  // the workspace disappear.
   const [saved, daemonSessions] = await Promise.all([
-    invoke<PersistedTab[]>("list_terminal_tabs", { workspaceId: props.workspaceId }),
+    invoke<PersistedTab[]>("list_terminal_tabs", { workspaceId: props.workspaceId })
+      .catch((e) => { console.warn("[terminal] list_terminal_tabs failed, restoring no terminals", e); return [] as PersistedTab[]; }),
     invoke<DaemonSession[]>("list_pty_sessions").catch(() => [] as DaemonSession[]),
   ]);
 
@@ -1647,6 +1659,7 @@ onMounted(async () => {
       // Falls back to defaultTitle if not saved (old rows / first-run).
       leaf.title = s.title || leaf.defaultTitle;
       if (s.session_id) leaf.sessionId = s.session_id;
+      if (s.branch) tabBranchSnapshot.set(leaf.id, s.branch);
       const tab: Tab = { id: leaf.id, root: leaf };
       tabs.value.push(tab);
       registerLeafListeners(leaf.id);

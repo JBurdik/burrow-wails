@@ -125,6 +125,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE terminal_tabs ADD COLUMN cwd TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN default_title TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN session_id TEXT`,
+		`ALTER TABLE terminal_tabs ADD COLUMN branch TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN handed_off INTEGER DEFAULT 0`,
 		`ALTER TABLE mission_tasks ADD COLUMN profile_id TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN repo_workspace_id INTEGER`,

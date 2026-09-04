@@ -78,6 +78,10 @@ export interface ChatSession {
 
   // ── blocking requests (ACP transport) ──
   acpPermReq: Ref<AcpPermReq | null>;
+  /** JSON-RPC id of the pending request. Lives here, not in the view: the
+   *  `serverRequest/resolved` that clears the prompt can arrive after a
+   *  remount, and a fresh view's local id would never match it. */
+  acpPermRpcId: Ref<number | null>;
   acpPermMsgId: Ref<number | null>;
   acpPromptRpcId: Ref<number | null>;
   acpControlIds: Set<number>;
@@ -226,6 +230,7 @@ function create(chatId: number): InternalSession {
     settledControlRequestIds: new Set<string>(),
 
     acpPermReq: ref<AcpPermReq | null>(null),
+    acpPermRpcId: ref<number | null>(null),
     acpPermMsgId: ref<number | null>(null),
     acpPromptRpcId: ref<number | null>(null),
     acpControlIds: new Set<number>(),

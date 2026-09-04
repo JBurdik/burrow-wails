@@ -6,6 +6,8 @@ import type { TermStatus } from "@/lib/terminalStatus";
 import { agentStatusMachine } from "@/machines/agentStatus";
 import type { AgentStatusEvent } from "@/machines/agentStatus";
 import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
+import { useWorkspaceStore } from "@/stores/workspace";
+import { useGitStore } from "@/stores/git";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
@@ -42,6 +44,8 @@ export interface ClaudeSession {
   // Last time anything happened on this chat (message, status/title change) —
   // the reference point for the days-of-inactivity auto-settle threshold.
   lastActivityAt?: number;
+  // Branch checked out when the chat was created — a snapshot, not live.
+  branch?: string;
 }
 
 const SESSIONS_KEY = "chatSessions";
@@ -152,6 +156,8 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     const agentKind = opts?.agentKind ?? 'claude';
     const transport: ChatTransport =
       (() => { const a = useProvidersStore().byId(agentKind); return a ? chatTransportFor(a) : (agentKind === 'claude' ? 'claude-cli' : 'acp'); })();
+    const ws = useWorkspaceStore().workspaces.find((w) => w.id === workspaceId);
+    const branch = ws?.worktree_branch || useGitStore().branchByWs[workspaceId] || undefined;
     const session: ClaudeSession = {
       id,
       workspaceId,
@@ -162,6 +168,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
       agentKind,
       transport,
       lastActivityAt: Date.now(),
+      branch,
     };
     sessions.value.push(session);
     // Pass the REACTIVE array element (not the raw `session`) so the actor's
