@@ -73,6 +73,51 @@ func TestRemoteChatsFromLiveConfig(t *testing.T) {
 	}
 }
 
+func TestRemoteCreateChatSessionBumpsCounterAndPreservesConfig(t *testing.T) {
+	cfg := map[string]any{
+		"someUnrelatedSetting": "keep-me",
+		"chatIdCounter":        float64(5),
+		"chatSessions": []any{
+			map[string]any{"id": float64(5), "workspaceId": float64(2), "title": "Chat 1"},
+		},
+	}
+	session, id := remoteCreateChatSession(cfg, 2, "claude")
+
+	if id != 6 {
+		t.Fatalf("id = %d, want 6 (must bump the counter, not reuse the last id)", id)
+	}
+	if cfg["chatIdCounter"] != float64(7) {
+		t.Fatalf("chatIdCounter = %v, want 7", cfg["chatIdCounter"])
+	}
+	if cfg["someUnrelatedSetting"] != "keep-me" {
+		t.Fatal("unrelated config keys must survive — config.json is a grab-bag, not just chat state")
+	}
+	if session["title"] != "Chat 2" {
+		t.Fatalf("title = %v, want \"Chat 2\" (second chat for this workspace)", session["title"])
+	}
+	if session["transport"] != "claude-cli" {
+		t.Fatalf("transport = %v, want claude-cli", session["transport"])
+	}
+	sessions, ok := cfg["chatSessions"].([]any)
+	if !ok || len(sessions) != 2 {
+		t.Fatalf("chatSessions = %#v, want 2 entries", cfg["chatSessions"])
+	}
+	history, ok := cfg["chatMessageHistory"].(map[string]any)
+	if !ok {
+		t.Fatal("chatMessageHistory was not created")
+	}
+	if msgs, ok := history["6"].([]any); !ok || len(msgs) != 0 {
+		t.Fatalf("chatMessageHistory[6] = %#v, want []", history["6"])
+	}
+}
+
+func TestRemoteCreateChatRejectsNonClaude(t *testing.T) {
+	a := &App{}
+	if _, err := a.RemoteCreateChat(1, "codex"); err == nil {
+		t.Fatal("expected an error — remote chat creation only supports agentKind claude for now")
+	}
+}
+
 // Empty SQL results used to marshal as JSON null, which threw inside
 // store.ts's `tabs.filter(...)` and surfaced on the phone as "Relace se
 // nepodařilo načíst". Every list the frontend maps over must be [].

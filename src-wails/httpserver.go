@@ -281,20 +281,28 @@ type wsCall struct {
 // wsArgs is the union of every argument object the mobile client sends.
 // Keys are camelCase because that is what api.ts puts on the wire.
 type wsArgs struct {
-	ID          string `json:"id"`
-	WorkspaceID int64  `json:"workspaceId"`
-	Data        []int  `json:"data"`
-	Cols        uint16 `json:"cols"`
-	Rows        uint16 `json:"rows"`
+	ID          string         `json:"id"`
+	WorkspaceID int64          `json:"workspaceId"`
+	Data        []int          `json:"data"`
+	Cols        uint16         `json:"cols"`
+	Rows        uint16         `json:"rows"`
+	Text        string         `json:"text"`
+	SessionId   string         `json:"sessionId"`
+	RequestId   string         `json:"requestId"`
+	Response    map[string]any `json:"response"`
+	RpcId       int64          `json:"rpcId"`
+	OptionId    string         `json:"optionId"`
+	AgentKind   string         `json:"agentKind"`
 }
 
 // dispatch maps a WS call onto an App method. Deliberately an explicit
 // allow-list, not reflection: this surface is reachable from the tailnet,
 // so every remotely-invokable method is one someone typed here on purpose.
 //
-// Read-only so far. The write half (claude_send, claude_respond_control,
-// remote_start_chat) is the next stage — every one of those can run a tool on
-// the user's machine, so they get added deliberately, not in bulk.
+// The write commands below (claude_send, acp_send, claude_respond_control,
+// acp_respond_permission, remote_create_chat) are thin wrappers over the same
+// App methods the desktop UI already calls — no new agent-control logic
+// here, just exposing it on the tailnet transport.
 func (s *HTTPServer) dispatch(c wsCall) (any, error) {
 	switch c.Command {
 	case "list_workspaces":
@@ -309,6 +317,17 @@ func (s *HTTPServer) dispatch(c wsCall) (any, error) {
 		return s.app.ListPtySessions()
 	case "remote_list_chats":
 		return s.app.RemoteListChats()
+	case "remote_create_chat":
+		return s.app.RemoteCreateChat(c.Args.WorkspaceID, c.Args.AgentKind)
+	case "claude_send":
+		return nil, s.app.ClaudeSend(c.Args.ID, c.Args.Text, c.Args.SessionId, nil)
+	case "acp_send":
+		_, err := s.app.AcpSend(c.Args.ID, c.Args.Text, nil)
+		return nil, err
+	case "claude_respond_control":
+		return nil, s.app.ClaudeRespondControl(c.Args.ID, c.Args.RequestId, c.Args.Response)
+	case "acp_respond_permission":
+		return nil, s.app.AcpRespondPermission(c.Args.ID, c.Args.RpcId, c.Args.OptionId)
 	default:
 		return nil, fmt.Errorf("unknown command %q", c.Command)
 	}

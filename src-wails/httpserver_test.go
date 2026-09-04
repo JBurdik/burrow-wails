@@ -195,3 +195,46 @@ func TestWsArgsRejectsNumericID(t *testing.T) {
 		t.Fatal("expected a decode error for a numeric id — if this now passes, handleWS's silent-drop guard must be revisited too")
 	}
 }
+
+// New write-path commands must decode their args and reach dispatch — this
+// only checks the allow-list + arg shape, not the App call itself (that
+// needs a live claudeMgr/acpReg, covered by claudechat_test.go/acp_test.go
+// patterns instead).
+func TestDispatchKnowsWritePathCommands(t *testing.T) {
+	s := &HTTPServer{app: &App{}}
+	for _, cmd := range []string{"claude_send", "acp_send", "claude_respond_control", "acp_respond_permission", "remote_create_chat"} {
+		_, err := s.dispatch(wsCall{Command: cmd, Args: wsArgs{ID: "1"}})
+		if err != nil && strings.Contains(err.Error(), "unknown command") {
+			t.Errorf("%s: still not in the dispatch allow-list", cmd)
+		}
+	}
+}
+
+func TestWsArgsDecodesWritePathFields(t *testing.T) {
+	var c wsCall
+	raw := `{"id":1,"command":"claude_send","args":{"id":"3","text":"hi","sessionId":"abc"}}`
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Args.Text != "hi" || c.Args.SessionId != "abc" {
+		t.Fatalf("bad decode: %+v", c.Args)
+	}
+
+	var rc wsCall
+	raw = `{"id":2,"command":"claude_respond_control","args":{"id":"3","requestId":"r1","response":{"behavior":"allow"}}}`
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatal(err)
+	}
+	if rc.Args.RequestId != "r1" || rc.Args.Response["behavior"] != "allow" {
+		t.Fatalf("bad decode: %+v", rc.Args)
+	}
+
+	var ap wsCall
+	raw = `{"id":3,"command":"acp_respond_permission","args":{"id":"3","rpcId":42,"optionId":"allow_once"}}`
+	if err := json.Unmarshal([]byte(raw), &ap); err != nil {
+		t.Fatal(err)
+	}
+	if ap.Args.RpcId != 42 || ap.Args.OptionId != "allow_once" {
+		t.Fatalf("bad decode: %+v", ap.Args)
+	}
+}
