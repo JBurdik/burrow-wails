@@ -15,3 +15,6 @@ src-tauri/gen
 *.mobileprovision
 .gitnexus
 src-server/target
+
+# git worktrees (agent-managed, scratch)
+.worktrees/
