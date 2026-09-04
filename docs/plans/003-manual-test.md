@@ -30,7 +30,7 @@ Prošlo v `wails dev` na `localhost:34115`, s reálnými daty a živým Claude:
   `chat-event-{id}`: `{ord:49, events:[{type:"text.delta",…}]}`.
 
 Neověřeno tímto průchodem: §5 (ACP/Codex), §6 (permissions), §7 (crash
-recovery), §9 (Manager), §10 (mobil).
+recovery), §9 (Manager), §10 (mobil) — dotestováno druhým průchodem níž.
 
 ### Co to našlo
 
@@ -71,6 +71,144 @@ recovery), §9 (Manager), §10 (mobil).
    nezačnou fungovat, dokud daemon nepojede z nového buildu. V `wails dev` se
    spouští přes `go run ./cmd/burrow-daemon`, takže stačí **zabít starý proces**
    (`pkill -f burrow-daemon`) a nechat ho nastartovat znovu.
+
+## Výsledky druhého průchodu — §5–§10 (agent-browser, 2026-09-04)
+
+Testováno z izolovaného worktree na tipu branche (`/tmp/burrow-mt003`, commit
+9074afa), protože v hlavním working tree paralelně pracoval jiný agent a jeho
+Go editace restartovaly backend uprostřed turnu — což samo vyrobilo jeden falešný
+nález (Codex approval, který umřel na restart adapteru, ne na bug).
+
+- **§5 ACP/Codex:** 5a–5d, 5f–5h prošlo. Text, thinking group („Worked for 8s"),
+  tool karty s výstupem i failed ikonou, notifikace, `modes`/`configOptions`
+  z handshake (Supervised / Auto-accept edits / Auto / Don't ask / Full access),
+  volba modelu i modu přežije reopen. 5g: kill adapteru mid-turn usadil spinner
+  bez „finished" notifikace. 5h prošlo **až po opravě** (nález 10).
+- **§5e není v tomhle buildu čím otestovat:** `acp_list_sessions` má shim ve
+  `wailsCompat/core.ts` i Go binding, ale **žádné call site v UI** — resume
+  picker neexistuje. Resume jako takový funguje (`resumeSessionId` v
+  `startRpcRuntime`, threadId přežil restart appky) a §5f (chat je po resume
+  `idle`, ne zaseknutý na „running") drží.
+- **§6 permissions:** 6a–6h prošlo, 6e/6f/6h **až po opravě** (nález 7 a 8).
+  6a diff dialog + `✏️` marker, 6c `❓` + `waiting` (modrý dot), 6e `⚡` +
+  `permission` (amber + bell), 6g „Claude proposed a plan" s Approve/Keep
+  planning + `📋`, 6f dialog po přepnutí pryč a zpět **jednou**, ne zdvojený
+  ani zmizelý — a přežije i celý reload stránky, protože request drží Go.
+- **§7 crash recovery:** prošlo. Zabito uprostřed 1500slovné eseje s
+  `folded_ord = 1920` a `max(ord) = 3009`; po restartu je v transcriptu i ta
+  část, co dojela po posledním uložení, a na hranici replaye není nic dvakrát
+  (`Job control is the Unix` právě 1×).
+- **§8 nepřečteno:** 8a–8f prošlo, včetně **8f, což je ten původní bug, kvůli
+  kterému plán vznikl** (`running → review` s composerem přes běžící tab).
+  8e transientní `done` zmizel sám po ~4 s, 8c/8d review dot drží i po návratu
+  focusu do okna na *jiný* tab.
+- **§9 Manager:** 9a–9c prošlo. Odpovídá, tool karty se renderují, `burrow run`
+  i `burrow spawn` fungují (vznikl tab, Manager nahlásil `pty_id`), a po
+  přepnutí projektu tam a zpět **vlákno běží dál** a transcript je celý.
+- **§10 mobil:** 10a–10f prošlo, 10d/10f **až po opravě** (nález 13).
+  Mobilní bundle je `//go:embed`-nutý, takže testování chce
+  `BURROW_DEV_MOBILE=<repo>/src-wails/dist-mobile/app` + `VITE_TARGET=mobile
+  vite build`, jinak server vrací na `/` 404.
+
+### Co to našlo (druhý průchod)
+
+7. **Codex approval request se nikdy nedostal do UI.** `pumpCodexLine` nemá case
+   pro `item/commandExecution/requestApproval` / `item/fileChange/requestApproval`
+   / `item/permissions/requestApproval`, takže spadly do `default`, kde
+   `rejectUnsupportedCodexRequest` odpoví JSON-RPC chybou. Turn pod *Supervised*
+   umřel na „the environment rejected the command approval request" a žádný
+   dialog se neukázal. Vtipné je, že komentář u `default` tvrdí „the known
+   approval requests still travel through acp-req above this default" — jenže ta
+   větev tam nikdy nebyla, a `parseAcpPermRequest` na frontendu přesně ty tři
+   metody už umí. Doplněn case → `acp-req`. **§6e/§6f/§6h.**
+8. **Regrese z fáze 2′/3: `acpPermRpcId` zůstal component-local.** `acpPermReq`
+   se přestěhoval do session, jeho rpcId ne (`AgentChat.vue:832`). Po remountu
+   tedy banner dál renderuje ze session, ale `serverRequest/resolved` se
+   porovnává s *lokálním* `acpPermRpcId`, který je v nové instanci `null` →
+   dialog už nikdy nezmizí. Horší je druhá polovina: `isIdle()` bere
+   `acpPermReq !== null` jako „nezahazuj session", takže session s viset
+   zůstalým requestem **nikdy nezidleuje** a listenery se nikdy neodpojí.
+   Přesunuto do session. *(Stejná třída bugu čeká na `codexUserInput` —
+   `item/tool/requestUserInput` drží celý request lokálně, takže po remountu
+   panel zmizí a Codex čeká navěky. Neověřeno, nesahal jsem na to.)*
+9. **Regrese z fáze 3: chat se otevírá odscrollovaný na začátek historie.**
+   Scroll na konec dělal jen `watch(() => chats.activeByWs[props.workspaceId])`
+   — bez `immediate` a bez ekvivalentu v `onMounted`. Dokud byl chat pořád
+   mountnutý, přepnutí tabu ten watcher fajrovalo; teď se komponenta vytváří
+   znovu a aktivní id je nastavené **dřív**, než nová instance mountne, takže
+   watcher nefajruje vůbec. Doplněn `scrollToBottom(true)` v `onMounted` za
+   naplnění transcriptu.
+10. **§5h: mrtvá ACP/Codex session zůstala v registry.** `pump()` po EOF ohlásí
+    `{_burrow:"exit"}`, ale session nechá v `acpReg`. `AcpStart` i `CodexStart`
+    se zkratkují na „pro tohle id už session žije", takže další prompt šel do
+    zavřeného stdin: `Error: write |1: broken pipe`. Přidán `dropIf(chatID, sess)`
+    (drží jen když je to pořád *ta* session, aby dobíhající reader nesmazal
+    svého nástupce) volaný **před** emitem exitu.
+11. **Zaseknutý daemon položí celý workspace.** `daemonserver.broadcast` držel
+    `s.mu` po celou dobu zápisu **všem** klientům, a `handleConn` si pod tímtéž
+    lockem registruje nové spojení. Jeden klient, který přestal čítat (zabitý
+    dev build, co nechal socket otevřený), tak zablokoval daemona pro všechny
+    — i pro čerstvě připojené. Důsledek na frontendu: `list_pty_sessions` se
+    **nikdy nevrátí** (ne error, ne timeout — visící promise), `Terminal.onMounted`
+    uvízne na `Promise.all` a všechno pod ním (obnova chat threadů, `syncStore`)
+    se neprovede → workspace bez jediného tabu a bez jediného threadu, bez
+    hlášky. Tohle je nejspíš i to „tahle instalace nemá v `terminal_tabs`
+    žádné řádky" z prvního průchodu. Opraveno dvakrát: snapshot klientů mimo
+    lock + `SetWriteDeadline` na jeden send (a close při chybě, aby dekodér
+    klienta odregistroval).
+12. **`list_terminal_tabs` bez `.catch`.** Jeho sourozenec `list_pty_sessions`
+    ho má, tenhle ne — a odmítnutí uvnitř `Promise.all` shodí celý mount hook
+    se vším pod ním (viz nález 11). Doplněn catch s `console.warn`: rozbitý
+    bridge pak stojí obnovu terminálů, ne obnovu chatů a sidebaru.
+13. **Mobil: fáze 6 doparsovala tool výstupy, ale nikdo je nerenderoval.**
+    `src/mobile/store.ts` plní `toolOutput` i `toolFailed` (řádky 246–247),
+    `views/ChatView.vue` ale vykresloval jen `⌘ {{ message.text }}`. Failed
+    tool byl na telefonu k nerozeznání od úspěšného a výstup nebyl vidět
+    vůbec — tedy přesně to, co fáze 6 v plánu inzeruje jako nově umělé.
+    Doplněn `⚠` marker, obarvený titulek a blok s výstupem. **§10d/§10f.**
+
+### Nálezy druhého průchodu, které jsem NEopravil
+
+14. **Odeslání z composeru nedá nový tab do URL.** Skončí to na `#/ws/:id`,
+    ne `#/ws/:id/tab/:pty` — tab se otevře a vykreslí, ale není adresovatelný,
+    dokud na něj člověk neklikne. `activateTab` naviguje jen
+    `if (wsStore.active?.id === props.workspaceId && uiStore.viewingTabs)`, a
+    `viewingTabs` je v tu chvíli ještě `false`, protože `WelcomeScreen.submit`
+    volá `ui.closeWelcome()` až **za** `openChat`. Přeřazení nestačí
+    (`router.push` se usazuje asynchronně) a ani `await ui.closeWelcome()` před
+    `open()` to nespravilo — takže tam je ještě něco dalšího, co po
+    `activateTab` adresu přepíše zpátky na `/ws/:id`. Zkusil jsem obojí a
+    revertoval; chce to doměřit, ne hádat. **§2g/§5a.**
+
+### Co se ukázalo jako prostředí, ne bug
+
+- **`claude` spouštěný appkou občas hlásí „Failed to authenticate: OAuth session
+  expired and could not be refreshed".** Z shellu `claude -p` jede (dědí auth
+  po nadřazeném agentovi), s prázdným env a `ANTHROPIC_API_KEY=` — což je přesně
+  to, co `ClaudeStart` posílá — hlásí „Not logged in". Chce to `claude /login`.
+  Chvíli to vrátilo turny (Manager i spawnutý chat 73 běžely), takže je to spíš
+  vypršelý token než konfigurace.
+- **§6a nešlo napoprvé vidět**, protože v `config.json` leží uložené pravidlo
+  `chatPermissionRules: ["Bash:burrow", "Edit"]` z dřívějšího „Always allow" —
+  Edit se schválil sám. S `Write` (bez pravidla) dialog naskočil normálně.
+- **Přepnutí providera uprostřed vlákna vlákno rozbije.** Přehodil jsem Codex
+  chatu model na Claude Opus; `claudeSessionId` v něm zůstal Codexí `threadId`,
+  takže `claude --resume <cizí id>` selhal. Chat 72 je tím pádem nepoužitelný.
+  Nehlásím jako bug (nikdo to normálně nedělá), ale guard by tam být mohl.
+- **Replay po restartu neposune `folded_ord`.** Transcript se vykreslí správně,
+  ale `chat_messages` i značka zůstanou, kde byly, takže každý další start
+  replayuje týž konec znovu. Idempotentní to je (ověřeno — nic dvakrát) a trim
+  nic nesmaže, protože maže jen pod značkou. Podle plánu je to v pořádku,
+  jen ať se to ví.
+- **Mobil nemá permission UI** (control protokol zůstal na raw kanálu záměrně),
+  takže turn pod *Supervised* rozjetý z desktopu se na telefonu jen zasekne na
+  „READY" a čeká, dokud to člověk neschválí na desktopu. A seznam chatů hlásí
+  u všech „0 zpráv" a otevřený existující chat je prázdný — historii mobil
+  neskládá, jen živé eventy. Obojí čeká na fázi 7.
+- **`wails dev` v externím prohlížeči má vlastní past:** bindingy volané dřív,
+  než se usadí runtime websocket, se **nevrátí vůbec** (visící promise, ne
+  reject). S opraveným nálezem 12 to už neshodí obnovu chatů, ale terminály
+  po takovém loadu chybí, dokud stránku nereloadneš.
 
 **Pozor na HMR při testování.** Editace `chatSession.ts` za běhu vyrobí nový
 registry session, takže `busy` se čte z čerstvé session, kdežto `status` drží
