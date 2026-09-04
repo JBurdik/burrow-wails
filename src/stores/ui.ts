@@ -109,8 +109,20 @@ interface Prefs {
   toastPosition: ToastPosition; // screen anchor for toast notifications
   defaultChatAgent: string; // default agent for new chat sessions (chatAgents store id)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
-  commitMessageModel: string; // Claude model id used for GitPanel's "generate commit message" (cheap by default)
+  // Background text generation (commit messages, PR content, branch names,
+  // chat titles) — "kind::provider::model::effort", effort optional.
+  textGenerationModel: string;
+  textGenerationPolicy: TextGenerationPolicy; // house style folded into every generation prompt
 }
+
+// t3code's TextGenerationPolicyKind, minus "custom" — that one needs per-op
+// instruction text, and nothing asks for it yet.
+export type TextGenerationPolicy = "default" | "conventional_commits" | "repo_conventions";
+export const TEXT_GENERATION_POLICIES: { id: TextGenerationPolicy; label: string; description: string }[] = [
+  { id: "default", label: "Default", description: "Plain imperative subjects, no house style imposed." },
+  { id: "conventional_commits", label: "Conventional Commits", description: "feat/fix/chore prefixes, scope only when the diff makes it obvious." },
+  { id: "repo_conventions", label: "Match this repository", description: "Shows the model your last 20 commit subjects and asks it to follow them." },
+];
 
 // Screen anchor for the toast stack (ToastStack.vue).
 export type ToastPosition =
@@ -138,6 +150,11 @@ export const NTFY_EVENTS: { id: NtfyEvent; label: string }[] = [
 // the whole UI relative to it, so the default uiFontSize being above the
 // baseline makes the default UI render slightly larger.
 const BASE_FONT_SIZE = 13;
+
+// Haiku is the cheap default t3code picks too (their
+// DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER), and it publishes no reasoning
+// efforts, so the selection stays three-part.
+export const DEFAULT_TEXT_GENERATION_MODEL = "claude::claude::claude-haiku-4-5-20251001";
 
 const DEFAULT_PREFS: Prefs = {
   uiFont: UI_FONTS[0].value,
@@ -189,20 +206,27 @@ const DEFAULT_PREFS: Prefs = {
   toastPosition: "bottom-left",
   defaultChatAgent: "claude",
   spawnMode: "terminal",
-  commitMessageModel: "claude::claude::claude-haiku-4-5-20251001",
+  textGenerationModel: DEFAULT_TEXT_GENERATION_MODEL,
+  textGenerationPolicy: "default",
 };
 
 function normalize(parsed: unknown): Prefs {
   if (parsed && typeof parsed === "object") {
     const stored = { ...DEFAULT_PREFS, ...(parsed as Partial<Prefs>) };
+    // The pref was `commitMessageModel` while commit messages were the only
+    // thing generated; it now covers every background writing job.
+    const legacyModel = (parsed as { commitMessageModel?: string }).commitMessageModel;
+    if (legacyModel && !(parsed as Partial<Prefs>).textGenerationModel) {
+      stored.textGenerationModel = legacyModel;
+    }
     // Until provider-aware text generation landed this held a bare Claude
     // model id. Keep existing preferences working and make them selectable.
-    if (!stored.commitMessageModel.includes("::")) {
-      stored.commitMessageModel = `claude::claude::${stored.commitMessageModel}`;
-    } else if (stored.commitMessageModel.split("::").length === 2) {
+    if (!stored.textGenerationModel.includes("::")) {
+      stored.textGenerationModel = `claude::claude::${stored.textGenerationModel}`;
+    } else if (stored.textGenerationModel.split("::").length === 2) {
       // Short-lived first provider-aware format: kind::model.
-      const [kind, model] = stored.commitMessageModel.split("::");
-      stored.commitMessageModel = `${kind}::${kind}::${model}`;
+      const [kind, model] = stored.textGenerationModel.split("::");
+      stored.textGenerationModel = `${kind}::${kind}::${model}`;
     }
     // Migrate installs saved below the current default up to it.
     if (stored.uiFontSize < DEFAULT_PREFS.uiFontSize) stored.uiFontSize = DEFAULT_PREFS.uiFontSize;
@@ -290,7 +314,8 @@ export const useUIStore = defineStore("ui", () => {
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "bottom-left");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
-  const commitMessageModel = ref<string>(loaded.commitMessageModel ?? "claude::claude::claude-haiku-4-5-20251001");
+  const textGenerationModel = ref<string>(loaded.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL);
+  const textGenerationPolicy = ref<TextGenerationPolicy>(loaded.textGenerationPolicy ?? "default");
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
 
@@ -349,7 +374,8 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition.value = p.toastPosition ?? "bottom-left";
     defaultChatAgent.value = p.defaultChatAgent ?? "claude";
     spawnMode.value = p.spawnMode ?? "terminal";
-    commitMessageModel.value = p.commitMessageModel ?? "claude::claude::claude-haiku-4-5-20251001";
+    textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
+    textGenerationPolicy.value = p.textGenerationPolicy ?? "default";
   });
 
   // Publish the soft sub-agent cap to a file the `burrow` CLI can read (it can't
@@ -507,7 +533,8 @@ export const useUIStore = defineStore("ui", () => {
         toastPosition: toastPosition.value,
         defaultChatAgent: defaultChatAgent.value,
         spawnMode: spawnMode.value,
-        commitMessageModel: commitMessageModel.value,
+        textGenerationModel: textGenerationModel.value,
+        textGenerationPolicy: textGenerationPolicy.value,
       } satisfies Prefs,
     );
   }
@@ -524,7 +551,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, commitMessageModel],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, textGenerationModel, textGenerationPolicy],
     () => {
       savePrefs();
       applyTheme();
@@ -817,6 +844,7 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition,
     defaultChatAgent,
     spawnMode,
-    commitMessageModel,
+    textGenerationModel,
+    textGenerationPolicy,
   };
 });

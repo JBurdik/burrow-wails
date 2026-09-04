@@ -91,9 +91,17 @@
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>
-                <span class="text-[11px] text-muted-foreground">Model used for small background writing jobs — the GitPanel sparkle button's commit message, and chat titles. Kept cheap by default.</span>
+                <span class="text-[11px] text-muted-foreground">Default model for generated text — chat titles, commit messages, pull request content and branch names. Kept cheap by default.</span>
               </div>
-              <Select v-model="ui.commitMessageModel" class="min-w-[200px]" :options="commitMessageModelOptions" />
+              <Select v-model="textGenModel" class="min-w-[200px]" :options="textGenModelOptions" />
+              <Select v-if="textGenEffortOptions.length > 1" v-model="textGenEffort" class="min-w-[130px]" :options="textGenEffortOptions" />
+            </div>
+            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Generated text style</span>
+                <span class="text-[11px] text-muted-foreground">{{ textGenPolicyDescription }}</span>
+              </div>
+              <Select v-model="ui.textGenerationPolicy" class="min-w-[200px]" :options="textGenPolicyOptions" />
             </div>
           </div>
 
@@ -1043,7 +1051,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
 import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, type NtfyEvent } from "@/stores/ui";
+import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEXT_GENERATION_POLICIES, type NtfyEvent } from "@/stores/ui";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import ProvidersPanel from "@/components/ProvidersPanel.vue";
@@ -1054,7 +1062,7 @@ import { soundsForKind, playSound, type SoundKind } from "@/lib/sounds";
 import { eventToShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
-import { ensureModels, modelsFor, textGenerationValue } from "@/lib/chatModels";
+import { effortLabel, effortsFor, ensureModels, modelsFor, parseTextGenerationValue, textGenerationValue } from "@/lib/chatModels";
 
 defineEmits<{ close: [] }>();
 
@@ -1116,7 +1124,7 @@ const SPAWN_MODE_OPTIONS = [
 const textGenerationAgents = computed(() =>
   providers.active.filter((a) => ["claude", "codex", "gemini", "opencode"].includes(a.providerId)),
 );
-const commitMessageModelOptions = computed(() =>
+const textGenModelOptions = computed(() =>
   textGenerationAgents.value.flatMap((agent) =>
     modelsFor(agent.id)
       .map((model) => ({
@@ -1124,6 +1132,43 @@ const commitMessageModelOptions = computed(() =>
         label: `${agent.name} · ${model.label}`,
       })),
   ),
+);
+// The preference is one string ("kind::provider::model::effort"); the two
+// pickers are views on it, so switching model can't leave an effort behind that
+// the new model never published.
+const NO_EFFORT = "provider-default";
+const textGenSelection = computed(() => parseTextGenerationValue(ui.textGenerationModel));
+const textGenAgent = computed(() =>
+  textGenerationAgents.value.find(
+    (agent) => agent.kind === textGenSelection.value.kind && agent.providerId === textGenSelection.value.providerId,
+  ),
+);
+const textGenModel = computed({
+  get: () => textGenerationValue(textGenSelection.value.kind, textGenSelection.value.providerId, textGenSelection.value.modelId),
+  set: (value: string) => { ui.textGenerationModel = value; }, // 3-part: drops any pinned effort
+});
+const textGenEffortOptions = computed(() => {
+  const agent = textGenAgent.value;
+  const efforts = agent ? effortsFor(agent.id, textGenSelection.value.modelId) : [];
+  if (!efforts.length) return [];
+  // Codex text generation runs at "low" unless told otherwise (t3code's
+  // CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT), so say so rather than pretend
+  // the provider's own default applies.
+  const fallback = textGenSelection.value.kind === "codex" ? "Low (default)" : "Provider default";
+  // NO_EFFORT rather than "": reka-ui's SelectItem rejects an empty value (it
+  // reserves it for "clear the selection and show the placeholder").
+  return [{ value: NO_EFFORT, label: fallback }, ...efforts.map((effort) => ({ value: effort, label: effortLabel(effort) }))];
+});
+const textGenEffort = computed({
+  get: () => textGenSelection.value.effort || NO_EFFORT,
+  set: (effort: string) => {
+    const { kind, providerId, modelId } = textGenSelection.value;
+    ui.textGenerationModel = textGenerationValue(kind, providerId, modelId, effort === NO_EFFORT ? "" : effort);
+  },
+});
+const textGenPolicyOptions = computed(() => TEXT_GENERATION_POLICIES.map((p) => ({ value: p.id, label: p.label })));
+const textGenPolicyDescription = computed(
+  () => TEXT_GENERATION_POLICIES.find((p) => p.id === ui.textGenerationPolicy)?.description ?? "",
 );
 watch(
   textGenerationAgents,

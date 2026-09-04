@@ -161,6 +161,7 @@
         <li>Stage, unstage, stage-all</li>
         <li>Diff viewer per file</li>
         <li>Git init button if no repo</li>
+        <li><strong>Generated text</strong> — commit message (sparkle button), PR title &amp; body (<code>Create PR</code>), worktree branch names and chat titles all come from one cheap model, picked in Settings → General together with a reasoning effort and a house style (<em>Default</em> / <em>Conventional Commits</em> / <em>Match this repository</em>). Ported from t3code; see <code>src-wails/textgen.go</code></li>
       </ul>
     </div>
     <div class="card">
@@ -285,6 +286,10 @@
       <tr><td>reinstall_status_hooks()</td><td>Re-merge the <code>burrow hook</code> status hook into Claude/Codex global config (idempotent)</td></tr>
       <tr><td>remove_status_hooks()</td><td>Strip burrow's status hooks back out (leaves other hooks intact)</td></tr>
       <tr><td>repair_agent_status()</td><td>One-button repair: reclaim <code>hook.port</code> for the live server + re-install bin &amp; hooks; returns the port</td></tr>
+      <tr><td>generate_commit_message(cwd, model, policy)</td><td>Commit subject + body from the staged diff (one-shot CLI, JSON schema)</td></tr>
+      <tr><td>generate_pr_content(cwd, model, policy, baseBranch, headBranch)</td><td>PR title + body from the commits and diff between two branches; <code>gh pr create</code> falls back to <code>--fill</code> when it fails</td></tr>
+      <tr><td>generate_branch_name(cwd, model, policy, message)</td><td>Semantic worktree branch slug from the composer's prompt; <code>""</code> keeps the random name</td></tr>
+      <tr><td>generate_chat_title(cwd, model, policy, text)</td><td>Thread title from the first user message; <code>""</code> keeps the heuristic one</td></tr>
     </tbody>
   </table>
   <p style="color:var(--muted);font-size:13px">Agent status flows: globally-installed hooks → <code>burrow hook</code> → <code>burrow status</code> → HTTP server → <code>pty-hook-{id}</code> event → <code>XTerm.vue</code>. Installed on every launch by <code>installStatusHooks</code> (<code>src-wails/statushooks.go</code>) into <code>~/.claude/settings.json</code>, <code>~/.codex/hooks.json</code>, <code>~/.copilot/hooks/burrow.json</code>, any <code>CLAUDE_CONFIG_DIR</code>/<code>CODEX_HOME</code>/<code>COPILOT_HOME</code> the app inherited, plus every per-instance config dir set in Settings → Providers. Merge is additive + marker-deduped, so other tools' hooks survive. The same pass installs the agent docs (<code>src-wails/agentdocs.go</code>): the <code>/burrow</code> skill wholesale into <code>&lt;dir&gt;/skills/burrow/SKILL.md</code> (Claude + Copilot, the latter also registered in <code>skillDirectories</code>), and a <code>&lt;!-- BURROW:BEGIN/END --&gt;</code> block in <code>~/.claude/CLAUDE.md</code> / <code>~/.codex/AGENTS.md</code>. Doc bodies are markdown files under <code>src-wails/agentdocs/</code>; <code>.claude/skills/burrow</code> in the repo is a symlink to the same source. See <a href="burrow.html">burrow.html</a> for the full mechanism.</p>
