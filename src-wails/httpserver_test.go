@@ -181,3 +181,17 @@ func TestRandomPairCodeIsSixDigits(t *testing.T) {
 		t.Fatalf("only %d distinct codes in 50 draws — not random enough", len(seen))
 	}
 }
+
+// A numeric id (what you get from JSON.stringify-ing a JS number, e.g.
+// tab.ptyId in src/mobile/store.ts) makes the WHOLE wsCall fail to decode —
+// not just the id field — so the command is silently dropped by the
+// `if json.Unmarshal(...) != nil { continue }` guard in handleWS. Every
+// mobile call site must therefore send ids as strings. This test exists so
+// nobody "fixes" wsArgs.ID to accept numbers instead of fixing the caller.
+func TestWsArgsRejectsNumericID(t *testing.T) {
+	var c wsCall
+	err := json.Unmarshal([]byte(`{"id":1,"command":"write_pty","args":{"id":42,"data":[1]}}`), &c)
+	if err == nil {
+		t.Fatal("expected a decode error for a numeric id — if this now passes, handleWS's silent-drop guard must be revisited too")
+	}
+}

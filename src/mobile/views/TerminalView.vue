@@ -54,7 +54,7 @@ function writeBytes(payload: number[]) {
 
 function sendBytes(bytes: number[]) {
   if (!tab) return;
-  store.getClient().call('write_pty', { id: tab.ptyId, data: bytes }).catch(() => {});
+  store.getClient().call('write_pty', { id: String(tab.ptyId), data: bytes }).catch(() => {});
 }
 
 function send() {
@@ -94,7 +94,7 @@ onMounted(() => {
   // Vec<u8> serializes as a JSON array of byte numbers over WS — not base64/text.
   client.subscribe(`pty-data-${tab.ptyId}`, (payload: number[]) => writeBytes(payload));
 
-  client.call('resize_pty', { id: tab.ptyId, cols: term.cols, rows: term.rows }).catch(() => {});
+  client.call('resize_pty', { id: String(tab.ptyId), cols: term.cols, rows: term.rows }).catch(() => {});
 
   window.addEventListener('resize', onResize);
 });
@@ -102,7 +102,7 @@ onMounted(() => {
 function onResize() {
   fitAddon?.fit();
   if (tab && term) {
-    store.getClient().call('resize_pty', { id: tab.ptyId, cols: term.cols, rows: term.rows }).catch(() => {});
+    store.getClient().call('resize_pty', { id: String(tab.ptyId), cols: term.cols, rows: term.rows }).catch(() => {});
   }
 }
 
