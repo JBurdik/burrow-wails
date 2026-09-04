@@ -98,6 +98,16 @@ export interface ChatSession {
   retain(): void;
   release(): void;
   /**
+   * Re-check whether this session is still worth keeping.
+   *
+   * release() cannot be the only place that decides: a session that was BUSY
+   * when its view closed is deliberately kept, and when that turn later
+   * finishes nothing looks again — so it would sit in the registry with its
+   * listeners and its whole transcript until the chat itself is closed. Call
+   * this at a turn boundary.
+   */
+  maybeEvict(): void;
+  /**
    * Is any mounted view holding this chat right now?
    *
    * The component must NOT answer this from its own props once it can be
@@ -111,6 +121,7 @@ export interface ChatSession {
 interface InternalSession extends ChatSession {
   handlers: ChatStreamHandlers;
   refCount: number;
+  evictTimer: ReturnType<typeof setTimeout> | null;
   eventsUL: UnlistenFn | null;
   claudeUL: UnlistenFn | null;
   acpDataUL: UnlistenFn | null;
@@ -169,6 +180,14 @@ export async function replayChatStream(chatId: number): Promise<void> {
  * t3code's `shouldEvictThreadDetailSubscription`, and it is the whole reason a
  * running turn survives the user switching tabs.
  */
+/** Delay before an unwatched, settled session is dropped. */
+const EVICT_DELAY_MS = 2_000;
+
+/** Nobody is looking, nothing is in flight, nothing is waiting to be sent. */
+function evictable(s: InternalSession): boolean {
+  return s.refCount === 0 && isIdle(s) && s.messageQueue.value.length === 0;
+}
+
 function isIdle(s: InternalSession): boolean {
   return !s.busy.value
     && s.pendingPermission.value === null
@@ -215,6 +234,7 @@ function create(chatId: number): InternalSession {
 
     handlers: { ...NOOP_HANDLERS },
     refCount: 0,
+    evictTimer: null,
     eventsUL: null,
     claudeUL: null,
     acpDataUL: null,
@@ -248,6 +268,7 @@ function create(chatId: number): InternalSession {
       }
     },
     detach() {
+      if (s.evictTimer) { clearTimeout(s.evictTimer); s.evictTimer = null; }
       s.eventsUL?.(); s.eventsUL = null;
       s.claudeUL?.(); s.claudeUL = null;
       s.acpDataUL?.(); s.acpDataUL = null;
@@ -257,10 +278,24 @@ function create(chatId: number): InternalSession {
 
     isWatched() { return s.refCount > 0; },
 
+    maybeEvict() {
+      if (s.evictTimer) clearTimeout(s.evictTimer);
+      // Deferred, and re-checked when it fires: a turn boundary is immediately
+      // followed by the queued-message flush (a nextTick away), and evicting
+      // between the two would hand that send a detached session while the next
+      // mount built a fresh one.
+      s.evictTimer = setTimeout(() => {
+        s.evictTimer = null;
+        if (!evictable(s)) return;
+        s.detach();
+        sessions.delete(chatId);
+      }, EVICT_DELAY_MS);
+    },
+
     retain() { s.refCount++; },
     release() {
       s.refCount = Math.max(0, s.refCount - 1);
-      if (s.refCount === 0 && isIdle(s)) {
+      if (evictable(s)) {
         s.detach();
         sessions.delete(chatId);
       }

@@ -24,6 +24,18 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.ResizePty(String(args.id), args.cols, args.rows);
     case "kill_pty":
       return App.KillPty(String(args.id));
+    // No-op, and deliberately NOT left to fall through to the default: the
+    // default throws, and XTerm.onBeforeUnmount awaits this call before
+    // disposing — so the throw skipped renderAddon.dispose() + term.dispose()
+    // and leaked an xterm instance (with its WebGL context) on every closed
+    // terminal.
+    //
+    // There is nothing to detach. The Rust backend closed a per-client stream;
+    // the Go daemon broadcasts frames to every attached client and a closed
+    // XTerm simply stops listening, while the PTY keeps running for the next
+    // reattach — which is exactly what the caller wants to happen.
+    case "detach_pty":
+      return Promise.resolve();
     case "get_pty_foreground":
       return App.GetPtyForeground(String(args.id));
     case "list_pty_sessions":

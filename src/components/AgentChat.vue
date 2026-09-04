@@ -2136,6 +2136,7 @@ function onEvents(batch: ChatEventBatch) {
           finalizeStuckTools(true);
           syncStore();
         }
+        S.maybeEvict();
         break;
     }
   }
@@ -2167,6 +2168,9 @@ function finishTurn() {
     if (qIdx !== -1) messages.value.splice(qIdx, 1);
     nextTick(() => sendMessage(next));
   }
+  // The session outlives this component while a turn is running; now that the
+  // turn is over it is only worth keeping if someone is still watching.
+  S.maybeEvict();
 }
 
 function onLine(line: string) {

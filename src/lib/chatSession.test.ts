@@ -127,3 +127,56 @@ describe("who counts as watching", () => {
     dropChatSession(21);
   });
 });
+
+describe("eviction after a turn ends behind a closed view", () => {
+  it("keeps a busy session on release, then drops it once it settles", () => {
+    // release() cannot be the only decision point: a busy session is kept on
+    // purpose, and if nothing looks again it sits in the registry with its
+    // listeners and transcript until the chat itself is closed.
+    vi.useFakeTimers();
+    const s = chatSession(30);
+    s.retain();
+    s.busy.value = true;
+    s.release();
+    expect(liveChatSessionIds()).toContain(30);
+
+    s.busy.value = false;
+    s.maybeEvict();
+    expect(liveChatSessionIds()).toContain(30); // deferred, not immediate
+    vi.runAllTimers();
+    expect(liveChatSessionIds()).not.toContain(30);
+    vi.useRealTimers();
+  });
+
+  it("does not evict while a queued message is still waiting to be sent", () => {
+    // finishTurn flushes the queue a nextTick later; evicting in between would
+    // hand that send a detached session while the next mount built a fresh one.
+    vi.useFakeTimers();
+    const s = chatSession(31);
+    s.retain();
+    s.release();
+    // release() already dropped it (idle, unwatched) — take a fresh one.
+    const s2 = chatSession(31);
+    s2.retain();
+    s2.busy.value = true;
+    s2.release();
+    s2.busy.value = false;
+    s2.messageQueue.value.push("next one");
+    s2.maybeEvict();
+    vi.runAllTimers();
+    expect(liveChatSessionIds()).toContain(31);
+    vi.useRealTimers();
+    dropChatSession(31);
+  });
+
+  it("keeps a session someone is still watching", () => {
+    vi.useFakeTimers();
+    const s = chatSession(32);
+    s.retain();
+    s.maybeEvict();
+    vi.runAllTimers();
+    expect(liveChatSessionIds()).toContain(32);
+    vi.useRealTimers();
+    dropChatSession(32);
+  });
+});
