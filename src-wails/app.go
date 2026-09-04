@@ -269,6 +269,23 @@ func (a *App) ListPtySessions() ([]string, error) {
 	return a.daemon.List()
 }
 
+// GetPtyForeground names the command in the foreground of a PTY. It is the
+// second of the two channels that decide a status dot (`XTerm.vue`): the agent
+// hooks are authoritative for an agent, and this poll covers everything they
+// cannot see — a plain `npm test` that has no hooks, and an agent that was
+// Ctrl-C'd without emitting a Stop.
+//
+// A failure is reported as an empty name, not an error: the caller polls this
+// every 2 s and already treats "" as "nothing to say", whereas a rejected
+// promise would spam the console on every teardown race.
+func (a *App) GetPtyForeground(id string) string {
+	name, err := a.daemon.Foreground(id)
+	if err != nil {
+		return ""
+	}
+	return name
+}
+
 // Idle-agent reaping, modelled on t3code's ProviderSessionReaper (same
 // thresholds): a chat's CLI is only worth its ~150 MB while something is
 // happening on it. Killing it emits the usual exit event, so the frontend marks

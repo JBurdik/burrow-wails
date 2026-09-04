@@ -24,6 +24,8 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.ResizePty(String(args.id), args.cols, args.rows);
     case "kill_pty":
       return App.KillPty(String(args.id));
+    case "get_pty_foreground":
+      return App.GetPtyForeground(String(args.id));
     case "list_pty_sessions":
       // The daemon binding exposes live IDs (`string[]`), while the legacy
       // Tauri UI contract expects session records. Normalize here so restored

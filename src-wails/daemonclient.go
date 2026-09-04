@@ -168,6 +168,16 @@ func (d *DaemonClient) Kill(id string) error {
 	return err
 }
 
+// Foreground asks the daemon what is running in the foreground of a PTY. Only
+// the daemon can answer: it holds the master fd the answer is read from.
+func (d *DaemonClient) Foreground(id string) (string, error) {
+	resp, err := d.call(daemonproto.Request{Kind: "foreground", ID: id})
+	if err != nil {
+		return "", err
+	}
+	return resp.Name, nil
+}
+
 func (d *DaemonClient) List() ([]string, error) {
 	resp, err := d.call(daemonproto.Request{Kind: "list"})
 	if err != nil {

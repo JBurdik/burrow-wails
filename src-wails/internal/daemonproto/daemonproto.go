@@ -9,7 +9,7 @@ package daemonproto
 // Request is a client -> daemon message. Kind selects which fields matter.
 type Request struct {
 	ReqID string   `json:"reqId"`
-	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list"
+	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list" | "foreground"
 	ID    string   `json:"id,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`
 	Env   []string `json:"env,omitempty"`
@@ -24,6 +24,7 @@ type Response struct {
 	OK    bool     `json:"ok"`
 	Error string   `json:"error,omitempty"`
 	IDs   []string `json:"ids,omitempty"` // for "list"
+	Name  string   `json:"name,omitempty"` // for "foreground"
 }
 
 // Frame is an unsolicited daemon -> client push: PTY output or exit.
