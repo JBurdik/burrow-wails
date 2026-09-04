@@ -118,6 +118,28 @@ func TestRemoteCreateChatRejectsNonClaude(t *testing.T) {
 	}
 }
 
+// RemoteCreateChat itself can't be exercised end-to-end here with an unknown
+// workspace id: resolving it goes through workspaceLabels() ->
+// ListWorkspaces(), which calls a.db.Query on the real *sql.DB — a bare
+// &App{} has a nil db, and database/sql panics (nil pointer dereference in
+// DB.conn) rather than returning an error. That's a pre-existing nil-DB
+// safety gap in ListWorkspaces/workspaceLabels, unrelated to this fix, and
+// out of scope here. So this tests the pure resolution logic RemoteCreateChat
+// added instead, which needs no DB at all.
+func TestResolveWorkspaceCwdRejectsUnknownWorkspace(t *testing.T) {
+	paths := map[int64]string{2: "/repo/path"}
+	if _, err := resolveWorkspaceCwd(paths, 999999); err == nil {
+		t.Fatal("expected an error for an unknown workspace id")
+	}
+	if _, err := resolveWorkspaceCwd(map[int64]string{2: ""}, 2); err == nil {
+		t.Fatal("expected an error for a workspace resolved to an empty path")
+	}
+	cwd, err := resolveWorkspaceCwd(paths, 2)
+	if err != nil || cwd != "/repo/path" {
+		t.Fatalf("cwd = %q, err = %v, want \"/repo/path\", nil", cwd, err)
+	}
+}
+
 // Empty SQL results used to marshal as JSON null, which threw inside
 // store.ts's `tabs.filter(...)` and surfaced on the phone as "Relace se
 // nepodařilo načíst". Every list the frontend maps over must be [].

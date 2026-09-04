@@ -6,9 +6,9 @@ const store = useRemoteStore();
 const liveChats = computed(() => store.chats.filter((chat) => store.chatStatus(chat) !== "idle"));
 const primaryChat = computed(() => liveChats.value[0] ?? store.chats[0] ?? null);
 const allTabs = computed(() => store.workspaces.flatMap((workspace) => workspace.tabs));
-const activeTabs = computed(() => allTabs.value.filter((tab) => ['running', 'waiting', 'permission'].includes(store.statusFor(tab.ptyId))));
-const completedTabs = computed(() => allTabs.value.filter((tab) => store.statusFor(tab.ptyId) === 'done'));
-const needsAttention = computed(() => activeTabs.value.filter((tab) => ['waiting', 'permission'].includes(store.statusFor(tab.ptyId))));
+const activeTabs = computed(() => allTabs.value.filter((tab) => ['running', 'waiting', 'permission', 'error'].includes(store.statusFor(tab.ptyId))));
+const completedTabs = computed(() => allTabs.value.filter((tab) => ['done', 'review'].includes(store.statusFor(tab.ptyId))));
+const needsAttention = computed(() => activeTabs.value.filter((tab) => ['waiting', 'permission', 'error'].includes(store.statusFor(tab.ptyId))));
 
 function statusLabel(status: TabStatus) {
   return { idle: 'Připraveno', running: 'Pracuje', waiting: 'Čeká', permission: 'Potřebuje tebe', done: 'Hotovo', review: 'Hotovo', error: 'Chyba' }[status];
@@ -49,7 +49,7 @@ onMounted(() => { if (!store.workspaces.length) store.loadSessions(); if (!store
     <template v-else>
       <section v-if="liveChats.length || store.chats.length > liveChats.length" class="session-section" aria-labelledby="chat-heading">
         <div class="section-heading"><p id="chat-heading" class="section-label">KONVERZACE</p><button class="text-action" type="button" @click="store.showChats">Všechny</button></div>
-        <ul class="session-list"><li v-for="chat in liveChats.slice(0, 3)" :key="chat.id"><button class="session-row" type="button" @click="store.openChat(chat)"><span :class="['session-icon', store.chatStatus(chat)]" aria-hidden="true">✦</span><span class="session-main"><span class="session-title">{{ chat.title }}</span><span class="session-path">{{ chat.workspaceName ? chat.workspaceName + ' · ' : '' }}{{ chat.agentKind || chat.transport }}</span></span><span :class="['state-pill', store.chatStatus(chat)]">{{ chat.busy ? 'Pracuje' : store.chatStatus(chat) === 'error' ? 'Chyba' : store.chatStatus(chat) === 'review' ? 'Hotovo' : store.chatStatus(chat) === 'permission' ? 'Potřebuje tě' : 'Připraven' }}</span><span class="session-chevron" aria-hidden="true">›</span></button></li></ul>
+        <ul class="session-list"><li v-for="chat in liveChats.slice(0, 3)" :key="chat.id"><button class="session-row" type="button" @click="store.openChat(chat)"><span :class="['session-icon', store.chatStatus(chat)]" aria-hidden="true">✦</span><span class="session-main"><span class="session-title">{{ chat.title }}</span><span class="session-path">{{ chat.workspaceName ? chat.workspaceName + ' · ' : '' }}{{ chat.agentKind || chat.transport }}</span></span><span :class="['state-pill', store.chatStatus(chat)]">{{ store.chatStatus(chat) === 'permission' ? 'Potřebuje tě' : chat.busy ? 'Pracuje' : store.chatStatus(chat) === 'error' ? 'Chyba' : store.chatStatus(chat) === 'review' ? 'Hotovo' : 'Připraven' }}</span><span class="session-chevron" aria-hidden="true">›</span></button></li></ul>
         <p v-if="store.chats.length > liveChats.length" class="settled-hint">{{ store.chats.length - liveChats.length }} dalších čeká v Chatech (bez aktivity)</p>
       </section>
       <section v-if="activeTabs.length" class="session-section" aria-labelledby="active-heading">

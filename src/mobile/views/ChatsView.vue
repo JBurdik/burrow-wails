@@ -44,7 +44,7 @@ onMounted(() => { if (!store.chats.length) store.loadChats(); });
     <button v-for="chat in liveChats" :key="chat.id" class="chat-row" type="button" @click="store.openChat(chat)">
       <span :class="['s-dot', store.chatStatus(chat)]" aria-hidden="true" />
       <span class="chat-row-main"><strong>{{ chat.title }}</strong><small><span v-if="chat.workspaceName" class="chat-ws">{{ chat.workspaceName }}</span>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
-      <span :class="['chat-status', { 'chat-status--busy': chat.busy }]">{{ chat.busy ? 'Pracuje' : store.chatStatus(chat) === 'review' ? 'Hotovo' : store.chatStatus(chat) === 'permission' ? 'Potřebuje tě' : store.chatStatus(chat) === 'error' ? 'Chyba' : 'Připraven' }}</span>
+      <span :class="['chat-status', { 'chat-status--busy': chat.busy }]">{{ store.chatStatus(chat) === 'permission' ? 'Potřebuje tě' : chat.busy ? 'Pracuje' : store.chatStatus(chat) === 'review' ? 'Hotovo' : store.chatStatus(chat) === 'error' ? 'Chyba' : 'Připraven' }}</span>
       <span class="chevron">›</span>
     </button>
     <section v-if="!liveChats.length && !settledChats.length" class="empty"><span>✦</span><strong>Žádná chatová relace</strong><p>Otevři nebo spusť chat v desktopovém Burrowu. Tady se objeví a půjde okamžitě ovládat.</p></section>

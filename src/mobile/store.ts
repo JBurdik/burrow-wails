@@ -52,6 +52,10 @@ export interface PendingPermission {
   // src/lib/acpParser.ts's parseAcpPermRequest); generic ACP's are read
   // verbatim from params.options since they're provider-defined.
   options: { optionId: string; kind: string }[];
+  // The tool's original arguments (Claude only) — must be echoed back verbatim
+  // on allow, since the protocol executes the tool with whatever
+  // `updatedInput` the response carries (see respondChatPermission).
+  input?: Record<string, unknown>;
 }
 
 export interface RemoteChat {
@@ -304,6 +308,14 @@ export const useRemoteStore = defineStore("remote", () => {
   // remote client no longer re-implements stream-json and ACP to its own,
   // shallower depth than the desktop.
   function applyEvent(chat: RemoteChat, event: Record<string, any>) {
+    // Only these events happen strictly during an active turn — a chat
+    // driven from the desktop (or another remote client) never runs sendChat
+    // on this client, so chat.busy would otherwise stay false the whole time
+    // and the chat would look idle (and get hidden by the settled-chats
+    // declutter) while it is actually streaming. tool.completed is excluded:
+    // it can arrive after the fact and says nothing about whether a turn is
+    // currently running.
+    if (["text.delta", "thinking.delta", "tool.started"].includes(event.type) && !chat.busy) chat.busy = true;
     switch (event.type) {
       case "text.delta":
         appendRemoteText(chat, "assistant", event.text ?? "");
@@ -330,6 +342,13 @@ export const useRemoteStore = defineStore("remote", () => {
       }
       case "turn.completed":
       case "turn.failed": {
+        // A turn ending is the one event guaranteed to mean "whatever was
+        // pending is no longer pending" — regardless of whether mobile,
+        // desktop, or nobody resolved it. Without this, a permission the
+        // desktop answered (or one bypassed by the turn otherwise moving on)
+        // would stay stuck forever, pinning this chat to the top of the list
+        // and permanently disabling its composer.
+        chat.pendingPermission = null;
         chat.busy = false;
         chat.messages.forEach((message) => { message.partial = false; });
         const watching = view.value === "chat" && activeChat.value?.id === chat.id;
@@ -378,9 +397,15 @@ export const useRemoteStore = defineStore("remote", () => {
   function watchChatPermissions(chat: RemoteChat) {
     const rawEvent = chat.transport === "claude-cli" ? `claude-data-${chat.id}` : `acp-req-${chat.id}`;
     client?.subscribe(rawEvent, (payload) => {
-      const line = typeof payload === "string" ? safeJson(payload) : payload;
-      if (!line || typeof line !== "object") return;
-      const msg = line as Record<string, any>;
+      // The WS payload is the ChatStreamLine envelope emitted by Go's
+      // emitChatLine ({ord, kind, line}) — `line` is a STRING holding the
+      // actual raw protocol JSON, not the message itself. Unwrap it before
+      // reading msg.type/.request/.id/.method, or every field below reads
+      // undefined and no permission is ever detected.
+      const envelope = (typeof payload === "string" ? safeJson(payload) : payload) as { line?: string } | null;
+      const parsed = typeof envelope?.line === "string" ? safeJson(envelope.line) : null;
+      if (!parsed || typeof parsed !== "object") return;
+      const msg = parsed as Record<string, any>;
 
       if (chat.transport === "claude-cli") {
         if (msg.type !== "control_request" || msg.request?.subtype !== "can_use_tool") return;
@@ -391,6 +416,7 @@ export const useRemoteStore = defineStore("remote", () => {
           toolName: msg.request.tool_name ?? "Tool",
           detail: String(detail),
           options: [],
+          input,
         };
         return;
       }
@@ -499,7 +525,11 @@ export const useRemoteStore = defineStore("remote", () => {
           id: String(chat.id),
           requestId: pending.requestId,
           response: allow
-            ? { behavior: "allow", updatedInput: {} }
+            // Echo the tool's original arguments — the protocol executes the
+            // tool with whatever updatedInput is sent, so sending {} would
+            // silently strip the command/file_path/etc the user was shown
+            // and approved (mirrors AgentChat.vue's opts?.updatedInput ?? cr.input).
+            ? { behavior: "allow", updatedInput: pending.input ?? {} }
             : { behavior: "deny", message: "User denied this action." },
         });
       } else if (pending.rpcId !== undefined) {

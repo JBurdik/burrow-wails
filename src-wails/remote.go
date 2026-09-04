@@ -144,11 +144,36 @@ func remoteCreateChatSession(cfg map[string]any, workspaceID int64, agentKind st
 	return session, id
 }
 
+// resolveWorkspaceCwd fails closed on an unknown workspace id — a request
+// naming a workspace the app doesn't know about must error instead of
+// silently resolving to cwd="" and letting ClaudeStart spawn the CLI in an
+// empty working directory (the spec's Error Handling section names this
+// case explicitly). Split out as a pure function so it can be unit-tested
+// without going through workspaceLabels()/ListWorkspaces(), which need a
+// live DB.
+func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, error) {
+	cwd, ok := paths[workspaceID]
+	if !ok || cwd == "" {
+		return "", fmt.Errorf("unknown workspace %d", workspaceID)
+	}
+	return cwd, nil
+}
+
 // RemoteCreateChat is the one write RemoteListChats's read-only comment
-// above deliberately excluded — see that comment for why config.json's
-// read-modify-write here can race a concurrent desktop setConfig save. The
-// window is one HTTP round trip right after the phone picks a workspace, so
-// the risk is accepted rather than adding cross-process locking for it.
+// above deliberately excluded. The risk here is broader than "one HTTP round
+// trip": the desktop frontend caches the whole of config.json in memory and
+// rewrites it wholesale on every setConfig, so ANY desktop write during this
+// read-modify-write — a font preference change, a panel resize, anything,
+// not just another chat mutation — can silently revert this call's new
+// session row and its chatIdCounter bump. In the worst case a
+// subsequently-created desktop chat reuses the id this call just "took" (the
+// counter reverted to its pre-bump value), silently attaching the desktop's
+// new chat UI to this call's still-running CLI process. remoteCreateMu below
+// only serializes concurrent RemoteCreateChat calls against each other
+// (e.g. two phones, or a rapid double-tap) — it does nothing to prevent the
+// desktop-side staleness, which needs the desktop frontend to reload chat
+// state after a remote-triggered creation (a larger change, tracked as a
+// follow-up, not attempted here).
 //
 // Claude-only for now: an ACP/Codex session needs command/args/configDir
 // resolved from provider config that today only exists in
@@ -157,6 +182,17 @@ func remoteCreateChatSession(cfg map[string]any, workspaceID int64, agentKind st
 func (a *App) RemoteCreateChat(workspaceID int64, agentKind string) (map[string]any, error) {
 	if agentKind != "claude" {
 		return nil, fmt.Errorf("remote chat creation only supports Claude for now (got %q)", agentKind)
+	}
+
+	a.remoteCreateMu.Lock()
+	defer a.remoteCreateMu.Unlock()
+
+	// Resolve and validate the workspace BEFORE touching config.json, so an
+	// invalid request never mutates it.
+	names, paths := a.workspaceLabels()
+	cwd, err := resolveWorkspaceCwd(paths, workspaceID)
+	if err != nil {
+		return nil, err
 	}
 
 	raw, err := a.ReadConfig()
@@ -181,8 +217,6 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind string) (map[string]
 		return nil, err
 	}
 
-	names, paths := a.workspaceLabels()
-	cwd := paths[workspaceID]
 	chatID := fmt.Sprint(id)
 	if err := a.ClaudeStart(chatID, cwd, "", "default", "", "", "", "", "", ""); err != nil {
 		return nil, fmt.Errorf("start claude: %w", err)

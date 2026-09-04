@@ -41,6 +41,14 @@ type App struct {
 
 	maxAgents         int
 	burrowMcpMaxDepth int
+
+	// Guards RemoteCreateChat's read-modify-write of config.json end to end
+	// (through the ClaudeStart call) so two concurrent remote callers (two
+	// phones, or a rapid double-tap) can't interleave their own reads and
+	// writes and corrupt each other's chatIdCounter bump. It does NOT protect
+	// against a concurrent desktop setConfig save — see RemoteCreateChat's
+	// comment in remote.go for that risk, which this mutex does not close.
+	remoteCreateMu sync.Mutex
 }
 
 const httpServerPort = 37892
