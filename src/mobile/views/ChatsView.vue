@@ -2,21 +2,29 @@
 import { computed, onMounted, ref } from "vue";
 import { useRemoteStore } from "../store";
 import { Select } from "@/components/ui/select";
+import { STATUS_PRIORITY } from "@/lib/terminalStatus";
 
 const store = useRemoteStore();
-const orderedChats = computed(() => [...store.chats].sort((a, b) => Number(b.busy) - Number(a.busy) || b.id - a.id));
+const sortedChats = computed(() =>
+  [...store.chats].sort((a, b) => {
+    const pa = STATUS_PRIORITY.indexOf(store.chatStatus(a));
+    const pb = STATUS_PRIORITY.indexOf(store.chatStatus(b));
+    return pa !== pb ? pa - pb : b.id - a.id;
+  })
+);
+const liveChats = computed(() => sortedChats.value.filter((c) => store.chatStatus(c) !== "idle"));
+const settledChats = computed(() => sortedChats.value.filter((c) => store.chatStatus(c) === "idle"));
+const showSettled = ref(false);
 const creating = ref(false);
 const workspaceId = ref<number | null>(null);
-const agentKind = ref<"codex" | "claude">("codex");
 const createError = ref("");
 const workspaceOptions = computed(() => store.workspaces.map((workspace) => ({ value: String(workspace.id), label: workspace.name })));
 const workspaceIdModel = computed<string | undefined>({ get: () => workspaceId.value?.toString(), set: (id) => { workspaceId.value = id ? Number(id) : null; } });
-const agentOptions = [{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude" }];
 
 async function createChat() {
   if (!workspaceId.value) return;
   creating.value = true; createError.value = "";
-  try { await store.createChat(workspaceId.value, agentKind.value); }
+  try { await store.createChat(workspaceId.value, "claude"); }
   catch (error: any) { createError.value = error?.message ?? "Chat se nepodařilo vytvořit."; }
   finally { creating.value = false; }
 }
@@ -31,15 +39,26 @@ onMounted(() => { if (!store.chats.length) store.loadChats(); });
     <button class="refresh" type="button" @click="store.loadChats">↻</button>
   </header>
   <main class="m-body chat-list">
-    <section class="new-chat"><p class="eyebrow">NOVÁ KONVERZACE</p><div class="create-grid"><Select v-model="workspaceIdModel" class="mobile-select" :options="workspaceOptions" placeholder="Vyber projekt…" /><Select v-model="agentKind" class="mobile-select" :options="agentOptions" /><button type="button" :disabled="!workspaceId || creating" @click="createChat">{{ creating ? 'Spouštím…' : 'Nový chat' }}</button></div><p v-if="createError" class="create-error">{{ createError }}</p></section>
+    <section class="new-chat"><p class="eyebrow">NOVÁ KONVERZACE</p><div class="create-grid"><Select v-model="workspaceIdModel" class="mobile-select" :options="workspaceOptions" placeholder="Vyber projekt…" /><button type="button" :disabled="!workspaceId || creating" @click="createChat">{{ creating ? 'Spouštím…' : 'Nový chat' }}</button></div><p v-if="createError" class="create-error">{{ createError }}</p></section>
     <p class="eyebrow">ŽIVÉ CHATY</p>
-    <button v-for="chat in orderedChats" :key="chat.id" class="chat-row" type="button" @click="store.openChat(chat)">
-      <span :class="['chat-orb', { 'chat-orb--busy': chat.busy }]">✦</span>
+    <button v-for="chat in liveChats" :key="chat.id" class="chat-row" type="button" @click="store.openChat(chat)">
+      <span :class="['s-dot', store.chatStatus(chat)]" aria-hidden="true" />
       <span class="chat-row-main"><strong>{{ chat.title }}</strong><small><span v-if="chat.workspaceName" class="chat-ws">{{ chat.workspaceName }}</span>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
-      <span :class="['chat-status', { 'chat-status--busy': chat.busy }]">{{ chat.busy ? 'Pracuje' : 'Připraven' }}</span>
+      <span :class="['chat-status', { 'chat-status--busy': chat.busy }]">{{ chat.busy ? 'Pracuje' : store.chatStatus(chat) === 'review' ? 'Hotovo' : store.chatStatus(chat) === 'permission' ? 'Potřebuje tě' : store.chatStatus(chat) === 'error' ? 'Chyba' : 'Připraven' }}</span>
       <span class="chevron">›</span>
     </button>
-    <section v-if="!orderedChats.length" class="empty"><span>✦</span><strong>Žádná chatová relace</strong><p>Otevři nebo spusť chat v desktopovém Burrowu. Tady se objeví a půjde okamžitě ovládat.</p></section>
+    <section v-if="!liveChats.length && !settledChats.length" class="empty"><span>✦</span><strong>Žádná chatová relace</strong><p>Otevři nebo spusť chat v desktopovém Burrowu. Tady se objeví a půjde okamžitě ovládat.</p></section>
+
+    <template v-if="settledChats.length">
+      <button type="button" class="collapse-toggle" @click="showSettled = !showSettled">{{ showSettled ? '▾' : '▸' }} Ostatní ({{ settledChats.length }})</button>
+      <template v-if="showSettled">
+        <button v-for="chat in settledChats" :key="chat.id" class="chat-row chat-row--settled" type="button" @click="store.openChat(chat)">
+          <span class="s-dot idle" aria-hidden="true" />
+          <span class="chat-row-main"><strong>{{ chat.title }}</strong><small><span v-if="chat.workspaceName" class="chat-ws">{{ chat.workspaceName }}</span>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
+          <span class="chevron">›</span>
+        </button>
+      </template>
+    </template>
   </main>
   <nav class="bottom-nav" aria-label="Hlavní navigace"><button class="nav-item" type="button" @click="store.showDashboard"><span>⊞</span>Přehled</button><button class="nav-item nav-item--active" type="button"><span>✦</span>Chaty</button><button class="nav-item" type="button" @click="store.showSessions"><span>›_</span>Terminály</button></nav>
 </template>
@@ -57,4 +76,7 @@ onMounted(() => { if (!store.chats.length) store.loadChats(); });
   content: " ·";
   color: var(--text-muted);
 }
+
+.collapse-toggle { width: 100%; text-align: left; padding: 10px 2px; border: 0; background: transparent; color: var(--text-muted); font: 700 11px var(--font-mono); letter-spacing: .06em; }
+.chat-row--settled { opacity: .65; }
 </style>
