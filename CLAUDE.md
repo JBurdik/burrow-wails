@@ -53,7 +53,7 @@ Tests: `pnpm test` (vitest, no DOM env). Currently covers only `src/machines/age
 | `workspace` | List of workspaces (SQLite-backed via Wails bindings), which one is active, which are "opened" (PTYs kept alive) |
 | `terminalTabs` | Lightweight mirror of each workspace's tab list for the Sidebar; the real Terminal component is source of truth |
 | `agents` | Configurable agent presets (command, args, shortcut, color) persisted to `localStorage` |
-| `ui` | Settings panel open/close, font + scale preferences (persisted to `localStorage`) |
+| `ui` | Settings panel open/close, font + scale preferences (persisted to `localStorage`). **Not** the view state — `mode`/`welcomeVisible`/`viewingTabs` are computed from the route |
 | `terminal` | Legacy simple terminal store (mostly superseded by XTerm.vue) |
 | `fileTree` | File tree state for the sidebar |
 | `git` | Git status / diff for the right panel |
@@ -75,6 +75,74 @@ App.vue
 
 **Key keyboard shortcuts:** `⌘,` settings, `⌘P` spotlight.
 
+### View state = the URL (`src/router.ts`)
+
+`/` welcome composer · `/ws/:wsId` a workspace's tabs · `/ws/:wsId/tab/:tabId`
+one tab · `/dashboard` · catch-all → `/`. Hash history (no server behind the
+Wails asset scheme), memory history outside a browser so store tests can import
+the module.
+
+**There is no `<router-view>`.** `App.vue` reads the route and shows the surface
+itself, because the terminal host must stay mounted across every route —
+re-attaching a PTY replays the daemon ring buffer into a re-fitted xterm and
+corrupts the scrollback. Two guarded watchers in `App.vue` keep route and
+workspace/tab stores in step. Navigation is how you focus something: `focus_tab`
+pushes `/ws/:id/tab/:pty`, clicking a tab `replace`s the same shape.
+
+This replaced `ui.mode` + a tri-state `ui.welcomeOpen`, which every new piece of
+code had to remember to consult — and one that forgot is how a tab behind the
+welcome composer counted as "watched". Plan + rationale (incl. what was taken
+from `pingdotgg/t3code` and what deliberately was not):
+`docs/plans/003-view-state-routes.md`.
+
+### Chat stream ownership (`src/lib/chatSession.ts` + `src-wails/chatstream.go`)
+
+A chat's stream is owned by a **session registry keyed by chat id**, not by
+`AgentChat.vue`. The session holds the transcript, turn state, blocking requests
+and the `claude-data-{id}` / `acp-data-{id}` / `acp-req-{id}` listeners; the
+component installs its reducers with `setHandlers` on mount and `release()`s on
+unmount. A session is only torn down when it is **idle** — a running turn or a
+pending permission keeps streaming behind an unmounted view (ported from
+t3code's `shouldEvictThreadDetailSubscription`). That is what lets chat leaves
+render with `v-if` (`Terminal.isChatVisible`), so "is the user looking at this"
+is whether the component exists rather than a predicate someone can forget.
+
+Backing it, every agent line is also appended to SQLite `chat_stream(chat_id,
+ord, kind, line)` before it is emitted, and the event payload is `{ord, kind,
+line}`. `chat_stream_state.folded_ord` records how far the frontend has folded
+that log into `chat_messages` (written in the same transaction as the messages),
+so the trim can never delete a line nobody rendered. After a restart,
+`replayChatStream()` catches a chat up from `folded_ord`.
+
+### Provider protocol is parsed in Go (`src-wails/providerruntime.go`)
+
+Claude stream-json and ACP JSON-RPC are read in **one** place, on the Go side,
+and re-emitted as provider-neutral `ProviderRuntimeEvent`s on
+`chat-event-{chatId}` (`{ord, events}`) alongside the raw channel. Vocabulary:
+`text.delta` · `thinking.delta` · `user.delta` · `tool.started` ·
+`tool.completed` · `turn.completed` · `turn.failed` · `session.title` ·
+`session.id` · `session.exited`.
+
+The frontend previously had **three** partial parsers (`onLine` in
+`AgentChat.vue`, `lib/providerRuntime.ts`, and a thinner one in
+`src/mobile/store.ts`), only the first complete — so a second client could not
+get a correct transcript without re-implementing the protocol to its own depth.
+The parse belongs to whoever owns the process.
+
+What is left on the frontend is rendering: `src/lib/chatProjection.ts` turns
+events into `ChatMessage[]` (append-to-partial, tool-result matching), and
+`AgentChat.onEvents` does what only a mounted view can — scroll, notify, account
+for the turn. `LoadChatEventsSince` replays the recorded log as events, which is
+what `replayChatStream()` uses.
+
+**Still on the raw channel, deliberately** — these are UI decisions, not
+transcript: the control/permission protocol, Claude `system/init`, the ACP
+handshake (`modes`/`configOptions`), `serverRequest/resolved`, and the
+`acpPromptRpcId` correlation that settles an ACP turn. `chat_messages` is also
+still written by the frontend; making Go its sole writer is fáze 7 in the plan
+and has a real prerequisite (the transcript mixes stream-derived messages with
+client-authored ones).
+
 ### PTY / Agent state machine (`XTerm.vue`)
 
 Each `XTerm` creates a native PTY in Go (`CreatePty`), streams bytes via a Wails event `pty-data-{id}`, and sends input back via `WritePty`.
@@ -82,7 +150,7 @@ Each `XTerm` creates a native PTY in Go (`CreatePty`), streams bytes via a Wails
 Agent state (running / waiting for input / done) is detected two ways:
 1. **Global persistent hooks (primary)** — at startup `installStatusHooks` (`statushooks.go`) merges a status hook into each agent's own global config: Claude `~/.claude/settings.json`, Codex `~/.codex/hooks.json` (same schema). The hook command is `[ -n "$BURROW_PTY_ID" ] && '<app-data>/bin/burrow' hook || true` — a **no-op outside Burrow** (BURROW_PTY_ID unset). Inside a Burrow PTY, `burrow hook` reads the hook JSON on stdin, maps `hook_event_name` → state (`UserPromptSubmit`/`PostToolUse`→running; `PreToolUse`→**waiting** for the blocking tools `AskUserQuestion`/`ExitPlanMode`, else running; `PermissionRequest`→**permission** (agent needs an allow/deny decision); `Stop`→done, **except** a Stop carrying still-running `background_tasks`→running (interim stop — Claude auto-resumes the same session, so reporting done here was the premature-completion bug; the `background_tasks` status check is scoped to that array slice, so an unrelated `"status":"running"` elsewhere in the JSON can't false-positive); `SessionStart`→**session** (forwards `model`/`source`/`session_title` as metadata to label the tab); `StopFailure`→**error** (turn ended on an API error; `error_type` passed through as `detail` — e.g. `billing_error`); `Notification`→refined by its `type` field (`permission_prompt`→permission, `idle_prompt`→waiting, else no-op — blanket no-op only for unknown types now); `SubagentStop`/`SessionEnd`→no-op telemetry, not a turn boundary) and `burrow status <state> [--detail/--model/--source/--title]` POSTs `{ptyId,state,…}` to a local Go HTTP server (`StartHookServer`, `hookserver.go`). The server re-emits Wails event `pty-hook-{id}` — bare state string for the legacy states, object `{state,detail?|model?|source?|title?}` for `error`/`session`; `XTerm.vue` listens → emits ONE semantic `agentState` (`running`/`waiting`/`permission`/`done`) which `Terminal.vue`'s `onAgentState` turns into a clean status transition (a single event has no ordering hazard, so a trailing `waiting` can't clobber a fresh `done`). **Because the hooks are global + env-driven, status works for every agent session — launched-by-button, typed by hand, or reattached after restart.** The merge is non-destructive (appends, dedupes by marker, writes a `.burrow-bak`). Port survives restart: `burrow status` reads `<BURROW_HOME_DIR>/hook.port` (authoritative — rewritten each launch) else `BURROW_HOOK_PORT`.
    - Per-tab result capture (`burrow wait`) still needs a per-launch `--settings` with a `Stop→burrow capture <token>` hook, since the token is unique to a spawned sub-agent. That's the **only** remaining per-launch injection.
-2. **Polling fallback** — every 2 s, `get_pty_foreground` → title only for agent processes. For an agent foreground proc the poll **never fabricates `busy`** (an agent stays foreground whether thinking or idle at its prompt — equating presence with busy was the old stuck-orange bug). It drives `busy` only for plain commands (`npm test`, `vim`), and clears state when the shell returns to foreground (rescues a Ctrl+C'd agent with no `done` hook). **Dead-PTY watchdog**: if an agent leaf is still in-flight (per its last hook: running/waiting/permission) but `get_pty_foreground` returns empty for ≥3 consecutive polls, the poll confirms the PTY is actually dead via `list_pty_sessions` (`alive=false`) and only then emits `interrupt` to settle the stuck dot — covers an agent killed/crashed with no `Stop`. A single empty read is a transient daemon race and is ignored.
+2. **Polling fallback** — every 2 s, `get_pty_foreground` → title only for agent processes. In Go this is `ptycore.Foreground()`: `TIOCGPGRP` (tcgetpgrp) on the PTY master fd — the terminal's own notion of foreground, i.e. whatever the kernel would send Ctrl-C to — resolved to a command name via `p_comm` from sysctl rather than forking `ps`. It travels over the daemon protocol (`kind:"foreground"`) because the daemon holds the master fd; the app-side binding reports failure as an empty name, since the caller polls it and already reads "" as "nothing to say". **The shell IS reported by name** when it is foreground — that is how `XTerm.vue`'s `SHELL_RE` branch learns a command or agent has exited. For an agent foreground proc the poll **never fabricates `busy`** (an agent stays foreground whether thinking or idle at its prompt — equating presence with busy was the old stuck-orange bug). It drives `busy` only for plain commands (`npm test`, `vim`), and clears state when the shell returns to foreground (rescues a Ctrl+C'd agent with no `done` hook). **Dead-PTY watchdog**: if an agent leaf is still in-flight (per its last hook: running/waiting/permission) but `get_pty_foreground` returns empty for ≥3 consecutive polls, the poll confirms the PTY is actually dead via `list_pty_sessions` (`alive=false`) and only then emits `interrupt` to settle the stuck dot — covers an agent killed/crashed with no `Stop`. A single empty read is a transient daemon race and is ignored.
 
 **Status surfacing** (`Terminal.vue`): each leaf carries `status: idle|running|waiting|permission|done|review|error`. `permission` (amber pulse + Sidebar bell) means the agent is blocked on an allow/deny decision — distinct from plain `waiting` (blue). `error` (**red pulse**) is a **failed turn** (Claude `StopFailure`: `rate_limit`/`overloaded`/`authentication_failed`/`billing_error`/`server_error`…); the `error_type` rides through as `detail` (shown as the dot tooltip, set on `leaf.statusDetail`). Like `review`, `error` **persists until the tab is seen** (`markTabSeen`) — it never auto-clears, even while watching; a fresh `running` turn clears it. On turn-finish, `settleDone()` checks `isWatching(tab)` (workspace visible + tab active + window focused): watching → transient `done` (lime, 4 s auto-clear); not watching → **`review`** (green pulse, persists until the tab is seen via `markTabSeen`). `tabStatus()` priority (`STATUS_PRIORITY` in `terminalStatus.ts`): **error** > permission > waiting > running > review > done > idle (error is most urgent — the user must see a failed turn first). The `session` event (`SessionStart`) is **not** a status — it's metadata; `XTerm.vue` forwards `{model,source,title}` via a separate `agentMeta` emit and `Terminal.vue` stashes `leaf.model` + `leaf.sessionTitle` (model shown as the tab tooltip; session title fills in only a default "Terminal N" name, never clobbers an agent-set task title). Surfaced as status dots in the tab bar + Sidebar (Superset-style "agent finished while you were away").
 
@@ -170,7 +238,9 @@ managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md`.
 
 Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem:
 - **PTY management** (`app.go`) — `CreatePty`, `WritePty`, `ResizePty`, `KillPty`, `ListPtySessions`
-- **SQLite** (`db.go`, `mattn/go-sqlite3`) — `workspaces` and `terminal_tabs` tables; DB lives in `<app-data>/workspaces.db`
+- **SQLite** (`db.go`) — `workspaces` and `terminal_tabs` tables; DB lives in `<app-data>/workspaces.db`, opened with `journal_mode(WAL)` + `busy_timeout(5000)` because the chat-stream writer appends from its own goroutine
+- **Chat transcripts** (`chatstore.go`) — `chat_messages`, `SaveChatMessages(chatID, json, foldedOrd)` / `LoadChatMessages`
+- **Chat stream log** (`chatstream.go`) — append-only `chat_stream` + `chat_stream_state`; `emitChatLine` is the single door for agent output (persist, then emit), used by both `claudechat.go` and `acp.go`
 - **Git** (`git.go`) — `RunGit` wraps the system git binary (checks known paths)
 - **FS** (`fs.go`) — `ReadDirShallow`, `WriteTextFile`
 
