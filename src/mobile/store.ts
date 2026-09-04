@@ -99,6 +99,10 @@ export const useRemoteStore = defineStore("remote", () => {
   const chats = ref<RemoteChat[]>([]);
   const activeChat = ref<RemoteChat | null>(null);
 
+  const reconnecting = ref(false);
+  let reconnectAttempt = 0;
+  let reconnectTimer: number | undefined;
+
   let client: BurrowWsClient | null = null;
   const doneTimers = new Map<number, number>();
 
@@ -159,6 +163,7 @@ export const useRemoteStore = defineStore("remote", () => {
       c.onClose = () => {
         connected.value = false;
         if (view.value === "terminal") view.value = "dashboard";
+        scheduleReconnect();
       };
       client = c;
       connected.value = true;
@@ -177,7 +182,28 @@ export const useRemoteStore = defineStore("remote", () => {
     }
   }
 
+  function scheduleReconnect() {
+    if (reconnectTimer !== undefined || view.value === "connect") return;
+    reconnecting.value = true;
+    const delay = Math.min(1000 * 2 ** reconnectAttempt, 30000);
+    reconnectTimer = window.setTimeout(async () => {
+      reconnectTimer = undefined;
+      if (!baseUrl.value || !token.value) { reconnecting.value = false; return; }
+      try {
+        await connect(baseUrl.value, token.value);
+        reconnectAttempt = 0;
+        reconnecting.value = false;
+      } catch {
+        reconnectAttempt++;
+        scheduleReconnect();
+      }
+    }, delay);
+  }
+
   function disconnect() {
+    if (reconnectTimer !== undefined) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
+    reconnectAttempt = 0;
+    reconnecting.value = false;
     client?.close();
     client = null;
     connected.value = false;
@@ -522,6 +548,6 @@ export const useRemoteStore = defineStore("remote", () => {
     chats, activeChat,
     pair, connect, disconnect, loadSessions, loadChats, openTerminal, closeTerminal, showDashboard, showSessions, showChats, openChat, closeChat, sendChat, createChat,
     statusFor, getClient,
-    markTabSeen, markChatSeen, chatStatus, respondChatPermission,
+    markTabSeen, markChatSeen, chatStatus, respondChatPermission, reconnecting,
   };
 });
