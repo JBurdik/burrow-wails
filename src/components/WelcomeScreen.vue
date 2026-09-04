@@ -207,6 +207,9 @@
       <WorkspaceTargetPicker
         :mode="worktreeMode"
         :current-branch="currentBranch"
+        :branches="switchableBranches"
+        @switch-branch="switchBranch"
+        @create-branch="createBranch"
         :base-branch="worktreeMode === 'new' ? currentBranch || 'HEAD' : undefined"
         appearance="attached"
         :disabled="worktreeBusy"
@@ -583,6 +586,21 @@ async function refreshCurrentBranch(workspace: Workspace | null) {
   } catch {
     fetchedBranch.value = "";
   }
+}
+
+// Switching is only safe for the repo the git store points at — that is the
+// checkout its switchBranch/createBranch would run in.
+const switchableBranches = computed(() =>
+  target.value && !target.value.worktree_branch && git.cwd === target.value.path ? git.branches : undefined,
+);
+
+async function switchBranch(name: string) {
+  try { await git.switchBranch(name); }
+  catch (e) { console.error("branch switch failed", e); }
+}
+async function createBranch(name: string) {
+  try { await git.createBranch(name); }
+  catch (e) { console.error("branch create failed", e); }
 }
 
 function worktreePath(workspace: Workspace, branch: string): string {

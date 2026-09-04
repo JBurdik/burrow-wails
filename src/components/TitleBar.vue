@@ -67,53 +67,6 @@
         <PhHouse :size="13" />
       </button>
       <span class="font-mono text-[11px] text-secondary-foreground" data-tauri-drag-region>{{ workspaceName || "Burrow" }}</span>
-      <div v-if="branch" class="relative [-webkit-app-region:no-drag]">
-        <button
-          class="flex items-center gap-[3px] rounded-md border border-border/70 bg-transparent px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-secondary-foreground"
-          :title="`Branch: ${branch} — click to switch`"
-          @click.stop="openBranchPicker"
-        >
-          <PhGitBranch :size="11" />
-          {{ branch }}
-        </button>
-        <div v-if="branchPickerOpen" class="absolute left-1/2 top-[calc(100%+5px)] z-[2000] w-[220px] -translate-x-1/2 overflow-hidden rounded-md border border-border bg-panel shadow-[0_8px_24px_rgba(0,0,0,0.45)]" @click.stop>
-          <input
-            ref="branchInputEl"
-            v-model="branchFilter"
-            class="box-border w-full border-0 border-b border-border bg-transparent px-[9px] py-[7px] font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
-            placeholder="Switch or create branch…"
-            @keydown.enter="onBranchEnter"
-            @keydown.esc="branchPickerOpen = false"
-          />
-          <div class="max-h-[180px] overflow-y-auto">
-            <div v-if="branchLoading" class="flex items-center gap-1.5 px-[9px] py-[5px] font-mono text-[11px] italic text-muted-foreground">Loading…</div>
-            <template v-else>
-              <div
-                v-for="b in filteredBranches"
-                :key="b"
-                class="flex cursor-pointer items-center gap-1.5 px-[9px] py-[5px] font-mono text-[11px] text-secondary-foreground hover:bg-hover hover:text-foreground"
-                :class="b === branch && 'text-accent'"
-                @click="switchBranch(b)"
-              >
-                <PhGitBranch :size="10" />
-                <span>{{ b }}</span>
-                <span v-if="b === branch" class="ml-auto not-italic text-accent">✓</span>
-              </div>
-              <div
-                v-if="showCreateOption"
-                class="flex cursor-pointer items-center gap-1.5 px-[9px] py-[5px] font-mono text-[11px] italic text-muted-foreground hover:bg-hover hover:text-foreground"
-                @click="createBranch(branchFilter.trim())"
-              >
-                <PhPlus :size="10" />
-                <span>Create "{{ branchFilter.trim() }}"</span>
-              </div>
-              <div v-if="!branchLoading && filteredBranches.length === 0 && !showCreateOption" class="px-2.5 py-2.5 text-center text-[10px] text-muted-foreground">
-                No branches found
-              </div>
-            </template>
-          </div>
-        </div>
-      </div>
       <CommitPushMenu v-if="branch" />
     </div>
 
@@ -217,12 +170,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhHouse, PhGitBranch, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhPlus, PhSkull, PhCopy } from "@phosphor-icons/vue";
+import { PhHouse, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhSkull, PhCopy } from "@phosphor-icons/vue";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useGitStore } from "@/stores/git";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import CommitPushMenu from "./CommitPushMenu.vue";
@@ -263,55 +215,6 @@ const lastOpenTarget = computed(() => openTargets.value.find((t) => t.id === las
 function toggleMenu() {
   menuOpen.value = !menuOpen.value;
   if (menuOpen.value) loadOpenTargets();
-}
-
-// ── Branch picker ───────────────────────────────────────────────────────────
-const git = useGitStore();
-const branchPickerOpen = ref(false);
-const branchFilter = ref("");
-const branchLoading = ref(false);
-const branchInputEl = ref<HTMLInputElement | null>(null);
-
-const filteredBranches = computed(() => {
-  const q = branchFilter.value.toLowerCase();
-  return q ? git.branches.filter(b => b.toLowerCase().includes(q)) : git.branches;
-});
-const showCreateOption = computed(() => {
-  const q = branchFilter.value.trim();
-  return q && !git.branches.includes(q);
-});
-
-async function openBranchPicker() {
-  if (branchPickerOpen.value) { branchPickerOpen.value = false; return; }
-  if (!props.folderPath) return;
-  branchPickerOpen.value = true;
-  branchFilter.value = "";
-  branchLoading.value = true;
-  try {
-    await git.fetchBranches();
-  } finally {
-    branchLoading.value = false;
-    await nextTick();
-    branchInputEl.value?.focus();
-  }
-}
-
-async function switchBranch(name: string) {
-  branchPickerOpen.value = false;
-  try { await git.switchBranch(name); }
-  catch (e) { console.error("branch switch failed", e); }
-}
-
-async function createBranch(name: string) {
-  if (!name) return;
-  branchPickerOpen.value = false;
-  try { await git.createBranch(name); }
-  catch (e) { console.error("branch create failed", e); }
-}
-
-function onBranchEnter() {
-  if (filteredBranches.value.length === 1) { switchBranch(filteredBranches.value[0]); return; }
-  if (showCreateOption.value) createBranch(branchFilter.value.trim());
 }
 
 // ── Notification center ─────────────────────────────────────────────────────
@@ -453,7 +356,6 @@ async function copyPath() {
 function onDocClick() {
   menuOpen.value = false;
   notifOpen.value = false;
-  branchPickerOpen.value = false;
   if (statsOpen.value) { statsOpen.value = false; clearInterval(statsTimer); }
 }
 onMounted(() => {
