@@ -184,11 +184,18 @@ export const useRemoteStore = defineStore("remote", () => {
       view.value = "dashboard";
       await Promise.all([loadSessions(), loadChats()]);
     } catch (e: any) {
-      connectError.value = e?.message ?? "Connection failed";
-      connected.value = false;
+      // Only clobber shared state if this is still the current attempt — a
+      // stale call failing after a newer one already succeeded must not
+      // flip a live connection back to disconnected/error.
+      if (myGeneration === connectGeneration) {
+        connectError.value = e?.message ?? "Connection failed";
+        connected.value = false;
+      }
       throw e;
     } finally {
-      connecting.value = false;
+      // Same guard: a superseded call's finally must not clear the
+      // "connecting" indicator while a newer call is still in flight.
+      if (myGeneration === connectGeneration) connecting.value = false;
     }
   }
 
