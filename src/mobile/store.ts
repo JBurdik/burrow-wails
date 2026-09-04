@@ -2,13 +2,14 @@ import { defineStore } from "pinia";
 import { reactive, ref } from "vue";
 import { BurrowWsClient } from "./api";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import type { TermStatus } from "@/lib/terminalStatus";
 
 const URL_LEGACY_KEY = "burrow-mobile-url";
 const TOKEN_LEGACY_KEY = "burrow-mobile-token";
 const URL_CONFIG_KEY = "mobileBaseUrl";
 const TOKEN_CONFIG_KEY = "mobileToken";
 
-export type TabStatus = "idle" | "running" | "waiting" | "permission" | "done";
+export type TabStatus = TermStatus;
 
 export interface Tab {
   ptyId: number;
@@ -53,6 +54,10 @@ export interface RemoteChat {
   workspaceName?: string;
   workspacePath?: string;
   messages: RemoteMessage[];
+  // Set when a turn finished while this chat was not the open one — cleared
+  // by markChatSeen(). Mirrors desktop's "review" persisting until the tab
+  // is seen (Terminal.vue's settleDone()).
+  unseen?: "review" | "error";
 }
 
 export type View = "connect" | "dashboard" | "chats" | "chat" | "sessions" | "terminal";
@@ -86,6 +91,12 @@ export const useRemoteStore = defineStore("remote", () => {
     return statuses.get(ptyId) ?? "idle";
   }
 
+  function chatStatus(chat: RemoteChat): TabStatus {
+    if (chat.busy) return "running";
+    if (chat.unseen) return chat.unseen;
+    return "idle";
+  }
+
   function watchTabStatus(ptyId: number) {
     client?.subscribe(`pty-hook-${ptyId}`, (payload) => {
       // Broadcast branch only ever sends the bare state string (see api.ts note).
@@ -94,10 +105,19 @@ export const useRemoteStore = defineStore("remote", () => {
         const t = doneTimers.get(ptyId);
         if (t !== undefined) { window.clearTimeout(t); doneTimers.delete(ptyId); }
         statuses.set(ptyId, state);
+      } else if (state === "error") {
+        const t = doneTimers.get(ptyId);
+        if (t !== undefined) { window.clearTimeout(t); doneTimers.delete(ptyId); }
+        statuses.set(ptyId, "error"); // persists until markTabSeen, like desktop
       } else if (state === "done") {
-        statuses.set(ptyId, "done");
-        const t = window.setTimeout(() => statuses.set(ptyId, "idle"), 4000);
-        doneTimers.set(ptyId, t);
+        const watching = view.value === "terminal" && activeTab.value?.ptyId === ptyId;
+        if (watching) {
+          statuses.set(ptyId, "done");
+          const t = window.setTimeout(() => statuses.set(ptyId, "idle"), 4000);
+          doneTimers.set(ptyId, t);
+        } else {
+          statuses.set(ptyId, "review");
+        }
       }
     });
   }
@@ -249,10 +269,13 @@ export const useRemoteStore = defineStore("remote", () => {
         return;
       }
       case "turn.completed":
-      case "turn.failed":
+      case "turn.failed": {
         chat.busy = false;
         chat.messages.forEach((message) => { message.partial = false; });
+        const watching = view.value === "chat" && activeChat.value?.id === chat.id;
+        if (!watching) chat.unseen = event.type === "turn.failed" ? "error" : "review";
         return;
+      }
       case "session.id":
         if (typeof event.sessionId === "string") chat.claudeSessionId = event.sessionId;
         return;
@@ -293,6 +316,12 @@ export const useRemoteStore = defineStore("remote", () => {
   function openChat(chat: RemoteChat) {
     activeChat.value = chat;
     view.value = "chat";
+    markChatSeen(chat.id);
+  }
+
+  function markChatSeen(chatId: number) {
+    const chat = chatFor(chatId);
+    if (chat) chat.unseen = undefined;
   }
 
   function closeChat() {
@@ -328,6 +357,12 @@ export const useRemoteStore = defineStore("remote", () => {
   function openTerminal(tab: Tab) {
     activeTab.value = tab;
     view.value = "terminal";
+    markTabSeen(tab.ptyId);
+  }
+
+  function markTabSeen(ptyId: number) {
+    const s = statuses.get(ptyId);
+    if (s === "review" || s === "error") statuses.set(ptyId, "idle");
   }
 
   function showDashboard() {
@@ -359,5 +394,6 @@ export const useRemoteStore = defineStore("remote", () => {
     chats, activeChat,
     pair, connect, disconnect, loadSessions, loadChats, openTerminal, closeTerminal, showDashboard, showSessions, showChats, openChat, closeChat, sendChat, createChat,
     statusFor, getClient,
+    markTabSeen, markChatSeen, chatStatus,
   };
 });
