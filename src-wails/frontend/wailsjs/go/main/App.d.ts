@@ -22,6 +22,8 @@ export function AcpStop(arg1:string):Promise<void>;
 
 export function AddMcpServer(arg1:string,arg2:Record<string, any>):Promise<void>;
 
+export function ChatFoldedOrd(arg1:string):Promise<number>;
+
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
 export function CheckpointDiff(arg1:string,arg2:string):Promise<string>;
@@ -86,6 +88,8 @@ export function GetHookServerPort():Promise<number>;
 
 export function GetHttpServerStatus():Promise<main.HttpServerStatus>;
 
+export function GetPtyForeground(arg1:string):Promise<string>;
+
 export function GetTailscaleStatus():Promise<main.TailscaleStatus>;
 
 export function HomeDir():Promise<string>;
@@ -120,7 +124,11 @@ export function ListTerminalTabs(arg1:number):Promise<Array<main.TerminalTab>>;
 
 export function ListWorkspaces():Promise<Array<main.Workspace>>;
 
+export function LoadChatEventsSince(arg1:string,arg2:number):Promise<Array<main.ChatEventBatch>>;
+
 export function LoadChatMessages(arg1:number):Promise<string>;
+
+export function LoadChatStreamSince(arg1:string,arg2:number):Promise<Array<main.ChatStreamLine>>;
 
 export function LspSend(arg1:string,arg2:string):Promise<void>;
 
@@ -192,7 +200,7 @@ export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
-export function SaveChatMessages(arg1:number,arg2:string):Promise<void>;
+export function SaveChatMessages(arg1:number,arg2:string,arg3:number):Promise<void>;
 
 export function SaveTempImage(arg1:string,arg2:string):Promise<string>;
 

@@ -272,13 +272,13 @@ func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 		// (session/request_permission); everything else is data.
 		_, hasMethod := msg["method"]
 		_, hasID := msg["id"]
-		topic := "acp-data-" + chatID
+		kind := "acp-data"
 		if hasMethod && hasID {
-			topic = "acp-req-" + chatID
+			kind = "acp-req"
 		}
-		emitAll(a.ctx, topic, raw)
+		a.emitChatLine(chatID, kind, raw)
 	}
-	emitAll(a.ctx, "acp-data-"+chatID, `{"_burrow":"exit"}`)
+	a.emitChatLine(chatID, "acp-data", `{"_burrow":"exit"}`)
 }
 
 // pumpCodexLine translates Codex app-server notifications into the ACP
@@ -295,7 +295,7 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		if err != nil {
 			return
 		}
-		emitAll(a.ctx, "acp-data-"+chatID, string(line))
+		a.emitChatLine(chatID, "acp-data", string(line))
 	}
 	// `turn/start` is acknowledged with an ordinary JSON-RPC response.  A
 	// rejection therefore has no `method`, and used to be silently discarded by
@@ -379,7 +379,7 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		// it on the request channel so the dedicated Codex input panel can respond.
 		line, err := json.Marshal(msg)
 		if err == nil {
-			emitAll(a.ctx, "acp-req-"+chatID, string(line))
+			a.emitChatLine(chatID, "acp-req", string(line))
 		}
 	default:
 		if _, hasID := msg["id"]; hasID {
@@ -516,7 +516,7 @@ func (a *App) resetCodexTurnWatchdog(chatID string, sess *acpSession) {
 		a.finishCodexTurn(chatID, sess, func(v any) {
 			line, err := json.Marshal(v)
 			if err == nil {
-				emitAll(a.ctx, "acp-data-"+chatID, string(line))
+				a.emitChatLine(chatID, "acp-data", string(line))
 			}
 		}, "The Codex app-server produced no events for 10 minutes. Stop and retry the turn.")
 	})
@@ -555,7 +555,7 @@ func (a *App) emitSession(chatID, sessionID string, modes any, configOptions any
 	if err != nil {
 		return
 	}
-	emitAll(a.ctx, "acp-data-"+chatID, string(line))
+	a.emitChatLine(chatID, "acp-data", string(line))
 }
 
 // AcpStart spawns an ACP adapter for chat opts.ID and completes its handshake.
@@ -681,7 +681,7 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 		// the history rendered (picker resume).
 		resp, err := reader.await(1, func(raw string, msg map[string]any) {
 			if m, _ := msg["method"].(string); m == "session/update" && opts.EmitHistory {
-				emitAll(a.ctx, "acp-data-"+opts.ID, raw)
+				a.emitChatLine(opts.ID, "acp-data", raw)
 			}
 		})
 		if err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,15 @@ func openDB(appDataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("mkdir app data dir: %w", err)
 	}
 	dbPath := filepath.Join(appDataDir, "workspaces.db")
-	db, err := sql.Open("sqlite", dbPath)
+	// WAL + a busy timeout, because writers are no longer only the UI thread:
+	// the chat stream log appends from its own goroutine while the frontend
+	// reads. On the default rollback journal with no timeout that is an
+	// immediate SQLITE_BUSY instead of a short wait. Both pragmas go in the
+	// DSN so every pooled connection gets them; the path is URL-escaped
+	// because the macOS app data dir contains a space.
+	dsn := "file:" + (&url.URL{Path: dbPath}).String() +
+		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -98,6 +107,7 @@ func migrate(db *sql.DB) error {
 		)`,
 	}
 	stmts = append(stmts, chatMessagesSchema()...)
+	stmts = append(stmts, chatStreamSchema()...)
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return err

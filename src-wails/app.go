@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"burrow/internal/agentproc"
@@ -20,6 +21,9 @@ type App struct {
 	ctx    context.Context
 	db     *sql.DB
 	daemon *DaemonClient
+
+	streamOnce sync.Once
+	streamW    *chatStreamWriter
 
 	claudeAgents *agentproc.Manager
 	acpSessions  *acpRegistry

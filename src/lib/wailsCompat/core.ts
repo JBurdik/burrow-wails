@@ -233,7 +233,15 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "load_chat_messages":
       return App.LoadChatMessages(args.chatId ?? args.chat_id);
     case "save_chat_messages":
-      return App.SaveChatMessages(args.chatId ?? args.chat_id, args.messages);
+      // foldedOrd: how far into chat_stream this transcript accounts for.
+      // -1 = "don't know", which leaves the existing mark alone (see chatstore.go).
+      return App.SaveChatMessages(args.chatId ?? args.chat_id, args.messages, args.foldedOrd ?? -1);
+    case "chat_folded_ord":
+      return App.ChatFoldedOrd(String(args.chatId ?? args.chat_id));
+    case "load_chat_events_since":
+      return App.LoadChatEventsSince(String(args.chatId ?? args.chat_id), args.since ?? 0);
+    case "load_chat_stream_since":
+      return App.LoadChatStreamSince(String(args.chatId ?? args.chat_id), args.since ?? 0);
     case "delete_chat_messages":
       return App.DeleteChatMessages(args.chatId ?? args.chat_id);
 

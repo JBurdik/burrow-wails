@@ -42,6 +42,10 @@ export function AddMcpServer(arg1, arg2) {
   return window['go']['main']['App']['AddMcpServer'](arg1, arg2);
 }
 
+export function ChatFoldedOrd(arg1) {
+  return window['go']['main']['App']['ChatFoldedOrd'](arg1);
+}
+
 export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
@@ -170,6 +174,10 @@ export function GetHttpServerStatus() {
   return window['go']['main']['App']['GetHttpServerStatus']();
 }
 
+export function GetPtyForeground(arg1) {
+  return window['go']['main']['App']['GetPtyForeground'](arg1);
+}
+
 export function GetTailscaleStatus() {
   return window['go']['main']['App']['GetTailscaleStatus']();
 }
@@ -238,8 +246,16 @@ export function ListWorkspaces() {
   return window['go']['main']['App']['ListWorkspaces']();
 }
 
+export function LoadChatEventsSince(arg1, arg2) {
+  return window['go']['main']['App']['LoadChatEventsSince'](arg1, arg2);
+}
+
 export function LoadChatMessages(arg1) {
   return window['go']['main']['App']['LoadChatMessages'](arg1);
+}
+
+export function LoadChatStreamSince(arg1, arg2) {
+  return window['go']['main']['App']['LoadChatStreamSince'](arg1, arg2);
 }
 
 export function LspSend(arg1, arg2) {
@@ -382,8 +398,8 @@ export function RunGit(arg1, arg2) {
   return window['go']['main']['App']['RunGit'](arg1, arg2);
 }
 
-export function SaveChatMessages(arg1, arg2) {
-  return window['go']['main']['App']['SaveChatMessages'](arg1, arg2);
+export function SaveChatMessages(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveChatMessages'](arg1, arg2, arg3);
 }
 
 export function SaveTempImage(arg1, arg2) {

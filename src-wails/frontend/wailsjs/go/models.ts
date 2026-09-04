@@ -50,6 +50,92 @@ export namespace main {
 	        this.defaultEffort = source["defaultEffort"];
 	    }
 	}
+	export class ProviderRuntimeEvent {
+	    type: string;
+	    messageId?: string;
+	    text?: string;
+	    toolCallId?: string;
+	    name?: string;
+	    input?: Record<string, any>;
+	    output?: string;
+	    failed?: boolean;
+	    inputTokens?: number;
+	    outputTokens?: number;
+	    costUsd?: number;
+	    message?: string;
+	    title?: string;
+	    sessionId?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderRuntimeEvent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.messageId = source["messageId"];
+	        this.text = source["text"];
+	        this.toolCallId = source["toolCallId"];
+	        this.name = source["name"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.failed = source["failed"];
+	        this.inputTokens = source["inputTokens"];
+	        this.outputTokens = source["outputTokens"];
+	        this.costUsd = source["costUsd"];
+	        this.message = source["message"];
+	        this.title = source["title"];
+	        this.sessionId = source["sessionId"];
+	    }
+	}
+	export class ChatEventBatch {
+	    ord: number;
+	    events: ProviderRuntimeEvent[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatEventBatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ord = source["ord"];
+	        this.events = this.convertValues(source["events"], ProviderRuntimeEvent);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ChatStreamLine {
+	    ord: number;
+	    kind: string;
+	    line: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatStreamLine(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ord = source["ord"];
+	        this.kind = source["kind"];
+	        this.line = source["line"];
+	    }
+	}
 	export class Checkpoint {
 	    id: number;
 	    cwd: string;
@@ -269,6 +355,7 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	
 	export class SearchHit {
 	    path: string;
 	    line: number;
