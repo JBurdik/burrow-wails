@@ -76,7 +76,7 @@ func TestRemoteChatsFromLiveConfig(t *testing.T) {
 func TestRemoteCreateChatSessionBumpsCounterAndPreservesConfig(t *testing.T) {
 	cfg := map[string]any{
 		"someUnrelatedSetting": "keep-me",
-		"chatIdCounter":        float64(5),
+		"chatIdCounter":        float64(6),
 		"chatSessions": []any{
 			map[string]any{"id": float64(5), "workspaceId": float64(2), "title": "Chat 1"},
 		},

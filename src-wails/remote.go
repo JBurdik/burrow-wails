@@ -96,17 +96,15 @@ func remoteChatsFromConfig(raw string) ([]map[string]any, error) {
 // builds client-side, and seeds an empty transcript. Pure function so the
 // id-allocation and shape logic is testable without a real app data dir.
 func remoteCreateChatSession(cfg map[string]any, workspaceID int64, agentKind string) (map[string]any, int64) {
-	counter := int64(0)
+	// claudeChats.ts's nextId is post-increment (`const id = nextId++`), so
+	// the persisted counter always equals (max used id) + 1 — mirror that
+	// invariant exactly rather than reserving extra headroom against a race
+	// that RemoteCreateChat's own doc comment already accepts as-is.
+	counter := int64(1)
 	if v, ok := cfg["chatIdCounter"].(float64); ok {
 		counter = int64(v)
 	}
-	// Pre-increment (id = counter+1, not counter) and then leave one extra
-	// unit of headroom in the stored counter (id+1, not id): the desktop may
-	// have already assigned an in-memory id one past what's on disk when
-	// this read-modify-write races its own setConfig save (see RemoteCreateChat
-	// below), so landing exactly on the last-known counter value risks a
-	// collision — skipping ahead is cheap, a duplicate id is not.
-	id := counter + 1
+	id := counter
 	cfg["chatIdCounter"] = float64(id + 1)
 
 	sessions, _ := cfg["chatSessions"].([]any)
