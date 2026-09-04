@@ -31,6 +31,16 @@ broadcast to WS clients via `emitAll()` (`events.go`). This design only adds
 the write path and the status/list model needed to make the existing read
 surface actually usable.
 
+## Amendment (found during planning)
+
+`remote_create_chat` supports `agentKind: "claude"` only. Building an ACP/Codex
+session needs `command`/`args`/`env`/`configDir` resolved from provider config
+that today only exists client-side in `AgentChat.vue`'s `acpStartPayload()` —
+porting that resolution to Go is real new logic, not a thin wrapper, so it's
+deferred rather than folded silently into this pass. `agentKind: "codex"`
+returns an explicit error; `ChatsView.vue`'s create form drops the agent
+picker accordingly.
+
 ## Non-goals
 
 - Native OS push notifications — in-page/toast only, requires the PWA open.
