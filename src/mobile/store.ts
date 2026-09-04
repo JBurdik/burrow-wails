@@ -42,6 +42,13 @@ export interface RemoteMessage {
   toolFailed?: boolean;
 }
 
+export interface PendingPermission {
+  requestId?: string; // Claude control_request id
+  rpcId?: number;      // ACP JSON-RPC id
+  toolName: string;
+  detail: string;
+}
+
 export interface RemoteChat {
   id: number;
   workspaceId: number;
@@ -58,6 +65,9 @@ export interface RemoteChat {
   // by markChatSeen(). Mirrors desktop's "review" persisting until the tab
   // is seen (Terminal.vue's settleDone()).
   unseen?: "review" | "error";
+  // Set when the agent is blocked on an allow/deny decision — mirrors
+  // desktop's "permission" status. Cleared by respondChatPermission().
+  pendingPermission?: PendingPermission | null;
 }
 
 export type View = "connect" | "dashboard" | "chats" | "chat" | "sessions" | "terminal";
@@ -92,6 +102,7 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   function chatStatus(chat: RemoteChat): TabStatus {
+    if (chat.pendingPermission) return "permission";
     if (chat.busy) return "running";
     if (chat.unseen) return chat.unseen;
     return "idle";
@@ -294,19 +305,53 @@ export const useRemoteStore = defineStore("remote", () => {
     });
   }
 
+  // Narrow reader: only recognizes a can_use_tool control_request (Claude) or
+  // a session/request_permission (ACP) — everything else on this raw channel
+  // is ignored on purpose (see spec's "Non-goals": no full protocol parsing
+  // on mobile, only enough to unblock a turn).
+  function watchChatPermissions(chat: RemoteChat) {
+    const rawEvent = chat.transport === "claude-cli" ? `claude-data-${chat.id}` : `acp-req-${chat.id}`;
+    client?.subscribe(rawEvent, (payload) => {
+      const line = typeof payload === "string" ? safeJson(payload) : payload;
+      if (!line || typeof line !== "object") return;
+      const msg = line as Record<string, any>;
+
+      if (chat.transport === "claude-cli") {
+        if (msg.type !== "control_request" || msg.request?.subtype !== "can_use_tool") return;
+        const input = msg.request.input ?? {};
+        const detail = input.command ?? input.file_path ?? input.path ?? "";
+        chat.pendingPermission = {
+          requestId: msg.request_id,
+          toolName: msg.request.tool_name ?? "Tool",
+          detail: String(detail),
+        };
+        return;
+      }
+
+      // ACP: server->client REQUEST has both method and id.
+      if (typeof msg.id !== "number" || !msg.method) return;
+      if (!/permissions\/requestApproval|request_permission/.test(msg.method)) return;
+      chat.pendingPermission = {
+        rpcId: msg.id,
+        toolName: msg.params?.toolCall?.title ?? msg.params?.title ?? "Tool",
+        detail: "",
+      };
+    });
+  }
+
   async function loadChats() {
     if (!client) return;
     try {
       const next = await client.call("remote_list_chats") as RemoteChat[];
       chats.value = next.map((chat) => ({ ...chat, messages: Array.isArray(chat.messages) ? chat.messages : [] }));
-      for (const chat of chats.value) watchChat(chat);
+      for (const chat of chats.value) { watchChat(chat); watchChatPermissions(chat); }
       client.subscribe("remote-chats", (payload) => {
         const change = typeof payload === "string" ? safeJson(payload) : payload;
         const incoming = (change as any)?.chat as RemoteChat | undefined;
         if (!incoming) return;
         const existing = chatFor(incoming.id);
         if (existing) Object.assign(existing, incoming);
-        else { chats.value.push(incoming); watchChat(incoming); }
+        else { chats.value.push(incoming); watchChat(incoming); watchChatPermissions(incoming); }
       });
     } catch (e: any) {
       listError.value = e?.message ?? "Failed to load chats";
@@ -351,7 +396,34 @@ export const useRemoteStore = defineStore("remote", () => {
     const chat = await client.call("remote_create_chat", { workspaceId, agentKind }) as RemoteChat;
     chats.value.push(chat);
     watchChat(chat);
+    watchChatPermissions(chat);
     openChat(chat);
+  }
+
+  async function respondChatPermission(chatId: number, allow: boolean) {
+    const chat = chatFor(chatId);
+    const pending = chat?.pendingPermission;
+    if (!client || !chat || !pending) return;
+    chat.pendingPermission = null;
+    try {
+      if (pending.requestId) {
+        await client.call("claude_respond_control", {
+          id: chat.id,
+          requestId: pending.requestId,
+          response: allow
+            ? { behavior: "allow", updatedInput: {} }
+            : { behavior: "deny", message: "User denied this action." },
+        });
+      } else if (pending.rpcId !== undefined) {
+        await client.call("acp_respond_permission", {
+          id: chat.id,
+          rpcId: pending.rpcId,
+          optionId: allow ? "allow_once" : "reject_once",
+        });
+      }
+    } catch (e: any) {
+      chat.messages.push({ id: Date.now(), role: "assistant", text: `Odpověď na povolení selhala: ${e?.message ?? e}` });
+    }
   }
 
   function openTerminal(tab: Tab) {
@@ -394,6 +466,6 @@ export const useRemoteStore = defineStore("remote", () => {
     chats, activeChat,
     pair, connect, disconnect, loadSessions, loadChats, openTerminal, closeTerminal, showDashboard, showSessions, showChats, openChat, closeChat, sendChat, createChat,
     statusFor, getClient,
-    markTabSeen, markChatSeen, chatStatus,
+    markTabSeen, markChatSeen, chatStatus, respondChatPermission,
   };
 });
