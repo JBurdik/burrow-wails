@@ -79,11 +79,60 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.2 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.2</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">září 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Historie chatů v SQLite</div>
+      <ul>
+        <li><strong>Přepisy chatů se ukládají po zprávách</strong> — nová tabulka <code>chat_messages</code> (jeden řádek = jedna zpráva) místo klíče <code>chatMessageHistory</code> v <code>config.json</code>. Ten narostl na 5,6&nbsp;MB a protože se serializuje celý při každém <code>setConfig</code>, jedna uložená zpráva znamenala přepis 5,6&nbsp;MB. Uložení turnu je teď zápis jednoho chatu v transakci.</li>
+        <li><strong>Migrace proběhne sama a jen jednou</strong> — <code>migrateChatHistoryToSQLite</code> při startu přesune existující historii do databáze, uloží <code>config.json.bak</code> a klíč z configu odebere. Když se některý chat nepodaří přenést, klíč zůstane a příští spuštění to zkusí znovu — historie se nezahodí.</li>
+        <li><strong>Zápis configu je atomický</strong> — <code>writeFileAtomic</code> (temp soubor + rename). Dřívější truncate-and-write nechal při padnutí aplikace uprostřed ukládání <code>config.json</code> poškozený, tedy bez všech předvoleb.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Nečinní agenti uvolní paměť</div>
+      <ul>
+        <li><strong><code>ReapIdle</code> ukončí agenty, kteří půl hodiny mlčí</strong> — každé agentní CLI drží ~150&nbsp;MB i když nic nedělá. Ticho je jediný potřebný signál: běžící turn průběžně streamuje výstup, takže se nikdy netváří jako nečinný. Přepis je na disku, další prompt session obnoví.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Stav „viděno“ počítá i s uvítací obrazovkou</div>
+      <ul>
+        <li><strong>Záložka za composerem se už netváří jako sledovaná</strong> — nové <code>viewingTabs</code> / <code>welcomeVisible</code> v <code>ui</code> storu jsou jediný zdroj pravdy o tom, co terminálový host zobrazuje. Dřív o tom rozhodoval computed lokální v <code>App.vue</code>, který <code>Terminal.vue</code> neviděl — takže turn dokončený, zatímco jste psali nové vlákno, ohlásil krátký <code>done</code> místo trvalého <code>review</code> a fokus okna mu odznak smazal, aniž jste ho viděli.</li>
+        <li><strong>Jedna cesta pro označení „viděno“</strong> — <code>seeActiveTab</code> nahradil tři samostatné watchery (přepnutí workspace, změna režimu, fokus okna) a pokaždé znovu ověří celý stav zobrazení.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Seznam vláken se sám nepřerovnává</div>
+      <ul>
+        <li><strong>Vlákno posune jen začátek turnu</strong> — <code>shouldRestamp</code> reaguje pouze na přechod do stavu <code>running</code> (odeslaný prompt), ne na každou změnu stavu, titulku nebo kola. Přerovnávání při jakémkoli zápisu bylo příčinou toho, že se feed sám míchal, zatímco agenti pracovali.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Názvy chatů od Codexu konečně projdou</div>
+      <ul>
+        <li><strong>Prózu i <code>```json</code> fence umíme rozbalit</strong> — <code>extractGeneratedJSON</code> vytáhne objekt, když tam je, a jinak vrátí surový text, takže i holý název dojde k volajícímu. Dřív každá odpověď mimo čisté JSON spadla na <code>Unmarshal</code> a generování se tiše zahodilo — proto se u Codexu nikdy nenahradil heuristický název.</li>
+        <li><strong>Timeout 30&nbsp;s → 60&nbsp;s a chyba se loguje</strong> — reasoning model na cold startu 30&nbsp;s nestíhal, a protože volající prázdný výsledek spolkne, špatně zvolený poskytovatel se nedal odlišit od „model byl pomalý“.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.1 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.1</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">září 2026</span>
     </div>
 
