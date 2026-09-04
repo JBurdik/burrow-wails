@@ -21,6 +21,14 @@ export interface ChatMessage {
   _acpMsgId?: string;   // ACP messageId — identity for incremental chunk append
 }
 
+/** A user prompt held until the active turn reaches a terminal boundary. */
+export interface QueuedChatMessage {
+  /** Matches the persisted `role: "queued"` transcript marker. */
+  id: number;
+  text: string;
+  images?: string[];
+}
+
 export interface TurnStats { inputTokens: number; outputTokens: number; costUsd: number }
 
 export interface CanUseToolReq {

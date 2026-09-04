@@ -2,7 +2,7 @@ import { ref, type Ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AcpConfigOption, AcpModes, AcpPermReq, CanUseToolReq, ChatMessage, TurnStats,
+  AcpConfigOption, AcpModes, AcpPermReq, CanUseToolReq, ChatMessage, QueuedChatMessage, TurnStats,
 } from "@/lib/chatTypes";
 import type { ChatEventBatch } from "@/lib/chatProjection";
 
@@ -58,7 +58,14 @@ export interface ChatSession {
   busy: Ref<boolean>;
   lastActivityAt: Ref<number>;
   turnStartedAt: Ref<number>;
-  messageQueue: Ref<string[]>;
+  /** FIFO of follow-ups. Never send these to a provider while a turn is active. */
+  messageQueue: Ref<QueuedChatMessage[]>;
+  enqueueMessage(text: string, images?: string[]): QueuedChatMessage;
+  removeQueuedMessage(id: number): void;
+  clearQueuedMessages(): void;
+  moveQueuedMessageNext(id: number): void;
+  takeNextQueuedMessage(): QueuedChatMessage | undefined;
+  restoreQueuedMessages(): void;
   suppressNextDone: Ref<boolean>;
   sessionId: Ref<string>;
   turnStats: Ref<TurnStats | null>;
@@ -212,7 +219,7 @@ function create(chatId: number): InternalSession {
     busy: ref(false),
     lastActivityAt: ref(Date.now()),
     turnStartedAt: ref(0),
-    messageQueue: ref<string[]>([]),
+    messageQueue: ref<QueuedChatMessage[]>([]),
     suppressNextDone: ref(false),
     sessionId: ref(""),
     turnStats: ref<TurnStats | null>(null),
@@ -236,6 +243,38 @@ function create(chatId: number): InternalSession {
     acpControlIds: new Set<number>(),
     acpModes: ref<AcpModes | null>(null),
     acpConfigOptions: ref<AcpConfigOption[]>([]),
+
+    enqueueMessage(text, images) {
+      const entry: QueuedChatMessage = { id: s.nextMsgId++, text, ...(images?.length ? { images } : {}) };
+      s.messageQueue.value.push(entry);
+      s.messages.value.push({ id: entry.id, role: "queued", text, ...(entry.images ? { images: entry.images } : {}) });
+      return entry;
+    },
+    removeQueuedMessage(id) {
+      s.messageQueue.value = s.messageQueue.value.filter((entry) => entry.id !== id);
+      s.messages.value = s.messages.value.filter((message) => message.id !== id || message.role !== "queued");
+    },
+    clearQueuedMessages() {
+      s.messageQueue.value = [];
+      s.messages.value = s.messages.value.filter((message) => message.role !== "queued");
+    },
+    moveQueuedMessageNext(id) {
+      const index = s.messageQueue.value.findIndex((entry) => entry.id === id);
+      if (index <= 0) return;
+      const [entry] = s.messageQueue.value.splice(index, 1);
+      s.messageQueue.value.unshift(entry);
+    },
+    takeNextQueuedMessage() {
+      const entry = s.messageQueue.value.shift();
+      if (entry) s.messages.value = s.messages.value.filter((message) => message.id !== entry.id || message.role !== "queued");
+      return entry;
+    },
+    restoreQueuedMessages() {
+      if (s.messageQueue.value.length > 0) return;
+      s.messageQueue.value = s.messages.value
+        .filter((message) => message.role === "queued")
+        .map((message) => ({ id: message.id, text: message.text, ...(message.images?.length ? { images: message.images } : {}) }));
+    },
 
     handlers: { ...NOOP_HANDLERS },
     refCount: 0,

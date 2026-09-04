@@ -361,11 +361,11 @@
             <button class="border-none bg-transparent px-1 py-px text-[10px] text-muted-foreground hover:text-foreground" @click.stop="clearQueue" title="Clear All">Clear All</button>
           </div>
           <div v-if="queueExpanded" class="flex flex-col gap-[3px] px-2.5 pb-1.5">
-            <div v-for="(msg, i) in messageQueue" :key="i" class="flex items-center gap-1.5 py-[3px]">
+            <div v-for="msg in messageQueue" :key="msg.id" class="flex items-center gap-1.5 py-[3px]">
               <span class="flex-shrink-0 text-xs text-[var(--chat-accent)]">•</span>
-              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-secondary-foreground">{{ msg }}</span>
-              <button class="queue-item-btn" @click="removeQueued(i)" title="Remove"><PhX :size="10" /></button>
-              <button class="queue-item-btn !text-[var(--chat-accent)] !border-[color-mix(in_srgb,var(--chat-accent)_35%,transparent)] hover:!border-[color-mix(in_srgb,var(--chat-accent)_65%,transparent)]" @click="sendQueuedNow(i)" title="Send Now">Send Now <kbd>↵</kbd></button>
+              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-secondary-foreground">{{ msg.text }}</span>
+              <button class="queue-item-btn" @click="removeQueued(msg.id)" title="Remove"><PhX :size="10" /></button>
+              <button class="queue-item-btn !text-[var(--chat-accent)] !border-[color-mix(in_srgb,var(--chat-accent)_35%,transparent)] hover:!border-[color-mix(in_srgb,var(--chat-accent)_65%,transparent)]" @click="sendQueuedNext(msg.id)" title="Run after the active turn">Send Next</button>
             </div>
           </div>
         </div>
@@ -843,6 +843,7 @@ const {
   pendingPermissionMsgId, pendingQuestionMsgId, pendingPlanMsgId, pendingDiffMsgId,
   settledControlRequestIds,
   acpPermReq, acpPermRpcId, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
+  enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext, takeNextQueuedMessage, restoreQueuedMessages,
 } = S;
 const permissionResponsePending = ref(false);
 const codexUserInput = ref<{ rpcId: number; questions: CodexUserInputQuestion[] } | null>(null);
@@ -1799,22 +1800,18 @@ function removeFeedMarker(id: number | null) {
 // Queue panel
 const queueExpanded = ref(true);
 function clearQueue() {
-  messageQueue.value = [];
-  messages.value = messages.value.filter((m) => m.role !== "queued");
+  clearQueuedMessages();
+  saveMessages(props.chatId, messages.value);
 }
-function removeQueued(i: number) {
-  const text = messageQueue.value[i];
-  messageQueue.value.splice(i, 1);
-  const qIdx = messages.value.findIndex((m) => m.role === "queued" && m.text === text);
-  if (qIdx !== -1) messages.value.splice(qIdx, 1);
+function removeQueued(id: number) {
+  removeQueuedMessage(id);
+  saveMessages(props.chatId, messages.value);
 }
-async function sendQueuedNow(i: number) {
-  const text = messageQueue.value.splice(i, 1)[0];
-  const qIdx = messages.value.findIndex((m) => m.role === "queued" && m.text === text);
-  if (qIdx !== -1) messages.value.splice(qIdx, 1);
-  // ACP supports promptQueueing → send now even mid-turn; stream-json must wait.
-  if (!busy.value || effectiveTransport.value === "acp") await sendMessage(text);
-  else { messageQueue.value.unshift(text); messages.value.unshift({ id: S.nextMsgId++, role: "queued", text }); }
+function sendQueuedNext(id: number) {
+  // This deliberately reorders instead of steering. A follow-up has to remain
+  // its own turn for every provider, including Codex and generic ACP adapters.
+  moveQueuedMessageNext(id);
+  saveMessages(props.chatId, messages.value);
 }
 
 // Context usage bar — 200k for all current models
@@ -2158,17 +2155,20 @@ function finishTurn() {
     chats.sendStatusEvent(props.chatId, { type: "STOP", watching: watchingNow() });
     notifyDone();
   }
-  // Flush one queued message (the next turn will flush the next one).
-  if (messageQueue.value.length > 0) {
-    const next = messageQueue.value.shift()!;
-    // Remove its greyed-out placeholder from the feed
-    const qIdx = messages.value.findIndex((m) => m.role === "queued" && m.text === next);
-    if (qIdx !== -1) messages.value.splice(qIdx, 1);
-    nextTick(() => sendMessage(next));
-  }
+  drainQueuedMessage();
   // The session outlives this component while a turn is running; now that the
   // turn is over it is only worth keeping if someone is still watching.
   S.maybeEvict();
+}
+
+function drainQueuedMessage() {
+  if (busy.value) return;
+  const next = takeNextQueuedMessage();
+  if (!next) return;
+  saveMessages(props.chatId, messages.value);
+  // Finish handlers first: the next prompt starts only after the prior turn
+  // has fully settled its transcript, status and provider correlation.
+  nextTick(() => sendMessage(next.text, next.images));
 }
 
 function onLine(line: string) {
@@ -2484,14 +2484,15 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   if (!text) return;
   // A cold chat (never opened this launch) has no process yet — start it now.
   if (await ensureRuntime()) return;
-  if (extraImages?.length) pendingImages.value.push(...extraImages);
-  // While busy: queue the message instead of sending immediately. ACP adapters
-  // support promptQueueing (the agent queues it itself), so send concurrently —
-  // pressing Enter force-sends now instead of waiting for the turn to finish.
-  if (busy.value && !forcedText && !isAcpRuntime.value) {
-    messageQueue.value.push(text);
-    messages.value.push({ id: S.nextMsgId++, role: "queued", text });
+  const images = [...pendingImages.value, ...(extraImages ?? [])];
+  // A follow-up is always a separate turn.  In particular, do not rely on an
+  // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
+  // as steering, and generic adapters have no negotiated queue capability.
+  if (busy.value) {
+    enqueueMessage(text, images);
+    pendingImages.value = [];
     inputText.value = "";
+    saveMessages(props.chatId, messages.value);
     await nextTick();
     autoResize();
     scrollToBottom(true);
@@ -2515,7 +2516,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     }
   }
 
-  const msgImages = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
+  const msgImages = images.length > 0 ? images : undefined;
   messages.value.push({ id: S.nextMsgId++, role: "user", text, images: msgImages });
   // Snapshot the worktree before the turn so it is revertable from the History
   // panel. Best-effort, and a no-op outside a git repo.
@@ -2541,9 +2542,8 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   scrollToBottom(true);
   if (usesRpcRuntime.value) {
     try {
-      const images = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
       pendingImages.value = [];
-      acpPromptRpcId.value = await sendRpcRuntime(text, images);
+      acpPromptRpcId.value = await sendRpcRuntime(text, msgImages);
     } catch (e) {
       messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
       busy.value = false;
@@ -2553,9 +2553,8 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     return;
   }
   try {
-    const images = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined;
     pendingImages.value = [];
-    await invoke("claude_send", { id: props.chatId, text, sessionId: sessionId.value || null, images });
+    await invoke("claude_send", { id: props.chatId, text, sessionId: sessionId.value || null, images: msgImages });
   } catch (e) {
     messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
     busy.value = false;
@@ -2759,12 +2758,11 @@ async function restartClaude() {
     removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
     acpPermReq.value = null; acpPermRpcId.value = null;
     busy.value = false;
-    messageQueue.value = [];
-    messages.value = messages.value.filter((m) => m.role !== "queued");
     const lastAcp = messages.value[messages.value.length - 1];
     if (lastAcp?.partial) lastAcp.partial = false;
     chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
     syncStore();
+    drainQueuedMessage();
     return;
   }
   // claude_stop removes the proc from the map so the subsequent claude_start actually spawns.
@@ -2784,8 +2782,6 @@ async function restartClaude() {
   }).catch(() => {});
   runtimeStarted.value = true;
   busy.value = false;
-  messageQueue.value = [];
-  messages.value = messages.value.filter((m) => m.role !== "queued");
   // Drop any in-flight permission/question/plan prompts — the proc backing them is gone.
   pendingPermission.value = null;
   pendingDiff.value = null;
@@ -2795,6 +2791,7 @@ async function restartClaude() {
   if (last?.partial) last.partial = false;
   chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
   syncStore();
+  drainQueuedMessage();
 }
 
 async function abortTurn() {
@@ -2807,7 +2804,7 @@ async function clearChat() {
   messages.value = [];
   sessionId.value = "";
   busy.value = false;
-  messageQueue.value = [];
+  clearQueuedMessages();
   pendingImages.value = [];
   turnStats.value = null;
   sessionCost.value = 0;
@@ -3186,6 +3183,9 @@ onMounted(async () => {
   // newer part away (exactly the hole this plan is about).
   if (messages.value.length === 0) {
     messages.value = await loadMessages(props.chatId);
+    // Queue markers are persisted with the transcript. Rebuild the in-memory
+    // scheduler after a relaunch before any runtime can dispatch a follow-up.
+    restoreQueuedMessages();
     // Ids must continue past the loaded history, or new messages collide with
     // old ones on the same `:key`.
     S.nextMsgId = messages.value.reduce((max, m) => Math.max(max, m.id + 1), 0);
@@ -3231,6 +3231,7 @@ onMounted(async () => {
   if (shouldAutoStart()) {
     const startErr = await ensureRuntime();
     if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
+    else if (!startErr) drainQueuedMessage();
     if (usesRpcRuntime.value) return;
   }
 

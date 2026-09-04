@@ -161,7 +161,7 @@ describe("eviction after a turn ends behind a closed view", () => {
     s2.busy.value = true;
     s2.release();
     s2.busy.value = false;
-    s2.messageQueue.value.push("next one");
+    s2.enqueueMessage("next one");
     s2.maybeEvict();
     vi.runAllTimers();
     expect(liveChatSessionIds()).toContain(31);
@@ -178,5 +178,32 @@ describe("eviction after a turn ends behind a closed view", () => {
     expect(liveChatSessionIds()).toContain(32);
     vi.useRealTimers();
     dropChatSession(32);
+  });
+});
+
+describe("queued follow-ups", () => {
+  it("keeps duplicate prompts distinct and preserves their images", () => {
+    const s = chatSession(40);
+    const first = s.enqueueMessage("run tests", ["data:image/png;base64,first"]);
+    const second = s.enqueueMessage("run tests", ["data:image/png;base64,second"]);
+
+    s.removeQueuedMessage(first.id);
+    expect(s.messageQueue.value).toEqual([second]);
+    expect(s.messages.value).toEqual([{ id: second.id, role: "queued", text: "run tests", images: second.images }]);
+    dropChatSession(40);
+  });
+
+  it("restores persisted queue markers in FIFO order", () => {
+    const s = chatSession(41);
+    s.messages.value = [
+      { id: 4, role: "queued", text: "first" },
+      { id: 5, role: "assistant", text: "working" },
+      { id: 6, role: "queued", text: "second", images: ["data:image/png;base64,x"] },
+    ];
+
+    s.restoreQueuedMessages();
+    expect(s.takeNextQueuedMessage()).toEqual({ id: 4, text: "first" });
+    expect(s.takeNextQueuedMessage()).toEqual({ id: 6, text: "second", images: ["data:image/png;base64,x"] });
+    dropChatSession(41);
   });
 });
