@@ -102,6 +102,11 @@ export const useRemoteStore = defineStore("remote", () => {
   const reconnecting = ref(false);
   let reconnectAttempt = 0;
   let reconnectTimer: number | undefined;
+  // Bumped on every connect() call and on disconnect(), so an in-flight
+  // connect() (its healthCheck/WS handshake can each take seconds) can tell,
+  // right before it commits success, whether a newer connect() or an
+  // explicit disconnect() superseded it in the meantime.
+  let connectGeneration = 0;
 
   let client: BurrowWsClient | null = null;
   const doneTimers = new Map<number, number>();
@@ -151,6 +156,7 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   async function connect(url: string, tok: string): Promise<void> {
+    const myGeneration = ++connectGeneration;
     connecting.value = true;
     connectError.value = "";
     const normalized = url.replace(/\/$/, "");
@@ -165,6 +171,10 @@ export const useRemoteStore = defineStore("remote", () => {
         if (view.value === "terminal") view.value = "dashboard";
         scheduleReconnect();
       };
+      // A newer connect() call or an explicit disconnect() ran while the
+      // above awaits were in flight — don't resurrect state disconnect()
+      // just tore down, and don't leak the socket we just opened.
+      if (myGeneration !== connectGeneration) { c.close(); return; }
       client = c;
       connected.value = true;
       baseUrl.value = normalized;
@@ -201,6 +211,7 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   function disconnect() {
+    connectGeneration++;
     if (reconnectTimer !== undefined) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
     reconnectAttempt = 0;
     reconnecting.value = false;
