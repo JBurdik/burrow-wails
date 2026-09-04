@@ -8,6 +8,7 @@ import type { AgentStatusEvent } from "@/machines/agentStatus";
 import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import { forgetChatSettings } from "@/lib/chatSettings";
+import { dropChatSession } from "@/lib/chatSession";
 
 export interface ClaudeSession {
   id: number;
@@ -78,9 +79,13 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
 
   function spawnActor(session: ClaudeSession): SessionActor {
     const actor = createActor(agentStatusMachine, { input: {} }).start();
+    // The actor's own state is authoritative from here on. Adopt it
+    // immediately: `status` is persisted with the session, so an app closed
+    // mid-turn comes back claiming `running` with no process behind it, and
+    // subscribe() only fires on later transitions — leaving that stale dot
+    // spinning forever.
+    session.status = actor.getSnapshot().value as TermStatus;
     actor.subscribe((snapshot) => {
-      // eslint-disable-next-line no-console
-      if (session.status !== snapshot.value) console.log("[UNREAD-DEBUG] session status", session.id, session.status, "->", snapshot.value);
       session.status = snapshot.value as TermStatus;
     });
     actors.set(session.id, actor);
@@ -188,6 +193,9 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     if (!s) return;
     actors.get(id)?.stop();
     actors.delete(id);
+    // The chat is gone, so its stream session must go with it — otherwise its
+    // listeners outlive it (they are deliberately kept across an unmount).
+    dropChatSession(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
     sessions.value = sessions.value.filter((x) => x.id !== id);
     // Hard delete — drop this chat's per-chat model / effort / permission mode /
@@ -313,9 +321,9 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     actors.get(id)?.send(event);
   }
 
+  // Called by AgentChat on mount — which now only happens when the chat is
+  // actually displayed (Terminal.isChatVisible), so "seen" means seen.
   function markSeen(id: number) {
-    // eslint-disable-next-line no-console
-    console.log("[UNREAD-DEBUG] chatsStore.markSeen", id, new Error().stack);
     actors.get(id)?.send({ type: "MARK_SEEN" });
   }
 

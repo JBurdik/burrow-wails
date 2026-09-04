@@ -35,6 +35,10 @@ export interface RemoteMessage {
   partial?: boolean;
   toolInput?: Record<string, unknown>;
   toolOutput?: string;
+  // Set from tool.started / tool.completed so a result can find its call —
+  // the remote client renders the same tool cards the desktop does.
+  toolUseId?: string;
+  toolFailed?: boolean;
 }
 
 export interface RemoteChat {
@@ -215,37 +219,44 @@ export const useRemoteStore = defineStore("remote", () => {
     else chat.messages.push({ id: Date.now() + chat.messages.length, role, text, partial });
   }
 
-  function handleClaudeData(chat: RemoteChat, raw: unknown) {
-    const event = typeof raw === "string" ? safeJson(raw) : raw;
-    if (!event || typeof event !== "object") return;
-    const data = event as Record<string, any>;
-    if (data.type === "assistant") {
-      for (const block of data.message?.content ?? []) {
-        if (block.type === "text") appendRemoteText(chat, "assistant", block.text ?? "");
-        if (block.type === "thinking") appendRemoteText(chat, "thinking", block.thinking ?? "");
-        if (block.type === "tool_use") chat.messages.push({ id: Date.now() + chat.messages.length, role: "tool", text: block.name ?? "Tool", toolInput: block.input ?? {} });
+  // One applier for both runtimes. The wire formats are read on the Go side
+  // (src-wails/providerruntime.go) and arrive as provider-neutral events, so a
+  // remote client no longer re-implements stream-json and ACP to its own,
+  // shallower depth than the desktop.
+  function applyEvent(chat: RemoteChat, event: Record<string, any>) {
+    switch (event.type) {
+      case "text.delta":
+        appendRemoteText(chat, "assistant", event.text ?? "");
+        return;
+      case "thinking.delta":
+        appendRemoteText(chat, "thinking", event.text ?? "");
+        return;
+      case "tool.started":
+        chat.messages.push({
+          id: Date.now() + chat.messages.length,
+          role: "tool",
+          text: event.name ?? "Tool",
+          toolInput: event.input ?? {},
+          toolUseId: event.toolCallId,
+        });
+        return;
+      case "tool.completed": {
+        const tool = [...chat.messages].reverse().find((m) => m.toolUseId === event.toolCallId);
+        if (tool) {
+          tool.toolOutput = event.output ?? "";
+          tool.toolFailed = event.failed === true;
+        }
+        return;
       }
+      case "turn.completed":
+      case "turn.failed":
+        chat.busy = false;
+        chat.messages.forEach((message) => { message.partial = false; });
+        return;
+      case "session.id":
+        if (typeof event.sessionId === "string") chat.claudeSessionId = event.sessionId;
+        return;
     }
-    if (data.type === "result" || data.type === "exit") {
-      chat.busy = false;
-      chat.messages.forEach((message) => { message.partial = false; });
-    }
-  }
-
-  function handleAcpData(chat: RemoteChat, raw: unknown) {
-    const event = typeof raw === "string" ? safeJson(raw) : raw;
-    if (!event || typeof event !== "object") return;
-    const data = event as Record<string, any>;
-    if (data._burrow === "session" && typeof data.sessionId === "string") chat.claudeSessionId = data.sessionId;
-    if (data._burrow === "exit" || ("id" in data && !("method" in data))) {
-      chat.busy = false;
-      chat.messages.forEach((message) => { message.partial = false; });
-    }
-    const update = data.params?.update;
-    if (data.method !== "session/update" || !update) return;
-    const text = update.content?.text ?? "";
-    if (update.sessionUpdate === "agent_message_chunk") appendRemoteText(chat, "assistant", text);
-    if (update.sessionUpdate === "agent_thought_chunk") appendRemoteText(chat, "thinking", text);
   }
 
   function safeJson(raw: string): unknown {
@@ -253,8 +264,11 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   function watchChat(chat: RemoteChat) {
-    client?.subscribe(`claude-data-${chat.id}`, (payload) => handleClaudeData(chat, payload));
-    client?.subscribe(`acp-data-${chat.id}`, (payload) => handleAcpData(chat, payload));
+    client?.subscribe(`chat-event-${chat.id}`, (payload) => {
+      const batch = (typeof payload === "string" ? safeJson(payload) : payload) as
+        { events?: Array<Record<string, any>> } | null;
+      for (const event of batch?.events ?? []) applyEvent(chat, event);
+    });
   }
 
   async function loadChats() {

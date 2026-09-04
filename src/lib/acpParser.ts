@@ -1,35 +1,10 @@
-import type { AgentEvent, PermissionOption } from './agentTransport'
+import type { PermissionOption } from './agentTransport'
 
-export function parseAcpUpdate(params: unknown): AgentEvent | null {
-  const p = params as Record<string, unknown>
-  const u = p?.update as Record<string, unknown> | undefined
-  if (!u) return null
-  const disc = u.sessionUpdate as string
-
-  switch (disc) {
-    case 'agent_message_chunk': {
-      const c = u.content as Record<string, unknown> | undefined
-      return { kind: 'text_chunk', messageId: (u.messageId as string) ?? 'msg', text: (c?.text as string) ?? '' }
-    }
-    case 'agent_thought_chunk': {
-      const c = u.content as Record<string, unknown> | undefined
-      return { kind: 'thinking_chunk', text: (c?.text as string) ?? '' }
-    }
-    case 'tool_call':
-      return { kind: 'tool_call', toolCallId: u.toolCallId as string, title: (u.title as string) ?? 'Tool' }
-    case 'tool_call_update': {
-      const status = u.status as string
-      if (status !== 'completed' && status !== 'failed') return null
-      const blocks = (u.content as Array<Record<string, unknown>>) ?? []
-      const text = blocks
-        .map(b => { const inner = b.content as Record<string, unknown> | undefined; return inner?.type === 'text' ? String(inner.text ?? '') : '' })
-        .filter(Boolean).join('\n')
-      return { kind: 'tool_output', toolCallId: u.toolCallId as string, output: text, done: status === 'completed' }
-    }
-    default:
-      return null
-  }
-}
+// Permission requests only. The transcript half of this file (parseAcpUpdate)
+// is gone: session/update notifications are read in Go now
+// (src-wails/providerruntime.go), so the wire format has one reader again.
+// A permission is a decision for a UI, not transcript, and keeps its own
+// channel — which is why this half stayed.
 
 export function parseAcpPermRequest(raw: unknown): {
   rpcId: number; sessionId: string; toolCallId: string; options: PermissionOption[]

@@ -97,7 +97,8 @@
             @error="(m) => onLeafError(m)"
           />
           <AgentChat
-            v-else-if="pane.leaf.leafType === 'chat'"
+            v-else-if="pane.leaf.leafType === 'chat' && shouldMountChat(tab, pane.leaf)"
+            :key="`chat-${pane.leaf.chatId}`"
             :chat-id="pane.leaf.chatId!"
             :workspace-id="workspaceId"
             :cwd="pane.leaf.cwd ?? cwd"
@@ -202,6 +203,8 @@ import GitPanel from "./GitPanel.vue";
 import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vue";
 import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import { spinnerFrame } from "@/lib/spinner";
+import { dropChatSession } from "@/lib/chatSession";
+import { router } from "@/router";
 import { configReady } from "@/lib/config";
 import { playSound } from "@/lib/sounds";
 import { notifyNtfy } from "@/lib/ntfy";
@@ -536,6 +539,28 @@ function isTabVisible(tab: Tab): boolean {
   return tab.id === splitChatTab.value?.id || tab.id === splitTerminalTab.value?.id;
 }
 
+// A chat leaf is MOUNTED only while it is genuinely on screen — not merely
+// v-show'd behind the welcome composer, another workspace or another tab. That
+// is the whole point of fáze 3 (docs/plans/003-view-state-routes.md): "is the
+// user looking at this?" stops being a predicate anyone can forget to call and
+// becomes whether the component exists at all. Its stream keeps running
+// regardless — lib/chatSession.ts owns that, not the component.
+//
+// Terminals deliberately do NOT get this treatment: reattaching a PTY replays a
+// ring buffer into a re-fitted xterm and corrupts the scrollback (fáze 5).
+function isChatVisible(tab: Tab): boolean {
+  return isTabVisible(tab) && uiStore.viewingTabs && wsStore.active?.id === props.workspaceId;
+}
+
+// ...with one exception: a chat spawned with a prompt has to start its agent
+// even if it landed in a workspace the user is not looking at. Without this a
+// background `burrow spawn` would sit unsent until someone opened the tab.
+// Such a chat mounts unwatched, so AgentChat gates "mark seen" on isWatching
+// rather than on mount alone.
+function shouldMountChat(tab: Tab, leaf: Leaf): boolean {
+  return isChatVisible(tab) || leaf.initialPrompt != null;
+}
+
 // ── Per-leaf hook-server event listeners ─────────────────────────────────────
 // Keyed by ptyId. Registered when a leaf is created, cleaned up when closed.
 const leafUnlisteners = new Map<number, UnlistenFn[]>();
@@ -742,18 +767,18 @@ function isWatching(tab: Tab): boolean {
   );
 }
 
-// Mark every finished leaf in a tab as seen (user opened/returned to it).
-// A leaf's status actor lives in one of two places: PTY leaves own one here,
-// chat leaves borrow their session's actor from the chats store. Marking only
-// the local ones left a chat stuck on "Done" forever — nothing else ever sent
-// it MARK_SEEN after ClaudeChat's mount.
+// Mark every finished TERMINAL leaf in a tab as seen (user opened/returned to
+// it). Terminal leaves stay mounted for their whole life, so nothing about them
+// says "on screen" — this is where that gets decided for them.
 function markTabSeen(tab: Tab) {
-  // eslint-disable-next-line no-console
-  console.log("[UNREAD-DEBUG] markTabSeen", tab.id, getAllLeaves(tab.root).map((l) => ({ id: l.id, type: l.leafType, chatId: l.chatId, status: l.status })), new Error().stack);
   for (const leaf of getAllLeaves(tab.root)) {
+    // Chats are not marked here any more: a chat is mounted only when it is on
+    // screen, so it marks ITSELF seen on mount. Marking from out here was the
+    // bug — this code had to guess at visibility, and a tab behind the welcome
+    // composer looked watched.
+    if (leaf.leafType === "chat") continue;
     // MARK_SEEN is only handled in done/review/error — a no-op elsewhere.
-    if (leaf.leafType === "chat" && leaf.chatId != null) chatsStore.markSeen(leaf.chatId);
-    else leafActors.get(leaf.id)?.send({ type: "MARK_SEEN" });
+    leafActors.get(leaf.id)?.send({ type: "MARK_SEEN" });
   }
 }
 
@@ -942,6 +967,11 @@ function activateTab(id: number) {
   activeTabId.value = id;
   const tab = tabs.value.find((t) => t.id === id);
   if (!tab) return;
+  // The open tab is part of the address, so selecting one is a navigation.
+  // `replace`, not `push`: clicking through tabs should not fill the back stack.
+  if (wsStore.active?.id === props.workspaceId && uiStore.viewingTabs) {
+    void router.replace(`/ws/${props.workspaceId}/tab/${id}`);
+  }
   // User is now looking at this tab — clear any done/review badge.
   markTabSeen(tab);
   const leaf = getFirstLeaf(tab.root);
@@ -1288,6 +1318,10 @@ function isTabSplit(tab: Tab): boolean {
 // open tab on the next launch, but it stays reachable from the Archived shelf.
 function stopChatSession(leaf: Leaf) {
   if (leaf.chatId == null) return;
+  // The chat is going away for good, so the session's listeners have nothing
+  // left to feed — this is the one place they are torn down (lib/chatSession.ts
+  // otherwise keeps them for the running turn behind an unmounted view).
+  dropChatSession(leaf.chatId);
   chatsStore.archive(leaf.chatId);
 }
 
@@ -1408,6 +1442,20 @@ function chatSessionOf(t: Tab) {
   return tabIsChat(t) ? chatsStore.sessions.find((s) => s.id === (t.root as Leaf).chatId) : undefined;
 }
 
+// Branch shown in the Sidebar is a snapshot taken the first time each tab is
+// synced, not the workspace's live branch — otherwise every tab silently
+// re-labels itself as the repo moves on to a new branch. Cache is per-tab-id
+// and never overwritten once set.
+const tabBranchSnapshot = new Map<number, string>();
+function branchSnapshotFor(tabId: number): string | undefined {
+  if (!tabBranchSnapshot.has(tabId)) {
+    const ws = wsStore.workspaces.find((w) => w.id === props.workspaceId);
+    const live = ws?.worktree_branch || gitStore.branchByWs[props.workspaceId];
+    if (live) tabBranchSnapshot.set(tabId, live);
+  }
+  return tabBranchSnapshot.get(tabId);
+}
+
 /** Icon key for the agent behind a tab: the chat's provider, else the provider
  *  matched from a launched agent's command. Undefined = plain terminal. */
 function tabAgentIcon(t: Tab): string | undefined {
@@ -1437,6 +1485,7 @@ function syncStore() {
         : isTabSettled(props.workspaceId, t.id),
       agentIcon: tabAgentIcon(t),
       model: chatSessionOf(t)?.model ?? getAllLeaves(t.root)[0]?.model,
+      branch: branchSnapshotFor(t.id),
     })),
   );
   tabsStore.setActive(props.workspaceId, activeTabId.value);
@@ -1451,6 +1500,10 @@ watch(
   () => [settledTabKeys.value.join(","), chatsStore.sessions.map((s) => `${s.id}:${s.settledOverride ?? ""}`).join(",")],
   syncStore,
 );
+// A tab can be created before the 60s git sweep has ever filled branchByWs
+// for this workspace; catch it up once that first value lands, so it still
+// gets a real snapshot instead of permanently missing one.
+watch(() => gitStore.branchByWs[props.workspaceId], syncStore);
 
 watch(activeTabId, (id) => {
   const tab = tabs.value.find((candidate) => candidate.id === id);
