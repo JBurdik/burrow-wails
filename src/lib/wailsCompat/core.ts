@@ -225,7 +225,7 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "is_pid_alive":
       return App.IsPidAlive(args.pid);
     case "set_tab_live_status":
-      return App.SetTabLiveStatus(args.ptyId ?? args.pty_id, args.status);
+      return App.SetTabLiveStatus(String(args.ptyId ?? args.pty_id), args.status);
     case "set_max_agents":
       return App.SetMaxAgents(args.n ?? args.max);
     case "set_burrow_mcp_max_depth":
@@ -257,16 +257,22 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     // support; see plan). request_float_snapshot/send_float_snapshot/
     // notify_float_grid stay — TaskLiveTerm.vue's task live-view reuses
     // the same event protocol and isn't a float window.
+    // Wails bindings are typed, and these take the pty id as a STRING (Go
+    // builds an event topic out of it: "float-grid-"+ptyID). Callers pass the
+    // numeric leaf id, which the bridge rejected outright with
+    // `json: cannot unmarshal number into Go value of type string` on every
+    // terminal resize. Stringify here — the topic the frontend listens on is
+    // built by the same coercion, so the names still match.
     case "request_float_snapshot":
-      return App.RequestFloatSnapshot(args.ptyId ?? args.pty_id);
+      return App.RequestFloatSnapshot(String(args.ptyId ?? args.pty_id));
     case "send_float_snapshot":
-      return App.SendFloatSnapshot(args.ptyId ?? args.pty_id, args.data, args.cols, args.rows);
+      return App.SendFloatSnapshot(String(args.ptyId ?? args.pty_id), args.data, args.cols, args.rows);
     case "notify_float_grid":
-      return App.NotifyFloatGrid(args.ptyId ?? args.pty_id, args.cols, args.rows);
+      return App.NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows);
     case "open_git_panel_window":
       return App.OpenGitPanelWindow();
     case "register_tmux_win":
-      return App.RegisterTmuxWin(args.winId ?? args.win_id, args.ptyId ?? args.pty_id);
+      return App.RegisterTmuxWin(String(args.winId ?? args.win_id), String(args.ptyId ?? args.pty_id));
 
     // Claude account/usage (stubbed — "unavailable" until reverse-engineered)
     case "claude_get_account":

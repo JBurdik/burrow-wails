@@ -25,6 +25,8 @@ export interface TabSummary {
   agentIcon?: string;
   /** Model id the agent is running (chat picker / SessionStart metadata). */
   model?: string;
+  /** Branch checked out when this tab was created — a snapshot, not live. */
+  branch?: string;
 }
 
 type TabRequest = {
@@ -114,8 +116,6 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     for (const tabId of Object.keys(seen)) {
       if (!currentIds.has(Number(tabId))) delete seen[Number(tabId)];
     }
-    // eslint-disable-next-line no-console
-    console.log("[UNREAD-DEBUG] setTabs", wsId, tabs.map((t) => ({ id: t.id, status: t.status, prev: previous.get(t.id) })), "seenBefore", seenCompletionsByWs.value[wsId], "seenAfter", seen);
     seenCompletionsByWs.value[wsId] = seen;
 
     const prevTabs = new Map((tabsByWs.value[wsId] ?? []).map((tab) => [tab.id, tab]));
@@ -158,8 +158,6 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   }
 
   function markCompletionSeen(wsId: number, tabId: number) {
-    // eslint-disable-next-line no-console
-    console.log("[UNREAD-DEBUG] markCompletionSeen", wsId, tabId, new Error().stack);
     seenCompletionsByWs.value[wsId] = {
       ...(seenCompletionsByWs.value[wsId] ?? {}),
       [tabId]: true,
