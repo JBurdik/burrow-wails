@@ -50,6 +50,37 @@ check:
     pnpm vue-tsc --noEmit
     cd src-wails && go vet ./... && go build ./... && go test ./...
 
+# ── beta (local-only, never signed/notarized/released) ─────────────────────────
+
+# Build a local beta bundle: purple title bar + purple icon, own bundle id so
+# it can sit next to the real Burrow.app in /Applications without colliding.
+# Never signed, notarized, tagged or pushed — this Mac only.
+build-beta:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ROOT="$(pwd)"
+    git diff --quiet -- src-wails/build/appicon.png || { echo "❌ src-wails/build/appicon.png has uncommitted changes — commit or stash first"; exit 1; }
+    cp src-wails/build/appicon-beta.png src-wails/build/appicon.png
+    trap 'git -C "$ROOT" checkout -- src-wails/build/appicon.png' EXIT
+    VITE_APP_CHANNEL=beta just build-web
+    just build-mobile
+    cd src-wails
+    wails build -platform darwin/arm64 -clean -s
+    go build -o build/bin/Burrow.app/Contents/MacOS/burrow-daemon ./cmd/burrow-daemon
+    go build -o build/bin/Burrow.app/Contents/MacOS/burrow-mcp ./cmd/burrow-mcp
+    rm -rf "build/bin/Burrow Beta.app"
+    mv build/bin/Burrow.app "build/bin/Burrow Beta.app"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.agenticide.wails.beta" "build/bin/Burrow Beta.app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName Burrow Beta" "build/bin/Burrow Beta.app/Contents/Info.plist"
+    echo "built: src-wails/build/bin/Burrow Beta.app"
+
+# Build + install the beta locally on this Mac (not signed, not released).
+beta: build-beta
+    rm -rf "/Applications/Burrow Beta.app"
+    cp -R "src-wails/build/bin/Burrow Beta.app" /Applications/
+    open "/Applications/Burrow Beta.app"
+    echo "installed: /Applications/Burrow Beta.app"
+
 # ── build ─────────────────────────────────────────────────────────────────────
 
 # Frontend production build, copied into src-wails/frontend/dist for the embed.

@@ -2,7 +2,7 @@
   <!-- data-tauri-drag-region makes the whole bar draggable with native decorations: true -->
   <div
     class="relative z-[100] flex h-[var(--titlebar-height)] shrink-0 items-center border-b border-border bg-panel [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)] [padding-top:env(titlebar-area-y,0px)]"
-    :class="isDev && 'bg-[#5c1a1a]'"
+    :style="isDev ? { backgroundColor: 'color-mix(in srgb, var(--bg-panel), #dc2626 40%)' } : isBeta ? { backgroundColor: 'color-mix(in srgb, var(--bg-panel), #a21caf 40%)' } : undefined"
     data-tauri-drag-region
   >
     <!-- Spacer for native macOS traffic lights (~72px) -->
@@ -466,6 +466,7 @@ onBeforeUnmount(() => {
 });
 
 const isDev = import.meta.env.DEV;
+const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
 </script>
 
 <style scoped>
