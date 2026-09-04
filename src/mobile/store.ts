@@ -47,6 +47,11 @@ export interface PendingPermission {
   rpcId?: number;      // ACP JSON-RPC id
   toolName: string;
   detail: string;
+  // ACP/Codex option ids the response must pick from — Codex's raw JSON-RPC
+  // carries no options array, so those are fabricated (mirrors
+  // src/lib/acpParser.ts's parseAcpPermRequest); generic ACP's are read
+  // verbatim from params.options since they're provider-defined.
+  options: { optionId: string; kind: string }[];
 }
 
 export interface RemoteChat {
@@ -305,10 +310,27 @@ export const useRemoteStore = defineStore("remote", () => {
     });
   }
 
-  // Narrow reader: only recognizes a can_use_tool control_request (Claude) or
-  // a session/request_permission (ACP) — everything else on this raw channel
-  // is ignored on purpose (see spec's "Non-goals": no full protocol parsing
-  // on mobile, only enough to unblock a turn).
+  // Codex's raw JSON-RPC approval requests carry no options array — the
+  // desktop's src/lib/acpParser.ts (parseAcpPermRequest) fabricates this
+  // fixed 3-item set and Go's AcpRespondPermission (control.go) only
+  // recognizes these exact optionId strings for a Codex session. Mirrored
+  // here rather than reinvented so mobile answers the same way desktop does.
+  const CODEX_APPROVAL_METHODS = [
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+  ];
+  const CODEX_APPROVAL_OPTIONS = [
+    { optionId: "codex:accept", kind: "allow_once" },
+    { optionId: "codex:acceptForSession", kind: "allow_always" },
+    { optionId: "codex:decline", kind: "reject_once" },
+  ];
+
+  // Narrow reader: only recognizes a can_use_tool control_request (Claude), a
+  // Codex requestApproval, or a generic session/request_permission (ACP) —
+  // everything else on this raw channel is ignored on purpose (see spec's
+  // "Non-goals": no full protocol parsing on mobile, only enough to unblock
+  // a turn).
   function watchChatPermissions(chat: RemoteChat) {
     const rawEvent = chat.transport === "claude-cli" ? `claude-data-${chat.id}` : `acp-req-${chat.id}`;
     client?.subscribe(rawEvent, (payload) => {
@@ -324,17 +346,36 @@ export const useRemoteStore = defineStore("remote", () => {
           requestId: msg.request_id,
           toolName: msg.request.tool_name ?? "Tool",
           detail: String(detail),
+          options: [],
         };
         return;
       }
 
       // ACP: server->client REQUEST has both method and id.
       if (typeof msg.id !== "number" || !msg.method) return;
-      if (!/permissions\/requestApproval|request_permission/.test(msg.method)) return;
+
+      if (CODEX_APPROVAL_METHODS.includes(msg.method)) {
+        const p = msg.params ?? {};
+        const command = typeof p.command === "string" ? p.command : "";
+        const toolName = msg.method.includes("commandExecution") ? "Run command"
+          : msg.method.includes("fileChange") ? "Apply file changes"
+          : "Grant additional permission";
+        chat.pendingPermission = {
+          rpcId: msg.id,
+          toolName,
+          detail: command,
+          options: CODEX_APPROVAL_OPTIONS,
+        };
+        return;
+      }
+
+      if (msg.method !== "session/request_permission") return;
+      const options = (msg.params?.options ?? []).map((o: any) => ({ optionId: o.optionId, kind: o.kind }));
       chat.pendingPermission = {
         rpcId: msg.id,
         toolName: msg.params?.toolCall?.title ?? msg.params?.title ?? "Tool",
         detail: "",
+        options,
       };
     });
   }
@@ -381,9 +422,12 @@ export const useRemoteStore = defineStore("remote", () => {
     chat.busy = true;
     try {
       if (chat.transport === "claude-cli") {
-        await client.call("claude_send", { id: chat.id, text: text.trim(), sessionId: chat.claudeSessionId || null });
+        // Go's wsArgs.ID is string-typed — an un-stringified numeric id
+        // silently fails to decode and the call hangs with no reply (same
+        // bug class Task 1 fixed for pty ids).
+        await client.call("claude_send", { id: String(chat.id), text: text.trim(), sessionId: chat.claudeSessionId || null });
       } else {
-        await client.call("acp_send", { id: chat.id, text: text.trim() });
+        await client.call("acp_send", { id: String(chat.id), text: text.trim() });
       }
     } catch (e: any) {
       chat.busy = false;
@@ -408,17 +452,29 @@ export const useRemoteStore = defineStore("remote", () => {
     try {
       if (pending.requestId) {
         await client.call("claude_respond_control", {
-          id: chat.id,
+          id: String(chat.id),
           requestId: pending.requestId,
           response: allow
             ? { behavior: "allow", updatedInput: {} }
             : { behavior: "deny", message: "User denied this action." },
         });
       } else if (pending.rpcId !== undefined) {
+        // optionIds are agent-defined — pick the matching one by kind from
+        // the request's own options (NOT a hardcoded string), same as
+        // AgentChat.vue's respondPermission. Only fall back to a bare
+        // "allow_once"/"reject_once" string if options came up empty.
+        const pick = (...kinds: string[]) => {
+          for (const k of kinds) {
+            const o = pending.options.find((x) => x.kind === k);
+            if (o) return o.optionId;
+          }
+          return pending.options[0]?.optionId ?? (allow ? "allow_once" : "reject_once");
+        };
+        const optionId = allow ? pick("allow_once", "allow_always") : pick("reject_once", "reject_always");
         await client.call("acp_respond_permission", {
-          id: chat.id,
+          id: String(chat.id),
           rpcId: pending.rpcId,
-          optionId: allow ? "allow_once" : "reject_once",
+          optionId,
         });
       }
     } catch (e: any) {
