@@ -13,6 +13,7 @@ import {
 } from "@/themes";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { router, tabsOrWelcome, workspaceRoute } from "@/router";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -224,17 +225,6 @@ function normalize(parsed: unknown): Prefs {
   return { ...DEFAULT_PREFS };
 }
 
-// Tri-state welcomeOpen resolved against the workspace's live tabs. Pure so the
-// rule ("no live work → land on the composer") is testable without a Pinia app.
-// Restore reopens EVERY saved chat thread, so "has tabs" is not "has live work":
-// a startup with only settled/old threads must still show the composer.
-export function resolveWelcomeVisible(
-  welcomeOpen: boolean | null,
-  liveTabCount: number,
-): boolean {
-  return welcomeOpen ?? liveTabCount === 0;
-}
-
 export const useUIStore = defineStore("ui", () => {
   const settingsOpen = ref(false);
 
@@ -263,10 +253,16 @@ export const useUIStore = defineStore("ui", () => {
   const debugOverlay = ref(loaded.debugOverlay);
   const floatCorner = ref(loaded.floatCorner);
   const worktreesDir = ref(loaded.worktreesDir);
-  // A pref saved before git became a tab can still say "git" — fall back to terminal.
-  const mode = ref<"terminal" | "claude" | "dashboard">(
-    (loaded.mode as string) === "git" ? "terminal" : loaded.mode,
+  // Which main surface is showing. Derived from the route, never assigned —
+  // the URL is the view state (fáze 4, docs/plans/003-view-state-routes.md), so
+  // this cannot drift from what is on screen the way a second ref could.
+  // Still persisted, only so a restart reopens on the surface you left.
+  const mode = computed<"terminal" | "claude" | "dashboard">(() =>
+    router.currentRoute.value.name === "dashboard" ? "dashboard" : "terminal",
   );
+  // A pref saved before git became a tab can still say "git" — fall back to terminal.
+  const startupMode: "terminal" | "dashboard" =
+    (loaded.mode as string) === "dashboard" ? "dashboard" : "terminal";
   const bgImagePath = ref(loaded.bgImagePath);
   const bgOpacity = ref(loaded.bgOpacity);
   const blurPanels = ref(loaded.blurPanels);
@@ -286,12 +282,8 @@ export const useUIStore = defineStore("ui", () => {
   const floatChatEnabled = ref(loaded.floatChatEnabled);
   const floatChatOpen = ref(loaded.floatChatOpen);
 
-  // Compose ("What should we build in X?") screen, shown over the terminal host.
-  // Session-only — a reload lands you back on your threads, not the composer.
-  // Tri-state: true = pinned open, false = explicitly dismissed, null = auto
-  // (resolved by welcomeVisible below from whether the workspace has any live,
-  // unsettled tab).
-  const welcomeOpen = ref<boolean | null>(null);
+  // The compose screen is its own route now (`/`), so "is the composer up" is
+  // not a ref anyone can forget to clear — see welcomeVisible below.
   const sidebarVisible = ref(loaded.sidebarVisible ?? false);
   const sidebarWidth = ref(loaded.sidebarWidth ?? 220);
   const rightPanelWidth = ref(loaded.rightPanelWidth ?? 300);
@@ -333,7 +325,6 @@ export const useUIStore = defineStore("ui", () => {
     debugOverlay.value = p.debugOverlay;
     floatCorner.value = p.floatCorner;
     worktreesDir.value = p.worktreesDir;
-    mode.value = (p.mode as string) === "mission" ? "terminal" : p.mode; // "mission" was the removed Mission Control pane
     bgImagePath.value = p.bgImagePath;
     bgOpacity.value = p.bgOpacity;
     blurPanels.value = p.blurPanels;
@@ -587,9 +578,12 @@ export const useUIStore = defineStore("ui", () => {
 
   // The scheme currently in force: "system" asks the OS, the other modes are
   // themselves.
+  // Reactive mirror of the OS scheme — a bare matchMedia() read inside a computed
+  // has no reactive dep, so the cache never invalidates when the OS flips.
+  const systemDark = ref(window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true);
   const resolvedScheme = computed<"light" | "dark">(() => {
     if (themeMode.value !== "system") return themeMode.value;
-    return (window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true) ? "dark" : "light";
+    return systemDark.value ? "dark" : "light";
   });
 
   // The families assigned to each scheme, and the one that is live now.
@@ -637,7 +631,8 @@ export const useUIStore = defineStore("ui", () => {
 
   // Follow OS theme changes live while in "system" mode.
   if (typeof window !== "undefined" && window.matchMedia) {
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+      systemDark.value = e.matches;
       if (themeMode.value === "system") resolveThemeMode();
     });
   }
@@ -648,12 +643,18 @@ export const useUIStore = defineStore("ui", () => {
     setThemeMode(resolvedScheme.value === "dark" ? "light" : "dark");
   }
 
+  // Route for a workspace's tabs, or the composer when there is no workspace
+  // to show. One place decides that, so "go back to the tabs" is unambiguous.
+  function tabsRoute(): string {
+    return workspaceRoute(useWorkspaceStore().active?.id);
+  }
+
   function setMode(m: "terminal" | "claude" | "dashboard") {
-    mode.value = m;
+    void router.push(m === "dashboard" ? "/dashboard" : tabsRoute());
   }
 
   function toggleDashboard() {
-    mode.value = mode.value === "dashboard" ? "terminal" : "dashboard";
+    void router.push(mode.value === "dashboard" ? tabsRoute() : "/dashboard");
   }
 
   function toggleSidebar() {
@@ -687,20 +688,38 @@ export const useUIStore = defineStore("ui", () => {
   // ChatView is simply unmounted); our terminals must stay mounted to keep the
   // PTY stream and the chat event listeners alive, so the state is explicit
   // instead of implied by the DOM.
-  const welcomeVisible = computed(() => {
-    const wsStore = useWorkspaceStore();
-    if (!wsStore.active) return true;
-    const all = useTerminalTabsStore().tabsByWs[wsStore.active.id] ?? [];
-    return resolveWelcomeVisible(welcomeOpen.value, all.filter((t) => !t.settled).length);
+  const welcomeVisible = computed(() => router.currentRoute.value.name === "welcome");
+  const viewingTabs = computed(() => {
+    const name = router.currentRoute.value.name;
+    return name === "workspace" || name === "tab";
   });
-  const viewingTabs = computed(() => mode.value === "terminal" && !welcomeVisible.value);
+
+  /** Number of the active workspace's tabs that still count as live. */
+  function liveTabCount(): number {
+    const wsStore = useWorkspaceStore();
+    if (!wsStore.active) return 0;
+    const all = useTerminalTabsStore().tabsByWs[wsStore.active.id] ?? [];
+    return all.filter((t) => !t.settled).length;
+  }
+
+  /**
+   * Go to a workspace's tabs — unless it has none live, in which case the
+   * composer is the honest destination. This is the old tri-state `welcomeOpen`
+   * auto branch, kept as a navigation decision instead of a stored one.
+   */
+  function showTabs() {
+    void router.push(tabsOrWelcome(useWorkspaceStore().active?.id, liveTabCount()));
+  }
 
   function openWelcome() {
-    welcomeOpen.value = true;
-    mode.value = "terminal"; // composer lives in the terminal host
+    void router.push("/");
   }
+  // Dismissing the composer is an explicit "show me the tabs", so it goes there
+  // even when the workspace has nothing live yet — a tab being opened in the
+  // same breath (a script, a new thread) has not reached the store yet, and
+  // bouncing back to the composer would swallow it.
   function closeWelcome() {
-    welcomeOpen.value = false;
+    void router.push(tabsRoute());
   }
 
   // Spotlight lives in App.vue's tree, so callers elsewhere (Sidebar's "New
@@ -783,7 +802,8 @@ export const useUIStore = defineStore("ui", () => {
     floatChatEnabled,
     floatChatOpen,
     toggleFloatChat,
-    welcomeOpen,
+    showTabs,
+    startupMode,
     welcomeVisible,
     viewingTabs,
     openWelcome,

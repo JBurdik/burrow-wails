@@ -104,6 +104,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, provide, watch, nextTick, useTemplateRef } from "vue";
+import { useRoute } from "vue-router";
+import { router, routeId } from "@/router";
 import { PhX } from "@phosphor-icons/vue";
 import TitleBar from "@/components/TitleBar.vue";
 import Sidebar from "@/components/Sidebar.vue";
@@ -180,17 +182,63 @@ function openShortcutsFromDocs() {
 }
 
 // Tabs of the active workspace (the Sidebar's shelves read them from here).
+const route = useRoute();
+
 const allTabs = computed(() => (ws.active ? tabsStore.tabsByWs[ws.active.id] ?? [] : []));
 
-// The view state lives in the ui store, not here: Terminal.vue's watched/seen
-// logic has to agree with what's on screen, and a computed local to App.vue
-// was invisible to it — hence a tab hidden behind the composer counting as
-// watched. See `welcomeVisible` / `viewingTabs` in stores/ui.ts.
+// The view state is the ROUTE (fáze 4, docs/plans/003-view-state-routes.md).
+// It used to be a computed local to App.vue, invisible to Terminal.vue's
+// watched/seen logic — which is how a tab hidden behind the composer counted as
+// watched. The ui store now only reads the route back out.
 const showWelcome = computed(() => ui.welcomeVisible);
+
+// ── route ⇄ stores ───────────────────────────────────────────────────────────
+// The URL names the workspace and tab; the stores hold the objects. These two
+// watchers keep them in step, each guarded so it never answers the other.
+//
+// ponytail: no navigation guards, no router-view. Two watchers in the shell are
+// enough for a single-window desktop app, and they stay readable — a guard
+// would have to wait for the workspace list to load before it could resolve
+// /ws/7 at all.
+watch(
+  () => route.fullPath,
+  async () => {
+    const wsId = routeId(route.params.wsId);
+    if (wsId === null) return;
+    if (ws.active?.id !== wsId) {
+      const target = ws.workspaces.find((w) => w.id === wsId) ?? ws.opened.find((w) => w.id === wsId);
+      // Unknown id (a stale deep link) — say so by going to the composer
+      // rather than showing whatever happened to be active.
+      if (!target) { void router.replace("/"); return; }
+      ws.open(target);
+    }
+    const tabId = routeId(route.params.tabId);
+    if (tabId !== null) tabsStore.activate(wsId, tabId);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => ws.active?.id,
+  (id) => {
+    // Closing the workspace (TitleBar back) leaves nothing addressable.
+    if (id == null) {
+      if (route.name === "workspace" || route.name === "tab") void router.replace("/");
+      return;
+    }
+    // Only re-address routes that name a workspace; being on /dashboard or the
+    // composer is a deliberate place to be, not a stale URL.
+    if (route.name !== "workspace" && route.name !== "tab") return;
+    if (routeId(route.params.wsId) === id) return;
+    void router.replace(`/ws/${id}`);
+  },
+);
 
 // Back to auto once the workspace is empty, so closing the last tab brings the
 // composer back after an earlier dismissal.
-watch(() => allTabs.value.length, (n) => { if (n === 0) ui.welcomeOpen = null; });
+// The last live tab closing means there is nothing left to look at, so the
+// composer becomes the honest destination rather than an empty terminal host.
+watch(() => allTabs.value.length, (n) => { if (n === 0) ui.openWelcome(); });
 
 // Screen stays mounted behind v-show, so re-focus its composer each time it shows.
 const welcomeEl = useTemplateRef<{ focus: () => void; cycleProvider: () => void; target: Workspace | null }>("welcomeEl");
@@ -382,7 +430,31 @@ function playStartupChime() {
 }
 
 onMounted(async () => {
-  ws.load();
+  await ws.load();
+  // Land where the last session left off. `replace` so the app does not open
+  // with a back entry pointing at nothing.
+  //
+  // The tab list is restored ASYNCHRONOUSLY (Terminal mounts, then answers with
+  // its tabs), so deciding this once here always saw zero live tabs and dumped
+  // every startup on the composer. Wait for the first non-empty list instead —
+  // and only act if the user has not navigated somewhere themselves meanwhile.
+  if (route.path === "/") {
+    if (ui.startupMode === "dashboard") {
+      void router.replace("/dashboard");
+    } else {
+      const stopStartupNav = watch(
+        () => allTabs.value.length,
+        (n) => {
+          if (n === 0) return;
+          stopStartupNav();
+          if (route.path === "/") ui.showTabs();
+        },
+        { immediate: true },
+      );
+      // Nothing to restore at all: stop waiting once the workspace list settled.
+      setTimeout(stopStartupNav, 10_000);
+    }
+  }
   playStartupChime();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener('mousemove', onResizeMove);

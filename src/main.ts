@@ -16,8 +16,12 @@ async function boot() {
     app.mount("#app");
   } else {
     const { default: App } = await import("./App.vue");
+    const { router } = await import("./router");
     const app = createApp(App);
     app.use(pinia);
+    // Only the main window is routed. The detached git panel is a different
+    // window with its own single-purpose root and no view state to address.
+    app.use(router);
     app.mount("#app");
   }
 }

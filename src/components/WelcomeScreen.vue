@@ -228,6 +228,7 @@ import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTermin
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
+import { useGitStore } from "@/stores/git";
 import { useProvidersStore, binaryFor } from "@/stores/providers";
 import { getConfig, setConfig } from "@/lib/config";
 import { invoke } from "@tauri-apps/api/core";
@@ -246,6 +247,7 @@ const emit = defineEmits<{ (e: "open-folder"): void }>();
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const ui = useUIStore();
+const git = useGitStore();
 const providers = useProvidersStore();
 
 const text = ref("");
@@ -545,7 +547,16 @@ defineExpose({ focus: () => inputEl.value?.focus(), cycleProvider, target });
 type WorktreeMode = "current" | "new";
 const worktreeMode = shallowRef<WorktreeMode>("current");
 const worktreeBranch = shallowRef("");
-const currentBranch = shallowRef("");
+const fetchedBranch = shallowRef("");
+// ponytail: the git store already re-reads HEAD for the active cwd on every
+// refresh; the one-shot fetch below is only for a target nobody is watching.
+const currentBranch = computed(() => {
+  const workspace = target.value;
+  if (!workspace) return "";
+  if (workspace.worktree_branch) return workspace.worktree_branch;
+  if (git.cwd === workspace.path && git.branch) return git.branch;
+  return fetchedBranch.value;
+});
 const worktreeBusy = shallowRef(false);
 const worktreeError = shallowRef("");
 
@@ -562,19 +573,15 @@ function selectWorktreeMode(mode: WorktreeMode) {
 }
 
 async function refreshCurrentBranch(workspace: Workspace | null) {
-  if (!workspace) {
-    currentBranch.value = "";
-    return;
-  }
-  if (workspace.worktree_branch) {
-    currentBranch.value = workspace.worktree_branch;
+  if (!workspace || workspace.worktree_branch) {
+    fetchedBranch.value = "";
     return;
   }
   try {
     const out = await invoke<{ stdout: string; code: number }>("run_git", { cwd: workspace.path, args: ["branch", "--show-current"] });
-    currentBranch.value = out.code === 0 ? out.stdout.trim() : "";
+    fetchedBranch.value = out.code === 0 ? out.stdout.trim() : "";
   } catch {
-    currentBranch.value = "";
+    fetchedBranch.value = "";
   }
 }
 
@@ -649,7 +656,6 @@ async function submit() {
   const terminalPrompt = launchMode.value === "terminal" && images.length > 0
     ? promptWithImagePaths(prompt, await persistTerminalImages(images))
     : prompt;
-  if (ui.mode !== "terminal") ui.setMode("terminal");
   const wasOpen = store.opened.some((w) => w.id === t.id);
   store.open(t);
   const open = launchMode.value === "terminal"
@@ -663,6 +669,8 @@ async function submit() {
   pendingImages.value = [];
   worktreeMode.value = "current";
   worktreeBranch.value = "";
+  // Leaving the composer for the tabs is the navigation that ends this screen —
+  // it also covers the dashboard case the old explicit setMode("terminal") did.
   ui.closeWelcome();
 }
 </script>

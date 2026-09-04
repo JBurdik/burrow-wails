@@ -17,6 +17,7 @@ import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useProvidersStore } from "@/stores/providers";
 import { useUIStore } from "@/stores/ui";
+import { router } from "@/router";
 import { useDiagram } from "@/composables/useDiagram";
 import { buildTerminalCommand } from "@/lib/agentCommand";
 import { readTermOutput } from "@/lib/termRegistry";
@@ -87,6 +88,7 @@ async function focusWorkspace(id: number) {
   const found = await workspaceById(id);
   if (!found) throw new Error(`no workspace with id ${id}`);
   useWorkspaceStore().open(found);
+  await router.push(`/ws/${found.id}`);
   return { workspace_id: found.id, name: found.name, path: found.path };
 }
 
@@ -108,7 +110,9 @@ async function focusTab(ptyId: number) {
     if (target) ws.open(target);
   }
   useTerminalTabsStore().activate(owner, ptyId);
-  useUIStore().mode = "terminal";
+  // Navigating IS the focus: the route names the workspace and the tab, so a
+  // control caller and the UI can no longer disagree about what is on screen.
+  await router.push(`/ws/${owner}/tab/${ptyId}`);
   return { pty_id: ptyId, workspace_id: owner };
 }
 

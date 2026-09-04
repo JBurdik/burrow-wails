@@ -134,6 +134,7 @@ import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
+import { router } from "@/router";
 import { aggregateStatus, type TermStatus } from "@/lib/terminalStatus";
 
 defineEmits<{ (e: "new-workspace"): void }>();
@@ -177,20 +178,21 @@ function wsAgg(wsId: number): TermStatus {
 function goToTab(a: { wsId: number; tabId: number }) {
   const target = ws.workspaces.find((w) => w.id === a.wsId);
   if (target) ws.open(target);
-  ui.setMode("terminal");
-  setTimeout(() => termTabs.activate(a.wsId, a.tabId), 60);
+  // One navigation instead of "switch mode, then remember to activate the tab
+  // 60 ms later": the route names both, and App.vue's route watcher activates it.
+  void router.push(`/ws/${a.wsId}/tab/${a.tabId}`);
 }
 
 // ── Quick actions ─────────────────────────────────────────────────────────────
 function newTerminal() {
   if (!ws.active) return;
   termTabs.add(ws.active.id);
-  ui.setMode("terminal");
+  ui.closeWelcome(); // leave the dashboard for the workspace that just got the tab
 }
 function newChat() {
   if (!ws.active) return;
   termTabs.openChat(ws.active.id);
-  ui.setMode("terminal");
+  ui.closeWelcome(); // leave the dashboard for the workspace that just got the tab
 }
 function openWs(w: Workspace) {
   ws.open(w);
