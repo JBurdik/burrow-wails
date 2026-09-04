@@ -76,6 +76,8 @@ export function DeleteSkill(arg1:string):Promise<void>;
 
 export function DeleteWorkspace(arg1:number):Promise<void>;
 
+export function ExtensionsDirectory():Promise<string>;
+
 export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function GenerateBranchName(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
@@ -88,6 +90,8 @@ export function GeneratePrContent(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function GetAppVersion():Promise<string>;
 
+export function GetExtensionSettings(arg1:string):Promise<Record<string, string>>;
+
 export function GetHookServerPort():Promise<number>;
 
 export function GetHttpServerStatus():Promise<main.HttpServerStatus>;
@@ -97,6 +101,8 @@ export function GetPtyForeground(arg1:string):Promise<string>;
 export function GetTailscaleStatus():Promise<main.TailscaleStatus>;
 
 export function HomeDir():Promise<string>;
+
+export function InstallExtension(arg1:string):Promise<void>;
 
 export function InstallUpdate(arg1:string,arg2:string):Promise<void>;
 
@@ -113,6 +119,8 @@ export function LatestNpmVersion(arg1:string):Promise<main.ProviderLatest>;
 export function ListCheckpoints(arg1:string,arg2:number):Promise<Array<main.Checkpoint>>;
 
 export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSessionInfo>>;
+
+export function ListExtensions():Promise<Array<main.ExtensionInfo>>;
 
 export function ListFonts():Promise<Array<string>>;
 
@@ -176,7 +184,7 @@ export function ReinstallStatusHooks():Promise<void>;
 
 export function RelaunchApp():Promise<void>;
 
-export function RemoteCreateChat(arg1:string):Promise<Record<string, any>>;
+export function RemoteCreateChat(arg1:number,arg2:string):Promise<Record<string, any>>;
 
 export function RemoteListChats():Promise<Array<Record<string, any>>>;
 
@@ -200,11 +208,15 @@ export function RestartDaemon():Promise<void>;
 
 export function RestoreCheckpoint(arg1:string,arg2:string):Promise<main.Checkpoint>;
 
+export function RunExtensionCommand(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function SaveChatMessages(arg1:number,arg2:string,arg3:number):Promise<void>;
+
+export function SaveExtensionSettings(arg1:string,arg2:Record<string, string>):Promise<void>;
 
 export function SaveTempImage(arg1:string,arg2:string):Promise<string>;
 
@@ -215,6 +227,8 @@ export function SearchFiles(arg1:string,arg2:string,arg3:number):Promise<Array<m
 export function SendFloatSnapshot(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
 export function SetBurrowMcpMaxDepth(arg1:number):Promise<void>;
+
+export function SetExtensionEnabled(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetHttpEnabled(arg1:boolean):Promise<void>;
 

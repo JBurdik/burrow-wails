@@ -994,31 +994,34 @@
           </div>
         </section>
 
-        <!-- Extensions (browser — planned) -->
+        <!-- Extensions -->
         <section v-else-if="active === 'extensions'" class="flex flex-col gap-3.5">
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
               <h2 class="text-[15px] font-semibold text-foreground">Extensions</h2>
-              <span class="text-xs text-muted-foreground">Browser &amp; editor integrations</span>
+              <span class="text-xs text-muted-foreground">Local, separately-run add-ons</span>
             </div>
+            <div class="flex-1" />
+            <Button variant="outline" size="sm" @click="openExtensionsFolder">Open extensions folder</Button>
+            <Button variant="outline" size="sm" :disabled="extensionInstalling" @click="chooseExtensionFolder">Choose folder</Button>
+            <Button size="sm" :disabled="extensionInstalling" @click="chooseExtensionArchive">{{ extensionInstalling ? "Installing…" : "Install ZIP" }}</Button>
           </div>
           <div class="h-px bg-border" />
+          <p class="m-0 max-w-[800px] text-xs leading-relaxed text-muted-foreground">Choose an extension folder or ZIP with an <code class="rounded bg-hover px-1 font-mono text-[10px]">extension.json</code>. Burrow validates it, copies it into its managed extensions folder, and runs declared commands only after you click them.</p>
+          <p v-if="extensionMessage" class="m-0 text-xs" :class="extensionMessageError ? 'text-destructive' : 'text-muted-foreground'">{{ extensionMessage }}</p>
 
-          <div class="flex flex-col gap-2">
-            <div class="flex items-start gap-3 rounded-lg border border-dashed border-border bg-panel px-3.5 py-3">
-              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-hover text-secondary-foreground"><PhBrowser :size="15" /></div>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 text-[13px] font-semibold text-foreground">
-                  Browser extension
-                  <Badge variant="warning" class="rounded-full text-[9.5px] font-bold uppercase tracking-[0.04em]">Planned</Badge>
-                </div>
-                <div class="mt-0.75 text-[11.5px] leading-snug text-secondary-foreground">
-                  Drive a real browser tab from inside Burrow — let agents open pages,
-                  fill forms, and read the DOM without leaving the IDE.
-                </div>
-              </div>
+          <div v-if="extensions.length === 0" class="rounded-lg border border-dashed border-border bg-panel px-3.5 py-5 text-center text-xs text-muted-foreground">No extensions yet. Choose a folder or ZIP to install one.</div>
+          <div v-for="extension in extensions" :key="extension.dir" class="flex flex-col gap-3 rounded-lg border border-border bg-panel px-3.5 py-3">
+            <div class="flex items-start gap-3">
+              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-hover text-secondary-foreground"><PhPuzzlePiece :size="15" /></div>
+              <div class="min-w-0 flex-1"><div class="flex items-center gap-2 text-[13px] font-semibold text-foreground">{{ extension.name || extension.dir }} <span class="font-mono text-[10px] font-normal text-muted-foreground">v{{ extension.version || "?" }}</span></div><p class="m-0 mt-0.5 text-[11.5px] leading-snug text-secondary-foreground">{{ extension.error || extension.description }}</p><p v-if="extension.permissions?.length" class="m-0 mt-1.5 text-[10.5px] text-muted-foreground">Declares: {{ extension.permissions.join(", ") }}</p></div>
+              <div class="flex items-center gap-2"><Button v-if="extension.settings?.length" variant="outline" size="sm" @click="configureExtension(extension)">Configure</Button><Switch :checked="extension.enabled" :disabled="!!extension.error" @update:checked="(enabled: boolean) => toggleExtension(extension, enabled)" /></div>
             </div>
+            <div v-if="configuringExtensionId === extension.id" class="flex flex-col gap-2 border-t border-border pt-3"><label v-for="setting in extension.settings" :key="setting.id" class="flex flex-col gap-1"><span class="text-[11.5px] font-medium text-secondary-foreground">{{ setting.title }}</span><span v-if="setting.description" class="text-[10.5px] text-muted-foreground">{{ setting.description }}</span><input class="h-8 rounded-md border border-border bg-base px-2.5 text-xs text-foreground outline-none focus:border-accent" :placeholder="setting.placeholder" :value="extensionSettings[extension.id]?.[setting.id] ?? ''" @input="setExtensionSetting(extension.id, setting.id, val($event))" /></label><div class="flex items-center gap-2 pt-1"><Button size="sm" :disabled="savingExtensionSettings" @click="saveExtensionSettings(extension)">{{ savingExtensionSettings ? "Saving…" : "Save connection" }}</Button><Button variant="outline" size="sm" @click="configuringExtensionId = null">Cancel</Button></div></div>
+            <div v-if="extension.enabled && !extension.error && extension.commands?.length" class="flex flex-wrap items-center gap-2 border-t border-border pt-3"><Button v-for="command in extension.commands" :key="command.id" variant="outline" size="sm" :disabled="runningExtensionCommand != null" @click="runExtensionCommand(extension.id, command.id)"><PhPlay :size="11" /> {{ runningExtensionCommand === `${extension.id}:${command.id}` ? "Running…" : command.title }}</Button><div v-if="extensionTasks[extension.id]" class="flex basis-full items-center gap-2 pt-1 text-[11px] text-muted-foreground"><span>{{ extensionTasks[extension.id].title }}</span><span v-if="extensionTasks[extension.id].progress != null" class="font-mono">{{ Math.round(extensionTasks[extension.id].progress! * 100) }}%</span><span class="text-secondary-foreground">{{ extensionTasks[extension.id].status }}</span></div></div>
           </div>
+
+          <details class="rounded-lg border border-border bg-panel px-3.5 py-3"><summary class="cursor-pointer text-[13px] font-medium text-foreground">Building an extension</summary><div class="mt-2 max-w-[760px] text-[11.5px] leading-relaxed text-secondary-foreground">Use <code class="rounded bg-hover px-1 font-mono text-[10px]">apiVersion: 1</code>, a lowercase hyphenated ID, and commands whose executable is on <code class="rounded bg-hover px-1 font-mono text-[10px]">PATH</code>. Commands receive <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_ID</code>, <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_DIR</code>, and <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_CWD</code>. Read <code class="rounded bg-hover px-1 font-mono text-[10px]">docs/extensions.md</code> in the source tree for the full contract. Only install extensions you trust: permissions are informational in v1, not an OS sandbox.</div></details>
         </section>
 
         <!-- Other panels (placeholder) -->
@@ -1032,21 +1035,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, type Component } from "vue";
+import { ref, computed, onUnmounted, watch, type Component } from "vue";
 import {
   PhGearSix, PhX, PhPlus, PhTrash, PhArrowCounterClockwise,
   PhSlidersHorizontal, PhFolderOpen, PhRobot, PhPalette, PhKeyboard,
   PhPuzzlePiece, PhInfo, PhSparkle,
   PhFolder, PhPencilSimple, PhCheck, PhBell, PhPlay,
   PhArrowClockwise, PhDownloadSimple, PhTerminalWindow,
-  PhPlugsConnected, PhBrowser, PhToggleLeft, PhToggleRight, PhArrowSquareOut, PhImage,
+  PhPlugsConnected, PhToggleLeft, PhToggleRight, PhArrowSquareOut, PhImage,
   PhPaperPlaneTilt, PhPawPrint, PhPlayCircle, PhArrowUp, PhArrowDown,
   PhDesktop, PhSun, PhMoon,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { pickDir, pickFile, AUDIO_EXTS, IMAGE_EXTS } from "@/lib/pickPath";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
 import { useScriptsStore, type Script } from "@/stores/scripts";
@@ -1465,10 +1468,138 @@ async function removeMcp(m: McpServer) {
   }
 }
 
+// ── Local extension registry ────────────────────────────────────────────────
+type ExtensionCommand = { id: string; title: string };
+type ExtensionSetting = { id: string; title: string; description?: string; placeholder?: string; type: "text"; required?: boolean };
+type ExtensionInfo = { id: string; name: string; version: string; description: string; permissions?: string[]; commands?: ExtensionCommand[]; settings?: ExtensionSetting[]; dir: string; enabled: boolean; error?: string };
+type ExtensionTask = { id: string; title: string; status: string; progress?: number };
+const extensions = ref<ExtensionInfo[]>([]);
+const extensionTasks = ref<Record<string, ExtensionTask>>({});
+const extensionInstalling = ref(false);
+const runningExtensionCommand = ref<string | null>(null);
+const extensionMessage = ref("");
+const extensionMessageError = ref(false);
+const configuringExtensionId = ref<string | null>(null);
+const extensionSettings = ref<Record<string, Record<string, string>>>({});
+const savingExtensionSettings = ref(false);
+let unlistenExtensionTask: UnlistenFn | null = null;
+
+async function listenForExtensionTasks(extensionId: string) {
+  unlistenExtensionTask?.();
+  unlistenExtensionTask = await listen<ExtensionTask>(`extension-task:${extensionId}`, ({ payload }) => {
+    extensionTasks.value = { ...extensionTasks.value, [extensionId]: payload };
+  });
+}
+
+onUnmounted(() => { unlistenExtensionTask?.(); });
+
+async function loadExtensions() {
+  try {
+    extensions.value = await invoke<ExtensionInfo[]>("list_extensions");
+  } catch (e) {
+    extensionMessage.value = `Could not load extensions: ${e}`;
+    extensionMessageError.value = true;
+  }
+}
+
+async function openExtensionsFolder() {
+  try {
+    const path = await invoke<string>("extensions_directory");
+    await invoke("open_path_in", { path, target: "finder" });
+  } catch (e) {
+    extensionMessage.value = `Could not open the extensions folder: ${e}`;
+    extensionMessageError.value = true;
+  }
+}
+
+async function configureExtension(extension: ExtensionInfo) {
+  try {
+    extensionSettings.value = { ...extensionSettings.value, [extension.id]: await invoke<Record<string, string>>("get_extension_settings", { extensionId: extension.id }) };
+    configuringExtensionId.value = extension.id;
+  } catch (e) {
+    extensionMessage.value = `Could not load ${extension.name} settings: ${e}`;
+    extensionMessageError.value = true;
+  }
+}
+
+function setExtensionSetting(extensionId: string, settingId: string, value: string) {
+  extensionSettings.value = { ...extensionSettings.value, [extensionId]: { ...extensionSettings.value[extensionId], [settingId]: value } };
+}
+
+async function saveExtensionSettings(extension: ExtensionInfo) {
+  savingExtensionSettings.value = true;
+  try {
+    await invoke("save_extension_settings", { extensionId: extension.id, values: extensionSettings.value[extension.id] ?? {} });
+    configuringExtensionId.value = null;
+    extensionMessage.value = `${extension.name} connection saved.`;
+    extensionMessageError.value = false;
+  } catch (e) {
+    extensionMessage.value = `Could not save ${extension.name} settings: ${e}`;
+    extensionMessageError.value = true;
+  } finally {
+    savingExtensionSettings.value = false;
+  }
+}
+
+async function installExtension(source: string) {
+  extensionInstalling.value = true;
+  extensionMessage.value = "";
+  try {
+    await invoke("install_extension", { source });
+    extensionMessage.value = "Extension installed.";
+    extensionMessageError.value = false;
+    await loadExtensions();
+  } catch (e) {
+    extensionMessage.value = String(e);
+    extensionMessageError.value = true;
+  } finally {
+    extensionInstalling.value = false;
+  }
+}
+
+async function chooseExtensionFolder() {
+  const source = await pickDir({ title: "Choose extension folder", allowCreate: false });
+  if (source) await installExtension(source);
+}
+
+async function chooseExtensionArchive() {
+  const source = await pickFile({ title: "Choose extension ZIP", extensions: ["zip"] });
+  if (source) await installExtension(source);
+}
+
+async function toggleExtension(extension: ExtensionInfo, enabled: boolean) {
+  try {
+    await invoke("set_extension_enabled", { id: extension.id, enabled });
+    extension.enabled = enabled;
+  } catch (e) {
+    extensionMessage.value = `Could not update ${extension.name}: ${e}`;
+    extensionMessageError.value = true;
+  }
+}
+
+async function runExtensionCommand(extensionId: string, commandId: string) {
+  const key = `${extensionId}:${commandId}`;
+  runningExtensionCommand.value = key;
+  extensionMessage.value = "";
+  extensionTasks.value = { ...extensionTasks.value, [extensionId]: { id: commandId, title: "Starting extension task…", status: "running" } };
+  try {
+    await listenForExtensionTasks(extensionId);
+    const output = await invoke<string>("run_extension_command", { extensionId, commandId });
+    extensionMessage.value = output || "Command completed.";
+    extensionMessageError.value = false;
+  } catch (e) {
+    extensionMessage.value = String(e);
+    extensionMessageError.value = true;
+  } finally {
+    runningExtensionCommand.value = null;
+  }
+}
+
 // Lazy-load each panel's data the first time it's opened.
 watch(active, (id) => {
   if (id === "skills" && skills.value.length === 0) loadSkills();
   if (id === "mcp" && mcpServers.value.length === 0) loadMcp();
+  if (id === "extensions") loadExtensions();
 });
 
 // --- App keybindings (Keybindings section) ---

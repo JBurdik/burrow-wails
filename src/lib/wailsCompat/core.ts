@@ -215,6 +215,22 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "remove_mcp_server":
       return App.RemoveMcpServer(args.name);
 
+    // Local extensions (manifest registry + explicit user-run commands).
+    case "list_extensions":
+      return App.ListExtensions();
+    case "set_extension_enabled":
+      return App.SetExtensionEnabled(args.id, !!args.enabled);
+    case "extensions_directory":
+      return App.ExtensionsDirectory();
+    case "get_extension_settings":
+      return App.GetExtensionSettings(args.extensionId);
+    case "install_extension":
+      return App.InstallExtension(args.source);
+    case "save_extension_settings":
+      return App.SaveExtensionSettings(args.extensionId, args.values ?? {});
+    case "run_extension_command":
+      return App.RunExtensionCommand(args.extensionId, args.commandId, args.cwd ?? "");
+
     // Claude session reading
     case "list_claude_sessions":
       return App.ListClaudeSessions(args.cwd);
@@ -304,7 +320,7 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
     case "remote_list_chats":
       return App.RemoteListChats();
     case "remote_create_chat":
-      return App.RemoteCreateChat(args.cwd);
+      return App.RemoteCreateChat(args.workspaceId ?? args.workspace_id ?? 0, args.cwd ?? "");
 
     // Daemon admin (stubbed)
     case "daemon_stats":

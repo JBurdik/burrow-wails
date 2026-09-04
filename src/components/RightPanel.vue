@@ -47,8 +47,16 @@
       </div>
     </div>
 
+    <!-- Extension surfaces are host-rendered, never third-party Vue code. -->
+    <WorkspacePulseSurface
+      v-if="activeExtensionSurface?.kind === 'workspace-pulse'"
+      :cwd="props.cwd"
+      :title="activeExtensionSurface.title"
+      :description="activeExtensionSurface.description"
+    />
+
     <!-- Explorer tab -->
-    <div v-if="activeTab === 'explorer'" class="flex flex-1 flex-col overflow-y-auto">
+    <div v-else-if="activeTab === 'explorer'" class="flex flex-1 flex-col overflow-y-auto">
       <div v-if="!props.cwd" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
       <div v-else-if="fileTree.rootError" class="p-4 text-center text-[11px] text-destructive">{{ fileTree.rootError }}</div>
       <div v-else class="flex-1 py-1">
@@ -428,7 +436,9 @@ import DiffView from "./DiffView.vue";
 import CommitPushMenu from "./CommitPushMenu.vue";
 import BrowserPane from "./BrowserPane.vue";
 import XTerm from "./XTerm.vue";
+import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
 import { nextPtyId } from "@/lib/ptyId";
+import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
@@ -437,6 +447,7 @@ const fileTree = useFileTreeStore();
 const chats = useClaudeChatsStore();
 const subagents = useSubagentsStore();
 const terminalTabs = useTerminalTabsStore();
+const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensionSurfaces();
 // RightPanel is one shared instance across all workspaces (App.vue doesn't
 // key it per workspace), so which surfaces are open / which tab is active
 // must be tracked per workspace, not as one global ref — otherwise switching
@@ -511,8 +522,12 @@ const tabs = computed(() => {
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
-  return all;
+  return [...all, ...extensionSurfaces.value];
 });
+
+const activeExtensionSurface = computed(() =>
+  extensionSurfaces.value.find((surface) => surface.tabId === activeTab.value),
+);
 
 // One scratch terminal (and its cwd) per workspace, kept mounted forever once
 // opened — like the main Terminal.vue leaves — so an app running in it keeps
@@ -651,6 +666,7 @@ function onVisible() { if (!document.hidden) autoRefresh(); }
 watch(activeTab, (t) => { if (t === "git") autoRefresh(); });
 
 onMounted(() => {
+  loadExtensionSurfaces();
   window.addEventListener("focus", onFocus);
   document.addEventListener("visibilitychange", onVisible);
 });

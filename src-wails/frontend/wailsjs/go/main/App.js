@@ -150,6 +150,10 @@ export function DeleteWorkspace(arg1) {
   return window['go']['main']['App']['DeleteWorkspace'](arg1);
 }
 
+export function ExtensionsDirectory() {
+  return window['go']['main']['App']['ExtensionsDirectory']();
+}
+
 export function FormatSource(arg1, arg2, arg3) {
   return window['go']['main']['App']['FormatSource'](arg1, arg2, arg3);
 }
@@ -174,6 +178,10 @@ export function GetAppVersion() {
   return window['go']['main']['App']['GetAppVersion']();
 }
 
+export function GetExtensionSettings(arg1) {
+  return window['go']['main']['App']['GetExtensionSettings'](arg1);
+}
+
 export function GetHookServerPort() {
   return window['go']['main']['App']['GetHookServerPort']();
 }
@@ -192,6 +200,10 @@ export function GetTailscaleStatus() {
 
 export function HomeDir() {
   return window['go']['main']['App']['HomeDir']();
+}
+
+export function InstallExtension(arg1) {
+  return window['go']['main']['App']['InstallExtension'](arg1);
 }
 
 export function InstallUpdate(arg1, arg2) {
@@ -224,6 +236,10 @@ export function ListCheckpoints(arg1, arg2) {
 
 export function ListClaudeSessions(arg1) {
   return window['go']['main']['App']['ListClaudeSessions'](arg1);
+}
+
+export function ListExtensions() {
+  return window['go']['main']['App']['ListExtensions']();
 }
 
 export function ListFonts() {
@@ -350,8 +366,8 @@ export function RelaunchApp() {
   return window['go']['main']['App']['RelaunchApp']();
 }
 
-export function RemoteCreateChat(arg1) {
-  return window['go']['main']['App']['RemoteCreateChat'](arg1);
+export function RemoteCreateChat(arg1, arg2) {
+  return window['go']['main']['App']['RemoteCreateChat'](arg1, arg2);
 }
 
 export function RemoteListChats() {
@@ -398,6 +414,10 @@ export function RestoreCheckpoint(arg1, arg2) {
   return window['go']['main']['App']['RestoreCheckpoint'](arg1, arg2);
 }
 
+export function RunExtensionCommand(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RunExtensionCommand'](arg1, arg2, arg3);
+}
+
 export function RunGh(arg1, arg2) {
   return window['go']['main']['App']['RunGh'](arg1, arg2);
 }
@@ -408,6 +428,10 @@ export function RunGit(arg1, arg2) {
 
 export function SaveChatMessages(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveChatMessages'](arg1, arg2, arg3);
+}
+
+export function SaveExtensionSettings(arg1, arg2) {
+  return window['go']['main']['App']['SaveExtensionSettings'](arg1, arg2);
 }
 
 export function SaveTempImage(arg1, arg2) {
@@ -428,6 +452,10 @@ export function SendFloatSnapshot(arg1, arg2, arg3, arg4) {
 
 export function SetBurrowMcpMaxDepth(arg1) {
   return window['go']['main']['App']['SetBurrowMcpMaxDepth'](arg1);
+}
+
+export function SetExtensionEnabled(arg1, arg2) {
+  return window['go']['main']['App']['SetExtensionEnabled'](arg1, arg2);
 }
 
 export function SetHttpEnabled(arg1) {
