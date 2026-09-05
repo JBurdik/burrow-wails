@@ -112,6 +112,39 @@ func TestWatchdogNeedsThreeEmptyReadsAndADeadPty(t *testing.T) {
 	}
 }
 
+// TestPollPrunesWatchdogCounters: empty is the one map in the poller that only
+// ever grew — every pty that ever went quiet kept an entry for the life of the
+// process. A pty that is neither known to the store nor listed by the daemon
+// is nobody's business any more.
+func TestPollPrunesWatchdogCounters(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	s, _ := newTestStore(t)
+	f := &fakePty{sessions: []string{"7"}, fg: map[string]string{"7": ""}}
+	p := newPhasePoller(s, f.list, f.foreground)
+
+	p.tick()
+	if p.empty["7"] != 1 {
+		t.Fatalf("empty read not counted: %v", p.empty)
+	}
+
+	// The pty is reaped: gone from the daemon, and its phase forgotten with it.
+	f.sessions = nil
+	s.Forget("pty:7")
+	p.tick()
+	if _, ok := p.empty["7"]; ok {
+		t.Fatalf("a reaped pty kept its watchdog counter: %v", p.empty)
+	}
+
+	// forget() is the same cleanup from CreatePty's side, for a reused id: the
+	// new tab must not inherit the dead one's empty-read streak.
+	p.empty["9"] = 2
+	p.forget("9")
+	if _, ok := p.empty["9"]; ok {
+		t.Fatal("forget did not clear the counter")
+	}
+}
+
 func TestWatchdogIgnoresASingleEmptyRead(t *testing.T) {
 	t.Cleanup(busReset)
 	busReset()

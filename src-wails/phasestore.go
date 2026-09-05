@@ -128,10 +128,52 @@ func (s *PhaseStore) persist(id string, p agentphase.Phase, seq uint64) {
 	}
 }
 
+// Forget drops every trace of one phase key: the row, the map entry and the
+// seq counter.
+//
+// PTY ids are REUSED. The frontend's counter reseeds from
+// max(saved, daemon-alive) on restart (src/lib/ptyId.ts), so with tabs 1-3,
+// closing 2 and 3 and quitting reseeds to 1 and the next new tab is id 2 —
+// which would otherwise adopt pty:2's persisted phase and open wearing a
+// green review dot for a turn that ended days ago, under the old session's
+// task title.
+//
+// The seq entry goes with it, and that is safe because Apply's staleness
+// check now gates the write as well as the emit: an in-flight Apply that
+// computed before the Forget finds seq[id] missing (0) instead of its own n,
+// so it cannot resurrect the row it was about to write. A brand-new Apply
+// after the Forget starts at seq 1 against a row that no longer exists, so
+// the INSERT lands cleanly rather than losing to persist's WHERE guard.
+func (s *PhaseStore) Forget(id string) {
+	// Same lock as the publish path, so a Forget cannot interleave between a
+	// concurrent Apply's staleness check and its write.
+	s.emitMu.Lock()
+	defer s.emitMu.Unlock()
+
+	s.mu.Lock()
+	_, known := s.phases[id]
+	delete(s.phases, id)
+	delete(s.seq, id)
+	s.mu.Unlock()
+
+	if !known {
+		return
+	}
+	if _, err := s.db.Exec(`DELETE FROM pty_phase WHERE id = ?`, id); err != nil {
+		log.Printf("forget phase %s: %v", id, err)
+	}
+}
+
 func (s *PhaseStore) Get(id string) agentphase.Phase {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.phases[id]
+	p, ok := s.phases[id]
+	if !ok {
+		// Never seen is IDLE, not "". Phase 4 ships this value over the wire
+		// and an empty string would defeat the client's exhaustiveness check.
+		return agentphase.Phase{State: agentphase.Idle}
+	}
+	return p
 }
 
 // All is what the snapshot RPC will hand a connecting client (phase 4).
@@ -140,6 +182,9 @@ func (s *PhaseStore) All() map[string]agentphase.Phase {
 	defer s.mu.Unlock()
 	out := make(map[string]agentphase.Phase, len(s.phases))
 	for k, v := range s.phases {
+		if v.State == "" {
+			v.State = agentphase.Idle
+		}
 		out[k] = v
 	}
 	return out

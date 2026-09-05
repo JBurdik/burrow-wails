@@ -23,6 +23,7 @@ type App struct {
 	db     *sql.DB
 	daemon *DaemonClient
 	phases *PhaseStore
+	poller *phasePoller
 
 	streamOnce sync.Once
 	streamW    *chatStreamWriter
@@ -243,7 +244,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	if a.phases != nil {
-		startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground)
+		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground)
 	}
 }
 
@@ -268,6 +269,23 @@ func appDataDir() (string, error) {
 // passes it in; the backend never generates one.
 
 func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
+	// Fresh spawn or reattach? The daemon already knows: it holds every live
+	// pty, so an id it does not list is a brand-new one. That distinction is
+	// the whole pty lifecycle we have — ids are REUSED (the frontend's counter
+	// reseeds from max(saved, daemon-alive) on restart), so without it a new
+	// "Terminal 2" inherits the phase of whatever held id 2 last: a green
+	// review dot for a turn that ended days ago, and that session's task title
+	// pasted over the tab name.
+	fresh := true
+	if live, err := a.daemon.List(); err == nil {
+		for _, s := range live {
+			if s == id {
+				fresh = false
+				break
+			}
+		}
+	}
+
 	env := []string{
 		"PATH=" + a.burrowBinDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BURROW_SESSION_DIR=" + a.sessionDir,
@@ -278,6 +296,17 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	}
 	if err := a.daemon.CreatePty(id, cwd, cols, rows, env); err != nil {
 		return err
+	}
+	if fresh {
+		if a.phases != nil {
+			a.phases.Forget("pty:" + id)
+		}
+		if a.poller != nil {
+			a.poller.forget(id)
+		}
+		if a.hookSrv != nil {
+			a.hookSrv.ForgetStatus(id)
+		}
 	}
 	// An externally spawned terminal may have sent its first hook before this
 	// frontend view attached. Replay the cached state now that XTerm is listening.

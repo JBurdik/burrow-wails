@@ -224,6 +224,71 @@ func TestPhaseStoreConcurrentApplyStaysOrdered(t *testing.T) {
 	}
 }
 
+// TestPhaseStoreForgetStartsClean covers the reused-pty-id bug: ids come from a
+// counter that reseeds from max(saved, daemon-alive), so a brand-new tab can be
+// handed the id of a tab that finished a turn days ago. A forgotten id must
+// start from idle in memory, on disk and after a restart.
+func TestPhaseStoreForgetStartsClean(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+
+	dir := t.TempDir()
+	db, err := openDB(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewPhaseStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Apply("pty:2", agentphase.Event{Kind: agentphase.HookSession, Title: "refactor the parser"})
+	s.Apply("pty:2", agentphase.Event{Kind: agentphase.HookRunning})
+	s.Apply("pty:2", agentphase.Event{Kind: agentphase.HookDone})
+
+	s.Forget("pty:2")
+
+	got := s.Get("pty:2")
+	if got.State != agentphase.Idle {
+		// Never-seen is idle, not "": phase 4 ships this over the wire.
+		t.Fatalf("a forgotten id is not idle: %+v", got)
+	}
+	if got.TurnEndedAt != 0 || got.Title != "" || got.IsAgent {
+		t.Fatalf("a forgotten id kept the old session: %+v", got)
+	}
+	if _, ok := s.All()["pty:2"]; ok {
+		t.Fatal("a forgotten id is still in the snapshot the poll and phase 4 read")
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM pty_phase WHERE id = ?`, "pty:2").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("the row survived Forget")
+	}
+
+	// The reused id starts a fresh sequence against a deleted row — the INSERT
+	// must land rather than lose to persist's WHERE guard.
+	s.Apply("pty:2", agentphase.Event{Kind: agentphase.HookRunning})
+	db.Close()
+
+	db2, err := openDB(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+	s2, err := NewPhaseStore(db2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := s2.Get("pty:2")
+	if after.State != agentphase.Running {
+		t.Fatalf("the reused id did not persist its own phase: %+v", after)
+	}
+	if after.Title != "" || after.TurnEndedAt != 0 {
+		t.Fatalf("the forgotten session leaked back across a restart: %+v", after)
+	}
+}
+
 func TestPhaseStoreReplayReemits(t *testing.T) {
 	t.Cleanup(busReset)
 	busReset()

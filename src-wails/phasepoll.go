@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"regexp"
+	"sync"
 	"time"
 
 	"burrow/internal/agentphase"
@@ -31,7 +32,10 @@ type phasePoller struct {
 	phases *PhaseStore
 	list   func() ([]string, error)
 	fg     func(string) string
-	empty  map[string]int
+	// mu guards empty, which the ticker goroutine writes and CreatePty's
+	// goroutine clears through forget().
+	mu    sync.Mutex
+	empty map[string]int
 }
 
 func newPhasePoller(ps *PhaseStore, list func() ([]string, error), fg func(string) string) *phasePoller {
@@ -61,9 +65,30 @@ func (p *phasePoller) tick() {
 	}
 	for _, id := range ids {
 		if !seen[id] {
+			seen[id] = true
 			p.pollOne(id, true)
 		}
 	}
+
+	// Drop the watchdog counters of ptys nobody polls any more (their phase was
+	// forgotten, and the daemon no longer lists them). Without this the map is
+	// the one thing in the poller that only ever grows.
+	p.mu.Lock()
+	for id := range p.empty {
+		if !seen[id] {
+			delete(p.empty, id)
+		}
+	}
+	p.mu.Unlock()
+}
+
+// forget clears the watchdog counter for one pty. Called when a pty id is
+// reused by a fresh spawn, so the new tab does not inherit the dead one's
+// empty-read streak and trip the watchdog on its first tick.
+func (p *phasePoller) forget(id string) {
+	p.mu.Lock()
+	delete(p.empty, id)
+	p.mu.Unlock()
 }
 
 func (p *phasePoller) pollOne(id string, alive bool) {
@@ -71,13 +96,18 @@ func (p *phasePoller) pollOne(id string, alive bool) {
 	name := p.fg(id)
 
 	if name == "" {
+		p.mu.Lock()
 		p.empty[id]++
-		if p.empty[id] >= emptyReadsBeforeDead && !alive {
+		streak := p.empty[id]
+		p.mu.Unlock()
+		if streak >= emptyReadsBeforeDead && !alive {
 			p.phases.Apply(key, agentphase.Event{Kind: agentphase.Dead})
 		}
 		return
 	}
+	p.mu.Lock()
 	p.empty[id] = 0
+	p.mu.Unlock()
 
 	switch {
 	case agentRE.MatchString(name):
@@ -112,8 +142,9 @@ func cutPtyKey(key string) (string, bool) {
 }
 
 // startPhasePoll runs the poll for the life of the app. It lives on the server
-// side because the phase must be derivable with no client attached.
-func startPhasePoll(ctx context.Context, ps *PhaseStore, list func() ([]string, error), fg func(string) string) {
+// side because the phase must be derivable with no client attached. It returns
+// the poller so CreatePty can clear a reused id's watchdog counter.
+func startPhasePoll(ctx context.Context, ps *PhaseStore, list func() ([]string, error), fg func(string) string) *phasePoller {
 	p := newPhasePoller(ps, list, fg)
 	go func() {
 		t := time.NewTicker(2 * time.Second)
@@ -127,4 +158,5 @@ func startPhasePoll(ctx context.Context, ps *PhaseStore, list func() ([]string, 
 			}
 		}
 	}()
+	return p
 }

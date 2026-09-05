@@ -128,6 +128,16 @@ func hookEvent(p hookPayload) (agentphase.Event, bool) {
 	return agentphase.Event{}, false
 }
 
+// ForgetStatus drops a PTY's cached hook state. Its pair is ReplayStatus:
+// a pty id that has just been reused by a FRESH spawn must not replay the
+// status of the session that held the id before it, on the legacy
+// pty-hook-{id} channel any more than on the phase one.
+func (h *HookServer) ForgetStatus(ptyID string) {
+	h.mu.Lock()
+	delete(h.statuses, ptyID)
+	h.mu.Unlock()
+}
+
 // ReplayStatus re-emits a PTY's last hook state after a frontend attaches.
 // The caller creates the PTY only after XTerm has subscribed to pty-hook-{id}.
 func (h *HookServer) ReplayStatus(ptyID string) {
