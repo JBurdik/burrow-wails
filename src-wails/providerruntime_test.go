@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"burrow/internal/agentphase"
 )
 
 // The first three cases mirror src/lib/providerRuntime.test.ts exactly. If this
@@ -222,6 +224,31 @@ func TestNormalizeAcpBurrowMarkers(t *testing.T) {
 	// to this turn's session/prompt does, and that correlation is the sender's.
 	if got := NormalizeAcpLine(`{"id":7,"result":{}}`); got != nil {
 		t.Fatalf("bare response should not settle a turn: %+v", got)
+	}
+}
+
+func TestChatPhaseEventMapping(t *testing.T) {
+	cases := []struct {
+		in   string
+		want agentphase.Kind
+		ok   bool
+	}{
+		{"text.delta", agentphase.HookRunning, true},
+		{"user.delta", agentphase.HookRunning, true},
+		{"turn.completed", agentphase.HookDone, true},
+		{"turn.failed", agentphase.HookError, true},
+		{"session.title", agentphase.HookSession, true},
+		{"tool.started", "", false},
+		{"thinking.delta", "", false},
+	}
+	for _, c := range cases {
+		ev, ok := chatPhaseEvent(ProviderRuntimeEvent{Type: c.in})
+		if ok != c.ok {
+			t.Fatalf("%q: ok=%v, want %v", c.in, ok, c.ok)
+		}
+		if ok && ev.Kind != c.want {
+			t.Fatalf("%q → %q, want %q", c.in, ev.Kind, c.want)
+		}
 	}
 }
 

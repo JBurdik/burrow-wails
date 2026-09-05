@@ -234,6 +234,14 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 	// has been re-implementing the protocol to a shallower depth.
 	if events := NormalizeChatLine(kind, line); len(events) > 0 {
 		busEmit("chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: events})
+
+		if a.phases != nil {
+			for _, e := range events {
+				if pev, ok := chatPhaseEvent(e); ok {
+					a.phases.Apply("chat:"+chatID, pev)
+				}
+			}
+		}
 	}
 }
 

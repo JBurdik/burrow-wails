@@ -1,6 +1,10 @@
 package main
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"burrow/internal/agentphase"
+)
 
 // Provider protocol → provider-neutral domain events, in Go.
 //
@@ -379,6 +383,23 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 	default:
 		return nil
 	}
+}
+
+// chatPhaseEvent maps a provider runtime event onto a phase event. A chat and a
+// PTY carry the SAME phase type: two derivations of "is this agent busy" is how
+// the mobile client's chat dots drifted from its terminal dots.
+func chatPhaseEvent(ev ProviderRuntimeEvent) (agentphase.Event, bool) {
+	switch ev.Type {
+	case EvtTextDelta, EvtUserDelta:
+		return agentphase.Event{Kind: agentphase.HookRunning}, true
+	case EvtTurnCompleted:
+		return agentphase.Event{Kind: agentphase.HookDone}, true
+	case EvtTurnFailed:
+		return agentphase.Event{Kind: agentphase.HookError, Detail: ev.Message}, true
+	case EvtSessionTitle:
+		return agentphase.Event{Kind: agentphase.HookSession, Title: ev.Title}, true
+	}
+	return agentphase.Event{}, false
 }
 
 // NormalizeChatLine dispatches on the stream kind used by chatstream.go, so a
