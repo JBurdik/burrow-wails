@@ -28,6 +28,17 @@ type PhaseStore struct {
 	// (millisecond resolution) can't do this job: two Applies inside the
 	// same millisecond would tie.
 	seq map[string]uint64
+
+	// emitMu serialises everything a client can OBSERVE: the row, the bus
+	// event and the terminal_tabs mirror. The seq check alone could not
+	// deliver the ordering it documents — goroutine A could pass it, be
+	// descheduled, let B persist and emit a newer phase, and then emit the
+	// older one last, leaving the UI a step behind a correct DB row with
+	// nothing to correct it until the next change.
+	//
+	// It is deliberately NOT s.mu: sinks must never run under the state lock,
+	// or a sink that reads the store back deadlocks.
+	emitMu sync.Mutex
 }
 
 func NewPhaseStore(db *sql.DB) (*PhaseStore, error) {
@@ -65,13 +76,18 @@ func (s *PhaseStore) Apply(id string, ev agentphase.Event) {
 	s.phases[id] = next
 	s.mu.Unlock()
 
-	s.persist(id, next, n)
+	// From here on this Apply is publishing, and publishing is single-file:
+	// the staleness check, the write, the emit and the mirror all happen under
+	// emitMu, so a concurrent Apply for the same id cannot slip between the
+	// check and the emit and leave the older phase as the last one out.
+	s.emitMu.Lock()
+	defer s.emitMu.Unlock()
 
-	// A concurrent Apply for the same id may have already superseded this
-	// value between the unlock above and here. persist's own WHERE guard
-	// already stopped it from winning the DB row; this stops it from also
-	// going out over the bus (and into the terminal_tabs mirror below) a
-	// step behind what was already emitted.
+	// A concurrent Apply for the same id may have superseded this value
+	// between the unlock above and here — or Forget may have dropped the key
+	// entirely, in which case seq[id] is gone and can never equal n. Either
+	// way this goroutine has nothing left to say: the winner writes and emits
+	// its own value, and a forgotten key must not be resurrected.
 	s.mu.Lock()
 	latest := s.seq[id] == n
 	s.mu.Unlock()
@@ -79,6 +95,7 @@ func (s *PhaseStore) Apply(id string, ev agentphase.Event) {
 		return
 	}
 
+	s.persist(id, next, n)
 	busEmit("phase-"+id, next)
 
 	// Mirror for `burrow list-tabs` / MCP list_tabs, which read the DB with no
@@ -88,10 +105,12 @@ func (s *PhaseStore) Apply(id string, ev agentphase.Event) {
 	}
 }
 
-// persist upserts one phase, guarded by seq so an out-of-order write (an
-// older Apply's goroutine reaching this call after a newer one already has)
-// cannot regress the row: the DO UPDATE only fires when the incoming seq is
-// actually newer than what's stored.
+// persist upserts one phase, guarded by seq so an out-of-order write cannot
+// regress the row: the DO UPDATE only fires when the incoming seq is actually
+// newer than what's stored. Apply now only reaches here as the latest
+// sequence and under emitMu, so this is the second line of defence rather
+// than the first — it still stands because the guard is what makes any future
+// caller (a batched writer, a replay) safe by construction.
 func (s *PhaseStore) persist(id string, p agentphase.Phase, seq uint64) {
 	_, err := s.db.Exec(
 		`INSERT INTO pty_phase (id, state, detail, model, title, is_agent, turn_ended_at, updated_at, seq)

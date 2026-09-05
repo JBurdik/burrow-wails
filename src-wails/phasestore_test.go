@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync"
 	"testing"
 
 	"burrow/internal/agentphase"
@@ -137,6 +138,89 @@ func TestPhaseStorePersistGuardsAgainstStaleSeq(t *testing.T) {
 	}
 	if got := s2.Get("pty:7").State; got != agentphase.Done {
 		t.Fatalf("phase regressed across restart: %v", got)
+	}
+}
+
+// TestPhaseStoreConcurrentApplyStaysOrdered drives the seq machinery the way
+// production does — two producers (the hook server and the foreground poll)
+// applying to the SAME id from their own goroutines — instead of through a
+// synthetic persist() call. Run under -race.
+//
+// Two properties matter, and they are the two the emitMu section exists for:
+// the LAST phase a client saw must be the one the store and the DB settled on
+// (otherwise the UI is a step behind a correct row, with nothing to correct
+// it), and emitted phases must arrive in seq order, which UpdatedAt witnesses
+// because it is sampled inside the same critical section that assigns seq.
+func TestPhaseStoreConcurrentApplyStaysOrdered(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+
+	var mu sync.Mutex
+	var seen []agentphase.Phase
+	busSubscribe(func(name string, payload any) {
+		if name != "phase-pty:7" {
+			return
+		}
+		p, ok := payload.(agentphase.Phase)
+		if !ok {
+			t.Errorf("bus payload is not a Phase: %T", payload)
+			return
+		}
+		mu.Lock()
+		seen = append(seen, p)
+		mu.Unlock()
+	})
+
+	s, _ := newTestStore(t)
+
+	const rounds = 200
+	var wg sync.WaitGroup
+	wg.Add(2)
+	// The hook producer: whole turns.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			s.Apply("pty:7", agentphase.Event{Kind: agentphase.HookRunning})
+			s.Apply("pty:7", agentphase.Event{Kind: agentphase.HookWaiting})
+			s.Apply("pty:7", agentphase.Event{Kind: agentphase.HookDone})
+		}
+	}()
+	// The poll producer: the agent flag, flipping under the hooks.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			s.Apply("pty:7", agentphase.Event{Kind: agentphase.PollAgent, Bool: i%2 == 0})
+			s.Apply("pty:7", agentphase.Event{Kind: agentphase.PollNotBusy})
+		}
+	}()
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) == 0 {
+		t.Fatal("nothing was emitted")
+	}
+	for i := 1; i < len(seen); i++ {
+		if seen[i].UpdatedAt < seen[i-1].UpdatedAt {
+			t.Fatalf("emit %d went backwards in time: %+v after %+v", i, seen[i], seen[i-1])
+		}
+	}
+
+	last := seen[len(seen)-1]
+	if got := s.Get("pty:7"); got != last {
+		t.Fatalf("the last emitted phase is not the stored one:\n emit  %+v\n store %+v", last, got)
+	}
+
+	var row agentphase.Phase
+	err := s.db.QueryRow(
+		`SELECT state, detail, model, title, is_agent, turn_ended_at, updated_at FROM pty_phase WHERE id = ?`,
+		"pty:7",
+	).Scan(&row.State, &row.Detail, &row.Model, &row.Title, &row.IsAgent, &row.TurnEndedAt, &row.UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row != last {
+		t.Fatalf("the DB and the last emit disagree:\n emit %+v\n row  %+v", last, row)
 	}
 }
 
