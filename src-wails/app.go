@@ -221,7 +221,7 @@ func (a *App) startup(ctx context.Context) {
 
 	a.initControl(dataDir)
 
-	hookSrv, err := StartHookServer(ctx, a.registerControlRoutes)
+	hookSrv, err := StartHookServer(ctx, a.phases, a.registerControlRoutes)
 	if err != nil {
 		log.Printf("hook server: %v", err)
 		return

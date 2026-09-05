@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"burrow/internal/agentphase"
 )
 
 // HookServer receives `burrow status <state>` POSTs from the `burrow`
@@ -17,6 +19,7 @@ type HookServer struct {
 	port     int
 	mu       sync.RWMutex
 	statuses map[string]hookPayload
+	phases   *PhaseStore
 }
 
 type hookPayload struct {
@@ -31,14 +34,14 @@ type hookPayload struct {
 // StartHookServer listens on a loopback ephemeral port. Callers pass registrars
 // for the other loopback routes (the control API) so everything an agent's shell
 // needs lives behind one port + one port file.
-func StartHookServer(ctx context.Context, routes ...func(*http.ServeMux)) (*HookServer, error) {
+func StartHookServer(ctx context.Context, phases *PhaseStore, routes ...func(*http.ServeMux)) (*HookServer, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	h := &HookServer{ctx: ctx, port: port, statuses: make(map[string]hookPayload)}
+	h := &HookServer{ctx: ctx, port: port, statuses: make(map[string]hookPayload), phases: phases}
 	mux := http.NewServeMux()
 	// /hook is the path the `burrow` CLI has always posted to; /status is kept as
 	// an alias. Serving only /status silently broke every status dot: the CLI's
@@ -96,7 +99,33 @@ func (h *HookServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	h.emitStatus(p)
 
+	if h.phases != nil && p.PtyID != "" {
+		if ev, ok := hookEvent(p); ok {
+			h.phases.Apply("pty:"+p.PtyID, ev)
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
+}
+
+// hookEvent translates one `burrow status` POST into a phase event. An unknown
+// state returns false: a hook nobody planned for must not move the dot.
+func hookEvent(p hookPayload) (agentphase.Event, bool) {
+	switch p.State {
+	case "running":
+		return agentphase.Event{Kind: agentphase.HookRunning}, true
+	case "waiting":
+		return agentphase.Event{Kind: agentphase.HookWaiting}, true
+	case "permission":
+		return agentphase.Event{Kind: agentphase.HookPermission}, true
+	case "done":
+		return agentphase.Event{Kind: agentphase.HookDone}, true
+	case "error":
+		return agentphase.Event{Kind: agentphase.HookError, Detail: p.Detail}, true
+	case "session":
+		return agentphase.Event{Kind: agentphase.HookSession, Model: p.Model, Source: p.Source, Title: p.Title}, true
+	}
+	return agentphase.Event{}, false
 }
 
 // ReplayStatus re-emits a PTY's last hook state after a frontend attaches.
@@ -107,6 +136,9 @@ func (h *HookServer) ReplayStatus(ptyID string) {
 	h.mu.RUnlock()
 	if ok {
 		h.emitStatus(p)
+	}
+	if h.phases != nil {
+		h.phases.Replay("pty:" + ptyID)
 	}
 }
 
