@@ -60,7 +60,7 @@ const (
 	PollNeedsInput Kind = "poll_needs_input"
 	PollGotInput   Kind = "poll_got_input"
 
-	Interrupt Kind = "interrupt" // Ctrl+C
+	Interrupt Kind = "interrupt" // Ctrl+C or ESC written to the PTY
 	Dead      Kind = "dead"      // watchdog confirmed the PTY is gone
 )
 
@@ -145,9 +145,19 @@ func Next(cur Phase, ev Event, now int64) Phase {
 			next.State = Running
 		}
 	case Interrupt:
-		next.State = Idle
-		next.Detail = ""
-		next.TurnEndedAt = 0
+		// Only a turn that is actually in flight can be cancelled. A stray ESC
+		// at an idle prompt must stay a no-op: clearing TurnEndedAt there would
+		// wipe the read receipt of a finished turn nobody has looked at yet,
+		// and the review dot with it. (The old XState machine guarded this the
+		// same way — INTERRUPT was accepted in running/waiting/permission only.)
+		//
+		// The turn was CANCELLED, not completed, so it settles straight to idle:
+		// no TurnEndedAt, hence no "done" badge and no review dot.
+		if cur.InFlight() {
+			next.State = Idle
+			next.Detail = ""
+			next.TurnEndedAt = 0
+		}
 	case Dead:
 		if cur.InFlight() {
 			next.State = Stale

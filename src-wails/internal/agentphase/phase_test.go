@@ -208,5 +208,46 @@ func TestTerminalEventsNoopOnRedelivery(t *testing.T) {
 	p = apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookError, Detail: "billing_error"})
 	if got := apply(p, Event{Kind: HookError, Detail: "server_error"}); got.State != Failed || got.Detail != "server_error" {
 		t.Fatalf("error with new detail must register: %q/%q", got.State, got.Detail)
+	} else if got.TurnEndedAt != now {
+		// The receipt, not just the label: TurnEndedAt is what the client
+		// compares against its own seenAt, so a re-stamped failure that forgot
+		// it would show no dot at all.
+		t.Fatalf("a new failure did not re-stamp TurnEndedAt: %+v", got)
+	}
+}
+
+// TestInterruptSettlesOnlyAnInFlightTurn pins both halves of the cancel
+// channel: ESC/Ctrl+C on a live turn is the ONLY thing that ends it (no Stop
+// hook fires, and the poll may not speak for an agent), while the same
+// keystroke at an idle prompt must not touch a read receipt nobody has read.
+func TestInterruptSettlesOnlyAnInFlightTurn(t *testing.T) {
+	for _, from := range []Event{{Kind: HookRunning}, {Kind: HookWaiting}, {Kind: HookPermission}} {
+		p := apply(Phase{}, Event{Kind: HookRunning}, from)
+		got := apply(p, Event{Kind: Interrupt})
+		if got.State != Idle {
+			t.Fatalf("interrupt from %v did not settle: %q", from.Kind, got.State)
+		}
+		if got.TurnEndedAt != 0 {
+			t.Fatalf("a cancelled turn must not leave a receipt: %+v", got)
+		}
+		if !got.IsAgent {
+			t.Fatal("interrupt must not un-agent the leaf")
+		}
+	}
+
+	// A settled turn keeps its receipt: a stray ESC at the prompt cannot erase
+	// the review dot of a turn that finished while the user was away.
+	done := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookDone})
+	if done.TurnEndedAt == 0 {
+		t.Fatal("precondition: done must stamp TurnEndedAt")
+	}
+	if got := Next(done, Event{Kind: Interrupt}, now+5_000); got != done {
+		t.Fatalf("interrupt on a settled phase changed it: %+v vs %+v", got, done)
+	}
+
+	// Same for a failed turn, whose dot also persists until seen.
+	failed := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookError, Detail: "rate_limit"})
+	if got := Next(failed, Event{Kind: Interrupt}, now+5_000); got != failed {
+		t.Fatalf("interrupt on a failed phase changed it: %+v vs %+v", got, failed)
 	}
 }

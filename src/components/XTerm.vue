@@ -564,8 +564,11 @@ onMounted(async () => {
   }
 
   // Send input from xterm → the PTY. A Ctrl+C / ESC interrupt needs no special
-  // handling here any more: Go's foreground poll sees the agent leave its turn
-  // and settles the phase itself, so the dot can't stick orange.
+  // handling here any more, but NOT because the poll notices: an agent stays
+  // foreground at its prompt whether it is thinking or idle, so the poll can
+  // never settle one. Go's WritePty recognises a lone 0x03/0x1b and applies the
+  // interrupt to the phase itself, which is what keeps the dot from sticking
+  // orange — for every client, not just this window.
   term.onData((data) => {
     const bytes = Array.from(new TextEncoder().encode(data));
     txBack += bytes.length;

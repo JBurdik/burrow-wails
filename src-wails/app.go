@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"burrow/internal/agentphase"
 	"burrow/internal/agentproc"
 	"burrow/internal/control"
 )
@@ -286,7 +287,31 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	return nil
 }
 
+// ctrlC / escByte are the two keystrokes that cancel an agent turn.
+const (
+	ctrlC   = 0x03
+	escByte = 0x1b
+)
+
+// WritePty forwards keystrokes to the PTY, and watches for the one keystroke
+// that is also a phase event.
+//
+// Cancelling a turn fires NO Stop hook, and the foreground poll cannot settle
+// an agent either — an agent is foreground whether it is thinking or idle at
+// its prompt, which is exactly why agentphase.Next refuses to let the poll
+// speak for one. The dead-PTY watchdog can't help either: the PTY is alive.
+// So this write is the only evidence the turn ended, and without it the dot
+// sticks orange until the next turn starts.
+//
+// It lives here rather than in XTerm.vue's onData (where it used to) so the
+// phase stays derivable server-side — phase 4's phone gets it for free.
+// A lone 0x03/0x1b only: arrow keys and every other escape sequence arrive as
+// ESC plus more bytes in one write, so length is what separates a cancel from
+// a cursor key.
 func (a *App) WritePty(id string, data []int) error {
+	if a.phases != nil && len(data) == 1 && (data[0] == ctrlC || data[0] == escByte) {
+		a.phases.Apply("pty:"+id, agentphase.Event{Kind: agentphase.Interrupt})
+	}
 	return a.daemon.Write(id, data)
 }
 
