@@ -632,11 +632,12 @@ function applyPhase(leafId: number, phase: Phase) {
   leaf.status = status;
   leaf.statusDetail = phase.detail || undefined;
   leaf.busy = status === "running" || status === "waiting" || status === "permission";
-  // Sticky: a phase recorded before hooks started carrying is_agent (a replay
-  // from a previous version's row) or one that arrived from the poll a tick
-  // before the first hook must not un-agent a leaf. `adoptPty` also sets this
-  // to true by hand for a handed-off agent PTY.
-  leaf.isAgent = phase.is_agent || leaf.isAgent;
+  // Mirrored, never remembered. Go is the authority in BOTH directions: a
+  // status hook sets IsAgent (agentphase.Next) and the poll clears it when the
+  // shell returns to the foreground. A leaf is a long-lived PTY that commonly
+  // runs an agent and then ordinary commands, so a sticky flag here would mark
+  // it an agent forever.
+  leaf.isAgent = phase.is_agent;
   if (phase.model) leaf.model = phase.model;
   // SessionStart metadata: fill in a generic "Terminal N" only, so an
   // agent-set descriptive title is never clobbered.
@@ -658,9 +659,10 @@ function applyPhase(leafId: number, phase: Phase) {
     if (status === "done") onTurnSettled(leafId);
     if (status === "review") { playSound("done"); onTurnSettled(leafId); }
     if (status === "error") maybeNtfy("error", leaf.title);
-    // The sticky flag, not `phase.is_agent`: a spawned agent's first hook can
-    // beat the first poll tick, and that turn still deserves its checkpoint.
-    if (status === "running" && leaf.isAgent) {
+    // Agent turns only: a plain `npm test` must not cut a checkpoint or bump
+    // the turn counter. The hook that starts an agent turn sets is_agent
+    // itself, so this does not have to wait for the 2 s poll tick.
+    if (status === "running" && phase.is_agent) {
       leaf.round = (leaf.round ?? 0) + 1;
       // Snapshot the worktree before the agent touches it, so this turn is
       // revertable from the History panel. No-op outside a git repo, and
