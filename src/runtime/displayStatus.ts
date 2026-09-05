@@ -58,11 +58,18 @@ export function displayStatus(
     case "done":
       if (!unseen(phase, seenAt)) return "idle";
       return watching ? "done" : "review";
+    case "idle":
+      return "idle";
     // A stale PTY settles quietly — nothing failed, the process just went away.
     case "stale":
-    case "idle":
-    default:
       return "idle";
+    default: {
+      // Compile-time exhaustiveness: if PhaseState gains a member and this
+      // switch does not handle it, this assignment stops being valid.
+      const _exhaustive: never = phase.state;
+      void _exhaustive;
+      return "idle";
+    }
   }
 }
 
