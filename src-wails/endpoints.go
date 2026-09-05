@@ -87,3 +87,20 @@ func selectEndpoint(eps []AdvertisedEndpoint, preferredKind string, sameMachine 
 	}
 	return pick(func(AdvertisedEndpoint) bool { return true })
 }
+
+// collectEndpoints asks every provider in order. A provider that returns
+// nothing is normal, not an error.
+func collectEndpoints(providers []EndpointProvider) []AdvertisedEndpoint {
+	out := make([]AdvertisedEndpoint, 0, len(providers))
+	for _, p := range providers {
+		out = append(out, p.Endpoints()...)
+	}
+	return out
+}
+
+// RemoteEndpoints is a DESKTOP binding, deliberately not an HTTP route: the
+// list of ways to reach this machine is recon information and nobody needs it
+// before they are connected. Settings renders it; pairing (phase 5) uses it.
+func (a *App) RemoteEndpoints() []AdvertisedEndpoint {
+	return collectEndpoints(a.endpointProviders)
+}

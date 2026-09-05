@@ -76,6 +76,8 @@ export function DeleteSkill(arg1:string):Promise<void>;
 
 export function DeleteWorkspace(arg1:number):Promise<void>;
 
+export function EnvironmentID():Promise<string>;
+
 export function ExtensionsDirectory():Promise<string>;
 
 export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string>;
@@ -185,6 +187,8 @@ export function ReinstallStatusHooks():Promise<void>;
 export function RelaunchApp():Promise<void>;
 
 export function RemoteCreateChat(arg1:number,arg2:string):Promise<Record<string, any>>;
+
+export function RemoteEndpoints():Promise<Array<main.AdvertisedEndpoint>>;
 
 export function RemoteListChats():Promise<Array<Record<string, any>>>;
 

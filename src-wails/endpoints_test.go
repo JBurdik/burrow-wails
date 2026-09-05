@@ -67,3 +67,32 @@ func TestLoopbackProvider(t *testing.T) {
 		t.Fatalf("port 0 must advertise nothing, got %+v", got)
 	}
 }
+
+type fakeProvider struct {
+	name string
+	eps  []AdvertisedEndpoint
+}
+
+func (f fakeProvider) Name() string                    { return f.name }
+func (f fakeProvider) Endpoints() []AdvertisedEndpoint { return f.eps }
+
+func TestCollectEndpointsConcatenates(t *testing.T) {
+	got := collectEndpoints([]EndpointProvider{
+		fakeProvider{name: "a", eps: []AdvertisedEndpoint{ep("loopback", false, true)}},
+		fakeProvider{name: "b", eps: nil},
+		fakeProvider{name: "c", eps: []AdvertisedEndpoint{ep("lan", false, false)}},
+	})
+	if len(got) != 2 {
+		t.Fatalf("want 2 endpoints, got %d: %+v", len(got), got)
+	}
+	if got[0].Kind != "loopback" || got[1].Kind != "lan" {
+		t.Fatalf("provider order not preserved: %+v", got)
+	}
+}
+
+func TestCollectEndpointsNeverNil(t *testing.T) {
+	got := collectEndpoints(nil)
+	if got == nil {
+		t.Fatal("must return an empty slice, not nil — the binding is JSON-marshalled")
+	}
+}

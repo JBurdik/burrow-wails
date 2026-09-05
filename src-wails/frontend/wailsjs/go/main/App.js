@@ -150,6 +150,10 @@ export function DeleteWorkspace(arg1) {
   return window['go']['main']['App']['DeleteWorkspace'](arg1);
 }
 
+export function EnvironmentID() {
+  return window['go']['main']['App']['EnvironmentID']();
+}
+
 export function ExtensionsDirectory() {
   return window['go']['main']['App']['ExtensionsDirectory']();
 }
@@ -368,6 +372,10 @@ export function RelaunchApp() {
 
 export function RemoteCreateChat(arg1, arg2) {
   return window['go']['main']['App']['RemoteCreateChat'](arg1, arg2);
+}
+
+export function RemoteEndpoints() {
+  return window['go']['main']['App']['RemoteEndpoints']();
 }
 
 export function RemoteListChats() {

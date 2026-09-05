@@ -29,13 +29,15 @@ type App struct {
 	acpSessions  *acpRegistry
 	lspMgr       *lspManager
 
-	hookSrv      *HookServer
-	control      *control.Core
-	ui           *uiBridge
-	controlToken string
-	burrowBinDir string
-	sessionDir   string
+	hookSrv       *HookServer
+	control       *control.Core
+	ui            *uiBridge
+	controlToken  string
+	burrowBinDir  string
+	sessionDir    string
 	environmentID string
+
+	endpointProviders []EndpointProvider
 
 	httpSrv        *HTTPServer
 	httpSrvRunning bool
@@ -168,6 +170,10 @@ func (a *App) startup(ctx context.Context) {
 		log.Printf("environment id: %v", err)
 	} else {
 		a.environmentID = id
+	}
+	a.endpointProviders = []EndpointProvider{
+		newLoopbackProvider(httpServerPort),
+		newTailscaleProvider(a.GetTailscaleStatus),
 	}
 	db, err := openDB(dataDir)
 	if err != nil {

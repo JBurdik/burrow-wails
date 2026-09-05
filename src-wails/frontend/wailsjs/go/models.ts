@@ -30,6 +30,30 @@ export namespace main {
 	        this.emitHistory = source["emitHistory"];
 	    }
 	}
+	export class AdvertisedEndpoint {
+	    kind: string;
+	    http_base: string;
+	    ws_base: string;
+	    reachability: string;
+	    hosted_https_compatible: boolean;
+	    default: boolean;
+	    available: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AdvertisedEndpoint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.http_base = source["http_base"];
+	        this.ws_base = source["ws_base"];
+	        this.reachability = source["reachability"];
+	        this.hosted_https_compatible = source["hosted_https_compatible"];
+	        this.default = source["default"];
+	        this.available = source["available"];
+	    }
+	}
 	export class AgentModel {
 	    id: string;
 	    label: string;
