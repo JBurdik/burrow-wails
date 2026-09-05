@@ -35,6 +35,7 @@ type App struct {
 	controlToken string
 	burrowBinDir string
 	sessionDir   string
+	environmentID string
 
 	httpSrv        *HTTPServer
 	httpSrvRunning bool
@@ -162,6 +163,11 @@ func (a *App) startup(ctx context.Context) {
 	if err != nil {
 		log.Printf("app data dir: %v", err)
 		return
+	}
+	if id, err := environmentID(dataDir); err != nil {
+		log.Printf("environment id: %v", err)
+	} else {
+		a.environmentID = id
 	}
 	db, err := openDB(dataDir)
 	if err != nil {
