@@ -228,7 +228,7 @@ znovu.
 
 ```go
 // src-wails/internal/agentphase
-type State string // starting|running|waiting_input|waiting_approval|done|failed|stale
+type State string // idle|running|waiting_input|waiting_approval|done|failed|stale
 
 type Phase struct {
     State       State
@@ -242,7 +242,8 @@ type Phase struct {
 func Next(cur Phase, ev Event, now int64) Phase // pure, žádné IO
 ```
 
-Jména z t3code. `stale` je jméno pro dnešní dead-PTY watchdog — `interrupt`
+Jména z t3code, mínus `starting` — Burrow nemá launch fázi odlišnou od `running`, zato
+potřebuje `idle` jako nulovou hodnotu. `stale` je jméno pro dnešní dead-PTY watchdog — `interrupt`
 říká, co se udělalo, ne co se stalo.
 
 **Vstupy**, všechny už v Go: hook eventy (`hookserver.go` drží latest state per
