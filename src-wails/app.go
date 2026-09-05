@@ -276,8 +276,13 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	// "Terminal 2" inherits the phase of whatever held id 2 last: a green
 	// review dot for a turn that ended days ago, and that session's task title
 	// pasted over the tab name.
-	fresh := true
+	// A failed List means we do not KNOW, and the conservative answer is
+	// "reattach": keeping a phase we should have dropped costs a stale dot
+	// until the next hook, dropping one we should have kept loses a live
+	// agent's state outright.
+	fresh := false
 	if live, err := a.daemon.List(); err == nil {
+		fresh = true
 		for _, s := range live {
 			if s == id {
 				fresh = false
