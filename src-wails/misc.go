@@ -1,7 +1,9 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/base64"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -82,8 +84,18 @@ func (a *App) IsPidAlive(pid int) bool {
 }
 
 func (a *App) SetTabLiveStatus(ptyID, status string) {
-	// Placeholder for future in-memory tab status tracking; the frontend
-	// primarily derives status from pty-hook-{id} events already.
+	setTabLiveStatus(a.db, ptyID, status)
+}
+
+// setTabLiveStatus mirrors a PTY's live status into terminal_tabs so
+// `burrow list-tabs` / MCP list_tabs can answer from SQLite alone, with no
+// frontend round-trip. PhaseStore.Apply is now the primary caller — Go
+// derives the phase itself — but the binding above stays for callers that
+// still push a status in directly.
+func setTabLiveStatus(db *sql.DB, ptyID, status string) {
+	if _, err := db.Exec(`UPDATE terminal_tabs SET status = ? WHERE pty_id = ?`, status, ptyID); err != nil {
+		log.Printf("set tab live status: %v", err)
+	}
 }
 
 func (a *App) SetMaxAgents(n int) {

@@ -105,6 +105,19 @@ func migrate(db *sql.DB) error {
 			file_path TEXT,
 			created_at INTEGER NOT NULL
 		)`,
+		// One row per PTY or chat. The phase used to live in Terminal.vue, so
+		// it existed only for a mounted workspace and an app restart threw it
+		// away. Here it survives both.
+		`CREATE TABLE IF NOT EXISTS pty_phase (
+			id TEXT PRIMARY KEY,
+			state TEXT NOT NULL,
+			detail TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			is_agent INTEGER NOT NULL DEFAULT 0,
+			turn_ended_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0
+		)`,
 	}
 	stmts = append(stmts, chatMessagesSchema()...)
 	stmts = append(stmts, chatStreamSchema()...)
@@ -126,6 +139,10 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE terminal_tabs ADD COLUMN default_title TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN session_id TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN branch TEXT`,
+		// Mirrored by setTabLiveStatus (phasestore.go) so `burrow list-tabs` /
+		// MCP list_tabs can answer from SQLite alone — internal/control's
+		// listTabs already selects this column.
+		`ALTER TABLE terminal_tabs ADD COLUMN status TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN handed_off INTEGER DEFAULT 0`,
 		`ALTER TABLE mission_tasks ADD COLUMN profile_id TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN repo_workspace_id INTEGER`,

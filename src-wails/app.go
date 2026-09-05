@@ -21,6 +21,7 @@ type App struct {
 	ctx    context.Context
 	db     *sql.DB
 	daemon *DaemonClient
+	phases *PhaseStore
 
 	streamOnce sync.Once
 	streamW    *chatStreamWriter
@@ -184,6 +185,11 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.db = db
+	if ps, err := NewPhaseStore(db); err != nil {
+		log.Printf("phase store: %v", err)
+	} else {
+		a.phases = ps
+	}
 
 	// Chat transcripts used to live in config.json; move them into SQLite before
 	// the frontend reads either store.
