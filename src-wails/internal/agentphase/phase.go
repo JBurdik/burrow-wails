@@ -91,12 +91,16 @@ func Next(cur Phase, ev Event, now int64) Phase {
 	case HookPermission:
 		next.State = WaitingApproval
 	case HookDone:
-		next.State = Done
-		next.TurnEndedAt = now
+		if cur.State != Done {
+			next.State = Done
+			next.TurnEndedAt = now
+		}
 	case HookError:
-		next.State = Failed
-		next.Detail = ev.Detail
-		next.TurnEndedAt = now
+		if cur.State != Failed || cur.Detail != ev.Detail {
+			next.State = Failed
+			next.Detail = ev.Detail
+			next.TurnEndedAt = now
+		}
 	case HookSession:
 		// Metadata, not a status: SessionStart labels the tab, it does not
 		// start a turn.

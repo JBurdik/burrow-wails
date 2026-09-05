@@ -154,3 +154,28 @@ func TestNoopReturnsAnUnchangedPhase(t *testing.T) {
 		t.Fatalf("repeated event produced a change: %+v vs %+v", got, p)
 	}
 }
+
+func TestTerminalEventsNoopOnRedelivery(t *testing.T) {
+	// HookDone and HookError are prone to redelivery (burrow status retries
+	// 3× by design). A redelivered terminal event at a later wall-clock time
+	// must be a no-op, or the store will spuriously write and emit.
+
+	// Redelivered HookDone at a later now must not change the phase.
+	p := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookDone})
+	laterNow := now + 1000
+	if got := Next(p, Event{Kind: HookDone}, laterNow); got != p {
+		t.Fatalf("redelivered HookDone produced a change: %+v vs %+v", got, p)
+	}
+
+	// Redelivered HookError with the same detail must be a no-op.
+	p = apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookError, Detail: "billing_error"})
+	if got := Next(p, Event{Kind: HookError, Detail: "billing_error"}, laterNow); got != p {
+		t.Fatalf("redelivered HookError with same detail produced a change: %+v vs %+v", got, p)
+	}
+
+	// HookError with a DIFFERENT detail is still a transition (rare but valid).
+	p = apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookError, Detail: "billing_error"})
+	if got := apply(p, Event{Kind: HookError, Detail: "server_error"}); got.State != Failed || got.Detail != "server_error" {
+		t.Fatalf("error with new detail must register: %q/%q", got.State, got.Detail)
+	}
+}
