@@ -240,6 +240,10 @@ func (a *App) startup(ctx context.Context) {
 			}
 		}
 	}
+
+	if a.phases != nil {
+		startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground)
+	}
 }
 
 func (a *App) GetHookServerPort() int {
