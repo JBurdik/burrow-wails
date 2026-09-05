@@ -1,3 +1,7 @@
+> **SUPERSEDED** (2026-09-05) — nahrazeno `docs/superpowers/specs/2026-09-05-remote-access-t3code-design.md`.
+> Z tohoto dokumentu nebyl implementovaný žádný kód. Nový design jde na full t3code model:
+> desktop mluví WS s lokálním serverem, jedna auth cesta se scopes, Tailscale jen jako endpoint provider.
+
 # Remote Access — Implementation Plan, part 1 (fáze 1 + 2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

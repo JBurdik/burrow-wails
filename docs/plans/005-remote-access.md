@@ -1,3 +1,7 @@
+> **SUPERSEDED** (2026-09-05) — nahrazeno `docs/superpowers/specs/2026-09-05-remote-access-t3code-design.md`.
+> Z tohoto dokumentu nebyl implementovaný žádný kód. Nový design jde na full t3code model:
+> desktop mluví WS s lokálním serverem, jedna auth cesta se scopes, Tailscale jen jako endpoint provider.
+
 # Plán: Remote access na session (t3code model)
 
 ## Cíl
