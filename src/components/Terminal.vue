@@ -608,6 +608,13 @@ function historyEventFor(state: Phase["state"]): string | null {
     case "waiting_approval": return "permission";
     case "done": return "done";
     case "failed": return "error";
+    // A turn the user cancelled (idle) or whose process went away (stale) is
+    // over too. Without a closing event its segment stays open and the panel
+    // shows a turn that runs forever. "done" is the store's neutral close —
+    // "error" would paint a red segment for a turn that did not fail.
+    case "idle":
+    case "stale":
+      return "done";
     default: return null;
   }
 }
@@ -646,7 +653,12 @@ function applyPhase(leafId: number, phase: Phase) {
     if (isDefaultTitle(leaf.title)) leaf.title = phase.title;
   }
 
-  if (prevState !== phase.state) {
+  // The History timeline records AGENT turns that happen while this window is
+  // up. Both gates earn their keep: a replayed `running` from the previous
+  // session would open a segment stamped at app launch that nothing ever
+  // closes, and a poll-driven running/done from a plain `npm test` is not a
+  // turn at all — the old hook-only channel never saw one.
+  if (prevState !== phase.state && isFresh(phase) && phase.is_agent) {
     const ev = historyEventFor(phase.state);
     if (ev) historyStore.addEvent(leafId, ev);
   }
