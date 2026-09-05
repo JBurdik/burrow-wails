@@ -81,6 +81,19 @@ func Next(cur Phase, ev Event, now int64) Phase {
 	}
 	next := cur
 
+	// A status hook only ever originates from an agent, so the hook itself is
+	// the authoritative IsAgent signal. The poll's process-name list is a
+	// fallback for an agent that has not reported yet, not the source of truth
+	// — Copilot is exactly why: Burrow installs its status hooks (statushooks.go)
+	// but no name match can be guaranteed to keep up with every agent CLI.
+	// The poll still CLEARS the flag when the shell returns to the foreground
+	// (PollAgent{false}), which is how a leaf goes back to poll-driven once its
+	// agent exits.
+	switch ev.Kind {
+	case HookRunning, HookWaiting, HookPermission, HookDone, HookError, HookSession:
+		next.IsAgent = true
+	}
+
 	switch ev.Kind {
 	case HookRunning:
 		next.State = Running

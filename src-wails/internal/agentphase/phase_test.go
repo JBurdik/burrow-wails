@@ -80,6 +80,37 @@ func TestSessionIsMetadataNotStatus(t *testing.T) {
 	}
 }
 
+func TestHookMarksTheLeafAnAgent(t *testing.T) {
+	// The hook is the authoritative IsAgent signal: an agent whose binary the
+	// poll's name list does not know (copilot was the real case) must still be
+	// an agent the moment it reports. Every Hook* kind carries it, because a
+	// turn can be joined at any point (a replayed done, a permission before
+	// any output, a SessionStart before the first prompt).
+	for _, k := range []Kind{HookRunning, HookWaiting, HookPermission, HookDone, HookError, HookSession} {
+		if got := apply(Phase{}, Event{Kind: k}); !got.IsAgent {
+			t.Fatalf("%q did not mark the leaf an agent: %+v", k, got)
+		}
+	}
+}
+
+func TestShellReturnStillClearsTheAgentFlag(t *testing.T) {
+	// How a leaf goes back to poll-driven once its agent exits: the poll's
+	// shell branch applies PollAgent{false} and then PollNotBusy, which is what
+	// settles an agent the user Ctrl+C'd (it fires no Stop hook). The hook's
+	// IsAgent must not make that unreachable.
+	p := apply(Phase{}, Event{Kind: HookRunning})
+	if !p.IsAgent || p.State != Running {
+		t.Fatalf("setup wrong: %+v", p)
+	}
+	p = apply(p, Event{Kind: PollAgent, Bool: false})
+	if p.IsAgent {
+		t.Fatalf("shell return did not clear the agent flag: %+v", p)
+	}
+	if got := apply(p, Event{Kind: PollNotBusy}); got.State != Done || got.TurnEndedAt != now {
+		t.Fatalf("interrupted agent did not settle: %+v", got)
+	}
+}
+
 func TestPollNeverDrivesAnAgent(t *testing.T) {
 	// The whole "stuck orange dot" rule: an agent is foreground whether it is
 	// thinking or sitting at its prompt, so presence is not busy.

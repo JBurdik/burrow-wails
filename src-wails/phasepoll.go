@@ -16,7 +16,11 @@ var shellRE = regexp.MustCompile(`^(zsh|bash|sh|fish|csh|tcsh|dash)$`)
 // agentRE matches the CLIs we treat as agents. For an agent leaf the poll only
 // ever sets IsAgent: an agent is foreground whether it is thinking or idle at
 // its prompt, so presence is not busy (the old stuck-orange-dot bug).
-var agentRE = regexp.MustCompile(`^(claude|codex|aider|gemini|opencode|amp|goose)$`)
+//
+// This list is a FALLBACK for an agent that has not fired a status hook yet —
+// any Hook* event sets IsAgent by itself (agentphase.Next), so a CLI missing
+// from here is no longer invisible, just late.
+var agentRE = regexp.MustCompile(`^(claude|codex|copilot|aider|gemini|opencode|amp|goose)$`)
 
 // emptyReadsBeforeDead is the watchdog's patience. One empty foreground read is
 // a transient race with the daemon; three plus a pty the daemon no longer
