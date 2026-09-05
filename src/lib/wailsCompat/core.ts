@@ -256,8 +256,6 @@ async function dispatch(cmd: string, args: Args): Promise<any> {
       return App.SaveTempImage(args.b64 ?? args.data, args.ext);
     case "is_pid_alive":
       return App.IsPidAlive(args.pid);
-    case "set_tab_live_status":
-      return App.SetTabLiveStatus(String(args.ptyId ?? args.pty_id), args.status);
     case "set_max_agents":
       return App.SetMaxAgents(args.n ?? args.max);
     case "set_burrow_mcp_max_depth":

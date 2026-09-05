@@ -14,8 +14,8 @@ import (
 )
 
 // Remaining small commands from src-tauri/src/lib.rs: system_stats,
-// save_temp_image, is_pid_alive, format_source,
-// set_tab_live_status, set_max_agents, set_burrow_mcp_max_depth.
+// save_temp_image, is_pid_alive, format_source, set_max_agents,
+// set_burrow_mcp_max_depth.
 
 // SystemStats reports host-wide CPU/memory, matching the shape the title bar's
 // gauge reads (`cpu_percent`/`mem_used`/`mem_total`). The Rust build used
@@ -83,15 +83,11 @@ func (a *App) IsPidAlive(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-func (a *App) SetTabLiveStatus(ptyID, status string) {
-	setTabLiveStatus(a.db, ptyID, status)
-}
-
 // setTabLiveStatus mirrors a PTY's live status into terminal_tabs so
 // `burrow list-tabs` / MCP list_tabs can answer from SQLite alone, with no
-// frontend round-trip. PhaseStore.Apply is now the primary caller — Go
-// derives the phase itself — but the binding above stays for callers that
-// still push a status in directly.
+// frontend round-trip. PhaseStore.Apply is its ONLY caller: Go derives the
+// phase, so there is nothing left for the frontend to push in (the
+// SetTabLiveStatus binding it used for that is gone).
 func setTabLiveStatus(db *sql.DB, ptyID, status string) {
 	if _, err := db.Exec(`UPDATE terminal_tabs SET status = ? WHERE pty_id = ?`, status, ptyID); err != nil {
 		log.Printf("set tab live status: %v", err)

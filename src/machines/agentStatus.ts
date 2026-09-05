@@ -1,14 +1,18 @@
 /**
- * XState v5 state machine for terminal/chat status — the SINGLE owner of a dot.
+ * XState v5 state machine for CHAT session status.
  *
- * Three input channels feed it, all arbitrated here:
- *   1. agent hooks   (burrow status → pty-hook-{id})  → START/WAIT/PERMISSION_REQUEST/STOP/FAIL
- *   2. foreground poll (get_pty_foreground, 2 s)      → BUSY/NOT_BUSY/NEEDS_INPUT/SET_AGENT
- *   3. interrupt + dead-PTY watchdog                  → INTERRUPT
+ * It used to own the terminal dot as well, arbitrating three client-side
+ * channels (agent hooks, the 2 s foreground poll, interrupt/watchdog). Those
+ * are gone: a terminal's phase is now derived in Go
+ * (src-wails/internal/agentphase) and each client turns it into a dot with
+ * src/runtime/displayStatus.ts. Chats have not made that move yet — Go's chat
+ * phase is derived from provider runtime events and has no notion of the
+ * permission gate AgentChat.vue owns — so this machine survives for
+ * `stores/claudeChats.ts` alone, driven by AgentChat's own events.
  *
- * The poll channel is guarded by `!context.isAgent`: for an agent leaf the hooks
- * are the sole authority and the poll can never fabricate a status. That guard is
- * the whole "stuck orange dot" rule, expressed once.
+ * The poll channel (SET_AGENT/BUSY/NOT_BUSY/NEEDS_INPUT) therefore has no
+ * sender any more; it stays only because the machine goes away wholesale when
+ * chats move onto the server phase.
  *
  * States: idle → running ⇄ waiting/permission → done/review/error
  *
@@ -191,8 +195,3 @@ export const agentStatusMachine = setup({
 
 /** The machine's state ids ARE the TermStatus values — assert it at the type level. */
 export type AgentStatusValue = Extract<TermStatus, "idle" | "running" | "waiting" | "permission" | "done" | "review" | "error">;
-
-/** A leaf is "busy" (spinner-ish) exactly in the in-flight states. */
-export function isBusyStatus(s: TermStatus): boolean {
-  return s === "running" || s === "waiting" || s === "permission";
-}

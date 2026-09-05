@@ -242,8 +242,6 @@ export function SetSkillEnabled(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetSleepInhibit(arg1:boolean):Promise<void>;
 
-export function SetTabLiveStatus(arg1:string,arg2:string):Promise<void>;
-
 export function SetTailscaleServe(arg1:boolean,arg2:number):Promise<main.TailscaleStatus>;
 
 export function SetWorkspaceIcon(arg1:number,arg2:string):Promise<void>;

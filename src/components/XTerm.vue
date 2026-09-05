@@ -32,7 +32,10 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 const props = defineProps<{ ptyId: number; cwd: string; initialCmd?: string; resultToken?: string; initiallyTitled?: boolean }>();
-const emit = defineEmits<{ title: [t: string]; busy: [b: boolean]; needsInput: [b: boolean]; spawn: [req: { cmd: string; token: string; cwd: string }]; agentState: [s: string, detail?: string]; agentMeta: [meta: { model: string; source: string; title: string }]; agent: [b: boolean]; interrupt: []; cwd: [p: string] }>();
+// No status emits: the agent's phase is derived in Go and reaches Terminal.vue
+// on `phase-pty:{id}`. What is left here is what only the view can know — the
+// title, an OSC 7 cwd, and a spawn request.
+const emit = defineEmits<{ title: [t: string]; spawn: [req: { cmd: string; token: string; cwd: string }]; cwd: [p: string] }>();
 
 const ui = useUIStore();
 
@@ -142,19 +145,12 @@ const CLAUDE_IDLE_TITLE_RE = /^✳?\s*Claude\s+Code$/i;
 const CODEX_RE = /^codex$/i;
 const COPILOT_RE = /^copilot$/i;
 const SHELL_RE = /^(zsh|bash|sh|fish|csh|tcsh|dash)$/;
-// Legacy pattern-match fallback (used when hooks aren't active)
-const NEEDS_INPUT_RE = /[›❯]|(\(y\/n\)|\[y\/n\]|\(Y\/n\)|\[Y\/n\])/i;
-const ANSI_RE = /\x1b(?:\[[0-9;?]*[A-Za-z]|[^[])/g;
 // OSC 9999 from the `burrow` CLI: \x1b]9999;spawn;<b64cmd>;<b64token>;<b64cwd>\x07
 const SPAWN_RE = /\x1b\]9999;spawn;([A-Za-z0-9+/=]*);([A-Za-z0-9+/=]*);([A-Za-z0-9+/=]*)\x07/g;
 // OSC 7: shell CWD hint — \e]7;file://hostname/path\a. Emitted by zsh/fish/bash
 // after each `cd` when the user's shell config includes the osc7 hook. Lets us
 // track live CWD without polling so `burrow spawn --cwd` always gets the right dir.
 const OSC7_RE = /\x1b\]7;file:\/\/[^/]*(\/?[^\x07\x1b]*)\x07/g;
-// OSC 133 shell integration markers — precise command boundary tracking without polling.
-//   A=prompt-start  B=prompt-end  C=command-start  D;N=command-done(exit N)
-// Supported by zsh (precmd/preexec hooks), bash (PS0/PROMPT_COMMAND), fish, iTerm2, etc.
-const OSC133_RE = /\x1b\]133;([A-D])(?:;[^\x07]*)?\x07/g;
 const b64decode = (s: string) =>
   s ? new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0))) : "";
 
@@ -170,15 +166,6 @@ let agentTitled = false; // set in onMounted after props are available
 // (agent titles with spaces/Unicode) take priority over shell cwd noise (bare words).
 // Cleared on shell-returns and at trySend (pre-injection shell titles are discarded).
 let pendingOscTitle: string | null = null;
-// Last hook state — used to freeze the tab title after a turn ends so Claude's
-// "Claude Code" idle-state title can't overwrite the task description.
-let hookState: "idle" | "running" | "waiting" | "permission" | "done" | "error" = "idle";
-// Agent process pid reported by the status hook (`burrow status --pid`), already
-// gated to a LOCAL pid by Rust (a remote/SSH pid never reaches here). Drives the
-// PID-liveness sweep in the poll below: when an in-flight agent's pid is gone we
-// settle the stuck dot immediately, instead of waiting out the slower dead-PTY
-// watchdog. null = no trusted local pid → only the watchdog applies.
-let agentPid: number | null = null;
 
 // Strip control/non-printable chars (mid-OSC replay garbage), trim, cap length.
 function sanitizeTitle(s: string): string {
@@ -186,14 +173,11 @@ function sanitizeTitle(s: string): string {
   return s.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, 80);
 }
 
-let outputBuffer = "";
-let lastInterruptScanAt = 0;
 // Timestamp of the last PTY output chunk — used to detect when the shell has
 // finished its startup (sourcing .zprofile/.zshrc, printing the first prompt)
 // and gone quiet, so we can inject the launch command without racing the init.
 let lastDataAt = 0;
 let hooksSettingsPath = "";
-let unlistenHook: UnlistenFn | null = null;
 let unlistenDrop: UnlistenFn | null = null;
 
 // Image files an agent can read. Drag-dropped paths and clipboard image mimes are
@@ -382,22 +366,23 @@ onMounted(async () => {
     if (SHELL_RE.test(foreground)) return;   // shell prompt cwd/cmd junk
     if (CLAUDE_RE.test(foreground) || CODEX_RE.test(foreground) || COPILOT_RE.test(foreground)) {
       // After Stop, Claude resets its OSC title to "✳ Claude Code" (idle state).
-      // Block ONLY that specific idle reset — not all titles — so /rename still works
-      // and future Claude versions that emit task-specific titles aren't blocked.
-      if (hookState === "done" && CLAUDE_IDLE_TITLE_RE.test(title)) return;
+      // Block ONLY that specific idle reset, and only once this session has
+      // already titled itself — not all titles — so the first startup seed still
+      // lands, /rename still works, and a future task-specific title isn't
+      // blocked. (This used to key off the last hook state; the hooks now go
+      // straight to Go, and the tab's own title history answers the same
+      // question without a status channel.)
+      if (agentTitled && CLAUDE_IDLE_TITLE_RE.test(title)) return;
       agentTitled = true;
     }
     emit("title", title);
   });
 
-  // Agent status (running/waiting/done) is driven by hooks installed GLOBALLY in
-  // each agent's config (~/.claude/settings.json, ~/.codex/hooks.json) by Rust at
-  // startup. Those hooks run `burrow hook`, which POSTs to the local hook HTTP
-  // server; Rust re-emits a `pty-hook-{id}` Tauri event that the listener below
-  // turns into busy/needsInput/done. Because they're global + env-driven, they fire
-  // for EVERY agent session in this PTY — launched-by-button, typed by hand, or
-  // reattached after restart. The poll never fabricates "busy" for an agent
-  // process, so these events are the sole source of truth (no stuck orange dot).
+  // Agent status is driven by hooks installed GLOBALLY in each agent's config
+  // (~/.claude/settings.json, ~/.codex/hooks.json) by Go at startup. Those hooks
+  // run `burrow hook`, which POSTs to the local hook HTTP server. From there the
+  // phase is derived and stored in Go, and reaches Terminal.vue as
+  // `phase-pty:{id}` — this component no longer sees, forwards or arbitrates it.
   const baseCmd = props.initialCmd?.trim().split(/\s+/)[0] ?? "";
   let launchArgs = "";
 
@@ -434,47 +419,10 @@ onMounted(async () => {
     } catch { /* MCP unavailable (browser-only dev) — launch without tools */ }
   }
 
-  // Register all three listeners in parallel before creating the PTY — they are
+  // Register both listeners in parallel before creating the PTY — they are
   // independent and each round-trips to the Tauri IPC bridge, so sequencing them
-  // added ~3× the latency for no reason.
-  [unlistenHook, unlistenWrite, unlistenSnapReq] = await Promise.all([
-    // Forward the agent's hook state straight through as ONE semantic event. A
-    // single running|waiting|done event has no ordering hazard; Terminal.vue owns
-    // the transition. The 2s poll never fabricates agent status, so these hooks
-    // are the sole source of truth for an agent's running/waiting/done.
-    // Payload is either a bare state string (legacy) or an object carrying the
-    // state plus extras: `detail` for an `error`, and `{model,source,title}` for a
-    // `session` (SessionStart metadata). Normalize, then fan out ONE event so there
-    // is no ordering hazard — Terminal.vue owns the transition.
-    listen<string | { state: string; detail?: string; model?: string; source?: string; title?: string; pid?: number }>(
-      `pty-hook-${props.ptyId}`,
-      (event) => {
-        const p = event.payload;
-        const obj = typeof p === "object" && p ? p : null;
-        const state = obj ? obj.state : p;
-        // Trusted local agent pid (Rust dropped any remote/SSH pid). Refresh it on
-        // every event that carries one so the sweep always polls the live process.
-        if (obj && typeof obj.pid === "number") agentPid = obj.pid;
-        if (state === "session") {
-          // Not a status — pure metadata (model/title from SessionStart). Surface it
-          // up so Terminal.vue can store it; never touch the status dot.
-          emit("agentMeta", {
-            model: obj?.model ?? "",
-            source: obj?.source ?? "",
-            title: obj?.title ?? "",
-          });
-          return;
-        }
-        if (
-          state === "running" || state === "waiting" || state === "permission" ||
-          state === "done" || state === "error"
-        ) {
-          hookState = state as typeof hookState;
-          // `error` carries a detail string (rate_limit|overloaded|…); pass it through.
-          emit("agentState", state, state === "error" ? obj?.detail : undefined);
-        }
-      },
-    ),
+  // added double the latency for no reason.
+  [unlistenWrite, unlistenSnapReq] = await Promise.all([
     // tmux send-keys path: the shim POSTs /write → hook server emits this event →
     // we forward to the daemon as regular PTY input.
     listen<string>(`pty-write-${props.ptyId}`, (event) => {
@@ -538,31 +486,7 @@ onMounted(async () => {
       if (p) emit("cwd", p);
     }
 
-    // OSC 133 shell integration: C=command-start → busy, D=command-done → idle.
-    // Only drives plain-shell busy; agent sessions ignore it (hooks are authoritative).
-    if (!isAgentSession) {
-      OSC133_RE.lastIndex = 0;
-      while ((m = OSC133_RE.exec(text)) !== null) {
-        if (m[1] === "C") emit("busy", true);
-        else if (m[1] === "D") emit("busy", false);
-      }
-    }
-
-    outputBuffer = (outputBuffer + text).slice(-500);
     lastDataAt = performance.now();
-
-    // ponytail: output scan for Ctrl+C interrupted state — no hook fires in this case
-    if (isAgentSession && hookState === "running") {
-      const now = performance.now();
-      if (now - lastInterruptScanAt > 2000) {
-        const plain = outputBuffer.replace(ANSI_RE, "");
-        if (plain.includes("Interrupted by user") || (plain.includes("Interrupted") && plain.includes("What should"))) {
-          lastInterruptScanAt = now;
-          hookState = "waiting";
-          emit("agentState", "waiting");
-        }
-      }
-    }
   });
 
   // Send initial command once the shell is actually ready (inject --settings for
@@ -639,16 +563,10 @@ onMounted(async () => {
     invoke("write_pty", { id: props.ptyId, data: Array.from(new TextEncoder().encode(s)) });
   }
 
-  // Send input from xterm → Rust PTY
+  // Send input from xterm → the PTY. A Ctrl+C / ESC interrupt needs no special
+  // handling here any more: Go's foreground poll sees the agent leave its turn
+  // and settles the phase itself, so the dot can't stick orange.
   term.onData((data) => {
-    // Interrupt detection: a bare ESC (single 0x1b — NOT an escape sequence like
-    // arrows "\x1b[A") or Ctrl+C (0x03) cancels an agent's running turn. Agents
-    // fire NO Stop hook on interrupt, and the foreground poll never clears an
-    // agent's "running" (claude stays foreground at its prompt) → the dot would
-    // stick orange forever. Forward as a semantic interrupt so Terminal can
-    // settle the leaf back to idle. Generic = works for every agent (claude,
-    // codex, aider…). No-op if nothing was running.
-    if (data === "\x1b" || data === "\x03") emit("interrupt");
     const bytes = Array.from(new TextEncoder().encode(data));
     txBack += bytes.length;
     txBackN++;
@@ -692,75 +610,27 @@ onMounted(async () => {
     }
   });
 
-  // Poll foreground process → auto-title. Runs once immediately (so tabs get a
-  // correct name right after reload instead of waiting 2s) then every 2s.
+  // Poll foreground process → auto-title ONLY. Runs once immediately (so tabs
+  // get a correct name right after reload instead of waiting 2s) then every 2s.
+  //
+  // Status used to be derived here too — busy/needs-input for plain commands, a
+  // PID-liveness sweep and a dead-PTY watchdog for agents. All of that now runs
+  // in Go against the same foreground read (src-wails/phasepoll.go), where it
+  // works for a workspace nobody has mounted and for a client that is not this
+  // window. What is left is the one thing only the view can do: name the tab.
   let lastProcess = "";
   // Sticky across polls: once an agent is seen foreground, the session stays
   // "agent" until the shell returns. Child processes the agent spawns (a pager,
   // git, node) then can't steal the tab name mid-conversation (the rename bug).
   let isAgentSession = false;
-  // Consecutive empty-foreground polls. A single empty read is normal (daemon
-  // race), but a sustained streak on an in-flight agent can mean a dead PTY whose
-  // `done` hook never fired — the stuck-dot watchdog below acts only after this.
-  let emptyForegroundStreak = 0;
   const poll = async () => {
-    // PID-liveness sweep (supacode-style): if the agent reported a trusted local
-    // pid and that process is gone while the leaf is still in-flight, the turn can
-    // never finish — no Stop hook will ever fire. Settle the dot immediately rather
-    // than waiting out the 3-empty-poll dead-PTY watchdog below. This catches a
-    // crashed/killed agent even when its (defunct) process still lingers in the
-    // foreground read. The watchdog stays as the fallback for the no-pid case.
-    if (
-      agentPid !== null &&
-      (hookState === "running" || hookState === "waiting" || hookState === "permission")
-    ) {
-      const alive = await invoke<boolean>("is_pid_alive", { pid: agentPid }).catch(() => true);
-      if (!alive) {
-        hookState = "idle";
-        agentPid = null;
-        emit("interrupt"); // agent process gone, no clean `done` → settle the stuck dot
-        return;
-      }
-    }
-
     const proc = await invoke<string>("get_pty_foreground", { id: props.ptyId });
     // Empty foreground = no non-shell process in the group: either a daemon
-    // race/mid-conversation read (must NOT reset an agent's title/state) OR a
-    // plain command just exited and only the shell remains. For an agent
-    // session, skip — keep last known title/state (the "Terminal N" reset bug).
-    // For a plain terminal that was busy, empty means the command finished and
-    // we're back at the prompt → clear busy, else the orange dot sticks forever
-    // (foreground_name returns "" for a bare shell, so SHELL_RE never fires).
-    if (!proc) {
-      emptyForegroundStreak++;
-      // Stuck-state watchdog: an agent leaf still in-flight (per its last hook)
-      // with foreground empty for several polls may be a genuinely dead PTY — the
-      // process was killed/crashed and no Stop hook fired, so the dot would stick
-      // forever. A single empty read is just a transient race, so we only act after
-      // a streak AND confirm the PTY is actually dead in the daemon before settling.
-      if (
-        isAgentSession &&
-        emptyForegroundStreak >= 3 &&
-        (hookState === "running" || hookState === "waiting" || hookState === "permission")
-      ) {
-        const alive = await invoke<{ pty_id: number; alive: boolean }[]>("list_pty_sessions")
-          .then((ss) => ss.find((s) => s.pty_id === props.ptyId)?.alive ?? true)
-          .catch(() => true);
-        if (!alive) {
-          hookState = "idle";
-          agentPid = null;
-          emit("interrupt"); // dead PTY, no clean `done` → settle the stuck dot
-        }
-      }
-      if (!isAgentSession && lastProcess && !SHELL_RE.test(lastProcess)) {
-        lastProcess = "";
-        emit("busy", false);
-        // No title reset — names are fully sticky. A transient empty-foreground
-        // read between commands must not wipe the last meaningful title.
-      }
-      return;
-    }
-    emptyForegroundStreak = 0;
+    // race/mid-conversation read or a plain command that just exited, leaving
+    // only the shell. Either way there is no title to derive, and names are
+    // fully sticky — a transient empty read must not wipe the last meaningful
+    // one (the "Terminal N" reset bug).
+    if (!proc) return;
     foreground = proc;
     if (proc === lastProcess) return;
     lastProcess = proc;
@@ -770,22 +640,13 @@ onMounted(async () => {
 
     if (SHELL_RE.test(proc)) {
       // Back at the shell prompt → whatever ran (agent or command) has exited.
-      // Clear running state (rescues a stuck dot if an agent was interrupted with
-      // no done hook). Names are fully sticky — do NOT reset the title here, so
-      // a tab keeps its last meaningful name across turn boundaries and on restart.
+      // Names are fully sticky — do NOT reset the title here, so a tab keeps its
+      // last meaningful name across turn boundaries and on restart.
       isAgentSession = false;
-      agentPid = null;          // agent exited cleanly → stop sweeping its old pid
       pendingOscTitle = null;   // discard any pre-shell-exit buffered title
       // Keep agentTitled as-is: if an agent set a meaningful title, it persists.
-      emit("agent", false);
-      emit("busy", false);
     } else if (isAgent) {
-      // An agent is the foreground process — but it stays foreground whether it's
-      // THINKING or sitting idle at its own prompt. Presence is NOT "busy": the
-      // poll must never fabricate a status here, or the spinner sticks forever.
-      // running/waiting/done come ONLY from the agent's hooks (listener above).
       isAgentSession = true;
-      emit("agent", true);        // mark the tab as an agent (robot icon)
       // Apply any OSC title buffered before foreground was known (early-start
       // race). Otherwise fall back to seeding "Claude" until the agent sets its own.
       if (!agentTitled && pendingOscTitle) {
@@ -803,15 +664,9 @@ onMounted(async () => {
       }
     } else if (isAgentSession) {
       // A non-shell child process INSIDE a live agent session (the agent opened a
-      // pager, ran git, spawned node…). Keep the agent's title and don't flip to
-      // a plain-command "busy" — the agent's hooks remain the status source.
+      // pager, ran a VCS command, spawned node…). Keep the agent's title.
     } else {
-      // Plain foreground command (npm test, vim, python…): presence == busy.
-      emit("agent", false);
-      emit("busy", true);
-      const stripped = outputBuffer.replace(ANSI_RE, "");
-      emit("needsInput", NEEDS_INPUT_RE.test(stripped.slice(-200)));
-      emit("title", proc);        // e.g. "vim", "python3", "node"
+      emit("title", proc);        // plain command: "vim", "python3", "node"
     }
   };
   poll();
@@ -846,7 +701,6 @@ onBeforeUnmount(async () => {
   resizeObserver?.disconnect();
   if (resizeTimer) clearTimeout(resizeTimer);
   unlisten?.();
-  unlistenHook?.();
   unlistenSnapReq?.();
   unlistenWrite?.();
   unlistenDrop?.();

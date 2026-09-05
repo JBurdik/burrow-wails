@@ -482,10 +482,6 @@ export function SetSleepInhibit(arg1) {
   return window['go']['main']['App']['SetSleepInhibit'](arg1);
 }
 
-export function SetTabLiveStatus(arg1, arg2) {
-  return window['go']['main']['App']['SetTabLiveStatus'](arg1, arg2);
-}
-
 export function SetTailscaleServe(arg1, arg2) {
   return window['go']['main']['App']['SetTailscaleServe'](arg1, arg2);
 }

@@ -37,7 +37,6 @@
       :initial-cmd="(node as Leaf).initialCmd"
       :ref="(el: unknown) => registerRef((node as Leaf).id, el)"
       @title="(t: string) => $emit('title', (node as Leaf).id, t)"
-      @busy="(b: boolean) => $emit('busy', (node as Leaf).id, b)"
     />
   </div>
   <div
