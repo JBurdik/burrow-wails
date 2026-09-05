@@ -116,7 +116,11 @@ func migrate(db *sql.DB) error {
 			title TEXT NOT NULL DEFAULT '',
 			is_agent INTEGER NOT NULL DEFAULT 0,
 			turn_ended_at INTEGER NOT NULL DEFAULT 0,
-			updated_at INTEGER NOT NULL DEFAULT 0
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			-- Per-id monotonic counter so two concurrent Apply calls for the
+			-- same id (hook server + foreground poll, different goroutines)
+			-- can't have the older one win the DB row just by persisting last.
+			seq INTEGER NOT NULL DEFAULT 0
 		)`,
 	}
 	stmts = append(stmts, chatMessagesSchema()...)

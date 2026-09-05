@@ -18,11 +18,21 @@ type PhaseStore struct {
 	mu     sync.Mutex
 	db     *sql.DB
 	phases map[string]agentphase.Phase
+	// seq is a per-id monotonic counter, bumped only on the change path of
+	// Apply. Two producers (the hook server and the foreground poll, from
+	// their own goroutines) can call Apply for the same id concurrently;
+	// nothing else orders which one's persist/busEmit runs last. seq is what
+	// lets the later map write win at the DB layer (persist's WHERE guard)
+	// and at the bus layer (the staleness check before busEmit below) even
+	// if the goroutines are scheduled the other way round. UpdatedAt
+	// (millisecond resolution) can't do this job: two Applies inside the
+	// same millisecond would tie.
+	seq map[string]uint64
 }
 
 func NewPhaseStore(db *sql.DB) (*PhaseStore, error) {
-	s := &PhaseStore{db: db, phases: make(map[string]agentphase.Phase)}
-	rows, err := db.Query(`SELECT id, state, detail, model, title, is_agent, turn_ended_at, updated_at FROM pty_phase`)
+	s := &PhaseStore{db: db, phases: make(map[string]agentphase.Phase), seq: make(map[string]uint64)}
+	rows, err := db.Query(`SELECT id, state, detail, model, title, is_agent, turn_ended_at, updated_at, seq FROM pty_phase`)
 	if err != nil {
 		return nil, err
 	}
@@ -30,10 +40,12 @@ func NewPhaseStore(db *sql.DB) (*PhaseStore, error) {
 	for rows.Next() {
 		var id string
 		var p agentphase.Phase
-		if err := rows.Scan(&id, &p.State, &p.Detail, &p.Model, &p.Title, &p.IsAgent, &p.TurnEndedAt, &p.UpdatedAt); err != nil {
+		var seq uint64
+		if err := rows.Scan(&id, &p.State, &p.Detail, &p.Model, &p.Title, &p.IsAgent, &p.TurnEndedAt, &p.UpdatedAt, &seq); err != nil {
 			return nil, err
 		}
 		s.phases[id] = p
+		s.seq[id] = seq
 	}
 	return s, rows.Err()
 }
@@ -48,10 +60,25 @@ func (s *PhaseStore) Apply(id string, ev agentphase.Event) {
 		s.mu.Unlock()
 		return
 	}
+	n := s.seq[id] + 1
+	s.seq[id] = n
 	s.phases[id] = next
 	s.mu.Unlock()
 
-	s.persist(id, next)
+	s.persist(id, next, n)
+
+	// A concurrent Apply for the same id may have already superseded this
+	// value between the unlock above and here. persist's own WHERE guard
+	// already stopped it from winning the DB row; this stops it from also
+	// going out over the bus (and into the terminal_tabs mirror below) a
+	// step behind what was already emitted.
+	s.mu.Lock()
+	latest := s.seq[id] == n
+	s.mu.Unlock()
+	if !latest {
+		return
+	}
+
 	busEmit("phase-"+id, next)
 
 	// Mirror for `burrow list-tabs` / MCP list_tabs, which read the DB with no
@@ -61,15 +88,21 @@ func (s *PhaseStore) Apply(id string, ev agentphase.Event) {
 	}
 }
 
-func (s *PhaseStore) persist(id string, p agentphase.Phase) {
+// persist upserts one phase, guarded by seq so an out-of-order write (an
+// older Apply's goroutine reaching this call after a newer one already has)
+// cannot regress the row: the DO UPDATE only fires when the incoming seq is
+// actually newer than what's stored.
+func (s *PhaseStore) persist(id string, p agentphase.Phase, seq uint64) {
 	_, err := s.db.Exec(
-		`INSERT INTO pty_phase (id, state, detail, model, title, is_agent, turn_ended_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO pty_phase (id, state, detail, model, title, is_agent, turn_ended_at, updated_at, seq)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   state=excluded.state, detail=excluded.detail, model=excluded.model,
 		   title=excluded.title, is_agent=excluded.is_agent,
-		   turn_ended_at=excluded.turn_ended_at, updated_at=excluded.updated_at`,
-		id, string(p.State), p.Detail, p.Model, p.Title, p.IsAgent, p.TurnEndedAt, p.UpdatedAt,
+		   turn_ended_at=excluded.turn_ended_at, updated_at=excluded.updated_at,
+		   seq=excluded.seq
+		 WHERE excluded.seq > pty_phase.seq`,
+		id, string(p.State), p.Detail, p.Model, p.Title, p.IsAgent, p.TurnEndedAt, p.UpdatedAt, seq,
 	)
 	if err != nil {
 		log.Printf("persist phase %s: %v", id, err)
