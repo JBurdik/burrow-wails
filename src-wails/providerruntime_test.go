@@ -233,13 +233,20 @@ func TestChatPhaseEventMapping(t *testing.T) {
 		want agentphase.Kind
 		ok   bool
 	}{
-		{"text.delta", agentphase.HookRunning, true},
-		{"user.delta", agentphase.HookRunning, true},
-		{"turn.completed", agentphase.HookDone, true},
-		{"turn.failed", agentphase.HookError, true},
-		{"session.title", agentphase.HookSession, true},
-		{"tool.started", "", false},
-		{"thinking.delta", "", false},
+		{EvtTextDelta, agentphase.HookRunning, true},
+		{EvtUserDelta, agentphase.HookRunning, true},
+		// A turn that opens with a tool call reaches text much later; until it
+		// did, the chat read idle through the whole thinking/tool prefix.
+		{EvtThinkingDelta, agentphase.HookRunning, true},
+		{EvtToolStarted, agentphase.HookRunning, true},
+		{EvtTurnCompleted, agentphase.HookDone, true},
+		{EvtTurnFailed, agentphase.HookError, true},
+		{EvtSessionTitle, agentphase.HookSession, true},
+		// The poll only walks pty: keys, so an exit is the only thing that can
+		// settle a chat whose CLI died mid-turn.
+		{EvtSessionExited, agentphase.Dead, true},
+		{EvtToolCompleted, "", false},
+		{EvtSessionID, "", false},
 	}
 	for _, c := range cases {
 		ev, ok := chatPhaseEvent(ProviderRuntimeEvent{Type: c.in})
@@ -249,6 +256,19 @@ func TestChatPhaseEventMapping(t *testing.T) {
 		if ok && ev.Kind != c.want {
 			t.Fatalf("%q → %q, want %q", c.in, ev.Kind, c.want)
 		}
+	}
+
+	// A chat whose CLI dies mid-turn settles; one that exits AFTER its turn
+	// completed keeps the receipt that turn earned.
+	var p agentphase.Phase
+	p = agentphase.Next(p, agentphase.Event{Kind: agentphase.HookRunning}, 1)
+	dead, _ := chatPhaseEvent(ProviderRuntimeEvent{Type: EvtSessionExited})
+	if got := agentphase.Next(p, dead, 2); got.State != agentphase.Stale {
+		t.Fatalf("a chat that died mid-turn did not settle: %+v", got)
+	}
+	done := agentphase.Next(p, agentphase.Event{Kind: agentphase.HookDone}, 2)
+	if got := agentphase.Next(done, dead, 3); got != done {
+		t.Fatalf("exit after turn.completed moved the phase: %+v", got)
 	}
 }
 

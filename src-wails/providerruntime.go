@@ -390,8 +390,18 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 // the mobile client's chat dots drifted from its terminal dots.
 func chatPhaseEvent(ev ProviderRuntimeEvent) (agentphase.Event, bool) {
 	switch ev.Type {
-	case EvtTextDelta, EvtUserDelta:
+	// Thinking and a tool call are as much evidence of a live turn as a text
+	// token — more, in fact, since a turn that opens with a tool call reaches
+	// text only much later, and until then the chat read idle.
+	case EvtTextDelta, EvtUserDelta, EvtThinkingDelta, EvtToolStarted:
 		return agentphase.Event{Kind: agentphase.HookRunning}, true
+	case EvtSessionExited:
+		// The CLI is gone. Nothing else settles a chat — the foreground poll
+		// only walks pty: keys — so without this a chat whose process dies
+		// mid-turn stays running forever. Dead is the honest name for it, and
+		// it yields `stale`: nothing failed, the process just went away. It is
+		// a no-op after a turn.completed, which is the order Claude sends them.
+		return agentphase.Event{Kind: agentphase.Dead}, true
 	case EvtTurnCompleted:
 		return agentphase.Event{Kind: agentphase.HookDone}, true
 	case EvtTurnFailed:
