@@ -88,6 +88,16 @@ func (p *phasePoller) pollOne(id string, alive bool) {
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollAgent, Bool: false})
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollNotBusy})
 	default:
+		// A non-shell child INSIDE a live agent session — the agent opened a
+		// pager, ran git, spawned node. Only the shell branch may clear the
+		// agent flag, because only the shell being foreground proves the agent
+		// is gone. Clearing it here would un-gate PollBusy on the very next
+		// line and overwrite a done-but-unseen turn with a permanent `running`,
+		// wiping its TurnEndedAt (and the review dot) along the way — and it
+		// would flap a DB write plus an emit every 2 s while the child lives.
+		if p.phases.Get(key).IsAgent {
+			return
+		}
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollAgent, Bool: false})
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollBusy})
 	}
