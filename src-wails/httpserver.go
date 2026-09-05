@@ -14,9 +14,26 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
+
+// wsBroadcaster points at the live HTTPServer while remote access is on,
+// nil otherwise. Set by SetHttpEnabled; read from the daemon/hook
+// goroutines, hence the atomic.
+var wsBroadcaster atomic.Pointer[HTTPServer]
+
+// installWSSink forwards every app event to the remote clients while remote
+// access is on. Registered once and never removed: the pointer being nil IS
+// the "remote access is off" state, so the bus needs no unsubscribe.
+func installWSSink() {
+	busSubscribe(func(name string, payload any) {
+		if s := wsBroadcaster.Load(); s != nil {
+			s.Broadcast(name, payload)
+		}
+	})
+}
 
 // The mobile web client (src/mobile/, built by `pnpm build:mobile`) is
 // baked into the binary so the .app bundle can serve it with no extra

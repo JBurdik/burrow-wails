@@ -95,7 +95,8 @@ func (a *App) setHttpEnabled(enabled bool) error {
 	}
 	if enabled {
 		a.httpSrv = NewHTTPServer(a)
-		// Publish it so emitAll fans events out to browser clients too.
+		// Publish it so the WS sink (installWSSink) fans bus events out
+		// to browser clients too.
 		wsBroadcaster.Store(a.httpSrv)
 		srv := a.httpSrv
 		go func() {
@@ -160,6 +161,8 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	installWailsSink(ctx)
+	installWSSink()
 
 	dataDir, err := appDataDir()
 	if err != nil {

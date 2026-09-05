@@ -11,7 +11,7 @@ import (
 // chat_messages holds the *rendered* transcript, written once per turn by the
 // frontend. That is fine while a chat component stays mounted forever, but it
 // is not enough to unmount one: deltas emitted while nothing is listening are
-// gone, because emitAll is fire-and-forget. So every raw agent line also lands
+// gone, because busEmit is fire-and-forget. So every raw agent line also lands
 // here, append-only under a monotonic per-chat `ord`, and can be replayed from
 // any point.
 //
@@ -225,7 +225,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 	if w := a.chatStream(); w != nil {
 		ord = w.append(chatID, kind, line)
 	}
-	emitAll(a.ctx, kind+"-"+chatID, ChatStreamLine{Ord: ord, Kind: kind, Line: line})
+	busEmit(kind+"-"+chatID, ChatStreamLine{Ord: ord, Kind: kind, Line: line})
 
 	// Also publish the provider-neutral reading of the line (providerruntime.go).
 	// Running alongside the raw channel rather than replacing it: the desktop
@@ -233,7 +233,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 	// instead of in one flip. The remote client is the first that wants it — it
 	// has been re-implementing the protocol to a shallower depth.
 	if events := NormalizeChatLine(kind, line); len(events) > 0 {
-		emitAll(a.ctx, "chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: events})
+		busEmit("chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: events})
 	}
 }
 

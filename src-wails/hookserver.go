@@ -66,7 +66,7 @@ func (h *HookServer) handleAgentDone(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&p)
 	if p.Token != "" {
-		emitAll(h.ctx, "control:result", map[string]string{"token": p.Token})
+		busEmit("control:result", map[string]string{"token": p.Token})
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -114,12 +114,12 @@ func (h *HookServer) emitStatus(p hookPayload) {
 	eventName := "pty-hook-" + p.PtyID
 	switch p.State {
 	case "waiting", "permission", "running", "done":
-		emitAll(h.ctx, eventName, p.State)
+		busEmit(eventName, p.State)
 	case "error":
-		emitAll(h.ctx, eventName, map[string]string{"state": "error", "detail": p.Detail})
+		busEmit(eventName, map[string]string{"state": "error", "detail": p.Detail})
 	case "session":
-		emitAll(h.ctx, eventName, map[string]string{"state": "session", "model": p.Model, "source": p.Source, "title": p.Title})
+		busEmit(eventName, map[string]string{"state": "session", "model": p.Model, "source": p.Source, "title": p.Title})
 	default:
-		emitAll(h.ctx, eventName, p.State)
+		busEmit(eventName, p.State)
 	}
 }

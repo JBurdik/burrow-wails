@@ -112,9 +112,8 @@ type uiAck struct {
 // unlike the sidebar's single-slot request ref, where a burst would clobber.
 type uiBridge struct {
 	// emit delivers the action to the frontend. Injected rather than calling
-	// emitAll directly: the Wails runtime needs a live app context, so a verb
-	// invoked before startup finished (or in a test) would otherwise panic
-	// inside the event system instead of failing as a timeout.
+	// busEmit directly so a test can substitute a fake and assert on it
+	// without touching the process-wide bus.
 	emit    func(event string, payload any)
 	mu      sync.Mutex
 	pending map[string]chan uiAck
@@ -123,7 +122,7 @@ type uiBridge struct {
 
 func newUIBridge(app *App) *uiBridge {
 	return &uiBridge{
-		emit:    func(event string, payload any) { emitAll(app.ctx, event, payload) },
+		emit:    func(event string, payload any) { busEmit(event, payload) },
 		pending: map[string]chan uiAck{},
 	}
 }
