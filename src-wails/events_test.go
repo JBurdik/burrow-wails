@@ -13,7 +13,6 @@ import (
 // emitWorkspacesChanged went missing.
 var wailsRuntimeAllowlist = map[string]string{
 	"main.go":             "menu items",
-	"wailssink.go":        "the bus → window sink itself",
 	"updater.go":          "update:progress, desktop-only",
 	"stubs.go":            "float window snapshots, desktop-only",
 	"lsp.go":              "lsp-msg, desktop-only",

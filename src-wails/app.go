@@ -170,7 +170,16 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	installWailsSink(ctx)
+	// No bus -> Wails-runtime sink: nothing in the frontend listens on the
+	// Wails event channel for a bus event any more. Every src/ subscription
+	// that is not one of the desktop-only names (menu-*, lsp-msg-*, float-*,
+	// extension-task:*, update:*, all of which are emitted with
+	// runtime.EventsEmit directly and are on events_test.go's allowlist) goes
+	// through src/lib/wailsCompat/event.ts to the /v2/ws transport, and the
+	// desktop's own connection subscribes to the bus for itself in
+	// remotews.handle. Feeding the webview as well marshalled every bus event
+	// -- including every pty-data-<id> chunk -- across the JS bridge for no
+	// consumer, on top of the copy the socket already delivers.
 	installWSSink()
 
 	dataDir, err := appDataDir()
