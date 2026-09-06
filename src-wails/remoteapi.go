@@ -38,6 +38,12 @@ const (
 	scopeUIAck remoteScope = "ui:ack"
 )
 
+// These scopes are NOT a sandbox. See the LOAD-BEARING NOTE above the
+// filesystem entries in remoteAllowed for what each one already grants (host
+// code execution, unrestricted file read and write, the tokens that authorize
+// every other surface) and for the fact that bus events reach every
+// connection regardless of scope.
+
 // remoteCmd is one exposed App method.
 //
 // Args names the wire keys POSITIONALLY, because parameter names do not exist
@@ -189,25 +195,66 @@ var remoteAllowed = map[string]remoteCmd{
 
 	// FS / misc
 	//
-	// LOAD-BEARING NOTE for whichever phase first hands scopeOrchRead/
-	// scopeOrchOperate to a client that ISN'T the in-process desktop holding
-	// every scope: orchestration:read grants unrestricted host file read
-	// (ReadTextFile/ReadFileBase64 are a bare os.ReadFile(path), fs.go) and
-	// orchestration:operate grants unrestricted host file write (WriteTextFile
-	// is a bare os.WriteFile(path, ...), same file) — no root/workspace check
-	// on either. So these two scopes are NOT a containment boundary; they sit
-	// alongside access:read/access:write in name only. A session holding
-	// orchestration:read can read <app-data>/control.token and
-	// <app-data>/http.token by path, which is full authority over the
-	// loopback control API and the tailnet bearer token respectively. Adding
-	// a path guard belongs in fs.go, with the methods it constrains — not
-	// here, and not as a side effect of this task — because it's a real
-	// behaviour change to calls the desktop legitimately makes on arbitrary
-	// paths (file tree, editor) and getting it wrong breaks both. This is a
-	// hard prerequisite before any phase exposes a scoped-but-not-fully-
-	// trusted session (e.g. a paired phone) to these two scopes over the
-	// network; it is not exploitable today, where the only client is the
-	// desktop itself, already holding every scope.
+	// LOAD-BEARING NOTE for whichever phase first hands any of these scopes to
+	// a client that ISN'T the in-process desktop holding every one of them.
+	//
+	// THE SCOPES ARE NOT A CONTAINMENT BOUNDARY — not the filesystem ones,
+	// not any of them. What a Scope does is record which door a call came
+	// through and force a NEW verb to state whether it joins the network
+	// surface at all. It does not limit what a call may reach once inside.
+	// Concretely, today:
+	//
+	//   * terminal:operate is full host code execution on its own. create_pty
+	//     takes an arbitrary cwd and spawns a shell; write_pty types into it.
+	//     Those two ARE an interactive shell running as the user, with the
+	//     user's environment and credentials — no other restriction in this
+	//     table can mean much next to a session that holds them.
+	//
+	//   * orchestration:operate is that same authority by other means:
+	//     run_git and run_gh take arbitrary argv (a `-c` override alone is an
+	//     exec primitive), install_extension and run_extension_command run
+	//     third-party code, and write_text_file is a bare
+	//     os.WriteFile(path, ...) (fs.go) with no root or workspace check —
+	//     enough to write a hook into ~/.claude/settings.json and have the
+	//     next agent turn execute it.
+	//
+	//   * orchestration:read is unrestricted host file read: ReadTextFile and
+	//     ReadFileBase64 are a bare os.ReadFile(path), same file, no path
+	//     check. It reads <app-data>/control.token (full authority over the
+	//     loopback control API, i.e. every verb) and <app-data>/http.token
+	//     (the long-lived tailnet bearer token). Note what that does to the
+	//     access:* pair further down: get_http_server_status is deliberately
+	//     gated at access:write BECAUSE its reply carries http.token — yet a
+	//     session holding orchestration:read simply reads that same token off
+	//     disk by path. That gate is decorative for as long as this is true.
+	//
+	//   * Events ignore scopes ENTIRELY. busSubscribe in remotews.handle is
+	//     unfiltered: every connection receives every bus event regardless of
+	//     what its ticket granted — chat-event-* transcripts, every
+	//     pty-data-* byte of every terminal in the app, every control:action
+	//     payload (which includes tab_output scrollback). A read scope
+	//     therefore means nothing for anything delivered as an event rather
+	//     than as a reply; the only thing a narrow ticket narrows is CALLS.
+	//
+	// So the honest model is: a ticket carrying terminal:operate or
+	// orchestration:* is a ticket to the whole machine, and a ticket carrying
+	// anything at all is a ticket to the whole event stream.
+	//
+	// A path guard in fs.go is worth having, and fs.go is where it belongs —
+	// with the methods it constrains, not here, and not as a side effect of a
+	// transport task, because it is a real behaviour change to calls the
+	// desktop legitimately makes on arbitrary paths (file tree, editor) and
+	// getting it wrong breaks both. But do not mistake it for the job: it
+	// closes one hole in the third bullet and leaves the other three exactly
+	// as they are. Making these scopes mean anything needs, at minimum,
+	// per-connection event filtering, an admission check on what may be
+	// executed and with what cwd/argv, and a decision about what a paired
+	// device may spawn at all.
+	//
+	// None of this is exploitable today, where the only client is the desktop
+	// itself, already holding every scope. It is a hard prerequisite before
+	// any phase exposes a scoped-but-not-fully-trusted session (e.g. a paired
+	// phone) to anything beyond access:read.
 	"write_text_file":        {Method: "WriteTextFile", Args: []string{"path", "content"}, Scope: scopeOrchOperate},
 	"read_text_file":         {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
 	"read_text_file_checked": {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
