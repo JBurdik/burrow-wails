@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -182,8 +183,19 @@ func TestWSDropsClientWhenOutboundQueueFills(t *testing.T) {
 	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, _, err := conn.ReadMessage(); err == nil {
+	_, _, err := conn.ReadMessage()
+	if err == nil {
 		t.Fatal("server did not drop the connection when its outbound queue filled")
+	}
+	// A plain read timeout is ALSO a non-nil error, and would be
+	// indistinguishable from a genuine close on `err == nil` alone: if the
+	// sink's queue-full branch silently dropped the event instead of
+	// calling shutdown(), the connection would stay open, nothing would
+	// arrive inside the deadline, and this test would pass for the wrong
+	// reason. Require the error to actually be the read deadline expiring
+	// on a still-open connection to be ruled OUT, not merely present.
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatalf("read timed out rather than observing a dropped connection: %v", err)
 	}
 }
 

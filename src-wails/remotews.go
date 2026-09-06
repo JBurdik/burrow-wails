@@ -19,15 +19,24 @@ const (
 	// change in the app, not just this client's view of it.
 	outboundQueue = 256
 
-	// maxInboundFrame bounds a single incoming message. The largest
-	// legitimate frame this endpoint expects is a write_pty payload (a
-	// paste) or a claude_send/acp_send call carrying a chat prompt plus a
-	// handful of inline screenshot images — not a file upload, which has
-	// its own path (save_temp_image, read/write_text_file, none of them
-	// over this socket). 16 MiB covers that comfortably while still
-	// bounding a hostile or buggy client's single frame to a fixed,
-	// deliberate allocation instead of gorilla's unlimited default.
-	maxInboundFrame = 16 << 20
+	// maxInboundFrame caps a single inbound frame. write_pty pastes and
+	// claude_send/acp_send prompts (plus their inline screenshot images)
+	// are orders of magnitude smaller than this; the traffic that
+	// legitimately approaches it is a write_text_file payload — that call
+	// IS reachable over this socket (remoteAllowed maps it to WriteTextFile
+	// under scopeOrchOperate, which remoteapi.go already documents as
+	// unrestricted host file write, so a large legitimate write here is
+	// expected, not exotic). Exceeding this limit closes the ENTIRE
+	// connection rather than failing the one call — that is what
+	// gorilla's SetReadLimit does, there is no per-call rejection — so
+	// every other in-flight PTY and chat on the session goes down with it.
+	// A per-call rejection would need a chunked/streaming inbound path,
+	// which does not exist yet; that is the upgrade path for a later phase.
+	// 64 MiB is a defensible bound in the meantime: generous enough that a
+	// legitimate write_text_file of any file this app plausibly edits
+	// clears it, while still not letting a hostile or buggy client force
+	// an unbounded allocation.
+	maxInboundFrame = 64 << 20
 
 	// pongWait/pingPeriod/writeWait implement the standard gorilla keepalive
 	// pattern. The read deadline is refreshed only by a pong, so a client
