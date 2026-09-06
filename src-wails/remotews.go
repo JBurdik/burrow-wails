@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
@@ -48,6 +49,28 @@ const (
 	pongWait   = 60 * time.Second
 	pingPeriod = pongWait * 9 / 10
 	writeWait  = 10 * time.Second
+
+	// maxInFlightCalls caps how many calls ONE connection may have running at
+	// once.
+	//
+	// Each call frame gets its own goroutine (see handle's read loop). It has
+	// to: serve() used to run inline, so the next ReadMessage waited for
+	// callApp to return, and the desktop uses exactly one connection for the
+	// whole app. One slow command — generate_commit_message shells out to a
+	// provider CLI on a 180 s budget (textgen.go) — meant no other frame was
+	// read for that long: keystrokes to a terminal, create_pty, claude_send,
+	// run_git all queued behind it, and the app looked frozen. Under the
+	// Wails bindings this could not happen (one goroutine per call), so the
+	// switch to this socket is what introduced it.
+	//
+	// The cap is what keeps "a goroutine per frame" from being an unbounded
+	// spawn a client controls. 64 is far above anything the app itself does
+	// concurrently (its widest fan-out is a handful of latest_npm_version
+	// probes from the providers store) and far below a number that costs the
+	// runtime anything. Exceeding it is answered with an error frame and
+	// never by blocking the read loop — blocking it would reintroduce exactly
+	// the head-of-line stall the goroutine exists to remove.
+	maxInFlightCalls = 64
 )
 
 // ticketTTL is short because a ticket is only ever carried from LocalEndpoint()
@@ -117,10 +140,19 @@ func (s *ticketStore) redeem(tok string) ([]remoteScope, bool) {
 type remoteWS struct {
 	app     *App
 	tickets *ticketStore
+
+	// call is the seam the concurrency tests use to stand in a command that
+	// blocks on demand; no real App method does so deterministically.
+	// Production always runs callApp against the *App.
+	call func(c remoteCmd, args map[string]json.RawMessage) (any, error)
 }
 
 func newRemoteWS(app *App, tickets *ticketStore) *remoteWS {
-	return &remoteWS{app: app, tickets: tickets}
+	h := &remoteWS{app: app, tickets: tickets}
+	h.call = func(c remoteCmd, args map[string]json.RawMessage) (any, error) {
+		return callApp(h.app, c, args)
+	}
+	return h
 }
 
 func (h *remoteWS) register(mux *http.ServeMux) {
@@ -234,6 +266,10 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 	})
 	defer unsubscribe()
 
+	// One semaphore per connection, so a client that saturates its own cap
+	// cannot throttle anybody else's.
+	inFlight := make(chan struct{}, maxInFlightCalls)
+
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
@@ -250,17 +286,38 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 			log.Printf("remote ws: %v", err)
 			continue
 		}
-		h.serve(f, granted, out, done)
+		select {
+		case inFlight <- struct{}{}:
+		default:
+			// Refuse rather than wait: the whole point of dispatching each
+			// call on its own goroutine is that this loop keeps reading.
+			// The client gets a real error for this id, so its promise
+			// settles instead of hanging.
+			sendFrame(out, done, errorFrame(f.ID, "too_many_calls", "connection has too many calls in flight"))
+			continue
+		}
+		go func(f clientFrame) {
+			defer func() { <-inFlight }()
+			h.serve(f, granted, out, done)
+		}(f)
 	}
 }
 
-func (h *remoteWS) serve(f clientFrame, granted map[remoteScope]bool, out chan<- serverFrame, done <-chan struct{}) {
-	send := func(fr serverFrame) {
-		select {
-		case out <- fr:
-		case <-done:
-		}
+// sendFrame enqueues one frame for the connection's single writer. It waits
+// for room (the queue drains as fast as the socket writes) but never past the
+// connection's own shutdown, so it cannot outlive the writer it is feeding.
+func sendFrame(out chan<- serverFrame, done <-chan struct{}, fr serverFrame) {
+	select {
+	case out <- fr:
+	case <-done:
 	}
+}
+
+// serve answers one call frame. It runs on its own goroutine, so a slow
+// command delays only its own reply — replies are matched by id on the client
+// and may therefore arrive out of order.
+func (h *remoteWS) serve(f clientFrame, granted map[remoteScope]bool, out chan<- serverFrame, done <-chan struct{}) {
+	send := func(fr serverFrame) { sendFrame(out, done, fr) }
 
 	cmd, ok := remoteAllowed[f.Cmd]
 	if !ok {
@@ -274,7 +331,7 @@ func (h *remoteWS) serve(f clientFrame, granted map[remoteScope]bool, out chan<-
 		return
 	}
 
-	result, err := callApp(h.app, cmd, f.Args)
+	result, err := h.call(cmd, f.Args)
 	if err != nil {
 		send(errorFrame(f.ID, "call_failed", err.Error()))
 		return

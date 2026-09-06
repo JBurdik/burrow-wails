@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -263,5 +264,142 @@ func TestLocalEndpointTicketsAreDistinct(t *testing.T) {
 	app := &App{tickets: newTicketStore(), hookPort: 1}
 	if app.LocalEndpoint().Ticket == app.LocalEndpoint().Ticket {
 		t.Fatal("two calls returned the same single-use ticket")
+	}
+}
+
+// TestLocalEndpointGrantsTheUIAckScope pins the one issuer of scopeUIAck.
+// ack_control_action is behind that scope precisely so a client that is not
+// the in-process UI cannot answer a control verb on the UI's behalf; a ticket
+// issued here that omitted it would break every UI-performed verb (spawn,
+// focus_tab, tab_output) instead of failing visibly.
+func TestLocalEndpointGrantsTheUIAckScope(t *testing.T) {
+	app := &App{tickets: newTicketStore(), hookPort: 1}
+	scopes, ok := app.tickets.redeem(app.LocalEndpoint().Ticket)
+	if !ok {
+		t.Fatal("issued ticket does not redeem")
+	}
+	for _, s := range scopes {
+		if s == scopeUIAck {
+			return
+		}
+	}
+	t.Fatalf("the desktop's own ticket cannot ack a control action: %v", scopes)
+}
+
+// dialSeamWS is dialTestWS with the call seam replaced, so a command can be
+// made to block on demand. No real App method blocks deterministically, and
+// the two tests below are entirely about what happens while one call is slow.
+func dialSeamWS(t *testing.T, call func(remoteCmd, map[string]json.RawMessage) (any, error)) *websocket.Conn {
+	t.Helper()
+	tickets := newTicketStore()
+	h := newRemoteWS(&App{}, tickets)
+	h.call = call
+	mux := http.NewServeMux()
+	h.register(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	tok := tickets.issue([]remoteScope{scopeOrchRead})
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/v2/ws?ticket=" + tok
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	var welcome serverFrame
+	if err := conn.ReadJSON(&welcome); err != nil {
+		t.Fatalf("welcome: %v", err)
+	}
+	return conn
+}
+
+// TestWSASlowCallDoesNotBlockTheNextOne is the head-of-line regression. serve()
+// used to run inside the read loop, so the next ReadMessage waited for the
+// current call to return — and the desktop drives the WHOLE app down one
+// connection, so one generate_commit_message (a 180 s CLI budget) stalled
+// every keystroke, create_pty and claude_send behind it.
+func TestWSASlowCallDoesNotBlockTheNextOne(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	conn := dialSeamWS(t, func(c remoteCmd, _ map[string]json.RawMessage) (any, error) {
+		if c.Method != "EnvironmentID" {
+			return "fast", nil
+		}
+		entered <- struct{}{}
+		<-release
+		return "slow", nil
+	})
+	defer close(release)
+
+	if err := conn.WriteJSON(clientFrame{T: "call", ID: 1, Cmd: "environment_id"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the slow call never started")
+	}
+
+	// Second call, sent while the first is still inside the seam.
+	if err := conn.WriteJSON(clientFrame{T: "call", ID: 2, Cmd: "home_dir"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var f serverFrame
+	if err := conn.ReadJSON(&f); err != nil {
+		t.Fatalf("the second call was head-of-line blocked by the first: %v", err)
+	}
+	if f.ID != 2 || f.Result != "fast" {
+		t.Fatalf("want the fast reply first, got %+v", f)
+	}
+}
+
+// TestWSTooManyInFlightCallsIsAnErrorNotAStall pins the other half of that
+// fix: a goroutine per frame is only safe with a cap, and hitting the cap has
+// to answer the id rather than park the read loop — parking it would be the
+// same stall again, just later.
+func TestWSTooManyInFlightCallsIsAnErrorNotAStall(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, maxInFlightCalls)
+	conn := dialSeamWS(t, func(_ remoteCmd, _ map[string]json.RawMessage) (any, error) {
+		entered <- struct{}{}
+		<-release
+		return nil, nil
+	})
+	defer close(release)
+
+	for i := 1; i <= maxInFlightCalls; i++ {
+		if err := conn.WriteJSON(clientFrame{T: "call", ID: int64(i), Cmd: "environment_id"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Every slot is taken once each seam call has been entered — the
+	// semaphore is acquired in the read loop, before the goroutine starts.
+	for i := 0; i < maxInFlightCalls; i++ {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of %d calls started", i, maxInFlightCalls)
+		}
+	}
+
+	overflow := int64(maxInFlightCalls + 1)
+	if err := conn.WriteJSON(clientFrame{T: "call", ID: overflow, Cmd: "environment_id"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var f serverFrame
+	if err := conn.ReadJSON(&f); err != nil {
+		t.Fatalf("the read loop stalled instead of refusing the call: %v", err)
+	}
+	if f.ID != overflow || f.Error == nil || f.Error.Code != "too_many_calls" {
+		t.Fatalf("want a too_many_calls error for id %d, got %+v", overflow, f)
 	}
 }

@@ -17,6 +17,25 @@ const (
 	scopeTerminal    remoteScope = "terminal:operate"
 	scopeAccessRead  remoteScope = "access:read"
 	scopeAccessWrite remoteScope = "access:write"
+
+	// scopeUIAck exists for exactly one command, ack_control_action, and is
+	// granted only by LocalEndpoint — i.e. only to the in-process desktop.
+	//
+	// It is not a level of authority, it is an identity claim: "I am the UI
+	// the control verb is waiting for". No other scope implies it and it
+	// implies no other. The distinction matters because busSubscribe in the
+	// WS handler is UNFILTERED — every connected client receives every bus
+	// event, so any client sees a control:action frame carrying its id — and
+	// AckControlAction authenticates nothing, it just matches the id against
+	// `pending` and delivers whatever resultJSON it was handed. A client that
+	// could ack would not be exercising authority it already has; it would be
+	// lying to a third party blocked in UIBridge.Do — a fabricated pty_id
+	// from spawn, fabricated tab_output scrollback fed into the Manager
+	// agent's context, or a bare errMsg as denial of service. Filing it under
+	// orchestration:operate would have written that forgery path into the
+	// scope model, to be inherited by the first paired phone that gets the
+	// scope for legitimate reasons.
+	scopeUIAck remoteScope = "ui:ack"
 )
 
 // remoteCmd is one exposed App method.
@@ -341,12 +360,13 @@ var remoteAllowed = map[string]remoteCmd{
 	// which stopped being true when the desktop UI lost its private
 	// in-process door: it now reaches the app over this same socket, and
 	// keeping this one call on a Wails binding would mean keeping a second
-	// transport alive — the drift the /v2/ws flip exists to end. The
-	// forged-ack risk the denial guarded is bounded by the scope: a session
-	// holding orchestration:operate can already open tabs, run shell commands
-	// and write arbitrary files, so answering one control action is not an
-	// escalation.
-	"ack_control_action": {Method: "AckControlAction", Args: []string{"id", "resultJson", "errMsg"}, Scope: scopeOrchOperate},
+	// transport alive — the drift the /v2/ws flip exists to end.
+	//
+	// The denial's real content survives as scopeUIAck (see its comment): the
+	// guarantee wanted here is "only the UI acks", which is an identity, not
+	// a level of authority, so it gets its own scope rather than riding on
+	// orchestration:operate.
+	"ack_control_action": {Method: "AckControlAction", Args: []string{"id", "resultJson", "errMsg"}, Scope: scopeUIAck},
 
 	// Daemon admin (stubbed)
 	"daemon_stats":           {Method: "DaemonStats", Args: nil, Scope: scopeOrchRead},

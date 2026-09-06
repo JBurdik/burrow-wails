@@ -442,8 +442,12 @@ func (a *App) LocalEndpoint() LocalEndpointInfo {
 	if a.tickets == nil {
 		return LocalEndpointInfo{}
 	}
-	// The desktop is the app; it gets every scope.
-	all := []remoteScope{scopeOrchRead, scopeOrchOperate, scopeTerminal, scopeAccessRead, scopeAccessWrite}
+	// The desktop is the app; it gets every scope — including scopeUIAck,
+	// which nothing else may ever hand out. That scope is not authority, it
+	// is the claim "I am the UI a control verb is waiting for" (see its
+	// comment in remoteapi.go); being in-process is the only thing that
+	// substantiates it, and this is the only issuer that knows it.
+	all := []remoteScope{scopeOrchRead, scopeOrchOperate, scopeTerminal, scopeAccessRead, scopeAccessWrite, scopeUIAck}
 	return LocalEndpointInfo{
 		WSURL:         fmt.Sprintf("ws://127.0.0.1:%d/v2/ws", a.hookPort),
 		Ticket:        a.tickets.issue(all),

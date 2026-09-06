@@ -49,7 +49,10 @@ func TestControlAPIFailsClosedWithoutToken(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/list_workspaces", nil)
 	req.Header.Set("Authorization", "Bearer ")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("got %d, want 401", resp.StatusCode)
