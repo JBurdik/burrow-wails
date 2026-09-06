@@ -158,4 +158,39 @@ describe("createTransport", () => {
     await tick();
     expect(getEndpoint.mock.calls.length).toBeGreaterThan(1);
   });
+
+  it("drops a queued frame instead of resending it after its call was already rejected", async () => {
+    const { t } = setup();
+    await tick();
+    const first = FakeWS.instances[0];
+    // Socket is still CONNECTING (readyState 0), so invoke() queues into
+    // outbox rather than sending immediately.
+    const p = t.invoke("orphan-queued");
+    await tick();
+    expect(first.sent).toHaveLength(0);
+
+    // Closing before the socket ever opened rejects the call via failPending
+    // — this is the path that used to leave the frame sitting in outbox.
+    first.close();
+    await expect(p).rejects.toThrow(/disconnected/i);
+
+    // Let the backoff-scheduled reconnect open a fresh socket and flush.
+    await tick();
+    await tick();
+    const second = FakeWS.instances[FakeWS.instances.length - 1];
+    second.open();
+    await tick();
+
+    const sentCmds = [...first.sent, ...second.sent].map((s) => JSON.parse(s).cmd);
+    expect(sentCmds).not.toContain("orphan-queued");
+  });
+
+  it("rejects invoke() called after close() instead of leaving it pending", async () => {
+    const { t } = setup();
+    await tick();
+    FakeWS.instances[0].open();
+
+    t.close();
+    await expect(t.invoke("late")).rejects.toThrow(/closed/i);
+  });
 });

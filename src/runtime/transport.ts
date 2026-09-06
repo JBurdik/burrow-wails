@@ -55,6 +55,11 @@ export function createTransport(
   function failPending(reason: string) {
     for (const p of pending.values()) p.reject(new Error(reason));
     pending.clear();
+    // Every queued frame belongs to one of the ids just rejected above — if it
+    // stayed queued, the next successful reconnect's flush() would send it
+    // verbatim for a call the caller was already told failed, and the
+    // eventual reply would have nowhere to go (its id is no longer pending).
+    outbox = [];
   }
 
   async function connect() {
@@ -122,6 +127,7 @@ export function createTransport(
 
   return {
     invoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+      if (closed) return Promise.reject(new Error("transport closed"));
       const id = nextId++;
       const frame = JSON.stringify({ t: "call", id, cmd, args });
       return new Promise<T>((resolve, reject) => {
