@@ -1,5 +1,13 @@
 /**
- * Every `invoke("...")` in the app must name a command the backend knows.
+ * Every `invoke("...")` in the app must name a command the backend knows —
+ * and pass it argument names the backend reads.
+ *
+ * The second half matters more than the first. A wrong command name is loud:
+ * a rejected promise the moment that code runs. A wrong ARGUMENT name is
+ * silent — `callApp` fills only the parameters `remoteAllowed` names, so an
+ * unrecognised key is dropped and the Go method runs on the zero value:
+ * `list_terminal_tabs` for workspace 0, `write_text_file` with empty content.
+ * Nothing throws, and the call looks like it worked.
  *
  * `TestRemoteSurfaceIsExhaustive` (src-wails/remoteapi_test.go) already runs
  * the other way — from Go's `App` methods to the table — so no method sneaks
@@ -94,24 +102,22 @@ function skipTypeArgs(src: string, start: number): number {
   return start;
 }
 
-/** The text of the call's first argument: from just after `(` to the first
- *  top-level comma or the closing paren. */
-function firstArgument(src: string, start: number): string {
-  let depth = 0;
-  for (let i = start; i < src.length; i++) {
-    const ch = src[i];
-    if (ch === '"' || ch === "'" || ch === "`") {
-      i = endOfStringLiteral(src, i);
+/** Whitespace and comments. Comments have to be stepped over now that the
+ *  scan reads argument OBJECTS: call sites annotate keys inline. */
+function skipTrivia(src: string, i: number): number {
+  for (;;) {
+    while (i < src.length && /\s/.test(src[i])) i++;
+    if (src[i] === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
       continue;
     }
-    if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === "]" || ch === "}") depth--;
-    else if (ch === ")") {
-      if (depth === 0) return src.slice(start, i);
-      depth--;
-    } else if (ch === "," && depth === 0) return src.slice(start, i);
+    if (src[i] === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      i = end === -1 ? src.length : end + 2;
+      continue;
+    }
+    return i;
   }
-  return src.slice(start);
 }
 
 function endOfStringLiteral(src: string, start: number): number {
@@ -121,6 +127,136 @@ function endOfStringLiteral(src: string, start: number): number {
     else if (src[i] === quote) return i;
   }
   return src.length;
+}
+
+/** The backtick closing the template literal at `start`, stepping over
+ *  `${…}` interpolations — whose braces must not be counted as object
+ *  braces by the callers below. */
+function endOfTemplate(src: string, start: number): number {
+  for (let i = start + 1; i < src.length; i++) {
+    if (src[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (src[i] === "`") return i;
+    if (src[i] === "$" && src[i + 1] === "{") {
+      let depth = 1;
+      i += 2;
+      while (i < src.length && depth > 0) {
+        const ch = src[i];
+        if (ch === "{") depth++;
+        else if (ch === "}") depth--;
+        else if (ch === '"' || ch === "'") i = endOfStringLiteral(src, i);
+        else if (ch === "`") i = endOfTemplate(src, i);
+        i++;
+      }
+      i--;
+    }
+  }
+  return src.length;
+}
+
+/** The texts of a call's top-level arguments; `open` is its `(`. */
+function callArguments(src: string, open: number): string[] {
+  const args: string[] = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let i = open + 1; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "/" && (src[i + 1] === "/" || src[i + 1] === "*")) {
+      i = skipTrivia(src, i) - 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i = endOfStringLiteral(src, i);
+      continue;
+    }
+    if (ch === "`") {
+      i = endOfTemplate(src, i);
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === "]" || ch === "}") depth--;
+    else if (ch === ")") {
+      if (depth === 0) {
+        args.push(src.slice(start, i));
+        return args;
+      }
+      depth--;
+    } else if (ch === "," && depth === 0) {
+      args.push(src.slice(start, i));
+      start = i + 1;
+    }
+  }
+  args.push(src.slice(start));
+  return args;
+}
+
+/** One object entry ends at the next top-level `,` or at the closing `}`. */
+function endOfEntry(text: string, i: number): number {
+  let depth = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) {
+      i = skipTrivia(text, i);
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i = endOfStringLiteral(text, i) + 1;
+      continue;
+    }
+    if (ch === "`") {
+      i = endOfTemplate(text, i) + 1;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]") depth--;
+    else if (ch === "}") {
+      if (depth === 0) return i;
+      depth--;
+    } else if (ch === "," && depth === 0) return i;
+    i++;
+  }
+  return i;
+}
+
+/**
+ * The top-level keys of an object literal, or null when the argument is not
+ * an object literal at all (a variable, a conditional, an omitted second
+ * argument) — nothing to compare, so nothing is claimed.
+ *
+ * A `...spread` and a computed `[key]` contribute no name: they are skipped
+ * rather than making the whole call site unreadable, so the literal keys
+ * beside them are still checked.
+ */
+function objectLiteralKeys(text: string): string[] | null {
+  let i = skipTrivia(text, 0);
+  if (text[i] !== "{") return null;
+  i++;
+  const keys: string[] = [];
+  for (;;) {
+    i = skipTrivia(text, i);
+    const ch = text[i];
+    if (ch === undefined || ch === "}") return keys;
+    if (ch === ",") {
+      i++;
+      continue;
+    }
+    if (text.startsWith("...", i) || ch === "[") {
+      i = endOfEntry(text, i);
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      const end = endOfStringLiteral(text, i);
+      keys.push(text.slice(i + 1, end));
+      i = endOfEntry(text, end + 1);
+      continue;
+    }
+    const ident = /^[A-Za-z_$][\w$]*/.exec(text.slice(i));
+    if (!ident) return keys;
+    keys.push(ident[0]);
+    i = endOfEntry(text, i + ident[0].length);
+  }
 }
 
 // Every key in `remoteAllowed` has this shape, and the "parsed the Go
@@ -149,6 +285,9 @@ function stringLiterals(text: string): string[] {
 interface CallSite {
   file: string;
   name: string;
+  /** Top-level keys of the args object literal, or null when the call passes
+   *  something this scan cannot read (or no second argument at all). */
+  argKeys: string[] | null;
 }
 
 function invokeCallSites(file: string, src: string): CallSite[] {
@@ -159,27 +298,60 @@ function invokeCallSites(file: string, src: string): CallSite[] {
     let i = skipSpace(src, m.index + "invoke".length);
     i = skipSpace(src, skipTypeArgs(src, i));
     if (src[i] !== "(") continue;
-    for (const name of stringLiterals(firstArgument(src, i + 1))) {
-      sites.push({ file, name });
+    const args = callArguments(src, i);
+    const argKeys = args.length > 1 ? objectLiteralKeys(args[1]) : null;
+    for (const name of stringLiterals(args[0] ?? "")) {
+      sites.push({ file, name, argKeys });
     }
   }
   return sites;
 }
 
-/** The keys of Go's `remoteAllowed`. Entries look like
- *  `"create_pty": {Method: "CreatePty", ...}`; `remoteDenied`'s entries are
- *  `"CreatePty": "reason"` and never match. */
-function remoteAllowedNames(): Set<string> {
+/** Go's `remoteAllowed`, as wire name -> the argument names it declares.
+ *  Entries look like
+ *  `"create_pty": {Method: "CreatePty", Args: []string{"id", …}, …}`;
+ *  `remoteDenied`'s entries are `"CreatePty": "reason"` and never match.
+ *  `[\s\S]*?` because a long Args list (claude_start) wraps across lines. */
+function remoteAllowedTable(): Map<string, string[]> {
   const src = readFileSync(REMOTE_API, "utf8");
-  const names = new Set<string>();
-  const re = /^\s*"([a-z0-9_]+)":\s*\{Method:/gm;
+  const table = new Map<string, string[]>();
+  const re = /"([a-z0-9_]+)":\s*\{Method:\s*"\w+",\s*Args:\s*(?:nil|\[\]string\{([\s\S]*?)\})/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(src))) names.add(m[1]);
-  return names;
+  while ((m = re.exec(src))) {
+    // Not stringLiterals(): argument names are camelCase (`chatId`,
+    // `resumeSessionId`), which WIRE_NAME deliberately rejects.
+    table.set(m[1], m[2] ? [...m[2].matchAll(/"([A-Za-z0-9_]+)"/g)].map((a) => a[1]) : []);
+  }
+  return table;
 }
 
+/**
+ * Argument names the check must not report. A key is either a whole command
+ * (its call sites are reshaped before dispatch, so comparing them means
+ * nothing) or one `command.argument` pair. Keep the reason with the entry.
+ */
+const ARGUMENT_SHAPE_EXCEPTIONS: Record<string, string> = {
+  // Reshaped in core.ts before dispatch: call sites pass the AcpStartOpts
+  // fields flat, and core.ts packs them into the single `opts` key the table
+  // names (one Go struct parameter cannot be spread across table entries).
+  acp_start: "core.ts packs the flat call-site fields into `opts`",
+  // Also reshaped in core.ts, which supplies the `foldedOrd` sentinel the
+  // call sites may omit.
+  save_chat_messages: "core.ts fills in foldedOrd",
+  // BUG, not a convention: src/lib/lsp.ts sends `name`/`rootPath` where the
+  // table names `command`/`cwd`, so LspStart receives two empty strings —
+  // it has presumably never started a server this way. Left listed rather
+  // than fixed here because fixing it is a behaviour change to the LSP
+  // path, out of scope for the transport work that added this check.
+  lsp_start: "KNOWN BUG: sends name/rootPath, table names command/cwd",
+  // Harmless leftover, and the one case where dropping the value is right:
+  // CreateWorktree (git.go) looks the parent workspace up from repoPath
+  // itself, so it has no parent-id parameter for this to land in.
+  "create_worktree.parentId": "CreateWorktree derives the parent from repoPath",
+};
+
 describe("invoke() command surface", () => {
-  const allowed = remoteAllowedNames();
+  const allowed = remoteAllowedTable();
   const sites = walk(SRC).flatMap((f) => invokeCallSites(f.slice(ROOT.length + 1), readFileSync(f, "utf8")));
 
   it("parsed the Go command table", () => {
@@ -188,6 +360,21 @@ describe("invoke() command surface", () => {
     expect(allowed.size).toBeGreaterThan(50);
     expect(allowed.has("create_pty")).toBe(true);
     expect(allowed.has("list_workspaces")).toBe(true);
+    // Same for the ARGUMENT names: an Args list that stopped parsing would
+    // read as "this command takes nothing", and the argument check below
+    // would report every call site instead of passing vacuously — but a
+    // command with a genuinely empty list must still read as empty.
+    expect(allowed.get("create_pty")).toEqual(["id", "cwd", "cols", "rows"]);
+    expect(allowed.get("list_workspaces")).toEqual([]);
+    // The one entry whose Args list wraps across several lines.
+    expect(allowed.get("claude_start")).toContain("appendSystemPrompt");
+  });
+
+  it("read the argument objects at the call sites", () => {
+    // Same guard from the other side: if the object scan broke, every site
+    // would read as "no args object" and the check below would pass while
+    // seeing nothing.
+    expect(sites.filter((s) => s.argKeys !== null).length).toBeGreaterThan(100);
   });
 
   it("found the call sites", () => {
@@ -206,6 +393,37 @@ describe("invoke() command surface", () => {
       .filter((s) => !(s.name in KNOWN_UNIMPLEMENTED))
       .map((s) => `${s.file}: invoke("${s.name}") — add it to remoteAllowed in src-wails/remoteapi.go`);
     expect([...new Set(missing)]).toEqual([]);
+  });
+
+  /**
+   * A wrong command NAME is loud — a rejected promise the moment that corner
+   * of the UI runs. A wrong ARGUMENT name is silent: callApp only fills the
+   * parameters the table names, so an unrecognised key is dropped and the Go
+   * method gets the zero value. `list_terminal_tabs` for workspace 0,
+   * `write_text_file` with empty content, `create_pty` in the wrong cwd —
+   * all of them "work", and none of them do what the call site asked.
+   *
+   * Only keys present at the call site and absent from the table are
+   * reported. An OMITTED argument is legitimate and common (core.ts's
+   * `args.cwd ?? ""` behaviour is preserved by design: absent means the zero
+   * value), so a missing key is not an error here.
+   */
+  it("passes only argument names the backend reads", () => {
+    const wrong = sites
+      .filter((s) => s.argKeys !== null && !(s.name in ARGUMENT_SHAPE_EXCEPTIONS))
+      .flatMap((s) => {
+        const declared = allowed.get(s.name);
+        if (!declared) return []; // an unknown command; reported above
+        return s.argKeys!
+          .filter((key) => !declared.includes(key))
+          .filter((key) => !(`${s.name}.${key}` in ARGUMENT_SHAPE_EXCEPTIONS))
+          .map(
+            (key) =>
+              `${s.file}: ${s.name} is passed "${key}", which remoteapi.go does not name ` +
+              `(it names: ${declared.join(", ") || "no arguments"}) — the value is silently dropped`,
+          );
+      });
+    expect([...new Set(wrong)]).toEqual([]);
   });
 
   it("keeps the client-side exceptions off the wire", () => {
