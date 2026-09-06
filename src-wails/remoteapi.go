@@ -147,14 +147,17 @@ var remoteAllowed = map[string]remoteCmd{
 	// Git / gh / text generation. RunGit/RunGh are generic passthroughs (they
 	// can run a write command like `commit` or `push`), so they get the
 	// mutating scope even though most calls in practice are reads. The
-	// generate_* calls only ever produce a string — no mutation — so they
-	// stay read scope despite living next to git.
+	// generate_* calls don't mutate anything themselves, but each one shells
+	// out to a configured provider CLI with client-supplied prompt text and a
+	// 180s budget (textgen.go) — spawning a host process and billing
+	// inference is not what a read scope should authorize, so these are
+	// operate scope despite returning only a string.
 	"run_git":                 {Method: "RunGit", Args: []string{"cwd", "args"}, Scope: scopeOrchOperate},
 	"run_gh":                  {Method: "RunGh", Args: []string{"cwd", "args"}, Scope: scopeOrchOperate},
-	"generate_commit_message": {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy"}, Scope: scopeOrchRead},
-	"generate_chat_title":     {Method: "GenerateChatTitle", Args: []string{"cwd", "model", "policy", "text"}, Scope: scopeOrchRead},
-	"generate_branch_name":    {Method: "GenerateBranchName", Args: []string{"cwd", "model", "policy", "message"}, Scope: scopeOrchRead},
-	"generate_pr_content":     {Method: "GeneratePrContent", Args: []string{"cwd", "model", "policy", "baseBranch", "headBranch"}, Scope: scopeOrchRead},
+	"generate_commit_message": {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy"}, Scope: scopeOrchOperate},
+	"generate_chat_title":     {Method: "GenerateChatTitle", Args: []string{"cwd", "model", "policy", "text"}, Scope: scopeOrchOperate},
+	"generate_branch_name":    {Method: "GenerateBranchName", Args: []string{"cwd", "model", "policy", "message"}, Scope: scopeOrchOperate},
+	"generate_pr_content":     {Method: "GeneratePrContent", Args: []string{"cwd", "model", "policy", "baseBranch", "headBranch"}, Scope: scopeOrchOperate},
 
 	// Checkpoints — pre-turn worktree snapshots (checkpoints.go)
 	"create_checkpoint":  {Method: "CreateCheckpoint", Args: []string{"cwd", "ptyId", "label"}, Scope: scopeOrchOperate},
@@ -166,6 +169,26 @@ var remoteAllowed = map[string]remoteCmd{
 	"search_files": {Method: "SearchFiles", Args: []string{"cwd", "query", "limit"}, Scope: scopeOrchRead},
 
 	// FS / misc
+	//
+	// LOAD-BEARING NOTE for whichever phase first hands scopeOrchRead/
+	// scopeOrchOperate to a client that ISN'T the in-process desktop holding
+	// every scope: orchestration:read grants unrestricted host file read
+	// (ReadTextFile/ReadFileBase64 are a bare os.ReadFile(path), fs.go) and
+	// orchestration:operate grants unrestricted host file write (WriteTextFile
+	// is a bare os.WriteFile(path, ...), same file) — no root/workspace check
+	// on either. So these two scopes are NOT a containment boundary; they sit
+	// alongside access:read/access:write in name only. A session holding
+	// orchestration:read can read <app-data>/control.token and
+	// <app-data>/http.token by path, which is full authority over the
+	// loopback control API and the tailnet bearer token respectively. Adding
+	// a path guard belongs in fs.go, with the methods it constrains — not
+	// here, and not as a side effect of this task — because it's a real
+	// behaviour change to calls the desktop legitimately makes on arbitrary
+	// paths (file tree, editor) and getting it wrong breaks both. This is a
+	// hard prerequisite before any phase exposes a scoped-but-not-fully-
+	// trusted session (e.g. a paired phone) to these two scopes over the
+	// network; it is not exploitable today, where the only client is the
+	// desktop itself, already holding every scope.
 	"write_text_file":        {Method: "WriteTextFile", Args: []string{"path", "content"}, Scope: scopeOrchOperate},
 	"read_text_file":         {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
 	"read_text_file_checked": {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
@@ -209,6 +232,15 @@ var remoteAllowed = map[string]remoteCmd{
 	// param), so the wire carries the whole options object under a single
 	// key. This is the one call in this table I could not port as a literal
 	// 1:1 transcription of core.ts's argument list.
+	//
+	// NOTE for Task 3's client: callApp's number->string coercion only looks
+	// at TOP-LEVEL args named in Args — here that's "opts" itself, not the
+	// fields nested inside it. AcpStartOpts.ID is a string, and core.ts:160
+	// does String(args.id) before nesting it into the object it passes to
+	// App.AcpStart. A caller that sends {"opts":{"id":3,...}} (a bare numeric
+	// id, unstringified) will fail to unmarshal, because the coercion never
+	// reaches inside the object. Whoever builds the opts payload must
+	// stringify id itself, same as core.ts already does.
 	"acp_start":         {Method: "AcpStart", Args: []string{"opts"}, Scope: scopeOrchOperate},
 	"codex_start":       {Method: "CodexStart", Args: []string{"id", "cwd", "env", "resumeSessionId"}, Scope: scopeOrchOperate},
 	"acp_send":          {Method: "AcpSend", Args: []string{"id", "text", "images"}, Scope: scopeOrchOperate},
@@ -218,15 +250,22 @@ var remoteAllowed = map[string]remoteCmd{
 	"acp_list_sessions": {Method: "AcpListSessions", Args: []string{"id", "cwd"}, Scope: scopeOrchOperate},
 	"acp_stop":          {Method: "AcpStop", Args: []string{"id"}, Scope: scopeOrchOperate},
 	"codex_stop":        {Method: "CodexStop", Args: []string{"id"}, Scope: scopeOrchOperate},
-	"codex_list_models": {Method: "CodexListModels", Args: []string{"cwd"}, Scope: scopeOrchRead},
+	// CodexListModels spawns `codex app-server` to probe the model catalog
+	// (acp.go) — a host process spawn, so operate scope, not read, matching
+	// the generate_* calls above for the same reason.
+	"codex_list_models": {Method: "CodexListModels", Args: []string{"cwd"}, Scope: scopeOrchOperate},
 
 	// LSP
 	"lsp_start": {Method: "LspStart", Args: []string{"id", "command", "args", "cwd"}, Scope: scopeOrchOperate},
 	"lsp_send":  {Method: "LspSend", Args: []string{"id", "message"}, Scope: scopeOrchOperate},
 	"lsp_stop":  {Method: "LspStop", Args: []string{"id"}, Scope: scopeOrchOperate},
 
-	// Providers
-	"probe_provider":     {Method: "ProbeProvider", Args: []string{"binary", "cwd"}, Scope: scopeOrchRead},
+	// Providers. ProbeProvider passes its client-supplied `binary` straight to
+	// resolveAgentBin (claudechat.go), which returns any existing absolute
+	// path unchanged, then runs it (`exec.CommandContext(ctx, path,
+	// "--version")`, providers.go) — arbitrary host process execution, so
+	// operate scope, not read.
+	"probe_provider":     {Method: "ProbeProvider", Args: []string{"binary", "cwd"}, Scope: scopeOrchOperate},
 	"latest_npm_version": {Method: "LatestNpmVersion", Args: []string{"pkg"}, Scope: scopeOrchRead},
 
 	// Skills / MCP servers
@@ -313,7 +352,15 @@ var remoteAllowed = map[string]remoteCmd{
 	// tailscale.go) — exposed too, at the same write scope, since a client
 	// asking to serve one specific port is a legitimate (if lower-level) use
 	// that SetTailscaleServe's combined toggle+status-refresh doesn't cover.
-	"get_http_server_status": {Method: "GetHttpServerStatus", Args: nil, Scope: scopeAccessRead},
+	//
+	// get_http_server_status is access:write, not access:read, even though it
+	// only returns a status struct: HttpServerStatus carries Token (the
+	// long-lived http.token that authenticates every remote connection and
+	// survives restarts) and PairCode (app.go) — reading it is equivalent to
+	// authenticating as a fully-privileged remote client, or to pairing
+	// another device. A read-scoped session must not be able to escalate to
+	// that just by asking for "status".
+	"get_http_server_status": {Method: "GetHttpServerStatus", Args: nil, Scope: scopeAccessWrite},
 	"regenerate_pair_code":   {Method: "RegeneratePairCode", Args: nil, Scope: scopeAccessWrite},
 	"get_tailscale_status":   {Method: "GetTailscaleStatus", Args: nil, Scope: scopeAccessRead},
 	"set_tailscale_serve":    {Method: "SetTailscaleServe", Args: []string{"enabled", "port"}, Scope: scopeAccessWrite},

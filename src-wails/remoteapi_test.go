@@ -113,6 +113,18 @@ func TestCallAppKeepsARealString(t *testing.T) {
 	}
 }
 
+func TestCallAppKeepsAQuotedNumericString(t *testing.T) {
+	// The coercion guard exists to leave an already-quoted numeric string
+	// alone (only a bare JSON number gets coerced) — assert the "7" case
+	// TestCallAppKeepsARealString's "abc" doesn't exercise.
+	f := &fakeRecv{}
+	got, err := callApp(f, remoteCmd{Method: "TakeString", Args: []string{"id"}},
+		map[string]json.RawMessage{"id": raw(t, "7")})
+	if err != nil || got != "7" || f.gotString != "7" {
+		t.Fatalf(`want "7", got %q, %v (method saw %q)`, got, err, f.gotString)
+	}
+}
+
 func TestCallAppMissingArgIsZeroValue(t *testing.T) {
 	// core.ts passed `args.cwd ?? ""` — an absent optional arg is the zero
 	// value, not an error.
