@@ -5,8 +5,10 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -199,14 +201,17 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 	// that read, so a full outbound queue really drops the connection
 	// rather than just going quiet on writes.
 	//
-	// Deferred immediately: if an exposed App method panics inside callApp
-	// (serve, below), the stack unwinds through serve and handle without
-	// ever reaching the explicit shutdown() calls further down this
-	// function, and net/http's per-request recover would otherwise leave
-	// done unclosed forever — the writer goroutine would sit blocked on its
-	// select for the lifetime of the process, one leaked goroutine per
-	// panicking call. Several exposed methods are documented (remoteapi.go)
-	// to dereference a.daemon with no nil guard, so this is not academic.
+	// Deferred immediately, before anything below can fail: every later
+	// return from handle — a client disconnect, a read deadline expiring on
+	// a vanished peer, a failed upgrade of the bus subscription, a panic in
+	// this handler goroutine itself — has to close `done`, or the writer
+	// goroutine sits blocked on its select for the lifetime of the process
+	// and the connection leaks with it. Registering it here rather than at
+	// each exit means no future early return can forget.
+	//
+	// (A panic inside a *call* no longer reaches these frames: each call
+	// runs on its own goroutine, which recovers for itself — see the read
+	// loop below.)
 	shutdown := func() {
 		closeOnce.Do(func() {
 			close(done)
@@ -297,7 +302,35 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		go func(f clientFrame) {
+			// Defers are LIFO, so the slot is released after the recover
+			// below has run — a panicking call must not leak its slot.
 			defer func() { <-inFlight }()
+			// A goroutine with no frame above it takes the whole process
+			// down when it panics, and an exposed App method panicking is a
+			// documented, expected event, not a theoretical one: several
+			// dereference a.daemon with no nil guard (remoteapi.go), so a
+			// list_pty_sessions on a startup race is enough. Before this
+			// dispatch was a goroutine, serve() ran inline and net/http's
+			// per-connection recover caught it — one socket dropped, the
+			// client reconnected, the app lived. Before the /v2/ws flip,
+			// Wails' own dispatcher caught it and returned a call error.
+			// This restores that: one connection dies, the process does not.
+			//
+			// The error frame is best effort — shutdown() closes `done` and
+			// the socket right behind it, so the writer may never flush it.
+			// It is enqueued anyway because it costs nothing and, when it
+			// does land, names the command that failed; the client settles
+			// this call either way, since a close rejects everything still
+			// pending on it.
+			defer func() {
+				e := recover()
+				if e == nil {
+					return
+				}
+				log.Printf("remote ws: %s panicked: %v\n%s", f.Cmd, e, debug.Stack())
+				sendFrame(out, done, errorFrame(f.ID, "call_failed", fmt.Sprint(e)))
+				shutdown()
+			}()
 			h.serve(f, granted, out, done)
 		}(f)
 	}
@@ -313,9 +346,11 @@ func sendFrame(out chan<- serverFrame, done <-chan struct{}, fr serverFrame) {
 	}
 }
 
-// serve answers one call frame. It runs on its own goroutine, so a slow
-// command delays only its own reply — replies are matched by id on the client
-// and may therefore arrive out of order.
+// serve answers one call frame. It runs on its own goroutine, so calls on a
+// connection are not serialized: a slow command delays only itself, and two
+// calls submitted in order may execute — and reply — in either. That is what
+// the client already assumes (transport.ts matches replies by id) and what
+// the Wails bindings did before this socket existed, one goroutine per call.
 func (h *remoteWS) serve(f clientFrame, granted map[remoteScope]bool, out chan<- serverFrame, done <-chan struct{}) {
 	send := func(fr serverFrame) { sendFrame(out, done, fr) }
 

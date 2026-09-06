@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -286,10 +287,13 @@ func TestLocalEndpointGrantsTheUIAckScope(t *testing.T) {
 	t.Fatalf("the desktop's own ticket cannot ack a control action: %v", scopes)
 }
 
-// dialSeamWS is dialTestWS with the call seam replaced, so a command can be
-// made to block on demand. No real App method blocks deterministically, and
-// the two tests below are entirely about what happens while one call is slow.
-func dialSeamWS(t *testing.T, call func(remoteCmd, map[string]json.RawMessage) (any, error)) *websocket.Conn {
+// seamWS starts a handler whose call seam is replaced, so a command can be
+// made to block or panic on demand. No real App method does either
+// deterministically, and the tests below are entirely about what happens
+// while one call is slow or blows up. The returned dial opens a fresh
+// connection to the same handler, which is how the panic test shows the
+// process (and the handler) outlived the panicking call.
+func seamWS(t *testing.T, call func(remoteCmd, map[string]json.RawMessage) (any, error)) func() *websocket.Conn {
 	t.Helper()
 	tickets := newTicketStore()
 	h := newRemoteWS(&App{}, tickets)
@@ -299,19 +303,27 @@ func dialSeamWS(t *testing.T, call func(remoteCmd, map[string]json.RawMessage) (
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	tok := tickets.issue([]remoteScope{scopeOrchRead})
-	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/v2/ws?ticket=" + tok
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
+	return func() *websocket.Conn {
+		t.Helper()
+		tok := tickets.issue([]remoteScope{scopeOrchRead})
+		url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/v2/ws?ticket=" + tok
+		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		t.Cleanup(func() { conn.Close() })
 
-	var welcome serverFrame
-	if err := conn.ReadJSON(&welcome); err != nil {
-		t.Fatalf("welcome: %v", err)
+		var welcome serverFrame
+		if err := conn.ReadJSON(&welcome); err != nil {
+			t.Fatalf("welcome: %v", err)
+		}
+		return conn
 	}
-	return conn
+}
+
+func dialSeamWS(t *testing.T, call func(remoteCmd, map[string]json.RawMessage) (any, error)) *websocket.Conn {
+	t.Helper()
+	return seamWS(t, call)()
 }
 
 // TestWSASlowCallDoesNotBlockTheNextOne is the head-of-line regression. serve()
@@ -380,8 +392,13 @@ func TestWSTooManyInFlightCallsIsAnErrorNotAStall(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Every slot is taken once each seam call has been entered — the
-	// semaphore is acquired in the read loop, before the goroutine starts.
+	// Wait until all 64 are actually inside the seam, so the cap is known to
+	// be full before the overflow frame is sent. (This does not, and cannot,
+	// distinguish acquiring the slot in the read loop from acquiring it
+	// inside the goroutine — both reach the cap here. The read-loop
+	// acquisition matters because it is what bounds the number of goroutines
+	// spawned, not the number running, and that is an argument about the
+	// code, not something this test observes.)
 	for i := 0; i < maxInFlightCalls; i++ {
 		select {
 		case <-entered:
@@ -402,4 +419,63 @@ func TestWSTooManyInFlightCallsIsAnErrorNotAStall(t *testing.T) {
 	if f.ID != overflow || f.Error == nil || f.Error.Code != "too_many_calls" {
 		t.Fatalf("want a too_many_calls error for id %d, got %+v", overflow, f)
 	}
+}
+
+// TestWSAPanickingCallDropsTheConnectionNotTheProcess is the regression for
+// dispatching calls on a bare goroutine. An exposed App method panicking is
+// expected, not theoretical — several dereference a.daemon with no nil guard
+// (remoteapi.go) — and a panic on a goroutine with no frame above it aborts
+// the whole process, taking every terminal, chat and the window with it.
+//
+// The strong assertion is the second connection: reaching it at all means the
+// test binary did not die, and getting a reply on it means the handler is
+// still serving.
+func TestWSAPanickingCallDropsTheConnectionNotTheProcess(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+
+	dial := seamWS(t, func(c remoteCmd, _ map[string]json.RawMessage) (any, error) {
+		if c.Method == "EnvironmentID" {
+			panic("exposed method dereferenced a nil daemon")
+		}
+		return "fine", nil
+	})
+
+	doomed := dial()
+	if err := doomed.WriteJSON(clientFrame{T: "call", ID: 1, Cmd: "environment_id"}); err != nil {
+		t.Fatal(err)
+	}
+	// Either outcome is correct and which one lands is a race the recover
+	// cannot win cleanly: it enqueues the error frame and then shuts the
+	// connection down, so the writer may or may not flush before the socket
+	// closes. What must NOT happen is a hang — or a dead process.
+	_ = doomed.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var f serverFrame
+	switch err := doomed.ReadJSON(&f); {
+	case err == nil:
+		if f.ID != 1 || f.Error == nil || f.Error.Code != "call_failed" {
+			t.Fatalf("want a call_failed reply for the panicking call, got %+v", f)
+		}
+	case isTimeout(err):
+		t.Fatalf("the panicking call neither answered nor dropped the connection: %v", err)
+	}
+
+	// The process survived the panic; so should the handler.
+	fresh := dial()
+	if err := fresh.WriteJSON(clientFrame{T: "call", ID: 1, Cmd: "home_dir"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = fresh.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var ok serverFrame
+	if err := fresh.ReadJSON(&ok); err != nil {
+		t.Fatalf("the handler stopped serving after a panicking call: %v", err)
+	}
+	if ok.Error != nil || ok.Result != "fine" {
+		t.Fatalf("a fresh connection could not make a call: %+v", ok)
+	}
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
