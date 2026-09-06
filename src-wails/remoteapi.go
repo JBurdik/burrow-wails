@@ -153,6 +153,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// because it is safe on a bare &App{} — most commands are not.
 	"environment_id":   {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
 	"remote_endpoints": {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
+	"shell_snapshot":   {Method: "ShellSnapshot", Args: nil, Scope: scopeOrchRead},
 
 	// Workspaces / tabs
 	"list_workspaces":     {Method: "ListWorkspaces", Args: nil, Scope: scopeOrchRead},
