@@ -50,6 +50,12 @@ func decodeClientFrame(b []byte) (clientFrame, error) {
 	if f.T != "call" {
 		return f, fmt.Errorf("unknown frame type %q", f.T)
 	}
+	// ID 0 would serialize out of a reply under omitempty and arrive
+	// indistinguishable from an event, so the protocol refuses it at the door
+	// rather than relying on every client to start counting at 1.
+	if f.ID <= 0 {
+		return f, fmt.Errorf("call frame needs a positive id, got %d", f.ID)
+	}
 	return f, nil
 }
 

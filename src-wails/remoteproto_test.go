@@ -80,3 +80,34 @@ func TestErrorFrameCarriesCodeAndMessage(t *testing.T) {
 		t.Fatalf("error frame lost its id: %+v", f)
 	}
 }
+
+func TestDecodeClientFrameRejectsZeroID(t *testing.T) {
+	// ID 0 would serialize out of a reply under omitempty and arrive
+	// indistinguishable from an event, so it must be rejected at decode time.
+	_, err := decodeClientFrame([]byte(`{"t":"call","id":0,"cmd":"list_workspaces"}`))
+	if err == nil {
+		t.Fatal("call frame with id 0 must not decode")
+	}
+	if !contains(err.Error(), "positive id") {
+		t.Fatalf("error message must mention positive id: %v", err)
+	}
+}
+
+func TestDecodeClientFrameRejectsNegativeID(t *testing.T) {
+	_, err := decodeClientFrame([]byte(`{"t":"call","id":-5,"cmd":"list_workspaces"}`))
+	if err == nil {
+		t.Fatal("call frame with negative id must not decode")
+	}
+	if !contains(err.Error(), "positive id") {
+		t.Fatalf("error message must mention positive id: %v", err)
+	}
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i < len(s)-len(substr)+1; i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
