@@ -35,7 +35,17 @@ func busSubscribe(s EventSink) func() {
 		defer busMu.Unlock()
 		for i, e := range busSinks {
 			if e.id == id {
-				busSinks = append(busSinks[:i], busSinks[i+1:]...)
+				last := len(busSinks) - 1
+				copy(busSinks[i:], busSinks[i+1:])
+				// Zero the now-unused tail slot explicitly: slicing alone
+				// (append(s[:i], s[i+1:]...)) shifts elements left but
+				// leaves a live copy of the closure in the backing array
+				// past the new length, which the GC still treats as
+				// reachable through that array — keeping a *websocket.Conn
+				// and its 256-slot channel around until some later append
+				// happens to overwrite that slot.
+				busSinks[last] = busEntry{}
+				busSinks = busSinks[:last]
 				return
 			}
 		}

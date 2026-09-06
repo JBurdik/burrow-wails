@@ -128,17 +128,62 @@ func TestWSForwardsBusEvents(t *testing.T) {
 	busReset()
 	conn, _ := dialTestWS(t, &App{})
 
-	// Give the sink a moment to register before emitting.
-	time.Sleep(20 * time.Millisecond)
-	busEmit("phase-pty:7", map[string]string{"state": "running"})
-
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	// The welcome frame is now enqueued and read before this connection
+	// subscribes to the bus (so it is guaranteed to arrive first, ahead of
+	// any live event), which means there is no longer a signal available to
+	// this test that the subscription has landed by the time dialTestWS
+	// returns. Rather than bet on a fixed sleep, retry the emit against a
+	// short per-attempt read deadline until the event frame shows up or an
+	// overall deadline is exceeded — this proves delivery instead of timing.
 	var f serverFrame
-	if err := conn.ReadJSON(&f); err != nil {
-		t.Fatalf("no event frame arrived: %v", err)
+	overall := time.Now().Add(2 * time.Second)
+	for {
+		busEmit("phase-pty:7", map[string]string{"state": "running"})
+		_ = conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		err := conn.ReadJSON(&f)
+		if err == nil {
+			break
+		}
+		if time.Now().After(overall) {
+			t.Fatalf("no event frame arrived: %v", err)
+		}
 	}
 	if f.T != "event" || f.Name != "phase-pty:7" {
 		t.Fatalf("bad event frame: %+v", f)
+	}
+}
+
+// TestWSDropsClientWhenOutboundQueueFills exercises the design's third named
+// property directly: a full outbound queue drops the connection rather than
+// blocking busEmit. The client here never reads, so nothing ever drains the
+// kernel socket buffers on either end of the connection.
+//
+// A burst of small events is not reliable bait for this: on a local
+// connection the writer goroutine can drain a few hundred tiny JSON frames
+// faster than a single busy producer goroutine can enqueue them, so the
+// per-connection queue (outboundQueue = 256) never actually fills — this was
+// tried and was flaky (it raced the writer instead of proving the property).
+// Instead each emitted event payload is large enough (well past this
+// machine's default 128 KiB TCP send/receive buffers, sysctl
+// net.inet.tcp.sendspace/recvspace) that the writer's very first WriteJSON
+// blocks solidly inside the network write syscall — since nothing is
+// draining those kernel buffers, that block does not clear. Once the writer
+// is genuinely wedged, busEmit's non-blocking sends (which never touch the
+// network themselves) fill the remaining queue slots and the sink's
+// queue-full branch fires deterministically, not probabilistically.
+func TestWSDropsClientWhenOutboundQueueFills(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	conn, _ := dialTestWS(t, &App{})
+
+	bigPayload := map[string]string{"state": strings.Repeat("x", 512*1024)}
+	for i := 0; i < outboundQueue+16; i++ {
+		busEmit("phase-pty:7", bigPayload)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("server did not drop the connection when its outbound queue filled")
 	}
 }
 
