@@ -220,6 +220,106 @@ executable (a `wails dev` run) — the CLI still works.
 `BURROW_PTY_ID`, `BURROW_HOOK_PORT`, `BURROW_HOME_DIR` (app-data dir, which also
 holds `hook.port` and `control.token`).
 
+### Desktop transport (`src/runtime/transport.ts` + `src-wails/remoteapi.go`/`remoteproto.go`/`remotews.go`)
+
+The desktop's entire data path — every PTY byte, every chat event, every SQLite-backed
+list/save call — travels over a websocket, `ws://127.0.0.1:<hookPort>/v2/ws`, mounted on
+the hook server's **always-on loopback mux** (not the tailnet HTTP server above, which
+starts and stops with the remote-access toggle). This is what a later phone client will
+connect to as well, against a different URL: remote access stops being a second API
+surface that can drift from the first, because there is no longer a first one to drift
+from. `src/lib/wailsCompat/core.ts` used to be a ~130-case switch mapping wire names onto
+Wails-generated bindings; it is now a thin **pass-through** onto this socket — the switch's
+old body is what became the command table below. What is left in `core.ts` is a short
+`CLIENT_SIDE_COMMANDS` set — `detach_pty` (resolves locally; there is nothing to detach,
+the PTY keeps running server-side for the next reattach) and `send_float_snapshot`/
+`notify_float_grid`/`open_git_panel_window` (stay on Wails bindings because they answer
+over `runtime.EventsEmit`, which only the native window ever receives, or serve the
+removed float-window feature outright) — plus a few cases that reshape args before
+forwarding (`list_pty_sessions` normalizes daemon ids into session records,
+`acp_start` nests flat call-site args into the one Go struct parameter the table names,
+`save_chat_messages` restores the `foldedOrd ?? -1` sentinel the old switch supplied).
+
+**`remoteapi.go`'s `remoteAllowed`** is the security boundary: wire command name → `App`
+method + positional argument names + a `remoteScope`. Argument names live in the table,
+not the method signature, because they do not exist at runtime for either side to read
+off — Go's `reflect` does not carry parameter names, and Wails-generated bindings are
+`arg1..argN`. Scope is enforced **per command**, not per connection: holding a ticket is
+not authorization to call everything it reaches. Two tests guard the table from opposite
+directions: `TestRemoteSurfaceIsExhaustive` walks every `App` method and fails if it is in
+neither `remoteAllowed` nor `remoteDenied` — a new method is unreachable until someone
+decides on purpose which list it belongs in — and `src/lib/wailsCompat/
+commandSurface.test.ts` walks every literal `invoke("...")` call site under `src/`
+(skipping `src/mobile`, still on the old `/ws` below) and fails if the wire name is in
+neither the table nor `CLIENT_SIDE_COMMANDS`. The first test cannot catch a wire name the
+frontend calls that the table forgot; the second cannot catch a table entry nothing calls
+— only together do they cover both directions the flip could break.
+
+**`remoteproto.go`** frames the wire in four tags: `call` (client → server), `reply`,
+`event`, `welcome`. Event names on the wire are identical to the internal bus names
+(`pty-data-7`, `phase-pty:7`) on purpose — no translation table to forget an entry in. A
+`call` frame with a non-positive id is rejected at decode time, because id `0` would
+vanish from a reply under `omitempty` and arrive indistinguishable from an event.
+
+**`remotews.go`** mounts `/v2/ws` on the hook server's mux (`StartHookServer`, unrelated to
+and unaffected by the remote-access toggle) and issues a single-use, 30-second ticket per
+connection attempt (via `App.LocalEndpoint()`, below) rather than a long-lived token —
+browsers cannot set headers on a WS handshake, so the ticket has to ride in the query
+string, and a token that dies on first use is safe to put there in a way a durable one is
+not. Each connection has **one outbound queue and one writer goroutine**: two goroutines
+must never write the same socket, and a single queue is what keeps a reply and the event
+that follows it in the order they were produced. A full queue **drops the client** rather
+than blocking — `busEmit` runs under `PhaseStore`'s `emitMu`, so a sink that blocked would
+stall every phase change in the app, not just this one connection's view of it. Each call
+frame is dispatched on its own goroutine behind a **64-slot per-connection semaphore**: one
+slow call — `generate_commit_message`'s 180 s CLI budget, say — used to head-of-line-block
+every other frame on the same connection (keystrokes to a terminal included), because the
+desktop uses exactly one connection for the whole app; a `recover` per call turns a
+panicking one (several `App` methods dereference `a.daemon` with no nil guard) into a
+failed reply and a dropped connection, never a dead process. Read limit, write/read
+deadlines and ping/pong keepalive reclaim a peer that vanished without a TCP FIN — a phone
+leaving the tailnet, a sleeping laptop — within one missed cycle instead of parking the
+reader in a syscall forever.
+
+**`App.LocalEndpoint()`** is the **one Wails binding left on the desktop's data path**, and
+the reason is worth stating on purpose: being in-process IS the desktop's authorization,
+which is not a claim anything reachable over the network can make. It returns a fresh
+ticket scoped to every scope that exists — including `scopeUIAck`, granted nowhere else
+(see `ack_control_action` just below) — and the frontend calls it again on every
+reconnect, since a ticket is spent by the handshake that redeems it. `LocalEndpoint` is
+itself in `remoteDenied`: reachable over a connection it authorizes, it would let an
+already-authenticated remote client mint itself a fresh full-scope ticket.
+
+**`ack_control_action` has its own scope, `ui:ack`**, granted only by `LocalEndpoint`. The
+bus sink `remotews.go` subscribes with is unfiltered — every connected client sees every
+`control:action` frame, including its id — so `AckControlAction` authenticates nothing
+beyond matching that id against a pending request; the scope is an identity claim ("I am
+the UI a verb is waiting for"), not a level of authority, and is kept off
+`orchestration:operate` so that a future paired phone inheriting that scope for legitimate
+reasons does not also inherit the ability to forge a reply to a control verb it never
+performed.
+
+**`src/runtime/transport.ts`** is the client half, and the *only* place the desktop and a
+remote client will differ — both use this transport, and what varies is the
+`EndpointSource` handed to it (`src/runtime/boundary.test.ts` keeps `src/runtime` from
+importing `src/components`, `src/stores`, `src/mobile` or xterm, so it cannot grow a
+dependency only one side has). It queues calls made before the socket opens (the frontend
+calls `invoke()` from `onMounted` while the connection is still being made), keeps its
+listener map across reconnects (the server fans every event out to every connection, so
+this map is the client's own routing table and has to outlive a socket, or a reconnect
+silently stops delivering PTY bytes), asks for a fresh ticket on every attempt (a ticket is
+single-use), and **rejects every queued call rather than replaying it** once a connection
+actually drops — a queued call replayed against the next connection could arrive for an id
+whose promise was already rejected, with nowhere for the eventual reply to go.
+
+**What did not change.** The old `/ws` and its hand-typed `dispatch` (`httpserver.go`) are
+still live, gated by the remote-access toggle, and `src/mobile/` still runs on them
+entirely — this phase did not touch the phone. Snapshot, resume and binary PTY frames do
+not exist on `/v2/ws` yet: the `welcome` frame carries only `environmentId` and `scopes`
+today, and `transport.ts` leaves it unhandled with a comment that phase 4 is what adds a
+`seq` to resume from. **No manual GUI verification of any of this has been done** —
+nobody in this process could launch the app.
+
 ### Manager (`src/components/ManagerPanel.vue`)
 
 A per-repository orchestrator chat living in the right panel. One thread per
@@ -251,10 +351,13 @@ Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem
 - **Git** (`git.go`) — `RunGit` wraps the system git binary (checks known paths)
 - **Text generation** (`textgen.go`) — `GenerateCommitMessage`, `GeneratePrContent`, `GenerateBranchName`, `GenerateChatTitle` (see below)
 - **FS** (`fs.go`) — `ReadDirShallow`, `WriteTextFile`
-- **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. Two sinks are wired today: the native window (`wailssink.go`) and the tailnet WS broadcaster for the mobile/PWA client (`installWSSink` in `httpserver.go`, live only while remote access is toggled on) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) already reach a connected phone, not just the desktop window. `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did
+- **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. Three sinks are wired today: the native window (`wailssink.go`), the tailnet WS broadcaster for the mobile/PWA client (`installWSSink` in `httpserver.go`, live only while remote access is toggled on), and `/v2/ws`'s per-connection subscription (`remotews.go`, always on — it is mounted on the hook server, not the toggled one) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) already reach a connected phone or the desktop's own socket, not just the native window. `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did
 - **Agent phase** (`phasestore.go`, `phasepoll.go`, `internal/agentphase/phase.go`) — see "PTY / Agent phase" above
-- **Environment identity** (`environment.go`) — `environmentID()` creates and persists a random id in `<app-data>/environment.json` on first run; every client-side record (known environments, endpoint preferences, seen-at receipts) is meant to key off this rather than IP/hostname, which change. `EnvironmentID()` is the Wails binding
-- **Remote endpoints** (`endpoints.go`, `endpoints_tailscale.go`) — `EndpointProvider` registry (currently loopback + Tailscale) contributing `AdvertisedEndpoint`s, `selectEndpoint()` implementing t3code's selection order (preferred kind → hosted-HTTPS-compatible → default → non-loopback → loopback-if-same-machine), surfaced by the `RemoteEndpoints()` Wails binding. **Nothing consumes this yet** — it exists for Settings/pairing in a later phase
+- **Environment identity** (`environment.go`) — `environmentID()` creates and persists a random id in `<app-data>/environment.json` on first run; every client-side record (known environments, endpoint preferences, seen-at receipts) is meant to key off this rather than IP/hostname, which change. `EnvironmentID()` is reachable over `/v2/ws` as `environment_id` (`scopeOrchRead`) — not a Wails binding call any more
+- **Remote endpoints** (`endpoints.go`, `endpoints_tailscale.go`) — `EndpointProvider` registry (currently loopback + Tailscale) contributing `AdvertisedEndpoint`s, `selectEndpoint()` implementing t3code's selection order (preferred kind → hosted-HTTPS-compatible → default → non-loopback → loopback-if-same-machine), surfaced as `remote_endpoints` (`scopeAccessRead`) over `/v2/ws`. **Nothing consumes this yet** — it exists for Settings/pairing in a later phase
+- **Remote command table** (`remoteapi.go`) — `remoteAllowed`/`remoteDenied`: every `App` method the desktop and a future remote client may reach over `/v2/ws`, with its wire name, positional argument names and required scope. See "Desktop transport" above
+- **Remote wire protocol** (`remoteproto.go`) — the tagged `call`/`reply`/`event`/`welcome` frame shapes for `/v2/ws`
+- **Remote socket server** (`remotews.go`) — `/v2/ws` itself: ticket issuance/redemption, per-connection outbound queue, per-call goroutine dispatch with a concurrency cap and panic recovery, keepalive
 
 ### Background text generation (`src-wails/textgen.go`)
 
