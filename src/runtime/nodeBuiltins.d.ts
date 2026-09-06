@@ -29,6 +29,9 @@
 declare module "node:fs" {
   export function readdirSync(path: string): string[];
   export function readFileSync(path: string, encoding: string): string;
+  // commandSurface.test.ts walks src/ recursively and has to tell a
+  // directory from a file; this is the one method it needs for that.
+  export function statSync(path: string): { isDirectory(): boolean };
 }
 
 declare module "node:path" {

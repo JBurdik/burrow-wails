@@ -336,6 +336,18 @@ var remoteAllowed = map[string]remoteCmd{
 	"remote_list_chats":  {Method: "RemoteListChats", Args: nil, Scope: scopeOrchRead},
 	"remote_create_chat": {Method: "RemoteCreateChat", Args: []string{"workspaceId", "agentKind"}, Scope: scopeOrchOperate},
 
+	// The frontend's answer to a control:action event (controlapi.go's
+	// UIBridge blocks on it). It was in remoteDenied as "not a client call",
+	// which stopped being true when the desktop UI lost its private
+	// in-process door: it now reaches the app over this same socket, and
+	// keeping this one call on a Wails binding would mean keeping a second
+	// transport alive — the drift the /v2/ws flip exists to end. The
+	// forged-ack risk the denial guarded is bounded by the scope: a session
+	// holding orchestration:operate can already open tabs, run shell commands
+	// and write arbitrary files, so answering one control action is not an
+	// escalation.
+	"ack_control_action": {Method: "AckControlAction", Args: []string{"id", "resultJson", "errMsg"}, Scope: scopeOrchOperate},
+
 	// Daemon admin (stubbed)
 	"daemon_stats":           {Method: "DaemonStats", Args: nil, Scope: scopeOrchRead},
 	"clean_daemon":           {Method: "CleanDaemon", Args: nil, Scope: scopeOrchOperate},
@@ -372,9 +384,6 @@ var remoteAllowed = map[string]remoteCmd{
 // remoteDenied names the App methods that are deliberately NOT reachable over
 // the wire, each with the reason. An entry here is a decision, not a TODO.
 var remoteDenied = map[string]string{
-	// Hook/control plumbing
-	"AckControlAction": "the UI's ack channel for a UI-performed verb; not a client call",
-
 	// LocalEndpoint issues the single-use ticket that authorizes a /v2/ws
 	// connection in the first place. Being in-process (a Wails binding) IS
 	// the desktop's authorization for calling it; an already-authenticated
