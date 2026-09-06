@@ -139,9 +139,21 @@ zapadnout.
 overhead proti base64, ~4× proti raw. Frame: `[1][4B ptyID][payload]`. Ostatní
 kanály jsou low-rate, zůstávají JSON.
 
-**Ordering.** Jeden goroutine na spojení, jedna odchozí fronta. Reply a event
-pro tentýž objekt nemůžou přijít přeházené — což je dnes u `pty-data` vs
-`create_pty` reply nezaručené.
+**Ordering.** Jeden writer a jedna odchozí fronta na spojení, takže pořadí,
+v jakém se rámce do fronty **zařadí**, je pořadí, v jakém dorazí ke klientovi.
+Víc protokol negarantuje — a konkrétně **nezaručuje**, že reply a event pro
+tentýž objekt nepřijdou přeházené. Každý call běží na vlastní goroutině
+(`remotews.handle`), cally se tedy navzájem neserializují a reply na
+`create_pty` se může do fronty dostat **až za** `pty-data` rámce, které ten
+samý call způsobil.
+
+Není to regrese: stejnou mezeru měly Wails bindingy (goroutina na call) i staré
+`/ws`, a klient s ní počítá — `XTerm.vue` registruje listener na
+`pty-data-{id}` až po `await invoke("create_pty")` a daemon mu ring buffer
+přehraje při attachi. Ale **resume ve fázi 4 na "reply a event nemůžou přijít
+přeházené" stavět nesmí.** Jediné uspořádání, které existuje, je fronta jednoho
+spojení; jediné, co identifikuje pozici ve streamu, je `seq` z
+`welcome`/`shell`.
 
 ### Go dispatch (`remoteapi.go`)
 
