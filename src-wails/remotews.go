@@ -266,6 +266,25 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 		case <-done:
 		default:
 			// Queue full: drop the client rather than block the bus.
+			//
+			// PHASE-4 BLOCKER — this is only safe once resume exists.
+			// Dropping is right for a phone, whose events are a view it can
+			// rebuild. It is harsh for the DESKTOP, which drives the whole
+			// app down this one connection: if the JS main thread stalls
+			// during heavy terminal output the writer wedges, 256 frames
+			// later the server drops the desktop, and with no resume every
+			// event emitted in the gap is simply GONE. Not delayed — gone.
+			// That is a hole in a terminal's scrollback with no reattach to
+			// replay it (pty-data-<id> is emit-once; the daemon's ring
+			// buffer is only replayed on a fresh attach), and phase dots
+			// frozen at whatever they were until the agent's next
+			// transition happens to repaint them.
+			//
+			// The reconnect brings the socket back, which is why this looks
+			// benign in testing; what does not come back is the gap. Until
+			// the welcome frame's seq is used to resume from the server's
+			// backlog, treat a desktop drop here as data loss, not as
+			// backpressure.
 			shutdown()
 		}
 	})
