@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createTransport } from "./transport";
+import { createTransport, MAX_CONNECT_FAILURES } from "./transport";
 import { createBackoff } from "./reconnectBackoff";
 
 /** Minimal scriptable WebSocket stand-in. */
@@ -275,5 +275,18 @@ describe("createTransport", () => {
 
     t.close();
     await expect(t.invoke("late")).rejects.toThrow(/closed/i);
+  });
+
+  it("gives a cold start more than the daemon's own 2s startup budget", async () => {
+    // The desktop's startup() runs concurrently with the webview and has
+    // daemon.Ensure() on its critical path, which alone blocks up to 2s before
+    // the ticket store exists. A give-up budget under that turns a slow boot
+    // into an app that rejects every onMounted call and never retries them.
+    const delays: number[] = [];
+    const b = createBackoff({ jitter: () => 0 });
+    for (let i = 0; i < MAX_CONNECT_FAILURES; i++) delays.push(b.next());
+
+    const budgetMs = delays.slice(0, -1).reduce((a, d) => a + d, 0);
+    expect(budgetMs).toBeGreaterThan(10_000);
   });
 });

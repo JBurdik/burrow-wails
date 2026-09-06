@@ -27,15 +27,21 @@ interface Pending {
 }
 
 /**
- * How many connection attempts may fail in a row before the transport declares
- * itself unreachable, settling everything waiting on it (see `unreachable`).
+ * Consecutive failed connection attempts before every pending call is rejected
+ * with `transport unreachable`.
  *
- * With the default backoff (250 ms base, doubling) five attempts span ~7.5 s,
- * which is long enough to ride out a hook server that is still binding its
- * port at startup and short enough that a caller is never left staring at a
- * promise that will not settle.
+ * Seven, against the default backoff (250 · 500 · 1000 · 2000 · 4000 · 8000 ·
+ * 10000, capped at 10 s), puts the give-up at roughly 15.75 s: a failure
+ * happens after each wait, so N failures cost the sum of the first N-1 delays.
+ *
+ * The floor is the desktop's own cold start. `startup()` creates the ticket
+ * store late and runs concurrently with the webview, so the frontend can call
+ * before it exists — and `daemon.Ensure()` alone blocks up to 2 s spawning the
+ * daemon, before the DB migration, the bin write and the agent-docs install.
+ * Give up sooner than that and a slow boot rejects every onMounted call, the
+ * socket then recovers, and nobody re-issues them: an empty app until reload.
  */
-const MAX_CONNECT_FAILURES = 5;
+export const MAX_CONNECT_FAILURES = 7;
 
 export function createTransport(
   getEndpoint: EndpointSource,
