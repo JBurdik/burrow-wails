@@ -42,6 +42,12 @@ type App struct {
 
 	endpointProviders []EndpointProvider
 
+	tickets *ticketStore
+	// hookPort mirrors hookSrv.port, assigned once at startup. It exists as
+	// its own field so LocalEndpoint is testable without standing up a real
+	// hook server; hookSrv stays the source of truth everywhere else.
+	hookPort int
+
 	httpSrv        *HTTPServer
 	httpSrvRunning bool
 
@@ -223,12 +229,14 @@ func (a *App) startup(ctx context.Context) {
 
 	a.initControl(dataDir)
 
-	hookSrv, err := StartHookServer(ctx, a.phases, a.registerControlRoutes)
+	a.tickets = newTicketStore()
+	hookSrv, err := StartHookServer(ctx, a.phases, a.registerControlRoutes, newRemoteWS(a, a.tickets).register)
 	if err != nil {
 		log.Printf("hook server: %v", err)
 		return
 	}
 	a.hookSrv = hookSrv
+	a.hookPort = a.hookSrv.port
 	if err := os.WriteFile(filepath.Join(dataDir, "hook.port"), []byte(fmt.Sprintf("%d", hookSrv.port)), 0o644); err != nil {
 		log.Printf("write hook.port: %v", err)
 	}
@@ -413,5 +421,32 @@ func (a *App) cleanupOnShutdown() {
 		for _, id := range a.acpSessions.ids() {
 			_ = a.AcpStop(id)
 		}
+	}
+}
+
+// LocalEndpointInfo is the desktop's bootstrap: where to connect and the
+// one-shot credential to connect with.
+type LocalEndpointInfo struct {
+	WSURL         string `json:"ws_url"`
+	Ticket        string `json:"ticket"`
+	EnvironmentID string `json:"environment_id"`
+}
+
+// LocalEndpoint hands the desktop frontend a fresh single-use ticket for
+// /v2/ws. This is the one thing the desktop still needs a Wails binding for,
+// and the reason it needs one: being in-process IS the desktop's
+// authorization, and that is not a claim anything on the network can make.
+// The frontend calls this again on every reconnect, since a ticket is spent
+// by the handshake that uses it.
+func (a *App) LocalEndpoint() LocalEndpointInfo {
+	if a.tickets == nil {
+		return LocalEndpointInfo{}
+	}
+	// The desktop is the app; it gets every scope.
+	all := []remoteScope{scopeOrchRead, scopeOrchOperate, scopeTerminal, scopeAccessRead, scopeAccessWrite}
+	return LocalEndpointInfo{
+		WSURL:         fmt.Sprintf("ws://127.0.0.1:%d/v2/ws", a.hookPort),
+		Ticket:        a.tickets.issue(all),
+		EnvironmentID: a.environmentID,
 	}
 }

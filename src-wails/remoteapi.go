@@ -375,6 +375,14 @@ var remoteDenied = map[string]string{
 	// Hook/control plumbing
 	"AckControlAction": "the UI's ack channel for a UI-performed verb; not a client call",
 
+	// LocalEndpoint issues the single-use ticket that authorizes a /v2/ws
+	// connection in the first place. Being in-process (a Wails binding) IS
+	// the desktop's authorization for calling it; an already-authenticated
+	// remote client reaching it over the wire could mint itself a fresh
+	// full-scope ticket, turning any one connection into an unbounded
+	// supply of new ones.
+	"LocalEndpoint": "issues the credential that authorizes a connection; reachable over a connection it would let any authenticated client mint itself a fresh ticket",
+
 	// Window / native chrome
 	"PickDirectory":      "opens a native OS file-picker dialog on the host; meaningless (and blocking) triggered from a remote client",
 	"PickFile":           "opens a native OS file-picker dialog on the host; meaningless (and blocking) triggered from a remote client",

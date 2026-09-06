@@ -144,6 +144,8 @@ export function LoadChatMessages(arg1:number):Promise<string>;
 
 export function LoadChatStreamSince(arg1:string,arg2:number):Promise<Array<main.ChatStreamLine>>;
 
+export function LocalEndpoint():Promise<main.LocalEndpointInfo>;
+
 export function LspSend(arg1:string,arg2:string):Promise<void>;
 
 export function LspStart(arg1:string,arg2:string,arg3:Array<string>,arg4:string):Promise<void>;

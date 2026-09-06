@@ -441,6 +441,22 @@ export namespace main {
 	        this.pairLocked = source["pairLocked"];
 	    }
 	}
+	export class LocalEndpointInfo {
+	    ws_url: string;
+	    ticket: string;
+	    environment_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LocalEndpointInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ws_url = source["ws_url"];
+	        this.ticket = source["ticket"];
+	        this.environment_id = source["environment_id"];
+	    }
+	}
 	export class OpenTarget {
 	    id: string;
 	    name: string;

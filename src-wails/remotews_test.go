@@ -234,3 +234,34 @@ func TestWSScopeIsEnforcedPerCommand(t *testing.T) {
 		t.Fatalf("read-only ticket was allowed to kill a pty: %+v", f)
 	}
 }
+
+func TestLocalEndpointIssuesAUsableTicket(t *testing.T) {
+	app := &App{environmentID: "env-test"}
+	app.tickets = newTicketStore()
+	app.hookPort = 1234
+
+	info := app.LocalEndpoint()
+	if info.EnvironmentID != "env-test" {
+		t.Errorf("environment id not carried: %+v", info)
+	}
+	if !strings.Contains(info.WSURL, "127.0.0.1:1234/v2/ws") {
+		t.Errorf("bad ws url: %q", info.WSURL)
+	}
+	if info.Ticket == "" {
+		t.Fatal("no ticket issued")
+	}
+	scopes, ok := app.tickets.redeem(info.Ticket)
+	if !ok {
+		t.Fatal("issued ticket does not redeem")
+	}
+	if len(scopes) == 0 {
+		t.Fatal("desktop ticket carries no scopes")
+	}
+}
+
+func TestLocalEndpointTicketsAreDistinct(t *testing.T) {
+	app := &App{tickets: newTicketStore(), hookPort: 1}
+	if app.LocalEndpoint().Ticket == app.LocalEndpoint().Ticket {
+		t.Fatal("two calls returned the same single-use ticket")
+	}
+}
