@@ -26,16 +26,39 @@ interface Pending {
   reject: (e: Error) => void;
 }
 
+/**
+ * How many connection attempts may fail in a row before the transport declares
+ * itself unreachable, settling everything waiting on it (see `unreachable`).
+ *
+ * With the default backoff (250 ms base, doubling) five attempts span ~7.5 s,
+ * which is long enough to ride out a hook server that is still binding its
+ * port at startup and short enough that a caller is never left staring at a
+ * promise that will not settle.
+ */
+const MAX_CONNECT_FAILURES = 5;
+
 export function createTransport(
   getEndpoint: EndpointSource,
-  opts: { WebSocketImpl?: typeof WebSocket; backoff?: Backoff } = {},
+  opts: {
+    WebSocketImpl?: typeof WebSocket;
+    backoff?: Backoff;
+    maxConnectFailures?: number;
+  } = {},
 ): Transport {
   const WS = opts.WebSocketImpl ?? WebSocket;
   const backoff = opts.backoff ?? createBackoff();
+  const maxConnectFailures = opts.maxConnectFailures ?? MAX_CONNECT_FAILURES;
 
   let ws: WebSocket | null = null;
   let closed = false;
   let nextId = 1;
+  // Consecutive attempts that never reached an open socket. Reset by onopen,
+  // so a connection that worked and then dropped starts counting from zero.
+  let connectFailures = 0;
+  // Set once `maxConnectFailures` attempts in a row have failed: the transport
+  // cannot be established, so callers are told that instead of waiting.
+  // Cleared by the next socket that actually opens — reconnecting never stops.
+  let unreachable = false;
   const pending = new Map<number, Pending>();
   // Frames written before the socket opened. The frontend calls invoke() from
   // onMounted while the connection is still being made, and failing those
@@ -62,36 +85,57 @@ export function createTransport(
     outbox = [];
   }
 
+  /**
+   * One attempt failed to produce a working socket. Past the threshold the
+   * transport is declared unreachable and every waiting call is settled: a
+   * caller must never block forever on a connection that is not coming.
+   */
+  function noteConnectFailure(reason: string) {
+    connectFailures++;
+    if (unreachable || connectFailures < maxConnectFailures) return;
+    unreachable = true;
+    failPending(`transport unreachable: ${reason}`);
+  }
+
   async function connect() {
     if (closed) return;
-    let endpoint: { wsUrl: string; ticket: string };
+    // The socket construction is INSIDE this try, not just getEndpoint(): with
+    // a malformed url (an empty ws_url from a backend that failed to finish
+    // starting up gives `"?ticket=…"`, which is not a ws:// url) the
+    // constructor throws SYNCHRONOUSLY. That throw used to escape connect(),
+    // get swallowed by the `void connect()` below, and leave the app with no
+    // socket, no error and no scheduled retry — a blank window, forever.
     try {
       // A ticket is single-use, so every attempt needs a fresh one.
-      endpoint = await getEndpoint();
-    } catch {
+      const endpoint = await getEndpoint();
+      if (closed) return;
+      if (!endpoint.wsUrl) throw new Error("no websocket url");
+
+      const url = `${endpoint.wsUrl}?ticket=${encodeURIComponent(endpoint.ticket)}`;
+      const socket = new WS(url);
+      ws = socket;
+
+      socket.onopen = () => {
+        connectFailures = 0;
+        unreachable = false;
+        backoff.reset();
+        flush();
+      };
+      socket.onmessage = (ev: MessageEvent) => handleFrame(String(ev.data));
+      socket.onclose = () => {
+        if (ws === socket) ws = null;
+        failPending("disconnected");
+        noteConnectFailure("connection closed");
+        scheduleReconnect();
+      };
+      socket.onerror = () => {
+        // onclose always follows; reconnect is scheduled there so it cannot be
+        // scheduled twice for one socket.
+      };
+    } catch (e) {
+      noteConnectFailure(e instanceof Error ? e.message : String(e));
       scheduleReconnect();
-      return;
     }
-    if (closed) return;
-
-    const url = `${endpoint.wsUrl}?ticket=${encodeURIComponent(endpoint.ticket)}`;
-    const socket = new WS(url);
-    ws = socket;
-
-    socket.onopen = () => {
-      backoff.reset();
-      flush();
-    };
-    socket.onmessage = (ev: MessageEvent) => handleFrame(String(ev.data));
-    socket.onclose = () => {
-      if (ws === socket) ws = null;
-      failPending("disconnected");
-      scheduleReconnect();
-    };
-    socket.onerror = () => {
-      // onclose always follows; reconnect is scheduled there so it cannot be
-      // scheduled twice for one socket.
-    };
   }
 
   function scheduleReconnect() {
@@ -128,6 +172,10 @@ export function createTransport(
   return {
     invoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
       if (closed) return Promise.reject(new Error("transport closed"));
+      // Queueing here would be queueing onto a connection that has already
+      // failed to come up `maxConnectFailures` times in a row; the reconnect
+      // loop keeps running, and the first socket that opens clears this.
+      if (unreachable) return Promise.reject(new Error("transport unreachable"));
       const id = nextId++;
       const frame = JSON.stringify({ t: "call", id, cmd, args });
       return new Promise<T>((resolve, reject) => {

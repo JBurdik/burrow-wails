@@ -185,6 +185,89 @@ describe("createTransport", () => {
     expect(sentCmds).not.toContain("orphan-queued");
   });
 
+  // A connection that can NEVER be established used to settle nothing:
+  // failPending() was reachable only from onclose and close(), so with no
+  // socket ever constructed every invoke() stayed pending for the lifetime of
+  // the page.
+  describe("when the connection can never be established", () => {
+    // The backoff is 1 ms, so a handful of macrotasks covers several attempts.
+    const drain = async (n = 20) => {
+      for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 2));
+    };
+    const fastBackoff = () => createBackoff({ baseMs: 1, maxMs: 1, jitter: () => 0 });
+
+    it("retries when the socket constructor throws synchronously", async () => {
+      // An empty ws_url (the backend's startup bailed before it had one) makes
+      // `new WebSocket("?ticket=…")` throw a SyntaxError on the spot. That
+      // throw is not an onclose, so nothing rescheduled — the app sat there
+      // with no socket and no retry.
+      FakeWS.instances = [];
+      let attempts = 0;
+      const Impl = function (url: string) {
+        attempts++;
+        if (attempts === 1) throw new SyntaxError("The URL's scheme must be either 'ws' or 'wss'");
+        return new FakeWS(url);
+      } as unknown as typeof WebSocket;
+
+      createTransport(async () => ({ wsUrl: "ws://x/v2/ws", ticket: "t" }), {
+        WebSocketImpl: Impl,
+        backoff: fastBackoff(),
+      });
+      await drain(5);
+      expect(attempts).toBeGreaterThan(1);
+      expect(FakeWS.instances.length).toBeGreaterThan(0);
+    });
+
+    it("rejects an invoke made before the transport gave up", async () => {
+      FakeWS.instances = [];
+      const t = createTransport(async () => ({ wsUrl: "", ticket: "t" }), {
+        WebSocketImpl: FakeWS as unknown as typeof WebSocket,
+        backoff: fastBackoff(),
+        maxConnectFailures: 3,
+      });
+      const p = t.invoke("hangs-forever");
+      const settled = expect(p).rejects.toThrow(/unreachable/i);
+      await drain();
+      await settled;
+      // No socket was ever constructed: this is the path with no onclose.
+      expect(FakeWS.instances).toHaveLength(0);
+    });
+
+    it("rejects an invoke made after it gave up, without queueing it", async () => {
+      const t = createTransport(async () => {
+        throw new Error("no endpoint");
+      }, {
+        WebSocketImpl: FakeWS as unknown as typeof WebSocket,
+        backoff: fastBackoff(),
+        maxConnectFailures: 2,
+      });
+      await drain();
+      await expect(t.invoke("late")).rejects.toThrow(/unreachable/i);
+    });
+
+    it("recovers once a socket finally opens", async () => {
+      FakeWS.instances = [];
+      let url = "";
+      const t = createTransport(async () => ({ wsUrl: url, ticket: "t" }), {
+        WebSocketImpl: FakeWS as unknown as typeof WebSocket,
+        backoff: fastBackoff(),
+        maxConnectFailures: 2,
+      });
+      await drain();
+      await expect(t.invoke("while-down")).rejects.toThrow(/unreachable/i);
+
+      url = "ws://x/v2/ws";
+      await drain(5);
+      const ws = FakeWS.instances[FakeWS.instances.length - 1];
+      ws.open();
+
+      const p = t.invoke("after-recovery");
+      await new Promise((r) => setTimeout(r, 0));
+      ws.deliver({ t: "reply", id: ws.lastCall().id, result: "ok" });
+      await expect(p).resolves.toBe("ok");
+    });
+  });
+
   it("rejects invoke() called after close() instead of leaving it pending", async () => {
     const { t } = setup();
     await tick();

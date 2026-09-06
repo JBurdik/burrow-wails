@@ -38,6 +38,22 @@ export const CLIENT_SIDE_COMMANDS: ReadonlySet<string> = new Set([
 
 let transport: Transport | null = null;
 
+/**
+ * Whether we are running inside the Wails webview at all.
+ *
+ * vite.config.ts aliases `@tauri-apps/api/core` to this file for BOTH bundles,
+ * and the mobile PWA reaches it through `@/lib/config` — which invokes
+ * `read_config` at module scope. The PWA talks to the older `/ws` protocol and
+ * has no Wails runtime, so letting that call fall into the desktop transport
+ * means `LocalEndpoint()` throws, the transport retries forever, and
+ * `configReady` never settles: the phone never restores its saved baseUrl and
+ * token. Failing fast here is what the Wails binding did before this file
+ * became a pass-through, and what config.ts's catch is written for.
+ */
+function hasWailsRuntime(): boolean {
+  return typeof window !== "undefined" && (window as any).go !== undefined;
+}
+
 /** The desktop's authorization is that it is in-process: it asks the binding
  *  for a fresh single-use ticket, including on every reconnect. */
 export function desktopTransport(): Transport {
@@ -51,6 +67,15 @@ export function desktopTransport(): Transport {
 }
 
 export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise<T> {
+  // Before the switch, so no case (transport OR Wails binding) can be reached
+  // outside the desktop webview. See hasWailsRuntime().
+  if (!hasWailsRuntime()) {
+    // The message deliberately does not spell out a call in the shape
+    // commandSurface.test.ts scans for, or it would be reported as a command
+    // name built at runtime.
+    throw new Error(`no Wails runtime in this context; cannot dispatch "${cmd}"`);
+  }
+
   switch (cmd) {
     // Nothing to detach. The Go daemon broadcasts frames to every attached
     // client and a closed XTerm simply stops listening, while the PTY keeps
