@@ -170,6 +170,15 @@ var remoteAllowed = map[string]remoteCmd{
 	"remote_regenerate_pair_code": {Method: "RemoteRegeneratePairCode", Args: nil, Scope: scopeAccessWrite},
 	"shell_snapshot":              {Method: "ShellSnapshot", Args: nil, Scope: scopeOrchRead},
 
+	// Chats. The list is shared state in SQLite (chats.go), so both clients
+	// reach it the same way — which is the point of moving it out of
+	// config.json, where each client kept its own copy of the truth and
+	// overwrote the other's.
+	"list_chats":  {Method: "ListChats", Args: nil, Scope: scopeOrchRead},
+	"create_chat": {Method: "CreateChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
+	"save_chats":  {Method: "SaveChats", Args: []string{"chats"}, Scope: scopeOrchOperate},
+	"delete_chat": {Method: "DeleteChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+
 	// Workspaces / tabs
 	"list_workspaces":     {Method: "ListWorkspaces", Args: nil, Scope: scopeOrchRead},
 	"create_workspace":    {Method: "CreateWorkspace", Args: []string{"name", "path"}, Scope: scopeOrchOperate},

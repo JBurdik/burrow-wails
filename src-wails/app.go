@@ -230,6 +230,10 @@ func (a *App) startup(ctx context.Context) {
 	// Chat transcripts used to live in config.json; move them into SQLite before
 	// the frontend reads either store.
 	a.migrateChatHistoryToSQLite()
+	// Before anything can serve a client: the chat LIST moves out of
+	// config.json here, and a client that read the old key first would then
+	// write it back over the new source of truth.
+	a.migrateChatsFromConfig()
 
 	a.daemon = NewDaemonClient(ctx, filepath.Join(dataDir, "daemon.sock"))
 	if err := a.daemon.Ensure(); err != nil {
