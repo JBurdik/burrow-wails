@@ -520,20 +520,24 @@ type chatNoteEnvelope struct {
 	TurnMs int      `json:"turnMs,omitempty"`
 }
 
-// chatNoteRoles are the ChatMessage roles (src/lib/chatTypes.ts) a "row" note
-// may carry. Deliberately excludes "queued": it is a transient marker that
-// resolves inside the turn that created it, so persisting one would leave a
-// dead "queued" row in history after a restart mid-turn. "user"/"assistant"/
-// "tool"/"thinking" are also excluded in practice — those come from the
-// provider stream, not a client-authored note — but nothing stops a future
-// caller from using them honestly, so the list is the ChatMessage union minus
-// "queued" rather than hand-narrowed to today's two call sites
-// ("system-info", "permission").
+// chatNoteRoles are the ONLY ChatMessage roles (src/lib/chatTypes.ts) a "row"
+// note may carry: "system-info" and "permission". Deliberately NOT the wider
+// ChatMessage union minus "queued" — "user"/"assistant"/"tool"/"thinking" are
+// produced by the fold from real provider events, which carry a MessageID or
+// ToolCallID the fold uses to RECONCILE them (append a delta into the same
+// bubble, route a tool result back to its call). A message.note carries
+// neither, so one of those four roles would land as an unreconcilable SECOND
+// bubble rather than joining the one the provider is building — corrupting
+// the transcript, not just duplicating a line. It also widens who can inject
+// one: publish_chat_note is scopeOrchOperate, so any paired device could
+// otherwise render a bubble indistinguishable from a real assistant/tool/user
+// message — the exact confusion chatNoteKind's own-kind-not-a-transport's
+// design exists to prevent, mirrored onto roles. Widen this only for a role
+// that argues past both problems; today nothing does. "queued" is excluded
+// for its own reason: it is a transient marker that resolves inside the turn
+// that created it, so persisting it would leave a dead row after a restart
+// mid-turn.
 var chatNoteRoles = map[string]bool{
-	"user":        true,
-	"assistant":   true,
-	"tool":        true,
-	"thinking":    true,
 	"permission":  true,
 	"system-info": true,
 }

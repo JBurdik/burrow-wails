@@ -376,6 +376,21 @@ func TestChatNoteUnknownRoleIsRejected(t *testing.T) {
 	}
 }
 
+// A role the FOLD itself produces from real provider events ("user",
+// "assistant", "tool", "thinking") must never be accepted from a note: those
+// roles are reconciled by MessageID/ToolCallID, which a note carries neither
+// of, so accepting one would render an unreconcilable second bubble
+// indistinguishable from a real provider message. chatNoteRoles is narrowed
+// to exactly {"system-info", "permission"} for this reason.
+func TestChatNoteRejectsProviderProducedRoles(t *testing.T) {
+	for _, role := range []string{"user", "assistant", "tool", "thinking"} {
+		got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"`+role+`","text":"x"}`, 1)
+		if got != nil {
+			t.Fatalf("role %q should be rejected, got %+v", role, got)
+		}
+	}
+}
+
 func TestChatNoteRowWithoutTextIsRejected(t *testing.T) {
 	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"system-info"}`, 1)
 	if got != nil {
