@@ -169,7 +169,65 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("%s: %w", s, err)
 		}
 	}
+
+	return migratePtyPhaseColumns(db)
+}
+
+// migratePtyPhaseColumns repairs a `pty_phase` table created before its key
+// column was renamed and `seq` was added.
+//
+// `CREATE TABLE IF NOT EXISTS` does not migrate an existing table, so every
+// install that predates those changes kept `pty_id` and no `seq` while the code
+// went on selecting `id` and `seq`. The failure was total and silent from the
+// UI's side: NewPhaseStore returned an error, startup logged
+// "phase store: SQL logic error: no such column: id" and carried on with
+// a.phases == nil, so nothing persisted a phase, nothing emitted
+// phase-pty:/phase-chat:, terminal_tabs.status was never written, and both
+// clients' status dots — plus `burrow list-tabs` and MCP list_tabs — read
+// empty forever.
+//
+// Done by column inspection rather than by running the ALTERs and ignoring the
+// errors: a rename that is already applied fails with the same "no such column"
+// shape as a genuinely broken table, so ignoring it would hide the very
+// condition this exists to fix.
+func migratePtyPhaseColumns(db *sql.DB) error {
+	cols, err := tableColumns(db, "pty_phase")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil // no table yet; the CREATE above already made the right one
+	}
+	if !cols["id"] && cols["pty_id"] {
+		if _, err := db.Exec(`ALTER TABLE pty_phase RENAME COLUMN pty_id TO id`); err != nil {
+			return fmt.Errorf("rename pty_phase.pty_id: %w", err)
+		}
+	}
+	if !cols["seq"] {
+		if _, err := db.Exec(`ALTER TABLE pty_phase ADD COLUMN seq INTEGER NOT NULL DEFAULT 0`); err != nil && !isDuplicateColumnErr(err) {
+			return fmt.Errorf("add pty_phase.seq: %w", err)
+		}
+	}
 	return nil
+}
+
+// tableColumns returns the column names of a table, or an empty map when the
+// table does not exist (PRAGMA table_info yields no rows rather than an error).
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, fmt.Errorf("table_info %s: %w", table, err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
 }
 
 func isDuplicateColumnErr(err error) bool {
