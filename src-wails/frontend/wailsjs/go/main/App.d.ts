@@ -250,6 +250,8 @@ export function SetWorkspaceIcon(arg1:number,arg2:string):Promise<void>;
 
 export function SetWorkspaceOrder(arg1:Array<number>):Promise<void>;
 
+export function ShellSnapshot():Promise<main.ShellSnapshot>;
+
 export function SystemStats():Promise<main.SystemStats>;
 
 export function TailscaleServe(arg1:number):Promise<string>;

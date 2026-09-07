@@ -1,3 +1,32 @@
+export namespace agentphase {
+	
+	export class Phase {
+	    state: string;
+	    detail?: string;
+	    model?: string;
+	    title?: string;
+	    is_agent: boolean;
+	    turn_ended_at: number;
+	    updated_at: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Phase(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.detail = source["detail"];
+	        this.model = source["model"];
+	        this.title = source["title"];
+	        this.is_agent = source["is_agent"];
+	        this.turn_ended_at = source["turn_ended_at"];
+	        this.updated_at = source["updated_at"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class AcpStartOpts {
@@ -522,6 +551,76 @@ export namespace main {
 	        this.text = source["text"];
 	    }
 	}
+	export class Workspace {
+	    id: number;
+	    name: string;
+	    path: string;
+	    created_at: number;
+	    last_opened?: number;
+	    parent_id?: number;
+	    worktree_branch?: string;
+	    is_git: boolean;
+	    icon?: string;
+	    sort_order: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Workspace(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.created_at = source["created_at"];
+	        this.last_opened = source["last_opened"];
+	        this.parent_id = source["parent_id"];
+	        this.worktree_branch = source["worktree_branch"];
+	        this.is_git = source["is_git"];
+	        this.icon = source["icon"];
+	        this.sort_order = source["sort_order"];
+	    }
+	}
+	export class ShellSnapshot {
+	    seq: number;
+	    environment_id: string;
+	    workspaces: Workspace[];
+	    tabs: Record<number, Array<TerminalTab>>;
+	    phases: Record<string, agentphase.Phase>;
+	    chats: any[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ShellSnapshot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.seq = source["seq"];
+	        this.environment_id = source["environment_id"];
+	        this.workspaces = this.convertValues(source["workspaces"], Workspace);
+	        this.tabs = this.convertValues(source["tabs"], Array<TerminalTab>, true);
+	        this.phases = this.convertValues(source["phases"], agentphase.Phase, true);
+	        this.chats = source["chats"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SkillInfo {
 	    dir: string;
 	    name: string;
@@ -624,36 +723,6 @@ export namespace main {
 	        this.notes = source["notes"];
 	        this.url = source["url"];
 	        this.sha256 = source["sha256"];
-	    }
-	}
-	export class Workspace {
-	    id: number;
-	    name: string;
-	    path: string;
-	    created_at: number;
-	    last_opened?: number;
-	    parent_id?: number;
-	    worktree_branch?: string;
-	    is_git: boolean;
-	    icon?: string;
-	    sort_order: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new Workspace(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.name = source["name"];
-	        this.path = source["path"];
-	        this.created_at = source["created_at"];
-	        this.last_opened = source["last_opened"];
-	        this.parent_id = source["parent_id"];
-	        this.worktree_branch = source["worktree_branch"];
-	        this.is_git = source["is_git"];
-	        this.icon = source["icon"];
-	        this.sort_order = source["sort_order"];
 	    }
 	}
 

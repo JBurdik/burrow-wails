@@ -498,6 +498,10 @@ export function SetWorkspaceOrder(arg1) {
   return window['go']['main']['App']['SetWorkspaceOrder'](arg1);
 }
 
+export function ShellSnapshot() {
+  return window['go']['main']['App']['ShellSnapshot']();
+}
+
 export function SystemStats() {
   return window['go']['main']['App']['SystemStats']();
 }
