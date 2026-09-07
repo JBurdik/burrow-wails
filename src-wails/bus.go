@@ -116,6 +116,12 @@ var notRingable = []string{
 	// adjacent enough (one per tool-permission round trip) that ringing it too
 	// would churn the ring the same way agent output would.
 	"chat-note-",
+	// The server-folded transcript tail (chattranscript.go). Same test as the
+	// rest of this list: one per changed message during a stream, and the
+	// messages it carries are derived from chat_stream lines that are already
+	// durably logged with an ord — a reconnecting client re-reads the
+	// transcript (or replays from folded_ord) rather than resuming these.
+	chatMessagesChangedPrefix,
 }
 
 // isRingable reports whether an event belongs in the replay ring.

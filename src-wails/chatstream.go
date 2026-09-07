@@ -98,6 +98,11 @@ type chatStreamWriter struct {
 	mu      sync.Mutex
 	nextOrd map[string]int64
 	appends map[string]int
+	// tails holds each chat's folded transcript (chattranscript.go). There is
+	// ONE writer for the app, so this is keyed by chat id like nextOrd and
+	// appends, and guarded by the same mu — which is never held across a
+	// SQLite call, and never taken while a chatTail's own mu is held.
+	tails   map[string]*chatTail
 	dropped int
 }
 
@@ -107,6 +112,7 @@ func newChatStreamWriter(db *sql.DB) *chatStreamWriter {
 		ch:      make(chan chatStreamRow, chatStreamQueue),
 		nextOrd: map[string]int64{},
 		appends: map[string]int{},
+		tails:   map[string]*chatTail{},
 	}
 	go w.run()
 	return w
@@ -243,6 +249,12 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 				}
 			}
 		}
+
+		// Fold the SAME events into the server-owned transcript
+		// (chattranscript.go). Handing the events over rather than the line
+		// keeps NormalizeChatLine at one call per line: two readings of the
+		// same line that had to agree anyway.
+		a.foldChatLine(chatID, ord, events)
 	}
 }
 
@@ -341,6 +353,9 @@ func (a *App) deleteChatStream(chatID string) error {
 		w.mu.Lock()
 		delete(w.nextOrd, chatID)
 		delete(w.appends, chatID)
+		// The folded transcript goes with it, or a deleted-then-recreated
+		// chat inherits the old one.
+		delete(w.tails, chatID)
 		w.mu.Unlock()
 	}
 	_, err := a.db.Exec(`DELETE FROM chat_stream WHERE chat_id = ?`, chatID)
