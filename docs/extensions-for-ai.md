@@ -17,9 +17,9 @@ Manifest requirements:
   pipes, redirects, or shell syntax.
 - args is an array of literal arguments. A command runs from the extension
   folder and has a 15 second time limit.
-- An optional surface can only use kind "workspace-pulse". This is a native
-  host-rendered RP surface; extensions cannot supply HTML, CSS or JavaScript for
-  the panel.
+- An optional surface can use kind "workspace-pulse" or kind "native". Native
+  surfaces provide a JSON ui tree made only from @burrow/sdk-vue primitives;
+  Burrow renders it in RP. Extensions cannot supply HTML, CSS or JavaScript.
 - Optional settings are host-rendered text fields. Each has id, title, type:
   "text", optional description/placeholder, and optional required. A command
   reads declared fields with createHost(process.env).settings.get(id) and must
@@ -41,9 +41,11 @@ Safety and scope:
 - The SDK host offers workspace() with workspace.read, Keychain secrets with
   secrets.read/secrets.write, and tasks.report() with tasks.report. Network is
   only disclosed through network.connect; it is not OS-sandboxed.
-- v1 has no direct API for tabs, terminals, arbitrary host files, settings,
-  notifications, or custom right-panel UI. Do not invent calls such as
-  window.burrow or a reusable localhost service.
+- v1 has no direct API for tabs, terminals, arbitrary host files,
+  notifications, or custom right-panel UI. Declared extension settings are the
+  sole settings API. `@burrow/sdk-vue` defines a future native UI data contract,
+  but v0.1 cannot mount a Vue SFC or publish a dynamic RP surface yet. Do not
+  invent calls such as window.burrow or a reusable localhost service.
 - Use the workspace path and normal system tools only when they are appropriate
   to the user-selected command. Handle an empty BURROW_EXTENSION_CWD cleanly.
 

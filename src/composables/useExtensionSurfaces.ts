@@ -6,7 +6,26 @@ export interface ExtensionSurface {
   id: string;
   title: string;
   description: string;
-  kind: "workspace-pulse";
+  kind: "workspace-pulse" | "native";
+  ui?: NativeSurfaceNode;
+}
+
+export interface NativeSurfaceNode {
+  type: "list" | "list-item" | "detail" | "form" | "text-field" | "section" | "action-panel" | "action";
+  id?: string;
+  title?: string;
+  subtitle?: string;
+  markdown?: string;
+  searchPlaceholder?: string;
+  accessories?: string[];
+  submitAction?: string;
+  label?: string;
+  value?: string;
+  placeholder?: string;
+  required?: boolean;
+  style?: "default" | "destructive";
+  children?: NativeSurfaceNode[];
+  actions?: NativeSurfaceNode;
 }
 
 interface ExtensionInfo {

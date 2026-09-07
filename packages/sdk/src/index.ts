@@ -23,6 +23,26 @@ export interface WorkspacePulseSurface {
   kind: "workspace-pulse";
 }
 
+/** A data-only native RP surface rendered by Burrow. */
+export interface NativeSurface {
+  id: string;
+  title: string;
+  description?: string;
+  kind: "native";
+  /** Build this payload with defineSurface() from @burrow/sdk-vue. */
+  ui: Record<string, unknown>;
+}
+
+/** A value that Burrow shows in the extension's native Settings form. */
+export interface ExtensionSetting {
+  id: string;
+  title: string;
+  description?: string;
+  placeholder?: string;
+  type: "text";
+  required?: boolean;
+}
+
 export interface ExtensionManifest {
   apiVersion: 1;
   id: string;
@@ -31,7 +51,8 @@ export interface ExtensionManifest {
   description?: string;
   permissions?: Permission[];
   commands?: CommandContribution[];
-  surfaces?: WorkspacePulseSurface[];
+  surfaces?: Array<WorkspacePulseSurface | NativeSurface>;
+  settings?: ExtensionSetting[];
 }
 
 export interface ExtensionDefinition {
@@ -88,8 +109,16 @@ export function defineExtension(definition: ExtensionDefinition): ExtensionDefin
     }
   }
   for (const surface of manifest.surfaces ?? []) {
-    if (!surface.id || !surface.title || surface.kind !== "workspace-pulse") {
-      throw new Error("v1 supports only a workspace-pulse surface with id and title");
+    if (!surface.id || !surface.title || (surface.kind !== "workspace-pulse" && surface.kind !== "native")) {
+      throw new Error("Every surface needs id, title, and kind workspace-pulse or native");
+    }
+    if (surface.kind === "native" && !surface.ui) {
+      throw new Error(`Native surface ${surface.id} needs a ui payload from @burrow/sdk-vue`);
+    }
+  }
+  for (const setting of manifest.settings ?? []) {
+    if (!idPattern.test(setting.id) || !setting.title.trim() || setting.type !== "text") {
+      throw new Error("Every setting needs a lowercase id, title, and type: text");
     }
   }
   return definition;

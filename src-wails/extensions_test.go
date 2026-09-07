@@ -24,6 +24,25 @@ func TestReadExtensionManifest(t *testing.T) {
 	}
 }
 
+func TestReadExtensionManifestNativeSurface(t *testing.T) {
+	dir := t.TempDir()
+	valid := `{"apiVersion":1,"id":"deployments","name":"Deployments","version":"0.1.0","surfaces":[{"id":"deployments","title":"Deployments","kind":"native","ui":{"type":"list","title":"Recent","children":[{"type":"list-item","id":"api","title":"API","actions":{"type":"action-panel","children":[{"type":"action","id":"logs","title":"Open logs"}]}}]}}]}`
+	if err := os.WriteFile(filepath.Join(dir, "extension.json"), []byte(valid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readExtensionManifest(dir); err != nil {
+		t.Fatalf("expected native surface to validate: %v", err)
+	}
+
+	invalid := `{"apiVersion":1,"id":"deployments","name":"Deployments","version":"0.1.0","surfaces":[{"id":"deployments","title":"Deployments","kind":"native","ui":{"type":"iframe"}}]}`
+	if err := os.WriteFile(filepath.Join(dir, "extension.json"), []byte(invalid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readExtensionManifest(dir); err == nil {
+		t.Fatal("expected unsupported native node to fail validation")
+	}
+}
+
 func TestReadExtensionManifestRejectsPathExecutable(t *testing.T) {
 	dir := t.TempDir()
 	invalid := `{"apiVersion":1,"id":"hello-burrow","name":"Hello","version":"0.1.0","commands":[{"id":"greet","title":"Greet","command":"./run.sh"}]}`

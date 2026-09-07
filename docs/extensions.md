@@ -90,9 +90,10 @@ The current API is deliberately suited to small, explicit workspace tools:
 - A native **Workspace Pulse** RP entry, declared in the manifest.
 
 There is deliberately **no** direct API for terminals, chats, arbitrary host
-file access, application settings, notifications, custom HTML/CSS/JS panels, or
-a reusable local HTTP bridge. An extension must use `@burrow/sdk` rather than
-inventing calls such as `window.burrow`.
+file access, notifications, custom HTML/CSS/JS panels, or a reusable local HTTP
+bridge. Settings are an exception: an extension may read only its own declared
+fields through `host.settings.get()`. An extension must use `@burrow/sdk`
+rather than inventing calls such as `window.burrow`.
 
 ## Install an extension
 
@@ -106,9 +107,9 @@ The source-controlled copy is in `examples/extensions/hello-burrow/`.
 
 ## Right-panel surfaces
 
-Extensions can add a native surface to the right panel. v1 supports the
-host-rendered `workspace-pulse` surface, which reads the active workspace's
-branch, working-tree changes, and most recent commit. It uses Burrow's own
+Extensions can add native surfaces to the right panel. `workspace-pulse` reads
+the active workspace's branch, working-tree changes, and most recent commit.
+`native` renders a data-only `@burrow/sdk-vue` tree with Burrow's own
 components and theme instead of loading extension UI code.
 
 ```json
@@ -119,6 +120,14 @@ components and theme instead of loading extension UI code.
   "kind": "workspace-pulse"
 }]
 ```
+
+### Native Vue surface
+
+Declare the output of `defineSurface()` as `ui` on a `kind: "native"` surface.
+The currently supported root can be a `List`, `Detail`, or `Form`; actions are
+named IDs, not JavaScript callbacks. The example in
+`~/code/burrow-extension/example/` demonstrates a deployment list that opens a
+native detail view in RP.
 
 ## Native extension settings
 
@@ -192,11 +201,19 @@ Use the copy-ready prompt in `docs/extensions-for-ai.md`. It gives an AI the
 exact manifest, host context, safety boundaries and required deliverables, so it
 will not invent unsupported host APIs.
 
-## SDK (first step)
+## SDKs
 
-`packages/sdk` contains the initial `@burrow/sdk` authoring package. It offers
-typed manifest definitions, local validation, and helpers for reading the v1
-command context. It deliberately does not claim to expose hidden application
-APIs. The SFTP starter in `examples/extensions/sftp-sync/` shows the intended
-authoring shape while secure credentials, capability-scoped networking, progress
-tasks and richer native surface primitives are designed for the next SDK step.
+`packages/sdk` contains `@burrow/sdk`: typed manifest definitions, local
+validation, command context and the capability-scoped host bridge.
+
+`packages/sdk-vue` contains the first `@burrow/sdk-vue` layer. Its `List`,
+`Detail`, `Form`, `TextField`, `Section`, `ActionPanel`, and `Action` factories
+produce a serializable native-surface tree. This is the intended Vue authoring
+model: build the tree from Composition API state (`computed()` or a render
+function), while Burrow owns the actual RP renderer and theme.
+
+The v0.1 package is the shared UI contract, not yet a persistent Vue/SFC
+runtime. Publishing reactive `.vue` components needs a persistent extension
+process, lifecycle management and a host-to-extension action channel; those
+pieces will be added together rather than exposing a misleading half-API.
+See `packages/sdk-vue/README.md` for a complete native list example.

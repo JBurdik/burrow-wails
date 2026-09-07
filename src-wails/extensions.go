@@ -38,13 +38,14 @@ type ExtensionCommand struct {
 	Args    []string `json:"args,omitempty"`
 }
 
-// ExtensionSurface is a host-rendered contribution. v1 intentionally supports
-// only workspace-pulse, keeping UI native, themed, and keyboard-consistent.
+// ExtensionSurface is a host-rendered contribution. Native surfaces carry data
+// only; Burrow owns the renderer, theme, focus and action dispatch.
 type ExtensionSurface struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Kind        string `json:"kind"`
+	ID          string          `json:"id"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Kind        string          `json:"kind"`
+	UI          json.RawMessage `json:"ui,omitempty"`
 }
 
 // ExtensionSetting describes a host-rendered configuration field. The host owns
@@ -110,8 +111,17 @@ func readExtensionManifest(dir string) (ExtensionManifest, error) {
 		}
 	}
 	for _, surface := range manifest.Surfaces {
-		if surface.ID == "" || surface.Title == "" || surface.Kind != "workspace-pulse" {
-			return manifest, fmt.Errorf("surface %q must have id, title, and supported kind workspace-pulse", surface.ID)
+		if surface.ID == "" || surface.Title == "" {
+			return manifest, fmt.Errorf("surface %q must have id and title", surface.ID)
+		}
+		switch surface.Kind {
+		case "workspace-pulse":
+		case "native":
+			if err := validateNativeSurface(surface.UI); err != nil {
+				return manifest, fmt.Errorf("surface %q has invalid native UI: %w", surface.ID, err)
+			}
+		default:
+			return manifest, fmt.Errorf("surface %q has unsupported kind %q", surface.ID, surface.Kind)
 		}
 	}
 	for _, setting := range manifest.Settings {
@@ -120,6 +130,41 @@ func readExtensionManifest(dir string) (ExtensionManifest, error) {
 		}
 	}
 	return manifest, nil
+}
+
+// validateNativeSurface accepts only the small declarative vocabulary emitted
+// by @burrow/sdk-vue. It prevents manifests from smuggling arbitrary component
+// descriptions into the host while keeping the format forward-compatible.
+func validateNativeSurface(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return errors.New("native surfaces require ui")
+	}
+	var node struct {
+		Type     string            `json:"type"`
+		Children []json.RawMessage `json:"children"`
+		Actions  json.RawMessage   `json:"actions"`
+	}
+	if err := json.Unmarshal(raw, &node); err != nil {
+		return errors.New("ui must be valid JSON")
+	}
+	allowed := map[string]bool{
+		"list": true, "list-item": true, "detail": true, "form": true,
+		"text-field": true, "section": true, "action-panel": true, "action": true,
+	}
+	if !allowed[node.Type] {
+		return fmt.Errorf("unsupported node type %q", node.Type)
+	}
+	for _, child := range node.Children {
+		if err := validateNativeSurface(child); err != nil {
+			return err
+		}
+	}
+	if len(node.Actions) > 0 && string(node.Actions) != "null" {
+		if err := validateNativeSurface(node.Actions); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) ExtensionsDirectory() (string, error) {
