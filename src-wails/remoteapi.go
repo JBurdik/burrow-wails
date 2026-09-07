@@ -420,6 +420,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"load_chat_events_since": {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
 	"load_chat_stream_since": {Method: "LoadChatStreamSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
 	"delete_chat_messages":   {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"publish_chat_note":      {Method: "PublishChatNote", Args: []string{"chatId", "note"}, Scope: scopeOrchOperate},
 
 	// App config file
 	"read_config":  {Method: "ReadConfig", Args: nil, Scope: scopeOrchRead},

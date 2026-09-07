@@ -110,6 +110,12 @@ var notRingable = []string{
 	// The human's own prompt, recorded in chat_stream like everything else on
 	// this list and replayed from folded_ord with it.
 	"chat-user-",
+	// Client-authored transcript rows/patches (system-info markers, permission
+	// receipts, turnMs/images on a user bubble) — same reasoning as chat-user-:
+	// already durably logged in chat_stream with an ord, and high-volume-
+	// adjacent enough (one per tool-permission round trip) that ringing it too
+	// would churn the ring the same way agent output would.
+	"chat-note-",
 }
 
 // isRingable reports whether an event belongs in the replay ring.

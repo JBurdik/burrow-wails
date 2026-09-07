@@ -208,6 +208,63 @@ func TestFoldSettlingUnPartialsEverythingNotJustTheLastMessage(t *testing.T) {
 	}
 }
 
+// A message.note pushes one row verbatim, never partial.
+func TestFoldPushesANoteRowVerbatim(t *testing.T) {
+	msgs := foldEvents([]ProviderRuntimeEvent{
+		ev(EvtMessageNote, func(e *ProviderRuntimeEvent) { e.Role = "system-info"; e.Text = "📋 plan ready" }),
+	})
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 message, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != "system-info" || msgs[0].Text != "📋 plan ready" || msgs[0].Partial {
+		t.Fatalf("got %+v", msgs[0])
+	}
+}
+
+func TestFoldNoteRowCarriesImages(t *testing.T) {
+	msgs := foldEvents([]ProviderRuntimeEvent{
+		ev(EvtMessageNote, func(e *ProviderRuntimeEvent) {
+			e.Role = "permission"
+			e.Text = "granted"
+			e.Images = []string{"data:x"}
+		}),
+	})
+	if len(msgs) != 1 || len(msgs[0].Images) != 1 || msgs[0].Images[0] != "data:x" {
+		t.Fatalf("got %+v", msgs)
+	}
+}
+
+// message.patch_user amends the LAST user bubble already in the transcript.
+func TestFoldPatchesTheLastUserBubble(t *testing.T) {
+	msgs := foldEvents([]ProviderRuntimeEvent{
+		ev(EvtUserDelta, func(e *ProviderRuntimeEvent) { e.MessageID = "acp:user:1"; e.Text = "first" }),
+		ev(EvtUserDelta, func(e *ProviderRuntimeEvent) { e.MessageID = "acp:user:2"; e.Text = "second" }),
+		ev(EvtMessagePatchUser, func(e *ProviderRuntimeEvent) { e.TurnMs = 42000; e.Images = []string{"data:y"} }),
+	})
+	if len(msgs) != 2 {
+		t.Fatalf("want 2 messages, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[0].TurnMs != 0 || len(msgs[0].Images) != 0 {
+		t.Fatalf("first user bubble should be untouched, got %+v", msgs[0])
+	}
+	if msgs[1].TurnMs != 42000 || len(msgs[1].Images) != 1 || msgs[1].Images[0] != "data:y" {
+		t.Fatalf("last user bubble should be patched, got %+v", msgs[1])
+	}
+}
+
+// A patch with no preceding user message is dropped rather than inventing a
+// headless row — same rule as an unmatched tool.completed.
+func TestFoldDropsAPatchWithNoUserMessage(t *testing.T) {
+	st := &foldState{messages: []ChatMessage{}}
+	changed := applyChatEvent(st, ev(EvtMessagePatchUser, func(e *ProviderRuntimeEvent) { e.TurnMs = 1000 }))
+	if changed {
+		t.Fatal("expected no change")
+	}
+	if len(st.messages) != 0 {
+		t.Fatalf("want 0 messages, got %d", len(st.messages))
+	}
+}
+
 // foldEvents must be pure: folding the same events twice yields the same
 // messages, with no shared/mutated state leaking between calls.
 func TestFoldEventsIsPureAndDeterministic(t *testing.T) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"sync"
 )
@@ -243,6 +244,24 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 			}
 		}
 	}
+}
+
+// PublishChatNote records a client-authored transcript row or patch (a
+// system-info marker, a permission receipt, attached images / elapsed turn
+// time on a user bubble) through the same door agent output uses. Publishing
+// through emitChatLine buys the live fan-out, the chat_stream row and the
+// folded_ord replay for free — the same three properties chatUserKind's
+// ClaudeSend/AcpSend publication got in the commit this one follows.
+//
+// The JSON is validated before it is handed to emitChatLine: a malformed note
+// here is an error the CALLER sees, rather than a line that gets written to
+// chat_stream and then silently normalizes to nothing on every future replay.
+func (a *App) PublishChatNote(chatID string, note string) error {
+	if normalizeChatNote(note, 0) == nil {
+		return fmt.Errorf("publish_chat_note: not a valid chat note: %s", note)
+	}
+	a.emitChatLine(chatID, chatNoteKind, note)
+	return nil
 }
 
 // ChatEventBatch is one raw line's worth of domain events. Batched rather than

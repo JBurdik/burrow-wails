@@ -314,3 +314,90 @@ func TestNormalizeAcpReplayedUserTurn(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
+
+// --- chat-note: client-authored transcript rows/patches ---
+
+func TestChatNoteRowNormalizesToAMessageNote(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"system-info","text":"❓ asked a question"}`, 1)
+	want := []ProviderRuntimeEvent{{Type: EvtMessageNote, Role: "system-info", Text: "❓ asked a question"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestChatNoteRowCarriesImages(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"permission","text":"granted","images":["data:x"]}`, 1)
+	if len(got) != 1 || got[0].Type != EvtMessageNote || len(got[0].Images) != 1 || got[0].Images[0] != "data:x" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestChatNotePatchNormalizesToAPatchUser(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"patch","turnMs":180000}`, 1)
+	want := []ProviderRuntimeEvent{{Type: EvtMessagePatchUser, TurnMs: 180000}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestChatNotePatchCanCarryImagesInsteadOfTurnMs(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"patch","images":["data:x"]}`, 1)
+	if len(got) != 1 || got[0].Type != EvtMessagePatchUser || got[0].TurnMs != 0 || len(got[0].Images) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestChatNoteMalformedJSONYieldsNoEvents(t *testing.T) {
+	if got := NormalizeChatLine(chatNoteKind, `{not json`, 1); got != nil {
+		t.Fatalf("malformed note should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNoteUnknownFormYieldsNoEvents(t *testing.T) {
+	if got := NormalizeChatLine(chatNoteKind, `{"form":"bogus"}`, 1); got != nil {
+		t.Fatalf("unknown form should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNoteQueuedRoleIsRejected(t *testing.T) {
+	// "queued" is a transient marker that resolves inside the turn that
+	// created it; persisting it would leave a dead row after a restart
+	// mid-turn.
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"queued","text":"hang on"}`, 1)
+	if got != nil {
+		t.Fatalf("queued role should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNoteUnknownRoleIsRejected(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"bogus","text":"x"}`, 1)
+	if got != nil {
+		t.Fatalf("unknown role should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNoteRowWithoutTextIsRejected(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"system-info"}`, 1)
+	if got != nil {
+		t.Fatalf("a row with no text should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNotePatchWithNothingToChangeYieldsNoEvents(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"patch"}`, 1)
+	if got != nil {
+		t.Fatalf("an empty patch should yield nil, got %+v", got)
+	}
+}
+
+// message.note / message.patch_user must never move the agent phase — a
+// system-info marker or a permission receipt is not evidence of a running
+// turn, and mistaking one for HookRunning would keep a dot orange after the
+// turn that produced it already settled.
+func TestChatNoteEventsDoNotMoveThePhase(t *testing.T) {
+	for _, evType := range []string{EvtMessageNote, EvtMessagePatchUser} {
+		if _, ok := chatPhaseEvent(ProviderRuntimeEvent{Type: evType}); ok {
+			t.Fatalf("%q should not map to a phase event", evType)
+		}
+	}
+}

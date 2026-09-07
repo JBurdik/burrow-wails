@@ -88,6 +88,36 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 		// A replayed user turn is never "partial" — it finished long ago.
 		return appendChunk(st, "user", ev, false)
 
+	case EvtMessageNote:
+		// A client-authored row (system-info marker, permission receipt).
+		// Pushed verbatim, never partial — unlike a provider delta it arrives
+		// whole, with nothing more to append.
+		st.messages = append(st.messages, ChatMessage{
+			ID:     len(st.messages),
+			Role:   ev.Role,
+			Text:   ev.Text,
+			Images: ev.Images,
+		})
+		return true
+
+	case EvtMessagePatchUser:
+		// Amends the LAST "user" bubble — turnMs/images are properties of the
+		// prompt that opened the turn, not a new row. Same rule as an
+		// unmatched tool.completed: no user message to patch means the event
+		// is dropped rather than inventing a headless row.
+		for i := len(st.messages) - 1; i >= 0; i-- {
+			if st.messages[i].Role == "user" {
+				if ev.TurnMs != 0 {
+					st.messages[i].TurnMs = ev.TurnMs
+				}
+				if len(ev.Images) > 0 {
+					st.messages[i].Images = ev.Images
+				}
+				return true
+			}
+		}
+		return false
+
 	case EvtToolStarted:
 		if ev.ToolCallID == "" {
 			return false

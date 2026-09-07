@@ -56,6 +56,14 @@ type ProviderRuntimeEvent struct {
 	Message   string `json:"message,omitempty"`
 	Title     string `json:"title,omitempty"`
 	SessionID string `json:"sessionId,omitempty"`
+
+	// message.note / message.patch_user — see normalizeChatNote. Additive
+	// fields only: this struct is on the wire and every existing consumer
+	// (chatProjection.ts, the mobile reducer) must be unaffected by their
+	// presence.
+	Role   string   `json:"role,omitempty"`   // message.note: the ChatMessage role to render
+	Images []string `json:"images,omitempty"` // message.note / message.patch_user
+	TurnMs int      `json:"turnMs,omitempty"` // message.patch_user
 }
 
 // Event type constants — the whole vocabulary, in one place.
@@ -75,6 +83,11 @@ const (
 	// rather than write to a dead pipe. Distinct from turn.completed, which is
 	// only a turn boundary and leaves the process up.
 	EvtSessionExited = "session.exited"
+	// message.note and message.patch_user are CLIENT-authored transcript rows
+	// that no provider produces — see normalizeChatNote / chatNoteKind. They
+	// carry no phase meaning (see chatPhaseEvent's fallthrough).
+	EvtMessageNote      = "message.note"
+	EvtMessagePatchUser = "message.patch_user"
 )
 
 // toolOutputLimit matches the frontend's slice(0, 2000): a tool result is shown
@@ -428,6 +441,8 @@ func NormalizeChatLine(kind, line string, ord int64) []ProviderRuntimeEvent {
 		return NormalizeAcpLine(line)
 	case chatUserKind:
 		return normalizeUserPrompt(line, ord)
+	case chatNoteKind:
+		return normalizeChatNote(line, ord)
 	default:
 		// acp-req is a blocking permission request — a UI decision, not
 		// transcript. It keeps its own channel.
@@ -470,4 +485,91 @@ func normalizeUserPrompt(line string, ord int64) []ProviderRuntimeEvent {
 		MessageID: fmt.Sprintf("acp:user:%d", ord),
 		Text:      line,
 	}}
+}
+
+// chatNoteKind is the stream kind for transcript rows the CLIENT authors
+// rather than something a provider said: a "question asked" / "plan ready" /
+// "file edit" / "tool wants permission" system-info marker, a permission
+// grant/deny receipt, or a patch onto the user bubble that opened the turn
+// (attached images, elapsed turn time).
+//
+// Its own kind, never a transport's — same reasoning as chatUserKind: a line
+// on claude-data or acp-data is something the PROVIDER said, and nothing a
+// provider says should be mistaken for something the app authored (or vice
+// versa). A stream reader that only knows one kind can never misfile the
+// other.
+const chatNoteKind = "chat-note"
+
+// chatNoteRow and chatNotePatch are the two JSON forms recorded under
+// chatNoteKind, discriminated by the "form" field. Unlike chatUserKind (plain
+// text, because there is nothing to structure), a note carries a role and
+// optional images/timing, which needs a real envelope:
+//
+//	{"form":"row",   "role":"system-info", "text":"...", "images":[...]}
+//	{"form":"patch", "turnMs":180000, "images":[...]}
+//
+// A "row" becomes one new ChatMessage (message.note); a "patch" amends the
+// last "user" bubble already in the transcript (message.patch_user) rather
+// than adding a row of its own — turnMs and attached images are properties OF
+// the prompt that opened the turn, not a new thing that happened.
+type chatNoteEnvelope struct {
+	Form   string   `json:"form"`
+	Role   string   `json:"role,omitempty"`
+	Text   string   `json:"text,omitempty"`
+	Images []string `json:"images,omitempty"`
+	TurnMs int      `json:"turnMs,omitempty"`
+}
+
+// chatNoteRoles are the ChatMessage roles (src/lib/chatTypes.ts) a "row" note
+// may carry. Deliberately excludes "queued": it is a transient marker that
+// resolves inside the turn that created it, so persisting one would leave a
+// dead "queued" row in history after a restart mid-turn. "user"/"assistant"/
+// "tool"/"thinking" are also excluded in practice — those come from the
+// provider stream, not a client-authored note — but nothing stops a future
+// caller from using them honestly, so the list is the ChatMessage union minus
+// "queued" rather than hand-narrowed to today's two call sites
+// ("system-info", "permission").
+var chatNoteRoles = map[string]bool{
+	"user":        true,
+	"assistant":   true,
+	"tool":        true,
+	"thinking":    true,
+	"permission":  true,
+	"system-info": true,
+}
+
+// normalizeChatNote turns a recorded client-authored note into the neutral
+// event(s) the fold understands. Malformed JSON, an unknown form, or a row
+// with an unusable role yields NO events — a bad line must not become a
+// partial or broken bubble.
+func normalizeChatNote(line string, ord int64) []ProviderRuntimeEvent {
+	var env chatNoteEnvelope
+	if err := json.Unmarshal([]byte(line), &env); err != nil {
+		return nil
+	}
+	switch env.Form {
+	case "row":
+		if !chatNoteRoles[env.Role] || env.Text == "" {
+			return nil
+		}
+		return []ProviderRuntimeEvent{{
+			Type:   EvtMessageNote,
+			Role:   env.Role,
+			Text:   env.Text,
+			Images: env.Images,
+		}}
+	case "patch":
+		if env.TurnMs == 0 && len(env.Images) == 0 {
+			// A patch that changes nothing is not an event — same rule as an
+			// empty text delta: nothing downstream should render for it.
+			return nil
+		}
+		return []ProviderRuntimeEvent{{
+			Type:   EvtMessagePatchUser,
+			TurnMs: env.TurnMs,
+			Images: env.Images,
+		}}
+	default:
+		return nil
+	}
 }
