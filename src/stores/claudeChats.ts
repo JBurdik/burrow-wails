@@ -202,15 +202,30 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
       }
     }
     sessions.value = next;
-    // Actors for anything newly seen. Idle is correct: busy is never persisted.
-    sessions.value.forEach(spawnActor);
+    // ONLY for sessions that do not have an actor yet. Spawning
+    // unconditionally re-created every actor on every reload, which reset
+    // every chat's status to idle and orphaned the previous actor without
+    // stopping it — and since a reload now happens on every `chats-changed`,
+    // that meant every chat's dot went blank whenever anything anywhere
+    // touched a chat.
+    for (const s of sessions.value) {
+      if (!actors.has(s.id)) spawnActor(s);
+    }
   }
+
+  // Writes this client has in flight. A `chats-changed` while one is
+  // outstanding is our OWN echo: reloading on it would be a round trip per
+  // save, and sync() saves on every message a streaming turn produces.
+  let selfWrites = 0;
 
   void reload();
   // Both clients follow this, so a chat created anywhere appears everywhere
   // without a reload — which is the whole reason the list moved out of a file
   // each client rewrote wholesale.
-  void listen("chats-changed", () => void reload());
+  void listen("chats-changed", () => {
+    if (selfWrites > 0) return;
+    void reload();
+  });
 
   configReady.then(() => {
     migrateFromLocalStorage(ACTIVE_LEGACY_KEY, ACTIVE_KEY);
@@ -245,10 +260,15 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
    * (`delete_chat`, from remove()).
    */
   function persist() {
-    void invoke("save_chats", { chats: sessions.value.map(rowFromSession) }).catch(() => {
-      // Best effort, same contract setConfig had. The next persist retries
-      // with the latest state, and `chats-changed` re-reads either way.
-    });
+    selfWrites++;
+    void invoke("save_chats", { chats: sessions.value.map(rowFromSession) })
+      .catch(() => {
+        // Best effort, same contract setConfig had. The next persist retries
+        // with the latest state, and `chats-changed` re-reads either way.
+      })
+      .finally(() => {
+        selfWrites--;
+      });
     setConfig(ACTIVE_KEY, activeByWs.value);
   }
 
