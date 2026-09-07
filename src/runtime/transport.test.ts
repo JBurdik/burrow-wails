@@ -289,4 +289,133 @@ describe("createTransport", () => {
     const budgetMs = delays.slice(0, -1).reduce((a, d) => a + d, 0);
     expect(budgetMs).toBeGreaterThan(10_000);
   });
+
+  describe("resume", () => {
+    it("does not resume on the first connection", async () => {
+      // Nothing held means nothing to catch up on; the caller takes a
+      // snapshot instead. Resuming from 0 would only earn a resync.
+      setup();
+      await tick();
+      const ws = FakeWS.instances[0];
+      ws.open();
+      await tick();
+      expect(ws.sent.map((s) => JSON.parse(s).t)).not.toContain("resume");
+    });
+
+    it("resumes from the last seq it saw after a reconnect", async () => {
+      setup();
+      await tick();
+      const first = FakeWS.instances[0];
+      first.open();
+      first.deliver({ t: "shell", events: [{ seq: 12, name: "workspaces-changed" }] });
+
+      first.close();
+      await tick();
+      await tick();
+      const second = FakeWS.instances[FakeWS.instances.length - 1];
+      second.open();
+      await tick();
+
+      const resume = second.sent.map((s) => JSON.parse(s)).find((f) => f.t === "resume");
+      expect(resume?.since).toBe(12);
+    });
+
+    it("resumes from the welcome seq when it never saw an event", async () => {
+      // A client that connects, never snapshots and then drops still has a
+      // position: where the server was when it arrived.
+      setup();
+      await tick();
+      const first = FakeWS.instances[0];
+      first.readyState = 1;
+      first.onopen?.();
+      first.deliver({ t: "welcome", environmentId: "env", scopes: [], seq: 5 });
+
+      first.close();
+      await tick();
+      await tick();
+      const second = FakeWS.instances[FakeWS.instances.length - 1];
+      second.open();
+      await tick();
+
+      const resume = second.sent.map((s) => JSON.parse(s)).find((f) => f.t === "resume");
+      expect(resume?.since).toBe(5);
+    });
+
+    it("delivers shell events to the same listeners a live event uses", async () => {
+      const { t } = setup();
+      await tick();
+      const ws = FakeWS.instances[0];
+      ws.open();
+
+      const seen: unknown[] = [];
+      t.listen("phase-pty:7", (p) => seen.push(p));
+      ws.deliver({ t: "shell", events: [{ seq: 3, name: "phase-pty:7", payload: { state: "done" } }] });
+      expect(seen).toEqual([{ state: "done" }]);
+    });
+
+    it("drops an event it has already seen", async () => {
+      // A reconnect can deliver the same event live and again in the resume's
+      // deltas. Handlers fire sounds and OS notifications, so at-least-once
+      // delivery is not good enough.
+      const { t } = setup();
+      await tick();
+      const ws = FakeWS.instances[0];
+      ws.open();
+
+      const seen: unknown[] = [];
+      t.listen("phase-pty:7", (p) => seen.push(p));
+      ws.deliver({ t: "shell", events: [{ seq: 3, name: "phase-pty:7", payload: 1 }] });
+      ws.deliver({ t: "shell", events: [{ seq: 3, name: "phase-pty:7", payload: 1 }] });
+      ws.deliver({ t: "shell", events: [{ seq: 4, name: "phase-pty:7", payload: 2 }] });
+      expect(seen).toEqual([1, 2]);
+    });
+
+    it("reports a resync so the caller can retake a snapshot", async () => {
+      const { t } = setup();
+      await tick();
+      const ws = FakeWS.instances[0];
+      ws.open();
+
+      let resynced = 0;
+      const off = t.onResync(() => resynced++);
+      ws.deliver({ t: "resync" });
+      expect(resynced).toBe(1);
+
+      off();
+      ws.deliver({ t: "resync" });
+      expect(resynced).toBe(1);
+    });
+
+    it("does not resume from a position the server already rejected", async () => {
+      // After a resync the client holds nothing until it applies a snapshot
+      // and reports its seq. Resuming from the dead position would earn
+      // another resync, forever.
+      const { t } = setup();
+      await tick();
+      const first = FakeWS.instances[0];
+      first.open();
+      first.deliver({ t: "shell", events: [{ seq: 12, name: "workspaces-changed" }] });
+      first.deliver({ t: "resync" });
+
+      first.close();
+      await tick();
+      await tick();
+      let second = FakeWS.instances[FakeWS.instances.length - 1];
+      second.open();
+      await tick();
+      expect(second.sent.map((s) => JSON.parse(s).t)).not.toContain("resume");
+
+      // ...and once the caller has applied a snapshot, that seq is the new
+      // resume point.
+      t.noteSeq(40);
+      second.close();
+      await tick();
+      await tick();
+      second = FakeWS.instances[FakeWS.instances.length - 1];
+      second.open();
+      await tick();
+      const resume = second.sent.map((s) => JSON.parse(s)).find((f) => f.t === "resume");
+      expect(resume?.since).toBe(40);
+    });
+  });
 });

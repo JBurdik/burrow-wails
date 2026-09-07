@@ -18,6 +18,21 @@ export interface Transport {
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   /** Returns an unlisten function. Survives reconnects. */
   listen<T = unknown>(event: string, handler: (payload: T) => void): () => void;
+  /**
+   * Called when the server says the client's position has fallen out of the
+   * replay ring (or the process restarted and the numbering began again).
+   * The only way back is a fresh `shell_snapshot`; the transport cannot take
+   * one itself, since it does not own the read model. Returns an unlisten.
+   */
+  onResync(handler: () => void): () => void;
+  /**
+   * Tell the transport how far the caller's state now reaches — the `seq` of
+   * a snapshot it just applied. Only the caller knows this: a snapshot is one
+   * RPC among many from here, and its result is opaque. Without it a resync
+   * would be followed by a resume from a position the server already said was
+   * gone, i.e. another resync.
+   */
+  noteSeq(seq: number): void;
   close(): void;
 }
 
@@ -74,6 +89,12 @@ export function createTransport(
   // connection, so this map is the routing table and it must outlive a
   // socket — otherwise a reconnect silently stops delivering pty bytes.
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const resyncHandlers = new Set<() => void>();
+  // How far this client's view reaches. Moved forward by every numbered event
+  // and by noteSeq(); never backward, so an out-of-order duplicate cannot
+  // rewind it. 0 means "nothing held", which is what makes a first connection
+  // skip resume and take a snapshot instead.
+  let lastSeq = 0;
 
   function flush() {
     if (!ws || ws.readyState !== 1) return;
@@ -125,6 +146,11 @@ export function createTransport(
         connectFailures = 0;
         unreachable = false;
         backoff.reset();
+        // Ask for the gap BEFORE flushing queued calls, so the deltas the
+        // client missed are read ahead of the replies to calls it makes now.
+        // Skipped on a first connection (lastSeq 0): there is no position to
+        // resume from, and the caller takes a snapshot instead.
+        if (lastSeq > 0) socket.send(JSON.stringify({ t: "resume", since: lastSeq }));
         flush();
       };
       socket.onmessage = (ev: MessageEvent) => handleFrame(String(ev.data));
@@ -165,12 +191,43 @@ export function createTransport(
       return;
     }
     if (frame?.t === "event") {
-      const set = listeners.get(frame.name);
-      if (!set) return;
-      for (const h of set) h(frame.payload);
+      dispatch(frame.name, frame.payload);
       return;
     }
-    // `welcome` needs no handling yet — phase 4 uses its seq to resume.
+    if (frame?.t === "shell") {
+      for (const ev of frame.events ?? []) {
+        // A reconnect can deliver an event both live (the sink fired while
+        // the resume was in flight) and again in the resume's deltas. Drop
+        // anything at or behind where this client already is: handlers fire
+        // notifications and sounds, so "at least once" is not good enough.
+        if (typeof ev?.seq === "number" && ev.seq <= lastSeq) continue;
+        if (typeof ev?.seq === "number") lastSeq = ev.seq;
+        dispatch(ev.name, ev.payload);
+      }
+      return;
+    }
+    if (frame?.t === "resync") {
+      // The caller retakes a snapshot and calls noteSeq with its seq. Until
+      // it does, this client holds nothing resumable.
+      lastSeq = 0;
+      for (const h of resyncHandlers) h();
+      return;
+    }
+    if (frame?.t === "welcome") {
+      // Only as a floor, and only when this client holds nothing: a client
+      // that connects, never snapshots and then drops still resumes from
+      // where the server was when it arrived, rather than from zero.
+      if (lastSeq === 0 && typeof frame.seq === "number") lastSeq = frame.seq;
+      return;
+    }
+  }
+
+  /** One dispatch for live and replayed events alike, so a replayed event and
+   *  a live one cannot diverge. */
+  function dispatch(name: string, payload: unknown) {
+    const set = listeners.get(name);
+    if (!set) return;
+    for (const h of set) h(payload);
   }
 
   void connect();
@@ -203,6 +260,15 @@ export function createTransport(
         set!.delete(h);
         if (set!.size === 0) listeners.delete(event);
       };
+    },
+
+    onResync(handler: () => void): () => void {
+      resyncHandlers.add(handler);
+      return () => resyncHandlers.delete(handler);
+    },
+
+    noteSeq(seq: number) {
+      if (seq > lastSeq) lastSeq = seq;
     },
 
     close() {
