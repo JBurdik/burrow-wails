@@ -26,7 +26,7 @@ func TestPhaseStoreEmitsOnChange(t *testing.T) {
 	t.Cleanup(busReset)
 	busReset()
 	var events []string
-	busSubscribe(func(name string, _ any) { events = append(events, name) })
+	busSubscribe(func(ev shellEvent) { events = append(events, ev.Name) })
 
 	s, _ := newTestStore(t)
 	s.Apply("pty:7", agentphase.Event{Kind: agentphase.HookRunning})
@@ -43,7 +43,7 @@ func TestPhaseStoreSilentOnNoop(t *testing.T) {
 	t.Cleanup(busReset)
 	busReset()
 	var count int
-	busSubscribe(func(string, any) { count++ })
+	busSubscribe(func(shellEvent) { count++ })
 
 	s, _ := newTestStore(t)
 	s.Apply("pty:7", agentphase.Event{Kind: agentphase.HookRunning})
@@ -157,13 +157,13 @@ func TestPhaseStoreConcurrentApplyStaysOrdered(t *testing.T) {
 
 	var mu sync.Mutex
 	var seen []agentphase.Phase
-	busSubscribe(func(name string, payload any) {
-		if name != "phase-pty:7" {
+	busSubscribe(func(ev shellEvent) {
+		if ev.Name != "phase-pty:7" {
 			return
 		}
-		p, ok := payload.(agentphase.Phase)
+		p, ok := ev.Payload.(agentphase.Phase)
 		if !ok {
-			t.Errorf("bus payload is not a Phase: %T", payload)
+			t.Errorf("bus payload is not a Phase: %T", ev.Payload)
 			return
 		}
 		mu.Lock()
@@ -297,8 +297,8 @@ func TestPhaseStoreReplayReemits(t *testing.T) {
 	s.Apply("pty:7", agentphase.Event{Kind: agentphase.HookRunning})
 
 	var replayed int
-	busSubscribe(func(name string, _ any) {
-		if name == "phase-pty:7" {
+	busSubscribe(func(ev shellEvent) {
+		if ev.Name == "phase-pty:7" {
 			replayed++
 		}
 	})

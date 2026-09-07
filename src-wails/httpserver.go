@@ -28,9 +28,11 @@ var wsBroadcaster atomic.Pointer[HTTPServer]
 // access is on. Registered once and never removed: the pointer being nil IS
 // the "remote access is off" state, so the bus needs no unsubscribe.
 func installWSSink() {
-	busSubscribe(func(name string, payload any) {
+	busSubscribe(func(ev shellEvent) {
 		if s := wsBroadcaster.Load(); s != nil {
-			s.Broadcast(name, payload)
+			// The old /ws protocol has no seq and no resume; src/mobile is on
+			// it until phase 6 rewrites that client onto /v2/ws.
+			s.Broadcast(ev.Name, ev.Payload)
 		}
 	})
 }

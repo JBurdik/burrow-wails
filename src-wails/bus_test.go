@@ -7,8 +7,8 @@ func TestBusFansOutToEverySink(t *testing.T) {
 	busReset()
 
 	var a, b []string
-	busSubscribe(func(name string, _ any) { a = append(a, name) })
-	busSubscribe(func(name string, _ any) { b = append(b, name) })
+	busSubscribe(func(ev shellEvent) { a = append(a, ev.Name) })
+	busSubscribe(func(ev shellEvent) { b = append(b, ev.Name) })
 
 	busEmit("workspaces-changed", nil)
 
@@ -28,7 +28,7 @@ func TestBusUnsubscribeRemovesTheSink(t *testing.T) {
 	busReset()
 
 	var got []string
-	unsub := busSubscribe(func(name string, _ any) { got = append(got, name) })
+	unsub := busSubscribe(func(ev shellEvent) { got = append(got, ev.Name) })
 	busEmit("a", nil)
 	unsub()
 	busEmit("b", nil)

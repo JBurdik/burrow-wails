@@ -35,6 +35,12 @@ func recordShellEvent(name string, payload any) shellEvent {
 	if len(shellRing) > shellRingSize {
 		// Drop from the front. Copying keeps the slice's backing array from
 		// growing without bound as it would with a bare reslice.
+		//
+		// ponytail: O(shellRingSize) memmove per insert once full — a ~12 KiB
+		// copy of 512 small structs. Only shell-state events reach here (see
+		// notRingable in bus.go), a handful a minute, so this costs less than
+		// the JSON marshal of the same event; swap in a head/tail circular
+		// index if something high-frequency is ever ringed.
 		copy(shellRing, shellRing[len(shellRing)-shellRingSize:])
 		shellRing = shellRing[:shellRingSize]
 	}

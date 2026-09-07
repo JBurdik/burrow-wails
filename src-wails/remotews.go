@@ -232,7 +232,7 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 	if h.app != nil {
 		envID = h.app.environmentID
 	}
-	out <- welcomeFrame(envID, scopes)
+	out <- welcomeFrame(envID, scopes, currentSeq())
 
 	go func() {
 		ticker := time.NewTicker(pingPeriod)
@@ -260,31 +260,28 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	unsubscribe := busSubscribe(func(name string, payload any) {
+	unsubscribe := busSubscribe(func(ev shellEvent) {
+		// A numbered event travels as a shell frame so the client can record
+		// where it got to; pty-data has no number and stays on the
+		// unnumbered channel.
+		fr := eventFrame(ev.Name, ev.Payload)
+		if ev.Seq > 0 {
+			fr = shellFrame([]shellEvent{ev})
+		}
 		select {
-		case out <- eventFrame(name, payload):
+		case out <- fr:
 		case <-done:
 		default:
 			// Queue full: drop the client rather than block the bus.
 			//
-			// PHASE-4 BLOCKER — this is only safe once resume exists.
-			// Dropping is right for a phone, whose events are a view it can
-			// rebuild. It is harsh for the DESKTOP, which drives the whole
-			// app down this one connection: if the JS main thread stalls
-			// during heavy terminal output the writer wedges, 256 frames
-			// later the server drops the desktop, and with no resume every
-			// event emitted in the gap is simply GONE. Not delayed — gone.
-			// That is a hole in a terminal's scrollback with no reattach to
-			// replay it (pty-data-<id> is emit-once; the daemon's ring
-			// buffer is only replayed on a fresh attach), and phase dots
-			// frozen at whatever they were until the agent's next
-			// transition happens to repaint them.
-			//
-			// The reconnect brings the socket back, which is why this looks
-			// benign in testing; what does not come back is the gap. Until
-			// the welcome frame's seq is used to resume from the server's
-			// backlog, treat a desktop drop here as data loss, not as
-			// backpressure.
+			// Dropping is now recoverable for everything numbered — the
+			// client reconnects, resumes from the seq it last saw, and the
+			// ring hands back the gap (or a resync, if the gap outran 512
+			// events). What is still lost is pty-data, which is not in the
+			// ring on purpose: that is a hole in a terminal's scrollback
+			// with no reattach to replay it, since pty-data-<id> is
+			// emit-once and the daemon's own ring is only replayed on a
+			// fresh attach. Phase dots, workspace and chat events survive.
 			shutdown()
 		}
 	})
@@ -308,6 +305,19 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 			// A malformed frame with no id cannot be replied to; log and
 			// carry on rather than killing a working connection.
 			log.Printf("remote ws: %v", err)
+			continue
+		}
+		if f.T == "resume" {
+			// Answered on the read loop rather than a goroutine: it is a
+			// slice read under one mutex, and running it in order is what
+			// keeps a resume's deltas ahead of the live events that follow.
+			if evs, ok := resumeSince(f.Since); ok {
+				if len(evs) > 0 {
+					sendFrame(out, done, shellFrame(evs))
+				}
+			} else {
+				sendFrame(out, done, resyncFrame())
+			}
 			continue
 		}
 		select {

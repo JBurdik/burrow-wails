@@ -66,7 +66,7 @@ func TestPollIgnoresAChildOfALiveAgent(t *testing.T) {
 	before := s.Get("pty:7")
 
 	var emits int
-	busSubscribe(func(string, any) { emits++ })
+	busSubscribe(func(shellEvent) { emits++ })
 
 	f := &fakePty{sessions: []string{"7"}, fg: map[string]string{"7": "git"}}
 	p := newPhasePoller(s, f.list, f.foreground)

@@ -43,7 +43,7 @@ func TestTicketRejectsUnknown(t *testing.T) {
 
 // dialTestWS starts the handler on a test server and returns a connection
 // that has already consumed the welcome frame.
-func dialTestWS(t *testing.T, app *App) (*websocket.Conn, *httptest.Server) {
+func dialTestWS(t *testing.T, app *App) (*websocket.Conn, serverFrame) {
 	t.Helper()
 	tickets := newTicketStore()
 	h := newRemoteWS(app, tickets)
@@ -67,7 +67,7 @@ func dialTestWS(t *testing.T, app *App) (*websocket.Conn, *httptest.Server) {
 	if welcome.T != "welcome" {
 		t.Fatalf("first frame was %q, want welcome", welcome.T)
 	}
-	return conn, srv
+	return conn, welcome
 }
 
 func TestWSRejectsMissingTicket(t *testing.T) {
@@ -151,8 +151,163 @@ func TestWSForwardsBusEvents(t *testing.T) {
 			t.Fatalf("no event frame arrived: %v", err)
 		}
 	}
-	if f.T != "event" || f.Name != "phase-pty:7" {
-		t.Fatalf("bad event frame: %+v", f)
+	// A ringable event arrives numbered, on the shell channel — that number
+	// is the client's resume position, so an event delivered without one is
+	// an event it can never ask for again.
+	if f.T != "shell" || len(f.Events) != 1 {
+		t.Fatalf("bad shell frame: %+v", f)
+	}
+	if f.Events[0].Name != "phase-pty:7" || f.Events[0].Seq <= 0 {
+		t.Fatalf("bad shell event: %+v", f.Events[0])
+	}
+}
+
+func TestWelcomeCarriesTheCurrentSeq(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	shellStreamReset()
+	recordShellEvent("a", nil)
+	recordShellEvent("b", nil)
+
+	// Without this a reconnecting client's first resume is a guess, and a
+	// first-time client has nothing to guess from at all.
+	_, welcome := dialTestWS(t, &App{})
+	if welcome.Seq != 2 {
+		t.Fatalf("welcome seq %d, want 2", welcome.Seq)
+	}
+}
+
+func TestResumeInsideTheRingSendsTheGap(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	shellStreamReset()
+
+	conn, _ := dialTestWS(t, &App{})
+	first := recordShellEvent("workspaces-changed", nil)
+	second := recordShellEvent("phase-pty:7", map[string]string{"state": "running"})
+
+	// The client says it holds `first`; the gap is everything after it.
+	// Recorded directly rather than via busEmit so no live frame races the
+	// resume reply onto the socket.
+	if err := conn.WriteJSON(clientFrame{T: "resume", Since: first.Seq}); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var f serverFrame
+	if err := conn.ReadJSON(&f); err != nil {
+		t.Fatalf("no frame after resume: %v", err)
+	}
+	if f.T != "shell" {
+		t.Fatalf("want a shell frame, got %q (%+v)", f.T, f)
+	}
+	if len(f.Events) != 1 || f.Events[0].Seq != second.Seq {
+		t.Fatalf("want only the gap (seq %d), got %+v", second.Seq, f.Events)
+	}
+}
+
+func TestResumeBeyondTheRingSendsResync(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	shellStreamReset()
+
+	conn, _ := dialTestWS(t, &App{})
+	for i := 0; i < shellRingSize+5; i++ {
+		recordShellEvent("filler", nil)
+	}
+
+	// seq 1 fell off the front long ago. A partial answer would leave the
+	// client silently missing events, so the only honest reply is "start
+	// over from a snapshot".
+	if err := conn.WriteJSON(clientFrame{T: "resume", Since: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var f serverFrame
+	if err := conn.ReadJSON(&f); err != nil {
+		t.Fatalf("no resync arrived: %v", err)
+	}
+	if f.T != "resync" {
+		t.Fatalf("want resync, got %q (%+v)", f.T, f)
+	}
+}
+
+func TestResumeFromNothingSendsResync(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	shellStreamReset()
+	recordShellEvent("a", nil)
+
+	conn, _ := dialTestWS(t, &App{})
+	// since 0 is a first-time client. It has no position to catch up from,
+	// so it needs a snapshot, not an empty delta it would mistake for
+	// "already up to date".
+	if err := conn.WriteJSON(clientFrame{T: "resume", Since: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var f serverFrame
+	if err := conn.ReadJSON(&f); err != nil {
+		t.Fatalf("no frame after resume: %v", err)
+	}
+	if f.T != "resync" {
+		t.Fatalf("want resync, got %q (%+v)", f.T, f)
+	}
+}
+
+func TestPtyDataIsNotInTheRing(t *testing.T) {
+	// PTY bytes are the hot channel and the daemon replays them on reattach.
+	// Ringing them would flush all 512 slots in a second of noisy output,
+	// taking every phase change and workspace update with them.
+	t.Cleanup(busReset)
+	busReset()
+	shellStreamReset()
+
+	busEmit("pty-data-7", []int{104, 105})
+	if got := currentSeq(); got != 0 {
+		t.Fatalf("pty-data was recorded: seq %d", got)
+	}
+
+	// Chat output is the other half of the rule: high volume AND already
+	// replayable from chat_stream, so ringing it would churn all 512 slots
+	// in one streaming turn and every reconnect would come back a resync.
+	busEmit("claude-data-12", ChatStreamLine{Ord: 1, Kind: "claude-data", Line: "{}"})
+	busEmit("chat-event-12", ChatEventBatch{Ord: 1})
+	busEmit("acp-req-12", ChatStreamLine{Ord: 2, Kind: "acp-req", Line: "{}"})
+	if got := currentSeq(); got != 0 {
+		t.Fatalf("chat output was recorded: seq %d", got)
+	}
+
+	// Shell state is what the ring is for.
+	busEmit("phase-pty:7", nil)
+	busEmit("workspaces-changed", nil)
+	if got := currentSeq(); got != 2 {
+		t.Fatalf("ringable events were not recorded: seq %d", got)
+	}
+}
+
+func TestPtyDataStaysOnTheUnnumberedChannel(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	shellStreamReset()
+	conn, _ := dialTestWS(t, &App{})
+
+	var f serverFrame
+	overall := time.Now().Add(2 * time.Second)
+	for {
+		busEmit("pty-data-7", []int{104, 105})
+		_ = conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		if err := conn.ReadJSON(&f); err == nil {
+			break
+		}
+		if time.Now().After(overall) {
+			t.Fatal("no frame arrived for pty-data")
+		}
+	}
+	if f.T != "event" || f.Name != "pty-data-7" {
+		t.Fatalf("pty-data must stay an unnumbered event frame, got %+v", f)
 	}
 }
 
