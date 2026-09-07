@@ -1706,12 +1706,22 @@ onMounted(async () => {
   // arrive behind configReady — reading before that resolves finds none of them
   // and silently drops every chat thread.
   await configReady;
-  // The sessions ARE the threads — no separate "which tabs were open" list to
-  // fall out of sync (a stale empty one used to hide every thread on restart).
-  // Skip the hidden Manager session and never-used blanks left by older builds.
+  // The sessions ARE the threads — thread = chat = tab, with no separate
+  // "which tabs were open" list to fall out of sync (a stale empty one used to
+  // hide every thread on restart).
+  //
+  // The only skip is the Manager, which is hidden by design (control: true).
+  // There used to be a second one — `!s.claudeSessionId && !s.messageCount`,
+  // meant for "never-used blanks left by older builds" — and it was asking a
+  // question those two fields cannot answer: a brand-new chat looks exactly
+  // like an abandoned one. It hid every chat the user created and did not
+  // immediately talk to (visible until the next restart, then gone), and it
+  // hid every chat created from the phone, which by definition has no session
+  // id and no messages yet. An empty thread showing up empty is correct;
+  // clutter is what `isSettled` is for, and an untouched one settles on its
+  // own after AUTO_SETTLE_AFTER_DAYS.
   for (const s of chatsStore.sessionsForWs(props.workspaceId)) {
     if (s.control) continue;
-    if (!s.claudeSessionId && !s.messageCount) continue;
     openClaudeChat(s.id);
   }
 

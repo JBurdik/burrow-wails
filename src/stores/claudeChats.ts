@@ -49,6 +49,30 @@ export interface ClaudeSession {
   branch?: string;
 }
 
+/** t3code's own default for "Days of inactivity before auto-settle"
+ *  (`sf.sidebarAutoSettleAfterDays ?? 3` in its settings panel). */
+export const AUTO_SETTLE_AFTER_DAYS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a chat needs no more attention right now. Ported from t3code's
+ * settle decision: pending work always wins (not settled), then a manual pin,
+ * then — only past AUTO_SETTLE_AFTER_DAYS of inactivity — auto-settled. A chat
+ * that just finished is NOT settled yet; it ages into the shelf.
+ *
+ * Module-level and `now`-injected so it is testable without a store, which
+ * matters more since Terminal.vue stopped filtering empty chats out of the
+ * restore: this is now the only thing keeping an untouched chat from sitting
+ * in the active list forever.
+ */
+export function settledFor(s: ClaudeSession | undefined, now: number): boolean {
+  if (!s) return false;
+  if (s.busy || s.status === "running" || s.status === "waiting" || s.status === "permission") return false;
+  if (s.settledOverride === "settled") return true;
+  if (s.settledOverride === "active") return false;
+  return now - (s.lastActivityAt ?? 0) >= AUTO_SETTLE_AFTER_DAYS * DAY_MS;
+}
+
 /**
  * The chat LIST lives in SQLite and Go owns it (src-wails/chats.go). There is
  * no `chatSessions` key and no `chatIdCounter` any more: both clients were
@@ -410,22 +434,8 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     persist();
   }
 
-  // t3code's own default for "Days of inactivity before auto-settle"
-  // (`sf.sidebarAutoSettleAfterDays ?? 3` in its settings panel).
-  const AUTO_SETTLE_AFTER_DAYS = 3;
-  const DAY_MS = 24 * 60 * 60 * 1000;
-
-  // Whether a chat needs no more attention right now. Ported from t3code's
-  // settle decision: pending work always wins (not settled), then a manual
-  // pin, then — only past AUTO_SETTLE_AFTER_DAYS of inactivity — auto-settled.
-  // A chat that just finished is NOT settled yet; it ages into the shelf.
   function isSettled(s: ClaudeSession | undefined): boolean {
-    if (!s) return false;
-    if (s.busy || s.status === "running" || s.status === "waiting" || s.status === "permission") return false;
-    if (s.settledOverride === "settled") return true;
-    if (s.settledOverride === "active") return false;
-    const last = s.lastActivityAt ?? 0;
-    return Date.now() - last >= AUTO_SETTLE_AFTER_DAYS * DAY_MS;
+    return settledFor(s, Date.now());
   }
 
   // Turn event tracking for 5-hour usage window.
