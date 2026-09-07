@@ -4,7 +4,11 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
+	"time"
+
+	"burrow/internal/agentphase"
 )
 
 // Live chat stream log. Phase 1 of docs/plans/003-view-state-routes.md.
@@ -315,6 +319,9 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 					a.phases.Apply("chat:"+chatID, pev)
 				}
 			}
+			if a.phases.Get("chat:"+chatID).State == agentphase.Running {
+				a.clearSettledOverrideOnRunning(chatID)
+			}
 		}
 
 		// Fold the SAME events into the server-owned transcript
@@ -322,6 +329,39 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 		// keeps NormalizeChatLine at one call per line: two readings of the
 		// same line that had to agree anyway.
 		a.foldChatLine(chatID, ord, events)
+	}
+}
+
+// clearSettledOverrideOnRunning drops a stale "settled" pin the moment a chat
+// re-enters Running. This used to be exclusively client-side (claudeChats.ts's
+// sync(), which clears its LOCAL settledOverride on a "running" patch) — fine
+// while only the desktop existed, but that only fires when SOME desktop
+// AgentChat.vue instance has that exact chat mounted to receive the patch. A
+// turn driven from the phone, or from a desktop that simply isn't looking at
+// this chat, never clears it, so a chat pinned "settled" earlier stays parked
+// in the Settled shelf forever even while it is actively streaming — it does
+// not vanish, it is just buried where nobody looks. Doing it here means every
+// activity path (phone, desktop, hook-driven) unsettles the same shared row.
+//
+// last_activity_at moves together with the override, same as sync()'s
+// `s.lastActivityAt = Date.now()` alongside its own clear: settledFor()'s
+// fallback re-settles by age once the override no longer forces true, so
+// clearing the override without a fresh timestamp would just trade one
+// permanently-settled reason for another the instant a client reloads the
+// list — the row would look untouched in years to whichever client asks.
+func (a *App) clearSettledOverrideOnRunning(chatID string) {
+	id, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return
+	}
+	res, err := a.db.Exec(`UPDATE chats SET settled_override = '', last_activity_at = ? WHERE id = ? AND settled_override = 'settled'`,
+		time.Now().UnixMilli(), id)
+	if err != nil {
+		log.Printf("clear settled override for chat %d: %v", id, err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		busEmit("chats-changed", nil)
 	}
 }
 

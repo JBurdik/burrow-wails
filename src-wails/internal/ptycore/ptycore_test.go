@@ -51,3 +51,30 @@ func TestForegroundUnknownPtyIsAnError(t *testing.T) {
 		t.Fatal("want an error for an unknown pty id")
 	}
 }
+
+// A reattach (app restart, dev hot-reload, a reused id) calls Create again for
+// an id that already has a live session. It must be a no-op: spawning a second
+// shell under the same id would leak the first one — orphaned in no map entry,
+// unreachable by Kill, its pty device never freed.
+func TestCreateOnLiveIdDoesNotLeakTheOldSession(t *testing.T) {
+	m := NewManager(nopEvents{})
+	if err := m.Create("t1", t.TempDir(), 80, 24, nil); err != nil {
+		t.Skipf("cannot allocate a pty here: %v", err)
+	}
+	defer m.Kill("t1")
+
+	first, _ := m.get("t1")
+	firstPID := first.cmd.Process.Pid
+
+	if err := m.Create("t1", t.TempDir(), 80, 24, nil); err != nil {
+		t.Fatalf("reattach Create: %v", err)
+	}
+
+	second, ok := m.get("t1")
+	if !ok {
+		t.Fatal("session vanished after reattach Create")
+	}
+	if second.cmd.Process.Pid != firstPID {
+		t.Fatalf("reattach spawned a new shell (pid %d -> %d), leaking the old one", firstPID, second.cmd.Process.Pid)
+	}
+}

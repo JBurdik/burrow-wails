@@ -63,8 +63,29 @@ func newRemoteAuth(app *App, tickets *ticketStore) *remoteAuth {
 }
 
 func (a *remoteAuth) register(mux *http.ServeMux) {
-	mux.HandleFunc("/v2/pair", a.handlePair)
-	mux.HandleFunc("/v2/ws-ticket", a.handleWSTicket)
+	mux.HandleFunc("/v2/pair", withCORS(a.handlePair))
+	mux.HandleFunc("/v2/ws-ticket", withCORS(a.handleWSTicket))
+}
+
+// withCORS lets these two answer a caller on a different origin — the phone
+// never needed this (it loads the PWA shell from this same host, so pairing
+// is same-origin by construction), but the desktop app is its own origin
+// (Wails' asset server, or wails:// in a built app) pairing OUT to some other
+// Burrow's address, which makes this a genuinely cross-origin fetch. The
+// security boundary here is the pairing code / device token, never the
+// origin, so opening it is not weakening anything — same reasoning as the
+// PWA shell and /healthz being unauthenticated on purpose.
+func withCORS(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // randomPairDigits returns six uniformly random digits. Deliberately NOT

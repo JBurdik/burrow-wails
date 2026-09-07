@@ -705,6 +705,7 @@ import { useUIStore, type NtfyEvent } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 
 function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string);
@@ -1985,18 +1986,6 @@ function scrollToBottom(force = false) {
   });
 }
 
-// Auto-title helpers
-const FILLER_PREFIX = /^(can you |please |i want (you )?to |how (do i|to) |what (is|are) (the |a )?|could you |would you |help me |i need (you )?to )/i;
-function smartTitle(text: string): string {
-  const clean = text.replace(FILLER_PREFIX, "").replace(/\s+/g, " ").trim();
-  const words = clean.split(" ");
-  const slug = words.slice(0, 6).join(" ");
-  const title = slug.charAt(0).toUpperCase() + slug.slice(1);
-  return title.length < clean.length ? title + "…" : title;
-}
-function isDefaultTitle(title: string): boolean {
-  return /^Chat(\s+\d+)?$/.test(title.trim());
-}
 // Upgrade the heuristic title with a model-written one (headless `claude -p`,
 // same cheap model as the commit-message button). Fire-and-forget: the
 // heuristic title is already on screen, so a failure or a slow answer costs

@@ -16,7 +16,7 @@ import {
   SendFloatSnapshot,
 } from "../../../src-wails/frontend/wailsjs/go/main/App";
 import { createTransport, type Transport } from "@/runtime/transport";
-import { loadRemoteCredentials, remoteEndpointSource } from "@/runtime/remoteEndpoint";
+import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource } from "@/runtime/remoteEndpoint";
 
 type Args = Record<string, any>;
 
@@ -82,7 +82,16 @@ export function remoteTransport(): Transport {
 
 /** Which transport this context can use, or null before pairing. */
 function activeTransport(): Transport | null {
-  if (hasWailsRuntime()) return desktopTransport();
+  if (hasWailsRuntime()) {
+    // A desktop window is always in-process to ITS OWN backend, but the
+    // point of pairing one to a remote Burrow (Settings → Remote access →
+    // "Connect to another Burrow") is that the window drives that machine
+    // instead. desktopUsesRemote() is the switch; without paired credentials
+    // to back it up, fall back to local rather than throw "not paired" at a
+    // window that has a perfectly good backend one call away.
+    if (desktopUsesRemote() && loadRemoteCredentials()) return remoteTransport();
+    return desktopTransport();
+  }
   if (loadRemoteCredentials()) return remoteTransport();
   return null;
 }

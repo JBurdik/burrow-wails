@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -165,4 +166,33 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind string) (map[string]
 	}
 
 	return remoteChatShape(chat, names, paths), nil
+}
+
+// RemoteSetChatTitle upgrades a chat's title from the phone — first the cheap
+// local heuristic off the prompt, then (fire-and-forget) the model-written one
+// from generate_chat_title, mirroring AgentChat.vue's smartTitle→refineTitle
+// two-step. expectTitle is a compare-and-swap: only replace the title this
+// caller actually saw, so a slower of two concurrent refinements (or a real
+// rename, once one exists) cannot stomp on a newer title with a stale one.
+//
+// Deliberately narrower than save_chats: that upserts a full desktop-shaped
+// Chat row, and RemoteListChats's shape the phone actually holds never carries
+// pinned_title/branch/model/settled_override/control — building a full row
+// from what the phone has would silently blank every one of them.
+func (a *App) RemoteSetChatTitle(id int64, title, expectTitle string) error {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return fmt.Errorf("title must not be empty")
+	}
+	res, err := a.db.Exec(
+		`UPDATE chats SET title = ? WHERE id = ? AND pinned_title = 0 AND title = ?`,
+		title, id, expectTitle,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		busEmit("chats-changed", nil)
+	}
+	return nil
 }

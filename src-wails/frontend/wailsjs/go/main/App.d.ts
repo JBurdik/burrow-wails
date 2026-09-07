@@ -172,6 +172,8 @@ export function PickFiles(arg1:string,arg2:Array<string>):Promise<Array<string>>
 
 export function ProbeProvider(arg1:string,arg2:string):Promise<main.ProviderProbe>;
 
+export function PublishChatNote(arg1:string,arg2:string):Promise<void>;
+
 export function ReadClaudeActivity(arg1:string,arg2:string):Promise<string>;
 
 export function ReadClaudeTranscript(arg1:string,arg2:string):Promise<Array<string>>;
@@ -203,6 +205,8 @@ export function RemoteListChats():Promise<Array<Record<string, any>>>;
 export function RemotePairStatus():Promise<main.PairStatus>;
 
 export function RemoteRegeneratePairCode():Promise<main.PairStatus>;
+
+export function RemoteSetChatTitle(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function RemoteSyncChat(arg1:Record<string, any>):Promise<void>;
 

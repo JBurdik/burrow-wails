@@ -243,6 +243,23 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 			writeJSONFileResponse(w, a.ControlVerbs())
 			return
 		}
+		// Pairing lives outside the Deps-based verb registry (RemotePairStatus/
+		// RemoteRegeneratePairCode need a.remoteAuth, which control.Deps has no
+		// business knowing about — it's git/exec/worktree shaped). Special-cased
+		// here, same as _verbs above, rather than widening Deps for two calls.
+		//
+		// This is what makes a headless deployment pairable at all: the code
+		// only ever lived in Settings, which is a window. `burrow pair-status`/
+		// `burrow pair-regenerate` reach it from a bare SSH session instead —
+		// the only "screen" a VPS operator has.
+		if verb == "pair_status" {
+			writeJSONFileResponse(w, a.RemotePairStatus())
+			return
+		}
+		if verb == "pair_regenerate" {
+			writeJSONFileResponse(w, a.RemoteRegeneratePairCode())
+			return
+		}
 
 		var params control.Params
 		if err := json.NewDecoder(r.Body).Decode(&params); err != nil && err.Error() != "EOF" {

@@ -12,6 +12,7 @@ import {
 import { displayStatus, type Phase } from "@/runtime/displayStatus";
 import type { TermStatus } from "@/lib/terminalStatus";
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
+import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 
 // The phone runs on the SAME transport, the same command table and the same
 // event names as the desktop (src/runtime/transport.ts, src-wails/remoteapi.go).
@@ -646,23 +647,101 @@ export const useRemoteStore = defineStore("remote", () => {
     view.value = "dashboard";
   }
 
+  // Mirrors AgentChat.vue's smartTitle→refineTitle: a cheap local heuristic
+  // the instant the first prompt goes out, then (fire-and-forget) a
+  // model-written upgrade from generate_chat_title. Only ever touches a
+  // still-default "Chat N"/"Chat N (phone)" title — a chat someone already
+  // named (by hand, once renaming exists, or an earlier refine) is left
+  // alone. remote_set_chat_title's expectTitle is a compare-and-swap: it
+  // only replaces the title this call actually saw, so a second send fired
+  // before the first refine lands can't stomp a newer title with a stale one.
+  async function autoTitleChat(chat: RemoteChat, prompt: string) {
+    if (!transport || !isDefaultTitle(chat.title)) return;
+    const heuristic = smartTitle(prompt);
+    const priorTitle = chat.title;
+    try {
+      await transport.invoke("remote_set_chat_title", { id: chat.id, title: heuristic, expectTitle: priorTitle });
+    } catch {
+      return;
+    }
+    chat.title = heuristic;
+
+    const cwd = workspaces.value.find((w) => w.id === chat.workspaceId)?.path ?? "";
+    let refined = "";
+    try {
+      refined = await transport.invoke<string>("generate_chat_title", { cwd, model: "", policy: "", text: prompt });
+    } catch {
+      return;
+    }
+    if (!refined || refined === heuristic) return;
+    try {
+      await transport.invoke("remote_set_chat_title", { id: chat.id, title: refined, expectTitle: heuristic });
+    } catch {
+      return;
+    }
+    if (chat.title === heuristic) chat.title = refined;
+  }
+
   async function sendChat(text: string) {
     const chat = activeChat.value;
     if (!transport || !chat || !text.trim() || chat.busy) return;
     const prompt = text.trim();
     chat.messages.push({ id: Date.now(), role: "user", text: prompt });
+    void autoTitleChat(chat, prompt);
     // Claim the echo before the call goes out, or a fast round trip lands
     // user.delta while we are still awaiting and draws a second bubble.
     pendingSends.add(prompt);
     chat.busy = true;
     try {
       if (chat.transport === "claude-cli") {
+        // AgentChat.vue's onMounted does this before ever sending; the phone
+        // never mounts that component, so an older chat whose Go-side process
+        // already exited (ReapIdle, or simply never spawned by this backend)
+        // sent straight into agentproc.Manager.Send with nothing registered —
+        // "unknown agent session" while the prompt still broadcast fine,
+        // because ClaudeSend publishes it before writing to stdin. ClaudeStart
+        // is a no-op if the session is already alive, so this is safe on
+        // every send, not just the first.
+        // ponytail: passes only cwd + resumeSessionId, not the chat's actual
+        // model/permission/profile config (mobile doesn't have it) — fine
+        // for a resume, would under-configure a process this backend never
+        // started at all. Thread real chat config through if that matters.
+        await transport.invoke("claude_start", {
+          id: String(chat.id),
+          cwd: workspaces.value.find((w) => w.id === chat.workspaceId)?.path ?? "",
+          resumeSessionId: chat.claudeSessionId || "",
+          permissionMode: "",
+          appendSystemPrompt: "",
+          model: "",
+          effort: "",
+          configDir: "",
+          profileCommand: "",
+          profileArgs: "",
+        });
         await transport.invoke("claude_send", {
           id: String(chat.id),
           text: text.trim(),
           sessionId: chat.claudeSessionId || null,
         });
       } else {
+        // Same class of bug as claude-cli above, reproduced against a live
+        // backend: an old codex-app-server chat with no process registered
+        // failed acp_send with "acp adapter not running". CodexStart resolves
+        // its own binary (resolveAgentBin("codex", cwd)) and is a no-op if
+        // already alive, so — unlike generic "acp" below — it needs nothing
+        // mobile doesn't already have.
+        // ponytail: plain "acp" transport (custom adapters) is NOT covered —
+        // AcpStart needs the adapter's command/args/kind, which only lives in
+        // the desktop's per-project agent config. Thread that through if a
+        // custom-adapter chat needs mobile resume too.
+        if (chat.transport === "codex-app-server") {
+          await transport.invoke("codex_start", {
+            id: String(chat.id),
+            cwd: workspaces.value.find((w) => w.id === chat.workspaceId)?.path ?? "",
+            env: {},
+            resumeSessionId: chat.claudeSessionId || "",
+          });
+        }
         await transport.invoke("acp_send", { id: String(chat.id), text: text.trim() });
       }
     } catch (e: any) {

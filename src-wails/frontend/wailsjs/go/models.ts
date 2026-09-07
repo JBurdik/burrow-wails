@@ -156,6 +156,9 @@ export namespace main {
 	    message?: string;
 	    title?: string;
 	    sessionId?: string;
+	    role?: string;
+	    images?: string[];
+	    turnMs?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProviderRuntimeEvent(source);
@@ -177,6 +180,9 @@ export namespace main {
 	        this.message = source["message"];
 	        this.title = source["title"];
 	        this.sessionId = source["sessionId"];
+	        this.role = source["role"];
+	        this.images = source["images"];
+	        this.turnMs = source["turnMs"];
 	    }
 	}
 	export class ChatEventBatch {

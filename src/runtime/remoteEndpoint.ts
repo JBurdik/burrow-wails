@@ -74,6 +74,25 @@ export function clearRemoteCredentials(): void {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+// Desktop-only: whether THIS window should drive a paired remote environment
+// instead of its own in-process backend. The phone has no such switch — it is
+// never anything but remote — but the desktop's whole point today is that it
+// always has a local backend to fall back to, and pairing one does not mean
+// abandoning that. core.ts's activeTransport() reads this to decide between
+// desktopTransport() and remoteTransport() when Wails runtime is present;
+// outside Wails (the phone) this is never consulted at all.
+const DESKTOP_USE_REMOTE_KEY = "burrow.desktop.useRemote";
+
+export function desktopUsesRemote(): boolean {
+  return typeof localStorage !== "undefined" && localStorage.getItem(DESKTOP_USE_REMOTE_KEY) === "1";
+}
+
+export function setDesktopUsesRemote(v: boolean): void {
+  if (typeof localStorage === "undefined") return;
+  if (v) localStorage.setItem(DESKTOP_USE_REMOTE_KEY, "1");
+  else localStorage.removeItem(DESKTOP_USE_REMOTE_KEY);
+}
+
 /** Strips a trailing slash so joining a path never produces a double one. */
 export function normalizeBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/, "");

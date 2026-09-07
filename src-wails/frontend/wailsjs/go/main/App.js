@@ -342,6 +342,10 @@ export function ProbeProvider(arg1, arg2) {
   return window['go']['main']['App']['ProbeProvider'](arg1, arg2);
 }
 
+export function PublishChatNote(arg1, arg2) {
+  return window['go']['main']['App']['PublishChatNote'](arg1, arg2);
+}
+
 export function ReadClaudeActivity(arg1, arg2) {
   return window['go']['main']['App']['ReadClaudeActivity'](arg1, arg2);
 }
@@ -404,6 +408,10 @@ export function RemotePairStatus() {
 
 export function RemoteRegeneratePairCode() {
   return window['go']['main']['App']['RemoteRegeneratePairCode']();
+}
+
+export function RemoteSetChatTitle(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RemoteSetChatTitle'](arg1, arg2, arg3);
 }
 
 export function RemoteSyncChat(arg1) {

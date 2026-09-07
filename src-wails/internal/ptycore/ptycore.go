@@ -53,6 +53,18 @@ func defaultShell() string {
 // create_pty(id: u32, cwd, cols, rows, ...) — the backend never generates
 // the id or picks the shell from JS args).
 func (m *Manager) Create(id, cwd string, cols, rows uint16, env []string) error {
+	// A live session under this id already exists — the caller is reattaching
+	// (app restart, dev hot-reload, a reused id), not asking for a fresh shell.
+	// Spawning unconditionally here would orphan the running one: pump() would
+	// keep blocking on the old fd forever, m.sessions[id] would point only at
+	// the new session, and KillPty could never reach the old process or pty
+	// again. Reattach is a no-op — the existing pump goroutine is already
+	// broadcasting this session's output to every daemon client, including a
+	// freshly (re)connected one.
+	if _, ok := m.get(id); ok {
+		return nil
+	}
+
 	c := exec.Command(defaultShell(), "-l")
 	if cwd != "" {
 		c.Dir = cwd

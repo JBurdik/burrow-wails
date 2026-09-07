@@ -139,6 +139,25 @@
             <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Private tunnel</span>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
             <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ tailscaleStatus.serve_url }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then type the pairing code above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
+
+            <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Connect to another Burrow</span>
+            <p class="m-0 text-[11px] leading-relaxed text-muted-foreground">This window is a client, not just a host — pair it to a Burrow running elsewhere (a VPS, another machine) and drive that one instead. Get its address and a pairing code from <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow pair-status</code> on that machine, or its own Settings above.</p>
+            <div v-if="!desktopRemoteCreds" class="flex flex-col gap-2 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-2">
+                <input v-model="remoteConnectUrl" type="text" placeholder="https://host.tailnet.ts.net/burrow" class="min-w-0 flex-1 rounded border border-border bg-base px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50" />
+                <input v-model="remoteConnectCode" type="text" inputmode="numeric" maxlength="6" placeholder="123456" class="w-[100px] rounded border border-border bg-base px-2.5 py-1.5 text-center font-mono text-[13px] tracking-[0.15em] text-foreground outline-none placeholder:text-muted-foreground/50" />
+                <Button variant="outline" size="sm" type="button" :disabled="remoteConnecting || !remoteConnectUrl.trim() || remoteConnectCode.trim().length !== 6" @click="onConnectRemote">{{ remoteConnecting ? "Connecting…" : "Connect" }}</Button>
+              </div>
+              <span v-if="remoteConnectError" class="text-[11px] text-red-400">{{ remoteConnectError }}</span>
+            </div>
+            <div v-else class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="truncate text-[13px] font-medium text-foreground">{{ desktopRemoteCreds.baseUrl }}</span>
+                <span class="text-[11px] text-muted-foreground">{{ desktopUsesRemoteNow ? "This window is driving that machine right now." : "Paired, but this window is still driving this Mac." }}</span>
+              </div>
+              <Switch :checked="desktopUsesRemoteNow" @update:checked="onToggleDesktopRemote" />
+              <Button variant="outline" size="sm" type="button" @click="onForgetRemote">Forget</Button>
+            </div>
           </div>
         </section>
 
@@ -1075,6 +1094,14 @@ import { eventToShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
 import { effortLabel, effortsFor, ensureModels, modelsFor, parseTextGenerationValue, textGenerationValue } from "@/lib/chatModels";
+import {
+  clearRemoteCredentials,
+  desktopUsesRemote,
+  loadRemoteCredentials,
+  pairDevice,
+  setDesktopUsesRemote,
+  type RemoteCredentials,
+} from "@/runtime/remoteEndpoint";
 
 defineEmits<{ close: [] }>();
 
@@ -1764,6 +1791,51 @@ function relativeSeen(ms: number): string {
 
 refreshHttpStatus();
 refreshPairing();
+
+// "Connect to another Burrow" — the desktop AS a remote client, not a host.
+// Separate credential store from the phone's (both just localStorage under
+// their own key), separate concern from the pairing/devices block above:
+// that section is about OTHER devices pairing to THIS Mac; this one is about
+// THIS window driving a DIFFERENT Burrow instead.
+const remoteConnectUrl = ref("");
+const remoteConnectCode = ref("");
+const remoteConnectError = ref<string | null>(null);
+const remoteConnecting = ref(false);
+const desktopRemoteCreds = ref<RemoteCredentials | null>(loadRemoteCredentials());
+const desktopUsesRemoteNow = ref(desktopUsesRemote());
+
+async function onConnectRemote() {
+  remoteConnectError.value = null;
+  remoteConnecting.value = true;
+  try {
+    const creds = await pairDevice(remoteConnectUrl.value, remoteConnectCode.value, "Desktop", "desktop");
+    desktopRemoteCreds.value = creds;
+    remoteConnectUrl.value = "";
+    remoteConnectCode.value = "";
+  } catch (e) {
+    remoteConnectError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    remoteConnecting.value = false;
+  }
+}
+
+function onForgetRemote() {
+  clearRemoteCredentials();
+  setDesktopUsesRemote(false);
+  desktopRemoteCreds.value = null;
+  desktopUsesRemoteNow.value = false;
+}
+
+// Switching which backend this window talks to needs a fresh load: core.ts's
+// desktopTransport()/remoteTransport() are cached module-level singletons, and
+// every mounted view already holds a socket from whichever one was active at
+// boot. Reloading is the same "restart to apply" contract the HTTP/WS toggle
+// above already asks for, not a special case invented for this one.
+function onToggleDesktopRemote(checked: boolean) {
+  setDesktopUsesRemote(checked);
+  desktopUsesRemoteNow.value = checked;
+  window.location.reload();
+}
 
 interface TailscaleStatus {
   installed: boolean;

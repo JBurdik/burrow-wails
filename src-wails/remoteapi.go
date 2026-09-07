@@ -444,8 +444,9 @@ var remoteAllowed = map[string]remoteCmd{
 	// it `agentKind` here matches both the Go signature and the one real
 	// caller.
 	"remote_sync_chat":   {Method: "RemoteSyncChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
-	"remote_list_chats":  {Method: "RemoteListChats", Args: nil, Scope: scopeOrchRead},
-	"remote_create_chat": {Method: "RemoteCreateChat", Args: []string{"workspaceId", "agentKind"}, Scope: scopeOrchOperate},
+	"remote_list_chats":     {Method: "RemoteListChats", Args: nil, Scope: scopeOrchRead},
+	"remote_create_chat":    {Method: "RemoteCreateChat", Args: []string{"workspaceId", "agentKind"}, Scope: scopeOrchOperate},
+	"remote_set_chat_title": {Method: "RemoteSetChatTitle", Args: []string{"id", "title", "expectTitle"}, Scope: scopeOrchOperate},
 
 	// The frontend's answer to a control:action event (controlapi.go's
 	// UIBridge blocks on it). It was in remoteDenied as "not a client call",
