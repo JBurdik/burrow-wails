@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 
@@ -36,10 +37,25 @@ func (a *App) lsp() *lspManager {
 }
 
 func (a *App) LspStart(id, command string, args []string, cwd string) error {
-	c := exec.Command(command, args...)
+	// A GUI-launched .app inherits a bare /usr/bin:/bin:/usr/sbin:/sbin PATH,
+	// so a bare "gopls"/"typescript-language-server"/etc. installed via
+	// Homebrew, ~/.local/bin or node_modules/.bin would fail to exec here —
+	// the exact PATH problem resolveAgentBin+augmentedPath exist for
+	// (claudechat.go), used already by RunGh. Resolve the binary the same
+	// way, falling back to the bare name so a PATH that genuinely does
+	// contain it (wails dev, a shell-launched build) keeps working.
+	bin := command
+	if resolved := resolveAgentBin(command, cwd); resolved != "" {
+		bin = resolved
+	}
+	c := exec.Command(bin, args...)
 	if cwd != "" {
 		c.Dir = cwd
 	}
+	// The server itself may shell out (gopls to `go`/`gofmt`, eslint to a
+	// linter plugin, …), so it needs the augmented PATH in its own
+	// environment too, not just a resolved argv[0].
+	c.Env = append(os.Environ(), "PATH="+augmentedPath(cwd))
 	stdin, err := c.StdinPipe()
 	if err != nil {
 		return err
