@@ -474,8 +474,10 @@ var remoteAllowed = map[string]remoteCmd{
 	// authenticating as a fully-privileged remote client, or to pairing
 	// another device. A read-scoped session must not be able to escalate to
 	// that just by asking for "status".
+	// Still access:write rather than access:read even though the reply no
+	// longer carries a token: the port and the on/off state are the shape of
+	// the access surface, and a paired device has no reason to read it.
 	"get_http_server_status": {Method: "GetHttpServerStatus", Args: nil, Scope: scopeAccessWrite},
-	"regenerate_pair_code":   {Method: "RegeneratePairCode", Args: nil, Scope: scopeAccessWrite},
 	"get_tailscale_status":   {Method: "GetTailscaleStatus", Args: nil, Scope: scopeAccessRead},
 	"set_tailscale_serve":    {Method: "SetTailscaleServe", Args: []string{"enabled", "port"}, Scope: scopeAccessWrite},
 	"set_http_enabled":       {Method: "SetHttpEnabled", Args: []string{"enabled"}, Scope: scopeAccessWrite},

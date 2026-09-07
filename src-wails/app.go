@@ -128,10 +128,10 @@ func (a *App) setHttpEnabled(enabled bool) error {
 		if funnel() {
 			return fmt.Errorf("remote access refused: `tailscale funnel` is on for this node, which would publish Burrow on the public internet. Turn funnel off (`tailscale funnel off`) and try again")
 		}
+		// No bus sink to publish any more: a remote client subscribes to the
+		// bus through its own /v2/ws connection, exactly like the desktop's,
+		// so there is nothing for this listener to fan out.
 		a.httpSrv = NewHTTPServer(a)
-		// Publish it so the WS sink (installWSSink) fans bus events out
-		// to browser clients too.
-		wsBroadcaster.Store(a.httpSrv)
 		srv := a.httpSrv
 		go func() {
 			// The very addr assertLoopbackAddr just cleared — not a second
@@ -141,7 +141,6 @@ func (a *App) setHttpEnabled(enabled bool) error {
 			}
 		}()
 	} else {
-		wsBroadcaster.Store(nil)
 		// Actually close the listener. "Remote access: off" that leaves the
 		// port open until the next restart is not off.
 		if a.httpSrv != nil {
@@ -157,38 +156,19 @@ func (a *App) setHttpEnabled(enabled bool) error {
 
 // HttpServerStatus mirrors Settings.vue's local httpStatus shape exactly
 // (camelCase — that's what the original Rust command actually returned).
+// HttpServerStatus is what Settings reads to render the remote-access block.
+//
+// There is no Token field any more. The shared http.token is gone (phase 6):
+// every device has its own, none of them is readable after pairing, and the
+// pairing code lives in RemotePairStatus. A field here that showed a
+// credential was also a credential in a screenshot.
 type HttpServerStatus struct {
-	Enabled   bool   `json:"enabled"`
-	Port      int    `json:"port"`
-	TokenPath string `json:"tokenPath"`
-	Token     string `json:"token"`
-	// PairCode is the six-digit code the phone types on the Connect screen.
-	// Empty while pairing is locked out after too many wrong guesses.
-	PairCode   string `json:"pairCode"`
-	PairLocked bool   `json:"pairLocked"`
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port"`
 }
 
 func (a *App) GetHttpServerStatus() HttpServerStatus {
-	dataDir, _ := appDataDir()
-	s := HttpServerStatus{
-		Enabled:   a.httpSrvRunning,
-		Port:      httpServerPort,
-		TokenPath: filepath.Join(dataDir, "http.token"),
-	}
-	if a.httpSrv != nil {
-		s.Token = a.httpSrv.token
-		s.PairCode = a.httpSrv.PairCode()
-		s.PairLocked = s.PairCode == ""
-	}
-	return s
-}
-
-// RegeneratePairCode issues a fresh pairing code and clears the lockout.
-func (a *App) RegeneratePairCode() string {
-	if a.httpSrv == nil {
-		return ""
-	}
-	return a.httpSrv.RegeneratePairCode()
+	return HttpServerStatus{Enabled: a.httpSrvRunning, Port: httpServerPort}
 }
 
 func NewApp() *App {
@@ -207,7 +187,19 @@ func (a *App) startup(ctx context.Context) {
 	// remotews.handle. Feeding the webview as well marshalled every bus event
 	// -- including every pty-data-<id> chunk -- across the JS bridge for no
 	// consumer, on top of the copy the socket already delivers.
-	installWSSink()
+	// The bus has exactly ONE sink now: remotews.handle's per-connection
+	// subscription. It is still the single door for every event a client may
+	// care about — what went away is the second delivery path, not the door.
+	//
+	// The v1 tailnet broadcaster is gone with the client that needed it, and
+	// there is deliberately no bus -> Wails-runtime sink either: every src/
+	// subscription that is not one of the desktop-only names (menu-*,
+	// lsp-msg-*, float-*, extension-task:*, update:*, all emitted with
+	// runtime.EventsEmit directly and on events_test.go's allowlist) goes
+	// through src/lib/wailsCompat/event.ts to the socket, and the desktop's
+	// own connection subscribes for itself. Feeding the webview as well
+	// marshalled every bus event — including every pty-data-<id> chunk —
+	// across the JS bridge for no consumer.
 
 	dataDir, err := appDataDir()
 	if err != nil {
@@ -264,6 +256,16 @@ func (a *App) startup(ctx context.Context) {
 	go a.reapIdleAgents()
 
 	a.initControl(dataDir)
+
+	// Hard cutover (spec §4): the shared tailnet token is deleted rather than
+	// migrated. A token with no scopes, no device identity and no revocation
+	// cannot be translated honestly into a scoped per-device session, and
+	// leaving the file on disk would leave a credential nothing reads and
+	// nobody can revoke. Devices paired against it must pair again — which is
+	// also true because the surface it authenticated no longer exists.
+	if err := os.Remove(filepath.Join(dataDir, "http.token")); err == nil {
+		log.Printf("removed the legacy shared http.token; devices pair per-device now")
+	}
 
 	a.tickets = newTicketStore()
 	a.remoteWS = newRemoteWS(a, a.tickets)

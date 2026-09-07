@@ -24,9 +24,14 @@ var (
 	busNextID uint64
 )
 
-// busSubscribe registers a sink and returns a function that removes it. The
-// window sink is registered once for the app's lifetime and never removed; a
-// remote connection's sink must be, or every connect leaks one.
+// busSubscribe registers a sink and returns a function that removes it.
+//
+// Since phase 6 there is exactly ONE subscriber: remotews.handle's
+// per-connection subscription. The v1 tailnet broadcaster went away with the
+// client that needed it, and there was never a Wails-runtime sink. busEmit is
+// still the single DOOR — that is about where events are published, not how
+// many things happen to be listening — and the unsubscribe still matters: a
+// remote connection's sink must be removed, or every connect leaks one.
 func busSubscribe(s EventSink) func() {
 	busMu.Lock()
 	busNextID++

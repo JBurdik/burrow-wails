@@ -125,7 +125,7 @@
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Burrow Remote</span>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
             <div v-if="httpError" class="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] text-red-300">{{ httpError }}</div>
-            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="httpStatus.pairLocked" class="text-[11px] text-red-400">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else class="text-[11px] text-muted-foreground">Type this into Burrow Remote on your phone. Single use — it changes as soon as a device pairs.</span><code v-if="!httpStatus.pairLocked" class="mt-1.5 block font-mono text-[22px] tracking-[0.3em] text-secondary-foreground">{{ httpStatus.pairCode }}</code></div><Button variant="outline" size="sm" type="button" @click="onRegeneratePairCode">New code</Button></div>
+            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="pairStatus?.locked" class="text-[11px] text-red-400">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else-if="!pairStatus?.code" class="text-[11px] text-muted-foreground">The code has expired. Generate a new one when you are ready to pair.</span><span v-else class="text-[11px] text-muted-foreground">Type this into Burrow Remote on your phone. Single use, and it expires in 3 minutes — the device gets its own token, so this code is never a lasting credential.</span><code v-if="pairStatus?.code" class="mt-1.5 block font-mono text-[22px] tracking-[0.3em] text-secondary-foreground">{{ pairStatus.code }}</code></div><Button variant="outline" size="sm" type="button" @click="onRegeneratePairCode">New code</Button></div>
             <div v-if="httpStatus?.enabled" class="flex flex-col gap-2 rounded-md border border-border bg-panel px-4 py-3">
               <div class="flex items-center gap-4"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Paired devices</span><span class="text-[11px] text-muted-foreground">Each device has its own token, so revoking one leaves the others paired. A paired device can drive your terminals — treat it as trusted with this machine.</span></div></div>
               <span v-if="remoteDevices === null" class="text-[11px] text-muted-foreground">Loading…</span>
@@ -135,7 +135,6 @@
                 <Button variant="outline" size="sm" type="button" @click="onRevokeDevice(d.id)">Revoke</Button>
               </div>
             </div>
-            <details v-if="httpStatus?.enabled" class="rounded-md border border-border bg-panel px-4 py-3"><summary class="cursor-pointer text-[13px] font-medium text-foreground">Access token (for integrations)</summary><div class="mt-2 flex items-start gap-4"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[11px] text-muted-foreground">Phones do not need this — pairing hands it over. Treat it like an SSH key: it is full access to your terminals.</span><code class="mt-1.5 block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ httpStatus.token }}</code></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(httpStatus.token, 'token')">{{ copiedLabel === 'token' ? 'Copied' : 'Copy token' }}</Button></div></details>
             <div v-else class="flex items-center gap-4 rounded-md border border-dashed border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Not enabled</span><span class="text-[11px] text-muted-foreground">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
             <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Private tunnel</span>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
@@ -1690,16 +1689,16 @@ function clampRange(v: string, min: number, max: number, fallback: number): numb
 // (server::maybe_start runs once at Tauri setup), so this just writes the
 // pref file and reflects the pending state back.
 const httpEnabled = ref(false);
-const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string; token: string; pairCode: string; pairLocked: boolean } | null>(null);
+// No token or pairCode here any more: the shared http.token is gone (phase 6)
+// and the pairing code lives in pairStatus below, which is the /v2 chain's.
+const httpStatus = ref<{ enabled: boolean; port: number } | null>(null);
 
 async function onRegeneratePairCode() {
-  await invoke("regenerate_pair_code");
   pairStatus.value = await invoke<PairStatus>("remote_regenerate_pair_code");
-  await refreshHttpStatus();
 }
 async function refreshHttpStatus() {
   try {
-    const s = await invoke<{ enabled: boolean; port: number; tokenPath: string; token: string; pairCode: string; pairLocked: boolean }>("get_http_server_status");
+    const s = await invoke<{ enabled: boolean; port: number }>("get_http_server_status");
     httpStatus.value = s;
     httpEnabled.value = s.enabled;
   } catch { /* browser-only dev — no Tauri backend */ }
