@@ -362,11 +362,81 @@ stream carries every bus event and this model tracks part of it.
 **Binary PTY frames are deferred, on purpose.** Spec §2 wants them and `pty-data` still
 travels as JSON. It is a bandwidth optimization, not a prerequisite for anything above.
 
-**What did not change.** The old `/ws` and its hand-typed `dispatch` (`httpserver.go`) are
+### Pairing and device tokens (`src-wails/remoteauth.go` + `remotedevices.go` + `remoteguard.go`)
+
+A phone gets in through three hops, and the middle one is the whole point:
+
+```
+POST /v2/pair       {code, name, kind}      → {device_token, environment_id, scopes}
+POST /v2/ws-ticket  Authorization: Bearer   → {ticket}
+GET  /v2/ws?ticket=…
+```
+
+A device token is long-lived, so it **never travels in a URL** — proxy logs, browser
+history, `tailscale serve` diagnostics all keep those. Browsers cannot set headers on a
+WebSocket handshake, so the handshake credential *has* to be in the query string; the
+answer is that it is a **different** credential — single-use, at most 30 s old, worthless
+by the time it reaches a log. That is why `/v2/ws-ticket` exists as its own hop, and a
+test refuses a device token both as a query parameter and as a ticket. (The old `/ws` took
+its token exactly the way this refuses to.)
+
+`/v2/pair` is unauthenticated by necessity — pairing without a credential is what pairing
+*is*. What keeps it honest: six random digits, a **3-minute TTL**, single use (a success
+rotates the code), and a **five-guess lockout** that holds even against someone who has
+since learned the code. An expired or locked code is reported to Settings as *absent*
+rather than as digits that will not work.
+
+**One row per device** (`remote_devices`), each with its own token, so revoking one leaves
+the others paired — which the shared `http.token` could never do. The DB stores only the
+token's SHA-256: not a defence against someone already reading this disk (`control.token`
+sits next to it in plaintext) but a defence against a usable token leaving in a backup, a
+sync folder or an error dump, for four lines. There is no way to read a token back after
+pairing. Scopes live per row, so narrowing one device later is an `UPDATE`. **A revoke
+closes that device's live sockets** (`remoteWS.dropDevice`, keyed by the `deviceID` the
+ticket carries) — a revoke that leaves yesterday's socket running is not a revoke, and
+that socket is the whole app.
+
+**Mounting `/v2/ws` on the tailnet listener is what makes any of this reach the phone.**
+It was on the hook server's loopback mux only, which the tailnet cannot see. The tailnet
+server mounts the app's **own** `remoteWS` and ticket store — a second store would mean a
+ticket minted by `/v2/ws-ticket` is unknown to the handler that redeems it, and a second
+`remoteWS` would keep its connections in a registry `RevokeRemoteDevice` never looks at.
+
+**Two fail-closed startup guards** (`remoteguard.go`, both pure functions so the invariants
+are testable without a tailnet). `tailscale funnel` publishes *this* handler — same host,
+same `:443`, same `/burrow` path — on the open internet, where a six-digit code is not a
+defence, so remote access **refuses to start** while funnel is on anywhere on the node.
+Measured against the real `tailscale serve status --json`: with funnel off the
+`AllowFunnel` key is **absent, not false**, so a check written against `== false` would
+read "off" as "on"; an unreadable config counts as **on**, because we cannot claim the
+handler is private if we cannot read the config that decides it. And the listener binds
+loopback only — not only for auth: plain HTTP on a private IP is not a secure context, so
+a browser reaching us that way gets no service worker, no installable PWA and later no
+push. A wildcard bind (`":37892"`) is the mistake the assert exists to catch, not a
+default. `SetHttpEnabled` does not write the pref file when a start was refused, and
+Settings now shows the refusal instead of leaving the switch looking on with nothing
+listening.
+
+**Scopes are not a containment boundary, and phase 5 answered that rather than building
+one.** A paired device is the owner's own phone and holds authority over this machine by
+design — the PWA's job includes driving a terminal and answering an agent's y/n prompt, and
+a client that can do that can do anything (t3code ships the same model). A `Scope` is a
+record of which door a call came through plus the forcing function that makes a *new* verb
+decide whether it joins the network surface at all; `access:write` (pairing bootstrap) and
+`ui:ack` (the desktop UI's identity claim) are still withheld from a paired device, not
+because it could not reach them by spawning a shell, but because the point is not to hand
+out the names. The real boundary is **paired or not paired** — which is where all the work
+above went. `remoteapi.go`'s LOAD-BEARING NOTE keeps the list of what a genuinely *limited*
+device role would need (an `fs.go` path guard, per-connection event filtering, an exec
+admission check) for whoever wants to let in a device that is not the owner's.
+
+**What did not change.** The old `/ws`, `/rpc/`, `/pair` and the shared `http.token` are
 still live, gated by the remote-access toggle, and `src/mobile/` still runs on them
-entirely — that client has no `seq`, no resume and no snapshot until phase 6 rewrites it
-onto `/v2/ws`. **No manual GUI verification of any of this has been done** — nobody in
-this process could launch the app.
+entirely — that client has no `seq`, no resume, no snapshot and no per-device token until
+phase 6 rewrites it onto `/v2/ws`. Spec §4 wants a hard cutover of `http.token`; doing it
+before phase 6's client exists would leave the phone with no way in at all, and phases are
+meant to ship one at a time. **No manual GUI verification of any of this has been done** —
+nobody in this process could launch the app.
 
 ### Manager (`src/components/ManagerPanel.vue`)
 
@@ -408,6 +478,9 @@ Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem
 - **Remote socket server** (`remotews.go`) — `/v2/ws` itself: ticket issuance/redemption, per-connection outbound queue, per-call goroutine dispatch with a concurrency cap and panic recovery, `resume` handling, keepalive
 - **Shell event stream** (`shellstream.go`) — the `seq` counter and the 512-event replay ring; `resumeSince` is a pure function over it, so there is no per-client state to keep. See "The shell stream" above
 - **First paint** (`shellsnapshot.go`) — `ShellSnapshot()`: workspaces, tabs for every workspace, phases, chats and the `seq` they are current as of, in one round trip (`shell_snapshot`, `scopeOrchRead`)
+- **Pairing** (`remoteauth.go`) — `/v2/pair` and `/v2/ws-ticket`, the pairing code's TTL/budget/rotation, and `RemotePairStatus`/`RemoteRegeneratePairCode` for Settings. See "Pairing and device tokens" above
+- **Paired devices** (`remotedevices.go`) — the `remote_devices` table, tokens hashed at rest, `pairDevice`/`deviceForToken`/`RemoteDevices`/`RevokeRemoteDevice`
+- **Startup guards** (`remoteguard.go`) — `funnelEnabledIn` and `assertLoopbackAddr`, both fail-closed and both pure so the invariants are testable without a tailnet
 
 ### Background text generation (`src-wails/textgen.go`)
 
