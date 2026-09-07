@@ -103,6 +103,44 @@ export namespace main {
 	        this.defaultEffort = source["defaultEffort"];
 	    }
 	}
+	export class Chat {
+	    id: number;
+	    workspace_id: number;
+	    title: string;
+	    pinned_title: boolean;
+	    claude_session_id: string;
+	    message_count: number;
+	    control: boolean;
+	    agent_kind: string;
+	    transport: string;
+	    model: string;
+	    branch: string;
+	    settled_override: string;
+	    archived_at: number;
+	    last_activity_at: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Chat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.workspace_id = source["workspace_id"];
+	        this.title = source["title"];
+	        this.pinned_title = source["pinned_title"];
+	        this.claude_session_id = source["claude_session_id"];
+	        this.message_count = source["message_count"];
+	        this.control = source["control"];
+	        this.agent_kind = source["agent_kind"];
+	        this.transport = source["transport"];
+	        this.model = source["model"];
+	        this.branch = source["branch"];
+	        this.settled_override = source["settled_override"];
+	        this.archived_at = source["archived_at"];
+	        this.last_activity_at = source["last_activity_at"];
+	    }
+	}
 	export class ProviderRuntimeEvent {
 	    type: string;
 	    messageId?: string;

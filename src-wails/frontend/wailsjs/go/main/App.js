@@ -114,6 +114,10 @@ export function ControlVerbs() {
   return window['go']['main']['App']['ControlVerbs']();
 }
 
+export function CreateChat(arg1) {
+  return window['go']['main']['App']['CreateChat'](arg1);
+}
+
 export function CreateCheckpoint(arg1, arg2, arg3) {
   return window['go']['main']['App']['CreateCheckpoint'](arg1, arg2, arg3);
 }
@@ -136,6 +140,10 @@ export function CreateWorktree(arg1, arg2, arg3, arg4, arg5) {
 
 export function DaemonStats() {
   return window['go']['main']['App']['DaemonStats']();
+}
+
+export function DeleteChat(arg1) {
+  return window['go']['main']['App']['DeleteChat'](arg1);
 }
 
 export function DeleteChatMessages(arg1) {
@@ -232,6 +240,10 @@ export function KillPty(arg1) {
 
 export function LatestNpmVersion(arg1) {
   return window['go']['main']['App']['LatestNpmVersion'](arg1);
+}
+
+export function ListChats() {
+  return window['go']['main']['App']['ListChats']();
 }
 
 export function ListCheckpoints(arg1, arg2) {
@@ -452,6 +464,10 @@ export function RunGit(arg1, arg2) {
 
 export function SaveChatMessages(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveChatMessages'](arg1, arg2, arg3);
+}
+
+export function SaveChats(arg1) {
+  return window['go']['main']['App']['SaveChats'](arg1);
 }
 
 export function SaveExtensionSettings(arg1, arg2) {

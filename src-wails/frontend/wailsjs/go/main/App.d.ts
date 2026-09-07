@@ -58,6 +58,8 @@ export function ConfigFilePath():Promise<string>;
 
 export function ControlVerbs():Promise<Array<main.ControlVerb>>;
 
+export function CreateChat(arg1:main.Chat):Promise<main.Chat>;
+
 export function CreateCheckpoint(arg1:string,arg2:string,arg3:string):Promise<main.Checkpoint>;
 
 export function CreateDir(arg1:string):Promise<void>;
@@ -69,6 +71,8 @@ export function CreateWorkspace(arg1:string,arg2:string):Promise<main.Workspace>
 export function CreateWorktree(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<main.Workspace>;
 
 export function DaemonStats():Promise<Record<string, any>>;
+
+export function DeleteChat(arg1:number):Promise<void>;
 
 export function DeleteChatMessages(arg1:number):Promise<void>;
 
@@ -117,6 +121,8 @@ export function KillOrphanSessions(arg1:Array<string>):Promise<number>;
 export function KillPty(arg1:string):Promise<void>;
 
 export function LatestNpmVersion(arg1:string):Promise<main.ProviderLatest>;
+
+export function ListChats():Promise<Array<main.Chat>>;
 
 export function ListCheckpoints(arg1:string,arg2:number):Promise<Array<main.Checkpoint>>;
 
@@ -227,6 +233,8 @@ export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function SaveChatMessages(arg1:number,arg2:string,arg3:number):Promise<void>;
+
+export function SaveChats(arg1:Array<main.Chat>):Promise<void>;
 
 export function SaveExtensionSettings(arg1:string,arg2:Record<string, string>):Promise<void>;
 
