@@ -43,6 +43,11 @@ type App struct {
 	endpointProviders []EndpointProvider
 
 	tickets *ticketStore
+	// remoteWS is held so RevokeRemoteDevice can reach the live connections
+	// and so the tailnet server can mount the SAME handler with the SAME
+	// ticket store — a second store would mean a ticket minted by
+	// /v2/ws-ticket is unknown to the handler that redeems it.
+	remoteWS *remoteWS
 	// hookPort mirrors hookSrv.port, assigned once at startup. It exists as
 	// its own field so LocalEndpoint is testable without standing up a real
 	// hook server; hookSrv stays the source of truth everywhere else.
@@ -257,7 +262,8 @@ func (a *App) startup(ctx context.Context) {
 	a.initControl(dataDir)
 
 	a.tickets = newTicketStore()
-	hookSrv, err := StartHookServer(ctx, a.phases, a.registerControlRoutes, newRemoteWS(a, a.tickets).register)
+	a.remoteWS = newRemoteWS(a, a.tickets)
+	hookSrv, err := StartHookServer(ctx, a.phases, a.registerControlRoutes, a.remoteWS.register)
 	if err != nil {
 		log.Printf("hook server: %v", err)
 		return

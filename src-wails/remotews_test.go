@@ -407,11 +407,11 @@ func TestLocalEndpointIssuesAUsableTicket(t *testing.T) {
 	if info.Ticket == "" {
 		t.Fatal("no ticket issued")
 	}
-	scopes, ok := app.tickets.redeem(info.Ticket)
+	tk, ok := app.tickets.redeem(info.Ticket)
 	if !ok {
 		t.Fatal("issued ticket does not redeem")
 	}
-	if len(scopes) == 0 {
+	if len(tk.scopes) == 0 {
 		t.Fatal("desktop ticket carries no scopes")
 	}
 }
@@ -430,16 +430,16 @@ func TestLocalEndpointTicketsAreDistinct(t *testing.T) {
 // focus_tab, tab_output) instead of failing visibly.
 func TestLocalEndpointGrantsTheUIAckScope(t *testing.T) {
 	app := &App{tickets: newTicketStore(), hookPort: 1}
-	scopes, ok := app.tickets.redeem(app.LocalEndpoint().Ticket)
+	tk, ok := app.tickets.redeem(app.LocalEndpoint().Ticket)
 	if !ok {
 		t.Fatal("issued ticket does not redeem")
 	}
-	for _, s := range scopes {
+	for _, s := range tk.scopes {
 		if s == scopeUIAck {
 			return
 		}
 	}
-	t.Fatalf("the desktop's own ticket cannot ack a control action: %v", scopes)
+	t.Fatalf("the desktop's own ticket cannot ack a control action: %v", tk.scopes)
 }
 
 // seamWS starts a handler whose call seam is replaced, so a command can be

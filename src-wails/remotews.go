@@ -83,8 +83,12 @@ const (
 const ticketTTL = 30 * time.Second
 
 type ticket struct {
-	scopes  []remoteScope
-	expires time.Time
+	scopes []remoteScope
+	// deviceID is the paired device this ticket was minted for, or "" for the
+	// in-process desktop (LocalEndpoint). It is what makes a revoke able to
+	// find the sockets it has to close.
+	deviceID string
+	expires  time.Time
 }
 
 type ticketStore struct {
@@ -97,7 +101,13 @@ func newTicketStore() *ticketStore {
 	return &ticketStore{ttl: ticketTTL, m: make(map[string]ticket)}
 }
 
+// issue mints a ticket for the in-process desktop. See issueFor for a paired
+// device's.
 func (s *ticketStore) issue(scopes []remoteScope) string {
+	return s.issueFor("", scopes)
+}
+
+func (s *ticketStore) issueFor(deviceID string, scopes []remoteScope) string {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return ""
@@ -114,15 +124,15 @@ func (s *ticketStore) issue(scopes []remoteScope) string {
 			delete(s.m, k)
 		}
 	}
-	s.m[tok] = ticket{scopes: scopes, expires: now.Add(s.ttl)}
+	s.m[tok] = ticket{scopes: scopes, deviceID: deviceID, expires: now.Add(s.ttl)}
 	return tok
 }
 
 // redeem consumes a ticket. Single use: a replayed handshake credential is
 // worthless even if it leaks into a proxy log.
-func (s *ticketStore) redeem(tok string) ([]remoteScope, bool) {
+func (s *ticketStore) redeem(tok string) (ticket, bool) {
 	if tok == "" {
-		return nil, false
+		return ticket{}, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,16 +142,28 @@ func (s *ticketStore) redeem(tok string) ([]remoteScope, bool) {
 		}
 		delete(s.m, k)
 		if time.Now().After(v.expires) {
-			return nil, false
+			return ticket{}, false
 		}
-		return v.scopes, true
+		return v, true
 	}
-	return nil, false
+	return ticket{}, false
 }
 
 type remoteWS struct {
 	app     *App
 	tickets *ticketStore
+
+	// Live connections by paired-device id, so RevokeRemoteDevice can close
+	// them. A revoke that leaves yesterday's socket running is not a revoke,
+	// and that socket is the whole app.
+	//
+	// Keyed by a per-connection id inside each device, so two connections
+	// from one phone unregister independently. The desktop's own connections
+	// (deviceID "") are never in here: there is no row to revoke, and being
+	// reachable would let a revoke drop the window.
+	connMu     sync.Mutex
+	conns      map[string]map[uint64]func()
+	nextConnID uint64
 
 	// call is the seam the concurrency tests use to stand in a command that
 	// blocks on demand; no real App method does so deterministically.
@@ -150,7 +172,7 @@ type remoteWS struct {
 }
 
 func newRemoteWS(app *App, tickets *ticketStore) *remoteWS {
-	h := &remoteWS{app: app, tickets: tickets}
+	h := &remoteWS{app: app, tickets: tickets, conns: map[string]map[uint64]func(){}}
 	h.call = func(c remoteCmd, args map[string]json.RawMessage) (any, error) {
 		return callApp(h.app, c, args)
 	}
@@ -161,12 +183,57 @@ func (h *remoteWS) register(mux *http.ServeMux) {
 	mux.HandleFunc("/v2/ws", h.handle)
 }
 
+// trackConn registers a connection's shutdown under its device, returning the
+// function that removes it again. A deviceID of "" is the desktop and is not
+// tracked (see the conns field).
+func (h *remoteWS) trackConn(deviceID string, shutdown func()) func() {
+	if deviceID == "" {
+		return func() {}
+	}
+	h.connMu.Lock()
+	h.nextConnID++
+	id := h.nextConnID
+	if h.conns[deviceID] == nil {
+		h.conns[deviceID] = map[uint64]func(){}
+	}
+	h.conns[deviceID][id] = shutdown
+	h.connMu.Unlock()
+
+	return func() {
+		h.connMu.Lock()
+		defer h.connMu.Unlock()
+		delete(h.conns[deviceID], id)
+		if len(h.conns[deviceID]) == 0 {
+			delete(h.conns, deviceID)
+		}
+	}
+}
+
+// dropDevice closes every connection a device holds. Called by
+// RevokeRemoteDevice AFTER the row is gone, so a connection racing the revoke
+// cannot re-authorize itself against a row that still exists.
+func (h *remoteWS) dropDevice(deviceID string) {
+	h.connMu.Lock()
+	shutdowns := make([]func(), 0, len(h.conns[deviceID]))
+	for _, fn := range h.conns[deviceID] {
+		shutdowns = append(shutdowns, fn)
+	}
+	h.connMu.Unlock()
+
+	// Outside the lock: each shutdown closes a socket, and the deferred
+	// untrack on that connection's own goroutine takes this same lock.
+	for _, fn := range shutdowns {
+		fn()
+	}
+}
+
 func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
-	scopes, ok := h.tickets.redeem(r.URL.Query().Get("ticket"))
+	tk, ok := h.tickets.redeem(r.URL.Query().Get("ticket"))
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	scopes := tk.scopes
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -219,6 +286,11 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	defer shutdown()
+
+	// Registered before the welcome frame, so a revoke landing during the
+	// handshake still finds this connection rather than missing it by a
+	// scheduling accident.
+	defer h.trackConn(tk.deviceID, shutdown)()
 
 	// The welcome frame is enqueued before the bus subscription exists and
 	// before the writer goroutine starts, into a channel that is still

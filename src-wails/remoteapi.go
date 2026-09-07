@@ -153,7 +153,16 @@ var remoteAllowed = map[string]remoteCmd{
 	// because it is safe on a bare &App{} — most commands are not.
 	"environment_id":   {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
 	"remote_endpoints": {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
-	"shell_snapshot":   {Method: "ShellSnapshot", Args: nil, Scope: scopeOrchRead},
+
+	// Paired devices. Both sit on access:* and are therefore desktop-only,
+	// since a paired device is never granted access:write (remotedevices.go)
+	// — a device must not be able to pair or unpair others. The inventory is
+	// at access:read rather than orchestration:read deliberately: it is the
+	// one list every paired phone would otherwise be able to read, and
+	// knowing what else is paired is not part of driving an agent.
+	"remote_devices":       {Method: "RemoteDevices", Args: nil, Scope: scopeAccessRead},
+	"revoke_remote_device": {Method: "RevokeRemoteDevice", Args: []string{"id"}, Scope: scopeAccessWrite},
+	"shell_snapshot":       {Method: "ShellSnapshot", Args: nil, Scope: scopeOrchRead},
 
 	// Workspaces / tabs
 	"list_workspaces":     {Method: "ListWorkspaces", Args: nil, Scope: scopeOrchRead},

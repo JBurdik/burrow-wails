@@ -125,6 +125,7 @@ func migrate(db *sql.DB) error {
 	}
 	stmts = append(stmts, chatMessagesSchema()...)
 	stmts = append(stmts, chatStreamSchema()...)
+	stmts = append(stmts, remoteDevicesSchema()...)
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return err
