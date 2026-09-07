@@ -341,12 +341,6 @@ const ARGUMENT_SHAPE_EXCEPTIONS: Record<string, string> = {
   // Also reshaped in core.ts, which supplies the `foldedOrd` sentinel the
   // call sites may omit.
   save_chat_messages: "core.ts fills in foldedOrd",
-  // BUG, not a convention: src/lib/lsp.ts sends `name`/`rootPath` where the
-  // table names `command`/`cwd`, so LspStart receives two empty strings —
-  // it has presumably never started a server this way. Left listed rather
-  // than fixed here because fixing it is a behaviour change to the LSP
-  // path, out of scope for the transport work that added this check.
-  lsp_start: "KNOWN BUG: sends name/rootPath, table names command/cwd",
   // Harmless leftover, and the one case where dropping the value is right:
   // CreateWorktree (git.go) looks the parent workspace up from repoPath
   // itself, so it has no parent-id parameter for this to land in.
