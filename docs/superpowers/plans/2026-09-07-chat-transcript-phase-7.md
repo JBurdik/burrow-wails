@@ -8,6 +8,26 @@
 
 **Tech Stack:** Go 1.25; Vue 3 + vitest (mazání).
 
+## Než začneš — kontext, který není v kódu
+
+- **Branch: `feat/remote-access-phase-1-2`, worktree `.worktrees/remote-access-phase-1-2`, NEPUSHNUTO.**
+  Tenhle plán stojí na commitech, které nikde jinde nejsou: `chats.go` a tabulka
+  `chats` (`4a54d83`), publikování promptu (`3412f1d`), oprava `pty_phase`
+  (`e73b1dc`). Ve fresh worktree z `main` nic z toho neexistuje a plán nedává
+  smysl. Pracuj na téhle branchi.
+- **Žádný spec dokument k tomuhle není.** Autoritou je tenhle plán plus
+  `CLAUDE.md` (sekce „The chat list is shared state", „Chat stream ownership",
+  „Provider protocol is parsed in Go"). Fáze 7 ve *spec* remote accessu je Web
+  Push — jiná věc, jiný dokument, uživatelem odložená.
+- **Reference pro Task 1 existuje a je to jediná záchranná síť:**
+  `src/lib/chatProjection.test.ts` (11 testů, pokrývá ACP/native split).
+  `ChatMessage` tvar je v `src/lib/chatTypes.ts`.
+- **Nic z fází 1–6 nebylo manuálně proklikané.** Dvě reálné chyby v nich našel
+  uživatel za dvě minuty používání (skrytý chat, mrtvý PhaseStore). Task 6 je
+  proto výslovně **za** manuálním ověřením a to ověření dělá uživatel, ne ty.
+- Ledger si veď v `.superpowers/sdd/2026-09-07-chat-transcript-phase-7/progress.md`
+  jako u předchozích fází.
+
 **Prerekvizita — SPLNĚNÁ.** CLAUDE.md ji vedla jako *„the transcript mixes stream-derived messages with client-authored ones"*. Commit `3412f1d` publikuje lidský prompt přes `emitChatLine`, takže transcript je od té chvíle **100 % odvozený ze streamu**. Bez toho by Go fold nemohl existovat: neměl by odkud vzít user bubliny.
 
 ## Co je dnes změřeno, ne odhadnuto
@@ -157,10 +177,32 @@ the invariant the current code gets right and must keep: *the marker and the
 messages move together, or the trim gets permission to delete something the
 stored transcript does not contain.*
 
-**Do not fold the whole stream per line.** Keep the folded tail in memory per
-chat (the writer already exists per chat) and append; recompute from the stream
-only on first touch after a restart. A chat with 4000 lines re-folded on every
-token is a live-typing hang.
+**Do not fold the whole stream per line.** Keep the folded tail in memory and
+append; recompute from the stream only on first touch after a restart. A chat
+with 4000 lines re-folded on every token is a live-typing hang.
+
+There is **one** `chatStreamWriter` for the app, not one per chat — it keys its
+state by chat id (`nextOrd map[string]int64`, `appends map[string]int`,
+`chatstream.go:93`), so the folded tail goes in a map alongside those, under the
+same `mu`.
+
+**The stream row is written ASYNCHRONOUSLY.** `append` assigns the `ord`
+synchronously and hands the row to a channel (`ch chan chatStreamRow`); the
+INSERT happens on the writer's own goroutine. So "fold and bump `folded_ord` in
+one transaction" cannot also include the stream row, and the task has to say
+which invariant it is actually buying:
+
+- what MUST hold: `chat_messages` and `folded_ord` move together, so the marker
+  never claims more than the stored transcript contains — that is the pair
+  `trim` reads;
+- what CANNOT hold on this design: the stream row landing in that same
+  transaction. If a crash loses the queued row but the fold already recorded
+  its message, the transcript keeps the message and the stream lacks the line.
+  That is the safe direction (a rendered message with no raw line) and is worth
+  stating rather than discovering.
+
+Decide in the task whether to keep the async append or make the fold path
+synchronous. Do not assume the current comment about one transaction covers it.
 
 Emit **`chat-messages-changed-<chatID>`** — additive, and in `notRingable`
 (same reasoning as the other chat channels: it has a durable log).
