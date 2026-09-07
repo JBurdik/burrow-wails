@@ -61,11 +61,17 @@ async function tryPair() {
   try {
     await store.pair(urlInput.value.trim(), code);
   } catch (e: any) {
+    // The two failures are told apart by TYPE, not by matching on a message:
+    // a refused code and an unreachable host are fixed differently (retype
+    // the code / check the URL and the tailnet), and a regex over prose
+    // silently reclassifies itself the next time the wording changes.
+    // pairDevice throws PairingRefusedError for the first and a plain Error
+    // beginning "Cannot reach" for the second.
+    isNetworkError.value = e?.name !== 'PairingRefusedError';
     const msg: string = e?.message ?? 'Připojení selhalo';
-    // Anything from /pair itself is a server answer, so the host is reachable.
-    // Only a transport failure (or a rejected /ws upgrade) is a network problem.
-    isNetworkError.value = !/kód|zamčené|token|unauthor/i.test(msg);
-    err.value = isNetworkError.value ? `Nedostupné ${urlInput.value}: ${msg}` : msg;
+    err.value = isNetworkError.value
+      ? `Nedostupné ${urlInput.value}: ${msg}`
+      : 'Špatný nebo expirovaný kód. Zkontroluj kód v Nastavení na desktopu, nebo vygeneruj nový.';
     codeDigits.value = [];
   } finally {
     busy.value = false;

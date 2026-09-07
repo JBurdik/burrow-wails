@@ -47,6 +47,7 @@ const termHost = ref<HTMLDivElement | null>(null);
 const draft = ref('');
 let term: Terminal;
 let fitAddon: FitAddon;
+let unlistenPtyData: (() => void) | null = null;
 
 function writeBytes(payload: number[]) {
   term.write(new Uint8Array(payload));
@@ -54,7 +55,7 @@ function writeBytes(payload: number[]) {
 
 function sendBytes(bytes: number[]) {
   if (!tab) return;
-  store.getClient().call('write_pty', { id: String(tab.ptyId), data: bytes }).catch(() => {});
+  store.getTransport().invoke('write_pty', { id: String(tab.ptyId), data: bytes }).catch(() => {});
 }
 
 function send() {
@@ -90,11 +91,13 @@ onMounted(() => {
   term.open(termHost.value);
   fitAddon.fit();
 
-  const client = store.getClient();
+  const t = store.getTransport();
   // Vec<u8> serializes as a JSON array of byte numbers over WS — not base64/text.
-  client.subscribe(`pty-data-${tab.ptyId}`, (payload: number[]) => writeBytes(payload));
+  // listen() returns the unlisten for THIS handler and survives a reconnect,
+  // which is why the socket does not have to be re-subscribed after a drop.
+  unlistenPtyData = t.listen<number[]>(`pty-data-${tab.ptyId}`, (payload) => writeBytes(payload));
 
-  client.call('resize_pty', { id: String(tab.ptyId), cols: term.cols, rows: term.rows }).catch(() => {});
+  t.invoke('resize_pty', { id: String(tab.ptyId), cols: term.cols, rows: term.rows }).catch(() => {});
 
   window.addEventListener('resize', onResize);
 });
@@ -102,13 +105,14 @@ onMounted(() => {
 function onResize() {
   fitAddon?.fit();
   if (tab && term) {
-    store.getClient().call('resize_pty', { id: String(tab.ptyId), cols: term.cols, rows: term.rows }).catch(() => {});
+    store.getTransport().invoke('resize_pty', { id: String(tab.ptyId), cols: term.cols, rows: term.rows }).catch(() => {});
   }
 }
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
-  if (tab) store.getClient().unsubscribe(`pty-data-${tab.ptyId}`);
+  unlistenPtyData?.();
+  unlistenPtyData = null;
   term?.dispose();
 });
 </script>

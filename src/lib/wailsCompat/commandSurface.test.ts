@@ -43,9 +43,12 @@ const ROOT = join(__dirname, "..", "..", "..");
 const SRC = join(ROOT, "src");
 const REMOTE_API = join(ROOT, "src-wails", "remoteapi.go");
 
-// src/mobile is the PWA, which talks to the older /ws protocol and its own
-// hand-written dispatch (httpserver.go) — a later phase moves it over.
-const SKIP_DIRS = new Set(["mobile"]);
+// Nothing is skipped any more. src/mobile used to be, because it spoke the
+// older /ws protocol and its own hand-written dispatch; since phase 6 it goes
+// through the same transport and the same table, so it gets the same
+// protection — a wire name the phone calls and the table forgot is now caught
+// here rather than at 2am on a train.
+const SKIP_DIRS = new Set<string>();
 
 /**
  * Wire names no backend implements and none is planned to, so they are not

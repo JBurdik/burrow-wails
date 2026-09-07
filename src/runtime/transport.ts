@@ -33,6 +33,16 @@ export interface Transport {
    * gone, i.e. another resync.
    */
   noteSeq(seq: number): void;
+  /**
+   * Called with true when a socket opens and false when one closes. This is
+   * the only place that knows: without it a UI wanting to show "reconnecting"
+   * would have to open a second socket just to observe the first one.
+   *
+   * The handler is invoked immediately with the current state, so a caller
+   * that subscribes after the connection came up does not sit showing
+   * "connecting" until the next transition. Returns an unlisten.
+   */
+  onState(handler: (up: boolean) => void): () => void;
   close(): void;
 }
 
@@ -90,6 +100,15 @@ export function createTransport(
   // socket — otherwise a reconnect silently stops delivering pty bytes.
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const resyncHandlers = new Set<() => void>();
+  const stateHandlers = new Set<(up: boolean) => void>();
+  let up = false;
+
+  function setState(next: boolean) {
+    if (up === next) return;
+    up = next;
+    for (const h of stateHandlers) h(next);
+  }
+
   // How far this client's view reaches. Moved forward by every numbered event
   // and by noteSeq(); never backward, so an out-of-order duplicate cannot
   // rewind it. 0 means "nothing held", which is what makes a first connection
@@ -152,10 +171,12 @@ export function createTransport(
         // resume from, and the caller takes a snapshot instead.
         if (lastSeq > 0) socket.send(JSON.stringify({ t: "resume", since: lastSeq }));
         flush();
+        setState(true);
       };
       socket.onmessage = (ev: MessageEvent) => handleFrame(String(ev.data));
       socket.onclose = () => {
         if (ws === socket) ws = null;
+        setState(false);
         failPending("disconnected");
         noteConnectFailure("connection closed");
         scheduleReconnect();
@@ -271,8 +292,18 @@ export function createTransport(
       if (seq > lastSeq) lastSeq = seq;
     },
 
+    onState(handler: (nowUp: boolean) => void): () => void {
+      stateHandlers.add(handler);
+      // Fire immediately, or a caller subscribing after the socket already
+      // opened shows "connecting" until the next transition — which on a
+      // healthy connection is never.
+      handler(up);
+      return () => stateHandlers.delete(handler);
+    },
+
     close() {
       closed = true;
+      setState(false);
       failPending("transport closed");
       ws?.close();
       ws = null;

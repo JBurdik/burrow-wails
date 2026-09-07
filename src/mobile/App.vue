@@ -6,6 +6,7 @@
     <ChatView v-else-if="store.view === 'chat'" />
     <SessionsView v-else-if="store.view === 'sessions'" />
     <TerminalView v-else-if="store.view === 'terminal'" />
+    <DiffView v-else-if="store.view === 'diff'" />
   </div>
 </template>
 
@@ -18,13 +19,16 @@ import ChatsView from './views/ChatsView.vue';
 import ChatView from './views/ChatView.vue';
 import SessionsView from './views/SessionsView.vue';
 import TerminalView from './views/TerminalView.vue';
+import DiffView from './views/DiffView.vue';
 
 const store = useRemoteStore();
 
 onMounted(() => {
-  if (store.baseUrl && store.token) {
-    store.connect(store.baseUrl, store.token).catch(() => {});
-  }
+  // A stored device token is all that is needed: the transport asks for a
+  // fresh ticket itself, so there is nothing to restore beyond "are we
+  // paired". A revoked token surfaces as RevokedError and drops the view back
+  // to the pairing screen rather than spinning.
+  if (store.credentials) store.connect().catch(() => {});
 });
 </script>
 

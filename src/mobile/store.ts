@@ -1,13 +1,28 @@
 import { defineStore } from "pinia";
 import { reactive, ref } from "vue";
-import { BurrowWsClient } from "./api";
-import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { appTransport } from "@/lib/wailsCompat/core";
+import type { Transport } from "@/runtime/transport";
+import {
+  clearRemoteCredentials,
+  loadRemoteCredentials,
+  pairDevice,
+  saveRemoteCredentials,
+  type RemoteCredentials,
+} from "@/runtime/remoteEndpoint";
+import { displayStatus, type Phase } from "@/runtime/displayStatus";
 import type { TermStatus } from "@/lib/terminalStatus";
+import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 
-const URL_LEGACY_KEY = "burrow-mobile-url";
-const TOKEN_LEGACY_KEY = "burrow-mobile-token";
-const URL_CONFIG_KEY = "mobileBaseUrl";
-const TOKEN_CONFIG_KEY = "mobileToken";
+// The phone runs on the SAME transport, the same command table and the same
+// event names as the desktop (src/runtime/transport.ts, src-wails/remoteapi.go).
+// What used to live here — a second websocket client, a second reconnect loop,
+// a second status derivation — is gone; api.ts with it.
+//
+// What is still mobile-specific and stays: the view stack, the WorkspaceGroup
+// shape its views are written against, and the chat read model (chats arrive
+// from remote_list_chats, and permission requests still come off the raw
+// control channel, which is deliberately not part of the neutral event
+// vocabulary — see CLAUDE.md).
 
 export type TabStatus = TermStatus;
 
@@ -44,7 +59,7 @@ export interface RemoteMessage {
 
 export interface PendingPermission {
   requestId?: string; // Claude control_request id
-  rpcId?: number;      // ACP JSON-RPC id
+  rpcId?: number; // ACP JSON-RPC id
   toolName: string;
   detail: string;
   // ACP/Codex option ids the response must pick from — Codex's raw JSON-RPC
@@ -79,44 +94,60 @@ export interface RemoteChat {
   pendingPermission?: PendingPermission | null;
 }
 
-export type View = "connect" | "dashboard" | "chats" | "chat" | "sessions" | "terminal";
+export type View = "connect" | "dashboard" | "chats" | "chat" | "sessions" | "terminal" | "diff";
+
+// Per-DEVICE read receipts, under their own key. `review` and the transient
+// lime `done` are not phases precisely because whether a finished turn still
+// needs looking at is per-device — so the phone must not share the desktop's
+// burrow.seenAt, or opening a tab on one would clear the badge on the other.
+const SEEN_AT_KEY = "burrow.seenAt.mobile";
+
+function loadSeenAt(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_AT_KEY) ?? "{}") as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
 
 export const useRemoteStore = defineStore("remote", () => {
-  const baseUrl = ref("");
-  const token = ref("");
-  configReady.then(() => {
-    migrateFromLocalStorage(URL_LEGACY_KEY, URL_CONFIG_KEY);
-    migrateFromLocalStorage(TOKEN_LEGACY_KEY, TOKEN_CONFIG_KEY);
-    baseUrl.value = getConfig<string>(URL_CONFIG_KEY, "");
-    token.value = getConfig<string>(TOKEN_CONFIG_KEY, "");
-  });
+  const credentials = ref<RemoteCredentials | null>(loadRemoteCredentials());
+  const baseUrl = ref(credentials.value?.baseUrl ?? "");
   const connected = ref(false);
   const connecting = ref(false);
   const connectError = ref("");
+  const reconnecting = ref(false);
 
-  const view = ref<View>("connect");
+  const view = ref<View>(credentials.value ? "dashboard" : "connect");
   const workspaces = ref<WorkspaceGroup[]>([]);
-  const statuses = reactive(new Map<number, TabStatus>());
+  const phases = reactive(new Map<number, Phase>());
+  const seenAt = reactive<Record<string, number>>(loadSeenAt());
   const loading = ref(false);
   const listError = ref("");
   const activeTab = ref<Tab | null>(null);
   const chats = ref<RemoteChat[]>([]);
   const activeChat = ref<RemoteChat | null>(null);
 
-  const reconnecting = ref(false);
-  let reconnectAttempt = 0;
-  let reconnectTimer: number | undefined;
-  // Bumped on every connect() call and on disconnect(), so an in-flight
-  // connect() (its healthCheck/WS handshake can each take seconds) can tell,
-  // right before it commits success, whether a newer connect() or an
-  // explicit disconnect() superseded it in the meantime.
-  let connectGeneration = 0;
+  let transport: Transport | null = null;
+  // Every listen() this store installed, so a disconnect() really stops
+  // listening rather than leaving handlers to fire against torn-down state.
+  const unlisteners: Array<() => void> = [];
+  const watchedPhases = new Set<number>();
+  const watchedChats = new Set<number>();
 
-  let client: BurrowWsClient | null = null;
-  const doneTimers = new Map<number, number>();
+  function track(off: () => void) {
+    unlisteners.push(off);
+  }
 
+  /**
+   * The status shown for a terminal. Derived exactly the way the desktop
+   * derives it (src/runtime/displayStatus.ts) from the server's phase plus
+   * THIS device's read receipt — no second state machine, and no client-side
+   * "done" timer to drift out of step with the desktop's.
+   */
   function statusFor(ptyId: number): TabStatus {
-    return statuses.get(ptyId) ?? "idle";
+    const watching = view.value === "terminal" && activeTab.value?.ptyId === ptyId;
+    return displayStatus(phases.get(ptyId), seenAt[`pty:${ptyId}`] ?? 0, watching);
   }
 
   function chatStatus(chat: RemoteChat): TabStatus {
@@ -126,126 +157,157 @@ export const useRemoteStore = defineStore("remote", () => {
     return "idle";
   }
 
-  function watchTabStatus(ptyId: number) {
-    client?.subscribe(`pty-hook-${ptyId}`, (payload) => {
-      // Broadcast branch only ever sends the bare state string (see api.ts note).
-      const state = typeof payload === "string" ? payload : payload?.state;
-      if (state === "running" || state === "waiting" || state === "permission") {
-        const t = doneTimers.get(ptyId);
-        if (t !== undefined) { window.clearTimeout(t); doneTimers.delete(ptyId); }
-        statuses.set(ptyId, state);
-      } else if (state === "error") {
-        const t = doneTimers.get(ptyId);
-        if (t !== undefined) { window.clearTimeout(t); doneTimers.delete(ptyId); }
-        statuses.set(ptyId, "error"); // persists until markTabSeen, like desktop
-      } else if (state === "done") {
-        const watching = view.value === "terminal" && activeTab.value?.ptyId === ptyId;
-        if (watching) {
-          statuses.set(ptyId, "done");
-          const t = window.setTimeout(() => statuses.set(ptyId, "idle"), 4000);
-          doneTimers.set(ptyId, t);
-        } else {
-          statuses.set(ptyId, "review");
-        }
-      }
-    });
+  function persistSeenAt() {
+    try {
+      localStorage.setItem(SEEN_AT_KEY, JSON.stringify(seenAt));
+    } catch { /* private mode / quota — the badge is not worth failing over */ }
   }
 
-  // Pair with a six-digit code, then connect with the token it returns.
-  // connect() persists that token, so this only happens on the first visit.
+  function markTabSeen(ptyId: number) {
+    seenAt[`pty:${ptyId}`] = Date.now();
+    persistSeenAt();
+  }
+
+  /** Subscribe to a leaf's phase. Idempotent: the snapshot and a live
+   *  workspaces-changed both walk the same tabs. */
+  function watchPhase(ptyId: number) {
+    if (watchedPhases.has(ptyId)) return;
+    watchedPhases.add(ptyId);
+    track(
+      transport!.listen<Phase>(`phase-pty:${ptyId}`, (phase) => {
+        if (phase) phases.set(ptyId, phase);
+      }),
+    );
+  }
+
+  // ── connection ────────────────────────────────────────────────────────────
+
+  /** Pair with a six-digit code, then connect with the token it returns. */
   async function pair(url: string, code: string): Promise<void> {
-    const normalized = url.replace(/\/$/, "");
-    const tok = await BurrowWsClient.pair(normalized, code);
-    await connect(normalized, tok);
-  }
-
-  async function connect(url: string, tok: string): Promise<void> {
-    const myGeneration = ++connectGeneration;
     connecting.value = true;
     connectError.value = "";
-    const normalized = url.replace(/\/$/, "");
     try {
-      const ok = await BurrowWsClient.healthCheck(normalized);
-      if (!ok) throw new Error("Server reachable but /healthz did not return 200");
-
-      const c = new BurrowWsClient();
-      await c.connect(normalized, tok);
-      c.onClose = () => {
-        connected.value = false;
-        if (view.value === "terminal") view.value = "dashboard";
-        scheduleReconnect();
-      };
-      // A newer connect() call or an explicit disconnect() ran while the
-      // above awaits were in flight — don't resurrect state disconnect()
-      // just tore down, and don't leak the socket we just opened.
-      if (myGeneration !== connectGeneration) { c.close(); return; }
-      client = c;
-      connected.value = true;
-      baseUrl.value = normalized;
-      token.value = tok;
-      setConfig(URL_CONFIG_KEY, normalized);
-      setConfig(TOKEN_CONFIG_KEY, tok);
-      view.value = "dashboard";
-      await Promise.all([loadSessions(), loadChats()]);
+      const creds = await pairDevice(url, code, deviceName(), deviceKind());
+      credentials.value = creds;
+      baseUrl.value = creds.baseUrl;
+      await connect();
     } catch (e: any) {
-      // Only clobber shared state if this is still the current attempt — a
-      // stale call failing after a newer one already succeeded must not
-      // flip a live connection back to disconnected/error.
-      if (myGeneration === connectGeneration) {
-        connectError.value = e?.message ?? "Connection failed";
-        connected.value = false;
-      }
+      connectError.value = e?.message ?? "Pairing failed";
       throw e;
     } finally {
-      // Same guard: a superseded call's finally must not clear the
-      // "connecting" indicator while a newer call is still in flight.
-      if (myGeneration === connectGeneration) connecting.value = false;
+      connecting.value = false;
     }
   }
 
-  function scheduleReconnect() {
-    if (reconnectTimer !== undefined || view.value === "connect") return;
-    reconnecting.value = true;
-    const delay = Math.min(1000 * 2 ** reconnectAttempt, 30000);
-    reconnectTimer = window.setTimeout(async () => {
-      reconnectTimer = undefined;
-      if (!baseUrl.value || !token.value) { reconnecting.value = false; return; }
-      try {
-        await connect(baseUrl.value, token.value);
-        reconnectAttempt = 0;
-        reconnecting.value = false;
-      } catch {
-        reconnectAttempt++;
-        scheduleReconnect();
-      }
-    }, delay);
+  function deviceName(): string {
+    const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+    // Enough to tell the rows apart in desktop Settings, which is the whole
+    // job here — a list of "Paired device" entries is not actionable.
+    if (/iPhone/i.test(ua)) return "iPhone";
+    if (/iPad/i.test(ua)) return "iPad";
+    if (/Android/i.test(ua)) return "Android phone";
+    return "Browser";
+  }
+
+  function deviceKind(): string {
+    const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+    if (/iPad|Tablet/i.test(ua)) return "tablet";
+    if (/iPhone|Android/i.test(ua)) return "phone";
+    return "browser";
+  }
+
+  /**
+   * Attach to the shared transport and take a first snapshot.
+   *
+   * There is no reconnect loop here any more: the transport owns backoff,
+   * ticket renewal and the queue, and `onState` is how this store learns what
+   * happened. A resync means the gap outran the server's replay ring, so the
+   * only honest recovery is a fresh snapshot.
+   */
+  async function connect(): Promise<void> {
+    if (!credentials.value) {
+      credentials.value = loadRemoteCredentials();
+      if (!credentials.value) throw new Error("this device is not paired");
+    }
+    if (transport) {
+      await refresh();
+      return;
+    }
+    connecting.value = true;
+    connectError.value = "";
+    try {
+      transport = appTransport();
+      track(
+        transport.onState((up) => {
+          connected.value = up;
+          reconnecting.value = !up;
+          if (up) {
+            // Every reconnect refreshes: resume replays the numbered events,
+            // but a phone that was asleep for an hour is past the ring more
+            // often than not, and a refresh is cheap next to being wrong.
+            void refresh();
+          } else if (view.value === "terminal") {
+            // A terminal with no socket is a frozen screen pretending to be
+            // live. The dashboard at least tells the truth.
+            view.value = "dashboard";
+          }
+        }),
+      );
+      track(transport.onResync(() => void refresh()));
+      if (view.value === "connect") view.value = "dashboard";
+      await refresh();
+    } catch (e: any) {
+      connectError.value = e?.message ?? "Connection failed";
+      throw e;
+    } finally {
+      connecting.value = false;
+    }
   }
 
   function disconnect() {
-    connectGeneration++;
-    if (reconnectTimer !== undefined) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
-    reconnectAttempt = 0;
-    reconnecting.value = false;
-    client?.close();
-    client = null;
+    for (const off of unlisteners.splice(0)) off();
+    watchedPhases.clear();
+    watchedChats.clear();
+    transport?.close();
+    transport = null;
+    clearRemoteCredentials();
+    credentials.value = null;
     connected.value = false;
+    reconnecting.value = false;
     workspaces.value = [];
-    statuses.clear();
+    phases.clear();
     chats.value = [];
     activeChat.value = null;
+    activeTab.value = null;
     view.value = "connect";
   }
 
-  async function loadSessions() {
-    if (!client) return;
+  // ── first paint ───────────────────────────────────────────────────────────
+
+  /**
+   * One `shell_snapshot` for the whole shell: workspaces, the tabs of EVERY
+   * workspace, every phase, and the chats — plus the `seq` that state is
+   * current as of, which is what a later resume counts from.
+   *
+   * This replaced list_workspaces followed by one list_terminal_tabs per
+   * workspace: N+1 round trips, each with a phone's latency, before anything
+   * could render.
+   */
+  async function refresh(): Promise<void> {
+    if (!transport) return;
     loading.value = true;
     listError.value = "";
     try {
-      const wss: { id: number; name: string; path: string }[] = await client.call("list_workspaces");
+      const snap = await transport.invoke<ShellSnapshotData>("shell_snapshot");
+      // Before applying, so an event landing during the apply is not counted
+      // as already seen (the server takes seq before its own data read for
+      // the same reason).
+      transport.noteSeq(snap.seq ?? 0);
+
       const groups: WorkspaceGroup[] = [];
-      for (const ws of wss) {
-        const tabs: any[] = (await client.call("list_terminal_tabs", { workspaceId: ws.id })) ?? [];
-        const liveTabs: Tab[] = tabs
+      for (const ws of snap.workspaces ?? []) {
+        const raw = (snap.tabs?.[ws.id] ?? []) as any[];
+        const tabs: Tab[] = raw
           .filter((t) => typeof t.pty_id === "number")
           .map((t) => ({
             ptyId: t.pty_id,
@@ -254,20 +316,19 @@ export const useRemoteStore = defineStore("remote", () => {
             workspaceId: ws.id,
             workspaceName: ws.name,
           }));
-        groups.push({ id: ws.id, name: ws.name, path: ws.path, tabs: liveTabs });
-        for (const t of liveTabs) {
-          if (!statuses.has(t.ptyId)) statuses.set(t.ptyId, "idle");
-          watchTabStatus(t.ptyId);
-        }
+        groups.push({ id: ws.id, name: ws.name, path: ws.path, tabs });
       }
+
       // A tab only reaches SQLite when the desktop saves the workspace, so a
-      // freshly spawned PTY can be live while absent from every group. Ask the
-      // daemon what it is actually holding and surface the leftovers, rather
-      // than showing an empty list next to a running agent.
+      // freshly spawned PTY can be live while absent from every group. The
+      // snapshot reads terminal_tabs, so the daemon still has to be asked
+      // separately, or an empty list shows next to a running agent.
       const known = new Set(groups.flatMap((g) => g.tabs.map((t) => t.ptyId)));
-      const live: string[] = (await client.call("list_pty_sessions").catch(() => [])) ?? [];
-      const orphans: Tab[] = live
-        .map((id) => Number(id))
+      const live = await transport
+        .invoke<{ pty_id: number }[]>("list_pty_sessions")
+        .catch(() => [] as { pty_id: number }[]);
+      const orphans: Tab[] = (live ?? [])
+        .map((s) => s.pty_id)
         .filter((id) => Number.isFinite(id) && !known.has(id))
         .map((id) => ({
           ptyId: id,
@@ -278,22 +339,56 @@ export const useRemoteStore = defineStore("remote", () => {
         }));
       if (orphans.length) {
         groups.push({ id: LIVE_GROUP_ID, name: "Živé relace", path: "", tabs: orphans });
-        for (const t of orphans) {
-          if (!statuses.has(t.ptyId)) statuses.set(t.ptyId, "idle");
-          watchTabStatus(t.ptyId);
-        }
       }
-
       workspaces.value = groups;
+
+      // Phases come from the snapshot keyed the way the server keys them
+      // ("pty:7"), so no client-side re-derivation and no window where a tab
+      // renders idle because its first phase event has not arrived yet.
+      for (const [key, phase] of Object.entries(snap.phases ?? {})) {
+        if (!key.startsWith("pty:")) continue;
+        const id = Number(key.slice("pty:".length));
+        if (Number.isFinite(id)) phases.set(id, phase);
+      }
+      for (const g of groups) for (const t of g.tabs) watchPhase(t.ptyId);
+
+      applyChats((snap.chats ?? []) as unknown as RemoteChat[]);
     } catch (e: any) {
-      listError.value = e?.message ?? "Failed to load sessions";
+      listError.value = e?.message ?? "Failed to load";
     } finally {
       loading.value = false;
     }
   }
 
+  /** Kept as the name the views call to force a reload. */
+  const loadSessions = refresh;
+
+  // ── chats ─────────────────────────────────────────────────────────────────
+
   function chatFor(id: number) {
     return chats.value.find((chat) => chat.id === id);
+  }
+
+  function applyChats(incoming: RemoteChat[]) {
+    const next = (incoming ?? []).map((chat) => {
+      const existing = chatFor(chat.id);
+      // Preserve the live transcript and turn state across a refresh: the
+      // snapshot's chat records carry metadata, not messages, so taking them
+      // verbatim would wipe a streaming turn on every reconnect.
+      return existing
+        ? Object.assign(existing, { ...chat, messages: existing.messages })
+        : { ...chat, messages: Array.isArray(chat.messages) ? chat.messages : [] };
+    });
+    chats.value = next;
+    for (const chat of next) watchChat(chat);
+  }
+
+  function safeJson(raw: string): unknown {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
 
   function appendRemoteText(chat: RemoteChat, role: "assistant" | "thinking", text: string, partial = true) {
@@ -350,7 +445,9 @@ export const useRemoteStore = defineStore("remote", () => {
         // and permanently disabling its composer.
         chat.pendingPermission = null;
         chat.busy = false;
-        chat.messages.forEach((message) => { message.partial = false; });
+        chat.messages.forEach((message) => {
+          message.partial = false;
+        });
         const watching = view.value === "chat" && activeChat.value?.id === chat.id;
         if (!watching) chat.unseen = event.type === "turn.failed" ? "error" : "review";
         return;
@@ -359,26 +456,6 @@ export const useRemoteStore = defineStore("remote", () => {
         if (typeof event.sessionId === "string") chat.claudeSessionId = event.sessionId;
         return;
     }
-  }
-
-  function safeJson(raw: string): unknown {
-    try { return JSON.parse(raw); } catch { return null; }
-  }
-
-  function watchChat(chat: RemoteChat) {
-    const id = chat.id;
-    client?.subscribe(`chat-event-${id}`, (payload) => {
-      const batch = (typeof payload === "string" ? safeJson(payload) : payload) as
-        { events?: Array<Record<string, any>> } | null;
-      // Mutate the array's reactive element, not the plain object this
-      // closure captured at subscribe time — the latter never goes through
-      // Pinia's proxy, so busy/messages/unseen do change but Vue's render
-      // effect never reruns (the DOM silently stops matching the data).
-      // This is what made "agent pracuje" spin forever despite the turn
-      // completing normally on the backend.
-      const live = chatFor(id) ?? chat;
-      for (const event of batch?.events ?? []) applyEvent(live, event);
-    });
   }
 
   // Codex's raw JSON-RPC approval requests carry no options array — the
@@ -397,88 +474,95 @@ export const useRemoteStore = defineStore("remote", () => {
     { optionId: "codex:decline", kind: "reject_once" },
   ];
 
-  // Narrow reader: only recognizes a can_use_tool control_request (Claude), a
-  // Codex requestApproval, or a generic session/request_permission (ACP) —
-  // everything else on this raw channel is ignored on purpose (see spec's
-  // "Non-goals": no full protocol parsing on mobile, only enough to unblock
-  // a turn).
-  function watchChatPermissions(chat: RemoteChat) {
+  /**
+   * Subscribe a chat to its event batch and its permission channel.
+   * Idempotent, because every refresh walks the whole chat list.
+   *
+   * The permission channel stays RAW (claude-data-* / acp-req-*) on purpose:
+   * the control/permission protocol is deliberately not part of the neutral
+   * ProviderRuntimeEvent vocabulary — it is a UI decision, not transcript.
+   */
+  function watchChat(chat: RemoteChat) {
     const id = chat.id;
-    const transport = chat.transport;
-    const rawEvent = transport === "claude-cli" ? `claude-data-${id}` : `acp-req-${id}`;
-    client?.subscribe(rawEvent, (payload) => {
-      // The WS payload is the ChatStreamLine envelope emitted by Go's
-      // emitChatLine ({ord, kind, line}) — `line` is a STRING holding the
-      // actual raw protocol JSON, not the message itself. Unwrap it before
-      // reading msg.type/.request/.id/.method, or every field below reads
-      // undefined and no permission is ever detected.
-      const envelope = (typeof payload === "string" ? safeJson(payload) : payload) as { line?: string } | null;
-      const parsed = typeof envelope?.line === "string" ? safeJson(envelope.line) : null;
-      if (!parsed || typeof parsed !== "object") return;
-      const msg = parsed as Record<string, any>;
-      // Same reactivity requirement as watchChat: write through the array's
-      // proxy element, not the plain object captured when this subscription
-      // was created, or the banner never appears despite pendingPermission
-      // actually being set.
-      const live = chatFor(id) ?? chat;
+    if (watchedChats.has(id)) return;
+    watchedChats.add(id);
 
-      if (transport === "claude-cli") {
-        if (msg.type !== "control_request" || msg.request?.subtype !== "can_use_tool") return;
-        const input = msg.request.input ?? {};
-        const detail = input.command ?? input.file_path ?? input.path ?? "";
-        live.pendingPermission = {
-          requestId: msg.request_id,
-          toolName: msg.request.tool_name ?? "Tool",
-          detail: String(detail),
-          options: [],
-          input,
-        };
-        return;
-      }
+    track(
+      transport!.listen<{ events?: Array<Record<string, any>> }>(`chat-event-${id}`, (payload) => {
+        const batch = (typeof payload === "string" ? safeJson(payload) : payload) as
+          | { events?: Array<Record<string, any>> }
+          | null;
+        // Mutate the array's reactive element, not the plain object this
+        // closure captured at subscribe time — the latter never goes through
+        // Pinia's proxy, so busy/messages/unseen do change but Vue's render
+        // effect never reruns (the DOM silently stops matching the data).
+        const live = chatFor(id);
+        if (!live) return;
+        for (const event of batch?.events ?? []) applyEvent(live, event);
+      }),
+    );
 
-      // ACP: server->client REQUEST has both method and id.
-      if (typeof msg.id !== "number" || !msg.method) return;
+    const transportKind = chat.transport;
+    const rawEvent = transportKind === "claude-cli" ? `claude-data-${id}` : `acp-req-${id}`;
+    track(
+      transport!.listen(rawEvent, (payload) => {
+        // The payload is the ChatStreamLine envelope Go's emitChatLine emits
+        // ({ord, kind, line}) — `line` is a STRING holding the raw protocol
+        // JSON, not the message itself. Unwrap it before reading
+        // msg.type/.request/.id/.method, or every field reads undefined and
+        // no permission is ever detected.
+        const envelope = (typeof payload === "string" ? safeJson(payload) : payload) as { line?: string } | null;
+        const parsed = typeof envelope?.line === "string" ? safeJson(envelope.line) : null;
+        if (!parsed || typeof parsed !== "object") return;
+        const msg = parsed as Record<string, any>;
+        const live = chatFor(id);
+        if (!live) return;
 
-      if (CODEX_APPROVAL_METHODS.includes(msg.method)) {
-        const p = msg.params ?? {};
-        const command = typeof p.command === "string" ? p.command : "";
-        const toolName = msg.method.includes("commandExecution") ? "Run command"
-          : msg.method.includes("fileChange") ? "Apply file changes"
-          : "Grant additional permission";
+        if (transportKind === "claude-cli") {
+          if (msg.type !== "control_request" || msg.request?.subtype !== "can_use_tool") return;
+          const input = msg.request.input ?? {};
+          const detail = input.command ?? input.file_path ?? input.path ?? "";
+          live.pendingPermission = {
+            requestId: msg.request_id,
+            toolName: msg.request.tool_name ?? "Tool",
+            detail: String(detail),
+            options: [],
+            input,
+          };
+          return;
+        }
+
+        // ACP: a server->client REQUEST has both method and id.
+        if (typeof msg.id !== "number" || !msg.method) return;
+
+        if (CODEX_APPROVAL_METHODS.includes(msg.method)) {
+          const p = msg.params ?? {};
+          const command = typeof p.command === "string" ? p.command : "";
+          const toolName = msg.method.includes("commandExecution")
+            ? "Run command"
+            : msg.method.includes("fileChange")
+              ? "Apply file changes"
+              : "Grant additional permission";
+          live.pendingPermission = { rpcId: msg.id, toolName, detail: command, options: CODEX_APPROVAL_OPTIONS };
+          return;
+        }
+
+        if (msg.method !== "session/request_permission") return;
+        const options = (msg.params?.options ?? []).map((o: any) => ({ optionId: o.optionId, kind: o.kind }));
         live.pendingPermission = {
           rpcId: msg.id,
-          toolName,
-          detail: command,
-          options: CODEX_APPROVAL_OPTIONS,
+          toolName: msg.params?.toolCall?.title ?? msg.params?.title ?? "Tool",
+          detail: "",
+          options,
         };
-        return;
-      }
-
-      if (msg.method !== "session/request_permission") return;
-      const options = (msg.params?.options ?? []).map((o: any) => ({ optionId: o.optionId, kind: o.kind }));
-      live.pendingPermission = {
-        rpcId: msg.id,
-        toolName: msg.params?.toolCall?.title ?? msg.params?.title ?? "Tool",
-        detail: "",
-        options,
-      };
-    });
+      }),
+    );
   }
 
   async function loadChats() {
-    if (!client) return;
+    if (!transport) return;
     try {
-      const next = await client.call("remote_list_chats") as RemoteChat[];
-      chats.value = next.map((chat) => ({ ...chat, messages: Array.isArray(chat.messages) ? chat.messages : [] }));
-      for (const chat of chats.value) { watchChat(chat); watchChatPermissions(chat); }
-      client.subscribe("remote-chats", (payload) => {
-        const change = typeof payload === "string" ? safeJson(payload) : payload;
-        const incoming = (change as any)?.chat as RemoteChat | undefined;
-        if (!incoming) return;
-        const existing = chatFor(incoming.id);
-        if (existing) Object.assign(existing, incoming);
-        else { chats.value.push(incoming); watchChat(incoming); watchChatPermissions(incoming); }
-      });
+      applyChats(await transport.invoke<RemoteChat[]>("remote_list_chats"));
     } catch (e: any) {
       listError.value = e?.message ?? "Failed to load chats";
     }
@@ -502,17 +586,18 @@ export const useRemoteStore = defineStore("remote", () => {
 
   async function sendChat(text: string) {
     const chat = activeChat.value;
-    if (!client || !chat || !text.trim() || chat.busy) return;
+    if (!transport || !chat || !text.trim() || chat.busy) return;
     chat.messages.push({ id: Date.now(), role: "user", text: text.trim() });
     chat.busy = true;
     try {
       if (chat.transport === "claude-cli") {
-        // Go's wsArgs.ID is string-typed — an un-stringified numeric id
-        // silently fails to decode and the call hangs with no reply (same
-        // bug class Task 1 fixed for pty ids).
-        await client.call("claude_send", { id: String(chat.id), text: text.trim(), sessionId: chat.claudeSessionId || null });
+        await transport.invoke("claude_send", {
+          id: String(chat.id),
+          text: text.trim(),
+          sessionId: chat.claudeSessionId || null,
+        });
       } else {
-        await client.call("acp_send", { id: String(chat.id), text: text.trim() });
+        await transport.invoke("acp_send", { id: String(chat.id), text: text.trim() });
       }
     } catch (e: any) {
       chat.busy = false;
@@ -521,22 +606,21 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   async function createChat(workspaceId: number, agentKind: "codex" | "claude") {
-    if (!client) throw new Error("not connected");
-    const chat = await client.call("remote_create_chat", { workspaceId, agentKind }) as RemoteChat;
-    chats.value.push(chat);
+    if (!transport) throw new Error("not connected");
+    const chat = await transport.invoke<RemoteChat>("remote_create_chat", { workspaceId, agentKind });
+    chats.value.push({ ...chat, messages: [] });
     watchChat(chat);
-    watchChatPermissions(chat);
-    openChat(chat);
+    openChat(chatFor(chat.id)!);
   }
 
   async function respondChatPermission(chatId: number, allow: boolean) {
     const chat = chatFor(chatId);
     const pending = chat?.pendingPermission;
-    if (!client || !chat || !pending) return;
+    if (!transport || !chat || !pending) return;
     chat.pendingPermission = null;
     try {
       if (pending.requestId) {
-        await client.call("claude_respond_control", {
+        await transport.invoke("claude_respond_control", {
           id: String(chat.id),
           requestId: pending.requestId,
           response: allow
@@ -560,16 +644,14 @@ export const useRemoteStore = defineStore("remote", () => {
           return pending.options[0]?.optionId ?? (allow ? "allow_once" : "reject_once");
         };
         const optionId = allow ? pick("allow_once", "allow_always") : pick("reject_once", "reject_always");
-        await client.call("acp_respond_permission", {
-          id: String(chat.id),
-          rpcId: pending.rpcId,
-          optionId,
-        });
+        await transport.invoke("acp_respond_permission", { id: String(chat.id), rpcId: pending.rpcId, optionId });
       }
     } catch (e: any) {
       chat.messages.push({ id: Date.now(), role: "assistant", text: `Odpověď na povolení selhala: ${e?.message ?? e}` });
     }
   }
+
+  // ── views ─────────────────────────────────────────────────────────────────
 
   function openTerminal(tab: Tab) {
     activeTab.value = tab;
@@ -577,40 +659,40 @@ export const useRemoteStore = defineStore("remote", () => {
     markTabSeen(tab.ptyId);
   }
 
-  function markTabSeen(ptyId: number) {
-    const s = statuses.get(ptyId);
-    if (s === "review" || s === "error") statuses.set(ptyId, "idle");
+  function closeTerminal() {
+    if (activeTab.value) markTabSeen(activeTab.value.ptyId);
+    activeTab.value = null;
+    view.value = "dashboard";
   }
 
   function showDashboard() {
     view.value = "dashboard";
   }
-
   function showSessions() {
     view.value = "sessions";
   }
-
-  function showChats() { view.value = "chats"; }
-
-  function closeTerminal() {
-    if (activeTab.value) {
-      client?.unsubscribe(`pty-data-${activeTab.value.ptyId}`);
-    }
-    activeTab.value = null;
-    view.value = "dashboard";
+  function showChats() {
+    view.value = "chats";
+  }
+  function showDiff() {
+    view.value = "diff";
   }
 
-  function getClient(): BurrowWsClient {
-    if (!client) throw new Error("not connected");
-    return client;
+  /** The socket itself, for the views that stream (TerminalView). */
+  function getTransport(): Transport {
+    if (!transport) throw new Error("not connected");
+    return transport;
   }
 
   return {
-    baseUrl, token, connected, connecting, connectError,
+    baseUrl, credentials, connected, connecting, connectError, reconnecting,
     view, workspaces, loading, listError, activeTab,
     chats, activeChat,
-    pair, connect, disconnect, loadSessions, loadChats, openTerminal, closeTerminal, showDashboard, showSessions, showChats, openChat, closeChat, sendChat, createChat,
-    statusFor, getClient,
-    markTabSeen, markChatSeen, chatStatus, respondChatPermission, reconnecting,
+    pair, connect, disconnect, loadSessions, refresh, loadChats,
+    openTerminal, closeTerminal, showDashboard, showSessions, showChats, showDiff,
+    openChat, closeChat, sendChat, createChat,
+    statusFor, chatStatus, getTransport,
+    markTabSeen, markChatSeen, respondChatPermission,
+    saveRemoteCredentials,
   };
 });

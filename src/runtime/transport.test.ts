@@ -386,6 +386,41 @@ describe("createTransport", () => {
       expect(resynced).toBe(1);
     });
 
+    it("reports going down and coming back up", async () => {
+      // onState is what a UI showing "reconnecting" reads. Without it the
+      // store would open a second socket just to observe the first one.
+      const { t } = setup();
+      const seen: boolean[] = [];
+      t.onState((up) => seen.push(up));
+      // Fires immediately with the current state, so a late subscriber is
+      // not stuck showing "connecting" until the next transition.
+      expect(seen).toEqual([false]);
+
+      await tick();
+      const first = FakeWS.instances[0];
+      first.open();
+      expect(seen).toEqual([false, true]);
+
+      first.close();
+      await tick();
+      await tick();
+      const second = FakeWS.instances[FakeWS.instances.length - 1];
+      second.open();
+      expect(seen).toEqual([false, true, false, true]);
+    });
+
+    it("does not repeat a state it is already in", async () => {
+      const { t } = setup();
+      await tick();
+      const ws = FakeWS.instances[0];
+      ws.open();
+
+      const seen: boolean[] = [];
+      t.onState((up) => seen.push(up));
+      ws.open(); // a second onopen for the same socket must not re-notify
+      expect(seen).toEqual([true]);
+    });
+
     it("does not resume from a position the server already rejected", async () => {
       // After a resync the client holds nothing until it applies a snapshot
       // and reports its seq. Resuming from the dead position would earn
