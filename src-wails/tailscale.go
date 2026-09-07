@@ -59,6 +59,25 @@ func (a *App) TailscaleServe(port int) (string, error) {
 	return string(out), nil
 }
 
+// funnelEnabled reports whether `tailscale funnel` publishes anything on this
+// node. See funnelEnabledIn (remoteguard.go) for the parse and for why an
+// unreadable config counts as enabled.
+//
+// Tailscale not installed, or `serve status` failing outright, counts as OFF:
+// with no serve config there is nothing published at all, which is a different
+// thing from a config we can see but cannot read.
+func (a *App) funnelEnabled() bool {
+	bin := tailscaleBin()
+	if bin == "" {
+		return false
+	}
+	out, err := exec.Command(bin, "serve", "status", "--json").Output()
+	if err != nil {
+		return false
+	}
+	return funnelEnabledIn(out)
+}
+
 func (a *App) TailscaleServeStop() error {
 	bin := tailscaleBin()
 	if bin == "" {

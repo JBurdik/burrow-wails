@@ -103,13 +103,31 @@ func (a *App) setHttpEnabled(enabled bool) error {
 		return nil
 	}
 	if enabled {
+		addr := fmt.Sprintf("127.0.0.1:%d", httpServerPort)
+		// Both guards fail CLOSED, before the listener exists (spec §4
+		// invariants 1 and 2). A warning in a log nobody reads is not a
+		// guard: funnel would publish this exact handler — same host, same
+		// :443, same /burrow path — on the open internet, where a six-digit
+		// pairing code is not a defence.
+		if err := assertLoopbackAddr(addr); err != nil {
+			return err
+		}
+		funnel := a.funnelEnabled
+		if funnelCheckHook != nil {
+			funnel = funnelCheckHook
+		}
+		if funnel() {
+			return fmt.Errorf("remote access refused: `tailscale funnel` is on for this node, which would publish Burrow on the public internet. Turn funnel off (`tailscale funnel off`) and try again")
+		}
 		a.httpSrv = NewHTTPServer(a)
 		// Publish it so the WS sink (installWSSink) fans bus events out
 		// to browser clients too.
 		wsBroadcaster.Store(a.httpSrv)
 		srv := a.httpSrv
 		go func() {
-			if err := srv.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", httpServerPort)); err != nil && err != http.ErrServerClosed {
+			// The very addr assertLoopbackAddr just cleared — not a second
+			// format string that could drift away from the one checked.
+			if err := srv.ListenAndServe(addr); err != nil && err != http.ErrServerClosed {
 				log.Printf("http server: %v", err)
 			}
 		}()
