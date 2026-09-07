@@ -254,6 +254,12 @@ export const useRemoteStore = defineStore("remote", () => {
         }),
       );
       track(transport.onResync(() => void refresh()));
+      // A chat created on the desktop (or on another device) now reaches this
+      // client without a reload. The mobile store used to subscribe to
+      // `remote-chats` for this, a name NOTHING in the tree ever emitted — so
+      // cross-client chat creation has never worked in either direction until
+      // the list moved into SQLite and got a real event.
+      track(transport.listen("chats-changed", () => void loadChats()));
       if (view.value === "connect") view.value = "dashboard";
       await refresh();
     } catch (e: any) {

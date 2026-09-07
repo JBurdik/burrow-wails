@@ -9,6 +9,7 @@ import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/store
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { listen } from "@tauri-apps/api/event";
 import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
 
@@ -48,12 +49,79 @@ export interface ClaudeSession {
   branch?: string;
 }
 
-const SESSIONS_KEY = "chatSessions";
-const SESSIONS_LEGACY_KEY = "burrow.claude.sessions";
+/**
+ * The chat LIST lives in SQLite and Go owns it (src-wails/chats.go). There is
+ * no `chatSessions` key and no `chatIdCounter` any more: both clients were
+ * rewriting the whole of config.json, so the desktop saving a font preference
+ * could revert a chat the phone had just created — and the reverted counter
+ * then handed the next desktop chat the phone's id and its running CLI.
+ *
+ * `chatActiveByWs` deliberately STAYS in config.json. Which chat is selected
+ * is per-device, exactly like the seen-at receipts: the desktop being on chat
+ * 78 says nothing about what the phone should be showing.
+ */
 const ACTIVE_KEY = "chatActiveByWs";
 const ACTIVE_LEGACY_KEY = "burrow.claude.active";
-const COUNTER_KEY = "chatIdCounter";
-const COUNTER_LEGACY_KEY = "burrow.claude.nextId";
+
+/** Wire shape of src-wails/chats.go's Chat. */
+interface ChatRow {
+  id: number;
+  workspace_id: number;
+  title: string;
+  pinned_title: boolean;
+  claude_session_id: string;
+  message_count: number;
+  control: boolean;
+  agent_kind: string;
+  transport: string;
+  model: string;
+  branch: string;
+  settled_override: string;
+  archived_at: number;
+  last_activity_at: number;
+}
+
+// The one place the column names and the client's field names meet. `busy`
+// and `status` are absent from the row on purpose — busy was always persisted
+// as false, and the status IS the phase.
+function sessionFromRow(r: ChatRow): ClaudeSession {
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    title: r.title,
+    pinnedTitle: r.pinned_title || undefined,
+    claudeSessionId: r.claude_session_id,
+    messageCount: r.message_count,
+    control: r.control || undefined,
+    agentKind: r.agent_kind || undefined,
+    transport: (r.transport || undefined) as ChatTransport | undefined,
+    model: r.model || undefined,
+    branch: r.branch || undefined,
+    settledOverride: (r.settled_override || null) as ClaudeSession["settledOverride"],
+    archivedAt: r.archived_at || null,
+    lastActivityAt: r.last_activity_at || undefined,
+    busy: false,
+  };
+}
+
+function rowFromSession(s: ClaudeSession): ChatRow {
+  return {
+    id: s.id,
+    workspace_id: s.workspaceId,
+    title: s.title ?? "",
+    pinned_title: !!s.pinnedTitle,
+    claude_session_id: s.claudeSessionId ?? "",
+    message_count: s.messageCount ?? 0,
+    control: !!s.control,
+    agent_kind: s.agentKind ?? "",
+    transport: s.transport ?? "",
+    model: s.model ?? "",
+    branch: s.branch ?? "",
+    settled_override: s.settledOverride ?? "",
+    archived_at: s.archivedAt ?? 0,
+    last_activity_at: s.lastActivityAt ?? 0,
+  };
+}
 const TURNS_KEY = "chatTurns";
 const TURNS_LEGACY_KEY = "burrow.claude.turns";
 const RULES_KEY = "chatPermissionRules";
@@ -72,7 +140,6 @@ type SessionActor = ReturnType<typeof createActor<typeof agentStatusMachine>>;
 export const useClaudeChatsStore = defineStore("claudeChats", () => {
   const sessions = ref<ClaudeSession[]>([]);
   const activeByWs = ref<Record<number, number>>({});
-  let nextId = 1;
   const turns = ref<TurnEvent[]>([]);
   // "Allow always" rules — opaque match keys (e.g. "Bash:git" or "Write").
   // Matched against the key(s) derived from an incoming can_use_tool request.
@@ -96,17 +163,58 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     return actor;
   }
 
-  configReady.then(() => {
-    migrateFromLocalStorage(SESSIONS_LEGACY_KEY, SESSIONS_KEY);
-    sessions.value = getConfig<ClaudeSession[]>(SESSIONS_KEY, []);
-    // Restore actors for sessions loaded from config (all start idle — correct since busy=false on persist).
-    sessions.value.forEach(spawnActor);
+  /**
+   * Load (or re-load) the shared chat list.
+   *
+   * MERGES rather than replaces: a re-load triggered by `chats-changed` must
+   * not discard a running actor or an in-flight `busy` for a chat that is
+   * only being re-read. Rows the server no longer has are dropped, with their
+   * actors, because that is what a delete on the other client looks like from
+   * here.
+   */
+  async function reload() {
+    let rows: ChatRow[];
+    try {
+      rows = await invoke<ChatRow[]>("list_chats");
+    } catch {
+      return; // no backend (browser-only dev) — leave whatever is loaded
+    }
+    const incoming = new Map(rows.map((r) => [r.id, r]));
 
+    for (const [id, actor] of actors) {
+      if (!incoming.has(id)) {
+        actor.stop();
+        actors.delete(id);
+      }
+    }
+
+    const next: ClaudeSession[] = [];
+    for (const row of rows) {
+      const existing = sessions.value.find((s) => s.id === row.id);
+      if (existing) {
+        // Keep the live-only fields this store owns; take the rest from the
+        // row, which is the shared truth.
+        const { busy, status } = existing;
+        Object.assign(existing, sessionFromRow(row), { busy, status });
+        next.push(existing);
+      } else {
+        next.push(sessionFromRow(row));
+      }
+    }
+    sessions.value = next;
+    // Actors for anything newly seen. Idle is correct: busy is never persisted.
+    sessions.value.forEach(spawnActor);
+  }
+
+  void reload();
+  // Both clients follow this, so a chat created anywhere appears everywhere
+  // without a reload — which is the whole reason the list moved out of a file
+  // each client rewrote wholesale.
+  void listen("chats-changed", () => void reload());
+
+  configReady.then(() => {
     migrateFromLocalStorage(ACTIVE_LEGACY_KEY, ACTIVE_KEY);
     activeByWs.value = getConfig<Record<number, number>>(ACTIVE_KEY, {});
-
-    migrateFromLocalStorage(COUNTER_LEGACY_KEY, COUNTER_KEY);
-    nextId = getConfig<number>(COUNTER_KEY, 1);
 
     migrateFromLocalStorage(TURNS_LEGACY_KEY, TURNS_KEY);
     turns.value = getConfig<TurnEvent[]>(TURNS_KEY, []);
@@ -128,11 +236,20 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     setConfig(RULES_KEY, []);
   }
 
+  /**
+   * Write the chat rows this client holds, plus the per-device selection.
+   *
+   * `save_chats` is an upsert that never deletes, so this cannot remove a
+   * chat another client created between our last read and this write — the
+   * failure that made a phone-created chat vanish. Deletion is explicit
+   * (`delete_chat`, from remove()).
+   */
   function persist() {
-    const toSave = sessions.value.map((s) => ({ ...s, busy: false }));
-    setConfig(SESSIONS_KEY, toSave);
+    void invoke("save_chats", { chats: sessions.value.map(rowFromSession) }).catch(() => {
+      // Best effort, same contract setConfig had. The next persist retries
+      // with the latest state, and `chats-changed` re-reads either way.
+    });
     setConfig(ACTIVE_KEY, activeByWs.value);
-    setConfig(COUNTER_KEY, nextId);
   }
 
   function sessionsForWs(workspaceId: number): ClaudeSession[] {
@@ -151,36 +268,47 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   }
 
   // Create and activate a new session for this workspace.
-  function create(workspaceId: number, opts?: { agentKind?: string }): ClaudeSession {
-    const id = nextId++;
+  /**
+   * Create a chat. Async because the id comes from the DATABASE now —
+   * a client inventing its own is how two clients ended up handing the same
+   * id to two different chats, one of which then adopted the other's running
+   * CLI process.
+   */
+  async function create(workspaceId: number, opts?: { agentKind?: string }): Promise<ClaudeSession> {
     const agentKind = opts?.agentKind ?? 'claude';
     const transport: ChatTransport =
       (() => { const a = useProvidersStore().byId(agentKind); return a ? chatTransportFor(a) : (agentKind === 'claude' ? 'claude-cli' : 'acp'); })();
     const ws = useWorkspaceStore().workspaces.find((w) => w.id === workspaceId);
     const branch = ws?.worktree_branch || useGitStore().branchByWs[workspaceId] || undefined;
-    const session: ClaudeSession = {
-      id,
-      workspaceId,
-      claudeSessionId: "",
-      title: `Chat ${sessionsForWs(workspaceId).length + 1}`,
-      busy: false,
-      messageCount: 0,
-      agentKind,
-      transport,
-      lastActivityAt: Date.now(),
-      branch,
-    };
+    const row = await invoke<ChatRow>("create_chat", {
+      chat: rowFromSession({
+        id: 0, // ignored — CreateChat assigns it
+        workspaceId,
+        claudeSessionId: "",
+        title: `Chat ${sessionsForWs(workspaceId).length + 1}`,
+        busy: false,
+        messageCount: 0,
+        agentKind,
+        transport,
+        lastActivityAt: Date.now(),
+        branch,
+      }),
+    });
+
+    const session = sessionFromRow(row);
     sessions.value.push(session);
     // Pass the REACTIVE array element (not the raw `session`) so the actor's
     // status mutations go through Vue's proxy and actually trigger reactivity.
     spawnActor(sessions.value[sessions.value.length - 1]);
-    activeByWs.value[workspaceId] = id;
-    persist();
-    return session;
+    activeByWs.value[workspaceId] = session.id;
+    // Only the per-device selection needs writing — the row is already in the
+    // database, and a save_chats here would be a redundant round trip.
+    setConfig(ACTIVE_KEY, activeByWs.value);
+    return sessions.value[sessions.value.length - 1];
   }
 
   // Ensure at least one session exists for this workspace; return active.
-  function ensureSession(workspaceId: number): ClaudeSession {
+  async function ensureSession(workspaceId: number): Promise<ClaudeSession> {
     const existing = sessionsForWs(workspaceId);
     if (existing.length === 0) return create(workspaceId);
     const active = activeSession(workspaceId);
@@ -204,6 +332,10 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     // listeners outlive it (they are deliberately kept across an unmount).
     dropChatSession(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
+    // Explicit delete: save_chats never removes, so a row only goes when
+    // somebody says so — which is what stops a stale client from deleting a
+    // chat it simply had not heard about yet.
+    await invoke("delete_chat", { id }).catch(() => {});
     sessions.value = sessions.value.filter((x) => x.id !== id);
     // Hard delete — drop this chat's per-chat model / effort / permission mode /
     // ACP selections too, so config.json doesn't accumulate dead ids. (archive()

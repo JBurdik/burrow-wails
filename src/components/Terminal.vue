@@ -1013,12 +1013,15 @@ function activateTab(id: number) {
   nextTick(() => xtermRefs.get(leaf.id)?.focus());
 }
 
-function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[], model?: string) {
+// async since chats.create() now gets its id from the database rather than
+// inventing one client-side. Every caller here is a fire-and-forget handler.
+async function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[], model?: string) {
   let session: import("@/stores/claudeChats").ClaudeSession;
   if (chatId != null) {
-    session = chatsStore.sessions.find((s) => s.id === chatId) ?? chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
+    session = chatsStore.sessions.find((s) => s.id === chatId)
+      ?? await chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   } else {
-    session = chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
+    session = await chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   }
   // Reopening an archived chat (e.g. from the Sidebar's Archived shelf) always
   // un-archives it — a chat with an open tab is never archived.
@@ -1273,16 +1276,16 @@ function openFileInTab(path: string, name: string, line?: number) {
   nextTick(() => xtermRefs.get(id)?.focus());
 }
 
-function makeChatLeaf(agentId?: string): Leaf {
-  const session = chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
+async function makeChatLeaf(agentId?: string): Promise<Leaf> {
+  const session = await chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   const id = nextPtyId();
   return { type: "leaf", id, title: session.title, defaultTitle: session.title, isAgent: false, busy: false, status: "idle", leafType: "chat", chatId: session.id, cwd: props.cwd };
 }
 
-function splitFocused(kind: "terminal" | "chat", direction: "h" | "v") {
+async function splitFocused(kind: "terminal" | "chat", direction: "h" | "v") {
   const tab = tabs.value.find((t) => t.id === activeTabId.value);
   if (!tab) return;
-  const newLeaf = kind === "chat" ? makeChatLeaf() : makeLeaf();
+  const newLeaf = kind === "chat" ? await makeChatLeaf() : makeLeaf();
   tab.root = insertSplit(tab.root, focusedLeafId.value, direction, newLeaf);
   focusedLeafId.value = newLeaf.id;
   if (kind === "terminal") registerLeafListeners(newLeaf.id);

@@ -182,7 +182,7 @@ async function spawn(args: Record<string, unknown>) {
   const openAs = str(args.target) || (ui.spawnMode === "chat" ? "chat" : "tab");
   if (openAs === "chat") {
     const chats = useClaudeChatsStore();
-    const session = chats.create(target.id, { agentKind: instance.id });
+    const session = await chats.create(target.id, { agentKind: instance.id });
     useTerminalTabsStore().openChat(target.id, session.id, instance.id, task);
     return { chat_id: session.id, workspace_id: target.id };
   }
