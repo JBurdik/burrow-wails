@@ -2,112 +2,77 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
-// The phone renders whatever this returns, so the contract is the shape in
-// src/mobile/store.ts: camelCase session keys plus an always-present
-// `messages` array pulled from the separate history map.
-func TestRemoteChatsFromConfig(t *testing.T) {
-	raw := `{
-	  "chatSessions": [
-	    {"id": 8, "workspaceId": 2, "title": "Chat 8", "busy": false, "transport": "claude-cli", "claudeSessionId": "abc"},
-	    {"id": 9, "workspaceId": 2, "title": "Chat 9", "busy": true,  "transport": "acp",        "claudeSessionId": ""},
-	    {"id": 99, "workspaceId": 2, "title": "Manager", "control": true, "transport": "claude-cli"}
-	  ],
-	  "chatMessageHistory": {
-	    "8": [{"id": 0, "role": "user", "text": "ahoj"}, {"id": 1, "role": "assistant", "text": "čau"}]
-	  }
-	}`
-	chats, err := remoteChatsFromConfig(raw)
+// The config.json-parsing tests that used to live here are gone with the code
+// they covered (remoteChatsFromConfig, remoteCreateChatSession and its
+// chatIdCounter bump). The chat list is a SQLite table now — chats_test.go
+// covers the store, and what is left here is the SHAPING this file still owns.
+
+func TestRemoteChatShapeCarriesWhatThePhoneReads(t *testing.T) {
+	names := map[int64]string{2: "Burrow GO"}
+	paths := map[int64]string{2: "/repo/path"}
+	got := remoteChatShape(Chat{
+		ID: 86, WorkspaceID: 2, Title: "Chat 56 (phone)",
+		AgentKind: "claude", Transport: "claude-cli", MessageCount: 3,
+		LastActivityAt: 1234,
+	}, names, paths)
+
+	for key, want := range map[string]any{
+		"id":             int64(86),
+		"workspaceId":    int64(2),
+		"title":          "Chat 56 (phone)",
+		"transport":      "claude-cli",
+		"agentKind":      "claude",
+		"messageCount":   int64(3),
+		"lastActivityAt": int64(1234),
+		"workspaceName":  "Burrow GO",
+		"workspacePath":  "/repo/path",
+		"busy":           false,
+	} {
+		if got[key] != want {
+			t.Errorf("%s = %#v, want %#v", key, got[key], want)
+		}
+	}
+	// The phone indexes this without a guard and fills it from the event
+	// stream; a missing key is a crash on first paint.
+	if _, ok := got["messages"]; !ok {
+		t.Error("messages missing")
+	}
+}
+
+func TestRemoteChatShapeDefaultsAnEmptyTransport(t *testing.T) {
+	// The phone picks its permission channel off `transport`
+	// (claude-data-* vs acp-req-*), so an empty value routes a Claude chat's
+	// approval requests to a channel nothing publishes on — the prompt simply
+	// never appears and the turn hangs.
+	got := remoteChatShape(Chat{ID: 1, WorkspaceID: 1}, nil, nil)
+	if got["transport"] != "claude-cli" {
+		t.Fatalf("transport = %#v, want claude-cli", got["transport"])
+	}
+}
+
+func TestRemoteListChatsHidesTheManagerSession(t *testing.T) {
+	// Mission Control's session is not a user-facing chat; the desktop
+	// sidebar hides it for the same reason.
+	a, _ := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+
+	if _, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "real"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "Manager", Control: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := a.RemoteListChats()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(chats) != 2 {
-		t.Fatalf("got %d chats, want 2 — the control:true Manager session must be hidden", len(chats))
-	}
-	msgs, ok := chats[0]["messages"].([]map[string]any)
-	if !ok || len(msgs) != 2 {
-		t.Fatalf("chat 8 messages: %#v", chats[0]["messages"])
-	}
-	if msgs[1]["text"] != "čau" {
-		t.Fatalf("transcript not inlined: %#v", msgs[1])
-	}
-	// A chat with no history must still carry an array, never null — store.ts
-	// only guards with Array.isArray, and null would blank the transcript.
-	empty, ok := chats[1]["messages"].([]map[string]any)
-	if !ok || len(empty) != 0 {
-		t.Fatalf("chat 9 messages: %#v", chats[1]["messages"])
-	}
-	if b, _ := json.Marshal(chats[1]["messages"]); string(b) != "[]" {
-		t.Fatalf("empty transcript must marshal to [], got %s", b)
-	}
-}
-
-func TestRemoteChatsFromConfigTolerantOfEmpty(t *testing.T) {
-	for _, raw := range []string{`{}`, `{"chatSessions": []}`} {
-		chats, err := remoteChatsFromConfig(raw)
-		if err != nil || len(chats) != 0 {
-			t.Fatalf("%s: got %v / %v", raw, chats, err)
-		}
-	}
-	if _, err := remoteChatsFromConfig("not json"); err == nil {
-		t.Fatal("expected a parse error")
-	}
-}
-
-// Guards against drift in the real file: whatever the desktop has actually
-// written must still parse. Skipped when there is no config yet.
-func TestRemoteChatsFromLiveConfig(t *testing.T) {
-	dir, err := appDataDir()
-	if err != nil {
-		t.Skip(err)
-	}
-	raw, err := os.ReadFile(dir + "/config.json")
-	if err != nil {
-		t.Skip("no config.json on this machine")
-	}
-	if _, err := remoteChatsFromConfig(string(raw)); err != nil {
-		t.Fatalf("live config.json no longer parses: %v", err)
-	}
-}
-
-func TestRemoteCreateChatSessionBumpsCounterAndPreservesConfig(t *testing.T) {
-	cfg := map[string]any{
-		"someUnrelatedSetting": "keep-me",
-		"chatIdCounter":        float64(6),
-		"chatSessions": []any{
-			map[string]any{"id": float64(5), "workspaceId": float64(2), "title": "Chat 1"},
-		},
-	}
-	session, id := remoteCreateChatSession(cfg, 2, "claude")
-
-	if id != 6 {
-		t.Fatalf("id = %d, want 6 (must bump the counter, not reuse the last id)", id)
-	}
-	if cfg["chatIdCounter"] != float64(7) {
-		t.Fatalf("chatIdCounter = %v, want 7", cfg["chatIdCounter"])
-	}
-	if cfg["someUnrelatedSetting"] != "keep-me" {
-		t.Fatal("unrelated config keys must survive — config.json is a grab-bag, not just chat state")
-	}
-	if session["title"] != "Chat 2" {
-		t.Fatalf("title = %v, want \"Chat 2\" (second chat for this workspace)", session["title"])
-	}
-	if session["transport"] != "claude-cli" {
-		t.Fatalf("transport = %v, want claude-cli", session["transport"])
-	}
-	sessions, ok := cfg["chatSessions"].([]any)
-	if !ok || len(sessions) != 2 {
-		t.Fatalf("chatSessions = %#v, want 2 entries", cfg["chatSessions"])
-	}
-	history, ok := cfg["chatMessageHistory"].(map[string]any)
-	if !ok {
-		t.Fatal("chatMessageHistory was not created")
-	}
-	if msgs, ok := history["6"].([]any); !ok || len(msgs) != 0 {
-		t.Fatalf("chatMessageHistory[6] = %#v, want []", history["6"])
+	if len(list) != 1 || list[0]["title"] != "real" {
+		t.Fatalf("want only the user-facing chat, got %+v", list)
 	}
 }
 
@@ -118,14 +83,6 @@ func TestRemoteCreateChatRejectsNonClaude(t *testing.T) {
 	}
 }
 
-// RemoteCreateChat itself can't be exercised end-to-end here with an unknown
-// workspace id: resolving it goes through workspaceLabels() ->
-// ListWorkspaces(), which calls a.db.Query on the real *sql.DB — a bare
-// &App{} has a nil db, and database/sql panics (nil pointer dereference in
-// DB.conn) rather than returning an error. That's a pre-existing nil-DB
-// safety gap in ListWorkspaces/workspaceLabels, unrelated to this fix, and
-// out of scope here. So this tests the pure resolution logic RemoteCreateChat
-// added instead, which needs no DB at all.
 func TestResolveWorkspaceCwdRejectsUnknownWorkspace(t *testing.T) {
 	paths := map[int64]string{2: "/repo/path"}
 	if _, err := resolveWorkspaceCwd(paths, 999999); err == nil {
@@ -151,6 +108,7 @@ func TestEmptyListsMarshalAsArrays(t *testing.T) {
 		"skills":          []SkillInfo{},
 		"control verbs":   []ControlVerb{},
 		"pty sessions":    []string{},
+		"chats":           []Chat{},
 	} {
 		b, err := json.Marshal(v)
 		if err != nil {

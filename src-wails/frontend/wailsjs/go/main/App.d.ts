@@ -180,8 +180,6 @@ export function ReadKeybindings():Promise<string>;
 
 export function ReadTextFile(arg1:string):Promise<string>;
 
-export function RegeneratePairCode():Promise<string>;
-
 export function RegisterTmuxWin(arg1:string,arg2:string):Promise<void>;
 
 export function ReinstallStatusHooks():Promise<void>;
@@ -190,9 +188,15 @@ export function RelaunchApp():Promise<void>;
 
 export function RemoteCreateChat(arg1:number,arg2:string):Promise<Record<string, any>>;
 
+export function RemoteDevices():Promise<Array<main.RemoteDevice>>;
+
 export function RemoteEndpoints():Promise<Array<main.AdvertisedEndpoint>>;
 
 export function RemoteListChats():Promise<Array<Record<string, any>>>;
+
+export function RemotePairStatus():Promise<main.PairStatus>;
+
+export function RemoteRegeneratePairCode():Promise<main.PairStatus>;
 
 export function RemoteSyncChat(arg1:Record<string, any>):Promise<void>;
 
@@ -213,6 +217,8 @@ export function ResizePty(arg1:string,arg2:number,arg3:number):Promise<void>;
 export function RestartDaemon():Promise<void>;
 
 export function RestoreCheckpoint(arg1:string,arg2:string):Promise<main.Checkpoint>;
+
+export function RevokeRemoteDevice(arg1:string):Promise<void>;
 
 export function RunExtensionCommand(arg1:string,arg2:string,arg3:string):Promise<string>;
 

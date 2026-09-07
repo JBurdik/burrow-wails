@@ -62,14 +62,6 @@ type App struct {
 
 	maxAgents         int
 	burrowMcpMaxDepth int
-
-	// Guards RemoteCreateChat's read-modify-write of config.json end to end
-	// (through the ClaudeStart call) so two concurrent remote callers (two
-	// phones, or a rapid double-tap) can't interleave their own reads and
-	// writes and corrupt each other's chatIdCounter bump. It does NOT protect
-	// against a concurrent desktop setConfig save — see RemoteCreateChat's
-	// comment in remote.go for that risk, which this mutex does not close.
-	remoteCreateMu sync.Mutex
 }
 
 const httpServerPort = 37892
@@ -154,8 +146,6 @@ func (a *App) setHttpEnabled(enabled bool) error {
 	return nil
 }
 
-// HttpServerStatus mirrors Settings.vue's local httpStatus shape exactly
-// (camelCase — that's what the original Rust command actually returned).
 // HttpServerStatus is what Settings reads to render the remote-access block.
 //
 // There is no Token field any more. The shared http.token is gone (phase 6):
@@ -177,16 +167,6 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// No bus -> Wails-runtime sink: nothing in the frontend listens on the
-	// Wails event channel for a bus event any more. Every src/ subscription
-	// that is not one of the desktop-only names (menu-*, lsp-msg-*, float-*,
-	// extension-task:*, update:*, all of which are emitted with
-	// runtime.EventsEmit directly and are on events_test.go's allowlist) goes
-	// through src/lib/wailsCompat/event.ts to the /v2/ws transport, and the
-	// desktop's own connection subscribes to the bus for itself in
-	// remotews.handle. Feeding the webview as well marshalled every bus event
-	// -- including every pty-data-<id> chunk -- across the JS bridge for no
-	// consumer, on top of the copy the socket already delivers.
 	// The bus has exactly ONE sink now: remotews.handle's per-connection
 	// subscription. It is still the single door for every event a client may
 	// care about — what went away is the second delivery path, not the door.

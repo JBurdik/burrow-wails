@@ -451,10 +451,6 @@ export namespace main {
 	export class HttpServerStatus {
 	    enabled: boolean;
 	    port: number;
-	    tokenPath: string;
-	    token: string;
-	    pairCode: string;
-	    pairLocked: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new HttpServerStatus(source);
@@ -464,10 +460,6 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
 	        this.port = source["port"];
-	        this.tokenPath = source["tokenPath"];
-	        this.token = source["token"];
-	        this.pairCode = source["pairCode"];
-	        this.pairLocked = source["pairLocked"];
 	    }
 	}
 	export class LocalEndpointInfo {
@@ -500,6 +492,22 @@ export namespace main {
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.icon = source["icon"];
+	    }
+	}
+	export class PairStatus {
+	    code: string;
+	    expires_at: number;
+	    locked: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PairStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.expires_at = source["expires_at"];
+	        this.locked = source["locked"];
 	    }
 	}
 	export class ProviderLatest {
@@ -535,6 +543,28 @@ export namespace main {
 	    }
 	}
 	
+	export class RemoteDevice {
+	    id: string;
+	    name: string;
+	    kind: string;
+	    scopes: string[];
+	    added_at: number;
+	    last_seen: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoteDevice(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.kind = source["kind"];
+	        this.scopes = source["scopes"];
+	        this.added_at = source["added_at"];
+	        this.last_seen = source["last_seen"];
+	    }
+	}
 	export class SearchHit {
 	    path: string;
 	    line: number;

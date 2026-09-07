@@ -358,10 +358,6 @@ export function ReadTextFile(arg1) {
   return window['go']['main']['App']['ReadTextFile'](arg1);
 }
 
-export function RegeneratePairCode() {
-  return window['go']['main']['App']['RegeneratePairCode']();
-}
-
 export function RegisterTmuxWin(arg1, arg2) {
   return window['go']['main']['App']['RegisterTmuxWin'](arg1, arg2);
 }
@@ -378,12 +374,24 @@ export function RemoteCreateChat(arg1, arg2) {
   return window['go']['main']['App']['RemoteCreateChat'](arg1, arg2);
 }
 
+export function RemoteDevices() {
+  return window['go']['main']['App']['RemoteDevices']();
+}
+
 export function RemoteEndpoints() {
   return window['go']['main']['App']['RemoteEndpoints']();
 }
 
 export function RemoteListChats() {
   return window['go']['main']['App']['RemoteListChats']();
+}
+
+export function RemotePairStatus() {
+  return window['go']['main']['App']['RemotePairStatus']();
+}
+
+export function RemoteRegeneratePairCode() {
+  return window['go']['main']['App']['RemoteRegeneratePairCode']();
 }
 
 export function RemoteSyncChat(arg1) {
@@ -424,6 +432,10 @@ export function RestartDaemon() {
 
 export function RestoreCheckpoint(arg1, arg2) {
   return window['go']['main']['App']['RestoreCheckpoint'](arg1, arg2);
+}
+
+export function RevokeRemoteDevice(arg1) {
+  return window['go']['main']['App']['RevokeRemoteDevice'](arg1);
 }
 
 export function RunExtensionCommand(arg1, arg2, arg3) {
