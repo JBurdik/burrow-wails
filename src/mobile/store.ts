@@ -139,6 +139,26 @@ export const useRemoteStore = defineStore("remote", () => {
     unlisteners.push(off);
   }
 
+  // Debounces the workspaces-changed → refresh() below. A single repo action
+  // can fire several emits back to back — deleting a repo with N worktrees
+  // is N+1 workspaces-changed events, one per child removal plus the parent
+  // (src/stores/workspace.ts's remove() deletes them one at a time) — and
+  // each refresh() costs two full RPCs, one of them a shell_snapshot
+  // carrying every workspace's icon as a base64 data URL. noteSeq is
+  // monotonic (src/runtime/transport.ts), so coalescing these into one
+  // trailing refresh cannot rewind the client's position; the only exposure
+  // a debounce adds is an out-of-order apply, which the very next event
+  // already corrects.
+  const WORKSPACES_CHANGED_DEBOUNCE_MS = 300;
+  let workspacesChangedTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleWorkspacesRefresh() {
+    if (workspacesChangedTimer !== null) clearTimeout(workspacesChangedTimer);
+    workspacesChangedTimer = setTimeout(() => {
+      workspacesChangedTimer = null;
+      void refresh();
+    }, WORKSPACES_CHANGED_DEBOUNCE_MS);
+  }
+
   /**
    * The status shown for a terminal. Derived exactly the way the desktop
    * derives it (src/runtime/displayStatus.ts) from the server's phase plus
@@ -266,7 +286,7 @@ export const useRemoteStore = defineStore("remote", () => {
       // so an already-connected client had no way to learn the list changed.
       // refresh() takes a whole new snapshot, so there is no echo to filter:
       // this client only reads workspaces, it never mutates them.
-      track(transport.listen("workspaces-changed", () => void refresh()));
+      track(transport.listen("workspaces-changed", scheduleWorkspacesRefresh));
       if (view.value === "connect") view.value = "dashboard";
       await refresh();
     } catch (e: any) {
@@ -279,6 +299,10 @@ export const useRemoteStore = defineStore("remote", () => {
 
   function disconnect() {
     for (const off of unlisteners.splice(0)) off();
+    if (workspacesChangedTimer !== null) {
+      clearTimeout(workspacesChangedTimer);
+      workspacesChangedTimer = null;
+    }
     watchedPhases.clear();
     watchedChats.clear();
     transport?.close();
