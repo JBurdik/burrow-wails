@@ -124,7 +124,17 @@
           <div class="flex max-w-[880px] flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Burrow Remote</span>
             <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
+            <div v-if="httpError" class="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] text-red-300">{{ httpError }}</div>
             <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="httpStatus.pairLocked" class="text-[11px] text-red-400">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else class="text-[11px] text-muted-foreground">Type this into Burrow Remote on your phone. Single use — it changes as soon as a device pairs.</span><code v-if="!httpStatus.pairLocked" class="mt-1.5 block font-mono text-[22px] tracking-[0.3em] text-secondary-foreground">{{ httpStatus.pairCode }}</code></div><Button variant="outline" size="sm" type="button" @click="onRegeneratePairCode">New code</Button></div>
+            <div v-if="httpStatus?.enabled" class="flex flex-col gap-2 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Paired devices</span><span class="text-[11px] text-muted-foreground">Each device has its own token, so revoking one leaves the others paired. A paired device can drive your terminals — treat it as trusted with this machine.</span></div></div>
+              <span v-if="remoteDevices === null" class="text-[11px] text-muted-foreground">Loading…</span>
+              <span v-else-if="remoteDevices.length === 0" class="text-[11px] text-muted-foreground">No devices paired yet.</span>
+              <div v-for="d in remoteDevices ?? []" :key="d.id" class="flex items-center gap-3 rounded border border-border/60 px-3 py-2">
+                <div class="flex flex-1 min-w-0 flex-col"><span class="truncate text-[12px] text-foreground">{{ d.name }}</span><span class="text-[11px] text-muted-foreground">{{ d.kind }} · last seen {{ relativeSeen(d.last_seen) }}</span></div>
+                <Button variant="outline" size="sm" type="button" @click="onRevokeDevice(d.id)">Revoke</Button>
+              </div>
+            </div>
             <details v-if="httpStatus?.enabled" class="rounded-md border border-border bg-panel px-4 py-3"><summary class="cursor-pointer text-[13px] font-medium text-foreground">Access token (for integrations)</summary><div class="mt-2 flex items-start gap-4"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[11px] text-muted-foreground">Phones do not need this — pairing hands it over. Treat it like an SSH key: it is full access to your terminals.</span><code class="mt-1.5 block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ httpStatus.token }}</code></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(httpStatus.token, 'token')">{{ copiedLabel === 'token' ? 'Copied' : 'Copy token' }}</Button></div></details>
             <div v-else class="flex items-center gap-4 rounded-md border border-dashed border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Not enabled</span><span class="text-[11px] text-muted-foreground">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
             <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Private tunnel</span>
@@ -1684,6 +1694,7 @@ const httpStatus = ref<{ enabled: boolean; port: number; tokenPath: string; toke
 
 async function onRegeneratePairCode() {
   await invoke("regenerate_pair_code");
+  pairStatus.value = await invoke<PairStatus>("remote_regenerate_pair_code");
   await refreshHttpStatus();
 }
 async function refreshHttpStatus() {
@@ -1695,12 +1706,65 @@ async function refreshHttpStatus() {
 }
 async function onToggleHttp(checked: boolean) {
   httpEnabled.value = checked;
+  httpError.value = null;
   try {
     await invoke("set_http_enabled", { enabled: checked });
-  } catch { /* browser-only dev */ }
+  } catch (e) {
+    // Turning this on can now legitimately FAIL and say why: the server
+    // refuses to start when `tailscale funnel` would publish it on the public
+    // internet, or when the bind address is not loopback (remoteguard.go).
+    // Swallowing that left the toggle looking on while nothing was listening.
+    httpError.value = e instanceof Error ? e.message : String(e);
+  }
   await refreshHttpStatus();
+  await refreshPairing();
 }
+const httpError = ref<string | null>(null);
+
+// Pairing, /v2 chain. Separate from get_http_server_status's pairCode, which
+// belongs to the v1 surface src/mobile still speaks; both are shown until
+// phase 6 retires the old client.
+interface PairStatus {
+  code: string;
+  expires_at: number;
+  locked: boolean;
+}
+interface RemoteDevice {
+  id: string;
+  name: string;
+  kind: string;
+  scopes: string[];
+  added_at: number;
+  last_seen: number;
+}
+const pairStatus = ref<PairStatus | null>(null);
+// null means "not loaded yet or failed"; [] means "nothing paired". Those are
+// different sentences and the template says each of them.
+const remoteDevices = ref<RemoteDevice[] | null>(null);
+
+async function refreshPairing() {
+  try {
+    pairStatus.value = await invoke<PairStatus>("remote_pair_status");
+    remoteDevices.value = await invoke<RemoteDevice[]>("remote_devices");
+  } catch { /* browser-only dev */ }
+}
+async function onRevokeDevice(id: string) {
+  try {
+    await invoke("revoke_remote_device", { id });
+  } catch { /* the refresh below shows whether it went */ }
+  await refreshPairing();
+}
+function relativeSeen(ms: number): string {
+  if (!ms) return "never";
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+
 refreshHttpStatus();
+refreshPairing();
 
 interface TailscaleStatus {
   installed: boolean;

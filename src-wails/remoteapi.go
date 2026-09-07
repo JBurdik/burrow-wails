@@ -256,21 +256,40 @@ var remoteAllowed = map[string]remoteCmd{
 	// orchestration:* is a ticket to the whole machine, and a ticket carrying
 	// anything at all is a ticket to the whole event stream.
 	//
-	// A path guard in fs.go is worth having, and fs.go is where it belongs —
-	// with the methods it constrains, not here, and not as a side effect of a
-	// transport task, because it is a real behaviour change to calls the
-	// desktop legitimately makes on arbitrary paths (file tree, editor) and
-	// getting it wrong breaks both. But do not mistake it for the job: it
-	// closes one hole in the third bullet and leaves the other three exactly
-	// as they are. Making these scopes mean anything needs, at minimum,
-	// per-connection event filtering, an admission check on what may be
-	// executed and with what cwd/argv, and a decision about what a paired
-	// device may spawn at all.
+	// PHASE 5 ANSWERED THIS RATHER THAN BUILDING CONTAINMENT, on purpose.
+	// A paired device is the owner's own phone, and it holds authority over
+	// this machine by design — the PWA's whole job includes driving a terminal
+	// and answering an agent's y/n prompt, and a client that can do that can
+	// do anything. t3code ships the same model. So:
 	//
-	// None of this is exploitable today, where the only client is the desktop
-	// itself, already holding every scope. It is a hard prerequisite before
-	// any phase exposes a scoped-but-not-fully-trusted session (e.g. a paired
-	// phone) to anything beyond access:read.
+	//   * What a Scope IS: a record of which door a call came through, and a
+	//     forcing function — a NEW verb is unreachable until someone decides
+	//     out loud whether it joins the network surface at all
+	//     (TestRemoteSurfaceIsExhaustive). It also keeps the two genuinely
+	//     different things apart: access:write (pairing bootstrap — a device
+	//     must not pair or unpair other devices) and ui:ack (the desktop UI's
+	//     identity claim, see above). Both are withheld from a paired device
+	//     even though it could reach them by spawning a shell, because the
+	//     point is not to pretend it cannot, it is not to hand out the names.
+	//
+	//   * What a Scope IS NOT: containment. All four bullets above are still
+	//     true and are the reason that sentence has to be said out loud.
+	//
+	//   * Where the real boundary is: PAIRED or NOT PAIRED. That is why the
+	//     security work of phase 5 went into the pairing code's TTL and guess
+	//     budget, the funnel refusal and loopback assert at startup
+	//     (remoteguard.go, both fail closed), the ticket hop that keeps a
+	//     long-lived token out of every URL, and a revoke that closes the
+	//     device's live sockets instead of only deleting a row.
+	//
+	// What a genuinely LIMITED device role would need, none of which is on
+	// the path to shipping this one: a path guard in fs.go (which belongs
+	// there, with the methods it constrains, and is a real behaviour change
+	// to the arbitrary-path calls the desktop legitimately makes for the file
+	// tree and the editor), per-connection event filtering, and an admission
+	// check on what may be executed and with what cwd/argv. If a future phase
+	// wants to let in a device that is NOT the owner's — a shared machine, a
+	// teammate, an agent — that is the work, and this note is the list.
 	"write_text_file":        {Method: "WriteTextFile", Args: []string{"path", "content"}, Scope: scopeOrchOperate},
 	"read_text_file":         {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
 	"read_text_file_checked": {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
