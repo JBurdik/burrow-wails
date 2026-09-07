@@ -260,6 +260,13 @@ export const useRemoteStore = defineStore("remote", () => {
       // cross-client chat creation has never worked in either direction until
       // the list moved into SQLite and got a real event.
       track(transport.listen("chats-changed", () => void loadChats()));
+      // A workspace created/renamed/deleted/reordered on the desktop (or by
+      // another device) now reaches this client without a reload. Nothing
+      // ever emitted this event before — shell_snapshot only ran on connect,
+      // so an already-connected client had no way to learn the list changed.
+      // refresh() takes a whole new snapshot, so there is no echo to filter:
+      // this client only reads workspaces, it never mutates them.
+      track(transport.listen("workspaces-changed", () => void refresh()));
       if (view.value === "connect") view.value = "dashboard";
       await refresh();
     } catch (e: any) {
