@@ -2,7 +2,7 @@
 // transport. Event names on the wire are identical to the bus names in Go, so
 // there is no translation table here to forget an entry in.
 import { EventsOn } from "../../../src-wails/frontend/wailsjs/runtime/runtime";
-import { desktopTransport } from "./core";
+import { appTransport } from "./core";
 
 export type UnlistenFn = () => void;
 
@@ -44,8 +44,17 @@ export async function listen<T = unknown>(
   const deliver = (payload: T) => handler({ event, payload });
   // EventsOn returns a cancel for THIS callback; the old shim used
   // EventsOff(event), which tore down every listener on the name.
-  if (isDesktopOnly(event)) return EventsOn(event, deliver);
-  return desktopTransport().listen<T>(event, deliver);
+  // A paired device has no Wails runtime, so a desktop-only name can only be
+  // silence there. Returning a no-op unlisten rather than throwing: these are
+  // subscriptions a shared component sets up unconditionally (the updater
+  // banner, the LSP bridge), and a throw on the phone would take the whole
+  // component down over an event that was never going to fire.
+  if (isDesktopOnly(event)) {
+    return typeof EventsOn === "function" && typeof window !== "undefined" && (window as any).runtime
+      ? EventsOn(event, deliver)
+      : () => {};
+  }
+  return appTransport().listen<T>(event, deliver);
 }
 
 export async function emit(event: string, _payload?: unknown): Promise<void> {

@@ -16,6 +16,7 @@ import {
   SendFloatSnapshot,
 } from "../../../src-wails/frontend/wailsjs/go/main/App";
 import { createTransport, type Transport } from "@/runtime/transport";
+import { loadRemoteCredentials, remoteEndpointSource } from "@/runtime/remoteEndpoint";
 
 type Args = Record<string, any>;
 
@@ -37,18 +38,16 @@ export const CLIENT_SIDE_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 let transport: Transport | null = null;
+let remote: Transport | null = null;
 
 /**
  * Whether we are running inside the Wails webview at all.
  *
  * vite.config.ts aliases `@tauri-apps/api/core` to this file for BOTH bundles,
  * and the mobile PWA reaches it through `@/lib/config` — which invokes
- * `read_config` at module scope. The PWA talks to the older `/ws` protocol and
- * has no Wails runtime, so letting that call fall into the desktop transport
- * means `LocalEndpoint()` throws, the transport retries forever, and
- * `configReady` never settles: the phone never restores its saved baseUrl and
- * token. Failing fast here is what the Wails binding did before this file
- * became a pass-through, and what config.ts's catch is written for.
+ * `read_config` at module scope. Letting that call fall into the desktop
+ * transport means `LocalEndpoint()` throws, the transport retries forever, and
+ * `configReady` never settles: the phone never restores its saved state.
  */
 function hasWailsRuntime(): boolean {
   return typeof window !== "undefined" && (window as any).go !== undefined;
@@ -66,14 +65,54 @@ export function desktopTransport(): Transport {
   return transport;
 }
 
+/**
+ * The paired device's transport. Same transport, same command table, same
+ * event names — the ONLY difference from the desktop is where the ticket
+ * comes from, which is the entire point of the rewrite.
+ *
+ * Built lazily and read through `loadRemoteCredentials()` on every attempt
+ * rather than closing over a value: pairing happens while the app is already
+ * running, and a source that captured `null` at module load would never see
+ * the credentials appear.
+ */
+export function remoteTransport(): Transport {
+  if (!remote) remote = createTransport(remoteEndpointSource(loadRemoteCredentials));
+  return remote;
+}
+
+/** Which transport this context can use, or null before pairing. */
+function activeTransport(): Transport | null {
+  if (hasWailsRuntime()) return desktopTransport();
+  if (loadRemoteCredentials()) return remoteTransport();
+  return null;
+}
+
+/**
+ * The transport for whichever client this is. Used by event.ts and by the
+ * mobile store, both of which need the socket itself rather than one call —
+ * listeners have to outlive a reconnect, and `onResync`/`noteSeq` are how a
+ * client rejoins after a gap.
+ *
+ * Unlike invoke(), this does not tolerate "not paired": a caller asking for
+ * the socket is asking to subscribe, and there is nothing to subscribe to.
+ */
+export function appTransport(): Transport {
+  const t = activeTransport();
+  if (!t) throw new Error("no endpoint in this context: this device is not paired");
+  return t;
+}
+
 export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise<T> {
-  // Before the switch, so no case (transport OR Wails binding) can be reached
-  // outside the desktop webview. See hasWailsRuntime().
-  if (!hasWailsRuntime()) {
+  // Before the switch, so no case can be reached with nothing to dispatch on.
+  // An unpaired phone lands here — @/lib/config invokes `read_config` at
+  // module scope, before the pairing screen has been through — and config.ts's
+  // catch is written for exactly this throw.
+  const t = activeTransport();
+  if (!t) {
     // The message deliberately does not spell out a call in the shape
     // commandSurface.test.ts scans for, or it would be reported as a command
     // name built at runtime.
-    throw new Error(`no Wails runtime in this context; cannot dispatch "${cmd}"`);
+    throw new Error(`no endpoint in this context; cannot dispatch "${cmd}"`);
   }
 
   switch (cmd) {
@@ -93,7 +132,7 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
     // arrives as JSON null, and a reply frame with no result at all arrives
     // as undefined — neither is a list to map over.)
     case "list_pty_sessions": {
-      const ids = await desktopTransport().invoke<string[] | null>("list_pty_sessions");
+      const ids = await t.invoke<string[] | null>("list_pty_sessions");
       return (ids ?? [])
         .map((id) => Number(id))
         .filter((pty_id) => Number.isFinite(pty_id))
@@ -112,7 +151,7 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
     // is `opts` itself — and never reaches inside the object, so a bare
     // numeric id would fail to unmarshal into AcpStartOpts.ID.
     case "acp_start":
-      return desktopTransport().invoke<T>("acp_start", { opts: { ...args, id: String(args.id) } });
+      return t.invoke<T>("acp_start", { opts: { ...args, id: String(args.id) } });
 
     // foldedOrd -1 is the "don't know" sentinel, which leaves the existing
     // fold mark alone (chatstore.go writes it only when >= 0). An absent
@@ -120,7 +159,7 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
     // call site (AgentChat's localStorage migration) omits it, so the
     // sentinel has to be supplied here, exactly as the old switch did.
     case "save_chat_messages":
-      return desktopTransport().invoke<T>("save_chat_messages", {
+      return t.invoke<T>("save_chat_messages", {
         ...args,
         foldedOrd: args.foldedOrd ?? -1,
       });
@@ -140,6 +179,20 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
     // these take it as a STRING; callers pass the numeric leaf id, which the
     // typed bridge rejected outright with `json: cannot unmarshal number into
     // Go value of type string` on every terminal resize.
+    // On a paired device there is no Wails runtime to call, and these three
+    // could not answer over the wire even if there were. Named error rather
+    // than a TypeError on an undefined binding, so a phone that somehow
+    // reaches one says what happened.
+    case "send_float_snapshot":
+    case "notify_float_grid":
+    case "open_git_panel_window":
+      if (!hasWailsRuntime()) {
+        throw new Error(`${cmd} is desktop-only: it answers on the Wails event channel`);
+      }
+      break;
+  }
+
+  switch (cmd) {
     case "send_float_snapshot":
       return SendFloatSnapshot(
         String(args.ptyId ?? args.pty_id),
@@ -153,5 +206,5 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
       return OpenGitPanelWindow() as Promise<T>;
   }
 
-  return desktopTransport().invoke<T>(cmd, args);
+  return t.invoke<T>(cmd, args);
 }
