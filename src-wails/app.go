@@ -48,6 +48,10 @@ type App struct {
 	// ticket store — a second store would mean a ticket minted by
 	// /v2/ws-ticket is unknown to the handler that redeems it.
 	remoteWS *remoteWS
+	// remoteAuth owns the pairing code and the /v2/pair + /v2/ws-ticket hops.
+	// One instance for the app, not one per listener: the code the user reads
+	// in Settings has to be the code the phone types.
+	remoteAuth *remoteAuth
 	// hookPort mirrors hookSrv.port, assigned once at startup. It exists as
 	// its own field so LocalEndpoint is testable without standing up a real
 	// hook server; hookSrv stays the source of truth everywhere else.
@@ -263,6 +267,7 @@ func (a *App) startup(ctx context.Context) {
 
 	a.tickets = newTicketStore()
 	a.remoteWS = newRemoteWS(a, a.tickets)
+	a.remoteAuth = newRemoteAuth(a, a.tickets)
 	hookSrv, err := StartHookServer(ctx, a.phases, a.registerControlRoutes, a.remoteWS.register)
 	if err != nil {
 		log.Printf("hook server: %v", err)

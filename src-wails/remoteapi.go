@@ -162,7 +162,13 @@ var remoteAllowed = map[string]remoteCmd{
 	// knowing what else is paired is not part of driving an agent.
 	"remote_devices":       {Method: "RemoteDevices", Args: nil, Scope: scopeAccessRead},
 	"revoke_remote_device": {Method: "RevokeRemoteDevice", Args: []string{"id"}, Scope: scopeAccessWrite},
-	"shell_snapshot":       {Method: "ShellSnapshot", Args: nil, Scope: scopeOrchRead},
+
+	// Pairing, desktop side. Both at access:write, including the read: the
+	// pairing code IS the credential, so handing it out is handing out the
+	// ability to pair — spec §7 test 8 is exactly this.
+	"remote_pair_status":          {Method: "RemotePairStatus", Args: nil, Scope: scopeAccessWrite},
+	"remote_regenerate_pair_code": {Method: "RemoteRegeneratePairCode", Args: nil, Scope: scopeAccessWrite},
+	"shell_snapshot":              {Method: "ShellSnapshot", Args: nil, Scope: scopeOrchRead},
 
 	// Workspaces / tabs
 	"list_workspaces":     {Method: "ListWorkspaces", Args: nil, Scope: scopeOrchRead},

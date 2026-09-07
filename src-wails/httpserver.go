@@ -219,6 +219,29 @@ func (s *HTTPServer) Close() error {
 
 func (s *HTTPServer) ListenAndServe(addr string) error {
 	mux := http.NewServeMux()
+
+	// The /v2 surface: this is what makes remote access reach the phone at
+	// all. /v2/ws is otherwise mounted only on the hook server's loopback
+	// mux, which the tailnet cannot see.
+	//
+	// It reuses the app's OWN handler and ticket store rather than building
+	// its own. A second ticket store would mean a ticket minted by
+	// /v2/ws-ticket here is unknown to the handler that redeems it, and a
+	// second remoteWS would keep its live connections in a registry that
+	// RevokeRemoteDevice never looks at.
+	if s.app != nil {
+		if s.app.remoteWS != nil {
+			s.app.remoteWS.register(mux)
+		}
+		if s.app.remoteAuth != nil {
+			s.app.remoteAuth.register(mux)
+		}
+	}
+
+	// The v1 surface. Still live, still on the shared http.token, still what
+	// src/mobile speaks — it dies in phase 6 together with store.ts and
+	// api.ts, when the rewritten client no longer needs it. Killing it here
+	// would leave the phone with no way in at all between phases.
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/rpc/", s.handleRPC)
 	// Both unauthenticated on purpose: a plain browser GET cannot send an
