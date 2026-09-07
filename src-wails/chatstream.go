@@ -103,19 +103,24 @@ type chatStreamWriter struct {
 	appends map[string]int
 	// tails holds each chat's folded transcript (chattranscript.go). There is
 	// ONE writer for the app, so this is keyed by chat id like nextOrd and
-	// appends, and guarded by the same mu — which is never held across a
-	// SQLite call, and never taken while a chatTail's own mu is held.
-	tails   map[string]*chatTail
-	dropped int
+	// appends, and guarded by the same mu. mu IS held across one SQLite call
+	// — loadMaxOrdLocked's QueryRow in append, only the first time a given
+	// chat is seen this run, since nextOrd caches the result after that — but
+	// it is never taken while a chatTail's own mu is held (see the t.mu →
+	// w.mu lock-order note on lockChatTail in chattranscript.go).
+	tails       map[string]*chatTail
+	dropped     int
+	hardCapHits map[string]int
 }
 
 func newChatStreamWriter(db *sql.DB) *chatStreamWriter {
 	w := &chatStreamWriter{
 		db:      db,
 		ch:      make(chan chatStreamRow, chatStreamQueue),
-		nextOrd: map[string]int64{},
-		appends: map[string]int{},
-		tails:   map[string]*chatTail{},
+		nextOrd:     map[string]int64{},
+		appends:     map[string]int{},
+		tails:       map[string]*chatTail{},
+		hardCapHits: map[string]int{},
 	}
 	go w.run()
 	return w
@@ -207,22 +212,38 @@ func (w *chatStreamWriter) trim(chatID string, latestOrd int64) {
 	// An absent marker means nothing has been folded, which is the same
 	// cutoff as folded_ord = 0 — but the two are NOT the same thing to
 	// adoption, which is why foldedOrd reports absence separately.
-	marker, _ := w.foldedOrd(chatID)
+	marker, _, readErr := w.foldedOrd(chatID)
 	foldProtected := marker - 1
 	if foldProtected < cutoff {
 		cutoff = foldProtected
 	}
-	if hard := latestOrd - chatStreamHardKeep; hard > cutoff {
-		// The hard cap is raising the cutoff above what the fold marker would
-		// protect, i.e. it is about to delete lines nobody has folded yet.
-		// That is only supposed to happen as a bounded backstop against a
-		// stuck fold, so name what is being lost and why, loudly enough that
-		// someone can go fix the chat whose fold got stuck rather than have
-		// its history quietly shrink forever.
-		log.Printf(
-			"chat stream: hard cap trimming chat %s past the fold marker — dropping unfolded ord <= %d (fold-protected cutoff would have been %d, folded_ord=%d); this chat's fold has likely stopped advancing (check for a latched noPersist)",
-			chatID, hard, foldProtected, marker,
-		)
+	// readErr genuinely absent (no row) reads the same as readErr transient
+	// (a SELECT failure) above — both give foldProtected = -1 — but they must
+	// NOT be treated the same below: a transient error is not evidence the
+	// fold is stuck, only that this one read failed, and for any chat whose
+	// ord has passed chatStreamHardKeep that would otherwise fire the "fold
+	// has likely stopped advancing" diagnostic about a perfectly healthy
+	// chat. Skip the hard-cap escalation entirely on a read error — the next
+	// scheduled trim gets a fresh read — rather than guess.
+	if hard := latestOrd - chatStreamHardKeep; readErr == nil && hard > cutoff {
+		w.mu.Lock()
+		w.hardCapHits[chatID]++
+		hits := w.hardCapHits[chatID]
+		w.mu.Unlock()
+		if hits == 1 || hits%1000 == 0 {
+			// The hard cap is raising the cutoff above what the fold marker
+			// would protect, i.e. it is about to delete lines nobody has
+			// folded yet. That is only supposed to happen as a bounded
+			// backstop against a stuck fold, so name what is being lost and
+			// why, loudly enough that someone can go fix the chat whose fold
+			// got stuck — but only once per 1000 hits per chat, the same
+			// treatment append (above) gives its own drop counter, so a
+			// permanently stuck fold logs a message instead of a flood.
+			log.Printf(
+				"chat stream: hard cap trimming chat %s past the fold marker — dropping unfolded ord <= %d (fold-protected cutoff would have been %d, folded_ord=%d, hit #%d); this chat's fold has likely stopped advancing (check for a latched noPersist)",
+				chatID, hard, foldProtected, marker, hits,
+			)
+		}
 		cutoff = hard
 	}
 	if cutoff < 0 {
@@ -235,25 +256,33 @@ func (w *chatStreamWriter) trim(chatID string, latestOrd int64) {
 	}
 }
 
-// foldedOrd reports the chat's fold marker AND whether the row exists at all.
-// The second return is load-bearing: a chat that has never had a marker
-// written (the config.json import and every client save that passes
-// foldedOrd = -1) reads back as 0, which is indistinguishable from "folded
-// nothing" — and adoption folding a whole surviving stream on top of rows that
-// already account for it duplicates the transcript permanently.
-func (w *chatStreamWriter) foldedOrd(chatID string) (int64, bool) {
+// foldedOrd reports the chat's fold marker, whether the row exists at all,
+// and whether the read itself failed. The second return is load-bearing: a
+// chat that has never had a marker written (the config.json import and every
+// client save that passes foldedOrd = -1) reads back as 0, which is
+// indistinguishable from "folded nothing" — and adoption folding a whole
+// surviving stream on top of rows that already account for it duplicates the
+// transcript permanently. The third return matters to exactly one caller,
+// trim's hard-cap branch: for the ROUTINE cutoff below, a genuinely absent
+// marker and a failed read both mean "protect everything, don't trim" and
+// that is the right call either way — but the hard cap treats a stuck fold as
+// a bug worth logging loudly, and a transient SELECT failure is not that; it
+// is not "no trim" the way the routine branch's absence is.
+func (w *chatStreamWriter) foldedOrd(chatID string) (int64, bool, error) {
 	var ord int64
 	err := w.db.QueryRow(`SELECT folded_ord FROM chat_stream_state WHERE chat_id = ?`, chatID).Scan(&ord)
 	if err == sql.ErrNoRows {
-		return 0, false
+		return 0, false, nil
 	}
 	if err != nil {
 		log.Printf("chat stream: folded ord for %s: %v", chatID, err)
-		// Unknown, so treat it as absent: the cautious reading everywhere
-		// this is used (no trim, no catch-up) rather than "nothing folded".
-		return 0, false
+		// Unknown, so treat it as absent for the routine cutoff (the
+		// cautious reading — no trim, no catch-up — rather than "nothing
+		// folded"), but report the error so the hard-cap branch can tell
+		// this apart from a chat that really has never been folded.
+		return 0, false, err
 	}
-	return ord, true
+	return ord, true, nil
 }
 
 // emitChatLine is the single door for agent output: persist, then emit. Both

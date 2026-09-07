@@ -207,7 +207,11 @@ func TestUnderHardCapKeepsEveryUnfoldedLine(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("trim ate unfolded lines under the hard cap, %d left", len(lines))
 	}
-	if got != "" {
+	// Not got != "": log.SetOutput is process-global, and other tests' own
+	// chatStreamWriter goroutines can still be alive and logging (e.g.
+	// "chat stream: append …"), which would fail that assertion for a reason
+	// unrelated to this test.
+	if strings.Contains(got, "hard cap") {
 		t.Fatalf("hard cap diagnostic fired when the hard cap did not act: %q", got)
 	}
 }
@@ -226,7 +230,10 @@ func TestRoutineTrimDoesNotLog(t *testing.T) {
 	}
 
 	got := captureTrimLog(t, w, "42", chatStreamKeep+10)
-	if got != "" {
+	// Same reasoning as TestUnderHardCapKeepsEveryUnfoldedLine: assert the
+	// hard-cap message is absent, not that nothing at all was logged, since
+	// other tests' writer goroutines share this process-global log output.
+	if strings.Contains(got, "hard cap") {
 		t.Fatalf("hard cap diagnostic fired on a routine trim: %q", got)
 	}
 }

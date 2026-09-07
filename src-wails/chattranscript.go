@@ -286,6 +286,13 @@ func (a *App) foldChatLine(chatID string, ord int64, events []ProviderRuntimeEve
 // costs nothing, because trim still sees the old marker and keeps the stream
 // lines the unpersisted messages came from.
 //
+// A tail latched t.noPersist (set below, and in adoptChatTail when adoption's
+// read of the stored prefix failed) never reaches the transaction at all —
+// see the check right after the a.db nil guard. That latch is exactly what
+// trim's hard-cap diagnostic (chatstream.go) is pointing an operator at: a
+// chat whose fold has "likely stopped advancing" is one whose noPersist got
+// set here and never cleared, because nothing retries the failed read.
+//
 // Called with t.mu held.
 func (a *App) persistChatTail(chatID string, t *chatTail, total int) {
 	if a.db == nil {
@@ -467,7 +474,7 @@ func (a *App) adoptChatTail(t *chatTail, w *chatStreamWriter, chatID string, upT
 		}
 	}
 
-	folded, haveMarker := w.foldedOrd(chatID)
+	folded, haveMarker, _ := w.foldedOrd(chatID)
 	t.foldedOrd = folded
 	t.persistedOrd = folded
 
@@ -584,9 +591,12 @@ func (w *chatStreamWriter) chatTailMessages(chatID string) []ChatMessage {
 // which point trim is free to delete the stream lines for the hole.
 //
 // Lock order note: this takes w.mu, RELEASES it, then takes t.mu — and
-// forgetChatTail then retakes w.mu while t.mu is held. That is not a cycle,
-// because no path anywhere holds w.mu while blocking on a t.mu (chatTailFor
-// never touches t.mu; chatTailMessages releases w.mu first).
+// SaveChatMessages, still holding the tail this returned, later calls
+// forgetChatTail, which retakes w.mu while t.mu is held. That is not a cycle:
+// every path that holds both locks acquires t.mu before w.mu (lockFoldTail
+// and persistChatTail do the same — both take w.mu only after t.mu is
+// already held), and the one path that takes w.mu first — chatTailMessages —
+// releases it before ever touching t.mu.
 func (w *chatStreamWriter) lockChatTail(chatID string) *chatTail {
 	w.mu.Lock()
 	t := w.tails[chatID]
