@@ -462,3 +462,45 @@ func TestAdoptionSettlesStoredPartials(t *testing.T) {
 		t.Fatalf("settling changed more than the flag: %+v", stored[1])
 	}
 }
+
+// IMPORTANT 3, second half: the race for a chat with NO tail in the map yet —
+// its first-ever client save against its first-ever fold. lockChatTail has
+// nothing to lock there, so the protection has to come from chatTailFor
+// refusing to store a prefix it read across a commit. If it does store one,
+// the next persist's DELETE ... ord >= total deletes the rows the save just
+// committed.
+func TestFirstSaveRacingFirstFoldKeepsTheSavedRows(t *testing.T) {
+	a := newTestApp(t)
+	saved := `[{"id":1,"role":"user","text":"a"},{"id":2,"role":"assistant","text":"b"},` +
+		`{"id":3,"role":"user","text":"c"},{"id":4,"role":"assistant","text":"d"},` +
+		`{"id":5,"role":"user","text":"e"},{"id":6,"role":"assistant","text":"f"}]`
+
+	for i := 0; i < 60; i++ {
+		chatID := 100 + i
+		key := strconv.Itoa(chatID)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err := a.SaveChatMessages(chatID, saved, -1); err != nil {
+				t.Errorf("chat %d: save: %v", chatID, err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			// A whole turn, so a persist (and its prune) is definitely due.
+			a.emitChatLine(key, chatUserKind, "ahoj")
+			a.emitChatLine(key, "claude-data", claudeTextLine("m1", "nazdar"))
+			a.emitChatLine(key, "claude-data", claudeResultLine)
+		}()
+		wg.Wait()
+
+		ords := storedOrds(t, a, chatID)
+		if len(ords) < 6 {
+			t.Fatalf("chat %d: the saved rows were deleted by a stale adopted prefix: ords %v", chatID, ords)
+		}
+		if !isContiguous(ords, len(ords)) {
+			t.Fatalf("chat %d: stored transcript has a hole: %v", chatID, ords)
+		}
+	}
+}

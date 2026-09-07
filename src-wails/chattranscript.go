@@ -123,6 +123,16 @@ type chatTail struct {
 	// enough to reach this, and losing the live fold is recoverable from
 	// chat_stream — deleting the adopted prefix is not.
 	noPersist bool
+
+	// loaded says whether adoption has run. A tail is put in the map BEFORE
+	// it is adopted (see lockFoldTail): the map entry is what the client-save
+	// path and the fold path contend on, and it has to exist for a chat
+	// neither has touched yet — that is the whole point.
+	loaded bool
+}
+
+func newChatTail() *chatTail {
+	return &chatTail{st: &foldState{messages: []ChatMessage{}}}
 }
 
 // length is the transcript's length without materializing it.
@@ -193,9 +203,7 @@ func (a *App) foldChatLine(chatID string, ord int64, events []ProviderRuntimeEve
 	if w == nil || len(events) == 0 {
 		return
 	}
-	t := a.chatTailFor(w, chatID, ord)
-
-	t.mu.Lock()
+	t := a.lockFoldTail(w, chatID, ord)
 	defer t.mu.Unlock()
 
 	batchFrom := -1
@@ -289,6 +297,25 @@ func (a *App) persistChatTail(chatID string, t *chatTail, total int) {
 		// to load. See chatTail.noPersist.
 		return
 	}
+	// Belt and braces on top of the locking: a tail that is no longer the
+	// map's tail for this chat has been invalidated (a client save, a delete)
+	// and its `adopted` may predate that write, so persisting could prune
+	// rows it never saw. lockFoldTail makes this unreachable — the swap can
+	// only happen while t.mu is held — and it stays because it is the
+	// invariant the prune depends on, checked rather than assumed.
+	//
+	// t.mu → w.mu, the same direction forgetChatTail uses; no path holds w.mu
+	// while blocking on a t.mu.
+	if w := a.chatStream(); w != nil {
+		w.mu.Lock()
+		stale := w.tails[chatID] != t
+		w.mu.Unlock()
+		if stale {
+			log.Printf("chat fold: %s left the tail map mid-turn; this fold is read-only", chatID)
+			t.noPersist = true
+			return
+		}
+	}
 	id, err := strconv.Atoi(chatID)
 	if err != nil {
 		return
@@ -343,37 +370,63 @@ func (a *App) persistChatTail(chatID string, t *chatTail, total int) {
 	t.lastSave = time.Now()
 }
 
-// chatTailFor returns the chat's tail, adopting the stored transcript on first
-// touch in this process.
+// lockFoldTail returns the chat's tail with ITS mu HELD and its stored
+// transcript adopted. The caller must Unlock it.
 //
-// The load happens OUTSIDE w.mu: it reads chat_messages, chat_stream_state and
-// chat_stream, and w.mu is the ord allocator every append takes. Losing the
-// insert race is fine — the winner loaded the same rows from the same tables,
-// and its state is the one both goroutines then fold into.
-func (a *App) chatTailFor(w *chatStreamWriter, chatID string, upTo int64) *chatTail {
-	w.mu.Lock()
-	t := w.tails[chatID]
-	w.mu.Unlock()
-	if t != nil {
+// The entry is created in the map BEFORE it is adopted, and adoption runs
+// UNDER t.mu. That ordering is the fix for the case a lock over an existing
+// tail cannot cover: a chat that neither the fold nor a client has touched yet
+// (every chat's first-ever save, every config.json import) has no tail to
+// lock, so a client save would proceed unlocked while adoption read the DB
+// unlocked — and a prefix read before that save's COMMIT would then prune
+// exactly the rows it wrote. Detecting "I read across a commit" afterwards is
+// not possible without this lock: the invalidation cannot be published
+// atomically with the commit, which is why a generation counter alone does
+// not close it.
+//
+// Because both paths create-if-absent under w.mu, they always contend on the
+// same *chatTail for a given chat id.
+//
+// w.mu is taken only for the map operations and never across a SQLite call or
+// across the client transaction — holding it there would serialise every chat
+// in the app behind one save.
+func (a *App) lockFoldTail(w *chatStreamWriter, chatID string, upTo int64) *chatTail {
+	for {
+		w.mu.Lock()
+		t := w.tails[chatID]
+		if t == nil {
+			t = newChatTail()
+			w.tails[chatID] = t
+		}
+		w.mu.Unlock()
+
+		t.mu.Lock()
+		w.mu.Lock()
+		current := w.tails[chatID] == t
+		w.mu.Unlock()
+		if !current {
+			// A client save (or a delete) held this tail and dropped it from
+			// the map while we waited. Its transcript is what the table holds
+			// now, so start over and adopt that instead of this zombie.
+			t.mu.Unlock()
+			continue
+		}
+		if !t.loaded {
+			a.adoptChatTail(t, w, chatID, upTo)
+		}
 		return t
 	}
-
-	loaded := a.loadChatTail(w, chatID, upTo)
-
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if t := w.tails[chatID]; t != nil {
-		return t
-	}
-	w.tails[chatID] = loaded
-	return loaded
 }
 
-// loadChatTail is adoption. It reads the stored rows as the starting state and
-// then folds forward from folded_ord only — never from ord 0, which for a
+// adoptChatTail is adoption. It reads the stored rows as the starting state
+// and then folds forward from folded_ord only — never from ord 0, which for a
 // trimmed chat would be a truncated history rather than a recomputed one.
-func (a *App) loadChatTail(w *chatStreamWriter, chatID string, upTo int64) *chatTail {
-	t := &chatTail{st: &foldState{messages: []ChatMessage{}}, lastSave: time.Now()}
+//
+// Called with t.mu held, which is what makes these reads exclusive against a
+// client's whole-transcript write.
+func (a *App) adoptChatTail(t *chatTail, w *chatStreamWriter, chatID string, upTo int64) {
+	t.loaded = true
+	t.lastSave = time.Now()
 
 	if id, err := strconv.Atoi(chatID); err == nil {
 		raw, err := a.loadStoredChatMessages(id)
@@ -428,7 +481,7 @@ func (a *App) loadChatTail(w *chatStreamWriter, chatID string, upTo int64) *chat
 		// folded, so nothing is folded. (The frontend guarded exactly this:
 		// chatSession.ts's `if (!folded) return`.)
 		t.foldedOrd = max(t.foldedOrd, upTo)
-		return t
+		return
 	}
 
 	// Catch up on lines recorded but not folded — a turn that was in flight
@@ -451,7 +504,6 @@ func (a *App) loadChatTail(w *chatStreamWriter, chatID string, upTo int64) *chat
 		// only stop trim forever.
 		t.foldedOrd = upTo
 	}
-	return t
 }
 
 // loadChatStreamRange returns the recorded lines in [from, upTo), oldest
@@ -507,6 +559,10 @@ func (w *chatStreamWriter) chatTailMessages(chatID string) []ChatMessage {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if !t.loaded {
+		// Created as a lock target, never adopted: it holds no transcript.
+		return nil
+	}
 	if t.noPersist {
 		// This tail has no idea what the stored prefix is, so its combined
 		// view would show a transcript that starts mid-conversation. Report
@@ -534,10 +590,16 @@ func (w *chatStreamWriter) chatTailMessages(chatID string) []ChatMessage {
 func (w *chatStreamWriter) lockChatTail(chatID string) *chatTail {
 	w.mu.Lock()
 	t := w.tails[chatID]
-	w.mu.Unlock()
 	if t == nil {
-		return nil
+		// Create-if-absent, unadopted. Returning nil here — which is what an
+		// untouched chat used to get — meant the save ran under no lock at
+		// all for exactly the chats most likely to be racing their own first
+		// fold, and the fold's unlocked adoption could then read a prefix
+		// from before this transaction and later prune the rows it commits.
+		t = newChatTail()
+		w.tails[chatID] = t
 	}
+	w.mu.Unlock()
 	t.mu.Lock()
 	return t
 }

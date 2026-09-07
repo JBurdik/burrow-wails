@@ -370,7 +370,9 @@ func (a *App) deleteChatStream(chatID string) error {
 		delete(w.nextOrd, chatID)
 		delete(w.appends, chatID)
 		// The folded transcript goes with it, or a deleted-then-recreated
-		// chat inherits the old one.
+		// chat inherits the old one. Anything still folding against the
+		// removed tail can no longer persist — persistChatTail checks that
+		// its tail is still the map's.
 		delete(w.tails, chatID)
 		w.mu.Unlock()
 	}
