@@ -95,6 +95,59 @@ welcome composer counted as "watched". Plan + rationale (incl. what was taken
 from `pingdotgg/t3code` and what deliberately was not):
 `docs/plans/003-view-state-routes.md`.
 
+### The chat list is shared state (`src-wails/chats.go`)
+
+Chats used to live in `config.json` under `chatSessions`, and that was the last piece of
+**shared** state stored in a client-owned blob. `src/lib/config.ts` reads the whole file
+once at boot into a module-level cache and rewrites the whole cache on every `setConfig`;
+`App.WriteConfig` is an atomic whole-file overwrite with **no merge**. Two independent
+writers — the desktop frontend and Go's `RemoteCreateChat` — therefore did read-modify-write
+on one blob, and last writer won on *every key*. Measured, not theorised:
+
+- the desktop never learned about a phone-created chat, because nothing emitted a change
+  event for chats (workspaces had `workspaces-changed`, phases had `phase-pty:`; the chat
+  list had nothing);
+- any desktop `setConfig` between the phone's read and its own next write reverted the
+  phone's row **and** the `chatIdCounter` bump — a font preference was enough;
+- with the counter reverted, the next desktop chat took the id the phone was already
+  using, and its UI attached to the phone's still-running CLI process.
+
+Now it is a table Go owns, and two properties do the work. **`INTEGER PRIMARY KEY
+AUTOINCREMENT`**: ids come from the database and are never reused, which matters because
+`chat_stream(chat_id)`, `chat_messages` and `pty_phase`'s `chat:<id>` keys all reference
+them — a plain `INTEGER PRIMARY KEY` recycles the highest freed rowid and would hand a new
+chat a deleted one's transcript. **`SaveChats` upserts and never deletes**: a client whose
+list predates another client's creation *cannot* remove a row it has not heard of, so the
+lost-creation failure is structurally impossible rather than merely unlikely. Removal is an
+explicit `DeleteChat`.
+
+What remains, said out loud: two clients editing the *same field of the same chat* at the
+same instant still resolve last-writer-wins. That is per-chat-per-field instead of
+per-file-per-anything, and `chats-changed` makes both converge within a round trip.
+
+**`busy` and `status` are not columns.** `busy` was always persisted as `false` anyway, and
+the status **is** the phase (`pty_phase`, keyed `chat:<id>`) — a second copy of it in a
+second table is exactly the drift the phase work removed.
+
+**What is still per-device, and why.** `chatActiveByWs` stays in `config.json`, next to
+`burrow.seenAt`: which chat is selected is this device's business, and the desktop being on
+chat 78 says nothing about what the phone should show. Same reasoning as `review` being a
+read receipt rather than a phase. `chatTurns` and `chatPermissionRules` also stay — an
+activity log and a user preference, neither of them the shared-list problem.
+
+The migration **preserves ids** rather than reassigning them (renumbering would orphan
+every transcript in the app), runs before anything serves a client, is a no-op on a
+populated table, tolerates a hand-broken `config.json`, and prunes `chatSessions` /
+`chatIdCounter` afterwards so no stale copy is left looking authoritative. It does **not**
+bump `sqlite_sequence` by hand: SQLite advances the sequence itself on an explicit-rowid
+insert that exceeds it, and a test asserts that rather than trusting it. Verified against
+the real install — 69 chats migrated, ids intact, next id one past the highest.
+
+A phone-created chat is titled `Chat N (phone)`. The desktop uses `Chat N` too, so a
+remotely-created one used to be indistinguishable from the fifty above it in the sidebar —
+which is how the chat in the original bug report managed to be on screen and still
+impossible to find.
+
 ### Chat stream ownership (`src/lib/chatSession.ts` + `src-wails/chatstream.go`)
 
 A chat's stream is owned by a **session registry keyed by chat id**, not by
@@ -523,6 +576,7 @@ managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md`.
 Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem:
 - **PTY management** (`app.go`) — `CreatePty`, `WritePty`, `ResizePty`, `KillPty`, `ListPtySessions`
 - **SQLite** (`db.go`) — `workspaces` and `terminal_tabs` tables; DB lives in `<app-data>/workspaces.db`, opened with `journal_mode(WAL)` + `busy_timeout(5000)` because the chat-stream writer appends from its own goroutine
+- **Chat list** (`chats.go`) — the `chats` table, `ListChats`/`CreateChat`/`SaveChats`/`DeleteChat`, the `chats-changed` event, and the one-time migration out of `config.json`. See "The chat list is shared state" below
 - **Chat transcripts** (`chatstore.go`) — `chat_messages`, `SaveChatMessages(chatID, json, foldedOrd)` / `LoadChatMessages`
 - **Chat stream log** (`chatstream.go`) — append-only `chat_stream` + `chat_stream_state`; `emitChatLine` is the single door for agent output (persist, then emit), used by both `claudechat.go` and `acp.go`
 - **Git** (`git.go`) — `RunGit` wraps the system git binary (checks known paths)
