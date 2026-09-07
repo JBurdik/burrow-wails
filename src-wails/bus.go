@@ -107,6 +107,9 @@ var notRingable = []string{
 	"acp-data-",
 	"acp-req-",
 	"chat-event-",
+	// The human's own prompt, recorded in chat_stream like everything else on
+	// this list and replayed from folded_ord with it.
+	"chat-user-",
 }
 
 // isRingable reports whether an event belongs in the replay ring.

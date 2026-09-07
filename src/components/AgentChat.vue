@@ -2085,8 +2085,27 @@ const projection: ChatProjectionState = {
   set nextMsgId(v: number) { S.nextMsgId = v; },
 };
 
+/**
+ * Prompts this client sent and has not yet seen echoed back.
+ *
+ * Go publishes the human's prompt through emitChatLine now, so it reaches
+ * every client — a message typed on the phone appears here, and vice versa.
+ * The sender already drew its own bubble, and locally is the only place the
+ * attached images exist (the stream records the text), so the echo has to be
+ * matched and dropped rather than the local bubble given up.
+ *
+ * ponytail: matched on text, not on the stream ord, which the sender never
+ * learns — ClaudeSend returns no ord. Ceiling: the identical text sent twice
+ * inside one round trip collapses to one bubble until the next reload. Thread
+ * the ord back through claude_send/acp_send if that ever matters.
+ */
+const pendingSends = new Set<string>();
+
 function onEvents(batch: ChatEventBatch) {
   for (const event of batch.events) {
+    // Our own prompt coming back. Consumed before the projection sees it, so
+    // it neither duplicates the bubble nor counts as agent activity.
+    if (event.type === "user.delta" && pendingSends.delete(event.text ?? "")) continue;
     if (isProjectedEvent(event.type)) {
       // Native transport only, per markAgentActive's own caveat: an ACP
       // session/load replays its whole history through this same feed with no
@@ -2519,6 +2538,9 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
 
   const msgImages = images.length > 0 ? images : undefined;
   messages.value.push({ id: S.nextMsgId++, role: "user", text, images: msgImages });
+  // Claim the echo before the send goes out — a loopback round trip can land
+  // user.delta before the next line runs.
+  pendingSends.add(text);
   // Snapshot the worktree before the turn so it is revertable from the History
   // panel. Best-effort, and a no-op outside a git repo.
   invoke("create_checkpoint", {

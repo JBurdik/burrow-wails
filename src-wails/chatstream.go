@@ -232,7 +232,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 	// still reduces raw lines, so this can be adopted one consumer at a time
 	// instead of in one flip. The remote client is the first that wants it — it
 	// has been re-implementing the protocol to a shallower depth.
-	if events := NormalizeChatLine(kind, line); len(events) > 0 {
+	if events := NormalizeChatLine(kind, line, ord); len(events) > 0 {
 		busEmit("chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: events})
 
 		if a.phases != nil {
@@ -262,7 +262,7 @@ func (a *App) LoadChatEventsSince(chatID string, since int64) ([]ChatEventBatch,
 	}
 	out := []ChatEventBatch{}
 	for _, l := range lines {
-		if events := NormalizeChatLine(l.Kind, l.Line); len(events) > 0 {
+		if events := NormalizeChatLine(l.Kind, l.Line, l.Ord); len(events) > 0 {
 			out = append(out, ChatEventBatch{Ord: l.Ord, Events: events})
 		}
 	}

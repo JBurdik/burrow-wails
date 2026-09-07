@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"burrow/internal/agentphase"
 )
@@ -414,15 +415,59 @@ func chatPhaseEvent(ev ProviderRuntimeEvent) (agentphase.Event, bool) {
 
 // NormalizeChatLine dispatches on the stream kind used by chatstream.go, so a
 // caller with a recorded line does not have to know which runtime produced it.
-func NormalizeChatLine(kind, line string) []ProviderRuntimeEvent {
+// `ord` is the line's position in chat_stream. Only the user-prompt kind uses
+// it — as the bubble's identity — but it is on the signature rather than
+// pushed in at one call site, because both callers (the live emit and the
+// replay) already have it and a normalizer that needed it later would
+// otherwise have nowhere to get it.
+func NormalizeChatLine(kind, line string, ord int64) []ProviderRuntimeEvent {
 	switch kind {
 	case "claude-data":
 		return NormalizeClaudeStreamLine(line)
 	case "acp-data":
 		return NormalizeAcpLine(line)
+	case chatUserKind:
+		return normalizeUserPrompt(line, ord)
 	default:
 		// acp-req is a blocking permission request — a UI decision, not
 		// transcript. It keeps its own channel.
 		return nil
 	}
+}
+
+// chatUserKind is the stream kind for what the HUMAN sent.
+//
+// It needs to be its own kind rather than riding the transport's: for Claude,
+// a `type:"user"` record is how the CLI reports TOOL RESULTS (see
+// claudeToolResults), so a prompt published on `claude-data` would have to be
+// told apart from a tool result by inspecting block types — a distinction one
+// future provider tweak away from swapping a person's words for a tool's
+// output. A separate kind cannot be confused with anything a provider says.
+const chatUserKind = "chat-user"
+
+// normalizeUserPrompt turns a recorded prompt into the neutral event both
+// clients already know how to render.
+//
+// The line is the prompt text verbatim, not JSON: it is the one stream kind
+// this app authors rather than parses, so there is no provider envelope to
+// preserve and nothing to lose by storing what the person actually typed.
+func normalizeUserPrompt(line string, ord int64) []ProviderRuntimeEvent {
+	if line == "" {
+		return nil
+	}
+	// Identified by the stream ORD, not by a hash of the text: two identical
+	// prompts ("ok", "continue") are two bubbles, and hashing would merge
+	// them into one on every replay. The ord is unique per line by
+	// construction and is the same number on a live emit and on a replay, so
+	// a client that saw the prompt live recognises the replayed copy instead
+	// of drawing it twice.
+	//
+	// The `acp:` prefix is what makes chatProjection.ts match BY ID rather
+	// than by position (see its comment on appendChunk) — the behaviour a
+	// prompt needs, whichever provider is behind the chat.
+	return []ProviderRuntimeEvent{{
+		Type:      EvtUserDelta,
+		MessageID: fmt.Sprintf("acp:user:%d", ord),
+		Text:      line,
+	}}
 }

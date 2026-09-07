@@ -195,16 +195,49 @@ func TestToolOutputIsClipped(t *testing.T) {
 
 func TestNormalizeChatLineDispatchesOnKind(t *testing.T) {
 	claude := `{"type":"assistant","message":{"id":"c1","content":[{"type":"text","text":"hi"}]}}`
-	if got := NormalizeChatLine("claude-data", claude); len(got) != 1 || got[0].Type != EvtTextDelta {
+	if got := NormalizeChatLine("claude-data", claude, 1); len(got) != 1 || got[0].Type != EvtTextDelta {
 		t.Fatalf("claude-data not dispatched: %+v", got)
 	}
 	acp := `{"method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"text":"x"}}}}`
-	if got := NormalizeChatLine("acp-data", acp); len(got) != 1 || got[0].Type != EvtThinkingDelta {
+	if got := NormalizeChatLine("acp-data", acp, 2); len(got) != 1 || got[0].Type != EvtThinkingDelta {
 		t.Fatalf("acp-data not dispatched: %+v", got)
 	}
 	// Permission requests are a UI decision on their own channel, never transcript.
-	if got := NormalizeChatLine("acp-req", acp); got != nil {
+	if got := NormalizeChatLine("acp-req", acp, 3); got != nil {
 		t.Fatalf("acp-req should not normalize, got %+v", got)
+	}
+}
+
+func TestUserPromptNormalizesToAUserDelta(t *testing.T) {
+	// The prompt is the one stream kind this app authors rather than parses,
+	// so the recorded line is the text itself.
+	got := NormalizeChatLine(chatUserKind, "ship it", 7)
+	if len(got) != 1 || got[0].Type != EvtUserDelta || got[0].Text != "ship it" {
+		t.Fatalf("bad user event: %+v", got)
+	}
+}
+
+func TestTwoIdenticalPromptsAreTwoBubbles(t *testing.T) {
+	// Identified by ord, not by a hash of the text. "ok" typed twice is two
+	// turns; an id derived from the text would merge them on every replay,
+	// because chatProjection matches an `acp:`-prefixed id BY ID.
+	first := NormalizeChatLine(chatUserKind, "ok", 4)
+	second := NormalizeChatLine(chatUserKind, "ok", 9)
+	if first[0].MessageID == second[0].MessageID {
+		t.Fatalf("identical prompts share an id: %q", first[0].MessageID)
+	}
+	// ...and the SAME line replayed keeps its id, so a client that saw it live
+	// recognises the replay instead of drawing the prompt twice.
+	if replay := NormalizeChatLine(chatUserKind, "ok", 4); replay[0].MessageID != first[0].MessageID {
+		t.Fatalf("replay changed the id: %q vs %q", replay[0].MessageID, first[0].MessageID)
+	}
+}
+
+func TestAnEmptyPromptIsNotRecordedAsATurn(t *testing.T) {
+	// An images-only send passes text "". Emitting an empty user bubble for it
+	// would put a blank turn in both clients' transcripts.
+	if got := NormalizeChatLine(chatUserKind, "", 1); got != nil {
+		t.Fatalf("empty prompt produced events: %+v", got)
 	}
 }
 

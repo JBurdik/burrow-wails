@@ -408,6 +408,23 @@ export const useRemoteStore = defineStore("remote", () => {
   // (src-wails/providerruntime.go) and arrive as provider-neutral events, so a
   // remote client no longer re-implements stream-json and ACP to its own,
   // shallower depth than the desktop.
+  /**
+   * Prompts this client sent and has not yet seen echoed back.
+   *
+   * Go publishes the human's prompt through emitChatLine now, so it reaches
+   * every client — including the one that typed it, which already drew the
+   * bubble locally (and locally is the only place the attached images exist,
+   * since the stream records the text). Matching the echo against this set is
+   * what keeps the sender from drawing it twice.
+   *
+   * ponytail: matched on text, not on an id, because the id is the stream ord
+   * and the sender does not learn it — ClaudeSend returns no ord today.
+   * Ceiling: sending the identical text twice inside one round trip collapses
+   * to one bubble until the next reload. Thread the ord back through
+   * claude_send/acp_send if that ever matters.
+   */
+  const pendingSends = new Set<string>();
+
   function applyEvent(chat: RemoteChat, event: Record<string, any>) {
     // Only these events happen strictly during an active turn — a chat
     // driven from the desktop (or another remote client) never runs sendChat
@@ -424,6 +441,14 @@ export const useRemoteStore = defineStore("remote", () => {
       case "thinking.delta":
         appendRemoteText(chat, "thinking", event.text ?? "");
         return;
+      case "user.delta": {
+        // A prompt from ANOTHER client (or a replay of one) — this is what
+        // makes a message typed on the desktop show up here at all.
+        const text = event.text ?? "";
+        if (pendingSends.delete(text)) return; // our own echo; already on screen
+        chat.messages.push({ id: Date.now() + chat.messages.length, role: "user", text });
+        return;
+      }
       case "tool.started":
         chat.messages.push({
           id: Date.now() + chat.messages.length,
@@ -593,7 +618,11 @@ export const useRemoteStore = defineStore("remote", () => {
   async function sendChat(text: string) {
     const chat = activeChat.value;
     if (!transport || !chat || !text.trim() || chat.busy) return;
-    chat.messages.push({ id: Date.now(), role: "user", text: text.trim() });
+    const prompt = text.trim();
+    chat.messages.push({ id: Date.now(), role: "user", text: prompt });
+    // Claim the echo before the call goes out, or a fast round trip lands
+    // user.delta while we are still awaiting and draws a second bubble.
+    pendingSends.add(prompt);
     chat.busy = true;
     try {
       if (chat.transport === "claude-cli") {
@@ -607,6 +636,10 @@ export const useRemoteStore = defineStore("remote", () => {
       }
     } catch (e: any) {
       chat.busy = false;
+      // Release the claim: the send failed, so no echo is coming. Leaving it
+      // set would swallow the NEXT identical prompt's echo — including one
+      // typed on the desktop.
+      pendingSends.delete(prompt);
       chat.messages.push({ id: Date.now() + 1, role: "assistant", text: `Chyba odeslání: ${e?.message ?? e}` });
     }
   }
