@@ -312,13 +312,61 @@ single-use), and **rejects every queued call rather than replaying it** once a c
 actually drops — a queued call replayed against the next connection could arrive for an id
 whose promise was already rejected, with nowhere for the eventual reply to go.
 
+### The shell stream: `seq`, the ring, resume (`src-wails/shellstream.go` + `shellsnapshot.go`)
+
+A dropped connection used to be data loss. `busEmit` now **numbers** an event before it
+fans out — one counter, one `shellEvent{seq,name,payload}` every sink sees — and keeps the
+last **512** in an in-memory ring (`shellRingSize`). The `welcome` frame carries
+`currentSeq()`, so a reconnecting client knows where the server is; it sends
+`{t:"resume", since}` and gets either a `shell` frame of the deltas or a `resync` telling it
+to start over from a snapshot. **A process restart always means `resync`**: the numbering
+begins at zero, so `since > shellSeq` is the give-away and there is nothing to hand back.
+There is deliberately **no per-client state on the server** — the ring is shared and
+`resumeSince` is a pure function over it, so a client the server has never heard of
+resumes exactly as well as one it just dropped.
+
+**What the ring does not hold** (`notRingable` in `bus.go`) is everything that is both
+high-volume **and** already replayable from a durable log of its own: `pty-data-*` (the
+daemon keeps its own ring and replays it on reattach) and the chat channels
+`claude-data-*`, `acp-data-*`, `acp-req-*`, `chat-event-*` (persisted to `chat_stream`
+with an `ord` before they are ever emitted; `replayChatStream`/`LoadChatEventsSince` catch
+a client up from `chat_stream_state.folded_ord`). This is not only about the cost of
+ringing them — it is what makes resume work at all. One streaming agent emits hundreds of
+chat lines per turn, so ringing them would churn all 512 slots in seconds and every
+reconnect would come back a `resync`, making the ring dead weight. What is left is shell
+state — phases, workspaces, pty exits, control results — which changes a handful of times
+a minute, so 512 slots is hours of history. The consequence to keep in mind: a dropped
+connection still loses **PTY bytes** with no reattach to replay them (`pty-data-<id>` is
+emit-once), which is a hole in a terminal's scrollback; phase dots, workspace and chat
+state all survive.
+
+**`shell_snapshot`** (`scopeOrchRead`) is the first paint in one round trip: workspaces,
+tabs for **every** workspace (a phone opens on one the desktop never mounted), all phases,
+chats, and the `seq` that state is current as of. It reads `seq` **first, before any
+data** — taken afterwards, an event landing between the data read and the seq read would be
+numbered as already seen and lost for good; taken first, the worst case is the client sees
+something twice, which its reducers tolerate. Every collection marshals empty rather than
+null, because a client indexes them without a guard. Deliberately **not** in the snapshot:
+chat transcript bodies and PTY scrollback, both of which already have the replay paths
+named above — a second one for the same data is worse than none.
+
+Client side, `src/runtime/transport.ts` tracks the position, sends `resume` in `onopen`
+before flushing queued calls, drops any event at or behind where it already is (a
+reconnect delivers some events both live and in the deltas, and these handlers fire sounds
+and OS notifications), and exposes `onResync(cb)` plus `noteSeq(seq)` — the caller has to
+report a snapshot's `seq` itself, since the snapshot is one opaque RPC from the
+transport's point of view. `src/runtime/shellSnapshot.ts` is the read model and
+`applyShellEvent` its reducer; unknown event names are ignored on purpose, since the
+stream carries every bus event and this model tracks part of it.
+
+**Binary PTY frames are deferred, on purpose.** Spec §2 wants them and `pty-data` still
+travels as JSON. It is a bandwidth optimization, not a prerequisite for anything above.
+
 **What did not change.** The old `/ws` and its hand-typed `dispatch` (`httpserver.go`) are
 still live, gated by the remote-access toggle, and `src/mobile/` still runs on them
-entirely — this phase did not touch the phone. Snapshot, resume and binary PTY frames do
-not exist on `/v2/ws` yet: the `welcome` frame carries only `environmentId` and `scopes`
-today, and `transport.ts` leaves it unhandled with a comment that phase 4 is what adds a
-`seq` to resume from. **No manual GUI verification of any of this has been done** —
-nobody in this process could launch the app.
+entirely — that client has no `seq`, no resume and no snapshot until phase 6 rewrites it
+onto `/v2/ws`. **No manual GUI verification of any of this has been done** — nobody in
+this process could launch the app.
 
 ### Manager (`src/components/ManagerPanel.vue`)
 
@@ -351,13 +399,15 @@ Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem
 - **Git** (`git.go`) — `RunGit` wraps the system git binary (checks known paths)
 - **Text generation** (`textgen.go`) — `GenerateCommitMessage`, `GeneratePrContent`, `GenerateBranchName`, `GenerateChatTitle` (see below)
 - **FS** (`fs.go`) — `ReadDirShallow`, `WriteTextFile`
-- **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. Two sinks are wired today: the tailnet WS broadcaster for the mobile/PWA client (`installWSSink` in `httpserver.go`, live only while remote access is toggled on) and `/v2/ws`'s per-connection subscription (`remotews.go`, always on — it is mounted on the hook server, not the toggled one) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) reach a connected phone and the desktop's own socket alike. There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own `/v2/ws` connection like any other client, and the only names still delivered on the Wails event channel (`menu-*`, `lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `runtime.EventsEmit` directly, never through `busEmit` (`src/lib/wailsCompat/event.ts` routes exactly those prefixes to `EventsOn`). `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did
+- **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. `busEmit` **numbers** the event into the replay ring first (unless `notRingable` excludes it) and hands every sink the same `shellEvent{seq,name,payload}` — one struct rather than a growing parameter list, and the same `seq` for all sinks so the ring's order is the order clients receive. Two sinks are wired today: the tailnet WS broadcaster for the mobile/PWA client (`installWSSink` in `httpserver.go`, live only while remote access is toggled on) and `/v2/ws`'s per-connection subscription (`remotews.go`, always on — it is mounted on the hook server, not the toggled one) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) reach a connected phone and the desktop's own socket alike. There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own `/v2/ws` connection like any other client, and the only names still delivered on the Wails event channel (`menu-*`, `lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `runtime.EventsEmit` directly, never through `busEmit` (`src/lib/wailsCompat/event.ts` routes exactly those prefixes to `EventsOn`). `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did
 - **Agent phase** (`phasestore.go`, `phasepoll.go`, `internal/agentphase/phase.go`) — see "PTY / Agent phase" above
 - **Environment identity** (`environment.go`) — `environmentID()` creates and persists a random id in `<app-data>/environment.json` on first run; every client-side record (known environments, endpoint preferences, seen-at receipts) is meant to key off this rather than IP/hostname, which change. `EnvironmentID()` is reachable over `/v2/ws` as `environment_id` (`scopeOrchRead`) — not a Wails binding call any more
 - **Remote endpoints** (`endpoints.go`, `endpoints_tailscale.go`) — `EndpointProvider` registry (currently loopback + Tailscale) contributing `AdvertisedEndpoint`s, `selectEndpoint()` implementing t3code's selection order (preferred kind → hosted-HTTPS-compatible → default → non-loopback → loopback-if-same-machine), surfaced as `remote_endpoints` (`scopeAccessRead`) over `/v2/ws`. **Nothing consumes this yet** — it exists for Settings/pairing in a later phase
 - **Remote command table** (`remoteapi.go`) — `remoteAllowed`/`remoteDenied`: every `App` method the desktop and a future remote client may reach over `/v2/ws`, with its wire name, positional argument names and required scope. See "Desktop transport" above
-- **Remote wire protocol** (`remoteproto.go`) — the tagged `call`/`reply`/`event`/`welcome` frame shapes for `/v2/ws`
-- **Remote socket server** (`remotews.go`) — `/v2/ws` itself: ticket issuance/redemption, per-connection outbound queue, per-call goroutine dispatch with a concurrency cap and panic recovery, keepalive
+- **Remote wire protocol** (`remoteproto.go`) — the tagged `call`/`resume` client frames and `reply`/`event`/`shell`/`resync`/`welcome` server frames for `/v2/ws`
+- **Remote socket server** (`remotews.go`) — `/v2/ws` itself: ticket issuance/redemption, per-connection outbound queue, per-call goroutine dispatch with a concurrency cap and panic recovery, `resume` handling, keepalive
+- **Shell event stream** (`shellstream.go`) — the `seq` counter and the 512-event replay ring; `resumeSince` is a pure function over it, so there is no per-client state to keep. See "The shell stream" above
+- **First paint** (`shellsnapshot.go`) — `ShellSnapshot()`: workspaces, tabs for every workspace, phases, chats and the `seq` they are current as of, in one round trip (`shell_snapshot`, `scopeOrchRead`)
 
 ### Background text generation (`src-wails/textgen.go`)
 
