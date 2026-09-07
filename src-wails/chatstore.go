@@ -115,6 +115,16 @@ func (a *App) SaveChatMessages(chatID int, messagesJSON string, foldedOrd int64)
 	if err := json.Unmarshal([]byte(messagesJSON), &msgs); err != nil {
 		return fmt.Errorf("decode messages: %w", err)
 	}
+	// Hold the chat's fold lock across the whole write, so this and Go's own
+	// coalesced persist cannot interleave into a transcript with a hole in it
+	// (see lockChatTail). A stopgap, and cheap: it goes away with this write
+	// path.
+	var tail *chatTail
+	if w := a.chatStream(); w != nil {
+		if tail = w.lockChatTail(strconv.Itoa(chatID)); tail != nil {
+			defer tail.mu.Unlock()
+		}
+	}
 	tx, err := a.db.Begin()
 	if err != nil {
 		return err
@@ -145,6 +155,8 @@ func (a *App) SaveChatMessages(chatID int, messagesJSON string, foldedOrd int64)
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	// Still inside the fold lock: the tail this forgets cannot be mid-persist,
+	// and the next folded line re-adopts what was just written.
 	if w := a.chatStream(); w != nil {
 		w.forgetChatTail(strconv.Itoa(chatID))
 	}

@@ -114,19 +114,50 @@ type chatTail struct {
 
 	unsaved  int
 	lastSave time.Time
+
+	// noPersist marks a tail whose adopted prefix could not be READ. Such a
+	// tail folds and publishes normally but must never write: dirtyFrom would
+	// be 0 over an empty prefix, so the first persist's prune
+	// (DELETE ... ord >= len) would delete the very stored transcript the read
+	// failed to load. A transient SQLITE_BUSY or one corrupt payload_json is
+	// enough to reach this, and losing the live fold is recoverable from
+	// chat_stream — deleting the adopted prefix is not.
+	noPersist bool
 }
 
-// combined is the whole transcript: adopted rows verbatim, then this process's
-// fold with the id offset applied.
-func (t *chatTail) combined() []ChatMessage {
-	out := make([]ChatMessage, 0, len(t.adopted)+len(t.st.messages))
-	out = append(out, t.adopted...)
-	for i, m := range t.st.messages {
-		m.ID = t.idOffset + i
-		out = append(out, m)
+// length is the transcript's length without materializing it.
+func (t *chatTail) length() int { return len(t.adopted) + len(t.st.messages) }
+
+// at returns transcript row i: an adopted row verbatim, or this process's fold
+// with the id offset applied.
+func (t *chatTail) at(i int) ChatMessage {
+	if i < len(t.adopted) {
+		return t.adopted[i]
+	}
+	j := i - len(t.adopted)
+	m := t.st.messages[j]
+	m.ID = t.idOffset + j
+	return m
+}
+
+// slice materializes the transcript from `from` onward, and only from there.
+// Copying the WHOLE transcript per folded line is the same per-token cost
+// Ruling D exists to keep off this path, one layer up from the DB write: a
+// 2000-message adopted prefix is a quarter of a megabyte copied per token, for
+// an emit that needs one message.
+func (t *chatTail) slice(from int) []ChatMessage {
+	from = max(from, 0)
+	n := t.length()
+	out := make([]ChatMessage, 0, max(n-from, 0))
+	for i := from; i < n; i++ {
+		out = append(out, t.at(i))
 	}
 	return out
 }
+
+// combined is the whole transcript. Only readers of the full transcript
+// (LoadChatMessages) use it; the fold path uses slice/length.
+func (t *chatTail) combined() []ChatMessage { return t.slice(0) }
 
 // isTurnBoundary reports the events after which nothing is still streaming.
 // session.exited counts because a CLI that dies mid-turn emits no
@@ -213,17 +244,17 @@ func (a *App) foldChatLine(chatID string, ord int64, events []ProviderRuntimeEve
 		t.unsaved++
 	}
 
-	msgs := t.combined()
-	pending := t.dirtyFrom < len(msgs) || t.persistedOrd != t.foldedOrd
+	total := t.length()
+	pending := t.dirtyFrom < total || t.persistedOrd != t.foldedOrd
 	due := settled || t.unsaved >= chatFoldPersistEvery || time.Since(t.lastSave) >= chatFoldPersistAfter
 	if pending && due {
-		a.persistChatTail(chatID, t, msgs)
+		a.persistChatTail(chatID, t, total)
 	}
 
 	if batchFrom >= 0 {
 		busEmit(chatMessagesChangedPrefix+chatID, ChatMessagesChanged{
 			FromIndex: batchFrom,
-			Messages:  msgs[batchFrom:],
+			Messages:  t.slice(batchFrom),
 		})
 	}
 }
@@ -248,8 +279,14 @@ func (a *App) foldChatLine(chatID string, ord int64, events []ProviderRuntimeEve
 // lines the unpersisted messages came from.
 //
 // Called with t.mu held.
-func (a *App) persistChatTail(chatID string, t *chatTail, msgs []ChatMessage) {
+func (a *App) persistChatTail(chatID string, t *chatTail, total int) {
 	if a.db == nil {
+		return
+	}
+	if t.noPersist {
+		// Adoption could not read the stored prefix, so this tail does not
+		// know what row 0 is. Writing anything would prune the rows it failed
+		// to load. See chatTail.noPersist.
 		return
 	}
 	id, err := strconv.Atoi(chatID)
@@ -270,8 +307,8 @@ func (a *App) persistChatTail(chatID string, t *chatTail, msgs []ChatMessage) {
 		return
 	}
 	defer stmt.Close()
-	for i := max(t.dirtyFrom, 0); i < len(msgs); i++ {
-		payload, err := json.Marshal(msgs[i])
+	for i := max(t.dirtyFrom, 0); i < total; i++ {
+		payload, err := json.Marshal(t.at(i))
 		if err != nil {
 			log.Printf("chat fold: encode %s#%d: %v", chatID, i, err)
 			return
@@ -283,7 +320,7 @@ func (a *App) persistChatTail(chatID string, t *chatTail, msgs []ChatMessage) {
 	}
 	// The transcript can only shrink through a client's own edit, but the
 	// delete is what keeps "rows 0..len-1" true rather than assumed.
-	if _, err := tx.Exec(`DELETE FROM chat_messages WHERE chat_id = ? AND ord >= ?`, id, len(msgs)); err != nil {
+	if _, err := tx.Exec(`DELETE FROM chat_messages WHERE chat_id = ? AND ord >= ?`, id, total); err != nil {
 		log.Printf("chat fold: prune %s: %v", chatID, err)
 		return
 	}
@@ -300,7 +337,7 @@ func (a *App) persistChatTail(chatID string, t *chatTail, msgs []ChatMessage) {
 		return
 	}
 
-	t.dirtyFrom = len(msgs)
+	t.dirtyFrom = total
 	t.persistedOrd = t.foldedOrd
 	t.unsaved = 0
 	t.lastSave = time.Now()
@@ -340,18 +377,19 @@ func (a *App) loadChatTail(w *chatStreamWriter, chatID string, upTo int64) *chat
 
 	if id, err := strconv.Atoi(chatID); err == nil {
 		raw, err := a.loadStoredChatMessages(id)
+		var msgs []ChatMessage
+		if err == nil {
+			err = json.Unmarshal([]byte(raw), &msgs)
+		}
 		if err != nil {
-			// Refusing to adopt would mean recomputing, which is the one thing
-			// this function exists to avoid — so log loudly and start empty
-			// only when there is genuinely nothing readable.
-			log.Printf("chat fold: adopt %s: %v", chatID, err)
+			// A failed READ is not the same as an empty transcript, and
+			// starting empty is the one thing that must not happen here: the
+			// first persist would prune the rows we could not load. Fold in
+			// memory so the live view still works, but never write.
+			log.Printf("chat fold: adopt %s failed, transcript is read-only for this chat: %v", chatID, err)
+			t.noPersist = true
 		} else {
-			var msgs []ChatMessage
-			if err := json.Unmarshal([]byte(raw), &msgs); err != nil {
-				log.Printf("chat fold: adopt %s: undecodable transcript: %v", chatID, err)
-			} else {
-				t.adopted = msgs
-			}
+			t.adopted = msgs
 		}
 	}
 	for _, m := range t.adopted {
@@ -362,9 +400,36 @@ func (a *App) loadChatTail(w *chatStreamWriter, chatID string, upTo int64) *chat
 	t.turnStart = len(t.adopted)
 	t.dirtyFrom = len(t.adopted)
 
-	folded := w.foldedOrd(chatID)
+	// A stored row can only be partial if the app died mid-turn between a
+	// coalesced write and the turn boundary. The turn it belonged to has ended
+	// by definition, and an adopted row is never re-derived, so settling has
+	// to happen here or the bubble renders as mid-stream forever. This is the
+	// one thing adoption changes about the stored rows, and it changes only
+	// the flag whose whole meaning is "still streaming".
+	for i := range t.adopted {
+		if t.adopted[i].Partial {
+			settleTranscript(t.adopted[i:])
+			t.dirtyFrom = i
+			break
+		}
+	}
+
+	folded, haveMarker := w.foldedOrd(chatID)
 	t.foldedOrd = folded
 	t.persistedOrd = folded
+
+	if !haveMarker && len(t.adopted) > 0 {
+		// Stored rows with NO marker: the config.json import and every client
+		// save that passes foldedOrd = -1 write rows without one, and Go
+		// appends to chat_stream for chats no client has mounted. Folding
+		// [0, upTo) here would append a second copy of a transcript the
+		// adopted rows already account for — permanently, on the next
+		// persist. Absence of a marker is not evidence that nothing was
+		// folded, so nothing is folded. (The frontend guarded exactly this:
+		// chatSession.ts's `if (!folded) return`.)
+		t.foldedOrd = max(t.foldedOrd, upTo)
+		return t
+	}
 
 	// Catch up on lines recorded but not folded — a turn that was in flight
 	// when the app last exited. Bounded above by the line being folded now, so
@@ -442,5 +507,37 @@ func (w *chatStreamWriter) chatTailMessages(chatID string) []ChatMessage {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.noPersist {
+		// This tail has no idea what the stored prefix is, so its combined
+		// view would show a transcript that starts mid-conversation. Report
+		// "nothing in memory" and let the caller read the table: stale but
+		// true beats short and wrong, and the read may well succeed now.
+		return nil
+	}
 	return t.combined()
+}
+
+// lockChatTail returns the chat's tail with ITS mu already held, or nil when
+// this process has not folded the chat. The caller must Unlock it.
+//
+// This exists for one caller: SaveChatMessages, which is still a client-driven
+// whole-transcript write until the clients move onto the fold. Without it, a
+// client save and a coalesced persist can interleave — client commits N rows,
+// the fold then upserts [dirtyFrom, len) and deletes >= len, leaving
+// N..dirtyFrom-1 MISSING while MAX() keeps folded_ord at the higher value, at
+// which point trim is free to delete the stream lines for the hole.
+//
+// Lock order note: this takes w.mu, RELEASES it, then takes t.mu — and
+// forgetChatTail then retakes w.mu while t.mu is held. That is not a cycle,
+// because no path anywhere holds w.mu while blocking on a t.mu (chatTailFor
+// never touches t.mu; chatTailMessages releases w.mu first).
+func (w *chatStreamWriter) lockChatTail(chatID string) *chatTail {
+	w.mu.Lock()
+	t := w.tails[chatID]
+	w.mu.Unlock()
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	return t
 }

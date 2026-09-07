@@ -128,7 +128,7 @@ func TestFoldPersistFailureMovesNeither(t *testing.T) {
 	if _, err := a.db.Exec(`DROP TABLE chat_messages`); err != nil {
 		t.Fatalf("drop: %v", err)
 	}
-	a.persistChatTail("5", t2, t2.combined())
+	a.persistChatTail("5", t2, t2.length())
 
 	if _, ok := storedFoldedOrd(t, a, "5"); ok {
 		t.Fatal("folded_ord committed although the messages could not be written")
@@ -188,6 +188,16 @@ func TestFoldAdoptsStoredTranscriptInsteadOfRecomputing(t *testing.T) {
 	// Ruling B: ids continue from max(stored id) + 1.
 	if msgs[3].ID != 4 {
 		t.Fatalf("id did not continue from the stored transcript: %d, want 4", msgs[3].ID)
+	}
+
+	// And the persist's prune (DELETE ... ord >= len) must not be able to
+	// reach an adopted row: force a write and count what survived.
+	a.emitChatLine("7", "claude-data", claudeResultLine)
+	if stored := loadStored(t, a, 7); len(stored) != 4 {
+		t.Fatalf("persist pruned adopted rows: %d rows left: %+v", len(stored), stored)
+	}
+	if ords := storedOrds(t, a, 7); !isContiguous(ords, 4) {
+		t.Fatalf("stored ords are not 0..3: %v", ords)
 	}
 }
 
@@ -275,5 +285,180 @@ func TestFoldConcurrentChatsDoNotRace(t *testing.T) {
 		if ord, ok := storedFoldedOrd(t, a, chatID); !ok || ord != 52 {
 			t.Fatalf("chat %s: folded_ord = %d (ok=%v), want 52", chatID, ord, ok)
 		}
+	}
+}
+
+func storedOrds(t *testing.T, a *App, chatID int) []int {
+	t.Helper()
+	rows, err := a.db.Query(`SELECT ord FROM chat_messages WHERE chat_id = ? ORDER BY ord`, chatID)
+	if err != nil {
+		t.Fatalf("ords: %v", err)
+	}
+	defer rows.Close()
+	var out []int
+	for rows.Next() {
+		var o int
+		if err := rows.Scan(&o); err != nil {
+			t.Fatalf("ords: %v", err)
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+func isContiguous(ords []int, want int) bool {
+	if len(ords) != want {
+		return false
+	}
+	for i, o := range ords {
+		if o != i {
+			return false
+		}
+	}
+	return true
+}
+
+// CRITICAL 1. Stored rows with NO chat_stream_state row — what the config.json
+// import and every client save passing foldedOrd = -1 leave behind. "Absent"
+// read as "folded nothing" would fold the whole surviving stream on top of
+// rows that already account for it, duplicating the transcript permanently.
+func TestFoldSkipsCatchUpWhenTheMarkerIsAbsent(t *testing.T) {
+	a := newTestApp(t)
+	prior := `[{"id":1,"role":"user","text":"otazka"},{"id":2,"role":"assistant","text":"odpoved"}]`
+	if err := a.SaveChatMessages(4, prior, -1); err != nil { // -1: no marker written
+		t.Fatalf("seed: %v", err)
+	}
+	if _, ok := storedFoldedOrd(t, a, "4"); ok {
+		t.Fatal("setup is wrong: a marker exists")
+	}
+	// The stream lines those stored rows came from are still present — which
+	// is the trap: they are already accounted for.
+	for i, line := range []string{
+		claudeTextLine("m1", "odpo"),
+		claudeTextLine("m1", "ved"),
+	} {
+		if _, err := a.db.Exec(
+			`INSERT INTO chat_stream (chat_id, ord, kind, line) VALUES (?, ?, ?, ?)`,
+			"4", i, "claude-data", line,
+		); err != nil {
+			t.Fatalf("seed stream: %v", err)
+		}
+	}
+
+	a.emitChatLine("4", chatUserKind, "dalsi otazka")
+
+	msgs := loadFolded(t, a, 4)
+	if len(msgs) != 3 {
+		t.Fatalf("catch-up re-folded an accounted-for stream: %d messages: %+v", len(msgs), msgs)
+	}
+	if msgs[2].Role != "user" || msgs[2].Text != "dalsi otazka" {
+		t.Fatalf("the only new message should be the new prompt: %+v", msgs[2])
+	}
+	// And the duplicate must not reach the table on the next persist either.
+	a.emitChatLine("4", "claude-data", claudeResultLine)
+	if stored := loadStored(t, a, 4); len(stored) != 3 {
+		t.Fatalf("duplicated transcript committed: %+v", stored)
+	}
+}
+
+// CRITICAL 2. An adoption READ failure must never lead to a write: dirtyFrom
+// would be 0 over an empty prefix and the prune would delete the stored rows.
+func TestAdoptionReadFailureNeverDeletesTheStoredTranscript(t *testing.T) {
+	a := newTestApp(t)
+	if err := a.SaveChatMessages(8, `[{"id":1,"role":"user","text":"drahocenne"}]`, 50); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// One corrupt payload is enough — the reader concatenates raw payloads, so
+	// the whole array fails to decode.
+	if _, err := a.db.Exec(
+		`INSERT INTO chat_messages (chat_id, ord, payload_json) VALUES (?, ?, ?)`,
+		8, 1, `{"id":2,"role":"assistant",`,
+	); err != nil {
+		t.Fatalf("corrupt row: %v", err)
+	}
+
+	// A whole turn, boundary included, so a persist is definitely due.
+	a.emitChatLine("8", chatUserKind, "ahoj")
+	a.emitChatLine("8", "claude-data", claudeTextLine("m1", "nazdar"))
+	a.emitChatLine("8", "claude-data", claudeResultLine)
+
+	if ords := storedOrds(t, a, 8); len(ords) != 2 {
+		t.Fatalf("stored transcript was pruned by a tail that could not read it: ords %v", ords)
+	}
+	var payload string
+	if err := a.db.QueryRow(`SELECT payload_json FROM chat_messages WHERE chat_id = 8 AND ord = 0`).Scan(&payload); err != nil {
+		t.Fatalf("row 0 gone: %v", err)
+	}
+	if payload != `{"id":1,"role":"user","text":"drahocenne"}` {
+		t.Fatalf("row 0 was rewritten: %s", payload)
+	}
+	if ord, _ := storedFoldedOrd(t, a, "8"); ord != 50 {
+		t.Fatalf("folded_ord moved for a tail that must not write: %d", ord)
+	}
+}
+
+// IMPORTANT 3. A client's whole-transcript save and a coalesced persist must
+// not interleave into a transcript with a hole in it. Run under -race.
+func TestClientSaveDoesNotInterleaveWithTheFold(t *testing.T) {
+	a := newTestApp(t)
+	a.emitChatLine("6", chatUserKind, "start")
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 60; i++ {
+			a.emitChatLine("6", "claude-data", claudeTextLine("m1", "x"))
+			if i%20 == 19 {
+				a.emitChatLine("6", "claude-data", claudeResultLine)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 30; i++ {
+			// The shape AgentChat.vue still writes: whole array, no marker.
+			if err := a.SaveChatMessages(6, `[{"id":1,"role":"user","text":"start"},{"id":2,"role":"assistant","text":"x"}]`, -1); err != nil {
+				t.Errorf("client save: %v", err)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+
+	// Whoever wrote last, the rows must be a contiguous 0..n-1 — a gap is what
+	// would let trim delete the stream lines for the missing range.
+	ords := storedOrds(t, a, 6)
+	if !isContiguous(ords, len(ords)) || len(ords) == 0 {
+		t.Fatalf("stored transcript has a hole: %v", ords)
+	}
+}
+
+// IMPORTANT 4. A hard crash mid-turn can persist partial rows at the
+// coalescing tick. Adopted rows are never re-derived, so adoption is the only
+// place that can settle them.
+func TestAdoptionSettlesStoredPartials(t *testing.T) {
+	a := newTestApp(t)
+	prior := `[{"id":1,"role":"user","text":"otazka"},{"id":2,"role":"assistant","text":"nedopsan","partial":true}]`
+	if err := a.SaveChatMessages(9, prior, 30); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a.emitChatLine("9", chatUserKind, "jsi tam?")
+
+	msgs := loadFolded(t, a, 9)
+	if len(msgs) != 3 {
+		t.Fatalf("setup: %+v", msgs)
+	}
+	if msgs[1].Partial {
+		t.Fatalf("a stored partial from an ended turn was adopted as still streaming: %+v", msgs[1])
+	}
+	// And the settle is written back, not just held in memory.
+	a.emitChatLine("9", "claude-data", claudeResultLine)
+	stored := loadStored(t, a, 9)
+	if len(stored) != 3 || stored[1].Partial {
+		t.Fatalf("settled partial was not persisted: %+v", stored)
+	}
+	if stored[1].Text != "nedopsan" {
+		t.Fatalf("settling changed more than the flag: %+v", stored[1])
 	}
 }

@@ -193,7 +193,11 @@ func (w *chatStreamWriter) run() {
 // of that part of the transcript, so age alone must never delete it.
 func (w *chatStreamWriter) trim(chatID string, latestOrd int64) {
 	cutoff := latestOrd - chatStreamKeep
-	if folded := w.foldedOrd(chatID) - 1; folded < cutoff {
+	// An absent marker means nothing has been folded, which is the same
+	// cutoff as folded_ord = 0 — but the two are NOT the same thing to
+	// adoption, which is why foldedOrd reports absence separately.
+	marker, _ := w.foldedOrd(chatID)
+	if folded := marker - 1; folded < cutoff {
 		cutoff = folded
 	}
 	if hard := latestOrd - chatStreamHardKeep; hard > cutoff {
@@ -209,13 +213,25 @@ func (w *chatStreamWriter) trim(chatID string, latestOrd int64) {
 	}
 }
 
-func (w *chatStreamWriter) foldedOrd(chatID string) int64 {
+// foldedOrd reports the chat's fold marker AND whether the row exists at all.
+// The second return is load-bearing: a chat that has never had a marker
+// written (the config.json import and every client save that passes
+// foldedOrd = -1) reads back as 0, which is indistinguishable from "folded
+// nothing" — and adoption folding a whole surviving stream on top of rows that
+// already account for it duplicates the transcript permanently.
+func (w *chatStreamWriter) foldedOrd(chatID string) (int64, bool) {
 	var ord int64
 	err := w.db.QueryRow(`SELECT folded_ord FROM chat_stream_state WHERE chat_id = ?`, chatID).Scan(&ord)
-	if err != nil && err != sql.ErrNoRows {
-		log.Printf("chat stream: folded ord for %s: %v", chatID, err)
+	if err == sql.ErrNoRows {
+		return 0, false
 	}
-	return ord
+	if err != nil {
+		log.Printf("chat stream: folded ord for %s: %v", chatID, err)
+		// Unknown, so treat it as absent: the cautious reading everywhere
+		// this is used (no trim, no catch-up) rather than "nothing folded".
+		return 0, false
+	}
+	return ord, true
 }
 
 // emitChatLine is the single door for agent output: persist, then emit. Both
