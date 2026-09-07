@@ -40,10 +40,13 @@ const (
 	// If replay ever comes up short, trim on turn boundaries instead.
 	chatStreamKeep = 20000
 	// chatStreamHardKeep is the ceiling that applies even to lines nobody has
-	// folded yet. Without it a chat that never saves its transcript grows the
-	// DB forever; with it, such a chat loses its oldest lines instead. Losing
-	// them is bad, so the limit is far above anything a real session reaches —
-	// it is a backstop against a bug, not a routine trim.
+	// folded yet. Without it a chat whose fold never advances (a stuck
+	// noPersist latch in chattranscript.go, say — see trim's comment) grows
+	// the DB forever; with it, such a chat loses its oldest lines instead.
+	// Losing them is bad, so the limit is far above anything a real session
+	// reaches, and trim logs every time this ceiling is what did the
+	// deleting — it is a backstop against a bug, not a routine trim, and
+	// reaching it should always be investigated, not just tolerated.
 	chatStreamHardKeep = 200000
 	// chatStreamTrimEvery keeps the DELETE off the hot path — one trim per
 	// this many appends per chat.
@@ -189,18 +192,37 @@ func (w *chatStreamWriter) run() {
 }
 
 // trim drops lines that are both old and already folded into chat_messages.
-// "Already folded" is the binding constraint: an unfolded line is the only copy
-// of that part of the transcript, so age alone must never delete it.
+// "Already folded" is the routine constraint: age alone does not delete an
+// unfolded line, because it is the only copy of that part of the transcript.
+//
+// The one deliberate exception is chatStreamHardKeep: if a chat's fold never
+// advances at all (see the constant's comment — most likely a latched
+// noPersist in chattranscript.go), folded_ord protects unfolded rows forever
+// and the table grows without bound. The hard cap overrides that protection
+// so growth stays bounded, but only once a chat is far enough past normal
+// that reaching it is itself a bug, not routine trimming — and when it fires,
+// it says so loudly (see the log below) rather than deleting silently.
 func (w *chatStreamWriter) trim(chatID string, latestOrd int64) {
 	cutoff := latestOrd - chatStreamKeep
 	// An absent marker means nothing has been folded, which is the same
 	// cutoff as folded_ord = 0 — but the two are NOT the same thing to
 	// adoption, which is why foldedOrd reports absence separately.
 	marker, _ := w.foldedOrd(chatID)
-	if folded := marker - 1; folded < cutoff {
-		cutoff = folded
+	foldProtected := marker - 1
+	if foldProtected < cutoff {
+		cutoff = foldProtected
 	}
 	if hard := latestOrd - chatStreamHardKeep; hard > cutoff {
+		// The hard cap is raising the cutoff above what the fold marker would
+		// protect, i.e. it is about to delete lines nobody has folded yet.
+		// That is only supposed to happen as a bounded backstop against a
+		// stuck fold, so name what is being lost and why, loudly enough that
+		// someone can go fix the chat whose fold got stuck rather than have
+		// its history quietly shrink forever.
+		log.Printf(
+			"chat stream: hard cap trimming chat %s past the fold marker — dropping unfolded ord <= %d (fold-protected cutoff would have been %d, folded_ord=%d); this chat's fold has likely stopped advancing (check for a latched noPersist)",
+			chatID, hard, foldProtected, marker,
+		)
 		cutoff = hard
 	}
 	if cutoff < 0 {
