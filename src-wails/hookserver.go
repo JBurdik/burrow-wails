@@ -6,20 +6,21 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sync"
 
 	"burrow/internal/agentphase"
 )
 
-// HookServer receives `burrow status <state>` POSTs from the `burrow`
-// CLI (running inside spawned PTYs) and re-emits them as `pty-hook-{id}`
-// events, matching src-tauri's start_hook_server / tiny_http implementation.
+// HookServer receives `burrow status <state>` POSTs from the `burrow` CLI
+// (running inside spawned PTYs) and applies them to the PhaseStore.
+//
+// It used to ALSO re-emit each one on a `pty-hook-{id}` bus event, kept alive
+// for the mobile client while it had its own status derivation. Phase 6 put
+// the phone on phases like everything else, so that channel had no consumer
+// left and is gone; a hook now has exactly one effect.
 type HookServer struct {
-	ctx      context.Context
-	port     int
-	mu       sync.RWMutex
-	statuses map[string]hookPayload
-	phases   *PhaseStore
+	ctx    context.Context
+	port   int
+	phases *PhaseStore
 }
 
 type hookPayload struct {
@@ -41,7 +42,7 @@ func StartHookServer(ctx context.Context, phases *PhaseStore, routes ...func(*ht
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	h := &HookServer{ctx: ctx, port: port, statuses: make(map[string]hookPayload), phases: phases}
+	h := &HookServer{ctx: ctx, port: port, phases: phases}
 	mux := http.NewServeMux()
 	// /hook is the path the `burrow` CLI has always posted to; /status is kept as
 	// an alias. Serving only /status silently broke every status dot: the CLI's
@@ -88,17 +89,6 @@ func (h *HookServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A terminal thread can already be running before its XTerm view attaches.
-	// Keep the latest state and replay it from CreatePty once that view has its
-	// listener installed; otherwise the initial `running` hook is lost and the
-	// sidebar mirror remains idle until the next hook arrives.
-	if p.PtyID != "" && p.State != "session" {
-		h.mu.Lock()
-		h.statuses[p.PtyID] = p
-		h.mu.Unlock()
-	}
-	h.emitStatus(p)
-
 	if h.phases != nil && p.PtyID != "" {
 		if ev, ok := hookEvent(p); ok {
 			h.phases.Apply("pty:"+p.PtyID, ev)
@@ -128,40 +118,24 @@ func hookEvent(p hookPayload) (agentphase.Event, bool) {
 	return agentphase.Event{}, false
 }
 
-// ForgetStatus drops a PTY's cached hook state. Its pair is ReplayStatus:
-// a pty id that has just been reused by a FRESH spawn must not replay the
-// status of the session that held the id before it, on the legacy
-// pty-hook-{id} channel any more than on the phase one.
+// ForgetStatus drops a PTY's phase. Its pair is ReplayStatus: a pty id that
+// has just been reused by a FRESH spawn must not wear the state of the session
+// that held the id before it. Kept as a HookServer method because CreatePty
+// calls it there, next to the daemon check that decides reattach-or-fresh.
 func (h *HookServer) ForgetStatus(ptyID string) {
-	h.mu.Lock()
-	delete(h.statuses, ptyID)
-	h.mu.Unlock()
+	if h.phases != nil {
+		h.phases.Forget("pty:" + ptyID)
+	}
 }
 
-// ReplayStatus re-emits a PTY's last hook state after a frontend attaches.
-// The caller creates the PTY only after XTerm has subscribed to pty-hook-{id}.
+// ReplayStatus re-emits a PTY's phase after a client attaches.
+//
+// There is no hook-payload cache behind this any more. It existed only to feed
+// the legacy `pty-hook-{id}` channel, whose last consumer went away when phase
+// 6 moved the phone onto phases — and PhaseStore is the better copy anyway: it
+// survives a restart, which that in-memory map never did.
 func (h *HookServer) ReplayStatus(ptyID string) {
-	h.mu.RLock()
-	p, ok := h.statuses[ptyID]
-	h.mu.RUnlock()
-	if ok {
-		h.emitStatus(p)
-	}
 	if h.phases != nil {
 		h.phases.Replay("pty:" + ptyID)
-	}
-}
-
-func (h *HookServer) emitStatus(p hookPayload) {
-	eventName := "pty-hook-" + p.PtyID
-	switch p.State {
-	case "waiting", "permission", "running", "done":
-		busEmit(eventName, p.State)
-	case "error":
-		busEmit(eventName, map[string]string{"state": "error", "detail": p.Detail})
-	case "session":
-		busEmit(eventName, map[string]string{"state": "session", "model": p.Model, "source": p.Source, "title": p.Title})
-	default:
-		busEmit(eventName, p.State)
 	}
 }

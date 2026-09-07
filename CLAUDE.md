@@ -152,7 +152,7 @@ Each `XTerm` creates a native PTY in Go (`CreatePty`), streams bytes via a Wails
 - **`internal/agentphase/phase.go`** — a pure function `Next(cur Phase, ev Event, now int64) Phase`, no `database/sql`, no Wails runtime, no `main` import; IO is the store's job, not this package's. States: `idle | running | waiting_input | waiting_approval | done | failed | stale`. Deliberately no `starting` state, and deliberately no `review` (see below — whether a finished turn still needs looking at is per-device, not part of the phase). `Phase` also carries `detail` (error_type / blocking tool), `model`, `title`, `is_agent`, `turn_ended_at` (0 mid-turn), `updated_at`, and is a comparable struct on purpose: the store skips a write and an emit whenever `Next()` returns the input unchanged.
 - **`phasestore.go`** — `PhaseStore` keeps one `Phase` per key (`pty:<ptyID>` or `chat:<chatID>`, one type for both so a terminal and a chat can never drift into two derivations of "is this agent busy"), persists it in the `pty_phase` table, and emits `phase-pty:<id>` / `phase-chat:<id>` carrying the whole `Phase`. Two producers — the hook server and the foreground poll — can call `Apply` for the same id from their own goroutines; a per-id monotonic `seq` (not `updated_at`, which can tie at millisecond resolution) guards both the SQLite upsert and the bus emit so an out-of-order write can't win either. The seq check alone was not enough — it and the emit have to be *atomic*, or the loser can still emit last and leave the UI a step behind a correct row — so the whole publish tail (staleness check → `persist` → `busEmit` → `terminal_tabs` mirror) runs under a dedicated `emitMu`, taken after `s.mu` is released so no sink ever runs under the state lock. **Phases have a lifecycle**: `CreatePty` asks the daemon whether it already holds the id, and an id the daemon does *not* list is a fresh spawn, not a reattach — it drops the phase row, the map/seq entries (`PhaseStore.Forget`), the poller's watchdog counter and the legacy hook-status cache. PTY ids **are** reused (the frontend's counter reseeds from `max(saved, daemon-alive)`), so without that a new "Terminal 2" opened wearing the review dot and task title of whatever held id 2 last. `Get`/`All` report a never-seen id as `idle`, never `""`. `PhaseStore.Apply` is also the **only** writer of `terminal_tabs.status` (the old `SetTabLiveStatus` Wails binding the frontend used to push this itself is gone) — so `burrow list-tabs` and MCP `list_tabs` now report the phase vocabulary (`waiting_input`, `waiting_approval`, `failed`, `stale`) straight out of SQLite, and never `review`, which never existed server-side.
 - **Inputs, three of them:**
-  1. **Global persistent hooks** — unchanged mechanism, because it is what makes status work for every agent session (launched-by-button, typed by hand, or reattached after restart): at startup `installStatusHooks` (`statushooks.go`) merges a status hook into each agent's own global config (Claude `~/.claude/settings.json`, Codex `~/.codex/hooks.json`), non-destructively (appends, dedupes by marker, writes a `.burrow-bak`), a no-op outside Burrow (`BURROW_PTY_ID` unset). Inside a Burrow PTY, `burrow hook` maps `hook_event_name` → state exactly as before (`UserPromptSubmit`/`PostToolUse`→running, `PreToolUse`→waiting for the blocking tools, `PermissionRequest`→permission, `Stop`→done except an interim stop still carrying `background_tasks`, `SessionStart`→session metadata, `StopFailure`→error with `error_type` as `detail`, `Notification`→refined by its `type`) and POSTs `{ptyId,state,…}` to the loopback hook server (`burrow status` reads `<BURROW_HOME_DIR>/hook.port`, rewritten each launch, so the port survives a restart). What changed is what happens next: `hookEvent()` in `hookserver.go` also translates the same payload into an `agentphase.Event` and calls `phases.Apply("pty:"+id, ev)`. The server **still also** re-emits the legacy `pty-hook-{id}` bus event alongside the new phase. That channel is not dead: `src/mobile/store.ts` still subscribes to it. Only the desktop listener (`XTerm.vue`) is gone — both channels run side by side until the mobile client is rewritten to read phases instead.
+  1. **Global persistent hooks** — unchanged mechanism, because it is what makes status work for every agent session (launched-by-button, typed by hand, or reattached after restart): at startup `installStatusHooks` (`statushooks.go`) merges a status hook into each agent's own global config (Claude `~/.claude/settings.json`, Codex `~/.codex/hooks.json`), non-destructively (appends, dedupes by marker, writes a `.burrow-bak`), a no-op outside Burrow (`BURROW_PTY_ID` unset). Inside a Burrow PTY, `burrow hook` maps `hook_event_name` → state exactly as before (`UserPromptSubmit`/`PostToolUse`→running, `PreToolUse`→waiting for the blocking tools, `PermissionRequest`→permission, `Stop`→done except an interim stop still carrying `background_tasks`, `SessionStart`→session metadata, `StopFailure`→error with `error_type` as `detail`, `Notification`→refined by its `type`) and POSTs `{ptyId,state,…}` to the loopback hook server (`burrow status` reads `<BURROW_HOME_DIR>/hook.port`, rewritten each launch, so the port survives a restart). What changed is what happens next: `hookEvent()` in `hookserver.go` also translates the same payload into an `agentphase.Event` and calls `phases.Apply("pty:"+id, ev)`. The legacy `pty-hook-{id}` bus event is **gone** (phase 6): it survived only for the mobile client's own status derivation, and once the phone moved onto phases it had no consumer left. A hook now has exactly one effect. `HookServer`'s in-memory status cache went with it — `ReplayStatus` replays from `PhaseStore`, which is the better copy anyway since it survives a restart and the map never did.
   2. **Foreground poll** — moved to Go entirely (`phasepoll.go`), ticking every 2 s server-side rather than being driven by `XTerm.vue`. Same semantics as before: an agent's presence in the foreground process group is never treated as `busy` (an agent stays foreground whether it's thinking or idle at its prompt — equating presence with busy was the old stuck-orange-dot bug), so the poll only ever sets `is_agent` for a recognized agent CLI and drives `running`/`done` for plain shell commands — `pollOne()` only ever applies `PollAgent`/`PollBusy`/`PollNotBusy`. **Only the shell branch may CLEAR `is_agent`** — the shell being foreground is the one thing that proves the agent is gone. Any other unrecognized name on a leaf already flagged `is_agent` is *no news* (the agent opened a pager, ran `git`, spawned `node`), and `pollOne` returns without applying anything; treating it as a plain command would strip the flag, un-gate `PollBusy` on the next line, and overwrite a done-but-unseen turn with a permanent `running`, flapping a write and an emit every 2 s. `agentphase.Next` also defines `PollNeedsInput`/`PollGotInput` for a plain command's own `waiting` state, but nothing in the tree emits them (only `phase_test.go` exercises them): the old client-side heuristic that drove `waiting` for a plain command lived in `XTerm.vue` and was not replaced when it moved to Go. **Dead-PTY watchdog**: three consecutive empty foreground reads *and* the daemon no longer listing the PTY settle an in-flight phase to **`stale`** (`agentphase.Dead`) — this replaced the old `interrupt` event name; a single empty read is still treated as a transient daemon race and ignored.
   3. **The interrupt keystroke** — `App.WritePty` watches for a payload that is exactly one byte of `0x03` (Ctrl+C) or `0x1b` (ESC) and applies `agentphase.Interrupt`. Cancelling a turn fires **no** `Stop` hook, the poll may not speak for an agent, and the watchdog can't fire on a live PTY, so this write is the only evidence the turn ended — without it the dot sticks orange until the next turn starts. It lives in Go rather than in `XTerm.vue`'s `onData` (where it used to) so the phase stays derivable server-side. `Next` guards `Interrupt` on `cur.InFlight()`, so a stray ESC at an idle prompt cannot wipe an unseen `turn_ended_at` and erase a review dot; a cancelled turn settles to `idle` with no receipt, hence no badge. Length is what separates a cancel from a cursor key — arrow keys arrive as ESC plus more bytes in one write.
 - **Chats feed the same store** via provider runtime events rather than hooks: `chatPhaseEvent()` in `providerruntime.go` maps a `ProviderRuntimeEvent` (`text.delta`/`user.delta`/`thinking.delta`/`tool.started`→running, `turn.completed`→done, `turn.failed`→error, `session.title`→metadata, `session.exited`→`Dead`, i.e. `stale`) onto an `agentphase.Event`, applied at the emit site in `chatstream.go`'s `emitChatLine` (`a.phases.Apply("chat:"+chatID, pev)`). Thinking and tool calls count because a turn that opens with a tool call reaches its first text token much later; `session.exited` counts because the poll only walks `pty:` keys, so nothing else can settle a chat whose CLI died mid-turn (it is a no-op after `turn.completed`, which is the order Claude sends the pair in). **Nothing on the frontend consumes `phase-chat:{id}` yet** — chat status today still comes entirely from `src/machines/agentStatus.ts` (see below); the chat phase is computed and persisted, but not yet wired to a client.
@@ -249,9 +249,9 @@ not authorization to call everything it reaches. Two tests guard the table from 
 directions: `TestRemoteSurfaceIsExhaustive` walks every `App` method and fails if it is in
 neither `remoteAllowed` nor `remoteDenied` — a new method is unreachable until someone
 decides on purpose which list it belongs in — and `src/lib/wailsCompat/
-commandSurface.test.ts` walks every literal `invoke("...")` call site under `src/`
-(skipping `src/mobile`, still on the old `/ws` below) and fails if the wire name is in
-neither the table nor `CLIENT_SIDE_COMMANDS`. The first test cannot catch a wire name the
+commandSurface.test.ts` walks every literal `invoke("...")` call site under `src/` —
+including `src/mobile`, since phase 6 put the phone on this same table — and fails if the
+wire name is in neither the table nor `CLIENT_SIDE_COMMANDS`. The first test cannot catch a wire name the
 frontend calls that the table forgot; the second cannot catch a table entry nothing calls
 — only together do they cover both directions the flip could break.
 
@@ -300,7 +300,7 @@ reasons does not also inherit the ability to forge a reply to a control verb it 
 performed.
 
 **`src/runtime/transport.ts`** is the client half, and the *only* place the desktop and a
-remote client will differ — both use this transport, and what varies is the
+remote client differ — both use this transport, and what varies is the
 `EndpointSource` handed to it (`src/runtime/boundary.test.ts` keeps `src/runtime` from
 importing `src/components`, `src/stores`, `src/mobile` or xterm, so it cannot grow a
 dependency only one side has). It queues calls made before the socket opens (the frontend
@@ -430,13 +430,72 @@ above went. `remoteapi.go`'s LOAD-BEARING NOTE keeps the list of what a genuinel
 device role would need (an `fs.go` path guard, per-connection event filtering, an exec
 admission check) for whoever wants to let in a device that is not the owner's.
 
-**What did not change.** The old `/ws`, `/rpc/`, `/pair` and the shared `http.token` are
-still live, gated by the remote-access toggle, and `src/mobile/` still runs on them
-entirely — that client has no `seq`, no resume, no snapshot and no per-device token until
-phase 6 rewrites it onto `/v2/ws`. Spec §4 wants a hard cutover of `http.token`; doing it
-before phase 6's client exists would leave the phone with no way in at all, and phases are
-meant to ship one at a time. **No manual GUI verification of any of this has been done** —
-nobody in this process could launch the app.
+### The phone (`src/mobile/` + `src/runtime/remoteEndpoint.ts`)
+
+**The PWA is a client of the same socket, the same command table and the same event names
+as the desktop.** The only thing that differs is where the ticket comes from: the desktop
+calls `LocalEndpoint()` because being in-process *is* its authorization; the phone trades
+its stored device token for a ticket at `/v2/ws-ticket`. `core.ts`'s `activeTransport()`
+picks between them — Wails runtime → desktop, stored credentials → remote, neither → a
+`no endpoint` throw, which is what an unpaired phone hits when `@/lib/config` invokes
+`read_config` at module scope and what `config.ts`'s catch is written for.
+
+Because `invoke` is transport-agnostic, adding the phone added **no** second data path and
+no new table entry. `commandSurface.test.ts` therefore no longer skips `src/mobile`: a
+wire name the phone calls and `remoteAllowed` forgot now fails in CI rather than on a
+train.
+
+Credentials live in `localStorage`, not in `@/lib/config`, on purpose: config reads
+through `invoke`, `invoke` needs a transport, the transport needs the credentials — via
+config that is a cycle that deadlocks on first load. A **401 from `/v2/ws-ticket` clears
+them** and throws `RevokedError`, so a revoked phone lands back on the pairing screen
+instead of retrying a dead token behind a spinner; a 500 does not, because a restart
+mid-request is not a revocation.
+
+What `src/mobile/store.ts` no longer contains, because the shared runtime does it:
+- **its own websocket client** (`api.ts`, deleted) and its own reconnect loop with its own
+  backoff and generation guard;
+- **its own status derivation.** Terminal dots come from `phase-pty:{id}` through
+  `displayStatus`, with a per-**device** read receipt under `burrow.seenAt.mobile` — a
+  separate key from the desktop's on purpose, since `review` is a receipt precisely
+  because the desktop may be staring at a tab the phone has never opened;
+- **an N+1 first paint.** One `shell_snapshot` replaced `list_workspaces` plus one
+  `list_terminal_tabs` per workspace, each round trip paying a phone's latency before
+  anything rendered. Its `seq` is reported with `noteSeq`, so a reconnect resumes from it;
+  a `resync` retakes the snapshot, which is the half of resume the client never had.
+- `transport.onState` is what the dashboard reads, so it says "Odpojeno" over a dead
+  socket rather than "Připojeno" over a stale screen. The socket is the only thing that
+  knows; without this the store would have opened a second one just to observe the first.
+
+What stays mobile-specific: the view stack, the `WorkspaceGroup` shape its views are
+written against, and the **chat permission channel**, which is still raw
+(`claude-data-*` / `acp-req-*`) because the control/permission protocol is deliberately
+not part of the neutral event vocabulary. Chat status still comes from
+`busy`/`pendingPermission` rather than `phase-chat:`, which has no consumer on either
+client yet. `store.ts` was **not** deleted and mobile was **not** moved onto the desktop's
+Pinia stores (spec §5 asks for both): that is a refactor with no gain in capability, and
+the desktop stores have a different shape and a different lifetime (`terminalTabs` is a
+mirror whose truth is a mounted `Terminal.vue`).
+
+`DiffView.vue` completes the PWA v1 surface — read what an agent changed, per workspace,
+read-only. No staging or committing: a destructive git action behind a mis-tap on a phone
+is a bad trade. Untracked files diff against `/dev/null`, because a plain `git diff` prints
+nothing for them and "nothing" reads as "no changes" for a file that is entirely new.
+
+**The v1 surface is gone** (phase 6, once a client existed that did not need it): `/ws` and
+its hand-written `dispatch`, `/rpc/`, `/pair`, `Broadcast`, `installWSSink`, and the shared
+`http.token` — which is **deleted from disk at startup** rather than migrated, because a
+token with no scopes, no device identity and no revocation cannot be translated honestly
+into a scoped per-device session. Devices paired against it pair again. The listener now
+serves the `/v2` surface, `/healthz` and the embedded bundle, and `TestV1SurfaceIsGone`
+requires a **404** on the old paths — a 401 would mean the handler is still mounted and
+merely refusing this caller.
+
+**No manual GUI verification of any of this has been done** — nobody in this process could
+launch the app. The load-bearing things to try first: pair a phone and watch the device
+appear in Settings; kill the socket mid-turn and check the dots catch up rather than
+freeze; revoke the device and confirm the phone drops to the pairing screen; heavy terminal
+output under backpressure; and pressing ESC mid-turn.
 
 ### Manager (`src/components/ManagerPanel.vue`)
 
@@ -469,7 +528,7 @@ Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem
 - **Git** (`git.go`) — `RunGit` wraps the system git binary (checks known paths)
 - **Text generation** (`textgen.go`) — `GenerateCommitMessage`, `GeneratePrContent`, `GenerateBranchName`, `GenerateChatTitle` (see below)
 - **FS** (`fs.go`) — `ReadDirShallow`, `WriteTextFile`
-- **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. `busEmit` **numbers** the event into the replay ring first (unless `notRingable` excludes it) and hands every sink the same `shellEvent{seq,name,payload}` — one struct rather than a growing parameter list, and the same `seq` for all sinks so the ring's order is the order clients receive. Two sinks are wired today: the tailnet WS broadcaster for the mobile/PWA client (`installWSSink` in `httpserver.go`, live only while remote access is toggled on) and `/v2/ws`'s per-connection subscription (`remotews.go`, always on — it is mounted on the hook server, not the toggled one) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) reach a connected phone and the desktop's own socket alike. There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own `/v2/ws` connection like any other client, and the only names still delivered on the Wails event channel (`menu-*`, `lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `runtime.EventsEmit` directly, never through `busEmit` (`src/lib/wailsCompat/event.ts` routes exactly those prefixes to `EventsOn`). `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did
+- **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. `busEmit` **numbers** the event into the replay ring first (unless `notRingable` excludes it) and hands every sink the same `shellEvent{seq,name,payload}` — one struct rather than a growing parameter list, and the same `seq` for all sinks so the ring's order is the order clients receive. There is exactly **one** subscriber: `/v2/ws`'s per-connection subscription (`remotews.go`) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) reach a connected phone and the desktop's own socket by the same path. The v1 tailnet broadcaster went away in phase 6 with the client that needed it; `busEmit` being the single *door* is about where events are published, not about how many things happen to listen. There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own `/v2/ws` connection like any other client, and the only names still delivered on the Wails event channel (`menu-*`, `lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `runtime.EventsEmit` directly, never through `busEmit` (`src/lib/wailsCompat/event.ts` routes exactly those prefixes to `EventsOn`). `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did
 - **Agent phase** (`phasestore.go`, `phasepoll.go`, `internal/agentphase/phase.go`) — see "PTY / Agent phase" above
 - **Environment identity** (`environment.go`) — `environmentID()` creates and persists a random id in `<app-data>/environment.json` on first run; every client-side record (known environments, endpoint preferences, seen-at receipts) is meant to key off this rather than IP/hostname, which change. `EnvironmentID()` is reachable over `/v2/ws` as `environment_id` (`scopeOrchRead`) — not a Wails binding call any more
 - **Remote endpoints** (`endpoints.go`, `endpoints_tailscale.go`) — `EndpointProvider` registry (currently loopback + Tailscale) contributing `AdvertisedEndpoint`s, `selectEndpoint()` implementing t3code's selection order (preferred kind → hosted-HTTPS-compatible → default → non-loopback → loopback-if-same-machine), surfaced as `remote_endpoints` (`scopeAccessRead`) over `/v2/ws`. **Nothing consumes this yet** — it exists for Settings/pairing in a later phase
