@@ -9,6 +9,13 @@ export interface GitFile {
   y: string;
 }
 
+export interface GitFileStat {
+  path: string;
+  insertions: number;
+  deletions: number;
+  binary: boolean;
+}
+
 export interface GitCommit {
   hash: string;
   shortHash: string;
@@ -293,6 +300,16 @@ export const useGitStore = defineStore("git", () => {
     }
   }
 
+  // Best-effort: Go returns "" on any failure and the caller keeps its fallback.
+  async function generateBranchName(message: string): Promise<string> {
+    if (!cwd.value || !message.trim()) return "";
+    try {
+      return await invoke<string>("generate_branch_name", { cwd: cwd.value, message, ...textGenPrefs() });
+    } catch {
+      return "";
+    }
+  }
+
   function setCwd(path: string) {
     if (path === cwd.value) return;
     cwd.value = path;
@@ -334,6 +351,21 @@ export const useGitStore = defineStore("git", () => {
   // Like t3code (GitActionsControl.logic.ts: `canCommit = hasChanges`, no
   // message check): Commit doesn't require you to type anything first — an
   // empty box gets auto-generated right before the commit.
+  // ponytail: numstat only, not full diff — the commit review dialog only needs
+  // per-file +/- counts, not the patch text (showDiff already covers that).
+  async function stagedFileStats(): Promise<GitFileStat[]> {
+    if (!cwd.value) return [];
+    const out = await runGit(cwd.value, ["diff", "--cached", "--numstat"]).catch(() => "");
+    return out
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((line) => {
+        const [ins, del, path] = line.split("\t");
+        const binary = ins === "-" || del === "-";
+        return { path, insertions: binary ? 0 : parseInt(ins, 10) || 0, deletions: binary ? 0 : parseInt(del, 10) || 0, binary };
+      });
+  }
+
   async function commit() {
     if (committing.value) return;
     committing.value = true;
@@ -452,8 +484,8 @@ export const useGitStore = defineStore("git", () => {
     diff, diffFile, diffStaged,
     loading, error, commitMsg,
     ahead, behind, hasUpstream, pushing, pulling, generating, generateError, committing, hasWorkingTreeChanges, log, logLoading,
-    setCwd, refresh, stageFile, unstageFile, unstageAll, stageAll, commit, showDiff, clearDiff, fetchAllDiff, gitInit,
-    push, pull, refreshLog, generateCommitMessage,
+    setCwd, refresh, stageFile, unstageFile, unstageAll, stageAll, stageAllIfNeeded, commit, showDiff, clearDiff, fetchAllDiff, gitInit,
+    push, pull, refreshLog, generateCommitMessage, stagedFileStats, generateBranchName,
     branches, fetching, fetchBranches, switchBranch, checkoutBranchForWorkspace, createBranch, fetch, discardFile,
     prByWs, branchByWs, fetchPr, fetchPrs,
   };

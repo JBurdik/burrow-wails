@@ -215,6 +215,10 @@ var remoteAllowed = map[string]remoteCmd{
 	"checkpoint_diff":    {Method: "CheckpointDiff", Args: []string{"cwd", "commit"}, Scope: scopeOrchRead},
 	"restore_checkpoint": {Method: "RestoreCheckpoint", Args: []string{"cwd", "commit"}, Scope: scopeOrchOperate},
 
+	// Branch diff — diff against the repo's default/upstream branch (git.go)
+	"branch_diff_base": {Method: "BranchDiffBase", Args: []string{"cwd"}, Scope: scopeOrchRead},
+	"branch_diff":      {Method: "BranchDiff", Args: []string{"cwd"}, Scope: scopeOrchRead},
+
 	// Workspace search (⌘P)
 	"search_files": {Method: "SearchFiles", Args: []string{"cwd", "query", "limit"}, Scope: scopeOrchRead},
 

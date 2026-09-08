@@ -60,6 +60,7 @@
       </button>
       <div v-if="pr.error.value" class="px-2.5 pt-1 text-[10px] text-destructive">{{ pr.error.value }}</div>
     </div>
+    <CommitDialog v-if="showCommitDialog" @close="showCommitDialog = false" />
   </div>
 </template>
 
@@ -68,10 +69,12 @@ import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { PhArrowUp, PhArrowDown, PhCaretDown, PhCheck, PhGitCommit, PhGitPullRequest } from "@phosphor-icons/vue";
 import { useGitStore } from "@/stores/git";
 import { usePullRequests } from "@/composables/usePullRequests";
+import CommitDialog from "./CommitDialog.vue";
 
 const git = useGitStore();
 const pr = usePullRequests(() => git.cwd);
 const open = ref(false);
+const showCommitDialog = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
 
 // Like t3code: enabled purely on "anything changed", no message required —
@@ -123,7 +126,7 @@ async function runPrimary() {
 
 async function doCommit() {
   open.value = false;
-  if (!commitDisabled.value) await git.commit();
+  if (!commitDisabled.value) showCommitDialog.value = true;
 }
 
 async function doPush() {

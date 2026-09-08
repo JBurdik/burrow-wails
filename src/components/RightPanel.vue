@@ -283,16 +283,33 @@
     <PullRequestsPanel v-else-if="activeTab === 'pull-requests'" :cwd="props.cwd" />
 
     <div v-else-if="activeTab === 'diff'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div class="flex shrink-0 items-center justify-between border-b border-border px-2 py-1.5">
-        <div class="flex items-center gap-1.5">
-          <PhGitCommit :size="13" class="text-secondary-foreground" />
-          <span class="text-[11px] font-semibold text-secondary-foreground">Workspace diff</span>
-        </div>
-        <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="workspaceDiffLoading" @click="loadWorkspaceDiff"><PhArrowClockwise :size="12" :class="workspaceDiffLoading && 'animate-spin'" /></button>
+      <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
+        <PhGitCommit :size="13" class="shrink-0 text-secondary-foreground" />
+        <select
+          class="min-w-0 flex-1 rounded-[var(--radius-nav)] border border-border bg-panel py-1 pl-1.5 pr-1 text-[11px] text-secondary-foreground outline-none hover:border-muted-foreground"
+          :value="diffScopeKey"
+          @change="onDiffScopeChange(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="workspace">Working tree</option>
+          <option value="branch">Branch changes</option>
+          <optgroup v-if="numberedCheckpoints.length" label="Turns">
+            <option v-for="nc in numberedCheckpoints" :key="nc.cp.id" :value="`turn:${nc.cp.id}`">
+              Turn {{ nc.turn }}{{ nc.turn === numberedCheckpoints.length ? " (latest)" : "" }}
+            </option>
+          </optgroup>
+        </select>
+        <button class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="scopedDiffLoading" @click="loadScopedDiff"><PhArrowClockwise :size="12" :class="scopedDiffLoading && 'animate-spin'" /></button>
       </div>
-      <div v-if="workspaceDiffLoading" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
-      <div v-else-if="!workspaceDiff" class="p-4 text-center text-[11px] leading-relaxed text-muted-foreground">No unstaged or staged changes.</div>
-      <DiffView v-else :diff="workspaceDiff" diff-key="workspace" />
+      <div v-if="scopedDiffLoading" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
+      <div v-else-if="diffScope.kind === 'branch' && !branchBase" class="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center text-[11px] text-muted-foreground">
+        <span>Couldn't find a default branch to diff against.</span>
+        <select class="rounded-[var(--radius-nav)] border border-border bg-panel px-1.5 py-1 text-[11px] text-secondary-foreground" @change="pickBranchBase(($event.target as HTMLSelectElement).value)">
+          <option value="" disabled selected>Pick a branch…</option>
+          <option v-for="b in git.branches.filter((b) => b !== git.branch)" :key="b" :value="b">{{ b }}</option>
+        </select>
+      </div>
+      <div v-else-if="!scopedDiff" class="p-4 text-center text-[11px] leading-relaxed text-muted-foreground">No changes.</div>
+      <DiffView v-else :diff="scopedDiff" :diff-key="diffScopeKey" />
     </div>
 
     <ManagerPanel
@@ -360,6 +377,13 @@
           <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ cp.label || "Checkpoint" }}</span>
           <span class="font-mono text-[9.5px] text-muted-foreground">{{ cpTime(cp.createdAt) }} · {{ cp.commit.slice(0, 7) }}</span>
         </div>
+        <button
+          class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground group-hover/cp:opacity-100"
+          title="Open diff in panel"
+          @click.stop="openCheckpointDiffInPanel(cp)"
+        >
+          <PhGitCommit :size="12" />
+        </button>
         <button
           class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground group-hover/cp:opacity-100"
           title="Restore the working tree to this checkpoint"
@@ -460,7 +484,8 @@ const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensio
 // must be tracked per workspace, not as one global ref — otherwise switching
 // projects shows the other project's open tabs.
 const NO_WS = -1;
-interface WsUiState { openedTabIds: string[]; activeTab: string | null }
+type DiffScope = { kind: "workspace" } | { kind: "branch" } | { kind: "turn"; checkpointId: number };
+interface WsUiState { openedTabIds: string[]; activeTab: string | null; diffScope: DiffScope }
 const wsUiStates = reactive<Record<number, WsUiState>>({});
 const wsKey = computed(() => props.workspaceId ?? NO_WS);
 
@@ -480,7 +505,7 @@ function subagentTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 function wsUi(id: number): WsUiState {
-  return (wsUiStates[id] ??= { openedTabIds: [], activeTab: null });
+  return (wsUiStates[id] ??= { openedTabIds: [], activeTab: null, diffScope: { kind: "workspace" } });
 }
 const activeTab = computed<string | null>({
   get: () => wsUi(wsKey.value).activeTab,
@@ -490,8 +515,21 @@ const openedTabIds = computed<string[]>({
   get: () => wsUi(wsKey.value).openedTabIds,
   set: (v) => { wsUi(wsKey.value).openedTabIds = v; },
 });
-const workspaceDiff = ref("");
-const workspaceDiffLoading = ref(false);
+const diffScope = computed<DiffScope>({
+  get: () => wsUi(wsKey.value).diffScope,
+  set: (v) => { wsUi(wsKey.value).diffScope = v; },
+});
+const diffScopeKey = computed(() => {
+  const s = diffScope.value;
+  return s.kind === "turn" ? `turn:${s.checkpointId}` : s.kind;
+});
+const scopedDiff = ref("");
+const scopedDiffLoading = ref(false);
+// Branch base is auto-detected per workspace (git.ts has no default-branch
+// concept), so it lives here rather than in a store; a manual pick overrides
+// detection until the workspace changes.
+const branchBase = ref("");
+const manualBranchBase = ref("");
 const showHistory = ref(false);
 const activeTerm = inject<() => any>('activeTerm', () => undefined);
 
@@ -616,6 +654,13 @@ async function openCheckpointDiff(cp: Checkpoint) {
   activeTerm()?.openDiffInTab(`Since “${cp.label || cp.commit.slice(0, 7)}”`, false, diff);
 }
 
+// Same diff, but shown in the panel's own Diff tab (as "Turn N") instead of a
+// new terminal tab.
+function openCheckpointDiffInPanel(cp: Checkpoint) {
+  diffScope.value = { kind: "turn", checkpointId: cp.id };
+  openSurface("diff");
+}
+
 async function confirmRestore() {
   if (!restoreTarget.value) return;
   restoreBusy.value = true;
@@ -633,19 +678,58 @@ async function confirmRestore() {
 }
 
 watch([activeTab, () => props.cwd], () => { if (activeTab.value === "history") loadCheckpoints(); });
-watch([activeTab, () => props.cwd], () => { if (activeTab.value === "diff") loadWorkspaceDiff(); });
+watch([activeTab, () => props.cwd], () => {
+  if (activeTab.value !== "diff") return;
+  loadCheckpoints(); // needed for the Turn N options, not just the Checkpoints tab
+  loadScopedDiff();
+});
 
-async function loadWorkspaceDiff() {
-  if (!props.cwd) { workspaceDiff.value = ""; return; }
-  workspaceDiffLoading.value = true;
+// checkpoints are listed newest-first; turn numbers count up from the oldest,
+// so "Turn 1" is stable as new turns land instead of shifting every time.
+const numberedCheckpoints = computed(() =>
+  checkpoints.value.map((cp, i) => ({ cp, turn: checkpoints.value.length - i })));
+
+function onDiffScopeChange(v: string) {
+  diffScope.value = v.startsWith("turn:")
+    ? { kind: "turn", checkpointId: Number(v.slice(5)) }
+    : { kind: v as "workspace" | "branch" };
+  if (diffScope.value.kind === "branch") manualBranchBase.value = "";
+  loadScopedDiff();
+}
+
+function pickBranchBase(b: string) {
+  if (!b) return;
+  manualBranchBase.value = b;
+  loadScopedDiff();
+}
+
+async function loadScopedDiff() {
+  if (!props.cwd) { scopedDiff.value = ""; return; }
+  const scope = diffScope.value;
+  scopedDiffLoading.value = true;
   try {
-    const [unstaged, staged] = await Promise.all([git.fetchAllDiff(false), git.fetchAllDiff(true)]);
-    workspaceDiff.value = [
-      unstaged && "# Unstaged changes\n" + unstaged,
-      staged && "# Staged changes\n" + staged,
-    ].filter(Boolean).join("\n\n");
+    if (scope.kind === "workspace") {
+      const [unstaged, staged] = await Promise.all([git.fetchAllDiff(false), git.fetchAllDiff(true)]);
+      scopedDiff.value = [
+        unstaged && "# Unstaged changes\n" + unstaged,
+        staged && "# Staged changes\n" + staged,
+      ].filter(Boolean).join("\n\n");
+    } else if (scope.kind === "branch") {
+      if (manualBranchBase.value) {
+        const out = await invoke<{ stdout: string; code: number }>("run_git", { cwd: props.cwd, args: ["diff", `${manualBranchBase.value}...HEAD`] });
+        branchBase.value = manualBranchBase.value;
+        scopedDiff.value = out.code === 0 ? out.stdout : "";
+      } else {
+        branchBase.value = await invoke<string>("branch_diff_base", { cwd: props.cwd });
+        if (!branchBase.value) { scopedDiff.value = ""; await git.fetchBranches(); }
+        else scopedDiff.value = await invoke<string>("branch_diff", { cwd: props.cwd });
+      }
+    } else {
+      const cp = checkpoints.value.find((c) => c.id === scope.checkpointId);
+      scopedDiff.value = cp ? await invoke<string>("checkpoint_diff", { cwd: props.cwd, commit: cp.commit }) : "";
+    }
   } finally {
-    workspaceDiffLoading.value = false;
+    scopedDiffLoading.value = false;
   }
 }
 

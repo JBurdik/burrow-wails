@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os/exec"
+	"strings"
 )
 
 // GitOutput mirrors the Rust struct returned by run_git/run_gh.
@@ -103,6 +104,48 @@ func (a *App) RemoveWorktree(id int64, force bool) error {
 		return gitErr(out)
 	}
 	return a.DeleteWorkspace(id)
+}
+
+// --- branch diff (against the repo's default/upstream branch) ---
+
+// branchDiffBase finds the branch "Branch changes" should diff against.
+// No repo config carries a "default branch" anywhere else in this codebase,
+// so this tries the remote's advertised HEAD first, then falls back to a
+// local main/master. Returns "" when neither exists (a repo with no remote
+// and no conventionally-named branch), which the caller treats as "ask the
+// user to pick one" rather than as an error.
+func branchDiffBase(cwd string) string {
+	if out := runCmd("git", cwd, []string{"symbolic-ref", "refs/remotes/origin/HEAD"}); out.Success {
+		ref := strings.TrimSpace(out.Stdout)
+		if i := strings.LastIndex(ref, "/"); i >= 0 {
+			return ref[i+1:]
+		}
+	}
+	for _, name := range []string{"main", "master"} {
+		if runCmd("git", cwd, []string{"show-ref", "--verify", "--quiet", "refs/heads/" + name}).Success {
+			return name
+		}
+	}
+	return ""
+}
+
+func (a *App) BranchDiffBase(cwd string) string {
+	return branchDiffBase(cwd)
+}
+
+// BranchDiff returns what changed on the current branch since it diverged
+// from branchDiffBase, i.e. "git diff <base>...HEAD". Empty base means no
+// base could be determined; empty result means base found but no changes.
+func (a *App) BranchDiff(cwd string) (string, error) {
+	base := branchDiffBase(cwd)
+	if base == "" {
+		return "", nil
+	}
+	out := runCmd("git", cwd, []string{"diff", base + "...HEAD"})
+	if !out.Success {
+		return "", gitErr(out)
+	}
+	return out.Stdout, nil
 }
 
 func gitErr(out GitOutput) error {

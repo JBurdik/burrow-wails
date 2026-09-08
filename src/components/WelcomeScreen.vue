@@ -661,7 +661,14 @@ const terminalProgram = computed(() => terminalProgramFor({ kind: selectedAgent.
 
 // A project can pin its own agent/model (Project Settings → General); the
 // app-wide default only applies where it hasn't.
-watch(target, (t) => {
+// Keyed on id, not the `target` object itself: a background reload (e.g.
+// `workspaces-changed` → store.load()) replaces every Workspace with a fresh
+// object even when nothing the user picked actually changed, and watching
+// the object would re-fire this and silently stomp the user's manual agent
+// pick while they're still composing.
+watch(() => target.value?.id, (id) => {
+  if (id == null) return;
+  const t = target.value;
   if (!t) return;
   const s = getProjectSettings(t.parent_id ?? t.id);
   selectedAgentId.value = s.agentId || ui.defaultChatAgent;
@@ -692,14 +699,22 @@ async function submit() {
   const terminalPrompt = launchMode.value === "terminal" && images.length > 0
     ? promptWithImagePaths(prompt, await persistTerminalImages(images))
     : prompt;
+  // Snapshot the user's picks now — store.open(t) below can change `target`'s
+  // identity (e.g. after createWorktree's reload) and re-fire the
+  // project-settings watch above, which would otherwise stomp these before
+  // the deferred open() runs.
+  const agentId = selectedAgentId.value;
+  const agent = selectedAgent.value;
+  const model = selectedModel.value;
+  const permMode = selectedPermMode.value;
   const wasOpen = store.opened.some((w) => w.id === t.id);
   store.open(t);
   const open = launchMode.value === "terminal"
     ? () => termTabs.add(t.id, buildTerminalCommand(
-        { kind: selectedAgent.value.kind, command: binaryFor(selectedAgent.value), model: selectedModel.value, permMode: selectedPermMode.value },
+        { kind: agent.kind, command: binaryFor(agent), model, permMode },
         terminalPrompt,
       ))
-    : () => termTabs.openChat(t.id, undefined, selectedAgentId.value, prompt, images, selectedModel.value);
+    : () => termTabs.openChat(t.id, undefined, agentId, prompt, images, model);
   wasOpen ? open() : nextTick(open); // freshly-mounted Terminal needs a tick to attach its request watcher
   text.value = "";
   pendingImages.value = [];
