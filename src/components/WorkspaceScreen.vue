@@ -73,10 +73,12 @@ import { ref, nextTick, onMounted } from "vue";
 import { PhTerminalWindow, PhFolder, PhFolderOpen, PhFolderPlus, PhX } from "@phosphor-icons/vue";
 import { pickDir } from "@/lib/pickPath";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
+import { useUIStore } from "@/stores/ui";
 import { Button } from "@/components/ui/button";
 
 const emit = defineEmits<{ open: [ws: Workspace] }>();
 const store = useWorkspaceStore();
+const ui = useUIStore();
 
 const pendingPath = ref("");
 const pendingName = ref("");
@@ -87,7 +89,7 @@ onMounted(() => store.load());
 async function pickFolder() {
   // In-app picker (PathPicker.vue) instead of the native panel — same browse UI
   // everywhere a folder is chosen, and it can create the folder too.
-  const selected = await pickDir({ title: "Add project", start: "~/" });
+  const selected = await pickDir({ title: "Add project", start: ui.defaultProjectDir || "~/" });
   if (!selected) return;
   pendingPath.value = selected;
   pendingName.value = selected.split("/").pop() || selected;

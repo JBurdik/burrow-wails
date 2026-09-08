@@ -559,6 +559,25 @@
             </div>
           </div>
 
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Default project folder</span>
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Where "Add project" pickers start</span>
+                <span class="text-[11px] text-muted-foreground">Used by the folder picker when adding a new workspace</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <input
+                  class="h-8 min-w-[240px] rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
+                  :value="ui.defaultProjectDir"
+                  @input="ui.defaultProjectDir = ($event.target as HTMLInputElement).value"
+                  spellcheck="false"
+                />
+                <Button variant="outline" size="sm" @click="pickDefaultProjectDir"><PhFolderOpen :size="12" /> Browse…</Button>
+              </div>
+            </div>
+          </div>
+
           <div class="flex flex-col gap-1.5">
             <div v-for="w in wsStore.workspaces" :key="w.id" class="flex items-center gap-3 rounded-[var(--radius-card)] border border-border bg-hover px-2.5 py-2">
               <button class="group relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius-nav)] border border-border bg-base hover:border-accent/40" title="Change icon" @click="pickWsIcon(w.id)">
@@ -1359,6 +1378,11 @@ async function pickWsIcon(id: number) {
 async function pickWorktreesDir() {
   const selected = await pickDir({ title: "Choose folder", start: ui.worktreesDir || "~/" });
   if (selected) ui.worktreesDir = selected;
+}
+
+async function pickDefaultProjectDir() {
+  const selected = await pickDir({ title: "Choose folder", start: ui.defaultProjectDir || "~/" });
+  if (selected) ui.defaultProjectDir = selected;
 }
 // Notification sounds: choose a custom audio file for done/waiting and store its
 // path; sounds.ts reads it lazily via read_file_base64.

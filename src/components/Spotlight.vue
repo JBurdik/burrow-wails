@@ -313,7 +313,7 @@ function openSettingsAt(section: string) {
 // no native dialog anywhere, and ⌘↵ in the picker creates the folder first.
 async function newProject() {
   close();
-  const path = await pickDir({ title: "Add project", start: "~/" });
+  const path = await pickDir({ title: "Add project", start: ui.defaultProjectDir || "~/" });
   if (!path) return;
   const name = path.split("/").filter(Boolean).pop() ?? path;
   const ws = await wsStore.create(name, path);

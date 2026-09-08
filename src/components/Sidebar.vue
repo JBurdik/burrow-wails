@@ -1128,7 +1128,7 @@ const nameInputEl = ref<HTMLInputElement>();
 async function pickFolder() {
   // In-app picker (PathPicker.vue) instead of the native panel — same browse UI
   // everywhere a folder is chosen, and it can create the folder too.
-  const selected = await pickDir({ title: "Add project", start: "~/" });
+  const selected = await pickDir({ title: "Add project", start: ui.defaultProjectDir || "~/" });
   if (!selected) return;
   pendingPath.value = selected;
   pendingName.value = selected.split("/").pop() || selected;

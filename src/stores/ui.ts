@@ -79,6 +79,7 @@ interface Prefs {
   debugOverlay: boolean; // show the per-terminal diagnostic overlay (XTerm.vue)
   floatCorner: string; // which screen corner floating windows snap+stack to
   worktreesDir: string; // parent dir for git worktrees: <dir>/<repo>/<branch>
+  defaultProjectDir: string; // starting folder for "Add project" dir pickers
   mode: "terminal" | "claude" | "dashboard"; // active main-pane mode
   bgImagePath: string; // absolute path to user wallpaper (empty = none)
   bgOpacity: number; // 0–1 opacity of panels/terminal over the wallpaper
@@ -181,6 +182,7 @@ const DEFAULT_PREFS: Prefs = {
   debugOverlay: false,
   floatCorner: "top-right",
   worktreesDir: "~/burrow-worktrees",
+  defaultProjectDir: "~/",
   mode: "terminal",
   bgImagePath: "",
   bgOpacity: 0.82,
@@ -277,6 +279,7 @@ export const useUIStore = defineStore("ui", () => {
   const debugOverlay = ref(loaded.debugOverlay);
   const floatCorner = ref(loaded.floatCorner);
   const worktreesDir = ref(loaded.worktreesDir);
+  const defaultProjectDir = ref(loaded.defaultProjectDir);
   // Which main surface is showing. Derived from the route, never assigned —
   // the URL is the view state (fáze 4, docs/plans/003-view-state-routes.md), so
   // this cannot drift from what is on screen the way a second ref could.
@@ -350,6 +353,7 @@ export const useUIStore = defineStore("ui", () => {
     debugOverlay.value = p.debugOverlay;
     floatCorner.value = p.floatCorner;
     worktreesDir.value = p.worktreesDir;
+    defaultProjectDir.value = p.defaultProjectDir ?? "~/";
     bgImagePath.value = p.bgImagePath;
     bgOpacity.value = p.bgOpacity;
     blurPanels.value = p.blurPanels;
@@ -508,6 +512,7 @@ export const useUIStore = defineStore("ui", () => {
         debugOverlay: debugOverlay.value,
         floatCorner: floatCorner.value,
         worktreesDir: worktreesDir.value,
+        defaultProjectDir: defaultProjectDir.value,
         mode: mode.value,
         bgImagePath: bgImagePath.value,
         bgOpacity: bgOpacity.value,
@@ -548,7 +553,7 @@ export const useUIStore = defineStore("ui", () => {
     [uiFont, uiFontSize, uiScale, terminalFont, terminalFontSize, swapPanels, theme, themeMode,
      preferredDarkTheme, preferredLightTheme,
      soundEnabled, soundDoneEnabled, soundWaitingEnabled, soundDoneId, soundDoneCustomPath,
-     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, mode,
+     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
      sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, textGenerationModel, textGenerationPolicy],
@@ -801,6 +806,7 @@ export const useUIStore = defineStore("ui", () => {
     debugOverlay,
     floatCorner,
     worktreesDir,
+    defaultProjectDir,
     mode,
     setMode,
     toggleDashboard,

@@ -378,7 +378,7 @@ provide('activeTerm', activeTerm);
 
 
 async function openNewWorkspace() {
-  const dir = await pickDir({ title: "Add project", start: "~/" });
+  const dir = await pickDir({ title: "Add project", start: ui.defaultProjectDir || "~/" });
   if (!dir) return;
   const name = dir.split("/").filter(Boolean).pop() ?? dir;
   const created = await ws.create(name, dir);
