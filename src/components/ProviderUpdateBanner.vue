@@ -9,13 +9,13 @@
         <div class="text-[12.5px] font-semibold text-foreground">
           Updates Available: {{ outdated.length }} provider{{ outdated.length === 1 ? "" : "s" }}
         </div>
-        <div class="mt-0.5 text-[11.5px] text-secondary-foreground">
-          Install the update now or review provider settings.
+        <div class="mt-0.5 text-[11.5px]" :class="error ? 'text-red-400' : 'text-secondary-foreground'">
+          {{ error || (updating ? "Installing…" : "Install the update now or review provider settings.") }}
         </div>
       </div>
 
       <div class="flex shrink-0 flex-col gap-1.5 self-center">
-        <button class="whitespace-nowrap rounded-lg border border-transparent bg-accent px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110" @click="installUpdates">Update</button>
+        <button class="whitespace-nowrap rounded-lg border border-transparent bg-accent px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110 disabled:opacity-60" :disabled="updating" @click="installUpdates">{{ updating ? "Updating…" : "Update" }}</button>
         <button class="whitespace-nowrap rounded-lg border border-border bg-transparent px-3 py-1 text-[11.5px] font-semibold text-secondary-foreground hover:bg-hover" @click="ui.openSettings('providers')">Settings</button>
       </div>
 
@@ -31,15 +31,12 @@ import { ref, computed } from "vue";
 import { PhWarning, PhX } from "@phosphor-icons/vue";
 import { useProvidersStore } from "@/stores/providers";
 import { useUIStore } from "@/stores/ui";
-import { useWorkspaceStore } from "@/stores/workspace";
-import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig } from "@/lib/config";
 
 const DISMISS_KEY = "providerUpdateDismissedSet";
 
 const providers = useProvidersStore();
 const ui = useUIStore();
-const ws = useWorkspaceStore();
 
 const outdated = computed(() => providers.outdated);
 /** Signature of the currently-outdated set — re-nags only once its membership changes. */
@@ -55,11 +52,26 @@ function dismiss() {
   setConfig(DISMISS_KEY, signature.value);
 }
 
-function installUpdates() {
-  const pkgs = new Set(outdated.value.map((a) => providers.catalog.find((p) => p.id === a.providerId)?.npmPackage).filter((p): p is string => !!p));
-  const wsId = ws.active?.id;
-  if (!wsId) return;
-  for (const pkg of pkgs) void useTerminalTabsStore().add(wsId, `npm install -g ${pkg}@latest`);
+const updating = ref(false);
+const error = ref("");
+
+/** Runs the install in-process (Go side) and re-probes, instead of typing a
+ * command into a terminal tab — that required a mounted workspace and never
+ * reflected whether the install actually worked. */
+async function installUpdates() {
+  updating.value = true;
+  error.value = "";
+  const targets = [...outdated.value];
+  const providerIds = [...new Set(targets.map((a) => a.providerId))];
+  const results = await Promise.all(providerIds.map((id) => providers.installLatest(id)));
+  const failed = results.find((r) => !r.ok);
+  if (failed) {
+    error.value = failed.error || "Update failed.";
+    updating.value = false;
+    return;
+  }
+  await Promise.all(targets.map((a) => providers.probe(a.id)));
+  updating.value = false;
   dismiss();
 }
 </script>

@@ -298,8 +298,19 @@ func (a *App) RemoveStatusHooks() {
 
 // RepairAgentStatus force-reclaims hook.port for THIS instance's live port
 // (rescues reattached PTYs whose baked BURROW_HOOK_PORT went stale across a
-// restart) and re-installs the hooks. Returns the live port for UI feedback.
+// restart), re-installs the hooks, and replaces the daemon if it's an orphan
+// (see DaemonClient.staleAndReplaced): a daemon left running from a deleted
+// build/worktree never picks up a hook fix no matter how many times the hooks
+// themselves get reinstalled, because it's the daemon's own ptycore that
+// stamps BURROW_PTY_ID into every PTY it spawns. ponytail: this DOES kill and
+// respawn every live PTY under a genuinely stale daemon (there's no way to
+// hot-patch a running process) — acceptable because Ensure() only replaces
+// when the binary is actually gone/mismatched, never a current daemon.
+// Returns the live port for UI feedback.
 func (a *App) RepairAgentStatus() int {
+	if a.daemon != nil {
+		_ = a.daemon.Ensure()
+	}
 	port := a.GetHookServerPort()
 	dataDir, err := appDataDir()
 	if err != nil {

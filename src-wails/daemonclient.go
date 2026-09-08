@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -35,10 +36,20 @@ func NewDaemonClient(ctx context.Context, sockPath string) *DaemonClient {
 	return &DaemonClient{ctx: ctx, sockPath: sockPath, pending: make(map[string]chan *daemonproto.Response)}
 }
 
-// Ensure connects to the daemon, spawning it if it isn't already running.
+// Ensure connects to the daemon, spawning it if it isn't already running. A
+// socket that answers connect() might still be an ORPHAN: a daemon process
+// left running from a build or worktree that no longer exists, frozen on
+// whatever code it had when it started. That is exactly how terminal status
+// hooks went dark on a running app: a hook fix landed and got reinstalled,
+// but every live PTY kept running under yesterday's daemon, which never
+// picked it up because nothing ever checked. staleAndReplaced() catches that
+// by comparing the live daemon's own binary against the one we'd spawn.
 func (d *DaemonClient) Ensure() error {
 	if err := d.connect(); err == nil {
-		return nil
+		if !d.staleAndReplaced() {
+			return nil
+		}
+		// fell through: killed the stale daemon and removed its socket, spawn below
 	}
 	if err := d.spawn(); err != nil {
 		return fmt.Errorf("spawn daemon: %w", err)
@@ -55,6 +66,57 @@ func (d *DaemonClient) Ensure() error {
 	return fmt.Errorf("daemon did not become reachable: %w", lastErr)
 }
 
+// staleAndReplaced compares the just-connected daemon's own binary against
+// the one Ensure would spawn (expectedDaemonPath). A mismatch, or an ExePath
+// that no longer exists on disk (our exact repro: a daemon built from a
+// since-deleted git worktree), means the live process is orphaned code — it
+// gets killed and its socket file removed so the code below spawns a current
+// one. Returns false (nothing replaced) for the dev `go run` fallback, which
+// has no fixed binary to compare against, and for a daemon old enough to
+// predate the "version" request itself (it can't self-heal past that one
+// release; every daemon after this one can).
+func (d *DaemonClient) staleAndReplaced() bool {
+	want, err := expectedDaemonPath()
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(want); err != nil {
+		return false // dev fallback: nothing built to compare against
+	}
+	resp, err := d.call(daemonproto.Request{Kind: "version"})
+	if err != nil {
+		return false
+	}
+	if resp.ExePath == want {
+		if _, err := os.Stat(resp.ExePath); err == nil {
+			return false // same binary, still on disk: current
+		}
+	}
+	log.Printf("daemon: replacing stale daemon pid %d (%s), want %s", resp.Pid, resp.ExePath, want)
+	d.mu.Lock()
+	if d.conn != nil {
+		d.conn.Close()
+		d.conn = nil
+		d.enc = nil
+	}
+	d.mu.Unlock()
+	if resp.Pid > 0 {
+		if p, err := os.FindProcess(resp.Pid); err == nil {
+			_ = p.Kill()
+		}
+	}
+	_ = os.Remove(d.sockPath)
+	return true
+}
+
+func expectedDaemonPath() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(exePath), "burrow-daemon"), nil
+}
+
 func (d *DaemonClient) connect() error {
 	conn, err := net.Dial("unix", d.sockPath)
 	if err != nil {
@@ -69,11 +131,10 @@ func (d *DaemonClient) connect() error {
 }
 
 func (d *DaemonClient) spawn() error {
-	exePath, err := os.Executable()
+	daemonPath, err := expectedDaemonPath()
 	if err != nil {
 		return err
 	}
-	daemonPath := filepath.Join(filepath.Dir(exePath), "burrow-daemon")
 	if _, err := os.Stat(daemonPath); err != nil {
 		// Dev fallback: run from the module's cmd/ dir via `go run`.
 		cmd := exec.Command("go", "run", "./cmd/burrow-daemon")

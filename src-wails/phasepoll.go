@@ -93,7 +93,17 @@ func (p *phasePoller) forget(id string) {
 
 func (p *phasePoller) pollOne(id string, alive bool) {
 	key := "pty:" + id
-	name := p.fg(id)
+	// A pty the daemon does not list has no foreground to ask about, and the
+	// daemon answers an unknown id with an error it LOGS — so asking anyway
+	// printed a line per dead phase row per tick, forever. Not-listed is
+	// itself the empty read: the watchdog wants a pty that is both quiet and
+	// unlisted, and `alive` already settles the second half. Patience is
+	// unchanged (emptyReadsBeforeDead ticks), so a transient daemon race that
+	// briefly drops the pty from `list` still cannot settle a live turn.
+	name := ""
+	if alive {
+		name = p.fg(id)
+	}
 
 	if name == "" {
 		p.mu.Lock()
@@ -101,6 +111,9 @@ func (p *phasePoller) pollOne(id string, alive bool) {
 		streak := p.empty[id]
 		p.mu.Unlock()
 		if streak >= emptyReadsBeforeDead && !alive {
+			// Idempotent past the first one: Next() returns cur unchanged for a
+			// phase that is already Stale (or was never InFlight, where Dead is
+			// a no-op), so Apply writes nothing and emits nothing.
 			p.phases.Apply(key, agentphase.Event{Kind: agentphase.Dead})
 		}
 		return

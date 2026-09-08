@@ -170,6 +170,11 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     return ws;
   }
 
+  async function renameWorktreeBranch(id: number, oldBranch: string, newBranch: string): Promise<void> {
+    await invoke("rename_worktree_branch", { id, oldBranch, newBranch });
+    await load();
+  }
+
   async function removeWorktree(id: number, force = false) {
     await invoke("remove_worktree", { id, force });
     workspaces.value = workspaces.value.filter((w) => w.id !== id);
@@ -240,6 +245,6 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   return {
     workspaces, active, opened, icons, topLevel, worktreesByParent,
     load, create, remove, rename, open, ensureOpen, close, closeWorkspace, setIcon, clearIcon,
-    createWorktree, removeWorktree, reorderTopLevel,
+    createWorktree, renameWorktreeBranch, removeWorktree, reorderTopLevel,
   };
 });

@@ -39,7 +39,7 @@ where:
 
 # Native dev window (hot-reload)
 dev:
-    cd src-wails && wails dev
+    cd src-wails && BURROW_DATA_SUFFIX="${BURROW_DATA_SUFFIX:-dev}" wails dev
 
 # Frontend only, in the browser (no Wails backend)
 web:

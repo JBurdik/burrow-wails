@@ -589,6 +589,20 @@ export namespace main {
 	    }
 	}
 	
+	export class ProviderUpdateResult {
+	    ok: boolean;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderUpdateResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.error = source["error"];
+	    }
+	}
 	export class RemoteDevice {
 	    id: string;
 	    name: string;

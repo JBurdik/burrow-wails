@@ -134,6 +134,11 @@
           <span class="ml-auto flex shrink-0 items-center gap-1">
             <span v-if="row.tab.model" class="rounded bg-hover px-1 font-mono text-[9px] leading-[1.5] text-muted-foreground" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
             <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
+            <span
+              v-if="row.tab.bottomTerms"
+              class="flex items-center gap-[2px] rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]"
+              :title="`${row.tab.bottomTerms} bottom terminal(s) running (⌘J)`"
+            ><PhTerminal :size="9" />{{ row.tab.bottomTerms > 1 ? row.tab.bottomTerms : "" }}</span>
             <span v-if="row.tab.isAgent && (row.tab.round ?? 0) > 1" class="text-[9px] font-semibold opacity-70" :title="`${row.tab.round} messages sent this session`">↺{{ row.tab.round }}</span>
             <span
               v-if="git.prByWs[row.ws.id]"
@@ -366,6 +371,7 @@
     >
       <template v-if="rowMenu.tab">
         <button class="menu-item" @click="withMenu((ws, tab) => startTabRename(ws.id, tab!))">Rename tab…</button>
+        <button v-if="rowMenu.tab.isChat" class="menu-item" @click="withMenu((ws, tab) => regenerateTitle(ws, tab!))">Regenerate title</button>
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
           {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
         </button>
@@ -937,6 +943,39 @@ async function confirmDelete() {
 const editingTab = ref<{ wsId: number; tabId: number } | null>(null);
 const editingTabTitle = ref("");
 let renameReadyAt = 0;
+
+// Rebuild a chat's title from its full transcript, not just the first prompt
+// (`refineTitle` in AgentChat.vue only sees that). Best-effort: falls back to
+// the transcript-less current title as the seed if the load fails, and is a
+// no-op if generation comes back empty.
+async function regenerateTitle(ws: Workspace, tab: TabSummary) {
+  if (!tab.isChat || tab.chatId == null) return;
+  const chatId = tab.chatId;
+  let text = tab.title;
+  try {
+    const raw = await invoke<string>("load_chat_messages", { chatId });
+    const messages = JSON.parse(raw) as { role: string; text?: string }[];
+    const transcript = messages
+      .filter((m) => m.text?.trim())
+      .map((m) => `${m.role}: ${m.text}`)
+      .join("\n");
+    if (transcript) text = transcript;
+  } catch {
+    // fall back to current title as the seed
+  }
+  let title = "";
+  try {
+    title = await invoke<string>("generate_chat_title", {
+      cwd: ws.path,
+      model: ui.textGenerationModel,
+      policy: ui.textGenerationPolicy,
+      text,
+    });
+  } catch {
+    return;
+  }
+  if (title) chats.sync(chatId, { title });
+}
 
 function startTabRename(wsId: number, tab: TabSummary) {
   editingTab.value = { wsId, tabId: tab.id };

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -117,4 +118,109 @@ func (a *App) LatestNpmVersion(pkg string) ProviderLatest {
 		return ProviderLatest{Error: "no version in registry response"}
 	}
 	return ProviderLatest{Version: body.Version}
+}
+
+// updateTimeout bounds `npm install -g` / `brew upgrade`, which fetch a
+// package rather than just answering a question — a plain probe's 3s budget
+// would fail every time.
+const updateTimeout = 120 * time.Second
+
+type ProviderUpdateResult struct {
+	Ok    bool   `json:"ok"`
+	Error string `json:"error"`
+}
+
+// isHomebrewInstallPath reports whether a resolved binary was installed by
+// Homebrew, ported from t3code's isHomebrewCommandPath. `binaryPath` should
+// be symlink-resolved first: Homebrew's PATH shims in bin/ are themselves
+// symlinks into Cellar/Caskroom, and a naive substring check on the shim
+// would still catch /opt/homebrew/bin/ or /usr/local/bin/ — kept here too as
+// a fallback for a formula that installs straight into bin/ with no symlink.
+func isHomebrewInstallPath(path string) bool {
+	p := strings.ToLower(path)
+	return strings.Contains(p, "/cellar/") ||
+		strings.Contains(p, "/caskroom/") ||
+		strings.HasPrefix(p, "/opt/homebrew/bin/") ||
+		strings.HasPrefix(p, "/usr/local/bin/")
+}
+
+// homebrewTapFor extracts the tap ("user/repo") from a formula reference of
+// the form "user/repo/name"; a bare core-formula name ("codex") needs none.
+func homebrewTapFor(formula string) (string, bool) {
+	parts := strings.Split(formula, "/")
+	if len(parts) != 3 {
+		return "", false
+	}
+	return parts[0] + "/" + parts[1], true
+}
+
+// UpdateProvider installs the latest version of a provider CLI. It resolves
+// `binary` on PATH the same way ProbeProvider does, then picks the update
+// command from *how that binary got there* rather than trusting the
+// catalog's default package manager: a `claude` resolved out of a Homebrew
+// Cellar path was installed with `brew install claude-code`, and `npm
+// install -g` on it would fight Homebrew's own symlinks on every future
+// `brew upgrade` — only `brew upgrade <formula>` is the actual owner. Falls
+// back to `npm install -g <pkg>@latest` for everything else (the common
+// case, and the only option when a provider has no Homebrew formula).
+func (a *App) UpdateProvider(binary string, pkg string, homebrewFormula string, cwd string) ProviderUpdateResult {
+	binary = strings.TrimSpace(binary)
+	pkg = strings.TrimSpace(pkg)
+	homebrewFormula = strings.TrimSpace(homebrewFormula)
+
+	var exe string
+	var args []string
+
+	if homebrewFormula != "" && binary != "" {
+		if resolved := resolveAgentBin(binary, cwd); resolved != "" {
+			real := resolved
+			if r, err := filepath.EvalSymlinks(resolved); err == nil {
+				real = r
+			}
+			if isHomebrewInstallPath(resolved) || isHomebrewInstallPath(real) {
+				if brewPath := resolveAgentBin("brew", cwd); brewPath != "" {
+					// A third-party formula ("user/repo/name") 404s from brew
+					// until its tap is added — the binary being installed
+					// already proves the tap was added once, but `brew
+					// upgrade` doesn't implicitly re-add it (e.g. after
+					// `brew untap` or a fresh machine restoring dotfiles
+					// without Brewfile taps). `brew tap` is a no-op if it's
+					// already there, so this is safe to run unconditionally.
+					if tap, ok := homebrewTapFor(homebrewFormula); ok {
+						tapCtx, tapCancel := context.WithTimeout(context.Background(), updateTimeout)
+						exec.CommandContext(tapCtx, brewPath, "tap", tap).Run()
+						tapCancel()
+					}
+					exe, args = brewPath, []string{"upgrade", homebrewFormula}
+				}
+			}
+		}
+	}
+
+	if exe == "" {
+		if pkg == "" {
+			return ProviderUpdateResult{Error: "no package configured"}
+		}
+		npmPath := resolveAgentBin("npm", cwd)
+		if npmPath == "" {
+			return ProviderUpdateResult{Error: "npm not found on PATH"}
+		}
+		exe, args = npmPath, []string{"install", "-g", pkg + "@latest"}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, exe, args...).CombinedOutput()
+	if ctx.Err() != nil {
+		return ProviderUpdateResult{Error: "update timed out"}
+	}
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return ProviderUpdateResult{Error: msg}
+	}
+	return ProviderUpdateResult{Ok: true}
 }

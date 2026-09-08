@@ -22,6 +22,10 @@ export function AcpStop(arg1:string):Promise<void>;
 
 export function AddMcpServer(arg1:string,arg2:Record<string, any>):Promise<void>;
 
+export function BranchDiff(arg1:string):Promise<string>;
+
+export function BranchDiffBase(arg1:string):Promise<string>;
+
 export function ChatFoldedOrd(arg1:string):Promise<number>;
 
 export function CheckUpdate():Promise<main.UpdateInfo>;
@@ -218,6 +222,8 @@ export function RemoveWorktree(arg1:number,arg2:boolean):Promise<void>;
 
 export function RenameWorkspace(arg1:number,arg2:string):Promise<void>;
 
+export function RenameWorktreeBranch(arg1:number,arg2:string,arg3:string):Promise<main.Workspace>;
+
 export function RepairAgentStatus():Promise<number>;
 
 export function RequestFloatSnapshot(arg1:string):Promise<void>;
@@ -277,6 +283,8 @@ export function TailscaleServe(arg1:number):Promise<string>;
 export function TailscaleServeStop():Promise<void>;
 
 export function TouchWorkspace(arg1:number):Promise<void>;
+
+export function UpdateProvider(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.ProviderUpdateResult>;
 
 export function WriteConfig(arg1:string):Promise<void>;
 

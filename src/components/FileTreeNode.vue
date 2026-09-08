@@ -16,6 +16,7 @@
       <component    v-else :is="fileIcon(node.name).icon" class="shrink-0" :class="fileIcon(node.name).color" :size="14" weight="regular" />
 
       <span class="flex-1 truncate text-xs">{{ node.name }}</span>
+      <PhWarningCircle v-if="node.error" class="mr-1 shrink-0 text-destructive" :size="12" :title="node.error" />
 
       <button
         class="mr-1 hidden shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-accent group-hover:flex"
@@ -41,7 +42,7 @@ import {
   PhFileCss, PhFileHtml, PhFileMd, PhFilePy, PhFileRs, PhFileSql,
   PhFileImage, PhFileSvg, PhFileZip, PhFileLock, PhFileTxt, PhFileCsv,
   PhBracketsCurly, PhPackage, PhGitBranch, PhCube,
-  PhFile, PhSpinner, PhAt,
+  PhFile, PhSpinner, PhAt, PhWarningCircle,
 } from "@phosphor-icons/vue";
 
 // ponytail: extension/filename -> icon+color map, close enough to a vscode-icons theme without pulling one in

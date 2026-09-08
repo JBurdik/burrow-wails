@@ -213,7 +213,15 @@ watch(
       ws.open(target);
     }
     const tabId = routeId(route.params.tabId);
-    if (tabId !== null) tabsStore.activate(wsId, tabId);
+    if (tabId !== null) {
+      // Chat tabs get a fresh numeric id every time Terminal (re)creates them
+      // (nextPtyId(), shared with real PTYs) — tabId alone can point at the
+      // wrong thread once Terminal has restored/remounted since this route was
+      // last visited. Pass the stable chatId too, when the mirror still knows
+      // it, so Terminal can re-resolve the current tab for that thread.
+      const chatId = tabsStore.tabsByWs[wsId]?.find((t) => t.id === tabId)?.chatId;
+      tabsStore.activate(wsId, tabId, chatId);
+    }
   },
   { immediate: true },
 );
@@ -376,6 +384,12 @@ function activeTerm() {
 
 provide('activeTerm', activeTerm);
 
+function openRightPanelGitTab() {
+  rightPanelRef.value?.openGitTab();
+}
+
+provide('openRightPanelGitTab', openRightPanelGitTab);
+
 
 async function openNewWorkspace() {
   const dir = await pickDir({ title: "Add project", start: ui.defaultProjectDir || "~/" });
@@ -514,7 +528,7 @@ function jumpToUnread() {
     if (reviewTab) {
       const targetWs = ws.workspaces.find((w) => w.id === Number(wsId));
       if (targetWs) ws.open(targetWs);
-      tabsStore.activate(Number(wsId), reviewTab.id);
+      tabsStore.activate(Number(wsId), reviewTab.id, reviewTab.chatId);
       return;
     }
   }

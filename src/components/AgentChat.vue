@@ -2,6 +2,16 @@
   <div class="claude-chat flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }">
     <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
 
+    <!-- Chat title bar -->
+    <div v-if="activeSession?.title" class="chat-title-bar flex flex-shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[12px] font-medium text-foreground">
+      <span class="min-w-0 flex-1 truncate">{{ activeSession.title }}</span>
+      <span v-if="turnCount > 0" class="flex-shrink-0 text-[11px] font-normal text-muted-foreground">{{ turnCount }} turn{{ turnCount === 1 ? '' : 's' }}</span>
+      <span v-if="activeModelLabel" class="flex flex-shrink-0 items-center gap-1 text-[11px] font-normal text-muted-foreground">
+        <component :is="agentIconComp(currentAgent?.icon)" :size="11" />
+        {{ activeModelLabel }}
+      </span>
+    </div>
+
     <!-- Permission prompt (Bash / generic tool) -->
     <div v-if="pendingPermission" class="status-banner status-banner--warn perm-slide-in flex flex-shrink-0 items-center gap-2 py-2.5 pl-3.5 pr-3 mx-3 mt-2 mb-0.5">
       <PhShieldWarning :size="14" class="perm-icon flex-shrink-0" />
@@ -180,7 +190,7 @@
                 <span>Changed files ({{ msg.files.length }})</span>
                 <span class="ml-auto flex-shrink-0 font-mono text-[10px]"><span class="diff-add">+{{ msg.added }}</span> <span class="diff-del">−{{ msg.removed }}</span></span>
               </div>
-              <div v-for="f in msg.files" :key="f.path" class="changed-files-row" :title="f.path">
+              <div v-for="f in msg.files" :key="f.path" class="changed-files-row cursor-pointer" :title="f.path" @click="openChangedFileDiff(f.path)">
                 <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ basename(f.path) }}</span>
                 <span class="ml-auto flex-shrink-0 font-mono text-[10px]"><span class="diff-add">+{{ f.added }}</span> <span class="diff-del">−{{ f.removed }}</span></span>
               </div>
@@ -679,7 +689,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch, inject } from "vue";
 import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { parseAcpPermRequest } from "@/lib/acpParser";
@@ -701,7 +711,7 @@ import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import CodexUserInputPanel, { type CodexUserInputQuestion } from "@/components/CodexUserInputPanel.vue";
 import { chatSession, replayChatStream } from "@/lib/chatSession";
 import type { AcpConfigOption, AcpModes, CanUseToolReq, ChatMessage } from "@/lib/chatTypes";
-import { modelsFor, learnModels, type ModelEntry } from "@/lib/chatModels";
+import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { playSound } from "@/lib/sounds";
 import { splitSkillTokens } from "@/lib/skillTokens";
@@ -1194,16 +1204,20 @@ function storedChatModel(): ClaudeModelId | null {
   const v = getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {})[chatSettingId.value];
   return CLAUDE_MODELS.some((m) => m.id === v) ? (v as ClaudeModelId) : null;
 }
-/** The model this chat starts with: its own pick, else last-used, else the
- *  caller's default, else the catalog head. */
+/** The model this chat starts with: its own pick, else the caller's explicit
+ *  default (e.g. what the composer's ModelPicker chose for this new thread),
+ *  else last-used-anywhere, else the catalog head. The caller's default has
+ *  to outrank last-used-anywhere, or picking a model for THIS chat can be
+ *  silently overridden by whatever some OTHER chat's picker set more
+ *  recently in the shared "seed for the next new chat" config key. */
 function loadModel(): ClaudeModelId {
   const own = storedChatModel();
   if (own) return own;
-  const v = getConfig<string | null>(MODEL_CONFIG_KEY, null);
-  if (CLAUDE_MODELS.some((m) => m.id === v)) return v as ClaudeModelId;
   if (props.defaultModel && CLAUDE_MODELS.some((m) => m.id === props.defaultModel)) {
     return props.defaultModel as ClaudeModelId;
   }
+  const v = getConfig<string | null>(MODEL_CONFIG_KEY, null);
+  if (CLAUDE_MODELS.some((m) => m.id === v)) return v as ClaudeModelId;
   return CLAUDE_MODELS[0].id;
 }
 function saveChatModel(id: ClaudeModelId) {
@@ -1227,6 +1241,14 @@ watch(
   (m) => { if (m) chats.setModel(props.chatId, m); },
   { immediate: true },
 );
+
+const activeModelLabel = computed(() => {
+  const id = effectiveTransport.value === "claude-cli" ? selectedModel.value : acpActiveModelId.value;
+  if (!id) return "";
+  return liveModels.value.find((m) => m.id === id)?.label ?? modelLabel(agentKind.value, id);
+});
+
+const turnCount = computed(() => messages.value.filter((m) => m.role === "user").length);
 
 const CLAUDE_EFFORTS = [
   { id: "low", label: "Low effort" },
@@ -1291,8 +1313,12 @@ async function selectEffort(effort: ClaudeEffort) {
 const TOOL_ICONS: Record<string, unknown> = {
   Read: PhFileText, Edit: PhPencilSimple, Write: PhPencilSimple, MultiEdit: PhPencilSimple,
   Bash: PhTerminalWindow, Grep: PhMagnifyingGlass, Glob: PhMagnifyingGlass,
-  TodoWrite: PhListChecks, WebFetch: PhGlobe, WebSearch: PhGlobe, Task: PhRobot,
+  TodoWrite: PhListChecks, WebFetch: PhGlobe, WebSearch: PhGlobe, Task: PhRobot, Agent: PhRobot,
 };
+// The sub-agent tool is "Task" on older Claude CLIs and "Agent" on current ones.
+function isSubagentTool(name: string | undefined): boolean {
+  return name === "Task" || name === "Agent";
+}
 function toolIcon(name: string): unknown {
   return TOOL_ICONS[name] ?? PhWrench;
 }
@@ -1313,6 +1339,12 @@ function toolIconFor(msg: ChatMessage): unknown {
 function basename(p: unknown): string {
   if (typeof p !== "string" || !p) return "";
   return p.split("/").filter(Boolean).pop() ?? p;
+}
+
+const openRightPanelGitTab = inject<() => void>("openRightPanelGitTab", () => {});
+function openChangedFileDiff(path: string) {
+  git.showDiff(path, false);
+  openRightPanelGitTab();
 }
 function toolSummary(name: string, input: Record<string, unknown> | undefined): string {
   const inp = input ?? {};
@@ -1336,6 +1368,7 @@ function toolSummary(name: string, input: Record<string, unknown> | undefined): 
         try { return url ? new URL(url).host : "Web search"; } catch { return url || "Web search"; }
       }
     case "Task":
+    case "Agent":
       return typeof inp.description === "string" ? inp.description : "Sub-agent task";
     default:
       return name.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -2142,7 +2175,7 @@ function onEvents(batch: ChatEventBatch) {
       if (!usesRpcRuntime.value) markAgentActive();
       if (applyChatEvent(projection, event)) scrollToBottom();
       // Sub-agent bookkeeping is the view's, not the transcript's.
-      if (event.type === "tool.started" && event.name === "Task" && event.toolCallId) {
+      if (event.type === "tool.started" && isSubagentTool(event.name) && event.toolCallId) {
         subagents.started(props.chatId, event.toolCallId, event.input);
       }
       if (event.type === "tool.completed" && event.toolCallId) {
@@ -3217,6 +3250,19 @@ async function ensureRuntime(): Promise<unknown> {
   }
 }
 
+// Set on unmount so the long async onMounted() below can stop writing into
+// this instance's (possibly by-then-evicted) session once nothing is
+// watching — see the guards after each `await` inside onMounted.
+let unmounted = false;
+
+// Coming back to the window counts as seeing this chat — mirrors Terminal.vue's
+// onWindowFocus/seeActiveTab. Without this, a turn that finished while the app
+// was backgrounded left the review dot up even after refocusing on this exact
+// chat, since finishTurn() only checks document.hasFocus() at the instant STOP fires.
+function onWindowFocus() {
+  if ((props.isWatching ?? true) && document.hasFocus()) chats.markSeen(props.chatId);
+}
+
 onMounted(async () => {
   // Install this mount's reducers into the session and take a reference. The
   // session already holds the listeners; setHandlers just points them at the
@@ -3229,13 +3275,20 @@ onMounted(async () => {
   // Config must be loaded (and legacy localStorage migrated) before any of the
   // config-backed refs below are trusted — reload them here once configReady settles.
   await configReady;
+  // Bail if this instance was torn down (chat/workspace switched away) while
+  // awaiting above: release() can evict+delete an idle session synchronously,
+  // so a late write here would land on an orphaned session nobody reads, or —
+  // if the user switched back in the meantime — race a fresh mount's own load.
+  if (unmounted) return;
   migrateLegacyChatConfig();
   // Only read the transcript back from SQLite when the session has none. A
   // non-empty session is the LIVE copy — it kept receiving while this view was
   // unmounted, so it is ahead of the DB, and assigning over it would throw the
   // newer part away (exactly the hole this plan is about).
   if (messages.value.length === 0) {
-    messages.value = await loadMessages(props.chatId);
+    const loaded = await loadMessages(props.chatId);
+    if (unmounted) return;
+    messages.value = loaded;
     // Queue markers are persisted with the transcript. Rebuild the in-memory
     // scheduler after a relaunch before any runtime can dispatch a follow-up.
     restoreQueuedMessages();
@@ -3245,6 +3298,7 @@ onMounted(async () => {
     // Catch up on anything the agent said after that transcript was written —
     // i.e. a turn that was in flight when the app was last closed or crashed.
     await replayChatStream(props.chatId);
+    if (unmounted) return;
   }
   // A remount is how you come back to a chat now (fáze 3 unmounts hidden chat
   // leaves), so land on the newest message. The activeByWs watcher below cannot
@@ -3264,6 +3318,7 @@ onMounted(async () => {
   // with a prompt can mount unwatched — marking that one seen would clear a dot
   // nobody looked at.
   if (props.isWatching ?? true) chats.markSeen(props.chatId);
+  window.addEventListener("focus", onWindowFocus);
   window.addEventListener("keydown", onWindowKeydown);
   window.addEventListener("mousedown", onPermMenuOutside);
   window.addEventListener("mousedown", onEffortMenuOutside);
@@ -3306,8 +3361,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  unmounted = true;
   if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
   if (stallTimer) clearInterval(stallTimer);
+  window.removeEventListener("focus", onWindowFocus);
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("mousedown", onPermMenuOutside);
   window.removeEventListener("mousedown", onEffortMenuOutside);

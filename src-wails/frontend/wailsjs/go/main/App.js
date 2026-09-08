@@ -42,6 +42,14 @@ export function AddMcpServer(arg1, arg2) {
   return window['go']['main']['App']['AddMcpServer'](arg1, arg2);
 }
 
+export function BranchDiff(arg1) {
+  return window['go']['main']['App']['BranchDiff'](arg1);
+}
+
+export function BranchDiffBase(arg1) {
+  return window['go']['main']['App']['BranchDiffBase'](arg1);
+}
+
 export function ChatFoldedOrd(arg1) {
   return window['go']['main']['App']['ChatFoldedOrd'](arg1);
 }
@@ -434,6 +442,10 @@ export function RenameWorkspace(arg1, arg2) {
   return window['go']['main']['App']['RenameWorkspace'](arg1, arg2);
 }
 
+export function RenameWorktreeBranch(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RenameWorktreeBranch'](arg1, arg2, arg3);
+}
+
 export function RepairAgentStatus() {
   return window['go']['main']['App']['RepairAgentStatus']();
 }
@@ -552,6 +564,10 @@ export function TailscaleServeStop() {
 
 export function TouchWorkspace(arg1) {
   return window['go']['main']['App']['TouchWorkspace'](arg1);
+}
+
+export function UpdateProvider(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['UpdateProvider'](arg1, arg2, arg3, arg4);
 }
 
 export function WriteConfig(arg1) {

@@ -41,13 +41,15 @@ export interface ProviderCatalogEntry {
   supportsConfigDir: boolean;
   /** npm package to check for updates against; unset for CLIs not installed via npm. */
   npmPackage?: string;
+  /** Homebrew formula to `brew upgrade` when the resolved binary lives in a Cellar/Caskroom path; unset when the CLI has no cask/formula. */
+  homebrewFormula?: string;
 }
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
-  { id: "claude", label: "Claude Code", binary: "claude", icon: "claude", color: "#d97757", kind: "claude", transport: "claude-cli", transportArgs: [], supportsConfigDir: true, npmPackage: "@anthropic-ai/claude-code" },
-  { id: "codex", label: "Codex", binary: "codex", icon: "openai", color: "#74aa9c", kind: "codex", transport: "codex-app-server", transportArgs: ["app-server"], supportsConfigDir: false, npmPackage: "@openai/codex" },
+  { id: "claude", label: "Claude Code", binary: "claude", icon: "claude", color: "#d97757", kind: "claude", transport: "claude-cli", transportArgs: [], supportsConfigDir: true, npmPackage: "@anthropic-ai/claude-code", homebrewFormula: "claude-code" },
+  { id: "codex", label: "Codex", binary: "codex", icon: "openai", color: "#74aa9c", kind: "codex", transport: "codex-app-server", transportArgs: ["app-server"], supportsConfigDir: false, npmPackage: "@openai/codex", homebrewFormula: "codex" },
   { id: "gemini", label: "Gemini", binary: "gemini", icon: "gemini", color: "#1a73e8", kind: "gemini", transport: "acp", transportArgs: ["--acp"], supportsConfigDir: false, npmPackage: "@google/gemini-cli" },
-  { id: "opencode", label: "opencode", binary: "opencode", icon: "terminal", color: "#f59e0b", kind: "custom", transport: "acp", transportArgs: ["acp"], supportsConfigDir: false, npmPackage: "opencode-ai" },
+  { id: "opencode", label: "opencode", binary: "opencode", icon: "terminal", color: "#f59e0b", kind: "custom", transport: "acp", transportArgs: ["acp"], supportsConfigDir: false, npmPackage: "opencode-ai", homebrewFormula: "anomalyco/tap/opencode" },
   { id: "copilot", label: "GitHub Copilot", binary: "copilot", icon: "copilot", color: "#8957e5", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false, npmPackage: "@github/copilot" },
   { id: "aider", label: "Aider", binary: "aider", icon: "robot", color: "#fbbf24", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false },
   { id: "cursor", label: "Cursor AI", binary: "cursor-agent", icon: "terminal", color: "#f472b6", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false },

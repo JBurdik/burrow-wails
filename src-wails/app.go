@@ -287,12 +287,23 @@ func (a *App) GetHookServerPort() int {
 	return a.hookSrv.port
 }
 
+// appDataDir is the one door to every piece of on-disk state: workspaces.db,
+// config.json, daemon.sock, hook.port, control.token. Two instances sharing it
+// share all of that — config.json is a whole-file overwrite with no merge, and
+// a shared daemon.sock hands the same PTY id to both frontends (each keeps its
+// own in-memory counter), so the second app "reattaches" to the first one's
+// running agent. BURROW_DATA_SUFFIX carves out a separate dir for a dev build
+// running next to an installed one. Unset (every shipped build) = unchanged.
 func appDataDir() (string, error) {
 	base, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "Library", "Application Support", "burrow-wails"), nil
+	name := "burrow-wails"
+	if suffix := os.Getenv("BURROW_DATA_SUFFIX"); suffix != "" {
+		name += "-" + suffix
+	}
+	return filepath.Join(base, "Library", "Application Support", name), nil
 }
 
 // --- PTY bindings (proxy to burrow-daemon) ---

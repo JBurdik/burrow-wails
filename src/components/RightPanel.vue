@@ -620,7 +620,11 @@ function openManager() {
   openSurface("manager");
 }
 
-defineExpose({ openManager });
+function openGitTab() {
+  openSurface("git");
+}
+
+defineExpose({ openManager, openGitTab });
 
 // --- Checkpoints (History tab) ---
 interface Checkpoint {

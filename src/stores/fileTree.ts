@@ -9,11 +9,12 @@ export interface FileNode {
   children?: FileNode[];
   expanded?: boolean;
   loading?: boolean;
+  error?: string;
 }
 
 interface RawEntry {
   name: string;
-  is_dir: boolean;
+  isDir: boolean;
 }
 
 const HIDDEN = new Set([".git", "node_modules", "target", ".DS_Store"]);
@@ -25,8 +26,8 @@ async function fetchChildren(dirPath: string): Promise<FileNode[]> {
     .map((e) => ({
       id: dirPath + "/" + e.name,
       name: e.name,
-      type: e.is_dir ? "folder" : "file",
-      children: e.is_dir ? [] : undefined,
+      type: e.isDir ? "folder" : "file",
+      children: e.isDir ? [] : undefined,
       expanded: false,
     }));
 }
@@ -70,11 +71,15 @@ export const useFileTreeStore = defineStore("fileTree", () => {
       return;
     }
     node.loading = true;
+    node.error = undefined;
     try {
       node.children = await fetchChildren(path);
       node.expanded = true;
-    } catch {
-      node.expanded = true;
+    } catch (e: unknown) {
+      // ponytail: surface the failure instead of silently flipping to "expanded, 0 children" -
+      // that state was indistinguishable from a genuinely empty folder and from "did nothing".
+      node.error = e instanceof Error ? e.message : "Failed to read directory";
+      console.error(`[fileTree] failed to read "${path}":`, e);
     } finally {
       node.loading = false;
     }

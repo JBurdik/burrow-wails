@@ -191,8 +191,9 @@ var remoteAllowed = map[string]remoteCmd{
 	"save_terminal_tabs":  {Method: "SaveTerminalTabs", Args: []string{"workspaceId", "tabs"}, Scope: scopeOrchOperate},
 
 	// Worktrees
-	"create_worktree": {Method: "CreateWorktree", Args: []string{"repoPath", "name", "path", "branch", "baseRef"}, Scope: scopeOrchOperate},
-	"remove_worktree": {Method: "RemoveWorktree", Args: []string{"id", "force"}, Scope: scopeOrchOperate},
+	"create_worktree":        {Method: "CreateWorktree", Args: []string{"repoPath", "name", "path", "branch", "baseRef"}, Scope: scopeOrchOperate},
+	"rename_worktree_branch": {Method: "RenameWorktreeBranch", Args: []string{"id", "oldBranch", "newBranch"}, Scope: scopeOrchOperate},
+	"remove_worktree":        {Method: "RemoveWorktree", Args: []string{"id", "force"}, Scope: scopeOrchOperate},
 
 	// Git / gh / text generation. RunGit/RunGh are generic passthroughs (they
 	// can run a write command like `commit` or `push`), so they get the
@@ -381,6 +382,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// operate scope, not read.
 	"probe_provider":     {Method: "ProbeProvider", Args: []string{"binary", "cwd"}, Scope: scopeOrchOperate},
 	"latest_npm_version": {Method: "LatestNpmVersion", Args: []string{"pkg"}, Scope: scopeOrchRead},
+	"update_provider":    {Method: "UpdateProvider", Args: []string{"binary", "pkg", "homebrewFormula", "cwd"}, Scope: scopeOrchOperate},
 
 	// Skills / MCP servers
 	"list_skills":       {Method: "ListSkills", Args: nil, Scope: scopeOrchRead},
@@ -447,7 +449,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// is a stale copy/paste, not a wire contract anything depends on. Naming
 	// it `agentKind` here matches both the Go signature and the one real
 	// caller.
-	"remote_sync_chat":   {Method: "RemoteSyncChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
+	"remote_sync_chat":      {Method: "RemoteSyncChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
 	"remote_list_chats":     {Method: "RemoteListChats", Args: nil, Scope: scopeOrchRead},
 	"remote_create_chat":    {Method: "RemoteCreateChat", Args: []string{"workspaceId", "agentKind", "model", "effort", "permissionMode"}, Scope: scopeOrchOperate},
 	"remote_set_chat_title": {Method: "RemoteSetChatTitle", Args: []string{"id", "title", "expectTitle"}, Scope: scopeOrchOperate},

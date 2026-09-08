@@ -145,6 +145,35 @@ func TestPollPrunesWatchdogCounters(t *testing.T) {
 	}
 }
 
+// TestPollNeverAsksAboutAnUnlistedPty: the daemon answers an unknown pty id
+// with an error AND logs it, so a phase row for a pty it no longer holds — a
+// tab from a previous run, of which there are dozens — printed a log line
+// every 2 s for the life of the process.
+func TestPollNeverAsksAboutAnUnlistedPty(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	s, _ := newTestStore(t)
+	s.Apply("pty:7", agentphase.Event{Kind: agentphase.HookRunning})
+
+	f := &fakePty{sessions: nil, fg: map[string]string{"7": ""}}
+	var asked []string
+	p := newPhasePoller(s, f.list, func(id string) string {
+		asked = append(asked, id)
+		return f.foreground(id)
+	})
+
+	for i := 0; i < emptyReadsBeforeDead+3; i++ {
+		p.tick()
+	}
+
+	if len(asked) != 0 {
+		t.Fatalf("asked the daemon about a pty it does not list: %v", asked)
+	}
+	if s.Get("pty:7").State != agentphase.Stale {
+		t.Fatalf("watchdog stopped working: %+v", s.Get("pty:7"))
+	}
+}
+
 func TestWatchdogIgnoresASingleEmptyRead(t *testing.T) {
 	t.Cleanup(busReset)
 	busReset()

@@ -9,7 +9,7 @@ package daemonproto
 // Request is a client -> daemon message. Kind selects which fields matter.
 type Request struct {
 	ReqID string   `json:"reqId"`
-	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list" | "foreground"
+	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list" | "foreground" | "version"
 	ID    string   `json:"id,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`
 	Env   []string `json:"env,omitempty"`
@@ -25,6 +25,13 @@ type Response struct {
 	Error string   `json:"error,omitempty"`
 	IDs   []string `json:"ids,omitempty"` // for "list"
 	Name  string   `json:"name,omitempty"` // for "foreground"
+	// ExePath/Pid answer "version": the daemon's own binary path and pid, so a
+	// client reconnecting to an ALREADY-RUNNING daemon.sock (the whole point of
+	// the daemon surviving app restarts) can tell "still my binary" apart from
+	// "orphaned process left over from a deleted build/worktree" and replace
+	// the latter instead of silently reattaching to dead code forever.
+	ExePath string `json:"exePath,omitempty"`
+	Pid     int    `json:"pid,omitempty"`
 }
 
 // Frame is an unsolicited daemon -> client push: PTY output or exit.

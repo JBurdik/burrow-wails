@@ -288,8 +288,23 @@ function addBottomTerminal(tabId: number) {
   s.activeId = id;
 }
 
+// A bottom terminal is a PTY like any other, so closing it kills the process
+// group. Ask first when something other than the shell is in the foreground —
+// the same read XTerm's auto-title poll uses. ponytail: one shell-out per pty
+// at close time, no watching.
+const SHELL_RE = /^(zsh|bash|sh|fish|csh|tcsh|dash)$/;
+async function runningIn(ptyIds: number[]): Promise<string> {
+  for (const id of ptyIds) {
+    const proc = await invoke<string>("get_pty_foreground", { id }).catch(() => "");
+    if (proc && !SHELL_RE.test(proc)) return proc;
+  }
+  return "";
+}
+
 async function closeBottomTerminal(tabId: number, ptyId: number) {
   const s = bottomPanelFor(tabId);
+  const proc = await runningIn([ptyId]);
+  if (proc && !(await confirmClose(proc))) return;
   await invoke("kill_pty", { id: ptyId }).catch(() => {});
   s.ptyIds = s.ptyIds.filter((id) => id !== ptyId);
   if (s.activeId === ptyId) s.activeId = s.ptyIds[s.ptyIds.length - 1] ?? null;
@@ -1026,10 +1041,11 @@ async function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, i
   // Reopening an archived chat (e.g. from the Sidebar's Archived shelf) always
   // un-archives it — a chat with an open tab is never archived.
   if (session.archivedAt) chatsStore.unarchive(session.id);
-  // Focus existing tab if already open
-  const existing = tabs.value.find(
-    (t) => t.root.type === "leaf" && t.root.leafType === "chat" && (t.root as Leaf).chatId === session.id
-  );
+  // Focus existing tab if already open — search every pane, not just a root
+  // leaf: a chat living inside a split tab was missed here, minting a second
+  // tab/leaf for the same chatId and leaving two stale numeric ids pointing at
+  // one thread.
+  const existing = tabs.value.find((t) => getAllLeaves(t.root).some((l) => l.chatId === session.id));
   if (existing) { activateTab(existing.id); return; }
   // Create new chat tab
   const id = nextPtyId();
@@ -1302,6 +1318,8 @@ async function closeTab(tabId: number) {
     const ok = await confirmClose(busyLeaf.title);
     if (!ok) return;
   }
+  const bottomProc = await runningIn(bottomPanels[tabId]?.ptyIds ?? []);
+  if (bottomProc && !(await confirmClose(bottomProc))) return;
   const dirtyLeaf = leaves.find((l) => l.leafType === "editor" && isLeafDirty(l));
   if (dirtyLeaf) {
     const ok = await confirmClose(dirtyLeaf.title, "unsaved");
@@ -1504,6 +1522,12 @@ function tabAgentIcon(t: Tab): string | undefined {
   return cmd ? providersStore.byId(providerIdForCommand(cmd))?.icon : undefined;
 }
 
+function tabSettled(t: Tab): boolean {
+  return tabIsChat(t)
+    ? chatsStore.isSettled(chatsStore.sessions.find((s) => s.id === (t.root as Leaf).chatId))
+    : isTabSettled(props.workspaceId, t.id);
+}
+
 function syncStore() {
   tabsStore.setTabs(
     props.workspaceId,
@@ -1518,29 +1542,48 @@ function syncStore() {
       round: Math.max(0, ...getAllLeaves(t.root).map((l) => l.round ?? 0)),
       sessionId: getAllLeaves(t.root)[0]?.sessionId,
       chatId: tabIsChat(t) ? (t.root as Leaf).chatId : undefined,
-      settled: tabIsChat(t)
-        ? chatsStore.isSettled(chatsStore.sessions.find((s) => s.id === (t.root as Leaf).chatId))
-        : isTabSettled(props.workspaceId, t.id),
+      settled: tabSettled(t),
       agentIcon: tabAgentIcon(t),
       model: chatSessionOf(t)?.model ?? getAllLeaves(t.root)[0]?.model,
       // Chat threads snapshot their own branch at creation (persisted in
       // config.json with the session — see claudeChats.create); plain
       // terminal/agent tabs use the per-tab cache backed by SQLite.
       branch: chatSessionOf(t)?.branch ?? branchSnapshotFor(t.id),
+      bottomTerms: bottomPanels[t.id]?.ptyIds.length || undefined,
     })),
   );
   tabsStore.setActive(props.workspaceId, activeTabId.value);
 }
 
 watch([tabs, activeTabId, focusedLeafId], syncStore, { deep: true });
+// Bottom panels live outside `tabs`, so the sidebar's terminal chip needs its
+// own trigger.
+watch(bottomPanels, syncStore, { deep: true });
 // Settle is toggled outside this component's own reactive tree (localStorage-
 // backed ref for terminal/agent tabs, settledOverride for chats) — neither
 // mutates `tabs`, so the sidebar mirror needs its own trigger or it only
 // updates on the next unrelated tab change.
 watch(
   () => [settledTabKeys.value.join(","), chatsStore.sessions.map((s) => `${s.id}:${s.settledOverride ?? ""}`).join(",")],
-  syncStore,
+  () => {
+    syncStore();
+    void reapSettledBottomPanels();
+  },
 );
+
+// Settling a thread means "done with this" — its ⌘J terminals go with it, so a
+// forgotten build/dev server does not keep running (and holding a PTY) behind a
+// row the user has filed away. Ask first if something is actually running; a
+// cancel leaves the terminals alone, the settle itself stands.
+async function reapSettledBottomPanels() {
+  for (const tab of tabs.value) {
+    const panel = bottomPanels[tab.id];
+    if (!panel?.ptyIds.length || !tabSettled(tab)) continue;
+    const proc = await runningIn(panel.ptyIds);
+    if (proc && !(await confirmClose(proc))) continue;
+    await killBottomPanel(tab.id);
+  }
+}
 // A tab can be created before the 60s git sweep has ever filled branchByWs
 // for this workspace; catch it up once that first value lands, so it still
 // gets a real snapshot instead of permanently missing one.
@@ -1597,13 +1640,27 @@ watch(() => uiStore.viewingTabs, seeActiveTab);
 // keeps that replay from re-running one this instance already handled.
 let handledNonce = 0;
 
+// A chat tab's numeric id is re-minted (nextPtyId(), shared with real PTYs)
+// every time Terminal (re)creates it — on restore, or after `openClaudeChat`
+// reopens an archived thread — so a tabId snapshotted before that no longer
+// names the same thread. Resolve by the stable chatId when the request has
+// one; only fall back to the raw tabId for non-chat tabs (real PTYs, whose id
+// IS their identity for the life of the process).
+function resolveActivateTarget(req: { tabId?: number; chatId?: number }): Tab | undefined {
+  if (req.chatId != null) {
+    return tabs.value.find((t) => getAllLeaves(t.root).some((l) => l.chatId === req.chatId));
+  }
+  return tabs.value.find((t) => t.id === req.tabId);
+}
+
 function applyTabRequest(req: typeof tabsStore.request) {
   if (!req || req.wsId !== props.workspaceId || req.nonce === handledNonce) return;
   // An activate for a tab that hasn't been restored yet stays unhandled, so the
   // onMounted replay picks it up once the tab list exists.
-  if (req.action === "activate" && !tabs.value.some((t) => t.id === req.tabId)) return;
+  const activateTarget = req.action === "activate" ? resolveActivateTarget(req) : undefined;
+  if (req.action === "activate" && !activateTarget) return;
   handledNonce = req.nonce;
-  if (req.action === "activate" && req.tabId != null) activateTab(req.tabId);
+  if (req.action === "activate" && activateTarget) activateTab(activateTarget.id);
   else if (req.action === "add") {
     const leaf = addTab(req.cmd || undefined, {
       cwd: req.cwd || undefined,
@@ -1738,6 +1795,9 @@ onBeforeUnmount(() => {
   window.removeEventListener("focus", onWindowFocus);
   leafUnlisteners.forEach((fns) => fns.forEach((fn) => fn()));
   leafUnlisteners.clear();
+  // Bottom-panel PTYs are not persisted, so nothing would ever reattach to them
+  // — leaving them alive orphans a process in the daemon for good.
+  Object.keys(bottomPanels).forEach((id) => void killBottomPanel(Number(id)));
   tabsStore.clear(props.workspaceId);
 });
 

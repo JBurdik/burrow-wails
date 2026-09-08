@@ -204,6 +204,28 @@ export const useProvidersStore = defineStore("providers", () => {
     );
   }
 
+  /**
+   * Install the latest version of a catalog provider, in-process (no terminal
+   * tab needed). Picks brew vs npm on the Go side by inspecting how the
+   * resolved binary was actually installed, not by trusting one default per
+   * provider — a `brew`-installed CLI updated via `npm install -g` fights
+   * Homebrew's own symlinks on the next `brew upgrade`.
+   */
+  async function installLatest(providerId: string, cwd = ""): Promise<{ ok: boolean; error: string }> {
+    const p = providerFor(providerId);
+    if (!p.npmPackage) return { ok: false, error: "no package configured" };
+    try {
+      return await invoke<{ ok: boolean; error: string }>("update_provider", {
+        binary: p.binary,
+        pkg: p.npmPackage,
+        homebrewFormula: p.homebrewFormula ?? "",
+        cwd,
+      });
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  }
+
   /** Enabled, installed instances whose version trails the latest published npm release. */
   const outdated = computed(() =>
     active.value.filter((a) => {
@@ -215,7 +237,7 @@ export const useProvidersStore = defineStore("providers", () => {
 
   return {
     instances, aliases, status, latest, ready, probing, active, chatAgents, outdated,
-    byId, resolve, add, update, remove, reset, move, setStatus, probe, probeAll, checkLatest,
+    byId, resolve, add, update, remove, reset, move, setStatus, probe, probeAll, checkLatest, installLatest,
     binaryFor, commandLine,
     catalog: PROVIDER_CATALOG,
   };

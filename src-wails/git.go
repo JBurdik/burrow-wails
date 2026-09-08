@@ -2,9 +2,26 @@ package main
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
+
+// expandHome resolves a leading "~/" the way a shell would — exec.Command
+// never goes through one, so a literal "~/burrow-worktrees" (the default
+// worktreesDir) would otherwise land as a directory named "~" inside the
+// repo itself instead of the user's home.
+func expandHome(p string) string {
+	if !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(home, p[2:])
+}
 
 // GitOutput mirrors the Rust struct returned by run_git/run_gh.
 type GitOutput struct {
@@ -48,6 +65,7 @@ func (a *App) RunGh(cwd string, args []string) GitOutput {
 // --- worktrees ---
 
 func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef string) (Workspace, error) {
+	path = expandHome(path)
 	var parentID int64
 	if err := a.db.QueryRow(`SELECT id FROM workspaces WHERE path = ?`, repoPath).Scan(&parentID); err != nil {
 		return Workspace{}, err
@@ -88,6 +106,28 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 		emitWorkspacesChanged()
 	}
 	return ws, err
+}
+
+// RenameWorktreeBranch renames a worktree's branch in place (git branch -m —
+// the worktree's own directory keeps its original path, same as t3code:
+// nothing depends on the path encoding the branch name once it exists).
+// Callers use this to rename the throwaway hex branch a worktree is created
+// with to a task-derived name generated afterward, off the critical path of
+// actually opening the new worktree.
+func (a *App) RenameWorktreeBranch(id int64, oldBranch, newBranch string) (Workspace, error) {
+	var wsPath string
+	if err := a.db.QueryRow(`SELECT path FROM workspaces WHERE id = ?`, id).Scan(&wsPath); err != nil {
+		return Workspace{}, err
+	}
+	if out := runCmd("git", wsPath, []string{"branch", "-m", oldBranch, newBranch}); !out.Success {
+		return Workspace{}, gitErr(out)
+	}
+	if _, err := a.db.Exec(`UPDATE workspaces SET worktree_branch = ? WHERE id = ?`, newBranch, id); err != nil {
+		return Workspace{}, err
+	}
+	emitWorkspacesChanged()
+	row := a.db.QueryRow("SELECT "+workspaceCols+" FROM workspaces WHERE id = ?", id)
+	return scanWorkspace(row)
 }
 
 func (a *App) RemoveWorktree(id int64, force bool) error {

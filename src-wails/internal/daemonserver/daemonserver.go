@@ -139,6 +139,9 @@ func (s *Server) handle(req daemonproto.Request) *daemonproto.Response {
 		resp.IDs = s.mgr.List()
 	case "foreground":
 		resp.Name, err = s.mgr.Foreground(req.ID)
+	case "version":
+		resp.ExePath, _ = os.Executable()
+		resp.Pid = os.Getpid()
 	default:
 		err = fmt.Errorf("unknown request kind: %s", req.Kind)
 	}

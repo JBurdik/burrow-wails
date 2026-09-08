@@ -197,7 +197,7 @@
                 >Terminal — run {{ terminalProgram }} in a PTY</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenuRoot>
-            <button class="welcome-send" type="button" :disabled="!text.trim()" @click="submit">
+            <button class="welcome-send" type="button" :disabled="!text.trim() || worktreeBusy" @click="submit">
               <PhArrowUp :size="14" weight="bold" />
             </button>
           </div>
@@ -210,6 +210,7 @@
         :branches="switchableBranches"
         @switch-branch="switchBranch"
         @create-branch="createBranch"
+        :detail="worktreeBusy ? 'Creating worktree…' : undefined"
         :base-branch="worktreeMode === 'new' ? currentBranch || 'HEAD' : undefined"
         appearance="attached"
         :disabled="worktreeBusy"
@@ -539,6 +540,10 @@ const target = computed<Workspace | null>(
   () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
 );
 function pick(repo: Workspace) { override.value = repo; }
+// Someone else switching the active project (⌘⇧O's picker, the Sidebar) wins
+// over a stale local pick — otherwise the composer kept showing whatever was
+// last chosen here.
+watch(() => store.active?.id, () => { override.value = null; });
 
 // Exposed so App.vue can point the titlebar/right-panel git surfaces at
 // whatever project this screen is targeting — picking a project here doesn't
@@ -566,7 +571,7 @@ const worktreeError = shallowRef("");
 function generatedWorktreeBranch(): string {
   const bytes = new Uint8Array(4);
   crypto.getRandomValues(bytes);
-  return `t3code/${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  return `burrow/${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 // A worktree branch named after the task instead of four random bytes, the way
@@ -580,7 +585,7 @@ async function namedWorktreeBranch(workspace: Workspace, message: string): Promi
       policy: ui.textGenerationPolicy,
       message,
     });
-    return slug ? `t3code/${slug}` : "";
+    return slug ? `burrow/${slug}` : "";
   } catch {
     return "";
   }
@@ -626,7 +631,17 @@ function worktreePath(workspace: Workspace, branch: string): string {
   return `${root}/${repo}/${branch.replaceAll("/", "-")}`;
 }
 
-watch(target, (workspace) => { void refreshCurrentBranch(workspace); }, { immediate: true });
+// git.branches (what the branch-switch dropdown lists) is otherwise only
+// ever fetched by RightPanel's branch-diff-scope code — never for this
+// screen's target — so the picker opened empty and switching a checkout
+// silently did nothing.
+watch(target, (workspace) => {
+  void refreshCurrentBranch(workspace);
+  if (workspace && !workspace.worktree_branch) {
+    git.setCwd(workspace.path);
+    void git.fetchBranches();
+  }
+}, { immediate: true });
 
 // The catalog is what knows the efforts, and it is only fetched lazily — ask for
 // it up front so the pill is there before the user opens the model picker.
@@ -681,12 +696,15 @@ async function submit() {
   let t = target.value;
   if (!prompt || !t) return;
   if (worktreeMode.value === "new") {
-    let branch = worktreeBranch.value.trim();
+    const branch = worktreeBranch.value.trim();
     if (!branch) return;
     worktreeBusy.value = true;
     worktreeError.value = "";
     try {
-      branch = (await namedWorktreeBranch(t, prompt)) || branch;
+      // Mirrors t3code: create the worktree under the throwaway hex name
+      // immediately (nothing here needs the LLM to have already answered),
+      // then rename it to a task-derived name in the background once it's
+      // ready — renaming never blocks getting the agent started.
       t = await store.createWorktree(t.id, branch, currentBranch.value || null, worktreePath(t, branch));
     } catch (err) {
       worktreeError.value = err instanceof Error ? err.message : String(err);
@@ -694,6 +712,10 @@ async function submit() {
     } finally {
       worktreeBusy.value = false;
     }
+    const worktreeId = t.id;
+    void namedWorktreeBranch(t, prompt).then((named) => {
+      if (named && named !== branch) return store.renameWorktreeBranch(worktreeId, branch, named);
+    }).catch(() => {});
   }
   const images = [...pendingImages.value];
   const terminalPrompt = launchMode.value === "terminal" && images.length > 0

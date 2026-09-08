@@ -27,6 +27,8 @@ export interface TabSummary {
   model?: string;
   /** Branch checked out when this tab was created — a snapshot, not live. */
   branch?: string;
+  /** Live bottom-panel (⌘J) terminals in this thread, if any. */
+  bottomTerms?: number;
 }
 
 type TabRequest = {
@@ -164,13 +166,17 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     };
   }
 
-  function activate(wsId: number, tabId: number) {
+  function activate(wsId: number, tabId: number, chatId?: number) {
     // Terminal also clears its durable review state. This makes the sidebar
     // acknowledge the completion immediately, before the component round-trip.
     markCompletionSeen(wsId, tabId);
     // Deliberately does NOT stamp activity: the sidebar sorts by it, so merely
     // focusing a thread would shuffle the row out from under the cursor.
-    request.value = { wsId, action: "activate", tabId, nonce: ++nonce };
+    // chatId (stable SQLite id), when known, lets Terminal resolve the CURRENT
+    // tab for that thread instead of trusting tabId — a chat tab's id is a
+    // fresh nextPtyId() every time Terminal (re)creates it, so a tabId snapshot
+    // from before a remount/restore can point at an unrelated tab afterwards.
+    request.value = { wsId, action: "activate", tabId, chatId, nonce: ++nonce };
   }
   /**
    * Ask the workspace's Terminal to open a tab. Resolves with the new tab's pty
