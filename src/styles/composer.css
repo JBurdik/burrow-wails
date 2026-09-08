@@ -61,3 +61,250 @@ textarea {
   width: 0;
   height: 0;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Composer chrome, shared by the welcome composer and the chat composer.
+
+   These lived twice — as `.welcome-pill`/`.welcome-send`/`.permission-menu-*`
+   in WelcomeScreen's scoped block and as `.toolbar-btn`/`.send-btn`/
+   `.floating-menu-*`/`.perm-mode-*` in AgentChat's — with different heights,
+   different pill treatments (borderless vs bordered chip) and two separate
+   dropdown implementations. One set here, so the two composers cannot drift.
+
+   Global rather than scoped on purpose: the dropdown content is portalled to
+   <body> by reka-ui, where a scoped selector and `--chat-*` vars scoped to
+   `.claude-chat` both stop applying. Everything below reads global tokens.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Toolbar row under the textarea: pills on the left, send group on the right. */
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Pills wrap instead of scrolling — an agent with model + effort + permission +
+   profile pills overflows a narrow composer, and a horizontal scrollbar inside
+   the input frame reads as breakage. */
+.composer-pillbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.composer-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  height: 27px;
+  padding: 0 9px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-chip);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  transition: color .12s ease-out, background .12s ease-out, border-color .12s ease-out;
+}
+.composer-pill:hover,
+.composer-pill[data-state="open"] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, var(--surface-elevated));
+  border-color: color-mix(in srgb, var(--text-primary) 20%, var(--border));
+}
+.composer-pill-label { font-size: 12px; font-weight: 650; }
+.composer-pill-caret { opacity: .6; margin-left: -1px; }
+.composer-pill-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.composer-pill-danger {
+  color: var(--red, #ef4444);
+  background: color-mix(in srgb, var(--red, #ef4444) 15%, transparent);
+  border-color: color-mix(in srgb, var(--red, #ef4444) 35%, transparent);
+}
+
+/* Menu surface — overrides DropdownMenuContent's utility defaults so every
+   composer popover matches the provider/model picker. */
+.composer-menu {
+  padding: 5px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+.composer-menu-item {
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.composer-menu-item-detailed {
+  height: auto;
+  min-height: 58px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  white-space: normal;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+.composer-menu-item:hover,
+.composer-menu-item[data-highlighted],
+.composer-menu-item-detailed:hover,
+.composer-menu-item-detailed[data-highlighted] {
+  color: var(--text-primary);
+  background: var(--bg-hover) !important;
+  outline: none;
+}
+.composer-menu-item-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.composer-menu-item-danger { color: var(--red, #ef4444); }
+.composer-menu-item-danger.composer-menu-item-active {
+  color: var(--red, #ef4444);
+  background: color-mix(in srgb, var(--red, #ef4444) 14%, transparent);
+}
+.composer-menu-icon { flex: 0 0 auto; margin-top: 1px; color: var(--text-muted); }
+.composer-menu-item-detailed:hover .composer-menu-icon,
+.composer-menu-item-detailed[data-highlighted] .composer-menu-icon,
+.composer-menu-item-active .composer-menu-icon { color: var(--accent); }
+.composer-menu-copy { display: grid; gap: 3px; min-width: 0; text-align: left; line-height: 1.2; }
+.composer-menu-copy > span:last-child {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+.composer-menu-item-detailed:hover .composer-menu-copy > span:last-child,
+.composer-menu-item-active .composer-menu-copy > span:last-child {
+  color: color-mix(in srgb, currentColor 68%, var(--text-muted));
+}
+.composer-menu-hint {
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+/* Send group — mode/launch pickers plus the send (or abort) button. */
+.composer-sendgroup {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer-send {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-pill, 999px);
+  /* --agent-accent is set per chat; the welcome composer has none and falls
+     back to the theme accent. */
+  background: var(--agent-accent, var(--accent));
+  color: #fff;
+  cursor: pointer;
+  transition: background .12s ease-out, opacity .12s ease-out, transform .15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.composer-send:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 80%, #000);
+  transform: translateY(-1px);
+}
+.composer-send:active:not(:disabled) { transform: translateY(0); }
+.composer-send:disabled { opacity: 0.35; cursor: default; }
+.composer-send-abort { background: var(--red, #dc2626); }
+.composer-send-abort:hover:not(:disabled) { background: color-mix(in srgb, var(--red, #dc2626) 80%, #000); }
+.composer-send-stalled { animation: composer-send-stalled-pulse 1.6s ease-in-out infinite; }
+@keyframes composer-send-stalled-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red, #dc2626) 55%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--red, #dc2626) 0%, transparent); }
+}
+
+/* Suggestion dropdown (@file / $skill / /command) — one list, one look. */
+.composer-suggestions {
+  max-height: 200px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  scrollbar-width: none;
+}
+.composer-suggestions::-webkit-scrollbar { width: 0; height: 0; }
+.composer-suggestion {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background .1s ease-out;
+}
+.composer-suggestion:hover,
+.composer-suggestion-active { background: var(--bg-hover); }
+.composer-suggestion-token {
+  min-width: 100px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.composer-suggestion-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Attached-image previews. */
+.composer-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.composer-image {
+  position: relative;
+  height: 64px;
+  width: 64px;
+  flex-shrink: 0;
+}
+.composer-image img {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  object-fit: cover;
+}
+.composer-image-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color .1s ease-out, background .1s ease-out;
+}
+.composer-image-remove:hover { color: var(--red, #f87171); background: color-mix(in srgb, var(--red, #f87171) 18%, transparent); }

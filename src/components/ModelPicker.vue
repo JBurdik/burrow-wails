@@ -1,6 +1,6 @@
 <template>
   <div class="mp">
-    <button ref="btnEl" class="mp-trigger" type="button" @click.stop="toggle">
+    <button ref="btnEl" class="composer-pill" type="button" @click.stop="toggle">
       <component :is="agentIconComp(agent.icon)" :size="12" />
       {{ triggerLabel }}
       <PhCaretDown :size="9" weight="bold" />
@@ -191,22 +191,6 @@ onBeforeUnmount(close);
 
 <style scoped>
 .mp { display: inline-flex; }
-
-.mp-trigger {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 5px 7px;
-}
-.mp-trigger:hover { color: var(--text-primary); background: var(--bg-hover); }
 
 .mp-panel {
   position: fixed;

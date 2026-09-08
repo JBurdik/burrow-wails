@@ -330,35 +330,6 @@
       </button>
     </div>
 
-    <!-- Command suggestions dropdown -->
-    <div v-if="suggestions.length > 0" ref="suggestionsEl" class="max-h-[200px] flex-shrink-0 overflow-y-auto border-t border-border bg-panel">
-      <div
-        v-for="(s, i) in suggestions"
-        :key="s.name"
-        class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-hover"
-        :class="{ '!bg-hover': i === suggestionIdx }"
-        @mousedown.prevent="applySuggestion(s.name)"
-      >
-        <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-[var(--chat-accent)]">/{{ s.name }}</span>
-        <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ s.description }}</span>
-      </div>
-    </div>
-
-    <!-- @-mention file suggestions dropdown -->
-    <div v-if="atSuggestions.length > 0" class="max-h-[200px] flex-shrink-0 overflow-y-auto border-t border-border bg-panel">
-      <div
-        v-for="(p, i) in atSuggestions"
-        :key="p"
-        class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-hover"
-        :class="{ '!bg-hover': i === atIdx }"
-        @mousedown.prevent="applyAtSuggestion(p)"
-      >
-        <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-[var(--chat-accent)]">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
-        <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ p }}</span>
-      </div>
-    </div>
-
-
     <!-- New-style input bar -->
     <div v-if="!hideComposer" class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
       <div class="mx-auto w-full max-w-[760px]">
@@ -450,7 +421,7 @@
             aria-hidden="true"
             class="pointer-events-none absolute inset-0 box-border overflow-hidden whitespace-pre-wrap [overflow-wrap:break-word] px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground"
           ><template v-for="(p, i) in skillParts" :key="i"><span v-if="p.pill" class="skill-pill">{{ p.v }}</span><template v-else>{{ p.v }}</template></template></div>
-          <textarea
+          <ComposerTextInput
             ref="inputEl"
             v-model="inputText"
             class="chat-input composer-input box-border block max-h-40 min-h-10 w-full resize-none border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground outline-none placeholder:text-muted-foreground"
@@ -460,24 +431,18 @@
             @keydown="onKeydown"
             @input="onInput"
             @paste="onPaste"
-            @scroll="syncHighlightScroll"
+            @scroll="completion.syncHighlightScroll"
           /></div>
-          <!-- Image previews, matching welcome-image-preview sizing/placement -->
-          <div v-if="pendingImages.length > 0" class="flex flex-wrap gap-1.5 px-3 pb-1.5">
-            <div v-for="(img, i) in pendingImages" :key="i" class="relative h-16 w-16 flex-shrink-0">
-              <img :src="img" class="block h-full w-full rounded-[7px] border border-border object-cover" :alt="`Image ${i + 1}`" />
-              <button class="pending-img-remove" @click="pendingImages.splice(i, 1)" :aria-label="'Remove attached image ' + (i + 1)" title="Remove">
-                <PhX :size="9" weight="bold" />
-              </button>
-            </div>
-          </div>
-          <div class="flex items-center justify-between gap-1.5 px-2 pb-2 pt-1.5">
+          <!-- @file / $skill / /command completion -->
+          <ComposerSuggestions :items="suggestions" :active-index="activeIndex" @pick="completion.apply" />
+          <ComposerImages v-model="pendingImages" class="px-3 pb-1.5" />
+          <div class="composer-toolbar px-2 pb-2 pt-1.5">
           <!-- Left: share selection, model dropdown, perm mode -->
-          <div class="flex items-center gap-1">
+          <div class="composer-pillbar">
             <img v-if="avatarSrc" :src="avatarSrc" class="toolbar-avatar mr-0.5 h-[22px] w-[22px] flex-shrink-0 rounded-full border border-border object-cover [object-position:center_18%]" alt="Manager" />
             <button
               v-if="editorCtx.selection"
-              class="toolbar-btn"
+              class="composer-pill"
               :title="`Add selection: ${relPath(editorCtx.selection.path)}#L${editorCtx.selection.startLine}-L${editorCtx.selection.endLine}`"
               @click="shareSelection"
             >
@@ -492,154 +457,68 @@
               @select="onPickModel"
             />
             <!-- Claude Agent SDK effort is forwarded to the local Claude Code CLI. -->
-            <div v-if="effectiveTransport === 'claude-cli'" class="model-dropdown">
-              <button ref="effortBtnEl" class="toolbar-btn toolbar-btn-label" title="Claude reasoning effort" @click="toggleEffortMenu">
-                {{ selectedEffortLabel }}
-                <PhCaretDown :size="9" weight="bold" class="btn-caret" />
-              </button>
-              <Teleport to="body">
-                <div v-if="effortMenuOpen" ref="effortMenuEl" class="floating-menu" :style="{ top: effortMenuPos.top + 'px', left: effortMenuPos.left + 'px' }">
-                  <button
-                    v-for="effort in CLAUDE_EFFORTS"
-                    :key="effort.id"
-                    class="floating-menu-item"
-                    :class="{ 'floating-menu-item-active': selectedEffort === effort.id }"
-                    @click="selectEffort(effort.id)"
-                  >
-                    {{ effort.label }}
-                  </button>
-                </div>
-              </Teleport>
-            </div>
+            <ComposerPill
+              v-if="effectiveTransport === 'claude-cli'"
+              :label="selectedEffortLabel"
+              :items="CLAUDE_EFFORTS"
+              :active="selectedEffort"
+              title="Claude reasoning effort"
+              @select="selectEffort($event as ClaudeEffort)"
+            />
             <!-- Profile switcher (only shown when more than one profile exists) -->
-            <div v-if="effectiveTransport === 'claude-cli' && claudeProfiles.length > 1" class="model-dropdown">
-              <button
-                ref="profileBtnEl"
-                class="toolbar-btn toolbar-btn-label"
-                :class="{ 'btn-active': selectedProfileId !== defaultProfileId }"
-                :title="selectedProfile?.configDir ? `CLAUDE_CONFIG_DIR: ${selectedProfile.configDir}` : 'Claude profile'"
-                @click="toggleProfileMenu"
-              >
-                <PhUserGear :size="12" />
-                {{ selectedProfile?.name ?? 'Default' }}
-                <PhCaretDown :size="9" weight="bold" class="btn-caret" />
-              </button>
-              <Teleport to="body">
-                <div
-                  v-if="profileMenuOpen"
-                  ref="profileMenuEl"
-                  class="floating-menu"
-                  :style="{ bottom: profileMenuPos.bottom + 'px', left: profileMenuPos.left + 'px' }"
-                >
-                  <button
-                    v-for="p in claudeProfiles"
-                    :key="p.id"
-                    class="floating-menu-item"
-                    :class="{ 'floating-menu-item-active': selectedProfileId === p.id }"
-                    @click="selectProfile(p.id)"
-                  >
-                    {{ p.name }}
-                    <span v-if="p.configDir" class="model-id-hint">{{ p.configDir }}</span>
-                  </button>
-                </div>
-              </Teleport>
-            </div>
+            <ComposerPill
+              v-if="effectiveTransport === 'claude-cli' && claudeProfiles.length > 1"
+              :icon="PhUserGear"
+              :label="selectedProfile?.name ?? 'Default'"
+              :items="profileItems"
+              :active="selectedProfileId"
+              :highlight="selectedProfileId !== defaultProfileId"
+              :title="selectedProfile?.configDir ? `CLAUDE_CONFIG_DIR: ${selectedProfile.configDir}` : 'Claude profile'"
+              @select="selectProfile"
+            />
             <!-- Permission mode switcher (native Claude only) -->
-            <div v-if="effectiveTransport === 'claude-cli'" class="perm-mode-dropdown">
-              <button
-                ref="permBtnEl"
-                class="toolbar-btn"
-                :class="{ 'btn-danger-active': permMeta.danger, 'btn-active': permMode === 'acceptEdits' }"
-                :title="permMeta.title"
-                @click="togglePermMenu"
-              >
-                <component :is="PERM_ICON[permMode]" :size="15" weight="bold" />
-                <span class="perm-mode-label">{{ permMeta.label }}</span>
-                <PhCaretDown :size="9" weight="bold" class="perm-mode-caret" />
-              </button>
-              <!-- Teleported to body so the float-card's `overflow:hidden` can't clip it. -->
-              <Teleport to="body">
-                <div
-                  v-if="permMenuOpen"
-                  ref="permMenuEl"
-                  class="perm-mode-menu"
-                  :style="{ top: permMenuPos.top + 'px', left: permMenuPos.left + 'px' }"
-                >
-                  <button
-                    v-for="m in PERM_MODES"
-                    :key="m"
-                    class="perm-mode-item"
-                    :class="{ 'perm-mode-item-active': permMode === m, 'perm-mode-item-danger': PERM_META[m].danger }"
-                    :title="PERM_META[m].title"
-                    @click="selectPermMode(m)"
-                  >
-                    <component :is="PERM_ICON[m]" :size="16" weight="bold" />
-                    <span class="perm-mode-copy">
-                      <span>{{ PERM_META[m].label }}</span>
-                      <span>{{ PERM_META[m].description }}</span>
-                    </span>
-                  </button>
-                </div>
-              </Teleport>
-            </div>
+            <ComposerPill
+              v-if="effectiveTransport === 'claude-cli'"
+              :icon="PERM_ICON[permMode]"
+              :label="permMeta.label"
+              :items="permItems"
+              :active="permMode"
+              :danger="permMeta.danger"
+              :highlight="permMode === 'acceptEdits'"
+              :title="permMeta.title"
+              detailed
+              @select="selectPermMode($event as PermMode)"
+            />
 
-            <!-- ACP model switcher (driven by the adapter's configOptions) -->
-            <div v-if="isAcpRuntime && acpEffortOption" class="model-dropdown">
-              <button ref="acpEffortBtnEl" class="toolbar-btn toolbar-btn-label" @click="openAcpMenu('effort')">
-                {{ acpEffortLabel }}
-                <PhCaretDown :size="9" weight="bold" class="btn-caret" />
-              </button>
-              <Teleport to="body">
-                <div v-if="acpEffortMenuOpen" ref="acpEffortMenuEl" class="floating-menu" :style="{ top: acpEffortMenuPos.top + 'px', left: acpEffortMenuPos.left + 'px' }">
-                  <button
-                    v-for="c in acpEffortOption.options"
-                    :key="c.value"
-                    class="floating-menu-item"
-                    :class="{ 'floating-menu-item-active': acpEffortOption.currentValue === c.value }"
-                    :title="c.description"
-                    @click="acpSelectEffort(c.value)"
-                  >
-                    {{ c.name }}
-                  </button>
-                </div>
-              </Teleport>
-            </div>
+            <!-- ACP effort switcher (driven by the adapter's configOptions) -->
+            <ComposerPill
+              v-if="isAcpRuntime && acpEffortOption"
+              :label="acpEffortLabel"
+              :items="acpEffortItems"
+              :active="acpEffortOption.currentValue"
+              @select="acpSelectEffort"
+            />
 
             <!-- ACP permission-mode switcher (driven by the adapter's session modes) -->
-            <div v-if="isAcpRuntime && acpModes" class="perm-mode-dropdown">
-              <button ref="acpModeBtnEl" class="toolbar-btn" :title="`Permission mode: ${acpModeLabel}`" @click="openAcpMenu('mode')">
-                <PhShieldCheck :size="15" weight="bold" />
-                <span class="perm-mode-label">{{ acpModeLabel }}</span>
-                <PhCaretDown :size="9" weight="bold" class="perm-mode-caret" />
-              </button>
-              <Teleport to="body">
-                <div v-if="acpModeMenuOpen" ref="acpModeMenuEl" class="perm-mode-menu" :style="{ top: acpModeMenuPos.top + 'px', left: acpModeMenuPos.left + 'px' }">
-                  <button
-                    v-for="m in acpModes.availableModes"
-                    :key="m.id"
-                    class="perm-mode-item"
-                    :class="{ 'floating-menu-item-active': acpModes.currentModeId === m.id }"
-                    :title="m.description"
-                    @click="acpSelectMode(m.id)"
-                  >
-                    <component :is="acpModeIcon(m.id)" :size="16" weight="bold" />
-                    <span class="perm-mode-copy">
-                      <span>{{ m.name }}</span>
-                      <span>{{ m.description }}</span>
-                    </span>
-                  </button>
-                </div>
-              </Teleport>
-            </div>
+            <ComposerPill
+              v-if="isAcpRuntime && acpModes"
+              :icon="PhShieldCheck"
+              :label="acpModeLabel"
+              :items="acpModeItems"
+              :active="acpModes.currentModeId"
+              :title="`Permission mode: ${acpModeLabel}`"
+              detailed
+              @select="acpSelectMode"
+            />
           </div>
 
           <!-- Right: cost badge + abort/send -->
-          <div class="flex items-center gap-1.5">
+          <div class="composer-sendgroup">
             <span v-if="sessionCost > 0 && !busy" class="px-1 font-mono text-[10px] text-muted-foreground">${{ sessionCost.toFixed(4) }}</span>
             <button
               v-if="busy"
-              class="send-btn send-btn-abort"
-              :class="{ 'send-btn-stalled': stalled }"
+              class="composer-send composer-send-abort"
+              :class="{ 'composer-send-stalled': stalled }"
               :title="stalled ? 'No response for a while — looks stuck. Click to restart (Esc)' : 'Abort (Esc)'"
               @click="abortTurn"
             >
@@ -647,13 +526,13 @@
             </button>
             <button
               v-else-if="messageQueue.length > 0"
-              class="send-btn"
+              class="composer-send"
               disabled
               :title="`${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`"
             >
               {{ messageQueue.length }}
             </button>
-            <button v-else class="send-btn" :disabled="!inputText.trim()" @click="sendMessage()">
+            <button v-else class="composer-send" :disabled="!inputText.trim()" @click="sendMessage()">
               <PhArrowUp :size="14" weight="bold" />
             </button>
           </div>
@@ -707,6 +586,11 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useProvidersStore, chatTransportFor, binaryFor, type ChatTransport } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import ModelPicker from "@/components/ModelPicker.vue";
+import ComposerTextInput from "@/components/ComposerTextInput.vue";
+import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
+import ComposerImages from "@/components/composer/ComposerImages.vue";
+import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
+import { useComposerCompletion } from "@/lib/composerCompletion";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import CodexUserInputPanel, { type CodexUserInputQuestion } from "@/components/CodexUserInputPanel.vue";
 import { chatSession, replayChatStream } from "@/lib/chatSession";
@@ -714,7 +598,6 @@ import type { AcpConfigOption, AcpModes, CanUseToolReq, ChatMessage } from "@/li
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { playSound } from "@/lib/sounds";
-import { splitSkillTokens } from "@/lib/skillTokens";
 import { chatSettingKey } from "@/lib/chatSettings";
 import { splitMentions } from "@/lib/mentionTokens";
 import { editOf, fmtDuration, mergeEdits, type FileEdit } from "@/lib/chatTurns";
@@ -956,37 +839,16 @@ const acpModeLabel = computed(() => acpModes.value?.availableModes.find((m) => m
 const acpActiveModelId = computed(() => acpModelOption.value?.currentValue ?? "");
 const acpEffortLabel = computed(() => { const o = acpEffortOption.value; return o?.options.find((c) => c.value === o.currentValue)?.name ?? "Effort"; });
 
-const acpModeMenuOpen = ref(false);
-const acpModeBtnEl = ref<HTMLElement | null>(null);
-const acpModeMenuEl = ref<HTMLElement | null>(null);
-const acpModeMenuPos = ref({ top: 0, left: 0 });
-const acpModelMenuOpen = ref(false);
-const acpModelBtnEl = ref<HTMLElement | null>(null);
-const acpModelMenuEl = ref<HTMLElement | null>(null);
-const acpModelMenuPos = ref({ top: 0, left: 0 });
-const acpEffortMenuOpen = ref(false);
-const acpEffortBtnEl = ref<HTMLElement | null>(null);
-const acpEffortMenuEl = ref<HTMLElement | null>(null);
-const acpEffortMenuPos = ref({ top: 0, left: 0 });
-
-function openAcpMenu(which: "mode" | "model" | "effort") {
-  const btn = which === "mode" ? acpModeBtnEl.value : which === "effort" ? acpEffortBtnEl.value : acpModelBtnEl.value;
-  const openRef = which === "mode" ? acpModeMenuOpen : which === "effort" ? acpEffortMenuOpen : acpModelMenuOpen;
-  const posRef = which === "mode" ? acpModeMenuPos : which === "effort" ? acpEffortMenuPos : acpModelMenuPos;
-  const count = which === "mode" ? (acpModes.value?.availableModes.length ?? 0) : which === "effort" ? (acpEffortOption.value?.options.length ?? 0) : (acpModelOption.value?.options.length ?? 0);
-  const rowHeight = which === "mode" ? 64 : 36;
-  if (!openRef.value && btn) {
-    const r = btn.getBoundingClientRect();
-    posRef.value = { top: Math.max(8, Math.round(r.top - (count * rowHeight + 12) - 6)), left: Math.round(r.left) };
-  }
-  openRef.value = !openRef.value;
-}
-function onAcpMenuOutside(e: MouseEvent) {
-  const t = e.target as Node;
-  if (acpModeMenuOpen.value && !acpModeBtnEl.value?.contains(t) && !acpModeMenuEl.value?.contains(t)) acpModeMenuOpen.value = false;
-  if (acpModelMenuOpen.value && !acpModelBtnEl.value?.contains(t) && !acpModelMenuEl.value?.contains(t)) acpModelMenuOpen.value = false;
-  if (acpEffortMenuOpen.value && !acpEffortBtnEl.value?.contains(t) && !acpEffortMenuEl.value?.contains(t)) acpEffortMenuOpen.value = false;
-}
+// The adapter reports its own selector sets, so the pill items are derived
+// rather than declared. Same shape as Claude's below — one pill component.
+const acpEffortItems = computed<ComposerPillItem[]>(() =>
+  (acpEffortOption.value?.options ?? []).map((c) => ({ id: c.value, label: c.name, title: c.description })),
+);
+const acpModeItems = computed<ComposerPillItem[]>(() =>
+  (acpModes.value?.availableModes ?? []).map((m) => ({
+    id: m.id, label: m.name, description: m.description, icon: acpModeIcon(m.id),
+  })),
+);
 // Request ids of OUR OWN restore pushes. The reply to a restore carries the
 // adapter's selector set again, so re-restoring from it is what would ping-pong
 // forever — skipping just those replies breaks the loop, while every OTHER
@@ -997,7 +859,6 @@ function onAcpMenuOutside(e: MouseEvent) {
 const acpRestorePushIds = new Set<number>();
 
 async function acpSelectMode(modeId: string, userPick = true) {
-  acpModeMenuOpen.value = false;
   if (acpModes.value) acpModes.value.currentModeId = modeId;
   setAcpSetting(props.chatId, "mode", modeId);
   try {
@@ -1009,7 +870,6 @@ async function acpSelectMode(modeId: string, userPick = true) {
   }
 }
 async function acpSelectModel(value: string, userPick = true) {
-  acpModelMenuOpen.value = false;
   if (acpModelOption.value) acpModelOption.value.currentValue = value;
   setAcpSetting(props.chatId, "model", value);
   try {
@@ -1021,7 +881,6 @@ async function acpSelectModel(value: string, userPick = true) {
   }
 }
 async function acpSelectEffort(value: string, userPick = true) {
-  acpEffortMenuOpen.value = false;
   if (acpEffortOption.value) acpEffortOption.value.currentValue = value;
   setAcpSetting(props.chatId, "effort", value);
   try {
@@ -1140,25 +999,10 @@ function saveProfileId(id: number, profileId: string) {
 }
 const selectedProfileId = ref<string>(loadProfileId(props.chatId));
 const selectedProfile = computed(() => chatAgents.byId(selectedProfileId.value) ?? claudeProfiles.value[0]);
-const profileMenuOpen = ref(false);
-const profileBtnEl = ref<HTMLElement | null>(null);
-const profileMenuEl = ref<HTMLElement | null>(null);
-const profileMenuPos = ref({ bottom: 0, left: 0 });
-function toggleProfileMenu() {
-  if (!profileMenuOpen.value && profileBtnEl.value) {
-    const r = profileBtnEl.value.getBoundingClientRect();
-    profileMenuPos.value = { bottom: Math.round(window.innerHeight - r.top + 4), left: Math.round(r.left) };
-  }
-  profileMenuOpen.value = !profileMenuOpen.value;
-}
-function onProfileMenuOutside(e: MouseEvent) {
-  if (!profileMenuOpen.value) return;
-  const t = e.target as Node;
-  if (profileBtnEl.value?.contains(t) || profileMenuEl.value?.contains(t)) return;
-  profileMenuOpen.value = false;
-}
+const profileItems = computed<ComposerPillItem[]>(() =>
+  claudeProfiles.value.map((p) => ({ id: p.id, label: p.name, hint: p.configDir || undefined })),
+);
 async function selectProfile(id: string) {
-  profileMenuOpen.value = false;
   if (id === selectedProfileId.value) return;
   selectedProfileId.value = id;
   saveProfileId(props.chatId, id);
@@ -1282,25 +1126,7 @@ function saveChatEffort(effort: ClaudeEffort) {
 }
 const selectedEffort = ref<ClaudeEffort>(loadEffort());
 const selectedEffortLabel = computed(() => CLAUDE_EFFORTS.find((option) => option.id === selectedEffort.value)?.label ?? "High effort");
-const effortMenuOpen = ref(false);
-const effortBtnEl = ref<HTMLElement | null>(null);
-const effortMenuEl = ref<HTMLElement | null>(null);
-const effortMenuPos = ref({ top: 0, left: 0 });
-function toggleEffortMenu() {
-  if (!effortMenuOpen.value && effortBtnEl.value) {
-    const r = effortBtnEl.value.getBoundingClientRect();
-    effortMenuPos.value = { top: Math.round(r.top - CLAUDE_EFFORTS.length * 36 - 18), left: Math.round(r.left) };
-  }
-  effortMenuOpen.value = !effortMenuOpen.value;
-}
-function onEffortMenuOutside(e: MouseEvent) {
-  if (!effortMenuOpen.value) return;
-  const t = e.target as Node;
-  if (effortBtnEl.value?.contains(t) || effortMenuEl.value?.contains(t)) return;
-  effortMenuOpen.value = false;
-}
 async function selectEffort(effort: ClaudeEffort) {
-  effortMenuOpen.value = false;
   if (effort === selectedEffort.value) return;
   selectedEffort.value = effort;
   saveChatEffort(effort);
@@ -1553,38 +1379,6 @@ const BUILTIN_COMMANDS: Command[] = [
 ];
 
 const allCommands = ref<Command[]>([...BUILTIN_COMMANDS]);
-const skillCommands = ref<Command[]>([]); // installed skills, completed via `$`
-
-// Skill pills in the composer: backdrop re-render of the input with /skill
-// tokens highlighted (see composer.css .skill-pill / .composer-ghost).
-const hlEl = ref<HTMLElement | null>(null);
-const skillNames = computed(() => skillCommands.value.map((c) => c.name));
-const skillParts = computed(() => splitSkillTokens(inputText.value, skillNames.value));
-const hasSkillPill = computed(() => skillParts.value.some((p) => p.pill));
-function syncHighlightScroll() {
-  if (hlEl.value && inputEl.value) hlEl.value.scrollTop = inputEl.value.scrollTop;
-}
-const suggestions = ref<Command[]>([]);
-const suggestionIdx = ref(0);
-
-// @-mention file completion — lazy repo file list (git ls-files), filtered on `@query`.
-const fileList = ref<string[]>([]);
-let fileListLoaded = false;
-const atSuggestions = ref<string[]>([]);
-const atIdx = ref(0);
-
-async function ensureFileList() {
-  if (fileListLoaded) return;
-  fileListLoaded = true;
-  try {
-    const out = await invoke<{ stdout: string }>("run_git", {
-      cwd: props.cwd,
-      args: ["ls-files", "--cached", "--others", "--exclude-standard"],
-    });
-    fileList.value = out.stdout.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 20000);
-  } catch { fileList.value = []; }
-}
-
 
 interface AccountInfo {
   email: string;
@@ -1677,8 +1471,21 @@ let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 // event that teardown emits doesn't fire a spurious "Claude finished" toast.
 const pendingImages = ref<string[]>([]); // data URIs
 const scrollEl = ref<HTMLElement | null>(null);
-const inputEl = ref<HTMLTextAreaElement | null>(null);
-const suggestionsEl = ref<HTMLElement | null>(null);
+const inputEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
+/** The live textarea, for the caret / auto-resize reads the wrapper can't do. */
+const inputTextarea = () => inputEl.value?.element ?? null;
+
+// @file / $skill / /command completion and the skill pills, shared with the
+// welcome composer (lib/composerCompletion.ts) so the two cannot drift.
+const completion = useComposerCompletion({
+  text: inputText,
+  element: () => inputEl.value?.element,
+  cwd: () => props.cwd,
+  commands: allCommands,
+  onApplied: autoResize,
+});
+const { hlEl, skillParts, hasSkillPill, suggestions, activeIndex } = completion;
+
 // Attach the acp-data/acp-req listeners if not already. onMounted only attaches
 // them when the chat STARTS as an ACP agent; switching to an ACP agent at runtime
 // (selectAgent → clearChat → acp_start) must attach them too, or every adapter
@@ -1742,25 +1549,9 @@ const ACP_MODE_ICON: Record<string, unknown> = {
   "full-access": PhShieldWarning,
 };
 function acpModeIcon(id: string): unknown { return ACP_MODE_ICON[id] ?? PhShieldCheck; }
-const permMenuOpen = ref(false);
-const permBtnEl = ref<HTMLElement | null>(null);
-const permMenuEl = ref<HTMLElement | null>(null);
-// The menu is teleported + position:fixed, so anchor it to the button's rect.
-const permMenuPos = ref({ top: 0, left: 0 });
-function togglePermMenu() {
-  if (!permMenuOpen.value && permBtnEl.value) {
-    const r = permBtnEl.value.getBoundingClientRect();
-    const menuH = PERM_MODES.length * 64 + 12;
-    permMenuPos.value = { top: Math.max(8, Math.round(r.top - menuH - 6)), left: Math.round(r.left) };
-  }
-  permMenuOpen.value = !permMenuOpen.value;
-}
-function onPermMenuOutside(e: MouseEvent) {
-  if (!permMenuOpen.value) return;
-  const t = e.target as Node;
-  if (permBtnEl.value?.contains(t) || permMenuEl.value?.contains(t)) return;
-  permMenuOpen.value = false;
-}
+const permItems = computed<ComposerPillItem[]>(() => PERM_MODES.map((m) => ({
+  id: m, ...PERM_META[m], icon: PERM_ICON[m],
+})));
 
 // Same ntfy gating as Terminal.vue (enabled, topic set, event subscribed, away-only).
 function maybeNtfy(event: NtfyEvent, message: string) {
@@ -2799,7 +2590,6 @@ async function respondPlan(approve: boolean) {
 // RPC runtimes update the active thread in place; restarting them loses the
 // pending approval context and was the source of "unknown agent session" errors.
 async function selectPermMode(mode: PermMode) {
-  permMenuOpen.value = false;
   if (mode === permMode.value) return;
 
   const previousMode = permMode.value;
@@ -2921,98 +2711,6 @@ async function clearChat() {
   await S.listenClaude();
 }
 
-// `/cmd` or `$skill` token immediately before the cursor — at line start OR after
-// whitespace, so command help works mid-message, not only when the input starts
-// with the trigger. `/` completes built-in commands, `$` completes skills; both
-// insert `/name` (the invocation Claude understands — `$` is only the menu trigger).
-function slashQueryBeforeCursor(): { lead: string; q: string; full: string; trigger: string } | null {
-  const el = inputEl.value;
-  const pos = el?.selectionStart ?? inputText.value.length;
-  const upto = inputText.value.slice(0, pos);
-  const m = upto.match(/(^|\s)([/$])([^\s/$]*)$/);
-  return m ? { lead: m[1], trigger: m[2], q: m[3], full: m[0] } : null;
-}
-
-function updateSuggestions() {
-  const m = slashQueryBeforeCursor();
-  if (!m) { suggestions.value = []; return; }
-  const q = m.q.toLowerCase();
-  const source = m.trigger === "$" ? skillCommands.value : allCommands.value;
-  suggestions.value = source.filter(
-    (c) => c.name.toLowerCase().startsWith(q)
-  );
-  suggestionIdx.value = 0;
-}
-
-function applySuggestion(name: string) {
-  const el = inputEl.value;
-  const pos = el?.selectionStart ?? inputText.value.length;
-  const m = slashQueryBeforeCursor();
-  if (!m) { inputText.value = `/${name} `; }
-  else {
-    const upto = inputText.value.slice(0, pos);
-    const after = inputText.value.slice(pos);
-    const base = upto.slice(0, upto.length - m.full.length);
-    inputText.value = `${base}${m.lead}/${name} ${after}`;
-  }
-  suggestions.value = [];
-  nextTick(() => { inputEl.value?.focus(); autoResize(); });
-}
-
-function scrollSuggestionIntoView(idx: number) {
-  nextTick(() => {
-    if (!suggestionsEl.value) return;
-    const items = suggestionsEl.value.querySelectorAll(".cmd-suggestion");
-    items[idx]?.scrollIntoView({ block: "nearest" });
-  });
-}
-
-// ── @-mention: complete a file path from the repo file list ─────────────────
-function atQueryBeforeCursor(): string | null {
-  const el = inputEl.value;
-  const pos = el?.selectionStart ?? inputText.value.length;
-  const upto = inputText.value.slice(0, pos);
-  const m = upto.match(/(?:^|\s)@([^\s@]*)$/);
-  return m ? m[1] : null;
-}
-
-async function updateAtSuggestions() {
-  const q = atQueryBeforeCursor();
-  if (q === null) { atSuggestions.value = []; return; }
-  await ensureFileList();
-  if (atQueryBeforeCursor() !== q) return; // cursor moved while loading
-  const ql = q.toLowerCase();
-  atSuggestions.value = fileList.value
-    .filter((p) => p.toLowerCase().includes(ql))
-    .sort((a, b) => {
-      const ab = a.slice(a.lastIndexOf("/") + 1).toLowerCase();
-      const bb = b.slice(b.lastIndexOf("/") + 1).toLowerCase();
-      return (Number(!ab.startsWith(ql)) - Number(!bb.startsWith(ql))) || a.length - b.length;
-    })
-    .slice(0, 8);
-  atIdx.value = 0;
-}
-
-function applyAtSuggestion(path: string) {
-  const el = inputEl.value;
-  const pos = el?.selectionStart ?? inputText.value.length;
-  const upto = inputText.value.slice(0, pos);
-  const after = inputText.value.slice(pos);
-  const m = upto.match(/@([^\s@]*)$/);
-  if (!m) return;
-  // Insert the @path inline where it was typed (rendered as a pill in the bubble).
-  const base = upto.slice(0, upto.length - m[0].length);
-  const sep = after.startsWith(" ") ? "" : " ";
-  inputText.value = `${base}@${path}${sep}${after}`;
-  atSuggestions.value = [];
-  nextTick(() => {
-    inputEl.value?.focus();
-    autoResize();
-    const el2 = inputEl.value;
-    if (el2) { const c = base.length + path.length + 1 + sep.length; el2.selectionStart = el2.selectionEnd = c; }
-  });
-}
-
 function onKeydown(e: KeyboardEvent) {
   if (pendingPermission.value || pendingDiff.value) {
     if (e.key === "y" || e.key === "Y") { e.preventDefault(); respondPermission(true); return; }
@@ -3028,44 +2726,19 @@ function onKeydown(e: KeyboardEvent) {
       e.preventDefault();
       inputText.value = lastUser.text;
       messages.value = messages.value.filter((m) => m !== lastUser);
-      nextTick(() => { inputEl.value?.focus(); autoResize(); const el = inputEl.value; if (el) el.selectionStart = el.selectionEnd = el.value.length; });
+      nextTick(() => { inputEl.value?.focus(); autoResize(); const el = inputTextarea(); if (el) el.selectionStart = el.selectionEnd = el.value.length; });
       return;
     }
   }
-  if (atSuggestions.value.length > 0) {
-    if (e.key === "ArrowDown") { e.preventDefault(); atIdx.value = Math.min(atIdx.value + 1, atSuggestions.value.length - 1); return; }
-    if (e.key === "ArrowUp") { e.preventDefault(); atIdx.value = Math.max(atIdx.value - 1, 0); return; }
-    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); applyAtSuggestion(atSuggestions.value[atIdx.value]); return; }
-    if (e.key === "Escape") { atSuggestions.value = []; return; }
-  }
-  if (suggestions.value.length > 0) {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      suggestionIdx.value = Math.min(suggestionIdx.value + 1, suggestions.value.length - 1);
-      scrollSuggestionIntoView(suggestionIdx.value);
-      return;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      suggestionIdx.value = Math.max(suggestionIdx.value - 1, 0);
-      scrollSuggestionIntoView(suggestionIdx.value);
-      return;
-    }
-    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-      e.preventDefault();
-      applySuggestion(suggestions.value[suggestionIdx.value].name);
-      return;
-    }
-    if (e.key === "Escape") { suggestions.value = []; return; }
-  }
+  // Suggestion nav claims Arrow/Tab/Enter/Escape while the list is open, so it
+  // has to run before the Enter-sends check below.
+  if (completion.handleKeydown(e)) return;
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
 
 function onInput() {
   autoResize();
-  updateSuggestions();
-  updateAtSuggestions();
-  nextTick(syncHighlightScroll);
+  void completion.update();
 }
 
 function onPaste(e: ClipboardEvent) {
@@ -3086,7 +2759,7 @@ function onPaste(e: ClipboardEvent) {
 }
 
 function autoResize() {
-  const el = inputEl.value;
+  const el = inputTextarea();
   if (!el) return;
   el.style.height = "auto";
   el.style.height = Math.min(el.scrollHeight, 160) + "px";
@@ -3094,7 +2767,7 @@ function autoResize() {
 
 function onWindowKeydown(e: KeyboardEvent) {
   if (!pendingPermission.value && !pendingDiff.value) return;
-  if (document.activeElement === inputEl.value) return; // handled by onKeydown
+  if (document.activeElement === inputTextarea()) return; // handled by onKeydown
   if (e.key === "y" || e.key === "Y") { e.preventDefault(); respondPermission(true); }
   if (e.key === "n" || e.key === "N") { e.preventDefault(); respondPermission(false); }
 }
@@ -3320,10 +2993,6 @@ onMounted(async () => {
   if (props.isWatching ?? true) chats.markSeen(props.chatId);
   window.addEventListener("focus", onWindowFocus);
   window.addEventListener("keydown", onWindowKeydown);
-  window.addEventListener("mousedown", onPermMenuOutside);
-  window.addEventListener("mousedown", onEffortMenuOutside);
-  window.addEventListener("mousedown", onProfileMenuOutside);
-  window.addEventListener("mousedown", onAcpMenuOutside);
   // Float (compact) control chat: pre-allow `burrow` Bash commands so routine
   // control calls (focus/list/new-tab/spawn) don't prompt every time. User can
   // still tighten via the perm-mode switch / Deny.
@@ -3348,16 +3017,6 @@ onMounted(async () => {
     .then((info) => { accountInfo.value = info; })
     .catch(() => {});
 
-  // Load installed skills into the `$` completion list (`/` stays built-ins only).
-  // Map-based dedup ensures no duplicates regardless of list_skills returning overlaps.
-  try {
-    const skills = await invoke<{ name: string; description: string; enabled: boolean }[]>("list_skills");
-    const merged = new Map<string, Command>();
-    for (const s of skills) {
-      if (s.enabled) merged.set(s.name, { name: s.name, description: s.description || `/${s.name} skill` });
-    }
-    skillCommands.value = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
-  } catch { /* browser-only dev without Tauri */ }
 });
 
 onBeforeUnmount(() => {
@@ -3366,10 +3025,6 @@ onBeforeUnmount(() => {
   if (stallTimer) clearInterval(stallTimer);
   window.removeEventListener("focus", onWindowFocus);
   window.removeEventListener("keydown", onWindowKeydown);
-  window.removeEventListener("mousedown", onPermMenuOutside);
-  window.removeEventListener("mousedown", onEffortMenuOutside);
-  window.removeEventListener("mousedown", onProfileMenuOutside);
-  window.removeEventListener("mousedown", onAcpMenuOutside);
   // Hand the session back instead of unsubscribing: it drops its listeners only
   // when nothing is in flight (lib/chatSession.ts). A turn running in a tab the
   // user navigated away from keeps streaming into the session and is simply
@@ -3399,7 +3054,7 @@ function focusInput() {
 function getPermMode(): PermMode {
   return permMode.value;
 }
-defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands, getPermMode, selectPermMode, permMode });
+defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode, selectPermMode, permMode });
 </script>
 
 <style scoped>
@@ -3439,60 +3094,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .btn-danger-active { color: var(--red, #ef4444) !important; background: color-mix(in srgb, var(--red, #ef4444) 15%, transparent) !important; }
 .btn-active { color: var(--chat-accent) !important; background: color-mix(in srgb, var(--chat-accent) 15%, transparent) !important; }
 
-/* Permission-mode dropdown */
-.perm-mode-dropdown { position: relative; display: flex; }
-.perm-mode-menu {
-  position: fixed;
-  z-index: 1000;
-  min-width: 330px;
-  padding: 5px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  /* Match the provider/model picker: all composer popovers share one surface. */
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
-.perm-mode-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  width: 100%;
-  min-height: 58px;
-  padding: 9px 10px;
-  background: none;
-  border: none;
-  border-radius: 8px;
-  color: var(--chat-text-secondary);
-  font-size: 13.5px;
-  font-weight: 550;
-  text-align: left;
-  cursor: pointer;
-  transition: color .12s ease-out, background-color .12s ease-out;
-}
-.perm-mode-item > svg { flex: 0 0 auto; margin-top: 1px; color: var(--chat-muted); }
-.perm-mode-item:hover,
-.perm-mode-item:focus-visible {
-  color: var(--chat-text);
-  background: var(--bg-hover) !important;
-  outline: none;
-}
-.perm-mode-item:hover > svg { color: var(--chat-accent); }
-.perm-mode-item-active { color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 12%, transparent); }
-.perm-mode-item-active > svg { color: var(--chat-accent); }
-.perm-mode-item-danger { color: var(--red, #ef4444); }
-.perm-mode-item-danger:hover,
-.perm-mode-item-danger:focus-visible {
-  background: var(--bg-hover) !important;
-}
-.perm-mode-item-danger.perm-mode-item-active { color: var(--red, #ef4444); background: color-mix(in srgb, var(--red, #ef4444) 14%, transparent); }
-.perm-mode-copy { display: grid; gap: 3px; min-width: 0; text-align: left; }
-.perm-mode-copy > span:last-child { color: var(--chat-muted); font-size: 11.5px; font-weight: 400; line-height: 1.35; }
-.perm-mode-item:hover .perm-mode-copy > span:last-child,
-.perm-mode-item-active .perm-mode-copy > span:last-child { color: color-mix(in srgb, currentColor 68%, var(--chat-muted)); }
-.perm-mode-label { font-size: 12px; font-weight: 650; }
-.perm-mode-caret { opacity: .6; margin-left: -1px; }
 
 /* Permission-gate banners: shared animation */
 .perm-slide-in { animation: perm-slide-in 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
@@ -3828,125 +3429,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 /* Command suggestions */
 .cmd-suggestion.selected { background: color-mix(in srgb, var(--chat-text) 5%, transparent); }
 
-/* Input toolbar buttons — bordered flat pill chips (model/mode/effort/profile
-   pickers), not plain text buttons: --surface-elevated fill, --border stroke,
-   --radius-chip radius, ~27px tall. */
-.toolbar-btn {
-  background: var(--surface-elevated);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 27px;
-  padding: 0 9px;
-  border-radius: var(--radius-chip);
-  font-size: 12px;
-  font-family: var(--font-ui);
-  transition: color .12s ease-out, background .12s ease-out, border-color .12s ease-out;
-}
-.toolbar-btn:hover {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 8%, var(--surface-elevated));
-  border-color: color-mix(in srgb, var(--text-primary) 20%, var(--border));
-}
-.toolbar-btn-label { font-weight: 500; }
-.btn-caret { opacity: 0.6; }
-
-/* Model / floating menus */
-.model-dropdown { position: relative; }
-
-.floating-menu {
-  position: fixed;
-  z-index: 1000;
-  min-width: 200px;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
-.floating-menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 7px 10px;
-  background: none;
-  border: none;
-  border-radius: 8px;
-  color: var(--chat-text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  transition: color .12s ease-out, background-color .12s ease-out;
-  gap: 6px;
-}
-.floating-menu-item:hover,
-.floating-menu-item:focus-visible {
-  color: var(--chat-text);
-  background: var(--bg-hover) !important;
-  outline: none;
-}
-.floating-menu-item-active { color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 12%, transparent); }
-.model-id-hint {
-  font-size: 9px;
-  font-family: var(--font-mono);
-  color: var(--chat-muted);
-  margin-left: 6px;
-}
-.floating-menu-item > .model-id-hint { margin-left: auto; }
-
-.agent-dropdown { position: relative; display: inline-flex; }
-
-/* Send button — filled accent circle, no border, no drop shadow. */
-.send-btn {
-  background: var(--agent-accent, var(--accent));
-  border: none;
-  border-radius: var(--radius-pill);
-  color: #fff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  transition: background .12s ease-out, opacity .12s ease-out, transform .15s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--agent-accent, var(--accent)) 80%, #000); transform: translateY(-1px); }
-.send-btn:active:not(:disabled) { transform: translateY(0); }
-.send-btn:disabled { opacity: 0.35; cursor: default; }
-.send-btn-abort { background: var(--red, #dc2626); }
-.send-btn-abort:hover:not(:disabled) { background: color-mix(in srgb, var(--red, #dc2626) 80%, #000); }
-.send-btn-stalled { animation: send-btn-stalled-pulse 1.6s ease-in-out infinite; }
-@keyframes send-btn-stalled-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red, #dc2626) 55%, transparent); }
-  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--red, #dc2626) 0%, transparent); }
-}
-
-.pending-img-remove {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 18px;
-  height: 18px;
-  background: var(--chat-dropdown);
-  border: 1px solid var(--chat-border);
-  border-radius: 50%;
-  color: var(--chat-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition: color .1s ease-out, background .1s ease-out;
-}
-.pending-img-remove:hover { color: var(--red, #f87171); background: color-mix(in srgb, var(--red, #f87171) 18%, transparent); }
 
 /* Markdown body inside assistant messages — v-html content, needs real
    selectors (:deep) since these elements aren't authored in this SFC. */

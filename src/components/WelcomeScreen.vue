@@ -44,164 +44,69 @@
             placeholder="Ask for changes, send follow-ups, or attach images"
             rows="3"
             autofocus
-            @input="onComposerInput"
+            @input="completion.update"
             @keydown="onComposerKeydown"
             @paste="onPaste"
-            @scroll="syncHighlightScroll"
+            @scroll="completion.syncHighlightScroll"
           />
         </div>
-        <!-- $skill suggestions (inserts /name — same invocation AgentChat uses) -->
-        <div v-if="skillSuggestions.length > 0" class="max-h-[200px] overflow-y-auto border-t border-border">
-          <div
-            v-for="(s, i) in skillSuggestions"
-            :key="s.name"
-            class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-hover"
-            :class="{ '!bg-hover': i === skillIdx }"
-            @mousedown.prevent="applySkillSuggestion(s.name)"
-          >
-            <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-accent">/{{ s.name }}</span>
-            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ s.description }}</span>
-          </div>
-        </div>
-        <!-- @-mention file suggestions -->
-        <div v-if="atSuggestions.length > 0" class="max-h-[200px] overflow-y-auto border-t border-border">
-          <div
-            v-for="(p, i) in atSuggestions"
-            :key="p"
-            class="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 transition-colors hover:bg-hover"
-            :class="{ '!bg-hover': i === atIdx }"
-            @mousedown.prevent="applyAtSuggestion(p)"
-          >
-            <span class="min-w-[100px] flex-shrink-0 font-mono text-xs font-semibold text-accent">@{{ p.slice(p.lastIndexOf('/') + 1) }}</span>
-            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">{{ p }}</span>
-          </div>
-        </div>
-        <div v-if="pendingImages.length" class="welcome-image-previews">
-          <div v-for="(image, index) in pendingImages" :key="image" class="welcome-image-preview">
-            <img :src="image" :alt="'Attached image ' + (index + 1)" />
-            <button type="button" class="welcome-image-remove" :aria-label="'Remove attached image ' + (index + 1)" @click="pendingImages.splice(index, 1)">
-              <PhX :size="11" weight="bold" />
-            </button>
-          </div>
-        </div>
+        <!-- @file / $skill completion (`$` inserts /name — the invocation the agent understands) -->
+        <ComposerSuggestions :items="suggestions" :active-index="activeIndex" @pick="completion.apply" />
+        <ComposerImages v-model="pendingImages" />
         <template #toolbar>
-        <div class="welcome-toolbar">
-          <div class="welcome-pillbar">
-            <ModelPicker :agent-id="selectedAgentId" :model-id="selectedModel" :cwd="target.path" @select="onModelSelect" />
-            <template v-if="isClaude">
-              <DropdownMenuRoot>
-                <DropdownMenuTrigger as-child>
-                  <button class="welcome-pill" type="button">
-                    {{ selectedEffortLabel }}
-                    <PhCaretDown :size="9" weight="bold" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top" class="min-w-[170px]">
-                  <DropdownMenuItem
-                    v-for="e in CLAUDE_EFFORTS"
-                    :key="e.id"
-                    class="text-[11.5px]"
-                    :class="{ 'text-foreground bg-accent/10': e.id === selectedEffort }"
-                    @select="pickEffort(e.id)"
-                  >{{ e.label }}</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenuRoot>
-              <DropdownMenuRoot>
-                <DropdownMenuTrigger as-child>
-                  <button class="welcome-pill" type="button">
-                    <PhShieldCheck :size="14" weight="bold" />
-                    {{ permMeta.label }}
-                    <PhCaretDown :size="9" weight="bold" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top" class="permission-menu min-w-[280px]">
-                  <DropdownMenuItem
-                    v-for="m in PERM_MODES"
-                    :key="m"
-                    class="permission-menu-item"
-                    :class="{ 'text-foreground bg-accent/10': m === selectedPermMode }"
-                    @select="pickPermMode(m)"
-                  >
-                    <component :is="PERM_ICON[m]" :size="17" weight="bold" class="permission-menu-icon" />
-                    <span class="permission-menu-copy">
-                      <span>{{ PERM_META[m].label }}</span>
-                      <span>{{ PERM_META[m].description }}</span>
-                    </span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenuRoot>
-            </template>
-            <template v-else-if="isCodex">
-              <DropdownMenuRoot v-if="codexEfforts.length">
-                <DropdownMenuTrigger as-child>
-                  <button class="welcome-pill" type="button">
-                    {{ codexEffort }}
-                    <PhCaretDown :size="9" weight="bold" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top" class="min-w-[170px]">
-                  <DropdownMenuItem
-                    v-for="e in codexEfforts"
-                    :key="e"
-                    class="text-[11.5px]"
-                    :class="{ 'text-foreground bg-accent/10': e === codexEffort }"
-                    @select="pickCodexEffort(e)"
-                  >{{ e }}</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenuRoot>
-              <DropdownMenuRoot>
-                <DropdownMenuTrigger as-child>
-                  <button class="welcome-pill" type="button">
-                    <PhShieldCheck :size="14" weight="bold" />
-                    {{ codexPermLabel }}
-                    <PhCaretDown :size="9" weight="bold" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top" class="permission-menu min-w-[280px]">
-                  <DropdownMenuItem
-                    v-for="m in CODEX_PERM_MODES"
-                    :key="m.id"
-                    class="permission-menu-item"
-                    :class="{ 'text-foreground bg-accent/10': m.id === codexPermMode }"
-                    @select="pickCodexPermMode(m.id)"
-                  >
-                    <component :is="m.icon" :size="17" weight="bold" class="permission-menu-icon" />
-                    <span class="permission-menu-copy">
-                      <span>{{ m.label }}</span>
-                      <span>{{ m.description }}</span>
-                    </span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenuRoot>
-            </template>
+          <div class="composer-toolbar">
+            <div class="composer-pillbar">
+              <ModelPicker :agent-id="selectedAgentId" :model-id="selectedModel" :cwd="target.path" @select="onModelSelect" />
+              <template v-if="isClaude">
+                <ComposerPill
+                  :label="selectedEffortLabel"
+                  :items="CLAUDE_EFFORTS"
+                  :active="selectedEffort"
+                  title="Claude reasoning effort"
+                  @select="pickEffort"
+                />
+                <ComposerPill
+                  :icon="PERM_ICON[selectedPermMode]"
+                  :label="permMeta.label"
+                  :items="permItems"
+                  :active="selectedPermMode"
+                  detailed
+                  @select="pickPermMode"
+                />
+              </template>
+              <template v-else-if="isCodex">
+                <ComposerPill
+                  v-if="codexEfforts.length"
+                  :label="codexEffort"
+                  :items="codexEffortItems"
+                  :active="codexEffort"
+                  title="Codex reasoning effort"
+                  @select="pickCodexEffort"
+                />
+                <ComposerPill
+                  :icon="PhShieldCheck"
+                  :label="codexPermLabel"
+                  :items="CODEX_PERM_MODES"
+                  :active="codexPermMode"
+                  detailed
+                  @select="pickCodexPermMode"
+                />
+              </template>
+            </div>
+            <div class="composer-sendgroup">
+              <ComposerPill
+                :icon="launchMode === 'chat' ? PhChatCenteredText : PhTerminal"
+                :items="launchItems"
+                :active="launchMode"
+                :title="`Send as ${launchMode === 'chat' ? 'chat' : 'terminal'}`"
+                align="end"
+                @select="pickMode"
+              />
+              <button class="composer-send" type="button" :disabled="!text.trim() || worktreeBusy" @click="submit">
+                <PhArrowUp :size="14" weight="bold" />
+              </button>
+            </div>
           </div>
-          <div class="welcome-sendgroup">
-            <DropdownMenuRoot>
-              <DropdownMenuTrigger as-child>
-                <button class="welcome-mode" type="button" :title="`Send as ${launchMode === 'chat' ? 'chat' : 'terminal'}`">
-                  <PhChatCenteredText v-if="launchMode === 'chat'" :size="12" />
-                  <PhTerminal v-else :size="12" />
-                  <PhCaretDown :size="9" weight="bold" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="top" class="min-w-[210px]">
-                <DropdownMenuItem
-                  class="text-[11.5px]"
-                  :class="{ 'text-foreground bg-accent/10': launchMode === 'chat' }"
-                  @select="pickMode('chat')"
-                >Chat UI — rich conversation</DropdownMenuItem>
-                <DropdownMenuItem
-                  class="text-[11.5px]"
-                  :class="{ 'text-foreground bg-accent/10': launchMode === 'terminal' }"
-                  @select="pickMode('terminal')"
-                >Terminal — run {{ terminalProgram }} in a PTY</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenuRoot>
-            <button class="welcome-send" type="button" :disabled="!text.trim() || worktreeBusy" @click="submit">
-              <PhArrowUp :size="14" weight="bold" />
-            </button>
-          </div>
-        </div>
         </template>
       </ComposerBox>
       <WorkspaceTargetPicker
@@ -228,7 +133,7 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch, nextTick } from "vue";
-import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhX, PhSparkle, PhPencilSimple, PhListChecks, PhFastForward, PhShieldWarning } from "@phosphor-icons/vue";
+import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhSparkle, PhPencilSimple, PhListChecks, PhFastForward, PhShieldWarning } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
@@ -241,8 +146,11 @@ import { modelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/cha
 import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
+import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
+import ComposerImages from "@/components/composer/ComposerImages.vue";
+import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
+import { useComposerCompletion } from "@/lib/composerCompletion";
 import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
-import { splitSkillTokens } from "@/lib/skillTokens";
 import { getProjectSettings } from "@/lib/projectSettings";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 
@@ -272,140 +180,18 @@ function cycleProvider() {
   onModelSelect(next.id, next.kind === "claude" ? getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id) : "");
 }
 
-// ── @file / $skill completion — mirrors AgentChat.vue's composer ────────────
-// `@` completes repo paths (git ls-files, lazy, per target repo); `$` completes
-// installed skills and inserts `/name` (the invocation Claude understands).
-const fileList = ref<string[]>([]);
-let fileListFor = ""; // path the cached list was loaded for
-const atSuggestions = ref<string[]>([]);
-const atIdx = ref(0);
-interface SkillCmd { name: string; description: string }
-const skillList = ref<SkillCmd[]>([]);
-let skillsLoaded = false;
-const skillSuggestions = ref<SkillCmd[]>([]);
-const skillIdx = ref(0);
-
-// Skill pills: backdrop re-render of the input with /skill tokens highlighted
-// (see composer.css .skill-pill / .composer-ghost).
-const hlEl = ref<HTMLElement | null>(null);
-const skillParts = computed(() => splitSkillTokens(text.value, skillList.value.map((s) => s.name)));
-const hasSkillPill = computed(() => skillParts.value.some((p) => p.pill));
-function syncHighlightScroll() {
-  const el = inputEl.value?.element;
-  if (hlEl.value && el) hlEl.value.scrollTop = el.scrollTop;
-}
-
-function caretPos(): number {
-  return inputEl.value?.element?.selectionStart ?? text.value.length;
-}
-
-async function ensureFileList() {
-  const path = target.value?.path ?? "";
-  if (!path || fileListFor === path) return;
-  fileListFor = path;
-  try {
-    const out = await invoke<{ stdout: string }>("run_git", {
-      cwd: path,
-      args: ["ls-files", "--cached", "--others", "--exclude-standard"],
-    });
-    fileList.value = out.stdout.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 20000);
-  } catch { fileList.value = []; }
-}
-
-async function ensureSkills() {
-  if (skillsLoaded) return;
-  skillsLoaded = true;
-  try {
-    const skills = await invoke<{ name: string; description: string; enabled: boolean }[]>("list_skills");
-    skillList.value = skills
-      .filter((s) => s.enabled)
-      .map((s) => ({ name: s.name, description: s.description || `/${s.name} skill` }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  } catch { skillList.value = []; }
-}
-
-function atQueryBeforeCursor(): string | null {
-  const m = text.value.slice(0, caretPos()).match(/(?:^|\s)@([^\s@]*)$/);
-  return m ? m[1] : null;
-}
-
-function skillQueryBeforeCursor(): string | null {
-  const m = text.value.slice(0, caretPos()).match(/(?:^|\s)\$([^\s/$]*)$/);
-  return m ? m[1] : null;
-}
-
-async function onComposerInput() {
-  nextTick(syncHighlightScroll);
-  const q = atQueryBeforeCursor();
-  if (q === null) { atSuggestions.value = []; }
-  else {
-    await ensureFileList();
-    if (atQueryBeforeCursor() === q) {
-      const ql = q.toLowerCase();
-      atSuggestions.value = fileList.value
-        .filter((p) => p.toLowerCase().includes(ql))
-        .sort((a, b) => {
-          const ab = a.slice(a.lastIndexOf("/") + 1).toLowerCase();
-          const bb = b.slice(b.lastIndexOf("/") + 1).toLowerCase();
-          return (Number(!ab.startsWith(ql)) - Number(!bb.startsWith(ql))) || a.length - b.length;
-        })
-        .slice(0, 8);
-      atIdx.value = 0;
-    }
-  }
-  const s = skillQueryBeforeCursor();
-  if (s === null) { skillSuggestions.value = []; }
-  else {
-    await ensureSkills();
-    if (skillQueryBeforeCursor() === s) {
-      const sl = s.toLowerCase();
-      skillSuggestions.value = skillList.value.filter((c) => c.name.toLowerCase().startsWith(sl)).slice(0, 8);
-      skillIdx.value = 0;
-    }
-  }
-}
-
-// Replace the trigger token before the cursor with `replacement` + a space.
-function replaceToken(tokenRe: RegExp, replacement: string) {
-  const pos = caretPos();
-  const upto = text.value.slice(0, pos);
-  const after = text.value.slice(pos);
-  const m = upto.match(tokenRe);
-  if (!m) return;
-  const base = upto.slice(0, upto.length - m[0].length);
-  const sep = after.startsWith(" ") ? "" : " ";
-  text.value = `${base}${replacement}${sep}${after}`;
-  nextTick(() => {
-    const el = inputEl.value?.element;
-    if (el) { el.focus(); const c = base.length + replacement.length + sep.length; el.selectionStart = el.selectionEnd = c; }
-  });
-}
-
-function applyAtSuggestion(path: string) {
-  replaceToken(/@([^\s@]*)$/, `@${path}`);
-  atSuggestions.value = [];
-}
-
-function applySkillSuggestion(name: string) {
-  replaceToken(/\$([^\s/$]*)$/, `/${name}`);
-  skillSuggestions.value = [];
-}
+// @file / $skill completion + skill pills — the same engine the chat composer
+// uses (lib/composerCompletion.ts), so the two cannot drift.
+const completion = useComposerCompletion({
+  text,
+  element: () => inputEl.value?.element,
+  cwd: () => target.value?.path ?? "",
+});
+const { hlEl, skillParts, hasSkillPill, suggestions, activeIndex } = completion;
 
 function onComposerKeydown(e: KeyboardEvent) {
-  const open = atSuggestions.value.length > 0 ? "at" : skillSuggestions.value.length > 0 ? "skill" : null;
-  if (open) {
-    const idx = open === "at" ? atIdx : skillIdx;
-    const len = open === "at" ? atSuggestions.value.length : skillSuggestions.value.length;
-    if (e.key === "ArrowDown") { e.preventDefault(); idx.value = Math.min(idx.value + 1, len - 1); return; }
-    if (e.key === "ArrowUp") { e.preventDefault(); idx.value = Math.max(idx.value - 1, 0); return; }
-    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-      e.preventDefault();
-      if (open === "at") applyAtSuggestion(atSuggestions.value[atIdx.value]);
-      else applySkillSuggestion(skillSuggestions.value[skillIdx.value].name);
-      return;
-    }
-    if (e.key === "Escape") { atSuggestions.value = []; skillSuggestions.value = []; return; }
-  }
+  // Completion first: Enter picks the highlighted suggestion instead of sending.
+  if (completion.handleKeydown(e)) return;
   if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
     e.preventDefault();
     submit();
@@ -474,13 +260,13 @@ function onModelSelect(agentId: string, modelId: string) {
   }
 }
 
-const CLAUDE_EFFORTS = [
+const CLAUDE_EFFORTS: ComposerPillItem[] = [
   { id: "low", label: "Low effort" },
   { id: "medium", label: "Medium effort" },
   { id: "high", label: "High effort" },
   { id: "xhigh", label: "Extra high" },
   { id: "max", label: "Max effort" },
-] as const;
+];
 const selectedEffort = ref(getConfig<string>("chatClaudeEffort", "high"));
 const selectedEffortLabel = computed(() => CLAUDE_EFFORTS.find((e) => e.id === selectedEffort.value)?.label ?? "High effort");
 function pickEffort(id: string) { selectedEffort.value = id; setConfig("chatClaudeEffort", id); }
@@ -503,14 +289,20 @@ const PERM_ICON: Record<PermMode, unknown> = {
   dontAsk: PhFastForward,
   bypassPermissions: PhShieldWarning,
 };
+const permItems = computed<ComposerPillItem[]>(() => PERM_MODES.map((m) => ({
+  id: m,
+  ...PERM_META[m],
+  icon: PERM_ICON[m],
+  danger: m === "bypassPermissions",
+})));
 interface ChatPermissionModeConfig { byChat: Record<string, string>; last?: string; dangerousByChat: Record<string, boolean> }
 const selectedPermMode = ref<PermMode>((() => {
   const last = getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }).last;
   return (PERM_MODES as string[]).includes(last ?? "") ? (last as PermMode) : "default";
 })());
 const permMeta = computed(() => PERM_META[selectedPermMode.value]);
-function pickPermMode(mode: PermMode) {
-  selectedPermMode.value = mode;
+function pickPermMode(mode: string) {
+  selectedPermMode.value = mode as PermMode;
   // ClaudeChat.vue's loadPermMode() falls back to this "last used" value for
   // any chat id it hasn't seen before — the chat we're about to create included.
   const cfg = { ...getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }) };
@@ -650,19 +442,20 @@ watch([selectedAgentId, () => target.value?.path], () => {
 }, { immediate: true });
 
 const codexEfforts = computed(() => effortsFor(selectedAgentId.value, selectedModel.value));
+const codexEffortItems = computed<ComposerPillItem[]>(() => codexEfforts.value.map((e) => ({ id: e, label: e })));
 const codexEffort = computed(() =>
   lastAcp("effort") ?? defaultEffortFor(selectedAgentId.value, selectedModel.value) ?? codexEfforts.value[0] ?? ""
 );
 function pickCodexEffort(id: string) { saveAcp("effort", id); }
 
 // Mirrors codexModes() in src-wails/acp.go — keep the ids in sync.
-const CODEX_PERM_MODES = [
+const CODEX_PERM_MODES: ComposerPillItem[] = [
   { id: "read-only", label: "Supervised", description: "Ask before commands and file changes.", icon: PhShieldCheck },
   { id: "auto-accept-edits", label: "Auto-accept edits", description: "Auto-approve edits, ask before other actions.", icon: PhPencilSimple },
   { id: "auto", label: "Auto", description: "Codex reviews routine actions automatically; risky actions still ask.", icon: PhSparkle },
   { id: "dontAsk", label: "Don't ask", description: "No approval prompts, still confined to the workspace.", icon: PhFastForward },
-  { id: "full-access", label: "Full access", description: "Allow commands and edits without prompts.", icon: PhShieldWarning },
-] as const;
+  { id: "full-access", label: "Full access", description: "Allow commands and edits without prompts.", icon: PhShieldWarning, danger: true },
+];
 const codexPermMode = computed(() => lastAcp("mode") ?? "auto");
 const codexPermLabel = computed(() => CODEX_PERM_MODES.find((m) => m.id === codexPermMode.value)?.label ?? "Auto");
 function pickCodexPermMode(id: string) { saveAcp("mode", id); }
@@ -671,8 +464,12 @@ function pickCodexPermMode(id: string) { saveAcp("mode", id); }
 // prompt is the same either way — only the surface it lands in differs.
 type LaunchMode = "chat" | "terminal";
 const launchMode = ref<LaunchMode>(getConfig<LaunchMode>("welcomeLaunchMode", "chat") === "terminal" ? "terminal" : "chat");
-function pickMode(m: LaunchMode) { launchMode.value = m; setConfig("welcomeLaunchMode", m); }
+function pickMode(m: string) { launchMode.value = m as LaunchMode; setConfig("welcomeLaunchMode", m); }
 const terminalProgram = computed(() => terminalProgramFor({ kind: selectedAgent.value.kind, command: binaryFor(selectedAgent.value) }));
+const launchItems = computed<ComposerPillItem[]>(() => [
+  { id: "chat", label: "Chat UI — rich conversation" },
+  { id: "terminal", label: `Terminal — run ${terminalProgram.value} in a PTY` },
+]);
 
 // A project can pin its own agent/model (Project Settings → General); the
 // app-wide default only applies where it hasn't.
@@ -832,141 +629,6 @@ async function submit() {
   line-height: 1.5;
 }
 .welcome-input::placeholder { color: var(--text-muted); }
-
-.welcome-image-previews {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.welcome-image-preview {
-  position: relative;
-  height: 64px;
-  width: 64px;
-}
-
-.welcome-image-preview img {
-  display: block;
-  height: 100%;
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  object-fit: cover;
-}
-
-.welcome-image-remove {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--bg-panel);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.welcome-image-remove:hover { color: var(--text-primary); background: var(--bg-hover); }
-
-.welcome-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Borderless ghost pills that wrap instead of scrolling — no frame, no scrollbar. */
-.welcome-pillbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.welcome-pill {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 8px;
-  border-radius: 6px;
-}
-.welcome-pill:hover { color: var(--text-primary); background: var(--bg-hover); }
-
-:deep(.permission-menu) {
-  padding: 5px;
-  background: var(--bg-panel);
-  border-color: var(--border);
-  border-radius: 12px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
-}
-.permission-menu-item {
-  height: auto;
-  min-height: 60px;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px;
-  border-radius: 8px;
-  white-space: normal;
-}
-.permission-menu-icon { flex: 0 0 auto; margin-top: 1px; color: var(--text-muted); }
-.permission-menu-copy { display: grid; gap: 3px; min-width: 0; font-size: 13.5px; font-weight: 550; line-height: 1.2; }
-.permission-menu-copy > span:last-child { color: var(--text-muted); font-size: 11.5px; font-weight: 400; line-height: 1.35; }
-.permission-menu-item:hover,
-.permission-menu-item[data-highlighted],
-.permission-menu-item:focus-visible {
-  color: var(--text-primary);
-  background: var(--bg-hover) !important;
-  outline: none;
-}
-.permission-menu-item[data-highlighted] .permission-menu-icon,
-.permission-menu-item.text-foreground .permission-menu-icon { color: var(--accent); }
-
-.welcome-sendgroup {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.welcome-mode {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 5px 6px;
-  border-radius: 6px;
-}
-.welcome-mode:hover { color: var(--text-primary); background: var(--bg-hover); }
-
-.welcome-send {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: none;
-  color: #fff;
-  cursor: pointer;
-}
-.welcome-send:hover:not(:disabled) { background: var(--accent-dim); }
-.welcome-send:disabled { opacity: 0.4; cursor: default; }
 
 .welcome-open-btn {
   background: var(--accent);
