@@ -385,7 +385,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"update_provider":    {Method: "UpdateProvider", Args: []string{"binary", "pkg", "homebrewFormula", "cwd"}, Scope: scopeOrchOperate},
 
 	// Skills / MCP servers
-	"list_skills":       {Method: "ListSkills", Args: nil, Scope: scopeOrchRead},
+	"list_skills":       {Method: "ListSkills", Args: []string{"cwd"}, Scope: scopeOrchRead},
 	"set_skill_enabled": {Method: "SetSkillEnabled", Args: []string{"dir", "enabled"}, Scope: scopeOrchOperate},
 	"delete_skill":      {Method: "DeleteSkill", Args: []string{"dir"}, Scope: scopeOrchOperate},
 	"list_mcp_servers":  {Method: "ListMcpServers", Args: nil, Scope: scopeOrchRead},

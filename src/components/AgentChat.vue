@@ -341,6 +341,11 @@
         <button class="flex-shrink-0 font-medium text-foreground hover:underline disabled:opacity-50" :disabled="restoringBranch" @click="restoreBranch">{{ restoringBranch ? 'Restoring…' : 'Restore branch' }}</button>
         <button class="flex-shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss" @click="branchBannerDismissed = true"><PhX :size="11" weight="bold" /></button>
       </div>
+      <div class="relative">
+      <!-- @file / $skill / /command picker. Floats above the frame rather than
+           inside it: .chat-input-box is overflow-hidden, and an inline list
+           pushed the whole toolbar down as the user typed. -->
+      <ComposerSuggestions :items="suggestions" :active-index="activeIndex" @pick="completion.apply" />
       <div class="chat-input-box overflow-hidden rounded-[var(--radius-composer)] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, var(--accent)) 4%, var(--chat-surface));">
         <!-- Queued messages panel (Zed-style) -->
         <div v-if="messageQueue.length > 0" class="border-b border-border bg-[color-mix(in_srgb,var(--chat-accent)_5%,transparent)]">
@@ -413,28 +418,17 @@
             </div>
           </div>
         </div>
-        <div class="relative">
-          <!-- Highlight backdrop: same metrics as the textarea, renders /skill tokens as pills. -->
-          <div
-            v-if="hasSkillPill"
-            ref="hlEl"
-            aria-hidden="true"
-            class="pointer-events-none absolute inset-0 box-border overflow-hidden whitespace-pre-wrap [overflow-wrap:break-word] px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground"
-          ><template v-for="(p, i) in skillParts" :key="i"><span v-if="p.pill" class="skill-pill">{{ p.v }}</span><template v-else>{{ p.v }}</template></template></div>
-          <ComposerTextInput
-            ref="inputEl"
-            v-model="inputText"
-            class="chat-input composer-input box-border block max-h-40 min-h-10 w-full resize-none border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground outline-none placeholder:text-muted-foreground"
-            :class="hasSkillPill && 'composer-ghost'"
-            :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
-            rows="1"
-            @keydown="onKeydown"
-            @input="onInput"
-            @paste="onPaste"
-            @scroll="completion.syncHighlightScroll"
-          /></div>
-          <!-- @file / $skill / /command completion -->
-          <ComposerSuggestions :items="suggestions" :active-index="activeIndex" @pick="completion.apply" />
+        <ComposerTextInput
+          ref="inputEl"
+          v-model="inputText"
+          class="chat-input composer-input box-border block max-h-40 min-h-10 w-full border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground outline-none"
+          :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
+          :skills="completion.skills.value"
+          :commands="allCommands"
+          @keydown="onKeydown"
+          @input="onInput"
+          @paste="onPaste"
+        />
           <ComposerImages v-model="pendingImages" class="px-3 pb-1.5" />
           <div class="composer-toolbar px-2 pb-2 pt-1.5">
           <!-- Left: share selection, model dropdown, perm mode -->
@@ -537,6 +531,7 @@
             </button>
           </div>
         </div>
+      </div>
       </div>
       <WorkspaceTargetPicker
         :mode="chatWorkspace?.parent_id ? 'new' : 'current'"
@@ -981,7 +976,7 @@ function shareSelection() {
   const ref = `@${relPath(sel.path)}#L${sel.startLine}-L${sel.endLine}`;
   const block = `${ref}\n\`\`\`\n${sel.text}\n\`\`\`\n`;
   inputText.value = inputText.value ? `${inputText.value}\n${block}` : block;
-  nextTick(() => { inputEl.value?.focus(); autoResize(); });
+  nextTick(() => inputEl.value?.focus());
 }
 
 // Profile switcher — the Claude provider instances (each one is a config dir).
@@ -1472,19 +1467,16 @@ let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingImages = ref<string[]>([]); // data URIs
 const scrollEl = ref<HTMLElement | null>(null);
 const inputEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
-/** The live textarea, for the caret / auto-resize reads the wrapper can't do. */
-const inputTextarea = () => inputEl.value?.element ?? null;
 
 // @file / $skill / /command completion and the skill pills, shared with the
 // welcome composer (lib/composerCompletion.ts) so the two cannot drift.
 const completion = useComposerCompletion({
   text: inputText,
-  element: () => inputEl.value?.element,
+  input: () => inputEl.value,
   cwd: () => props.cwd,
   commands: allCommands,
-  onApplied: autoResize,
 });
-const { hlEl, skillParts, hasSkillPill, suggestions, activeIndex } = completion;
+const { suggestions, activeIndex } = completion;
 
 // Attach the acp-data/acp-req listeners if not already. onMounted only attaches
 // them when the chat STARTS as an ACP agent; switching to an ACP agent at runtime
@@ -2368,14 +2360,12 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     inputText.value = "";
     saveMessages(props.chatId, messages.value);
     await nextTick();
-    autoResize();
     scrollToBottom(true);
     return;
   }
   if (!forcedText) {
     inputText.value = "";
     await nextTick();
-    autoResize();
   }
 
   // /pr: build a PR description prompt from git diff
@@ -2726,7 +2716,7 @@ function onKeydown(e: KeyboardEvent) {
       e.preventDefault();
       inputText.value = lastUser.text;
       messages.value = messages.value.filter((m) => m !== lastUser);
-      nextTick(() => { inputEl.value?.focus(); autoResize(); const el = inputTextarea(); if (el) el.selectionStart = el.selectionEnd = el.value.length; });
+      nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(inputText.value.length); });
       return;
     }
   }
@@ -2737,7 +2727,6 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 function onInput() {
-  autoResize();
   void completion.update();
 }
 
@@ -2758,16 +2747,9 @@ function onPaste(e: ClipboardEvent) {
   }
 }
 
-function autoResize() {
-  const el = inputTextarea();
-  if (!el) return;
-  el.style.height = "auto";
-  el.style.height = Math.min(el.scrollHeight, 160) + "px";
-}
-
 function onWindowKeydown(e: KeyboardEvent) {
   if (!pendingPermission.value && !pendingDiff.value) return;
-  if (document.activeElement === inputTextarea()) return; // handled by onKeydown
+  if (document.activeElement === inputEl.value?.element) return; // handled by onKeydown
   if (e.key === "y" || e.key === "Y") { e.preventDefault(); respondPermission(true); }
   if (e.key === "n" || e.key === "N") { e.preventDefault(); respondPermission(false); }
 }
@@ -3049,7 +3031,7 @@ watch(() => chats.activeByWs[props.workspaceId], (activeId) => {
 // Exposed for host shells (e.g. the Manager bar) that drive this chat from an
 // external compact input: send a message and focus the textarea.
 function focusInput() {
-  nextTick(() => { inputEl.value?.focus(); autoResize(); });
+  nextTick(() => inputEl.value?.focus());
 }
 function getPermMode(): PermMode {
   return permMode.value;

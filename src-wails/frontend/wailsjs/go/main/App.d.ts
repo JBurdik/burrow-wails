@@ -142,7 +142,7 @@ export function ListOpenTargets():Promise<Array<main.OpenTarget>>;
 
 export function ListPtySessions():Promise<Array<string>>;
 
-export function ListSkills():Promise<Array<main.SkillInfo>>;
+export function ListSkills(arg1:string):Promise<Array<main.SkillInfo>>;
 
 export function ListTerminalTabs(arg1:number):Promise<Array<main.TerminalTab>>;
 

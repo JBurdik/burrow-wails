@@ -714,6 +714,8 @@ export namespace main {
 	export class SkillInfo {
 	    dir: string;
 	    name: string;
+	    description: string;
+	    source: string;
 	    enabled: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -724,6 +726,8 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.dir = source["dir"];
 	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.source = source["source"];
 	        this.enabled = source["enabled"];
 	    }
 	}

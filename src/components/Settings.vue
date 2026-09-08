@@ -1432,7 +1432,9 @@ const skillsLoading = ref(false);
 async function loadSkills() {
   skillsLoading.value = true;
   try {
-    skills.value = await invoke<SkillInfo[]>("list_skills");
+    // "" = personal skills only. Settings' toggle/delete resolve `dir` against
+    // ~/.claude/skills, so a project row here would act on the wrong path.
+    skills.value = await invoke<SkillInfo[]>("list_skills", { cwd: "" });
   } catch (e) {
     console.error("list_skills failed", e);
   } finally {

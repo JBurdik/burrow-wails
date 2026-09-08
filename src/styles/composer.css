@@ -35,22 +35,65 @@ textarea {
   background-clip: padding-box;
 }
 
-/* Skill pill rendering in composers: a highlight backdrop div sits behind the
-   textarea and re-renders its text with `/skill` tokens wrapped in .skill-pill.
-   While a pill is present the textarea's own text goes transparent
-   (.composer-ghost) so only the backdrop shows — the pill must therefore never
-   change text metrics (no padding/margin/font-weight), only color. */
-.composer-ghost {
-  /* !important: must beat the scoped .welcome-input / utility color rules. */
-  color: transparent !important;
-  caret-color: var(--text-primary) !important;
+/* The composer input is a contenteditable, not a <textarea>, so a skill can be
+   an atomic inline chip with an icon and a display name. `pre-wrap` is what
+   makes a plain "\n" in the model render as a line break, which is why the
+   editor never has to create (or flatten back out) <div>/<br> blocks. */
+.composer-editable {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow-y: auto;
+  cursor: text;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 55%, transparent) transparent;
 }
-.skill-pill {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+.composer-editable:focus,
+.composer-editable:focus-visible { outline: none; }
+
+/* :empty is not usable — the browser leaves a filler <br> behind, so the
+   element is rarely truly empty. The component sets data-empty off the model. */
+.composer-editable[data-empty]::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* An inline chip. contenteditable="false" in the markup, which is what makes
+   one Backspace take the whole thing and stops the caret landing inside.
+
+   Sized to sit INSIDE a line of 13px text without changing its height: no
+   vertical padding, 1.05em line-box, inherited font-size. A chip that is taller
+   than the line it lives in pushes the line apart and stops reading as text. */
+.composer-inline-chip {
+  display: inline;
+  padding: 0 3px;
   border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
   color: var(--accent);
+  font-weight: 550;
+  white-space: nowrap;
 }
+/* Small diamond marks a skill; a command keeps its slash instead (see
+   ComposerTextInput's render), so the two never need the same glyph. */
+.composer-inline-chip[data-chip="skill"]::before {
+  content: "◆";
+  margin-right: 3px;
+  font-size: 0.72em;
+  opacity: 0.7;
+}
+/* A built-in command is app plumbing, not something the user installed — muted
+   surface rather than the accent, so a `/compact` cannot be mistaken for a
+   skill that is about to run. */
+.composer-inline-chip[data-chip="command"] {
+  background: var(--surface-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+/* The browser paints a non-editable node as one selected block; keep it legible
+   rather than accent-on-accent. */
+.composer-inline-chip::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 
 /* Dropdown panels: keep them scrollable, drop the grey bar (macOS "Show scroll
    bars: Always" would otherwise draw one inside every menu). */
@@ -235,39 +278,82 @@ textarea {
   50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--red, #dc2626) 0%, transparent); }
 }
 
-/* Suggestion dropdown (@file / $skill / /command) — one list, one look. */
+/* Suggestion panel (@file / $skill / /command).
+   Floats ABOVE the composer rather than sitting inside its frame: the chat box
+   is `overflow:hidden` (so an inner list is clipped) and an inline 200px list
+   shoved the whole toolbar down as you typed. Anchored to the nearest
+   positioned ancestor, which both hosts make the composer frame itself. */
 .composer-suggestions {
-  max-height: 200px;
-  flex-shrink: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 60;
+  max-height: 264px;
   overflow-y: auto;
-  border-top: 1px solid var(--border);
+  padding: 5px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
   scrollbar-width: none;
 }
 .composer-suggestions::-webkit-scrollbar { width: 0; height: 0; }
+
 .composer-suggestion {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
-  padding: 6px 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background .1s ease-out;
 }
 .composer-suggestion:hover,
 .composer-suggestion-active { background: var(--bg-hover); }
-.composer-suggestion-token {
-  min-width: 100px;
+
+.composer-suggestion-name {
   flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-primary);
 }
+.composer-suggestion-active .composer-suggestion-name { color: var(--accent); }
+
+/* The description is the part that gets sacrificed when the row is narrow —
+   the name and the badge both have to stay readable. */
 .composer-suggestion-hint {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.composer-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.composer-badge-project {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* Attached-image previews. */

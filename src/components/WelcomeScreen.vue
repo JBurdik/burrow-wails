@@ -28,30 +28,20 @@
         </DropdownMenuRoot>?
       </h1>
       <ComposerBox class="welcome-compose">
-        <div class="relative">
-          <!-- Highlight backdrop: same metrics as .welcome-input, renders /skill tokens as pills. -->
-          <div
-            v-if="hasSkillPill"
-            ref="hlEl"
-            aria-hidden="true"
-            class="welcome-input pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap [overflow-wrap:break-word]"
-          ><template v-for="(p, i) in skillParts" :key="i"><span v-if="p.pill" class="skill-pill">{{ p.v }}</span><template v-else>{{ p.v }}</template></template></div>
-          <ComposerTextInput
-            ref="inputEl"
-            v-model="text"
-            class="welcome-input composer-input block w-full"
-            :class="hasSkillPill && 'composer-ghost'"
-            placeholder="Ask for changes, send follow-ups, or attach images"
-            rows="3"
-            autofocus
-            @input="completion.update"
-            @keydown="onComposerKeydown"
-            @paste="onPaste"
-            @scroll="completion.syncHighlightScroll"
-          />
-        </div>
-        <!-- @file / $skill completion (`$` inserts /name — the invocation the agent understands) -->
+        <!-- Floats above the box (styles/composer.css) — .welcome-compose is the
+             positioned ancestor it anchors to. -->
         <ComposerSuggestions :items="suggestions" :active-index="activeIndex" @pick="completion.apply" />
+        <ComposerTextInput
+          ref="inputEl"
+          v-model="text"
+          class="welcome-input composer-input block w-full min-h-[60px]"
+          placeholder="Ask for changes, send follow-ups, or attach images"
+          :skills="completion.skills.value"
+          autofocus
+          @input="completion.update"
+          @keydown="onComposerKeydown"
+          @paste="onPaste"
+        />
         <ComposerImages v-model="pendingImages" />
         <template #toolbar>
           <div class="composer-toolbar">
@@ -184,10 +174,10 @@ function cycleProvider() {
 // uses (lib/composerCompletion.ts), so the two cannot drift.
 const completion = useComposerCompletion({
   text,
-  element: () => inputEl.value?.element,
+  input: () => inputEl.value,
   cwd: () => target.value?.path ?? "",
 });
-const { hlEl, skillParts, hasSkillPill, suggestions, activeIndex } = completion;
+const { suggestions, activeIndex } = completion;
 
 function onComposerKeydown(e: KeyboardEvent) {
   // Completion first: Enter picks the highlighted suggestion instead of sending.
@@ -628,7 +618,6 @@ async function submit() {
   font-family: var(--font-ui);
   line-height: 1.5;
 }
-.welcome-input::placeholder { color: var(--text-muted); }
 
 .welcome-open-btn {
   background: var(--accent);

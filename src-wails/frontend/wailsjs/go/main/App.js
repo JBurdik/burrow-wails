@@ -282,8 +282,8 @@ export function ListPtySessions() {
   return window['go']['main']['App']['ListPtySessions']();
 }
 
-export function ListSkills() {
-  return window['go']['main']['App']['ListSkills']();
+export function ListSkills(arg1) {
+  return window['go']['main']['App']['ListSkills'](arg1);
 }
 
 export function ListTerminalTabs(arg1) {

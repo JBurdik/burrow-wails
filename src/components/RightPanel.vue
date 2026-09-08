@@ -747,8 +747,12 @@ watch(() => props.cwd, (p) => {
 }, { immediate: true });
 
 // --- Auto-refresh: window focus + configurable interval ---
+// Runs regardless of which tab is active — the titlebar's commit/push
+// button reads git.hasWorkingTreeChanges too, and it stayed stale (only
+// updating once someone opened the Changes tab) if this only refreshed
+// while that tab was already the one showing.
 function autoRefresh() {
-  if (activeTab.value === "git" && props.cwd && !document.hidden) {
+  if (props.cwd && !document.hidden) {
     git.refresh(true);
   }
 }

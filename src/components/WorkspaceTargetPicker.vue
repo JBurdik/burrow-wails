@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, computed, watch } from "vue";
 import { PhFolder, PhGitBranch, PhCaretDown, PhPlus } from "@phosphor-icons/vue";
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuRoot, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { PopoverContent, PopoverRoot, PopoverTrigger } from "@/components/ui/popover";
 
 type TargetMode = "current" | "new";
 type TargetAppearance = "attached" | "inline";
@@ -27,13 +28,14 @@ const emit = defineEmits<{
 }>();
 
 // Branch switcher, moved here from the title bar so the branch lives in one
-// place. A plain popover rather than DropdownMenu: it holds a text input, and
-// the menu's typeahead eats keystrokes.
+// place. A Popover rather than a DropdownMenu because it holds a text input and
+// the menu's typeahead eats keystrokes — but reka-ui's Popover, not the
+// hand-rolled Teleport this used to be: that one measured the trigger's rect
+// itself, so it had no collision handling and stayed pinned to a stale position
+// after a scroll or resize, and its outside-click guard was a window listener
+// that every ancestor had to remember to `@click.stop` around.
 const pickerOpen = ref(false);
 const filter = ref("");
-const filterEl = ref<HTMLInputElement | null>(null);
-const triggerEl = ref<HTMLButtonElement | null>(null);
-const pickerPos = ref({ left: 0, bottom: 0 });
 const filtered = computed(() => {
   const q = filter.value.trim().toLowerCase();
   const all = props.branches ?? [];
@@ -44,16 +46,8 @@ const showCreate = computed(() => {
   return !!q && !(props.branches ?? []).includes(q);
 });
 
-async function togglePicker() {
-  pickerOpen.value = !pickerOpen.value;
-  if (!pickerOpen.value) return;
-  filter.value = "";
-  const r = triggerEl.value?.getBoundingClientRect();
-  // Anchored by its bottom edge, so the popover's own height stays its business.
-  if (r) pickerPos.value = { left: Math.max(8, r.right - 220), bottom: window.innerHeight - r.top + 5 };
-  await nextTick();
-  filterEl.value?.focus();
-}
+watch(pickerOpen, (open) => { if (open) filter.value = ""; });
+
 function switchBranch(name: string) {
   pickerOpen.value = false;
   emit("switchBranch", name);
@@ -67,9 +61,6 @@ function onEnter() {
   if (filtered.value.length === 1) { switchBranch(filtered.value[0]); return; }
   if (showCreate.value) createBranch(filter.value.trim());
 }
-const close = () => { pickerOpen.value = false; };
-onMounted(() => window.addEventListener("click", close));
-onBeforeUnmount(() => window.removeEventListener("click", close));
 
 function selectMode(mode: TargetMode) {
   emit("selectMode", mode);
@@ -124,29 +115,23 @@ function selectMode(mode: TargetMode) {
       <span class="flex-1" aria-hidden="true" />
       <span class="h-[13px] w-px bg-border" aria-hidden="true" />
       <PhGitBranch :size="11" weight="bold" class="shrink-0" />
-      <div v-if="props.branches">
-        <button
-          ref="triggerEl"
-          class="rounded-[5px] border-0 bg-transparent px-1 py-0.5 font-mono text-inherit text-secondary-foreground hover:bg-hover hover:text-foreground disabled:cursor-default"
-          type="button"
-          :disabled="props.disabled"
-          :title="`Branch: ${props.currentBranch || 'HEAD'} — click to switch`"
-          @click.stop="togglePicker"
-        >{{ props.currentBranch || "HEAD" }}</button>
-        <Teleport to="body">
-        <div
-          v-if="pickerOpen"
-          class="fixed z-[2000] w-[220px] overflow-hidden rounded-md border border-border bg-panel shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
-          :style="{ left: `${pickerPos.left}px`, bottom: `${pickerPos.bottom}px` }"
-          @click.stop
-        >
+      <PopoverRoot v-if="props.branches" v-model:open="pickerOpen">
+        <PopoverTrigger as-child>
+          <button
+            class="rounded-[5px] border-0 bg-transparent px-1 py-0.5 font-mono text-inherit text-secondary-foreground hover:bg-hover hover:text-foreground disabled:cursor-default"
+            type="button"
+            :disabled="props.disabled"
+            :title="`Branch: ${props.currentBranch || 'HEAD'} — click to switch`"
+          >{{ props.currentBranch || "HEAD" }}</button>
+        </PopoverTrigger>
+        <PopoverContent align="end" side="top" class="w-[220px]">
+          <!-- The input is the first focusable child, so Popover's own
+               open-autofocus lands on it — no nextTick().focus() dance. -->
           <input
-            ref="filterEl"
             v-model="filter"
             class="box-border w-full border-0 border-b border-border bg-transparent px-[9px] py-[7px] font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
             placeholder="Switch or create branch…"
             @keydown.enter="onEnter"
-            @keydown.esc="pickerOpen = false"
           />
           <div class="max-h-[180px] overflow-y-auto">
             <div
@@ -172,9 +157,8 @@ function selectMode(mode: TargetMode) {
               No branches found
             </div>
           </div>
-        </div>
-        </Teleport>
-      </div>
+        </PopoverContent>
+      </PopoverRoot>
       <span v-else class="font-mono text-secondary-foreground">{{ props.currentBranch || "HEAD" }}</span>
     </template>
     <template v-else>
