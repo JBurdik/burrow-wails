@@ -706,20 +706,22 @@ export const useRemoteStore = defineStore("remote", () => {
     }
   }
 
-  // agentKind is "claude" only — RemoteCreateChat (remote.go) rejects
-  // anything else today (an ACP/Codex session needs command/args/configDir
-  // that only exist in the desktop's per-project agent config). WelcomeView's
-  // model picker only offers Claude models for the same reason: a Codex
-  // choice would reach this call and fail every time.
+  // agentKind is "claude" | "codex" — RemoteCreateChat (remote.go) rejects
+  // every other provider today (a plain-ACP session needs command/args/
+  // configDir that only exist in the desktop's per-project agent config;
+  // Codex is exempt because CodexStart resolves its own binary and needs
+  // nothing beyond cwd, same as ClaudeStart).
   //
   // model/effort/permissionMode are WelcomeView's composer choices, passed
   // straight through to remote_create_chat so they reach the SAME
-  // ClaudeStart call that spawns the CLI (see remote.go) — the only place
-  // they can take effect, since every later claude_start (sendChat, below)
-  // is a no-op once the session is alive.
+  // ClaudeStart/CodexStart call that spawns the CLI (see remote.go) — for
+  // Claude that's the only place they can take effect (every later
+  // claude_start, in sendChat below, is a no-op once the session is alive);
+  // for Codex they're applied as a best-effort follow-up (AcpSetConfig/
+  // AcpSetMode) once the thread exists.
   async function createChat(
     workspaceId: number,
-    agentKind: "claude",
+    agentKind: "claude" | "codex",
     model = "",
     effort = "",
     permissionMode = "",

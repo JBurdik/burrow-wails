@@ -112,20 +112,28 @@ func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, err
 // database now owns, and its own comment admitted it never closed the real
 // one.
 //
-// Claude-only for now: an ACP/Codex session needs command/args/configDir
-// resolved from provider config that today only exists in AgentChat.vue's
-// acpStartPayload().
+// Claude and Codex only: a plain-ACP session (gemini, opencode, a custom
+// adapter) needs command/args/configDir resolved from provider config that
+// today only exists in AgentChat.vue's acpStartPayload(). Codex is exempt —
+// CodexStart (acp.go) resolves its own binary and needs nothing beyond
+// cwd, exactly like ClaudeStart.
 //
 // model/effort/permissionMode come straight from WelcomeView's composer.
-// This is the ONLY place they can take effect: ClaudeStart (below) is what
-// actually spawns the CLI, and it is a no-op on every later call once the
-// session is alive — a value threaded in afterwards, on the first sendChat,
-// is threaded in too late to matter. ClaudeStart itself validates/defaults
-// each of the three (an empty or unrecognized value is simply dropped), so
-// this passes them through unchecked.
+// This is the ONLY place they can take effect for Claude: ClaudeStart
+// (below) is what actually spawns the CLI, and it is a no-op on every later
+// call once the session is alive — a value threaded in afterwards, on the
+// first sendChat, is threaded in too late to matter. ClaudeStart itself
+// validates/defaults each of the three (an empty or unrecognized value is
+// simply dropped), so this passes them through unchecked. Codex is
+// different: CodexStart takes no model/effort/mode params at all (a fresh
+// thread always starts in its own Auto default), so those three are applied
+// as a best-effort follow-up via AcpSetConfig/AcpSetMode once the thread
+// exists — see below. codexModeSettings (acp.go) deliberately aliases
+// Claude's own permissionMode ids ("default", "acceptEdits", …), so the
+// SAME composer value works for both agents without a second mode list.
 func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, permissionMode string) (map[string]any, error) {
-	if agentKind != "claude" {
-		return nil, fmt.Errorf("remote chat creation only supports Claude for now (got %q)", agentKind)
+	if agentKind != "claude" && agentKind != "codex" {
+		return nil, fmt.Errorf("remote chat creation only supports claude and codex (got %q)", agentKind)
 	}
 
 	// Resolve and validate the workspace BEFORE creating anything, so an
@@ -147,6 +155,11 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 		}
 	}
 
+	transport := "claude-cli"
+	if agentKind == "codex" {
+		transport = "codex-app-server"
+	}
+
 	chat, err := a.CreateChat(Chat{
 		WorkspaceID: workspaceID,
 		// The " (phone)" is not decoration. The desktop names chats
@@ -156,7 +169,7 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 		// does not.
 		Title:          fmt.Sprintf("Chat %d (phone)", countForWs+1),
 		AgentKind:      agentKind,
-		Transport:      "claude-cli",
+		Transport:      transport,
 		Model:          model,
 		LastActivityAt: time.Now().UnixMilli(),
 	})
@@ -164,10 +177,31 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 		return nil, err
 	}
 
-	if err := a.ClaudeStart(fmt.Sprint(chat.ID), cwd, "", permissionMode, "", model, effort, "", "", ""); err != nil {
-		// Roll the row back. A chat whose CLI never started is a ghost in
-		// both sidebars that can only be removed by hand — and under
-		// config.json that is exactly what a failed start used to leave.
+	id := fmt.Sprint(chat.ID)
+	if agentKind == "codex" {
+		if err := a.CodexStart(id, cwd, nil, ""); err != nil {
+			// Roll the row back. A chat whose CLI never started is a ghost in
+			// both sidebars that can only be removed by hand — and under
+			// config.json that is exactly what a failed start used to leave.
+			if delErr := a.DeleteChat(chat.ID); delErr != nil {
+				return nil, fmt.Errorf("start codex: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
+			}
+			return nil, fmt.Errorf("start codex: %w", err)
+		}
+		// Best-effort refinements: the thread already exists and runs on
+		// Codex's own Auto default (CodexStart's startParams), so a failure
+		// here only narrows what the composer's choice did — it is not a
+		// reason to throw away a chat that already started successfully.
+		if model != "" {
+			_, _ = a.AcpSetConfig(id, "model", model)
+		}
+		if effort != "" {
+			_, _ = a.AcpSetConfig(id, "effort", effort)
+		}
+		if permissionMode != "" {
+			_, _ = a.AcpSetMode(id, permissionMode)
+		}
+	} else if err := a.ClaudeStart(id, cwd, "", permissionMode, "", model, effort, "", "", ""); err != nil {
 		if delErr := a.DeleteChat(chat.ID); delErr != nil {
 			return nil, fmt.Errorf("start claude: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
 		}

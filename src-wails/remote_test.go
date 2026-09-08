@@ -76,10 +76,10 @@ func TestRemoteListChatsHidesTheManagerSession(t *testing.T) {
 	}
 }
 
-func TestRemoteCreateChatRejectsNonClaude(t *testing.T) {
+func TestRemoteCreateChatRejectsUnsupportedAgentKind(t *testing.T) {
 	a := &App{}
-	if _, err := a.RemoteCreateChat(1, "codex", "", "", ""); err == nil {
-		t.Fatal("expected an error — remote chat creation only supports agentKind claude for now")
+	if _, err := a.RemoteCreateChat(1, "gemini", "", "", ""); err == nil {
+		t.Fatal("expected an error — remote chat creation only supports agentKind claude and codex")
 	}
 }
 

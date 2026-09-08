@@ -6,11 +6,11 @@
 // picking a model (which implies the agent/provider), a reasoning effort and
 // a permission mode before the first message ever goes out.
 //
-// claude_start's remote-callable args already include model/effort/
-// permissionMode (src-wails/remoteapi.go); this composer's choices are
-// passed straight through store.createChat() into remote_create_chat
-// (remote.go), which is the ClaudeStart call that actually spawns the CLI —
-// the only place they can take effect.
+// remote_create_chat's args already include model/effort/permissionMode
+// (src-wails/remoteapi.go); this composer's choices are passed straight
+// through store.createChat() into it, which spawns the CLI directly
+// (ClaudeStart for a Claude pick, CodexStart + best-effort AcpSetConfig/
+// AcpSetMode for a Codex one — see remote.go).
 import { computed, onMounted, ref, type Component } from "vue";
 import { Bot, Sparkles, Gauge, ShieldCheck, ChevronDown, Paperclip, ArrowUp, Folder, Check } from "lucide-vue-next";
 import { agentIconComp } from "@/lib/agentIcons";
@@ -58,46 +58,62 @@ function saveLastPermMode(mode: PermMode) {
 }
 
 // ── picker state ─────────────────────────────────────────────────────────
-// "claude" only: remote_create_chat (remote.go) rejects every other
-// agentKind today (an ACP/Codex session needs command/args/configDir that
-// only exist in the desktop's per-project agent config), so the model
-// picker below only ever lists Claude models — offering Codex would be a
-// choice that fails every time it's picked.
-const agentKind = "claude" as const;
-const modelId = ref(modelsFor(agentKind)[0]?.id ?? "");
-const effort = ref(modelsFor(agentKind)[0]?.defaultEffort ?? "");
+// "claude" | "codex" — remote_create_chat (remote.go) rejects every other
+// agentKind today (a plain-ACP session needs command/args/configDir that
+// only exist in the desktop's per-project agent config; Codex is exempt —
+// CodexStart needs nothing beyond cwd). The model chip is really a
+// provider+model picker for that reason: picking a model implies which
+// agent creates the chat.
+const agentKind = ref<"claude" | "codex">("claude");
+const modelId = ref(modelsFor("claude")[0]?.id ?? "");
+const effort = ref(modelsFor("claude")[0]?.defaultEffort ?? "");
 const permMode = ref<PermMode>("default");
 const workspaceId = ref<number | null>(null);
 const prompt = ref("");
 const creating = ref(false);
 const error = ref("");
 
-const currentEfforts = computed(() => modelsFor(agentKind).find((m) => m.id === modelId.value)?.efforts ?? []);
+const currentEfforts = computed(() => modelsFor(agentKind.value).find((m) => m.id === modelId.value)?.efforts ?? []);
 
+// Codex has no static model catalog (chatModels.ts's MODELS_BY_AGENT only
+// has a real list for "claude" — every other provider gets a single
+// {id:"", label:"Default"} row, since Codex's real models are only known
+// AFTER spawning the process, via CodexStart's own model/list call). Its
+// label carries the provider name for that entry ("Codex — Default");
+// Claude's own model names already say what they are.
 const modelChipLabel = computed(() => {
-  const m = modelsFor(agentKind).find((x) => x.id === modelId.value);
-  return m?.label ?? "Model";
+  const m = modelsFor(agentKind.value).find((x) => x.id === modelId.value);
+  if (!m) return "Model";
+  return m.label === "Default" ? `${providerFor(agentKind.value).label} — Default` : m.label;
 });
 
-interface ModelRow { key: string; modelId: string; label: string; sub: string; icon: Component; color: string; }
+interface ModelRow { key: string; agentKind: "claude" | "codex"; modelId: string; label: string; sub: string; icon: Component; color: string; }
 const modelRows = computed<ModelRow[]>(() => {
-  const provider = providerFor(agentKind);
-  return modelsFor(agentKind).map((m) => ({
-    key: m.id,
-    modelId: m.id,
-    label: m.label,
-    sub: provider.label,
-    icon: agentIconComp(provider.icon),
-    color: provider.color,
-  }));
+  const rows: ModelRow[] = [];
+  for (const kind of ["claude", "codex"] as const) {
+    const provider = providerFor(kind);
+    for (const m of modelsFor(kind)) {
+      rows.push({
+        key: `${kind}:${m.id}`,
+        agentKind: kind,
+        modelId: m.id,
+        label: m.label === "Default" ? `${provider.label} — Default` : m.label,
+        sub: provider.label,
+        icon: agentIconComp(provider.icon),
+        color: provider.color,
+      });
+    }
+  }
+  return rows;
 });
 
 function selectModel(row: ModelRow) {
+  agentKind.value = row.agentKind;
   modelId.value = row.modelId;
   // A model swap can invalidate the previously chosen effort (a different
   // model publishes a different effort list, or none at all) — reset to the
   // new model's own default rather than carrying over a stale value.
-  effort.value = modelsFor(agentKind).find((m) => m.id === row.modelId)?.defaultEffort ?? "";
+  effort.value = modelsFor(row.agentKind).find((m) => m.id === row.modelId)?.defaultEffort ?? "";
   sheet.value = null;
 }
 
@@ -135,7 +151,7 @@ const sheetRows = computed<SheetRow[]>(() => {
       sub: row.sub,
       icon: row.icon,
       color: row.color,
-      selected: row.modelId === modelId.value,
+      selected: row.agentKind === agentKind.value && row.modelId === modelId.value,
       pick: () => selectModel(row),
     }));
   }
@@ -188,7 +204,7 @@ async function submit() {
   creating.value = true;
   try {
     const chosenEffort = currentEfforts.value.length ? effort.value : "";
-    await store.createChat(workspaceId.value, agentKind, modelId.value, chosenEffort, permMode.value);
+    await store.createChat(workspaceId.value, agentKind.value, modelId.value, chosenEffort, permMode.value);
     await store.sendChat(text);
   } catch (e: any) {
     error.value = e?.message ?? "Chat se nepodařilo vytvořit.";
