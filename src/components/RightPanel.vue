@@ -11,17 +11,17 @@
         <button
           v-for="tab in openedTabs"
           :key="tab.id"
-          class="group flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
+          class="group flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-nav)] px-2 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
           :class="activeTab === tab.id && 'bg-accent/15 text-foreground'"
           @click="activeTab = tab.id"
         >
           <span class="relative flex h-[13px] w-[13px] shrink-0 items-center justify-center">
             <component :is="tab.icon" :size="13" class="group-hover:opacity-0" />
-            <span class="absolute inset-0 hidden items-center justify-center rounded text-muted-foreground hover:bg-black/10 hover:text-foreground group-hover:flex" role="button" :aria-label="`Close ${tab.label}`" @click.stop="closeSurface(tab.id)"><PhX :size="12" /></span>
+            <span class="absolute inset-0 hidden items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground group-hover:flex" role="button" :aria-label="`Close ${tab.label}`" @click.stop="closeSurface(tab.id)"><PhX :size="12" /></span>
           </span>
           <span class="font-medium">{{ tab.label }}</span>
         </button>
-        <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="showSurfacePicker"><PhPlus :size="15" /></button>
+        <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="showSurfacePicker"><PhPlus :size="15" /></button>
       </div>
 
     <div v-if="!activeTab" class="flex flex-1 items-center justify-center overflow-y-auto p-5">
@@ -34,7 +34,7 @@
           <button
             v-for="tab in tabs"
             :key="tab.id"
-            class="group flex min-h-[66px] items-start gap-3 rounded-lg border border-border/70 bg-transparent px-3 py-3 text-left transition-colors hover:border-accent/45 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            class="group flex min-h-[66px] items-start gap-3 rounded-[var(--radius-card)] border border-border/70 bg-panel px-3 py-3 text-left transition-colors hover:border-accent/45 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             @click="openSurface(tab.id)"
           >
             <component :is="tab.icon" :size="16" class="mt-0.5 shrink-0 text-secondary-foreground group-hover:text-accent" />
@@ -69,7 +69,7 @@
       <!-- Header -->
       <div class="flex shrink-0 items-center justify-between border-b border-border px-2 py-[5px]">
         <div class="flex items-center gap-1 font-mono text-[11px] text-secondary-foreground">
-          <PhGitBranch :size="12" class="shrink-0 text-yellow-400" style="color: var(--yellow);" />
+          <PhGitBranch :size="12" class="shrink-0 text-warning" />
           <span>{{ git.branch || "—" }}</span>
           <span v-if="git.ahead > 0" class="text-[10px] text-success" title="Commits ahead of upstream">↑{{ git.ahead }}</span>
           <span v-if="git.behind > 0" class="text-[10px] text-warning" title="Commits behind upstream">↓{{ git.behind }}</span>
@@ -77,7 +77,7 @@
         <div class="flex items-center gap-[3px]">
           <button
             v-if="!git.error && git.hasUpstream && git.behind > 0"
-            class="flex items-center gap-[3px] rounded border border-border bg-transparent px-[7px] py-0.5 font-sans text-[10px] font-medium text-secondary-foreground transition-colors hover:border-accent/40 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
+            class="flex items-center gap-[3px] rounded-[var(--radius-chip)] border border-border bg-transparent px-[7px] py-0.5 font-sans text-[10px] font-medium text-secondary-foreground transition-colors hover:border-accent/40 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
             :disabled="git.pulling || git.pushing || git.loading"
             @click="git.pull()"
             title="git pull --ff-only"
@@ -88,7 +88,7 @@
           </button>
           <button
             v-if="!git.error"
-            class="flex items-center gap-[3px] rounded border border-border bg-transparent px-[7px] py-0.5 font-sans text-[10px] font-medium text-secondary-foreground transition-colors hover:border-accent/40 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
+            class="flex items-center gap-[3px] rounded-[var(--radius-chip)] border border-border bg-transparent px-[7px] py-0.5 font-sans text-[10px] font-medium text-secondary-foreground transition-colors hover:border-accent/40 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
             :disabled="git.pushing || git.loading || (git.hasUpstream && git.ahead === 0)"
             @click="git.push()"
             :title="git.hasUpstream ? 'git push' : 'git push -u origin ' + git.branch"
@@ -105,14 +105,14 @@
             :set-refresh-interval="ar.setRefreshInterval"
           />
           <button
-            class="flex items-center rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            class="flex items-center rounded-[var(--radius-nav)] p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
             @click="activeTerm()?.openGitTab()"
             title="Open the full git manager as a tab"
           >
             <PhArrowsOutSimple :size="13" />
           </button>
           <button
-            class="flex items-center rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
+            class="flex items-center rounded-[var(--radius-nav)] p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
             :disabled="git.loading"
             @click="git.refresh()"
             title="Refresh"
@@ -136,7 +136,7 @@
           <PhWarning :size="13" />
           Not a git repository
           <button
-            class="ml-auto flex items-center gap-1 rounded border border-border bg-hover px-2 py-[3px] text-[11px] text-foreground hover:border-warning hover:bg-warning hover:text-black disabled:cursor-default disabled:opacity-35"
+            class="ml-auto flex items-center gap-1 rounded-[var(--radius-chip)] border border-border bg-hover px-2 py-[3px] text-[11px] text-foreground hover:border-warning hover:bg-warning hover:text-black disabled:cursor-default disabled:opacity-35"
             :disabled="git.loading"
             @click="git.gitInit()"
           >
@@ -151,12 +151,12 @@
             Staged
             <button
               v-if="git.staged.length > 0"
-              class="flex items-center gap-0.5 rounded border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100"
+              class="flex items-center gap-0.5 rounded-[var(--radius-chip)] border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100"
               @click="openAllDiffInTab(true)"
               title="Open all staged diffs in new tab"
             ><PhArrowUpRight :size="10" /> View</button>
           </div>
-          <div v-if="git.staged.length === 0" class="px-2 pb-1.5 pt-0.5 text-[11px] text-muted-foreground opacity-60">Nothing staged</div>
+          <div v-if="git.staged.length === 0" class="px-2 pb-1.5 pt-0.5 text-[11px] text-[var(--blue)]/70">Nothing staged</div>
           <div
             v-for="f in git.staged"
             :key="'s:' + f.path"
@@ -174,20 +174,20 @@
             <div class="flex items-center gap-[3px]">
               <button
                 v-if="git.unstaged.length > 0"
-                class="flex items-center gap-0.5 rounded border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100"
+                class="flex items-center gap-0.5 rounded-[var(--radius-chip)] border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100"
                 @click="openAllDiffInTab(false)"
                 title="Open all unstaged diffs in new tab"
               ><PhArrowUpRight :size="10" /> View</button>
               <button
                 v-if="git.unstaged.length > 0 || git.untracked.length > 0"
-                class="rounded border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100 disabled:cursor-default disabled:opacity-30"
+                class="rounded-[var(--radius-chip)] border border-border bg-transparent px-[5px] py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground opacity-80 transition-colors hover:bg-hover hover:text-foreground hover:opacity-100 disabled:cursor-default disabled:opacity-30"
                 :disabled="git.loading"
                 @click="git.stageAll()"
                 title="Stage all"
               >+ All</button>
             </div>
           </div>
-          <div v-if="git.unstaged.length === 0 && git.untracked.length === 0" class="px-2 pb-1.5 pt-0.5 text-[11px] text-muted-foreground opacity-60">
+          <div v-if="git.unstaged.length === 0 && git.untracked.length === 0" class="px-2 pb-1.5 pt-0.5 text-[11px] text-[var(--blue)]/70">
             Working tree clean
           </div>
           <div
@@ -214,7 +214,7 @@
           <div class="mt-1.5 flex shrink-0 flex-col gap-[5px] border-t border-border p-2">
             <textarea
               v-model="git.commitMsg"
-              class="commit-input box-border w-full min-h-[52px] max-h-[100px] resize-none rounded border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 font-sans text-[11px] leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/60"
+              class="commit-input box-border w-full min-h-[52px] max-h-[100px] resize-none rounded-[var(--radius-chip)] border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 font-sans text-[11px] leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/60"
               placeholder="Commit message…"
               rows="3"
               @keydown.ctrl.enter="git.commit()"
@@ -222,7 +222,7 @@
             />
             <div class="flex gap-[5px]">
               <button
-                class="flex flex-1 items-center justify-center gap-[5px] rounded border-0 bg-accent/85 px-2.5 py-[5px] font-sans text-[11px] font-semibold text-white transition-colors hover:bg-accent disabled:cursor-default disabled:opacity-35"
+                class="flex flex-1 items-center justify-center gap-[5px] rounded-[var(--radius-chip)] border-0 bg-accent px-2.5 py-[5px] font-sans text-[11px] font-semibold text-white transition-colors hover:bg-accent-dim disabled:cursor-default disabled:opacity-35"
                 :disabled="!git.commitMsg.trim() || git.staged.length === 0"
                 @click="git.commit()"
               >
@@ -238,7 +238,7 @@
             <div class="flex shrink-0 items-center gap-1.5 bg-[color-mix(in_srgb,var(--border)_20%,var(--bg-panel))] px-2 py-1">
               <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground">{{ git.diffFile }}</span>
               <span class="shrink-0 text-[10px] text-muted-foreground">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
-              <button class="flex items-center rounded p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="git.clearDiff()" title="Close">
+              <button class="flex items-center rounded-[var(--radius-nav)] p-[3px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground" @click="git.clearDiff()" title="Close">
                 <PhX :size="11" />
               </button>
             </div>
@@ -282,7 +282,7 @@
           <PhGitCommit :size="13" class="text-secondary-foreground" />
           <span class="text-[11px] font-semibold text-secondary-foreground">Workspace diff</span>
         </div>
-        <button class="rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="workspaceDiffLoading" @click="loadWorkspaceDiff"><PhArrowClockwise :size="12" :class="workspaceDiffLoading && 'animate-spin'" /></button>
+        <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="workspaceDiffLoading" @click="loadWorkspaceDiff"><PhArrowClockwise :size="12" :class="workspaceDiffLoading && 'animate-spin'" /></button>
       </div>
       <div v-if="workspaceDiffLoading" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
       <div v-else-if="!workspaceDiff" class="p-4 text-center text-[11px] leading-relaxed text-muted-foreground">No unstaged or staged changes.</div>
@@ -304,7 +304,7 @@
         <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sub-agents</span>
       </div>
 
-      <div v-if="!subagentList.length" class="m-2 rounded-lg border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
+      <div v-if="!subagentList.length" class="m-2 rounded-[var(--radius-card)] border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
         No sub-agents spawned yet.<br />Shows up when a chat uses the Task tool.
       </div>
 
@@ -323,7 +323,7 @@
           class="mt-0.5 shrink-0 rounded-full px-1.5 py-[1px] text-[9px] font-medium"
           :class="{
             'bg-accent/15 text-accent': entry.status === 'running',
-            'bg-emerald-500/15 text-emerald-500': entry.status === 'done',
+            'bg-success/15 text-success': entry.status === 'done',
             'bg-destructive/15 text-destructive': entry.status === 'failed',
           }"
         >{{ entry.status }}</span>
@@ -334,12 +334,12 @@
     <div v-else-if="activeTab === 'history'" class="flex flex-1 flex-col overflow-y-auto">
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Checkpoints</span>
-        <button class="rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh" @click="loadCheckpoints">
+        <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh" @click="loadCheckpoints">
           <PhArrowClockwise :size="12" />
         </button>
       </div>
 
-      <div v-if="!checkpoints.length" class="m-2 rounded-lg border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
+      <div v-if="!checkpoints.length" class="m-2 rounded-[var(--radius-card)] border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
         No checkpoints yet.<br />One is taken before every agent turn.
       </div>
 
@@ -355,7 +355,7 @@
           <span class="font-mono text-[9.5px] text-muted-foreground">{{ cpTime(cp.createdAt) }} · {{ cp.commit.slice(0, 7) }}</span>
         </div>
         <button
-          class="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground group-hover/cp:opacity-100"
+          class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground group-hover/cp:opacity-100"
           title="Restore the working tree to this checkpoint"
           @click.stop="restoreTarget = cp"
         >
@@ -387,8 +387,8 @@
 
     <!-- Restore confirm — overwrites files on disk, so it always asks first -->
     <Teleport to="body">
-      <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="restoreTarget" @click.self="restoreTarget = null">
-        <div class="flex w-[430px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+      <div class="fixed inset-0 z-[100] flex items-center justify-center bg-base/60" v-if="restoreTarget" @click.self="restoreTarget = null">
+        <div class="flex w-[430px] flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-panel p-6">
           <h3 class="text-sm font-semibold text-foreground">Restore checkpoint “{{ restoreTarget!.label || restoreTarget!.commit.slice(0, 7) }}”?</h3>
           <p class="text-[11.5px] leading-[1.7] text-secondary-foreground">
             Every file in this workspace goes back to how it looked at
@@ -400,8 +400,8 @@
           </p>
           <p v-if="restoreError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ restoreError }}</p>
           <div class="flex justify-end gap-2">
-            <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="restoreTarget = null">Cancel</button>
-            <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" :disabled="restoreBusy" @click="confirmRestore">
+            <button class="flex items-center gap-[5px] rounded-[var(--radius-chip)] border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-muted-foreground hover:text-foreground" @click="restoreTarget = null">Cancel</button>
+            <button class="flex items-center gap-[5px] rounded-[var(--radius-chip)] border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" :disabled="restoreBusy" @click="confirmRestore">
               {{ restoreBusy ? "Restoring…" : "Restore" }}
             </button>
           </div>

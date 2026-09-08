@@ -9,7 +9,6 @@ import {
   saveRemoteCredentials,
   type RemoteCredentials,
 } from "@/runtime/remoteEndpoint";
-import { displayStatus, type Phase } from "@/runtime/displayStatus";
 import type { TermStatus } from "@/lib/terminalStatus";
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
@@ -27,22 +26,10 @@ import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 
 export type TabStatus = TermStatus;
 
-export interface Tab {
-  ptyId: number;
-  title: string;
-  cwd: string;
-  workspaceId: number;
-  workspaceName: string;
-}
-
-// Synthetic group for live PTYs the workspace tables do not know about.
-export const LIVE_GROUP_ID = -1;
-
 export interface WorkspaceGroup {
   id: number;
   name: string;
   path: string;
-  tabs: Tab[];
 }
 
 export interface RemoteMessage {
@@ -93,19 +80,33 @@ export interface RemoteChat {
   // Set when the agent is blocked on an allow/deny decision — mirrors
   // desktop's "permission" status. Cleared by respondChatPermission().
   pendingPermission?: PendingPermission | null;
+  // Client-only, never persisted or round-tripped through
+  // remote_create_chat/remote_list_chats: set locally right after
+  // createChat() returns (WelcomeView's picker choices), read once by
+  // sendChat()'s first claude_start call. A refresh()/loadChats() can never
+  // wipe these — applyChats's Object.assign source is the server's chat
+  // record, which carries no such keys, so an absent key never overwrites
+  // one already set here.
+  initialModel?: string;
+  initialEffort?: string;
+  initialPermissionMode?: string;
 }
 
-export type View = "connect" | "dashboard" | "chats" | "chat" | "sessions" | "terminal" | "diff";
+export type View = "connect" | "chats" | "chat" | "welcome";
 
-// Per-DEVICE read receipts, under their own key. `review` and the transient
-// lime `done` are not phases precisely because whether a finished turn still
-// needs looking at is per-device — so the phone must not share the desktop's
-// burrow.seenAt, or opening a tab on one would clear the badge on the other.
-const SEEN_AT_KEY = "burrow.seenAt.mobile";
+// Mirrors desktop's settled/live split (src/stores/claudeChats.ts
+// AUTO_SETTLE_AFTER_DAYS/settledFor) so the mobile chat list groups the same
+// way — but as a mobile-side heuristic, not synced data: lastActivityAt and
+// the manual settledOverride both live only in this device's localStorage,
+// same reasoning as burrow.seenAt.mobile above.
+const AUTO_SETTLE_AFTER_DAYS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const LAST_ACTIVITY_KEY = "burrow.chatActivity.mobile";
+const SETTLED_OVERRIDE_KEY = "burrow.chatSettledOverride.mobile";
 
-function loadSeenAt(): Record<string, number> {
+function loadJsonRecord<T>(key: string): Record<string, T> {
   try {
-    return JSON.parse(localStorage.getItem(SEEN_AT_KEY) ?? "{}") as Record<string, number>;
+    return JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, T>;
   } catch {
     return {};
   }
@@ -119,21 +120,19 @@ export const useRemoteStore = defineStore("remote", () => {
   const connectError = ref("");
   const reconnecting = ref(false);
 
-  const view = ref<View>(credentials.value ? "dashboard" : "connect");
+  const view = ref<View>(credentials.value ? "chats" : "connect");
   const workspaces = ref<WorkspaceGroup[]>([]);
-  const phases = reactive(new Map<number, Phase>());
-  const seenAt = reactive<Record<string, number>>(loadSeenAt());
   const loading = ref(false);
   const listError = ref("");
-  const activeTab = ref<Tab | null>(null);
   const chats = ref<RemoteChat[]>([]);
   const activeChat = ref<RemoteChat | null>(null);
+  const chatActivity = reactive<Record<string, number>>(loadJsonRecord(LAST_ACTIVITY_KEY));
+  const chatSettledOverride = reactive<Record<string, "settled" | "active">>(loadJsonRecord(SETTLED_OVERRIDE_KEY));
 
   let transport: Transport | null = null;
   // Every listen() this store installed, so a disconnect() really stops
   // listening rather than leaving handlers to fire against torn-down state.
   const unlisteners: Array<() => void> = [];
-  const watchedPhases = new Set<number>();
   const watchedChats = new Set<number>();
 
   function track(off: () => void) {
@@ -160,17 +159,6 @@ export const useRemoteStore = defineStore("remote", () => {
     }, WORKSPACES_CHANGED_DEBOUNCE_MS);
   }
 
-  /**
-   * The status shown for a terminal. Derived exactly the way the desktop
-   * derives it (src/runtime/displayStatus.ts) from the server's phase plus
-   * THIS device's read receipt — no second state machine, and no client-side
-   * "done" timer to drift out of step with the desktop's.
-   */
-  function statusFor(ptyId: number): TabStatus {
-    const watching = view.value === "terminal" && activeTab.value?.ptyId === ptyId;
-    return displayStatus(phases.get(ptyId), seenAt[`pty:${ptyId}`] ?? 0, watching);
-  }
-
   function chatStatus(chat: RemoteChat): TabStatus {
     if (chat.pendingPermission) return "permission";
     if (chat.busy) return "running";
@@ -178,27 +166,35 @@ export const useRemoteStore = defineStore("remote", () => {
     return "idle";
   }
 
-  function persistSeenAt() {
+  function touchChatActivity(chatId: number) {
+    chatActivity[String(chatId)] = Date.now();
     try {
-      localStorage.setItem(SEEN_AT_KEY, JSON.stringify(seenAt));
-    } catch { /* private mode / quota — the badge is not worth failing over */ }
+      localStorage.setItem(LAST_ACTIVITY_KEY, JSON.stringify(chatActivity));
+    } catch { /* private mode / quota — settling degrades to "always fresh", not fatal */ }
   }
 
-  function markTabSeen(ptyId: number) {
-    seenAt[`pty:${ptyId}`] = Date.now();
-    persistSeenAt();
+  /** Ported from desktop's settledFor(): pending work always wins (not
+   *  settled), then a manual pin, then — only past AUTO_SETTLE_AFTER_DAYS of
+   *  inactivity — auto-settled. A chat never locally observed yet (no
+   *  chatActivity entry) is treated as fresh, same as one that just finished:
+   *  it ages into the shelf rather than snapping there on first load. */
+  function chatSettled(chat: RemoteChat): boolean {
+    const status = chatStatus(chat);
+    if (chat.busy || status === "running" || status === "waiting" || status === "permission") return false;
+    const override = chatSettledOverride[String(chat.id)];
+    if (override === "settled") return true;
+    if (override === "active") return false;
+    const last = chatActivity[String(chat.id)];
+    if (last === undefined) return false;
+    return Date.now() - last >= AUTO_SETTLE_AFTER_DAYS * DAY_MS;
   }
 
-  /** Subscribe to a leaf's phase. Idempotent: the snapshot and a live
-   *  workspaces-changed both walk the same tabs. */
-  function watchPhase(ptyId: number) {
-    if (watchedPhases.has(ptyId)) return;
-    watchedPhases.add(ptyId);
-    track(
-      transport!.listen<Phase>(`phase-pty:${ptyId}`, (phase) => {
-        if (phase) phases.set(ptyId, phase);
-      }),
-    );
+  function setChatSettledOverride(chatId: number, value: "settled" | "active" | null) {
+    if (value === null) delete chatSettledOverride[String(chatId)];
+    else chatSettledOverride[String(chatId)] = value;
+    try {
+      localStorage.setItem(SETTLED_OVERRIDE_KEY, JSON.stringify(chatSettledOverride));
+    } catch { /* private mode / quota */ }
   }
 
   // ── connection ────────────────────────────────────────────────────────────
@@ -267,10 +263,6 @@ export const useRemoteStore = defineStore("remote", () => {
             // but a phone that was asleep for an hour is past the ring more
             // often than not, and a refresh is cheap next to being wrong.
             void refresh();
-          } else if (view.value === "terminal") {
-            // A terminal with no socket is a frozen screen pretending to be
-            // live. The dashboard at least tells the truth.
-            view.value = "dashboard";
           }
         }),
       );
@@ -288,7 +280,7 @@ export const useRemoteStore = defineStore("remote", () => {
       // refresh() takes a whole new snapshot, so there is no echo to filter:
       // this client only reads workspaces, it never mutates them.
       track(transport.listen("workspaces-changed", scheduleWorkspacesRefresh));
-      if (view.value === "connect") view.value = "dashboard";
+      if (view.value === "connect") view.value = "chats";
       await refresh();
     } catch (e: any) {
       connectError.value = e?.message ?? "Connection failed";
@@ -304,7 +296,6 @@ export const useRemoteStore = defineStore("remote", () => {
       clearTimeout(workspacesChangedTimer);
       workspacesChangedTimer = null;
     }
-    watchedPhases.clear();
     watchedChats.clear();
     transport?.close();
     transport = null;
@@ -313,23 +304,20 @@ export const useRemoteStore = defineStore("remote", () => {
     connected.value = false;
     reconnecting.value = false;
     workspaces.value = [];
-    phases.clear();
     chats.value = [];
     activeChat.value = null;
-    activeTab.value = null;
     view.value = "connect";
   }
 
   // ── first paint ───────────────────────────────────────────────────────────
 
   /**
-   * One `shell_snapshot` for the whole shell: workspaces, the tabs of EVERY
-   * workspace, every phase, and the chats — plus the `seq` that state is
-   * current as of, which is what a later resume counts from.
-   *
-   * This replaced list_workspaces followed by one list_terminal_tabs per
-   * workspace: N+1 round trips, each with a phone's latency, before anything
-   * could render.
+   * One `shell_snapshot` for the whole shell: workspaces and chats, plus the
+   * `seq` that state is current as of, which is what a later resume counts
+   * from. Mobile only shows chats now (no terminal-tab or phase UI left), so
+   * this reads just the workspace list (for the chat-creation picker) and the
+   * chat list — not snap.tabs/snap.phases/list_pty_sessions, which existed
+   * only to feed the terminal views that were removed.
    */
   async function refresh(): Promise<void> {
     if (!transport) return;
@@ -342,54 +330,7 @@ export const useRemoteStore = defineStore("remote", () => {
       // the same reason).
       transport.noteSeq(snap.seq ?? 0);
 
-      const groups: WorkspaceGroup[] = [];
-      for (const ws of snap.workspaces ?? []) {
-        const raw = (snap.tabs?.[ws.id] ?? []) as any[];
-        const tabs: Tab[] = raw
-          .filter((t) => typeof t.pty_id === "number")
-          .map((t) => ({
-            ptyId: t.pty_id,
-            title: t.title || t.default_title || `PTY ${t.pty_id}`,
-            cwd: t.cwd ?? ws.path,
-            workspaceId: ws.id,
-            workspaceName: ws.name,
-          }));
-        groups.push({ id: ws.id, name: ws.name, path: ws.path, tabs });
-      }
-
-      // A tab only reaches SQLite when the desktop saves the workspace, so a
-      // freshly spawned PTY can be live while absent from every group. The
-      // snapshot reads terminal_tabs, so the daemon still has to be asked
-      // separately, or an empty list shows next to a running agent.
-      const known = new Set(groups.flatMap((g) => g.tabs.map((t) => t.ptyId)));
-      const live = await transport
-        .invoke<{ pty_id: number }[]>("list_pty_sessions")
-        .catch(() => [] as { pty_id: number }[]);
-      const orphans: Tab[] = (live ?? [])
-        .map((s) => s.pty_id)
-        .filter((id) => Number.isFinite(id) && !known.has(id))
-        .map((id) => ({
-          ptyId: id,
-          title: `PTY ${id}`,
-          cwd: "",
-          workspaceId: LIVE_GROUP_ID,
-          workspaceName: "Živé relace",
-        }));
-      if (orphans.length) {
-        groups.push({ id: LIVE_GROUP_ID, name: "Živé relace", path: "", tabs: orphans });
-      }
-      workspaces.value = groups;
-
-      // Phases come from the snapshot keyed the way the server keys them
-      // ("pty:7"), so no client-side re-derivation and no window where a tab
-      // renders idle because its first phase event has not arrived yet.
-      for (const [key, phase] of Object.entries(snap.phases ?? {})) {
-        if (!key.startsWith("pty:")) continue;
-        const id = Number(key.slice("pty:".length));
-        if (Number.isFinite(id)) phases.set(id, phase);
-      }
-      for (const g of groups) for (const t of g.tabs) watchPhase(t.ptyId);
-
+      workspaces.value = (snap.workspaces ?? []).map((ws) => ({ id: ws.id, name: ws.name, path: ws.path }));
       applyChats((snap.chats ?? []) as unknown as RemoteChat[]);
     } catch (e: any) {
       listError.value = e?.message ?? "Failed to load";
@@ -398,7 +339,7 @@ export const useRemoteStore = defineStore("remote", () => {
     }
   }
 
-  /** Kept as the name the views call to force a reload. */
+  /** Kept as the name views call to force a reload. */
   const loadSessions = refresh;
 
   // ── chats ─────────────────────────────────────────────────────────────────
@@ -418,7 +359,12 @@ export const useRemoteStore = defineStore("remote", () => {
         : { ...chat, messages: Array.isArray(chat.messages) ? chat.messages : [] };
     });
     chats.value = next;
-    for (const chat of next) watchChat(chat);
+    for (const chat of next) {
+      watchChat(chat);
+      // First observation of this chat on this device: seed a baseline so it
+      // doesn't snap straight to "settled" for having no recorded activity.
+      if (chatActivity[String(chat.id)] === undefined) touchChatActivity(chat.id);
+    }
   }
 
   function safeJson(raw: string): unknown {
@@ -458,6 +404,7 @@ export const useRemoteStore = defineStore("remote", () => {
   const pendingSends = new Set<string>();
 
   function applyEvent(chat: RemoteChat, event: Record<string, any>) {
+    touchChatActivity(chat.id);
     // Only these events happen strictly during an active turn — a chat
     // driven from the desktop (or another remote client) never runs sendChat
     // on this client, so chat.busy would otherwise stay false the whole time
@@ -644,7 +591,7 @@ export const useRemoteStore = defineStore("remote", () => {
 
   function closeChat() {
     activeChat.value = null;
-    view.value = "dashboard";
+    view.value = "chats";
   }
 
   // Mirrors AgentChat.vue's smartTitle→refineTitle: a cheap local heuristic
@@ -686,6 +633,7 @@ export const useRemoteStore = defineStore("remote", () => {
     const chat = activeChat.value;
     if (!transport || !chat || !text.trim() || chat.busy) return;
     const prompt = text.trim();
+    touchChatActivity(chat.id);
     chat.messages.push({ id: Date.now(), role: "user", text: prompt });
     void autoTitleChat(chat, prompt);
     // Claim the echo before the call goes out, or a fast round trip lands
@@ -702,18 +650,24 @@ export const useRemoteStore = defineStore("remote", () => {
         // because ClaudeSend publishes it before writing to stdin. ClaudeStart
         // is a no-op if the session is already alive, so this is safe on
         // every send, not just the first.
-        // ponytail: passes only cwd + resumeSessionId, not the chat's actual
-        // model/permission/profile config (mobile doesn't have it) — fine
+        // permissionMode/model/effort come from WelcomeView's composer
+        // (chat.initialPermissionMode/initialModel/initialEffort, set once
+        // right after createChat() returns) — they only actually apply on
+        // THIS very first claude_start, since every later call finds the
+        // session already alive and is a no-op.
+        // ponytail: appendSystemPrompt/configDir/profileCommand/profileArgs
+        // still aren't threaded — mobile has no per-instance provider config
+        // (custom binary/config dir/system prompt) to draw them from. Fine
         // for a resume, would under-configure a process this backend never
         // started at all. Thread real chat config through if that matters.
         await transport.invoke("claude_start", {
           id: String(chat.id),
           cwd: workspaces.value.find((w) => w.id === chat.workspaceId)?.path ?? "",
           resumeSessionId: chat.claudeSessionId || "",
-          permissionMode: "",
+          permissionMode: chat.initialPermissionMode ?? "",
           appendSystemPrompt: "",
-          model: "",
-          effort: "",
+          model: chat.initialModel ?? "",
+          effort: chat.initialEffort ?? "",
           configDir: "",
           profileCommand: "",
           profileArgs: "",
@@ -754,12 +708,17 @@ export const useRemoteStore = defineStore("remote", () => {
     }
   }
 
-  async function createChat(workspaceId: number, agentKind: "codex" | "claude") {
+  async function createChat(workspaceId: number, agentKind: "codex" | "claude"): Promise<RemoteChat> {
     if (!transport) throw new Error("not connected");
     const chat = await transport.invoke<RemoteChat>("remote_create_chat", { workspaceId, agentKind });
     chats.value.push({ ...chat, messages: [] });
     watchChat(chat);
-    openChat(chatFor(chat.id)!);
+    const stored = chatFor(chat.id)!;
+    openChat(stored);
+    // Returned so a caller (WelcomeView) can attach its picker choices
+    // (initialModel/initialEffort/initialPermissionMode) to the SAME reactive
+    // object this store now holds, before its own sendChat() reads them.
+    return stored;
   }
 
   async function respondChatPermission(chatId: number, allow: boolean) {
@@ -802,46 +761,22 @@ export const useRemoteStore = defineStore("remote", () => {
 
   // ── views ─────────────────────────────────────────────────────────────────
 
-  function openTerminal(tab: Tab) {
-    activeTab.value = tab;
-    view.value = "terminal";
-    markTabSeen(tab.ptyId);
-  }
-
-  function closeTerminal() {
-    if (activeTab.value) markTabSeen(activeTab.value.ptyId);
-    activeTab.value = null;
-    view.value = "dashboard";
-  }
-
-  function showDashboard() {
-    view.value = "dashboard";
-  }
-  function showSessions() {
-    view.value = "sessions";
-  }
   function showChats() {
     view.value = "chats";
   }
-  function showDiff() {
-    view.value = "diff";
-  }
-
-  /** The socket itself, for the views that stream (TerminalView). */
-  function getTransport(): Transport {
-    if (!transport) throw new Error("not connected");
-    return transport;
+  function showWelcome() {
+    view.value = "welcome";
   }
 
   return {
     baseUrl, credentials, connected, connecting, connectError, reconnecting,
-    view, workspaces, loading, listError, activeTab,
-    chats, activeChat,
+    view, workspaces, loading, listError,
+    chats, activeChat, chatActivity,
     pair, connect, disconnect, loadSessions, refresh, loadChats,
-    openTerminal, closeTerminal, showDashboard, showSessions, showChats, showDiff,
-    openChat, closeChat, sendChat, createChat,
-    statusFor, chatStatus, getTransport,
-    markTabSeen, markChatSeen, respondChatPermission,
+    showChats, showWelcome,
+    openChat, closeChat, sendChat, createChat, chatSettled, setChatSettledOverride,
+    chatStatus,
+    markChatSeen, respondChatPermission,
     saveRemoteCredentials,
   };
 });

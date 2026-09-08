@@ -17,7 +17,7 @@
           <button class="perm-btn perm-allow !rounded-l-none !rounded-r-md border-l border-black/[0.15] !px-[5px]" :disabled="nativeControlResponsePending" @click="permDropdownOpen = !permDropdownOpen" title="More options">
             <PhCaretDown :size="9" weight="bold" />
           </button>
-          <div v-if="permDropdownOpen" class="absolute bottom-[calc(100%+4px)] right-0 z-[100] min-w-[200px] rounded-lg border border-[var(--chat-border)] bg-[var(--chat-dropdown)] p-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
+          <div v-if="permDropdownOpen" class="absolute bottom-[calc(100%+4px)] right-0 z-[100] min-w-[200px] rounded-lg border border-[var(--chat-border)] bg-[var(--chat-dropdown)] p-1">
             <button class="perm-dropdown-item" @click="permDropdownOpen = false; respondPermission(true)">
               Allow once
             </button>
@@ -130,8 +130,8 @@
     <div ref="scrollEl" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
-        <div class="chat-empty-avatar mb-2 flex h-11 w-11 items-center justify-center rounded-[11px] text-white shadow-[0_0_0_1px_color-mix(in_srgb,var(--agent-accent,#ec4899)_36%,transparent)]" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 72%, #16161a);" aria-hidden="true">
-          <component :is="currentAgentIcon" :size="28" :style="{ color: '#fff' }" />
+        <div class="chat-empty-avatar mb-2 flex h-11 w-11 items-center justify-center rounded-[var(--radius-avatar)] border border-border" style="background: var(--surface-elevated);" aria-hidden="true">
+          <component :is="currentAgentIcon" :size="28" :style="{ color: 'var(--agent-accent)' }" />
         </div>
         <span class="text-[9px] font-semibold uppercase tracking-[.08em] text-muted-foreground">New conversation</span>
         <span class="text-base font-semibold text-foreground">Start a focused conversation</span>
@@ -191,7 +191,7 @@
         <!-- User message -->
         <template v-else-if="msg.role === 'user'">
           <div class="group flex items-end justify-end gap-1.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
-            <div class="bubble-user max-w-[72%] rounded-[16px_16px_5px_16px] border px-3.5 py-2.5 text-[13px] leading-[1.55] shadow-[0_2px_10px_rgba(0,0,0,0.22)]" style="background: var(--chat-user-bg, #1e1b2e); border-color: var(--chat-user-border, rgba(124,58,237,0.35)); color: var(--chat-text, rgba(255,255,255,0.88));">
+            <div class="bubble-user max-w-[72%] rounded-[var(--radius-bubble)] px-3.5 py-2.5 text-[13px] leading-[1.55]" style="background: var(--accent); color: #fff;">
               <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
                 <img
                   v-for="(img, i) in msg.images"
@@ -282,8 +282,8 @@
         <!-- Assistant message -->
         <template v-else>
           <div class="flex items-start gap-2.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
-            <div v-if="isFirstOfRun(msgIdx)" class="agent-avatar mt-0.5 flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-white shadow-[0_2px_6px_color-mix(in_srgb,var(--agent-accent,#ec4899)_28%,transparent)]">
-              <component :is="currentAgentIcon" :size="14" :style="{ color: '#fff' }" />
+            <div v-if="isFirstOfRun(msgIdx)" class="agent-avatar mt-0.5 flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center">
+              <component :is="currentAgentIcon" :size="14" :style="{ color: 'var(--agent-accent)' }" />
             </div>
             <div v-else class="mt-0.5 w-[26px] flex-shrink-0" />
             <div class="min-w-0 flex-1 pt-1 text-[13px] leading-[1.65] text-foreground">
@@ -299,8 +299,8 @@
       </div>
 
       <div v-if="busy" class="flex items-center gap-1.5 px-4 py-1.5">
-        <div class="agent-avatar flex h-[22px] w-[22px] items-center justify-center rounded-full text-white shadow-[0_2px_6px_color-mix(in_srgb,var(--agent-accent,#ec4899)_28%,transparent)]">
-          <component :is="currentAgentIcon" :size="12" :style="{ color: '#fff' }" />
+        <div class="agent-avatar flex h-[22px] w-[22px] items-center justify-center">
+          <component :is="currentAgentIcon" :size="12" :style="{ color: 'var(--agent-accent)' }" />
         </div>
         <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
         <span class="ml-1 text-[11px] italic text-muted-foreground tabular-nums">Working for {{ workingElapsed }}</span>
@@ -312,7 +312,7 @@
     <div class="relative h-0">
       <button
         v-if="!atBottom"
-        class="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] text-secondary-foreground shadow-md transition-colors hover:bg-hover"
+        class="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] text-secondary-foreground transition-colors hover:bg-hover"
         title="Jump to latest"
         @click="scrollToBottom(true)"
       >
@@ -352,7 +352,7 @@
     <!-- New-style input bar -->
     <div v-if="!hideComposer" class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
       <div class="mx-auto w-full max-w-[760px]">
-      <div class="chat-input-box overflow-hidden rounded-xl border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, #ec4899) 4%, var(--chat-surface));">
+      <div class="chat-input-box overflow-hidden rounded-[var(--radius-composer)] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, var(--accent)) 4%, var(--chat-surface));">
         <!-- Queued messages panel (Zed-style) -->
         <div v-if="messageQueue.length > 0" class="border-b border-border bg-[color-mix(in_srgb,var(--chat-accent)_5%,transparent)]">
           <div class="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 hover:bg-hover" @click="queueExpanded = !queueExpanded">
@@ -3319,25 +3319,23 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   --chat-text: var(--text-primary, rgba(255,255,255,0.88));
   --chat-text-secondary: var(--text-secondary, rgba(255,255,255,0.6));
   --chat-muted: var(--text-muted, rgba(255,255,255,0.42));
-  --chat-user-bg: color-mix(in srgb, var(--chat-accent) 14%, var(--chat-bg));
-  --chat-user-border: color-mix(in srgb, var(--chat-accent) 35%, transparent);
   /* Semantic status hues for gate banners — warn/success ride the theme's own
-     yellow/green so they shift with it; info has no theme slot (diff preview
-     and question prompts aren't a themed surface color) so it stays a fixed,
-     deliberately neutral blue across every theme. */
+     yellow/green so they shift with it; info rides the new status-blue token
+     ("done"/finished feel) rather than a hardcoded hex, so it shifts with
+     every theme too. */
   --chat-warn: var(--yellow, #f59e0b);
   --chat-success: var(--green, #10b981);
-  --chat-info: #3b82f6;
+  --chat-info: var(--blue, #60a5fa);
 }
 
 .diff-line { line-height: 1.5; }
-.diff-add { color: var(--success); }
-.diff-del { color: var(--destructive); }
+.diff-add { color: var(--green); }
+.diff-del { color: var(--red); }
 
 .chat-header-btn { position: relative; }
 
 .chat-runtime-dot {
-  box-shadow: 0 0 7px color-mix(in srgb, var(--success, #22c55e) 75%, transparent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--green, #22c55e) 75%, transparent);
 }
 
 .btn-danger-active { color: var(--red, #ef4444) !important; background: color-mix(in srgb, var(--red, #ef4444) 15%, transparent) !important; }
@@ -3357,7 +3355,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
 }
 .perm-mode-item {
   display: flex;
@@ -3413,7 +3410,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   border-radius: 10px;
   border: 1px solid var(--_sb-border);
   background: var(--_sb-bg);
-  box-shadow: 0 8px 24px -6px rgba(0,0,0,0.3);
 }
 .status-banner--warn {
   --_sb-border: color-mix(in srgb, var(--chat-warn) 34%, transparent);
@@ -3450,10 +3446,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 }
 .perm-btn:hover { filter: brightness(1.1); }
 .perm-btn:active { filter: brightness(0.9); }
-.perm-allow { background: #16a34a; color: #fff; }
-.perm-always { background: color-mix(in srgb, #16a34a 22%, var(--bg-panel)); color: var(--text-primary); }
-.perm-deny  { background: #b91c1c; color: #fff; }
-.perm-neutral { background: color-mix(in srgb, var(--agent-accent, #a855f7) 20%, var(--bg-panel)); color: var(--text-primary); border: 1px solid color-mix(in srgb, var(--agent-accent, #a855f7) 35%, transparent); }
+.perm-allow { background: var(--green); color: #fff; }
+.perm-always { background: color-mix(in srgb, var(--green) 22%, var(--bg-panel)); color: var(--text-primary); }
+.perm-deny  { background: var(--red); color: #fff; }
+.perm-neutral { background: color-mix(in srgb, var(--agent-accent, var(--accent)) 20%, var(--bg-panel)); color: var(--text-primary); border: 1px solid color-mix(in srgb, var(--agent-accent, var(--accent)) 35%, transparent); }
 .perm-btn:disabled { opacity: 0.4; cursor: default; filter: none; }
 .perm-kbd {
   font-size: 9px;
@@ -3494,8 +3490,9 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 
 /* Avatars */
 .agent-avatar {
-  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--agent-accent, #ec4899) 80%, #fff) 0%, var(--agent-accent, #ec4899) 60%, color-mix(in srgb, var(--agent-accent, #ec4899) 55%, #000) 100%);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.18);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-avatar);
 }
 
 .mention-pill {
@@ -3541,9 +3538,9 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   align-items: center;
   gap: 6px;
   padding: 3px 9px 3px 6px;
-  background: color-mix(in srgb, var(--agent-accent, #ec4899) 7%, transparent);
-  border: 1px solid color-mix(in srgb, var(--agent-accent, #ec4899) 18%, transparent);
-  border-radius: 8px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-chip);
   font-size: 11px;
   color: var(--text-secondary, rgba(255,255,255,0.55));
   cursor: pointer;
@@ -3553,13 +3550,13 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   transition: background .1s, color .1s, border-color .1s;
 }
 .tool-row:hover {
-  background: color-mix(in srgb, var(--agent-accent, #ec4899) 13%, transparent);
+  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 13%, var(--surface-elevated));
   color: var(--text-primary);
 }
-.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 20%, transparent); }
+.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 35%, var(--border)); }
 .tool-row-failed {
-  background: color-mix(in srgb, var(--destructive, #ef4444) 8%, transparent);
-  border-color: color-mix(in srgb, var(--destructive, #ef4444) 30%, transparent);
+  background: color-mix(in srgb, var(--red, #ef4444) 8%, var(--surface-elevated));
+  border-color: color-mix(in srgb, var(--red, #ef4444) 30%, transparent);
 }
 .changed-files {
   width: 100%;
@@ -3574,7 +3571,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   align-items: center;
   gap: 6px;
   padding: 4px 9px;
-  background: color-mix(in srgb, var(--agent-accent, #ec4899) 6%, transparent);
+  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 6%, transparent);
   border-bottom: 1px solid var(--border);
 }
 .changed-files-row {
@@ -3587,18 +3584,18 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .changed-files-row + .changed-files-row { border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
 .tool-caret {
   flex-shrink: 0;
-  color: var(--agent-accent, #ec4899);
+  color: var(--agent-accent, var(--accent));
   transition: transform .15s;
 }
 .tool-caret-open { transform: rotate(90deg); }
-.tool-icon { color: var(--agent-accent, #ec4899); flex-shrink: 0; }
-.tool-row-failed .tool-icon { color: var(--destructive, #ef4444); }
+.tool-icon { color: var(--agent-accent, var(--accent)); flex-shrink: 0; }
+.tool-row-failed .tool-icon { color: var(--red, #ef4444); }
 .tool-status-icon { flex-shrink: 0; }
 .tool-pulse-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--agent-accent, #ec4899);
+  background: var(--agent-accent, var(--accent));
   animation: tool-pulse 1.4s ease-in-out infinite;
 }
 @keyframes tool-pulse {
@@ -3623,12 +3620,12 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 .tool-output {
   margin: 0;
   padding: 8px 12px;
-  background: color-mix(in srgb, var(--success, #16a34a) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 16%, transparent);
+  background: color-mix(in srgb, var(--green, #16a34a) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green, #16a34a) 16%, transparent);
   border-radius: 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-family: var(--font-mono);
-  color: var(--text-secondary, var(--text-primary));
+  color: var(--green, var(--text-primary));
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 200px;
@@ -3636,8 +3633,9 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   max-width: min(560px, 90vw);
 }
 .tool-output-failed {
-  background: color-mix(in srgb, var(--destructive, #ef4444) 6%, transparent);
-  border-color: color-mix(in srgb, var(--destructive, #ef4444) 20%, transparent);
+  background: color-mix(in srgb, var(--red, #ef4444) 6%, transparent);
+  border-color: color-mix(in srgb, var(--red, #ef4444) 20%, transparent);
+  color: var(--red, #ef4444);
 }
 
 /* Working / thinking dots */
@@ -3732,22 +3730,29 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 /* Command suggestions */
 .cmd-suggestion.selected { background: color-mix(in srgb, var(--chat-text) 5%, transparent); }
 
-/* Input toolbar buttons */
+/* Input toolbar buttons — bordered flat pill chips (model/mode/effort/profile
+   pickers), not plain text buttons: --surface-elevated fill, --border stroke,
+   --radius-chip radius, ~27px tall. */
 .toolbar-btn {
-  background: none;
-  border: none;
-  color: var(--chat-muted);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 7px;
-  border-radius: 7px;
-  font-size: 11px;
+  height: 27px;
+  padding: 0 9px;
+  border-radius: var(--radius-chip);
+  font-size: 12px;
   font-family: var(--font-ui);
-  transition: color .12s ease-out, background .12s ease-out;
+  transition: color .12s ease-out, background .12s ease-out, border-color .12s ease-out;
 }
-.toolbar-btn:hover { color: var(--chat-text); background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
+.toolbar-btn:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, var(--surface-elevated));
+  border-color: color-mix(in srgb, var(--text-primary) 20%, var(--border));
+}
 .toolbar-btn-label { font-weight: 500; }
 .btn-caret { opacity: 0.6; }
 
@@ -3765,7 +3770,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
 }
 .floating-menu-item {
   display: flex;
@@ -3801,23 +3805,22 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 
 .agent-dropdown { position: relative; display: inline-flex; }
 
-/* Send button */
+/* Send button — filled accent circle, no border, no drop shadow. */
 .send-btn {
-  background: var(--agent-accent, #ec4899);
+  background: var(--agent-accent, var(--accent));
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   color: #fff;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
-  transition: background .12s ease-out, opacity .12s ease-out, box-shadow .12s ease-out, transform .15s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--agent-accent, #ec4899) 40%, transparent);
+  transition: background .12s ease-out, opacity .12s ease-out, transform .15s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--agent-accent, #ec4899) 80%, #000); transform: translateY(-1px); }
+.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--agent-accent, var(--accent)) 80%, #000); transform: translateY(-1px); }
 .send-btn:active:not(:disabled) { transform: translateY(0); }
 .send-btn:disabled { opacity: 0.35; cursor: default; }
 .send-btn-abort { background: var(--red, #dc2626); }
@@ -3872,22 +3875,9 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, allCommands,
 /* Chat input box: quiet by default, agent-accent ring on focus so the active
    composer is unambiguous without a heavy persistent border. */
 .chat-input-box:focus-within {
-  border-color: color-mix(in srgb, var(--agent-accent, #ec4899) 55%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, #ec4899) 14%, transparent);
+  border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, var(--accent)) 14%, transparent);
 }
 
 .chat-input-box { position: relative; z-index: 1; }
-
-/* Empty-state avatar: soft halo instead of a flat icon tile. */
-.chat-empty-avatar {
-  position: relative;
-}
-.chat-empty-avatar::before {
-  content: "";
-  position: absolute;
-  inset: -10px;
-  border-radius: 16px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--agent-accent, #ec4899) 22%, transparent) 0%, transparent 70%);
-  z-index: -1;
-}
 </style>

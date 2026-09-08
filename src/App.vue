@@ -635,28 +635,55 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 :root {
-  /* T3 Code-inspired palette: deep purple-black, pink/magenta accent,
-     monospace throughout (matches the reference screenshots). */
-  --bg-base: #0e0c14;
-  --terminal-bg: #0a0810;
-  --bg-panel: #16131f;
-  --bg-dropdown: #1a1726;
-  --bg-hover: #201c2d;
-  --bg-selected: #2a2138;
-  --border: #262233;
-  --text-primary: #f0eef7;
-  --text-secondary: #a9a2c0;
-  --text-muted: #6f6885;
-  --accent: #ec4899;
-  --accent-dim: #be185d;
-  --green: #34d399;
-  --yellow: #fbbf24;
-  --red: #f87171;
+  /* pen.dev-derived palette: near-black bg, flat bordered dark-purple chrome.
+     Mirrors themes.ts's "dark" entry (DEFAULT_THEME_KEY) — this block is only
+     the pre-JS paint; stores/ui.ts's applyTheme() overwrites these same
+     `--${key}` custom properties from the active Theme on mount/switch. */
+  --bg-base: #0A0B0F;
+  --terminal-bg: #0A0B0F;
+  --bg-panel: #14161C;
+  --bg-dropdown: #14161C;
+  --bg-hover: #1B1E26;
+  --bg-selected: #241f38;
+  --border: #262A33;
+  --text-primary: #F2F3F5;
+  --text-secondary: #8B909C;
+  --text-muted: #5C6270;
+  --accent: #7C6FF0;
+  --accent-dim: #5B4FC9;
+  --green: #4ADE80;
+  --yellow: #FBBF24;
+  --red: #F87171;
   --font-mono: "JetBrains Mono", "0xProto Nerd Font", "Fira Code", "Cascadia Code", monospace;
   --font-ui: "JetBrains Mono", "0xProto Nerd Font", "Fira Code", monospace;
   --sidebar-width: 220px;
   --right-panel-width: 300px;
   --titlebar-height: 36px;
+
+  /* ── Visual-language aliases (pen.dev card/bubble/chip spec) ──
+     Named to match the design tokens directly (surface / surface-elevated /
+     text-tertiary) while staying theme-aware: they reference the existing
+     Theme vars above rather than hardcoding a color, so every one of the
+     17 themes in themes.ts gets a sensible value for free and switching
+     themes (stores/ui.ts's applyTheme) never needs to know these names exist. */
+  --surface: var(--bg-panel);
+  --surface-elevated: var(--bg-hover);
+  --text-tertiary: var(--text-muted);
+
+  /* Status-blue: "done"/"review" render blue in the new language, distinct
+     from the purple accent and from status-dots.css's running/waiting/error
+     colors (which key off --status-*, not --blue). */
+  --blue: #60A5FA;
+
+  /* Shape tokens: 16px cards/bubbles, 10-14px buttons/chips, pill badges. No
+     drop shadows anywhere in this language — flat, bordered, fill-only. */
+  --radius-card: 16px;
+  --radius-bubble: 16px;
+  --radius-composer: 20px;
+  --radius-chip: 14px;
+  --radius-nav: 10px;
+  --radius-avatar: 10px;
+  --radius-pill: 999px;
 }
 
 body {

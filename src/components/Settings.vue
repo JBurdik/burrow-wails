@@ -6,7 +6,7 @@
         <PhGearSix :size="15" class="text-muted-foreground" />
         <span class="text-sm font-semibold text-foreground">Settings</span>
       </div>
-      <button class="flex rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="$emit('close')">
+      <button class="flex rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="$emit('close')">
         <PhX :size="15" />
       </button>
     </div>
@@ -36,14 +36,14 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Sub-agent delegation</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Max concurrent sub-agents</span>
                 <span class="text-[11px] text-muted-foreground">Soft per-workspace cap the <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> skill respects when it spawns agents (1–20)</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <input
-                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
+                  class="h-8 w-16 cursor-text rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   type="number"
                   min="1"
                   max="20"
@@ -53,14 +53,14 @@
                 <span class="text-xs text-muted-foreground/70">agents</span>
               </div>
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">MCP recursion depth</span>
                 <span class="text-[11px] text-muted-foreground">How deep MCP-spawned sub-agents may spawn further sub-agents before the depth cap refuses (1–10)</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <input
-                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
+                  class="h-8 w-16 cursor-text rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   type="number"
                   min="1"
                   max="10"
@@ -74,21 +74,21 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Chat</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Default agent</span>
                 <span class="text-[11px] text-muted-foreground">Agent used when opening a new chat.</span>
               </div>
               <Select v-model="ui.defaultChatAgent" class="min-w-[200px]" :options="chatAgentOptions" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Spawn sub-agents as</span>
                 <span class="text-[11px] text-muted-foreground">How <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow spawn</code> sub-agents open. Chat prefills the task in a new chat's input; Terminal keeps <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow wait</code> result capture.</span>
               </div>
               <Select v-model="ui.spawnMode" class="min-w-[200px]" :options="SPAWN_MODE_OPTIONS" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>
                 <span class="text-[11px] text-muted-foreground">Default model for generated text — chat titles, commit messages, pull request content and branch names. Kept cheap by default.</span>
@@ -96,7 +96,7 @@
               <Select v-model="textGenModel" class="min-w-[200px]" :options="textGenModelOptions" />
               <Select v-if="textGenEffortOptions.length > 1" v-model="textGenEffort" class="min-w-[130px]" :options="textGenEffortOptions" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Generated text style</span>
                 <span class="text-[11px] text-muted-foreground">{{ textGenPolicyDescription }}</span>
@@ -107,7 +107,7 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Floating windows</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Snap corner</span>
                 <span class="text-[11px] text-muted-foreground">Which screen corner popped-out terminal bubbles snap to and stack at</span>
@@ -123,34 +123,34 @@
           <div class="h-px bg-border" />
           <div class="flex max-w-[880px] flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Burrow Remote</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
-            <div v-if="httpError" class="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] text-red-300">{{ httpError }}</div>
-            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="pairStatus?.locked" class="text-[11px] text-red-400">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else-if="!pairStatus?.code" class="text-[11px] text-muted-foreground">The code has expired. Generate a new one when you are ready to pair.</span><span v-else class="text-[11px] text-muted-foreground">Type this into Burrow Remote on your phone. Single use, and it expires in 3 minutes — the device gets its own token, so this code is never a lasting credential.</span><code v-if="pairStatus?.code" class="mt-1.5 block font-mono text-[22px] tracking-[0.3em] text-secondary-foreground">{{ pairStatus.code }}</code></div><Button variant="outline" size="sm" type="button" @click="onRegeneratePairCode">New code</Button></div>
-            <div v-if="httpStatus?.enabled" class="flex flex-col gap-2 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
+            <div v-if="httpError" class="rounded-[var(--radius-card)] border border-destructive/40 bg-destructive/10 px-4 py-3 text-[11px] text-destructive">{{ httpError }}</div>
+            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="pairStatus?.locked" class="text-[11px] text-destructive">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else-if="!pairStatus?.code" class="text-[11px] text-muted-foreground">The code has expired. Generate a new one when you are ready to pair.</span><span v-else class="text-[11px] text-muted-foreground">Type this into Burrow Remote on your phone. Single use, and it expires in 3 minutes — the device gets its own token, so this code is never a lasting credential.</span><code v-if="pairStatus?.code" class="mt-1.5 block font-mono text-[22px] tracking-[0.3em] text-secondary-foreground">{{ pairStatus.code }}</code></div><Button variant="outline" size="sm" type="button" @click="onRegeneratePairCode">New code</Button></div>
+            <div v-if="httpStatus?.enabled" class="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex items-center gap-4"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Paired devices</span><span class="text-[11px] text-muted-foreground">Each device has its own token, so revoking one leaves the others paired. A paired device can drive your terminals — treat it as trusted with this machine.</span></div></div>
               <span v-if="remoteDevices === null" class="text-[11px] text-muted-foreground">Loading…</span>
               <span v-else-if="remoteDevices.length === 0" class="text-[11px] text-muted-foreground">No devices paired yet.</span>
-              <div v-for="d in remoteDevices ?? []" :key="d.id" class="flex items-center gap-3 rounded border border-border/60 px-3 py-2">
+              <div v-for="d in remoteDevices ?? []" :key="d.id" class="flex items-center gap-3 rounded-[var(--radius-card)] border border-border/60 px-3 py-2">
                 <div class="flex flex-1 min-w-0 flex-col"><span class="truncate text-[12px] text-foreground">{{ d.name }}</span><span class="text-[11px] text-muted-foreground">{{ d.kind }} · last seen {{ relativeSeen(d.last_seen) }}</span></div>
                 <Button variant="outline" size="sm" type="button" @click="onRevokeDevice(d.id)">Revoke</Button>
               </div>
             </div>
-            <div v-else class="flex items-center gap-4 rounded-md border border-dashed border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Not enabled</span><span class="text-[11px] text-muted-foreground">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
+            <div v-else class="flex items-center gap-4 rounded-[var(--radius-card)] border border-dashed border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Not enabled</span><span class="text-[11px] text-muted-foreground">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
             <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Private tunnel</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
-            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="flex items-start gap-4 rounded-md border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ tailscaleStatus.serve_url }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then type the pairing code above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
+            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="flex items-start gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ tailscaleStatus.serve_url }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then type the pairing code above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
 
             <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Connect to another Burrow</span>
             <p class="m-0 text-[11px] leading-relaxed text-muted-foreground">This window is a client, not just a host — pair it to a Burrow running elsewhere (a VPS, another machine) and drive that one instead. Get its address and a pairing code from <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow pair-status</code> on that machine, or its own Settings above.</p>
-            <div v-if="!desktopRemoteCreds" class="flex flex-col gap-2 rounded-md border border-border bg-panel px-4 py-3">
+            <div v-if="!desktopRemoteCreds" class="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex items-center gap-2">
-                <input v-model="remoteConnectUrl" type="text" placeholder="https://host.tailnet.ts.net/burrow" class="min-w-0 flex-1 rounded border border-border bg-base px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50" />
-                <input v-model="remoteConnectCode" type="text" inputmode="numeric" maxlength="6" placeholder="123456" class="w-[100px] rounded border border-border bg-base px-2.5 py-1.5 text-center font-mono text-[13px] tracking-[0.15em] text-foreground outline-none placeholder:text-muted-foreground/50" />
+                <input v-model="remoteConnectUrl" type="text" placeholder="https://host.tailnet.ts.net/burrow" class="min-w-0 flex-1 rounded-[var(--radius-chip)] border border-border bg-base px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50" />
+                <input v-model="remoteConnectCode" type="text" inputmode="numeric" maxlength="6" placeholder="123456" class="w-[100px] rounded-[var(--radius-chip)] border border-border bg-base px-2.5 py-1.5 text-center font-mono text-[13px] tracking-[0.15em] text-foreground outline-none placeholder:text-muted-foreground/50" />
                 <Button variant="outline" size="sm" type="button" :disabled="remoteConnecting || !remoteConnectUrl.trim() || remoteConnectCode.trim().length !== 6" @click="onConnectRemote">{{ remoteConnecting ? "Connecting…" : "Connect" }}</Button>
               </div>
-              <span v-if="remoteConnectError" class="text-[11px] text-red-400">{{ remoteConnectError }}</span>
+              <span v-if="remoteConnectError" class="text-[11px] text-destructive">{{ remoteConnectError }}</span>
             </div>
-            <div v-else class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div v-else class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="truncate text-[13px] font-medium text-foreground">{{ desktopRemoteCreds.baseUrl }}</span>
                 <span class="text-[11px] text-muted-foreground">{{ desktopUsesRemoteNow ? "This window is driving that machine right now." : "Paired, but this window is still driving this Mac." }}</span>
@@ -194,7 +194,7 @@
             <div
               v-for="s in (activeWsPath != null ? scriptsStore.scriptsFor(activeWsPath) : [])"
               :key="s.id"
-              class="mb-2.5 rounded-lg border border-border bg-base/50 p-2.5"
+              class="mb-2.5 rounded-[var(--radius-card)] border border-border bg-base/50 p-2.5"
             >
               <div class="flex items-center gap-2">
                 <label class="group relative flex shrink-0 cursor-pointer items-center" title="Pick color">
@@ -207,17 +207,17 @@
                   <span class="whitespace-nowrap text-[11px] text-secondary-foreground">Continue on error</span>
                 </label>
                 <span class="flex-1" />
-                <button class="flex rounded p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove script" @click="activeWsPath != null && scriptsStore.removeScript(activeWsPath, s.id)">
+                <button class="flex rounded-[var(--radius-nav)] p-1.5 text-muted-foreground/40 hover:bg-destructive/12 hover:text-destructive" title="Remove script" @click="activeWsPath != null && scriptsStore.removeScript(activeWsPath, s.id)">
                   <PhTrash :size="13" />
                 </button>
               </div>
               <div class="mt-2.5 flex flex-col gap-[5px]">
                 <div v-for="(_, i) in s.steps" :key="i" class="flex items-center gap-1.5">
-                  <span class="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded bg-accent/12 text-[10px] text-muted-foreground">{{ i + 1 }}</span>
+                  <span class="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] bg-accent/12 text-[10px] text-muted-foreground">{{ i + 1 }}</span>
                   <input class="min-w-0 w-full flex-1 border-0 bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50" :value="s.steps[i]" placeholder="npm install" @input="setStep(s, i, val($event))" />
-                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent/12 hover:text-foreground disabled:opacity-30" title="Move up" :disabled="i === 0" @click="moveStep(s, i, i - 1)"><PhArrowUp :size="12" /></button>
-                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent/12 hover:text-foreground disabled:opacity-30" title="Move down" :disabled="i === s.steps.length - 1" @click="moveStep(s, i, i + 1)"><PhArrowDown :size="12" /></button>
-                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-transparent text-muted-foreground transition-colors hover:bg-destructive/16 hover:text-destructive disabled:opacity-30" title="Remove step" @click="removeStep(s, i)"><PhX :size="12" /></button>
+                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-nav)] border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent/12 hover:text-foreground disabled:opacity-30" title="Move up" :disabled="i === 0" @click="moveStep(s, i, i - 1)"><PhArrowUp :size="12" /></button>
+                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-nav)] border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent/12 hover:text-foreground disabled:opacity-30" title="Move down" :disabled="i === s.steps.length - 1" @click="moveStep(s, i, i + 1)"><PhArrowDown :size="12" /></button>
+                  <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-nav)] border border-border bg-transparent text-muted-foreground transition-colors hover:bg-destructive/16 hover:text-destructive disabled:opacity-30" title="Remove step" @click="removeStep(s, i)"><PhX :size="12" /></button>
                 </div>
                 <Button variant="outline" size="sm" class="mt-1 self-start" @click="addStep(s)"><PhPlus :size="11" /> Add step</Button>
               </div>
@@ -239,7 +239,7 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">UI scale</span>
                 <span class="text-[11px] text-muted-foreground">Zoom the entire interface</span>
@@ -250,7 +250,7 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Layout</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Swap panel sides</span>
                 <span class="text-[11px] text-muted-foreground">Move primary panel to the right</span>
@@ -261,7 +261,7 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Developer</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Terminal debug overlay</span>
                 <span class="text-[11px] text-muted-foreground">Show per-terminal diagnostics (size, bytes, buffer)</span>
@@ -283,7 +283,7 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Toasts</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Position</span>
                 <span class="text-[11px] text-muted-foreground">Where on-screen toast notifications appear</span>
@@ -294,14 +294,14 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">General</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Enable sounds</span>
                 <span class="text-[11px] text-muted-foreground">Master switch for all notification sounds</span>
               </div>
               <Switch :checked="ui.soundEnabled" @update:checked="(v: boolean) => ui.soundEnabled = v" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Volume</span>
                 <span class="text-[11px] text-muted-foreground">Playback volume ({{ ui.soundVolume }}%)</span>
@@ -319,24 +319,24 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Agent finished</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Play when an agent finishes while you're away</span>
                 <span class="text-[11px] text-muted-foreground">Fires on the "review" state (another tab/window)</span>
               </div>
               <Switch :checked="ui.soundDoneEnabled" @update:checked="(v: boolean) => ui.soundDoneEnabled = v" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Sound</span>
                 <span class="text-[11px] text-muted-foreground">Choose a built-in sound or a custom file</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <Select v-model="ui.soundDoneId" class="min-w-[200px]" :options="soundDoneOptions" />
-                <button class="flex items-center justify-center rounded border border-border bg-transparent p-1.5 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground" title="Test" @click="playSound('done', true)"><PhPlay :size="13" /></button>
+                <button class="flex items-center justify-center rounded-[var(--radius-nav)] border border-border bg-transparent p-1.5 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground" title="Test" @click="playSound('done', true)"><PhPlay :size="13" /></button>
               </div>
             </div>
-            <div v-if="ui.soundDoneId === 'custom'" class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div v-if="ui.soundDoneId === 'custom'" class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Custom file</span>
                 <span class="text-[11px] text-muted-foreground">{{ ui.soundDoneCustomPath ? soundFileName(ui.soundDoneCustomPath) : "No file selected" }}</span>
@@ -347,24 +347,24 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Needs input</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Play when an agent is waiting for your input</span>
                 <span class="text-[11px] text-muted-foreground">Fires on the "waiting" state</span>
               </div>
               <Switch :checked="ui.soundWaitingEnabled" @update:checked="(v: boolean) => ui.soundWaitingEnabled = v" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Sound</span>
                 <span class="text-[11px] text-muted-foreground">Choose a built-in sound or a custom file</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <Select v-model="ui.soundWaitingId" class="min-w-[200px]" :options="soundWaitingOptions" />
-                <button class="flex items-center justify-center rounded border border-border bg-transparent p-1.5 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground" title="Test" @click="playSound('waiting', true)"><PhPlay :size="13" /></button>
+                <button class="flex items-center justify-center rounded-[var(--radius-nav)] border border-border bg-transparent p-1.5 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground" title="Test" @click="playSound('waiting', true)"><PhPlay :size="13" /></button>
               </div>
             </div>
-            <div v-if="ui.soundWaitingId === 'custom'" class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div v-if="ui.soundWaitingId === 'custom'" class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Custom file</span>
                 <span class="text-[11px] text-muted-foreground">{{ ui.soundWaitingCustomPath ? soundFileName(ui.soundWaitingCustomPath) : "No file selected" }}</span>
@@ -386,7 +386,7 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">ntfy.sh — push notifications</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Enable ntfy</span>
                 <span class="text-[11px] text-muted-foreground">Push agent events to your phone/desktop via <a class="text-accent hover:underline" href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a></span>
@@ -395,39 +395,39 @@
             </div>
 
             <template v-if="ui.ntfyEnabled">
-              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Server</span>
                   <span class="text-[11px] text-muted-foreground">Base URL of your ntfy server</span>
                 </div>
-                <input v-model="ui.ntfyServer" class="h-8 min-w-[200px] rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="https://ntfy.sh" spellcheck="false" />
+                <input v-model="ui.ntfyServer" class="h-8 min-w-[200px] rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="https://ntfy.sh" spellcheck="false" />
               </div>
-              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Topic</span>
                   <span class="text-[11px] text-muted-foreground">Subscribe to this topic in the ntfy app to receive pushes</span>
                 </div>
-                <input v-model="ui.ntfyTopic" class="h-8 min-w-[200px] rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="my-burrow-agents" spellcheck="false" />
+                <input v-model="ui.ntfyTopic" class="h-8 min-w-[200px] rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="my-burrow-agents" spellcheck="false" />
               </div>
-              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Access token</span>
                   <span class="text-[11px] text-muted-foreground">Optional — only for protected topics (Bearer token)</span>
                 </div>
-                <input v-model="ui.ntfyToken" type="password" class="h-8 min-w-[200px] rounded-md border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="tk_…" spellcheck="false" autocomplete="off" />
+                <input v-model="ui.ntfyToken" type="password" class="h-8 min-w-[200px] rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="tk_…" spellcheck="false" autocomplete="off" />
               </div>
             </template>
           </div>
 
           <div v-if="ui.ntfyEnabled" class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Notify on</span>
-            <div v-for="ev in NTFY_EVENTS" :key="ev.id" class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div v-for="ev in NTFY_EVENTS" :key="ev.id" class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">{{ ev.label }}</span>
               </div>
               <Switch :checked="ui.ntfyEvents.includes(ev.id)" @update:checked="(v: boolean) => toggleNtfyEvent(ev.id, v)" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Only when away</span>
                 <span class="text-[11px] text-muted-foreground">Skip pushes while the Burrow window is focused</span>
@@ -455,7 +455,7 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">🐾 Terminal Pets</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Enable pets</span>
                 <span class="text-[11px] text-muted-foreground">A mixed pixel zoo — cat, mole, slime, ghost, duck — roams the bottom of the window. One critter per active agent; it struts while the agent works, bounces when it needs input, hops when a turn finishes, and shakes red on error.</span>
@@ -464,14 +464,14 @@
             </div>
 
             <template v-if="ui.petsEnabled">
-              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Speech bubbles</span>
                   <span class="text-[11px] text-muted-foreground">Pets squeak tiny status quips — “working…”, “need input!”, “done!”</span>
                 </div>
                 <Switch :checked="ui.petsSpeech" @update:checked="(v: boolean) => ui.petsSpeech = v" />
               </div>
-              <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Leveling &amp; crowns</span>
                   <span class="text-[11px] text-muted-foreground">Pets level up as their agent finishes turns and earn a ♛ crown once they hit veteran status.</span>
@@ -504,7 +504,7 @@
               <span class="text-xs text-muted-foreground">{{ c.label }}</span>
               <span class="flex shrink-0 items-center gap-2">
                 <button
-                  class="min-w-[86px] rounded border px-2 py-0.5 font-mono text-[11px] leading-snug"
+                  class="min-w-[86px] rounded-[var(--radius-chip)] border px-2 py-0.5 font-mono text-[11px] leading-snug"
                   :class="kbRecording === c.id
                     ? 'border-accent bg-accent/10 text-accent'
                     : 'border-border bg-hover text-secondary-foreground hover:border-accent/40'"
@@ -542,14 +542,14 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Worktrees directory</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Where new git worktrees are created</span>
                 <span class="text-[11px] text-muted-foreground">Worktrees land at &lt;dir&gt;/&lt;repo&gt;/&lt;branch&gt;</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <input
-                  class="h-8 min-w-[240px] rounded-md border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
+                  class="h-8 min-w-[240px] rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 font-mono text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   :value="ui.worktreesDir"
                   @input="ui.worktreesDir = ($event.target as HTMLInputElement).value"
                   spellcheck="false"
@@ -560,10 +560,10 @@
           </div>
 
           <div class="flex flex-col gap-1.5">
-            <div v-for="w in wsStore.workspaces" :key="w.id" class="flex items-center gap-3 rounded-lg border border-border bg-hover px-2.5 py-2">
-              <button class="group relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-base hover:border-accent/40" title="Change icon" @click="pickWsIcon(w.id)">
+            <div v-for="w in wsStore.workspaces" :key="w.id" class="flex items-center gap-3 rounded-[var(--radius-card)] border border-border bg-hover px-2.5 py-2">
+              <button class="group relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius-nav)] border border-border bg-base hover:border-accent/40" title="Change icon" @click="pickWsIcon(w.id)">
                 <img v-if="wsStore.icons[w.id]" :src="wsStore.icons[w.id]" class="h-full w-full object-cover" />
-                <PhFolder v-else :size="18" weight="fill" class="text-[#60a5fa]" />
+                <PhFolder v-else :size="18" weight="fill" class="text-[var(--blue)]" />
                 <span class="absolute -bottom-px -right-px hidden h-3.5 w-3.5 items-center justify-center rounded-[4px_0_6px_0] bg-accent text-white group-hover:flex"><PhPencilSimple :size="10" /></span>
               </button>
               <div class="flex min-w-0 flex-1 flex-col">
@@ -572,7 +572,7 @@
               </div>
               <button
                 v-if="wsStore.icons[w.id]"
-                class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border border-border bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
+                class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] border border-border bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
                 title="Reset to default icon"
                 @click="wsStore.clearIcon(w.id)"
               >
@@ -602,7 +602,7 @@
               <button
                 v-for="m in THEME_MODES"
                 :key="m.id"
-                class="flex flex-col items-center gap-2 rounded-lg border border-border bg-base px-3 py-4 transition-[border-color,box-shadow] duration-[120ms] hover:border-muted-foreground"
+                class="flex flex-col items-center gap-2 rounded-[var(--radius-card)] border border-border bg-base px-3 py-4 transition-[border-color,box-shadow] duration-[120ms] hover:border-muted-foreground"
                 :class="ui.themeMode === m.id && 'border-accent shadow-[0_0_0_1px_var(--accent)]'"
                 @click="ui.setThemeMode(m.id)"
               >
@@ -626,7 +626,7 @@
               <div
                 v-for="card in themeFamilyCards"
                 :key="card.family.key"
-                class="group flex flex-col gap-2 rounded-lg border border-border bg-base p-2 transition-[border-color,box-shadow] duration-[120ms]"
+                class="group flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-base p-2 transition-[border-color,box-shadow] duration-[120ms]"
                 :class="(ui.lightFamily.key === card.family.key || ui.darkFamily.key === card.family.key) && 'border-accent shadow-[0_0_0_1px_var(--accent)]'"
               >
                 <div class="flex gap-2">
@@ -660,7 +660,7 @@
                 <div class="flex items-center justify-between gap-2 px-0.5">
                   <span class="truncate text-xs text-foreground">{{ card.family.label }}</span>
                   <button
-                    class="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity duration-[120ms] hover:border-accent hover:text-accent group-hover:opacity-100"
+                    class="shrink-0 rounded-[var(--radius-chip)] border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity duration-[120ms] hover:border-accent hover:text-accent group-hover:opacity-100"
                     :class="ui.lightFamily.key === card.family.key && ui.darkFamily.key === card.family.key && 'opacity-100 border-accent text-accent'"
                     title="Use for both light and dark"
                     @click="ui.setThemeFamily(card.family.key)"
@@ -677,21 +677,21 @@
           <!-- Typography -->
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface font</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">UI font</span>
                 <span class="text-[11px] text-muted-foreground">Font used across the app interface</span>
               </div>
               <Select v-model="ui.uiFont" :options="uiFontOptions" :trigger-style="{ fontFamily: ui.uiFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">UI font size</span>
                 <span class="text-[11px] text-muted-foreground">Base interface text size (10–20)</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <input
-                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
+                  class="h-8 w-16 cursor-text rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   type="number"
                   min="10"
                   max="20"
@@ -705,21 +705,21 @@
 
           <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Terminal font</span>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Terminal font</span>
                 <span class="text-[11px] text-muted-foreground">Monospace font for terminal panes</span>
               </div>
               <Select v-model="ui.terminalFont" :options="terminalFontOptions" :trigger-style="{ fontFamily: ui.terminalFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
             </div>
-            <div class="flex items-center gap-4 rounded-md border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Terminal font size</span>
                 <span class="text-[11px] text-muted-foreground">Size in pixels (8–24)</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <input
-                  class="h-8 w-16 cursor-text rounded-md border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
+                  class="h-8 w-16 cursor-text rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-center text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent"
                   type="number"
                   min="8"
                   max="24"
@@ -729,7 +729,7 @@
                 <span class="text-xs text-muted-foreground/70">px</span>
               </div>
             </div>
-            <div class="rounded-md border border-border bg-base px-3.5 py-3 leading-snug text-foreground/90" :style="{ fontFamily: ui.terminalFont, fontSize: ui.terminalFontSize + 'px' }">
+            <div class="rounded-[var(--radius-card)] border border-border bg-base px-3.5 py-3 leading-snug text-foreground/90" :style="{ fontFamily: ui.terminalFont, fontSize: ui.terminalFontSize + 'px' }">
               <span class="text-success">~/agentic-ide $</span> claude --resume
             </div>
           </div>
@@ -747,9 +747,9 @@
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Background</span>
 
             <!-- Image picker card -->
-            <div class="flex items-center gap-3.5 rounded-[10px] border border-border bg-hover p-3">
+            <div class="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-border bg-hover p-3">
               <div
-                class="group relative flex h-[74px] w-[116px] shrink-0 cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border border-border bg-base bg-cover bg-center transition-colors duration-[120ms] hover:border-accent"
+                class="group relative flex h-[74px] w-[116px] shrink-0 cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-[var(--radius-card)] border border-border bg-base bg-cover bg-center transition-colors duration-[120ms] hover:border-accent"
                 :class="{ 'border-dashed text-muted-foreground': !ui.bgImageUrl }"
                 :style="ui.bgImageUrl ? { backgroundImage: `url('${ui.bgImageUrl}')` } : {}"
                 @click="pickBgImage"
@@ -758,23 +758,23 @@
                   <PhImage :size="22" weight="thin" />
                   <span class="text-[10px] text-muted-foreground">Click to choose</span>
                 </template>
-                <div v-else class="absolute inset-0 flex items-center justify-center bg-black/45 text-white opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100"><PhPencilSimple :size="16" weight="bold" /></div>
+                <div v-else class="absolute inset-0 flex items-center justify-center bg-base/60 text-white opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100"><PhPencilSimple :size="16" weight="bold" /></div>
               </div>
               <div class="flex min-w-0 flex-1 flex-col gap-0.75">
                 <span class="truncate text-[13px] font-semibold text-foreground">{{ ui.bgImagePath ? bgFileName(ui.bgImagePath) : "No background image" }}</span>
                 <span class="text-[11px] text-muted-foreground">{{ ui.bgImagePath ? "Shown behind the workspace" : "PNG, JPG or WebP" }}</span>
                 <div class="mt-2 flex gap-1.5">
-                  <button class="rounded-md border border-border bg-base px-3 py-1.25 text-xs text-foreground transition-colors hover:border-accent hover:text-accent" @click="pickBgImage">
+                  <button class="rounded-[var(--radius-chip)] border border-border bg-base px-3 py-1.25 text-xs text-foreground transition-colors hover:border-accent hover:text-accent" @click="pickBgImage">
                     {{ ui.bgImagePath ? "Replace…" : "Choose image…" }}
                   </button>
-                  <button v-if="ui.bgImagePath" class="rounded-md border border-border bg-base px-3 py-1.25 text-xs text-foreground transition-colors hover:border-destructive hover:text-destructive" @click="ui.clearBgImage()">Remove</button>
+                  <button v-if="ui.bgImagePath" class="rounded-[var(--radius-chip)] border border-border bg-base px-3 py-1.25 text-xs text-foreground transition-colors hover:border-destructive hover:text-destructive" @click="ui.clearBgImage()">Remove</button>
                 </div>
               </div>
             </div>
 
             <template v-if="ui.bgImagePath">
               <!-- Opacity -->
-              <div class="flex flex-col gap-2 rounded-[10px] border border-border bg-hover px-3.5 py-3">
+              <div class="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-hover px-3.5 py-3">
                 <div class="flex items-baseline justify-between gap-2.5">
                   <span class="text-xs font-semibold text-foreground">Opacity</span>
                   <span class="text-xs font-semibold tabular-nums text-accent">{{ Math.round(ui.bgOpacity * 100) }}%</span>
@@ -791,7 +791,7 @@
               </div>
 
               <!-- Backdrop blur -->
-              <div class="flex flex-col gap-2 rounded-[10px] border border-border bg-hover px-3.5 py-3">
+              <div class="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-hover px-3.5 py-3">
                 <div class="flex items-baseline justify-between gap-2.5">
                   <span class="text-xs font-semibold text-foreground">Backdrop blur</span>
                   <span class="text-[11px] text-muted-foreground">Frosted-glass over the image</span>
@@ -828,14 +828,14 @@
 
           <div class="flex flex-col gap-2.5">
             <div class="flex items-center gap-3.5">
-              <div class="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-hover text-accent"><PhTerminalWindow :size="26" weight="duotone" /></div>
+              <div class="flex h-12 w-12 items-center justify-center rounded-[var(--radius-nav)] border border-border bg-hover text-accent"><PhTerminalWindow :size="26" weight="duotone" /></div>
               <div>
                 <div class="text-[15px] font-semibold text-foreground">Burrow</div>
                 <div class="mt-0.5 text-xs text-secondary-foreground">Version {{ appVersion || "…" }}</div>
               </div>
             </div>
 
-            <div class="mt-4 rounded-lg border border-border bg-panel px-4 py-3.5">
+            <div class="mt-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3.5">
               <div class="flex items-center justify-between gap-4">
                 <div class="flex min-w-0 flex-col gap-0.75">
                   <template v-if="update.installed">
@@ -888,7 +888,7 @@
               </div>
             </div>
 
-            <div class="mt-4 rounded-lg border border-border bg-panel px-4 py-3.5">
+            <div class="mt-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3.5">
               <div class="flex items-center justify-between gap-4">
                 <div class="flex min-w-0 flex-col gap-0.75">
                   <span class="text-[12.5px] font-semibold text-foreground">Agent status hooks</span>
@@ -928,25 +928,25 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2">
-            <div v-for="s in skills" :key="s.dir" class="flex items-start gap-3 rounded-lg border border-border bg-panel px-3.5 py-3" :class="{ 'opacity-55': !s.enabled }">
-              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-hover text-secondary-foreground"><PhSparkle :size="15" /></div>
+            <div v-for="s in skills" :key="s.dir" class="flex items-start gap-3 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3" :class="{ 'opacity-55': !s.enabled }">
+              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] bg-hover text-secondary-foreground"><PhSparkle :size="15" /></div>
               <div class="flex-1 min-w-0">
                 <div class="text-[13px] font-semibold text-foreground">{{ s.name }}</div>
                 <div class="mt-0.75 text-[11.5px] leading-snug text-secondary-foreground">{{ s.description || "No description" }}</div>
               </div>
               <div class="flex shrink-0 items-center gap-1">
                 <button
-                  class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground"
+                  class="flex h-[26px] w-[26px] items-center justify-center rounded-[var(--radius-nav)] bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground"
                   :title="s.enabled ? 'Disable skill' : 'Enable skill'"
                   @click="toggleSkill(s)"
                 >
                   <component :is="s.enabled ? PhToggleRight : PhToggleLeft" :size="20"
                     :class="s.enabled ? 'text-success' : 'text-secondary-foreground'" />
                 </button>
-                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground" title="Reveal in Finder" @click="revealSkill(s)">
+                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-[var(--radius-nav)] bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground" title="Reveal in Finder" @click="revealSkill(s)">
                   <PhArrowSquareOut :size="14" />
                 </button>
-                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-destructive" title="Delete skill" @click="deleteSkill(s)">
+                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-[var(--radius-nav)] bg-transparent text-secondary-foreground hover:bg-hover hover:text-destructive" title="Delete skill" @click="deleteSkill(s)">
                   <PhTrash :size="14" />
                 </button>
               </div>
@@ -971,20 +971,20 @@
           <div class="h-px bg-border" />
 
           <!-- Add / edit form -->
-          <div v-if="mcpFormOpen" class="mb-3.5 flex flex-col gap-2 rounded-lg border border-border bg-panel px-3.5 py-3">
+          <div v-if="mcpFormOpen" class="mb-3.5 flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3">
             <div class="flex items-center">
               <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{{ mcpEditName ? "Edit" : "New" }} MCP server</span>
-              <button class="ml-auto flex rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground" @click="mcpFormOpen = false"><PhX :size="12" /></button>
+              <button class="ml-auto flex rounded-[var(--radius-nav)] p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground" @click="mcpFormOpen = false"><PhX :size="12" /></button>
             </div>
             <input
-              class="max-w-[280px] rounded-md border border-border bg-base/40 px-2.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
+              class="max-w-[280px] rounded-[var(--radius-chip)] border border-border bg-base/40 px-2.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
               v-model="mcpName"
               :disabled="!!mcpEditName"
               placeholder="server-name"
               spellcheck="false"
             />
             <textarea
-              class="box-border w-full resize-y rounded-md border border-border bg-panel px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
+              class="box-border w-full resize-y rounded-[var(--radius-chip)] border border-border bg-panel px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
               v-model="mcpConfig"
               rows="7"
               spellcheck="false"
@@ -1001,17 +1001,17 @@
           </div>
 
           <div class="flex flex-col gap-2">
-            <div v-for="m in mcpServers" :key="m.name" class="flex items-start gap-3 rounded-lg border border-border bg-panel px-3.5 py-3">
-              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-hover text-secondary-foreground"><PhPlugsConnected :size="15" /></div>
+            <div v-for="m in mcpServers" :key="m.name" class="flex items-start gap-3 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3">
+              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] bg-hover text-secondary-foreground"><PhPlugsConnected :size="15" /></div>
               <div class="flex-1 min-w-0">
                 <div class="text-[13px] font-semibold text-foreground">{{ m.name }}</div>
-                <pre class="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-base px-2.5 py-2 font-mono text-[11px] leading-snug text-secondary-foreground">{{ m.config }}</pre>
+                <pre class="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-chip)] border border-border bg-base px-2.5 py-2 font-mono text-[11px] leading-snug text-secondary-foreground">{{ m.config }}</pre>
               </div>
               <div class="flex shrink-0 items-center gap-1">
-                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground" title="Edit" @click="editMcp(m)">
+                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-[var(--radius-nav)] bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground" title="Edit" @click="editMcp(m)">
                   <PhPencilSimple :size="14" />
                 </button>
-                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-transparent text-secondary-foreground hover:bg-hover hover:text-destructive" title="Remove server" @click="removeMcp(m)">
+                <button class="flex h-[26px] w-[26px] items-center justify-center rounded-[var(--radius-nav)] bg-transparent text-secondary-foreground hover:bg-hover hover:text-destructive" title="Remove server" @click="removeMcp(m)">
                   <PhTrash :size="14" />
                 </button>
               </div>
@@ -1038,18 +1038,18 @@
           <p class="m-0 max-w-[800px] text-xs leading-relaxed text-muted-foreground">Choose an extension folder or ZIP with an <code class="rounded bg-hover px-1 font-mono text-[10px]">extension.json</code>. Burrow validates it, copies it into its managed extensions folder, and runs declared commands only after you click them.</p>
           <p v-if="extensionMessage" class="m-0 text-xs" :class="extensionMessageError ? 'text-destructive' : 'text-muted-foreground'">{{ extensionMessage }}</p>
 
-          <div v-if="extensions.length === 0" class="rounded-lg border border-dashed border-border bg-panel px-3.5 py-5 text-center text-xs text-muted-foreground">No extensions yet. Choose a folder or ZIP to install one.</div>
-          <div v-for="extension in extensions" :key="extension.dir" class="flex flex-col gap-3 rounded-lg border border-border bg-panel px-3.5 py-3">
+          <div v-if="extensions.length === 0" class="rounded-[var(--radius-card)] border border-dashed border-border bg-panel px-3.5 py-5 text-center text-xs text-muted-foreground">No extensions yet. Choose a folder or ZIP to install one.</div>
+          <div v-for="extension in extensions" :key="extension.dir" class="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3">
             <div class="flex items-start gap-3">
-              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-hover text-secondary-foreground"><PhPuzzlePiece :size="15" /></div>
+              <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] bg-hover text-secondary-foreground"><PhPuzzlePiece :size="15" /></div>
               <div class="min-w-0 flex-1"><div class="flex items-center gap-2 text-[13px] font-semibold text-foreground">{{ extension.name || extension.dir }} <span class="font-mono text-[10px] font-normal text-muted-foreground">v{{ extension.version || "?" }}</span></div><p class="m-0 mt-0.5 text-[11.5px] leading-snug text-secondary-foreground">{{ extension.error || extension.description }}</p><p v-if="extension.permissions?.length" class="m-0 mt-1.5 text-[10.5px] text-muted-foreground">Declares: {{ extension.permissions.join(", ") }}</p></div>
               <div class="flex items-center gap-2"><Button v-if="extension.settings?.length" variant="outline" size="sm" @click="configureExtension(extension)">Configure</Button><Switch :checked="extension.enabled" :disabled="!!extension.error" @update:checked="(enabled: boolean) => toggleExtension(extension, enabled)" /></div>
             </div>
-            <div v-if="configuringExtensionId === extension.id" class="flex flex-col gap-2 border-t border-border pt-3"><label v-for="setting in extension.settings" :key="setting.id" class="flex flex-col gap-1"><span class="text-[11.5px] font-medium text-secondary-foreground">{{ setting.title }}</span><span v-if="setting.description" class="text-[10.5px] text-muted-foreground">{{ setting.description }}</span><input class="h-8 rounded-md border border-border bg-base px-2.5 text-xs text-foreground outline-none focus:border-accent" :placeholder="setting.placeholder" :value="extensionSettings[extension.id]?.[setting.id] ?? ''" @input="setExtensionSetting(extension.id, setting.id, val($event))" /></label><div class="flex items-center gap-2 pt-1"><Button size="sm" :disabled="savingExtensionSettings" @click="saveExtensionSettings(extension)">{{ savingExtensionSettings ? "Saving…" : "Save connection" }}</Button><Button variant="outline" size="sm" @click="configuringExtensionId = null">Cancel</Button></div></div>
+            <div v-if="configuringExtensionId === extension.id" class="flex flex-col gap-2 border-t border-border pt-3"><label v-for="setting in extension.settings" :key="setting.id" class="flex flex-col gap-1"><span class="text-[11.5px] font-medium text-secondary-foreground">{{ setting.title }}</span><span v-if="setting.description" class="text-[10.5px] text-muted-foreground">{{ setting.description }}</span><input class="h-8 rounded-[var(--radius-chip)] border border-border bg-base px-2.5 text-xs text-foreground outline-none focus:border-accent" :placeholder="setting.placeholder" :value="extensionSettings[extension.id]?.[setting.id] ?? ''" @input="setExtensionSetting(extension.id, setting.id, val($event))" /></label><div class="flex items-center gap-2 pt-1"><Button size="sm" :disabled="savingExtensionSettings" @click="saveExtensionSettings(extension)">{{ savingExtensionSettings ? "Saving…" : "Save connection" }}</Button><Button variant="outline" size="sm" @click="configuringExtensionId = null">Cancel</Button></div></div>
             <div v-if="extension.enabled && !extension.error && extension.commands?.length" class="flex flex-wrap items-center gap-2 border-t border-border pt-3"><Button v-for="command in extension.commands" :key="command.id" variant="outline" size="sm" :disabled="runningExtensionCommand != null" @click="runExtensionCommand(extension.id, command.id)"><PhPlay :size="11" /> {{ runningExtensionCommand === `${extension.id}:${command.id}` ? "Running…" : command.title }}</Button><div v-if="extensionTasks[extension.id]" class="flex basis-full items-center gap-2 pt-1 text-[11px] text-muted-foreground"><span>{{ extensionTasks[extension.id].title }}</span><span v-if="extensionTasks[extension.id].progress != null" class="font-mono">{{ Math.round(extensionTasks[extension.id].progress! * 100) }}%</span><span class="text-secondary-foreground">{{ extensionTasks[extension.id].status }}</span></div></div>
           </div>
 
-          <details class="rounded-lg border border-border bg-panel px-3.5 py-3"><summary class="cursor-pointer text-[13px] font-medium text-foreground">Building an extension</summary><div class="mt-2 max-w-[760px] text-[11.5px] leading-relaxed text-secondary-foreground">Use <code class="rounded bg-hover px-1 font-mono text-[10px]">apiVersion: 1</code>, a lowercase hyphenated ID, and commands whose executable is on <code class="rounded bg-hover px-1 font-mono text-[10px]">PATH</code>. Commands receive <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_ID</code>, <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_DIR</code>, and <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_CWD</code>. Read <code class="rounded bg-hover px-1 font-mono text-[10px]">docs/extensions.md</code> in the source tree for the full contract. Only install extensions you trust: permissions are informational in v1, not an OS sandbox.</div></details>
+          <details class="rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3"><summary class="cursor-pointer text-[13px] font-medium text-foreground">Building an extension</summary><div class="mt-2 max-w-[760px] text-[11.5px] leading-relaxed text-secondary-foreground">Use <code class="rounded bg-hover px-1 font-mono text-[10px]">apiVersion: 1</code>, a lowercase hyphenated ID, and commands whose executable is on <code class="rounded bg-hover px-1 font-mono text-[10px]">PATH</code>. Commands receive <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_ID</code>, <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_DIR</code>, and <code class="rounded bg-hover px-1 font-mono text-[10px]">BURROW_EXTENSION_CWD</code>. Read <code class="rounded bg-hover px-1 font-mono text-[10px]">docs/extensions.md</code> in the source tree for the full contract. Only install extensions you trust: permissions are informational in v1, not an OS sandbox.</div></details>
         </section>
 
         <!-- Other panels (placeholder) -->

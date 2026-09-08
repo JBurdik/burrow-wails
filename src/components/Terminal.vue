@@ -60,7 +60,7 @@
           :data-leaf-id="pane.leaf.id"
           @mousedown.capture="activateLeaf(pane.leaf.id)"
         >
-          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[26px] shrink-0 items-center gap-[5px] border-b border-[#1e1e1e] bg-[#111111] px-2 text-[11px] text-secondary-foreground" @mousedown.stop>
+          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[26px] shrink-0 items-center gap-[5px] border-b border-border bg-[var(--surface)] px-2 text-[11px] text-secondary-foreground" @mousedown.stop>
             <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="10" class="shrink-0 text-muted-foreground" />
             <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="10" class="shrink-0 text-muted-foreground" />
             <PhRobot v-else-if="pane.leaf.isAgent" :size="10" class="shrink-0 text-accent" />

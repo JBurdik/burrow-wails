@@ -1,71 +1,96 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { Sparkles } from "lucide-vue-next";
+import { agentIconComp } from "@/lib/agentIcons";
+import { providerFor } from "@/lib/providers";
 import { useRemoteStore } from "../store";
-import { Select } from "@/components/ui/select";
 import { STATUS_PRIORITY } from "@/lib/terminalStatus";
 
 const store = useRemoteStore();
-const sortedChats = computed(() =>
-  [...store.chats].sort((a, b) => {
-    const pa = STATUS_PRIORITY.indexOf(store.chatStatus(a));
-    const pb = STATUS_PRIORITY.indexOf(store.chatStatus(b));
-    return pa !== pb ? pa - pb : b.id - a.id;
-  })
+// Live/settled split ported from desktop's Sidebar.vue: pending work always
+// wins as "live"; a settled chat sorts by recency instead of status, same as
+// the desktop shelf.
+const liveChats = computed(() =>
+  store.chats
+    .filter((c) => !store.chatSettled(c))
+    .sort((a, b) => {
+      const pa = STATUS_PRIORITY.indexOf(store.chatStatus(a));
+      const pb = STATUS_PRIORITY.indexOf(store.chatStatus(b));
+      return pa !== pb ? pa - pb : b.id - a.id;
+    })
 );
-const liveChats = computed(() => sortedChats.value.filter((c) => store.chatStatus(c) !== "idle"));
-const settledChats = computed(() => sortedChats.value.filter((c) => store.chatStatus(c) === "idle"));
+const settledChats = computed(() =>
+  store.chats
+    .filter((c) => store.chatSettled(c))
+    .sort((a, b) => (store.chatActivity[String(b.id)] ?? 0) - (store.chatActivity[String(a.id)] ?? 0))
+);
 const showSettled = ref(false);
-const creating = ref(false);
-const workspaceId = ref<number | null>(null);
-const createError = ref("");
-const workspaceOptions = computed(() => store.workspaces.map((workspace) => ({ value: String(workspace.id), label: workspace.name })));
-const workspaceIdModel = computed<string | undefined>({ get: () => workspaceId.value?.toString(), set: (id) => { workspaceId.value = id ? Number(id) : null; } });
-
-async function createChat() {
-  if (!workspaceId.value) return;
-  creating.value = true; createError.value = "";
-  try { await store.createChat(workspaceId.value, "claude"); }
-  catch (error: any) { createError.value = error?.message ?? "Chat se nepodařilo vytvořit."; }
-  finally { creating.value = false; }
-}
 
 onMounted(() => { if (!store.chats.length) store.loadChats(); });
 </script>
 
 <template>
   <header class="m-nav">
-    <button class="m-nav-back" type="button" @click="store.showDashboard">‹ Přehled</button>
     <span class="m-nav-title">Konverzace</span>
     <button class="refresh" type="button" @click="store.loadChats">↻</button>
   </header>
   <main class="m-body chat-list">
-    <section class="new-chat"><p class="eyebrow">NOVÁ KONVERZACE</p><div class="create-grid"><Select v-model="workspaceIdModel" class="mobile-select" :options="workspaceOptions" placeholder="Vyber projekt…" /><button type="button" :disabled="!workspaceId || creating" @click="createChat">{{ creating ? 'Spouštím…' : 'Nový chat' }}</button></div><p v-if="createError" class="create-error">{{ createError }}</p></section>
+    <section class="new-chat"><p class="eyebrow">NOVÁ KONVERZACE</p><button type="button" class="new-chat-cta" @click="store.showWelcome"><Sparkles :size="16" />Spustit nový chat</button></section>
     <p class="eyebrow">ŽIVÉ CHATY</p>
-    <button v-for="chat in liveChats" :key="chat.id" class="chat-row" type="button" @click="store.openChat(chat)">
-      <span :class="['s-dot', store.chatStatus(chat)]" aria-hidden="true" />
-      <span class="chat-row-main"><strong>{{ chat.title }}</strong><small><span v-if="chat.workspaceName" class="chat-ws">{{ chat.workspaceName }}</span>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
-      <span :class="['chat-status', { 'chat-status--busy': chat.busy }]">{{ store.chatStatus(chat) === 'permission' ? 'Potřebuje tě' : chat.busy ? 'Pracuje' : store.chatStatus(chat) === 'review' ? 'Hotovo' : store.chatStatus(chat) === 'error' ? 'Chyba' : 'Připraven' }}</span>
-      <span class="chevron">›</span>
-    </button>
+    <div v-for="chat in liveChats" :key="chat.id" class="chat-row">
+      <button class="chat-row-hit" type="button" @click="store.openChat(chat)">
+        <span class="chat-avatar" :style="{ color: providerFor(chat.agentKind ?? '').color }" aria-hidden="true"><component :is="agentIconComp(providerFor(chat.agentKind ?? '').icon)" :size="20" /></span>
+        <span class="chat-row-main"><strong>{{ chat.title }}</strong><small><span v-if="chat.workspaceName" class="chat-ws">{{ chat.workspaceName }}</span>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
+        <span :class="['chat-status', store.chatStatus(chat), { 'chat-status--busy': chat.busy }]"><span class="chat-status-dot" aria-hidden="true" />{{ store.chatStatus(chat) === 'permission' ? 'Potřebuje tě' : chat.busy ? 'Pracuje' : store.chatStatus(chat) === 'review' ? 'Hotovo' : store.chatStatus(chat) === 'error' ? 'Chyba' : 'Připraven' }}</span>
+      </button>
+      <button class="settle-btn" type="button" title="Označit jako vyřízené" @click="store.setChatSettledOverride(chat.id, 'settled')">✓</button>
+    </div>
     <section v-if="!liveChats.length && !settledChats.length" class="empty"><span>✦</span><strong>Žádná chatová relace</strong><p>Otevři nebo spusť chat v desktopovém Burrowu. Tady se objeví a půjde okamžitě ovládat.</p></section>
 
     <template v-if="settledChats.length">
       <button type="button" class="collapse-toggle" @click="showSettled = !showSettled">{{ showSettled ? '▾' : '▸' }} Ostatní ({{ settledChats.length }})</button>
       <template v-if="showSettled">
-        <button v-for="chat in settledChats" :key="chat.id" class="chat-row chat-row--settled" type="button" @click="store.openChat(chat)">
-          <span class="s-dot idle" aria-hidden="true" />
-          <span class="chat-row-main"><strong>{{ chat.title }}</strong><small><span v-if="chat.workspaceName" class="chat-ws">{{ chat.workspaceName }}</span>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
-          <span class="chevron">›</span>
-        </button>
+        <div v-for="chat in settledChats" :key="chat.id" class="chat-row chat-row--settled">
+          <button class="chat-row-hit" type="button" @click="store.openChat(chat)">
+            <span class="chat-avatar" :style="{ color: providerFor(chat.agentKind ?? '').color }" aria-hidden="true"><component :is="agentIconComp(providerFor(chat.agentKind ?? '').icon)" :size="20" /></span>
+            <span class="chat-row-main"><strong>{{ chat.title }}</strong><small><span v-if="chat.workspaceName" class="chat-ws">{{ chat.workspaceName }}</span>{{ chat.agentKind || chat.transport }} · {{ chat.messages.length }} zpráv</small></span>
+          </button>
+          <button class="settle-btn" type="button" title="Vrátit mezi aktivní" @click="store.setChatSettledOverride(chat.id, 'active')">↩</button>
+        </div>
       </template>
     </template>
   </main>
-  <nav class="bottom-nav" aria-label="Hlavní navigace"><button class="nav-item" type="button" @click="store.showDashboard"><span>⊞</span>Přehled</button><button class="nav-item nav-item--active" type="button"><span>✦</span>Chaty</button><button class="nav-item" type="button" @click="store.showSessions"><span>›_</span>Terminály</button><button class="nav-item" type="button" @click="store.showDiff"><span>±</span>Změny</button></nav>
 </template>
 
 <style scoped>
-.refresh{border:0;background:transparent;color:var(--accent);font-size:20px}.chat-list{padding:20px 16px calc(84px + var(--safe-bottom))}.eyebrow{margin:20px 0 9px;color:var(--text-muted);font:700 10px/1 var(--font-mono);letter-spacing:.12em}.eyebrow:first-child{margin-top:0}.create-grid{display:grid;grid-template-columns:1fr 100px;gap:8px}.create-grid :deep(.mobile-select),.create-grid button{min-height:40px;border:1px solid var(--border);border-radius:8px;background:var(--bg-hover);color:var(--text-primary);padding:0 9px;font:12px var(--font-ui)}.create-grid button{grid-column:span 2;border-color:var(--accent);background:var(--accent);font-weight:700}.create-grid button:disabled{opacity:.45}.create-error{margin:8px 0 0;color:var(--red);font-size:11px}.chat-row{width:100%;min-height:75px;display:flex;align-items:center;gap:10px;padding:10px 2px;border:0;border-top:1px solid var(--border);background:transparent;color:inherit;text-align:left}.chat-row:last-of-type{border-bottom:1px solid var(--border)}.chat-orb{width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border);border-radius:50%;color:var(--text-secondary)}.chat-orb--busy{border-color:var(--yellow);color:var(--yellow);box-shadow:0 0 18px color-mix(in srgb,var(--yellow) 25%,transparent)}.chat-row-main{flex:1;min-width:0;display:grid;gap:4px}.chat-row-main strong,.chat-row-main small{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.chat-row-main strong{font:650 14px/1.2 var(--font-mono);color:var(--text-primary)}.chat-row-main small{color:var(--text-muted);font:11px/1.2 var(--font-mono)}.chat-status{color:var(--text-muted);font-size:10px}.chat-status--busy{color:var(--yellow)}.chevron{color:var(--text-muted);font-size:22px}.empty{min-height:310px;display:grid;place-content:center;gap:10px;text-align:center;color:var(--text-secondary)}.empty span{color:var(--accent);font-size:28px}.empty strong{color:var(--text-primary)}.empty p{max-width:260px;margin:0;font-size:12px}.bottom-nav{position:fixed;right:0;bottom:0;left:0;display:grid;grid-template-columns:repeat(4,1fr);padding:9px 10px calc(9px + var(--safe-bottom));border-top:1px solid var(--border);background:var(--bg-panel)}.nav-item{min-height:48px;display:grid;place-items:center;gap:3px;border:0;background:transparent;color:var(--text-muted);font-size:10px}.nav-item span{font:700 22px/.9 var(--font-mono)}.nav-item--active{color:var(--accent)}
+.refresh{width:36px;height:36px;flex-shrink:0;display:grid;place-items:center;border:1px solid var(--border);border-radius:10px;background:var(--bg-panel);color:var(--text-primary);font-size:18px}
+.chat-list{padding:20px 16px calc(20px + var(--safe-bottom))}
+.eyebrow{margin:20px 0 9px;color:var(--text-muted);font:700 10px/1 var(--font-mono);letter-spacing:.12em}
+.eyebrow:first-child{margin-top:0}
+.new-chat-cta{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:44px;border:0;border-radius:12px;background:var(--accent);color:#fff;font:600 13px var(--font-ui)}
+.new-chat-cta:active{opacity:.85}
 
+.chat-row{width:100%;min-height:75px;display:flex;align-items:stretch;gap:4px;padding:8px;border:1px solid var(--border);border-radius:16px;background:var(--bg-panel)}
+.chat-row + .chat-row{margin-top:12px}
+.chat-row-hit{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:8px;border:0;background:transparent;color:inherit;text-align:left}
+.chat-row-hit:active{background:var(--bg-hover);border-radius:10px}
+.settle-btn{flex-shrink:0;align-self:center;width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--border);border-radius:9px;background:var(--bg-hover);color:var(--text-secondary);font-size:14px}
+.settle-btn:active{color:var(--accent);border-color:var(--accent)}
+.chat-avatar{width:40px;height:40px;flex-shrink:0;display:grid;place-items:center;border:1px solid var(--border);border-radius:10px;background:var(--bg-hover);color:var(--text-secondary)}
+.chat-row-main{flex:1;min-width:0;display:grid;gap:4px}
+.chat-row-main strong,.chat-row-main small{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.chat-row-main strong{font-family:var(--font-ui);font-size:15px;font-weight:600;color:var(--text-primary)}
+.chat-row-main small{color:var(--text-muted);font:11px/1.2 var(--font-mono)}
+.chat-status{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;padding:5px 10px;border:1px solid var(--border);border-radius:20px;background:var(--bg-hover);color:var(--text-secondary);font:11px var(--font-mono);font-weight:600;white-space:nowrap}
+.chat-status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--border)}
+.chat-status.running .chat-status-dot,.chat-status--busy .chat-status-dot{background:var(--status-running)}
+.chat-status.permission .chat-status-dot{background:var(--status-permission)}
+.chat-status.review .chat-status-dot,.chat-status.done .chat-status-dot{background:var(--status-review)}
+.chat-status.error .chat-status-dot{background:var(--status-error)}
+.empty{min-height:310px;display:grid;place-content:center;gap:10px;text-align:center;color:var(--text-secondary)}
+.empty span{color:var(--accent);font-size:28px}
+.empty strong{color:var(--text-primary)}
+.empty p{max-width:260px;margin:0;font-size:12px}
 /* Which project a chat belongs to is the first thing you need when several
    agents are running — lead the meta line with it. */
 .chat-ws {

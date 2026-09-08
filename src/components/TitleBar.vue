@@ -21,7 +21,7 @@
     <!-- Notification center -->
     <div class="relative ml-1 flex shrink-0 [-webkit-app-region:no-drag]">
       <button
-        class="notif-btn relative flex items-center rounded p-[5px] text-secondary-foreground [-webkit-app-region:no-drag] hover:bg-hover hover:text-foreground"
+        class="notif-btn relative flex items-center rounded-[var(--radius-nav)] border border-border bg-panel p-[5px] text-secondary-foreground [-webkit-app-region:no-drag] hover:bg-hover hover:text-foreground"
         :class="[notifOpen && 'text-accent', notifStore.unreadCount > 0 && 'text-success']"
         title="Notifications"
         @click.stop="toggleNotif"
@@ -63,7 +63,7 @@
     </div>
 
     <div class="flex flex-1 items-center justify-center gap-1.5" data-tauri-drag-region>
-      <button v-if="workspaceName" class="flex items-center rounded px-[5px] py-[3px] text-secondary-foreground [-webkit-app-region:no-drag] hover:bg-hover hover:text-foreground" @click="$emit('back')" title="Switch workspace">
+      <button v-if="workspaceName" class="flex items-center rounded-[var(--radius-nav)] border border-border bg-panel px-[5px] py-[3px] text-secondary-foreground [-webkit-app-region:no-drag] hover:bg-hover hover:text-foreground" @click="$emit('back')" title="Switch workspace">
         <PhHouse :size="13" />
       </button>
       <span class="font-mono text-[11px] text-secondary-foreground" data-tauri-drag-region>{{ workspaceName || "Burrow" }}</span>
@@ -73,7 +73,7 @@
     <div class="flex shrink-0 items-center gap-0.5 pr-2 [-webkit-app-region:no-drag]">
       <div class="relative flex gap-0">
         <button
-          class="tb-btn rounded-l-[5px] rounded-r-none pr-1.5"
+          class="tb-btn rounded-l-[var(--radius-nav)] rounded-r-none pr-1.5"
           :title="lastOpenTarget.id === 'finder' ? 'Reveal in Finder' : `Open in ${lastOpenTarget.name}`"
           :disabled="!folderPath"
           @click.stop="openIn(lastOpenTarget.id)"
@@ -83,7 +83,7 @@
           <span class="text-[11px] font-medium">{{ lastOpenTarget.name }}</span>
         </button>
         <button
-          class="tb-btn rounded-l-none rounded-r-[5px] border-l border-border pl-[5px] pr-[5px]"
+          class="tb-btn rounded-l-none rounded-r-[var(--radius-nav)] border-l border-border pl-[5px] pr-[5px]"
           title="Open folder in…"
           :disabled="!folderPath"
           @click.stop="toggleMenu"
@@ -132,7 +132,7 @@
 
           <div class="flex items-center justify-between px-0.5 py-0.5 font-sans text-xs text-secondary-foreground">
             <span class="flex items-center gap-1.5"><PhStack :size="13" />Daemon</span>
-            <span class="font-mono text-[11px] text-foreground" :class="daemon && !daemon.connected && 'text-[#ff7676]'">
+            <span class="font-mono text-[11px] text-foreground" :class="daemon && !daemon.connected && 'text-destructive'">
               {{ daemon ? (daemon.connected ? daemon.alive + "/" + daemon.total + " live" : "offline") : "…" }}
             </span>
           </div>
@@ -373,19 +373,19 @@ const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
 
 <style scoped>
 .tb-btn {
-  background: none;
-  border: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
   color: var(--text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
   padding: 4px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-nav);
   -webkit-app-region: no-drag;
 }
-.tb-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.tb-btn:hover { background: var(--surface-elevated); color: var(--text-primary); }
 .tb-btn:disabled { opacity: 0.35; cursor: default; }
-.tb-btn:disabled:hover { background: none; color: var(--text-secondary); }
+.tb-btn:disabled:hover { background: var(--surface); color: var(--text-secondary); }
 
 .tb-menu {
   position: absolute;
@@ -398,7 +398,6 @@ const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
   z-index: 1000;
 }
 
@@ -421,5 +420,5 @@ const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
 .tb-menu-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 .tb-menu-item:disabled { opacity: 0.4; cursor: default; }
 .tb-menu-item:disabled:hover { background: none; color: var(--text-secondary); }
-.tb-menu-item-danger:hover { background: rgba(220, 60, 60, 0.15); color: #ff7676; }
+.tb-menu-item-danger:hover { background: color-mix(in srgb, var(--color-destructive) 15%, transparent); color: var(--color-destructive); }
 </style>

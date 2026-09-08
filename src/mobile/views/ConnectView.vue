@@ -102,7 +102,7 @@ async function tryPair() {
   display: grid;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--bg-panel);
   color: var(--accent);
   font-family: var(--font-mono);
@@ -110,7 +110,7 @@ async function tryPair() {
   font-weight: 800;
 }
 .pair-product {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
@@ -156,10 +156,10 @@ async function tryPair() {
   text-align: center;
   font-family: var(--font-mono);
   font-size: 22px;
-  color: var(--text);
-  background: var(--bg-input, var(--bg-panel));
+  color: var(--text-primary);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   outline: none;
   -moz-appearance: textfield;
 }
@@ -173,14 +173,14 @@ async function tryPair() {
   font-size: 12px;
   color: var(--red);
   padding: 8px 10px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--red) 10%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));
+  border-radius: 10px;
 }
 .pair-error--network {
   color: var(--yellow);
-  background: rgba(234, 179, 8, 0.08);
-  border-color: rgba(234, 179, 8, 0.3);
+  background: color-mix(in srgb, var(--yellow) 10%, var(--bg-panel));
+  border-color: color-mix(in srgb, var(--yellow) 35%, var(--border));
 }
 
 .pair-hint {
