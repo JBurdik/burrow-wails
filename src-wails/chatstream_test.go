@@ -1,9 +1,25 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"log"
+	"strings"
 	"testing"
 )
+
+// captureTrimLog redirects the package logger for the duration of one trim
+// call and returns what it printed — the smallest way to assert the hard cap
+// is loud without threading a logger through trim's signature.
+func captureTrimLog(t *testing.T, w *chatStreamWriter, chatID string, latestOrd int64) string {
+	t.Helper()
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+	w.trim(chatID, latestOrd)
+	return buf.String()
+}
 
 // drainChatStream blocks until the writer goroutine has flushed everything
 // enqueued so far — the channel is FIFO and single-consumer, so a marker line
@@ -131,6 +147,94 @@ func TestTrimKeepsUnfoldedLines(t *testing.T) {
 	}
 	if got, _ := a.ChatFoldedOrd("5"); got != 1 {
 		t.Fatalf("folded ord regressed to %d", got)
+	}
+}
+
+// TestHardCapTrimsPastFoldMarkerAndLogsLoudly drives trim with a latestOrd
+// standing in for a chat that has produced far more than chatStreamHardKeep
+// lines (inserting 200000 real rows would just be slow, not more honest),
+// and a fold marker that never advanced — the noPersist-latch scenario the
+// hard cap exists for. Two things must both be true: the growth bound
+// actually holds (unfolded lines below the hard cutoff are deleted), and the
+// deletion is not silent.
+func TestHardCapTrimsPastFoldMarkerAndLogsLoudly(t *testing.T) {
+	a := newTestApp(t)
+	w := a.chatStream()
+	w.append("40", "claude-data", `{"i":0}`)
+	w.append("40", "claude-data", `{"i":1}`)
+	drainChatStream(t, a, "40")
+
+	// No fold recorded at all: folded_ord is absent, so the ordinary
+	// protection alone would keep both lines forever regardless of age.
+	latestOrd := int64(chatStreamHardKeep + 10)
+	got := captureTrimLog(t, w, "40", latestOrd)
+
+	lines, err := a.LoadChatStreamSince("40", 0)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// Hard cutoff = latestOrd - chatStreamHardKeep = 10, so both ord 0 and 1
+	// are below it and must be gone: the growth bound genuinely holds even
+	// though nothing was folded.
+	if len(lines) != 0 {
+		t.Fatalf("hard cap did not bound growth, %d line(s) left: %v", len(lines), lines)
+	}
+	if !strings.Contains(got, "40") || !strings.Contains(got, "hard cap") {
+		t.Fatalf("expected a loud hard-cap diagnostic naming the chat, got: %q", got)
+	}
+}
+
+// TestUnderHardCapKeepsEveryUnfoldedLine is the same "fold marker far
+// behind" shape as the hard-cap case above, but with too few lines to reach
+// chatStreamHardKeep. The ordinary fold protection must still win, and the
+// hard cap must stay silent — it only speaks when it is the one doing the
+// deleting.
+func TestUnderHardCapKeepsEveryUnfoldedLine(t *testing.T) {
+	a := newTestApp(t)
+	w := a.chatStream()
+	w.append("41", "claude-data", `{"i":0}`)
+	w.append("41", "claude-data", `{"i":1}`)
+	drainChatStream(t, a, "41")
+
+	// Nothing folded, but latestOrd is only just past the routine keep
+	// window, nowhere near the hard cap.
+	got := captureTrimLog(t, w, "41", chatStreamKeep+10)
+
+	lines, err := a.LoadChatStreamSince("41", 0)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("trim ate unfolded lines under the hard cap, %d left", len(lines))
+	}
+	// Not got != "": log.SetOutput is process-global, and other tests' own
+	// chatStreamWriter goroutines can still be alive and logging (e.g.
+	// "chat stream: append …"), which would fail that assertion for a reason
+	// unrelated to this test.
+	if strings.Contains(got, "hard cap") {
+		t.Fatalf("hard cap diagnostic fired when the hard cap did not act: %q", got)
+	}
+}
+
+// TestRoutineTrimDoesNotLog is an ordinary trim of already-folded history —
+// the hard cap never gets a chance to outrank anything, so it must not log.
+// A diagnostic that fires on every trim is the same as no diagnostic.
+func TestRoutineTrimDoesNotLog(t *testing.T) {
+	a := newTestApp(t)
+	w := a.chatStream()
+	w.append("42", "claude-data", `{"i":0}`)
+	drainChatStream(t, a, "42")
+
+	if err := a.SaveChatMessages(42, `[{"id":1}]`, 1); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got := captureTrimLog(t, w, "42", chatStreamKeep+10)
+	// Same reasoning as TestUnderHardCapKeepsEveryUnfoldedLine: assert the
+	// hard-cap message is absent, not that nothing at all was logged, since
+	// other tests' writer goroutines share this process-global log output.
+	if strings.Contains(got, "hard cap") {
+		t.Fatalf("hard cap diagnostic fired on a routine trim: %q", got)
 	}
 }
 

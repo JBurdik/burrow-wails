@@ -105,9 +105,28 @@ func migrate(db *sql.DB) error {
 			file_path TEXT,
 			created_at INTEGER NOT NULL
 		)`,
+		// One row per PTY or chat. The phase used to live in Terminal.vue, so
+		// it existed only for a mounted workspace and an app restart threw it
+		// away. Here it survives both.
+		`CREATE TABLE IF NOT EXISTS pty_phase (
+			id TEXT PRIMARY KEY,
+			state TEXT NOT NULL,
+			detail TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			is_agent INTEGER NOT NULL DEFAULT 0,
+			turn_ended_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			-- Per-id monotonic counter so two concurrent Apply calls for the
+			-- same id (hook server + foreground poll, different goroutines)
+			-- can't have the older one win the DB row just by persisting last.
+			seq INTEGER NOT NULL DEFAULT 0
+		)`,
 	}
 	stmts = append(stmts, chatMessagesSchema()...)
 	stmts = append(stmts, chatStreamSchema()...)
+	stmts = append(stmts, remoteDevicesSchema()...)
+	stmts = append(stmts, chatsSchema()...)
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return err
@@ -126,6 +145,10 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE terminal_tabs ADD COLUMN default_title TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN session_id TEXT`,
 		`ALTER TABLE terminal_tabs ADD COLUMN branch TEXT`,
+		// Mirrored by setTabLiveStatus (phasestore.go) so `burrow list-tabs` /
+		// MCP list_tabs can answer from SQLite alone — internal/control's
+		// listTabs already selects this column.
+		`ALTER TABLE terminal_tabs ADD COLUMN status TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN handed_off INTEGER DEFAULT 0`,
 		`ALTER TABLE mission_tasks ADD COLUMN profile_id TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN repo_workspace_id INTEGER`,
@@ -146,7 +169,65 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("%s: %w", s, err)
 		}
 	}
+
+	return migratePtyPhaseColumns(db)
+}
+
+// migratePtyPhaseColumns repairs a `pty_phase` table created before its key
+// column was renamed and `seq` was added.
+//
+// `CREATE TABLE IF NOT EXISTS` does not migrate an existing table, so every
+// install that predates those changes kept `pty_id` and no `seq` while the code
+// went on selecting `id` and `seq`. The failure was total and silent from the
+// UI's side: NewPhaseStore returned an error, startup logged
+// "phase store: SQL logic error: no such column: id" and carried on with
+// a.phases == nil, so nothing persisted a phase, nothing emitted
+// phase-pty:/phase-chat:, terminal_tabs.status was never written, and both
+// clients' status dots — plus `burrow list-tabs` and MCP list_tabs — read
+// empty forever.
+//
+// Done by column inspection rather than by running the ALTERs and ignoring the
+// errors: a rename that is already applied fails with the same "no such column"
+// shape as a genuinely broken table, so ignoring it would hide the very
+// condition this exists to fix.
+func migratePtyPhaseColumns(db *sql.DB) error {
+	cols, err := tableColumns(db, "pty_phase")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil // no table yet; the CREATE above already made the right one
+	}
+	if !cols["id"] && cols["pty_id"] {
+		if _, err := db.Exec(`ALTER TABLE pty_phase RENAME COLUMN pty_id TO id`); err != nil {
+			return fmt.Errorf("rename pty_phase.pty_id: %w", err)
+		}
+	}
+	if !cols["seq"] {
+		if _, err := db.Exec(`ALTER TABLE pty_phase ADD COLUMN seq INTEGER NOT NULL DEFAULT 0`); err != nil && !isDuplicateColumnErr(err) {
+			return fmt.Errorf("add pty_phase.seq: %w", err)
+		}
+	}
 	return nil
+}
+
+// tableColumns returns the column names of a table, or an empty map when the
+// table does not exist (PRAGMA table_info yields no rows rather than an error).
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, fmt.Errorf("table_info %s: %w", table, err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
 }
 
 func isDuplicateColumnErr(err error) bool {

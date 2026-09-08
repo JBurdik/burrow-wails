@@ -6,17 +6,21 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sync"
+
+	"burrow/internal/agentphase"
 )
 
-// HookServer receives `burrow status <state>` POSTs from the `burrow`
-// CLI (running inside spawned PTYs) and re-emits them as `pty-hook-{id}`
-// events, matching src-tauri's start_hook_server / tiny_http implementation.
+// HookServer receives `burrow status <state>` POSTs from the `burrow` CLI
+// (running inside spawned PTYs) and applies them to the PhaseStore.
+//
+// It used to ALSO re-emit each one on a `pty-hook-{id}` bus event, kept alive
+// for the mobile client while it had its own status derivation. Phase 6 put
+// the phone on phases like everything else, so that channel had no consumer
+// left and is gone; a hook now has exactly one effect.
 type HookServer struct {
-	ctx      context.Context
-	port     int
-	mu       sync.RWMutex
-	statuses map[string]hookPayload
+	ctx    context.Context
+	port   int
+	phases *PhaseStore
 }
 
 type hookPayload struct {
@@ -31,14 +35,14 @@ type hookPayload struct {
 // StartHookServer listens on a loopback ephemeral port. Callers pass registrars
 // for the other loopback routes (the control API) so everything an agent's shell
 // needs lives behind one port + one port file.
-func StartHookServer(ctx context.Context, routes ...func(*http.ServeMux)) (*HookServer, error) {
+func StartHookServer(ctx context.Context, phases *PhaseStore, routes ...func(*http.ServeMux)) (*HookServer, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	h := &HookServer{ctx: ctx, port: port, statuses: make(map[string]hookPayload)}
+	h := &HookServer{ctx: ctx, port: port, phases: phases}
 	mux := http.NewServeMux()
 	// /hook is the path the `burrow` CLI has always posted to; /status is kept as
 	// an alias. Serving only /status silently broke every status dot: the CLI's
@@ -66,7 +70,7 @@ func (h *HookServer) handleAgentDone(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&p)
 	if p.Token != "" {
-		emitAll(h.ctx, "control:result", map[string]string{"token": p.Token})
+		busEmit("control:result", map[string]string{"token": p.Token})
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -85,41 +89,53 @@ func (h *HookServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A terminal thread can already be running before its XTerm view attaches.
-	// Keep the latest state and replay it from CreatePty once that view has its
-	// listener installed; otherwise the initial `running` hook is lost and the
-	// sidebar mirror remains idle until the next hook arrives.
-	if p.PtyID != "" && p.State != "session" {
-		h.mu.Lock()
-		h.statuses[p.PtyID] = p
-		h.mu.Unlock()
+	if h.phases != nil && p.PtyID != "" {
+		if ev, ok := hookEvent(p); ok {
+			h.phases.Apply("pty:"+p.PtyID, ev)
+		}
 	}
-	h.emitStatus(p)
 
 	w.WriteHeader(http.StatusOK)
 }
 
-// ReplayStatus re-emits a PTY's last hook state after a frontend attaches.
-// The caller creates the PTY only after XTerm has subscribed to pty-hook-{id}.
-func (h *HookServer) ReplayStatus(ptyID string) {
-	h.mu.RLock()
-	p, ok := h.statuses[ptyID]
-	h.mu.RUnlock()
-	if ok {
-		h.emitStatus(p)
+// hookEvent translates one `burrow status` POST into a phase event. An unknown
+// state returns false: a hook nobody planned for must not move the dot.
+func hookEvent(p hookPayload) (agentphase.Event, bool) {
+	switch p.State {
+	case "running":
+		return agentphase.Event{Kind: agentphase.HookRunning}, true
+	case "waiting":
+		return agentphase.Event{Kind: agentphase.HookWaiting}, true
+	case "permission":
+		return agentphase.Event{Kind: agentphase.HookPermission}, true
+	case "done":
+		return agentphase.Event{Kind: agentphase.HookDone}, true
+	case "error":
+		return agentphase.Event{Kind: agentphase.HookError, Detail: p.Detail}, true
+	case "session":
+		return agentphase.Event{Kind: agentphase.HookSession, Model: p.Model, Source: p.Source, Title: p.Title}, true
+	}
+	return agentphase.Event{}, false
+}
+
+// ForgetStatus drops a PTY's phase. Its pair is ReplayStatus: a pty id that
+// has just been reused by a FRESH spawn must not wear the state of the session
+// that held the id before it. Kept as a HookServer method because CreatePty
+// calls it there, next to the daemon check that decides reattach-or-fresh.
+func (h *HookServer) ForgetStatus(ptyID string) {
+	if h.phases != nil {
+		h.phases.Forget("pty:" + ptyID)
 	}
 }
 
-func (h *HookServer) emitStatus(p hookPayload) {
-	eventName := "pty-hook-" + p.PtyID
-	switch p.State {
-	case "waiting", "permission", "running", "done":
-		emitAll(h.ctx, eventName, p.State)
-	case "error":
-		emitAll(h.ctx, eventName, map[string]string{"state": "error", "detail": p.Detail})
-	case "session":
-		emitAll(h.ctx, eventName, map[string]string{"state": "session", "model": p.Model, "source": p.Source, "title": p.Title})
-	default:
-		emitAll(h.ctx, eventName, p.State)
+// ReplayStatus re-emits a PTY's phase after a client attaches.
+//
+// There is no hook-payload cache behind this any more. It existed only to feed
+// the legacy `pty-hook-{id}` channel, whose last consumer went away when phase
+// 6 moved the phone onto phases — and PhaseStore is the better copy anyway: it
+// survives a restart, which that in-memory map never did.
+func (h *HookServer) ReplayStatus(ptyID string) {
+	if h.phases != nil {
+		h.phases.Replay("pty:" + ptyID)
 	}
 }

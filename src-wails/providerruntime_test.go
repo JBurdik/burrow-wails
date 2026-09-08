@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"burrow/internal/agentphase"
 )
 
 // The first three cases mirror src/lib/providerRuntime.test.ts exactly. If this
@@ -193,16 +195,49 @@ func TestToolOutputIsClipped(t *testing.T) {
 
 func TestNormalizeChatLineDispatchesOnKind(t *testing.T) {
 	claude := `{"type":"assistant","message":{"id":"c1","content":[{"type":"text","text":"hi"}]}}`
-	if got := NormalizeChatLine("claude-data", claude); len(got) != 1 || got[0].Type != EvtTextDelta {
+	if got := NormalizeChatLine("claude-data", claude, 1); len(got) != 1 || got[0].Type != EvtTextDelta {
 		t.Fatalf("claude-data not dispatched: %+v", got)
 	}
 	acp := `{"method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"text":"x"}}}}`
-	if got := NormalizeChatLine("acp-data", acp); len(got) != 1 || got[0].Type != EvtThinkingDelta {
+	if got := NormalizeChatLine("acp-data", acp, 2); len(got) != 1 || got[0].Type != EvtThinkingDelta {
 		t.Fatalf("acp-data not dispatched: %+v", got)
 	}
 	// Permission requests are a UI decision on their own channel, never transcript.
-	if got := NormalizeChatLine("acp-req", acp); got != nil {
+	if got := NormalizeChatLine("acp-req", acp, 3); got != nil {
 		t.Fatalf("acp-req should not normalize, got %+v", got)
+	}
+}
+
+func TestUserPromptNormalizesToAUserDelta(t *testing.T) {
+	// The prompt is the one stream kind this app authors rather than parses,
+	// so the recorded line is the text itself.
+	got := NormalizeChatLine(chatUserKind, "ship it", 7)
+	if len(got) != 1 || got[0].Type != EvtUserDelta || got[0].Text != "ship it" {
+		t.Fatalf("bad user event: %+v", got)
+	}
+}
+
+func TestTwoIdenticalPromptsAreTwoBubbles(t *testing.T) {
+	// Identified by ord, not by a hash of the text. "ok" typed twice is two
+	// turns; an id derived from the text would merge them on every replay,
+	// because chatProjection matches an `acp:`-prefixed id BY ID.
+	first := NormalizeChatLine(chatUserKind, "ok", 4)
+	second := NormalizeChatLine(chatUserKind, "ok", 9)
+	if first[0].MessageID == second[0].MessageID {
+		t.Fatalf("identical prompts share an id: %q", first[0].MessageID)
+	}
+	// ...and the SAME line replayed keeps its id, so a client that saw it live
+	// recognises the replay instead of drawing the prompt twice.
+	if replay := NormalizeChatLine(chatUserKind, "ok", 4); replay[0].MessageID != first[0].MessageID {
+		t.Fatalf("replay changed the id: %q vs %q", replay[0].MessageID, first[0].MessageID)
+	}
+}
+
+func TestAnEmptyPromptIsNotRecordedAsATurn(t *testing.T) {
+	// An images-only send passes text "". Emitting an empty user bubble for it
+	// would put a blank turn in both clients' transcripts.
+	if got := NormalizeChatLine(chatUserKind, "", 1); got != nil {
+		t.Fatalf("empty prompt produced events: %+v", got)
 	}
 }
 
@@ -225,6 +260,51 @@ func TestNormalizeAcpBurrowMarkers(t *testing.T) {
 	}
 }
 
+func TestChatPhaseEventMapping(t *testing.T) {
+	cases := []struct {
+		in   string
+		want agentphase.Kind
+		ok   bool
+	}{
+		{EvtTextDelta, agentphase.HookRunning, true},
+		{EvtUserDelta, agentphase.HookRunning, true},
+		// A turn that opens with a tool call reaches text much later; until it
+		// did, the chat read idle through the whole thinking/tool prefix.
+		{EvtThinkingDelta, agentphase.HookRunning, true},
+		{EvtToolStarted, agentphase.HookRunning, true},
+		{EvtTurnCompleted, agentphase.HookDone, true},
+		{EvtTurnFailed, agentphase.HookError, true},
+		{EvtSessionTitle, agentphase.HookSession, true},
+		// The poll only walks pty: keys, so an exit is the only thing that can
+		// settle a chat whose CLI died mid-turn.
+		{EvtSessionExited, agentphase.Dead, true},
+		{EvtToolCompleted, "", false},
+		{EvtSessionID, "", false},
+	}
+	for _, c := range cases {
+		ev, ok := chatPhaseEvent(ProviderRuntimeEvent{Type: c.in})
+		if ok != c.ok {
+			t.Fatalf("%q: ok=%v, want %v", c.in, ok, c.ok)
+		}
+		if ok && ev.Kind != c.want {
+			t.Fatalf("%q → %q, want %q", c.in, ev.Kind, c.want)
+		}
+	}
+
+	// A chat whose CLI dies mid-turn settles; one that exits AFTER its turn
+	// completed keeps the receipt that turn earned.
+	var p agentphase.Phase
+	p = agentphase.Next(p, agentphase.Event{Kind: agentphase.HookRunning}, 1)
+	dead, _ := chatPhaseEvent(ProviderRuntimeEvent{Type: EvtSessionExited})
+	if got := agentphase.Next(p, dead, 2); got.State != agentphase.Stale {
+		t.Fatalf("a chat that died mid-turn did not settle: %+v", got)
+	}
+	done := agentphase.Next(p, agentphase.Event{Kind: agentphase.HookDone}, 2)
+	if got := agentphase.Next(done, dead, 3); got != done {
+		t.Fatalf("exit after turn.completed moved the phase: %+v", got)
+	}
+}
+
 func TestNormalizeAcpReplayedUserTurn(t *testing.T) {
 	// session/load hands back the user's own past turns. They are transcript,
 	// but only on replay — a live prompt is pushed by whoever sent it.
@@ -232,5 +312,107 @@ func TestNormalizeAcpReplayedUserTurn(t *testing.T) {
 	want := []ProviderRuntimeEvent{{Type: EvtUserDelta, MessageID: "acp:u1", Text: "do it"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+// --- chat-note: client-authored transcript rows/patches ---
+
+func TestChatNoteRowNormalizesToAMessageNote(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"system-info","text":"❓ asked a question"}`, 1)
+	want := []ProviderRuntimeEvent{{Type: EvtMessageNote, Role: "system-info", Text: "❓ asked a question"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestChatNoteRowCarriesImages(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"permission","text":"granted","images":["data:x"]}`, 1)
+	if len(got) != 1 || got[0].Type != EvtMessageNote || len(got[0].Images) != 1 || got[0].Images[0] != "data:x" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestChatNotePatchNormalizesToAPatchUser(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"patch","turnMs":180000}`, 1)
+	want := []ProviderRuntimeEvent{{Type: EvtMessagePatchUser, TurnMs: 180000}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestChatNotePatchCanCarryImagesInsteadOfTurnMs(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"patch","images":["data:x"]}`, 1)
+	if len(got) != 1 || got[0].Type != EvtMessagePatchUser || got[0].TurnMs != 0 || len(got[0].Images) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestChatNoteMalformedJSONYieldsNoEvents(t *testing.T) {
+	if got := NormalizeChatLine(chatNoteKind, `{not json`, 1); got != nil {
+		t.Fatalf("malformed note should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNoteUnknownFormYieldsNoEvents(t *testing.T) {
+	if got := NormalizeChatLine(chatNoteKind, `{"form":"bogus"}`, 1); got != nil {
+		t.Fatalf("unknown form should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNoteQueuedRoleIsRejected(t *testing.T) {
+	// "queued" is a transient marker that resolves inside the turn that
+	// created it; persisting it would leave a dead row after a restart
+	// mid-turn.
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"queued","text":"hang on"}`, 1)
+	if got != nil {
+		t.Fatalf("queued role should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNoteUnknownRoleIsRejected(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"bogus","text":"x"}`, 1)
+	if got != nil {
+		t.Fatalf("unknown role should yield nil, got %+v", got)
+	}
+}
+
+// A role the FOLD itself produces from real provider events ("user",
+// "assistant", "tool", "thinking") must never be accepted from a note: those
+// roles are reconciled by MessageID/ToolCallID, which a note carries neither
+// of, so accepting one would render an unreconcilable second bubble
+// indistinguishable from a real provider message. chatNoteRoles is narrowed
+// to exactly {"system-info", "permission"} for this reason.
+func TestChatNoteRejectsProviderProducedRoles(t *testing.T) {
+	for _, role := range []string{"user", "assistant", "tool", "thinking"} {
+		got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"`+role+`","text":"x"}`, 1)
+		if got != nil {
+			t.Fatalf("role %q should be rejected, got %+v", role, got)
+		}
+	}
+}
+
+func TestChatNoteRowWithoutTextIsRejected(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"row","role":"system-info"}`, 1)
+	if got != nil {
+		t.Fatalf("a row with no text should yield nil, got %+v", got)
+	}
+}
+
+func TestChatNotePatchWithNothingToChangeYieldsNoEvents(t *testing.T) {
+	got := NormalizeChatLine(chatNoteKind, `{"form":"patch"}`, 1)
+	if got != nil {
+		t.Fatalf("an empty patch should yield nil, got %+v", got)
+	}
+}
+
+// message.note / message.patch_user must never move the agent phase — a
+// system-info marker or a permission receipt is not evidence of a running
+// turn, and mistaking one for HookRunning would keep a dot orange after the
+// turn that produced it already settled.
+func TestChatNoteEventsDoNotMoveThePhase(t *testing.T) {
+	for _, evType := range []string{EvtMessageNote, EvtMessagePatchUser} {
+		if _, ok := chatPhaseEvent(ProviderRuntimeEvent{Type: evType}); ok {
+			t.Fatalf("%q should not map to a phase event", evType)
+		}
 	}
 }

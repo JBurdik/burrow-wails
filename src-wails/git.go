@@ -62,6 +62,19 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 			return Workspace{}, gitErr(out2)
 		}
 	}
+	// CreateWorkspace already emits workspaces-changed once the row exists,
+	// but AT THAT POINT the row isn't nested yet (parent_id/worktree_branch/
+	// is_git below are still unset) — a client reloading on that first emit
+	// can see the worktree as a top-level non-git workspace, and nothing
+	// corrects it until an unrelated mutation happens to fire another emit.
+	// This is the only write to the workspaces table outside workspace.go,
+	// so it is also the one hole in "every mutation of the list notifies".
+	// Fixed by emitting again below, once the row is actually nested. The
+	// inner emit stays: CreateWorkspace is shared with the plain
+	// (non-worktree) creation path, and duplicating its body here just to
+	// suppress one harmless, idempotent extra event isn't worth the coupling
+	// — a client that reloads on the premature emit and reloads again on the
+	// correct one ends up in the same place either way.
 	ws, err := a.CreateWorkspace(worktreeName, path)
 	if err != nil {
 		return ws, err
@@ -70,6 +83,9 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 	ws.ParentID = &parentID
 	ws.WorktreeBranch = &branch
 	ws.IsGit = true
+	if err == nil {
+		emitWorkspacesChanged()
+	}
 	return ws, err
 }
 

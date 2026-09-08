@@ -37,7 +37,28 @@ func chatMessagesSchema() []string {
 
 // LoadChatMessages returns the chat's transcript as the same JSON array the
 // frontend used to read out of config.json.
+//
+// The in-memory fold wins when this process has one (chattranscript.go): it is
+// authoritative while the app runs, and the table lags it by up to one
+// coalescing window. Reading the table instead would show a client a
+// transcript a second old for no reason.
 func (a *App) LoadChatMessages(chatID int) (string, error) {
+	if w := a.chatStream(); w != nil {
+		if msgs := w.chatTailMessages(strconv.Itoa(chatID)); msgs != nil {
+			out, err := json.Marshal(msgs)
+			if err != nil {
+				return "", err
+			}
+			return string(out), nil
+		}
+	}
+	return a.loadStoredChatMessages(chatID)
+}
+
+// loadStoredChatMessages reads the table, ignoring any in-memory fold. This is
+// what adoption reads (loadChatTail), so it must never consult the tails map:
+// that is the state being built.
+func (a *App) loadStoredChatMessages(chatID int) (string, error) {
 	if a.db == nil {
 		return "[]", nil
 	}
@@ -78,6 +99,14 @@ func (a *App) LoadChatMessages(chatID int) (string, error) {
 // before the rendered copy of them is actually committed. Pass -1 when the
 // caller does not track ords (mobile clients, the config.json migration) and
 // the existing mark is left alone.
+//
+// Since Go owns the fold (chattranscript.go), this whole-transcript
+// DELETE+reinsert is NOT the live path — the fold upserts only its changed
+// tail. What is left here is the import/migration path, which has no stream
+// behind it, plus the clients that have not moved onto the fold yet. A
+// successful save therefore FORGETS the in-memory tail, so the next folded
+// line re-adopts what the caller just wrote instead of folding onto state the
+// table no longer agrees with.
 func (a *App) SaveChatMessages(chatID int, messagesJSON string, foldedOrd int64) error {
 	if a.db == nil {
 		return fmt.Errorf("db not open")
@@ -85,6 +114,16 @@ func (a *App) SaveChatMessages(chatID int, messagesJSON string, foldedOrd int64)
 	var msgs []json.RawMessage
 	if err := json.Unmarshal([]byte(messagesJSON), &msgs); err != nil {
 		return fmt.Errorf("decode messages: %w", err)
+	}
+	// Hold the chat's fold lock across the whole write, so this and Go's own
+	// coalesced persist cannot interleave into a transcript with a hole in it
+	// (see lockChatTail). A stopgap, and cheap: it goes away with this write
+	// path.
+	var tail *chatTail
+	if w := a.chatStream(); w != nil {
+		if tail = w.lockChatTail(strconv.Itoa(chatID)); tail != nil {
+			defer tail.mu.Unlock()
+		}
 	}
 	tx, err := a.db.Begin()
 	if err != nil {
@@ -113,7 +152,15 @@ func (a *App) SaveChatMessages(chatID int, messagesJSON string, foldedOrd int64)
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// Still inside the fold lock: the tail this forgets cannot be mid-persist,
+	// and the next folded line re-adopts what was just written.
+	if w := a.chatStream(); w != nil {
+		w.forgetChatTail(strconv.Itoa(chatID))
+	}
+	return nil
 }
 
 func (a *App) DeleteChatMessages(chatID int) error {

@@ -18,7 +18,7 @@
         <div v-if="filterOpen" class="fixed z-[1000] max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-panel p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]" :style="filterMenuStyle" @click.stop>
           <button
             class="flex w-full items-center gap-[7px] rounded-md border-0 bg-transparent px-2 py-1.5 text-left font-ui text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground"
-            :class="filterProjectId == null && 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] text-foreground'"
+            :class="filterProjectId == null && 'bg-selected text-foreground'"
             @click="filterProjectId = null; filterOpen = false"
           >
             All projects
@@ -28,7 +28,7 @@
             :key="repo.id"
             class="flex w-full items-center gap-[7px] rounded-md border-0 bg-transparent px-2 py-1.5 text-left font-ui text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground"
             :class="[
-              filterProjectId === repo.id && 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] text-foreground',
+              filterProjectId === repo.id && 'bg-selected text-foreground',
               isArchived(repo.id) && 'opacity-50',
             ]"
             @click="pickProject(repo)"
@@ -60,9 +60,9 @@
       <div
         v-for="row in feed.live"
         :key="rowKey(row)"
-        class="group relative cursor-pointer border-b border-border/40 px-2.5 py-[7px] transition-colors hover:bg-hover"
+        class="group relative cursor-pointer border-b border-border/40 px-2.5 py-[7px] transition-colors hover:rounded-lg hover:bg-hover"
         :class="[
-          isActiveRow(row) && 'bg-[color-mix(in_srgb,var(--accent)_9%,transparent)]',
+          isActiveRow(row) && 'rounded-lg bg-selected',
           row.tab.isAgent && `agent-state-${attentionState(row)}`,
         ]"
         @click="selectTab(row)"
@@ -82,7 +82,7 @@
           <span class="grid shrink-0 justify-items-end">
             <span class="[grid-area:1/1] text-[10px] tabular-nums group-hover:invisible" :class="statusClass(row.tab.status)">{{ statusText(row) }}</span>
             <button
-              class="invisible flex items-center gap-[3px] self-center rounded px-1 text-[10px] font-semibold leading-none text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-[#4ade80] group-hover:visible"
+              class="invisible flex items-center gap-[3px] self-center rounded px-1 text-[10px] font-semibold leading-none text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-[var(--green)] group-hover:visible"
               title="Settle"
               @click.stop="toggleSettled(row.tab, row.ws.id)"
             >
@@ -99,15 +99,15 @@
             :is="agentIconComp(row.tab.agentIcon)"
             :size="11"
             class="shrink-0"
-            :class="[row.tab.isChat ? 'text-[#d97706]' : 'ws-term-icon-agent text-accent']"
+            :class="[row.tab.isChat ? 'text-[var(--yellow)]' : 'ws-term-icon-agent text-accent']"
           />
-          <PhChatCenteredText v-else-if="row.tab.isChat" :size="11" class="shrink-0 text-[#d97706]" />
+          <PhChatCenteredText v-else-if="row.tab.isChat" :size="11" class="shrink-0 text-[var(--yellow)]" />
           <PhRobot v-else-if="row.tab.isAgent" :size="11" class="ws-term-icon-agent shrink-0 text-accent" />
           <PhTerminal v-else :size="11" class="shrink-0 text-muted-foreground" />
           <input
             v-if="editingTab?.wsId === row.ws.id && editingTab?.tabId === row.tab.id"
             v-model="editingTabTitle"
-            class="ws-term-rename-input m-0 w-full min-w-0 flex-1 border-0 border-b border-accent bg-transparent p-0 text-[12px] text-foreground outline-none"
+            class="ws-term-rename-input m-0 w-full min-w-0 flex-1 border-0 border-b border-accent bg-transparent p-0 text-[12px] font-semibold text-foreground outline-none"
             @blur="commitTabRename"
             @keydown.enter.prevent="commitTabRename"
             @keydown.esc.prevent="cancelTabRename"
@@ -115,7 +115,7 @@
           />
           <span
             v-else
-            class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-foreground"
+            class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-semibold text-foreground"
             @dblclick.stop="startTabRename(row.ws.id, row.tab)"
           >{{ row.tab.title }}</span>
           <PhX
@@ -129,19 +129,19 @@
 
         <!-- line 3: branch + badges -->
         <div class="mt-[3px] flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <PhGitBranch v-if="row.ws.parent_id" :size="9" class="shrink-0 text-[#a78bfa]" />
+          <PhGitBranch v-if="row.ws.parent_id" :size="9" class="shrink-0 text-accent" />
           <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ row.tab.branch || branchOf(row.ws) }}</span>
           <span class="ml-auto flex shrink-0 items-center gap-1">
-            <span v-if="row.tab.model" class="rounded bg-white/[0.06] px-1 text-[9px] leading-[1.5] opacity-70" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
-            <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-white/[0.08] px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
+            <span v-if="row.tab.model" class="rounded bg-hover px-1 font-mono text-[9px] leading-[1.5] text-muted-foreground" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
+            <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
             <span v-if="row.tab.isAgent && (row.tab.round ?? 0) > 1" class="text-[9px] font-semibold opacity-70" :title="`${row.tab.round} messages sent this session`">↺{{ row.tab.round }}</span>
             <span
               v-if="git.prByWs[row.ws.id]"
-              class="flex items-center gap-[3px] rounded-[7px] bg-white/[0.06] px-[5px] py-px pl-1 font-mono text-[9px] font-semibold leading-none"
+              class="flex items-center gap-[3px] rounded-[7px] bg-hover px-[5px] py-px pl-1 font-mono text-[9px] font-semibold leading-none"
               :class="prClass(git.prByWs[row.ws.id]!)"
               :title="prTitle(git.prByWs[row.ws.id]!)"
             ><span class="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />#{{ git.prByWs[row.ws.id]!.number }}</span>
-            <PhBell v-if="row.tab.status === 'permission'" :size="10" weight="fill" class="text-[#f59e0b]" title="Permission required" />
+            <PhBell v-if="row.tab.status === 'permission'" :size="10" weight="fill" class="text-[var(--yellow)]" title="Permission required" />
             <span
               v-if="row.tab.status && row.tab.status !== 'idle'"
               class="status-dot"
@@ -170,7 +170,7 @@
           <div
             v-for="row in settledChatsVisible"
             :key="rowKey(row)"
-            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
+            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:rounded-lg hover:bg-hover hover:opacity-100"
             @click="selectTab(row)"
             @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
             @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
@@ -221,7 +221,7 @@
           <div
             v-for="s in archivedChats"
             :key="s.id"
-            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:bg-hover hover:opacity-100"
+            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:rounded-lg hover:bg-hover hover:opacity-100"
             @click="unarchiveAndOpen(s.id)"
             @mouseenter="active && scheduleHoverCard(hoverInfoFromArchived(s, active), $event)"
             @mouseleave="cancelHoverCard"
@@ -317,7 +317,7 @@
           <PhFolder v-else :size="11" weight="fill" class="shrink-0 text-accent/80" />
           <span class="min-w-0 truncate text-foreground/80">{{ repoName(hoverInfo.ws) }}</span>
         </div>
-        <div class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverInfo.ws.path">{{ hoverInfo.ws.path }}</div>
+        <div class="min-w-0 truncate font-mono text-[9.5px] text-muted-foreground" :title="hoverInfo.ws.path">{{ hoverInfo.ws.path }}</div>
         <div v-if="hoverInfo.branch || branchOf(hoverInfo.ws)" class="flex min-w-0 items-center gap-1.5">
           <PhGitBranch :size="11" class="shrink-0" />
           <span class="min-w-0 truncate font-mono text-foreground/80">{{ hoverInfo.branch || branchOf(hoverInfo.ws) }}</span>
@@ -337,7 +337,7 @@
         <div class="flex min-w-0 items-center gap-1.5">
           <span class="truncate">Last activity {{ ago(hoverInfo.ts) }}</span>
         </div>
-        <div v-if="hoverInfo.sessionId" class="min-w-0 truncate font-mono text-[9.5px] text-foreground/60" :title="hoverInfo.sessionId">{{ hoverInfo.sessionId }}</div>
+        <div v-if="hoverInfo.sessionId" class="min-w-0 truncate font-mono text-[9.5px] text-muted-foreground" :title="hoverInfo.sessionId">{{ hoverInfo.sessionId }}</div>
         <div
           v-if="git.prByWs[hoverInfo.ws.id]"
           class="flex min-w-0 items-center gap-1.5"
@@ -797,10 +797,10 @@ function statusText(row: ActivityRow): string {
 function statusClass(status: TermStatus): string {
   switch (status) {
     case "running": return "text-accent";
-    case "permission": return "text-[#f59e0b]";
-    case "waiting": return "text-[#60a5fa]";
+    case "permission": return "text-[var(--yellow)]";
+    case "waiting": return "text-[var(--blue)]";
     case "error": return "text-destructive";
-    case "review": return "text-[#4ade80]";
+    case "review": return "text-[var(--blue)]";
     default: return "text-muted-foreground";
   }
 }
@@ -820,12 +820,12 @@ function attentionLabel(state: AgentAttentionState): string {
 }
 
 function prClass(info: PrInfo): string {
-  if (info.checks === "fail") return "text-[#f87171] bg-[color-mix(in_srgb,#f87171_14%,transparent)]";
-  if (info.checks === "pending") return "text-[#fbbf24] bg-[color-mix(in_srgb,#fbbf24_14%,transparent)]";
-  if (info.state === "MERGED") return "text-[#a78bfa] bg-[color-mix(in_srgb,#a78bfa_14%,transparent)]";
-  if (info.state === "CLOSED") return "text-[#f87171] bg-[color-mix(in_srgb,#f87171_12%,transparent)]";
-  if (info.isDraft) return "text-[#9ca3af]";
-  return "text-[#4ade80] bg-[color-mix(in_srgb,#4ade80_12%,transparent)]";
+  if (info.checks === "fail") return "text-destructive bg-[color-mix(in_srgb,var(--red)_14%,transparent)]";
+  if (info.checks === "pending") return "text-[var(--yellow)] bg-[color-mix(in_srgb,var(--yellow)_14%,transparent)]";
+  if (info.state === "MERGED") return "text-accent bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]";
+  if (info.state === "CLOSED") return "text-destructive bg-[color-mix(in_srgb,var(--red)_12%,transparent)]";
+  if (info.isDraft) return "text-muted-foreground";
+  return "text-[var(--green)] bg-[color-mix(in_srgb,var(--green)_12%,transparent)]";
 }
 function prTitle(info: PrInfo): string {
   const state = info.isDraft && info.state === "OPEN" ? "draft" : info.state.toLowerCase();

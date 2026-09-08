@@ -67,12 +67,36 @@ describe("transcript projection", () => {
   });
 
   it("renders a replayed user turn as a finished bubble", () => {
+    // A user.delta carries the whole prompt in one event (normalizeUserPrompt
+    // emits it once), so this is a single event, not two chunks to append —
+    // see "does not double a non-partial message delivered twice" below for
+    // what happens when that single event is redelivered.
     const s = state();
-    applyChatEvent(s, { type: "user.delta", messageId: "acp:u1", text: "do " });
-    applyChatEvent(s, { type: "user.delta", messageId: "acp:u1", text: "it" });
+    applyChatEvent(s, { type: "user.delta", messageId: "acp:u1", text: "do it" });
     expect(s.messages).toHaveLength(1);
     expect(s.messages[0]).toMatchObject({ role: "user", text: "do it" });
     expect(s.messages[0].partial).toBeUndefined();
+  });
+
+  it("does not double a non-partial message delivered twice", () => {
+    // A settled message identified by id is a COMPLETE bubble, so a second
+    // delivery of the same event is a duplicate, not a continuation. Appending
+    // turns "ok" into "okok" — a corrupted transcript rather than a repeated one.
+    const s = state();
+    const ev = { type: "user.delta", messageId: "acp:user:7", text: "ok" };
+    applyChatEvent(s, ev);
+    applyChatEvent(s, ev);
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0].text).toBe("ok");
+  });
+
+  it("still concatenates a PARTIAL message's chunks", () => {
+    // The opposite case, and the reason this cannot be fixed by refusing every
+    // repeat id: streamed assistant text arrives as many events under one id.
+    const s = state();
+    applyChatEvent(s, { type: "text.delta", messageId: "acp:a1", text: "he" });
+    applyChatEvent(s, { type: "text.delta", messageId: "acp:a1", text: "llo" });
+    expect(s.messages[0].text).toBe("hello");
   });
 
   it("drops empty chunks instead of creating empty bubbles", () => {

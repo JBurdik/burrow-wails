@@ -113,7 +113,15 @@ function appendChunk(
     : lastOf(state.messages);
 
   if (last?.role === role && (last.partial || !partial)) {
-    last.text += text;
+    if (acpId && !partial) {
+      // A settled ACP message carries its whole text in one event
+      // (normalizeUserPrompt emits the prompt once), so a repeat delivery of
+      // the same id is a duplicate, not a continuation — assign, don't
+      // append, or a redelivered "ok" becomes "okok".
+      last.text = text;
+    } else {
+      last.text += text;
+    }
     return true;
   }
   state.messages.push({

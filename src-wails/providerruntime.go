@@ -1,6 +1,11 @@
 package main
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+
+	"burrow/internal/agentphase"
+)
 
 // Provider protocol → provider-neutral domain events, in Go.
 //
@@ -51,6 +56,14 @@ type ProviderRuntimeEvent struct {
 	Message   string `json:"message,omitempty"`
 	Title     string `json:"title,omitempty"`
 	SessionID string `json:"sessionId,omitempty"`
+
+	// message.note / message.patch_user — see normalizeChatNote. Additive
+	// fields only: this struct is on the wire and every existing consumer
+	// (chatProjection.ts, the mobile reducer) must be unaffected by their
+	// presence.
+	Role   string   `json:"role,omitempty"`   // message.note: the ChatMessage role to render
+	Images []string `json:"images,omitempty"` // message.note / message.patch_user
+	TurnMs int      `json:"turnMs,omitempty"` // message.patch_user
 }
 
 // Event type constants — the whole vocabulary, in one place.
@@ -70,6 +83,11 @@ const (
 	// rather than write to a dead pipe. Distinct from turn.completed, which is
 	// only a turn boundary and leaves the process up.
 	EvtSessionExited = "session.exited"
+	// message.note and message.patch_user are CLIENT-authored transcript rows
+	// that no provider produces — see normalizeChatNote / chatNoteKind. They
+	// carry no phase meaning (see chatPhaseEvent's fallthrough).
+	EvtMessageNote      = "message.note"
+	EvtMessagePatchUser = "message.patch_user"
 )
 
 // toolOutputLimit matches the frontend's slice(0, 2000): a tool result is shown
@@ -381,17 +399,181 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 	}
 }
 
+// chatPhaseEvent maps a provider runtime event onto a phase event. A chat and a
+// PTY carry the SAME phase type: two derivations of "is this agent busy" is how
+// the mobile client's chat dots drifted from its terminal dots.
+func chatPhaseEvent(ev ProviderRuntimeEvent) (agentphase.Event, bool) {
+	switch ev.Type {
+	// Thinking and a tool call are as much evidence of a live turn as a text
+	// token — more, in fact, since a turn that opens with a tool call reaches
+	// text only much later, and until then the chat read idle.
+	case EvtTextDelta, EvtUserDelta, EvtThinkingDelta, EvtToolStarted:
+		return agentphase.Event{Kind: agentphase.HookRunning}, true
+	case EvtSessionExited:
+		// The CLI is gone. Nothing else settles a chat — the foreground poll
+		// only walks pty: keys — so without this a chat whose process dies
+		// mid-turn stays running forever. Dead is the honest name for it, and
+		// it yields `stale`: nothing failed, the process just went away. It is
+		// a no-op after a turn.completed, which is the order Claude sends them.
+		return agentphase.Event{Kind: agentphase.Dead}, true
+	case EvtTurnCompleted:
+		return agentphase.Event{Kind: agentphase.HookDone}, true
+	case EvtTurnFailed:
+		return agentphase.Event{Kind: agentphase.HookError, Detail: ev.Message}, true
+	case EvtSessionTitle:
+		return agentphase.Event{Kind: agentphase.HookSession, Title: ev.Title}, true
+	}
+	return agentphase.Event{}, false
+}
+
 // NormalizeChatLine dispatches on the stream kind used by chatstream.go, so a
 // caller with a recorded line does not have to know which runtime produced it.
-func NormalizeChatLine(kind, line string) []ProviderRuntimeEvent {
+// `ord` is the line's position in chat_stream. Only the user-prompt kind uses
+// it — as the bubble's identity — but it is on the signature rather than
+// pushed in at one call site, because both callers (the live emit and the
+// replay) already have it and a normalizer that needed it later would
+// otherwise have nowhere to get it.
+func NormalizeChatLine(kind, line string, ord int64) []ProviderRuntimeEvent {
 	switch kind {
 	case "claude-data":
 		return NormalizeClaudeStreamLine(line)
 	case "acp-data":
 		return NormalizeAcpLine(line)
+	case chatUserKind:
+		return normalizeUserPrompt(line, ord)
+	case chatNoteKind:
+		return normalizeChatNote(line, ord)
 	default:
 		// acp-req is a blocking permission request — a UI decision, not
 		// transcript. It keeps its own channel.
+		return nil
+	}
+}
+
+// chatUserKind is the stream kind for what the HUMAN sent.
+//
+// It needs to be its own kind rather than riding the transport's: for Claude,
+// a `type:"user"` record is how the CLI reports TOOL RESULTS (see
+// claudeToolResults), so a prompt published on `claude-data` would have to be
+// told apart from a tool result by inspecting block types — a distinction one
+// future provider tweak away from swapping a person's words for a tool's
+// output. A separate kind cannot be confused with anything a provider says.
+const chatUserKind = "chat-user"
+
+// normalizeUserPrompt turns a recorded prompt into the neutral event both
+// clients already know how to render.
+//
+// The line is the prompt text verbatim, not JSON: it is the one stream kind
+// this app authors rather than parses, so there is no provider envelope to
+// preserve and nothing to lose by storing what the person actually typed.
+func normalizeUserPrompt(line string, ord int64) []ProviderRuntimeEvent {
+	if line == "" {
+		return nil
+	}
+	// Identified by the stream ORD, not by a hash of the text: two identical
+	// prompts ("ok", "continue") are two bubbles, and hashing would merge
+	// them into one on every replay. The ord is unique per line by
+	// construction and is the same number on a live emit and on a replay, so
+	// a client that saw the prompt live recognises the replayed copy instead
+	// of drawing it twice.
+	//
+	// The `acp:` prefix is what makes chatProjection.ts match BY ID rather
+	// than by position (see its comment on appendChunk) — the behaviour a
+	// prompt needs, whichever provider is behind the chat.
+	return []ProviderRuntimeEvent{{
+		Type:      EvtUserDelta,
+		MessageID: fmt.Sprintf("acp:user:%d", ord),
+		Text:      line,
+	}}
+}
+
+// chatNoteKind is the stream kind for transcript rows the CLIENT authors
+// rather than something a provider said: a "question asked" / "plan ready" /
+// "file edit" / "tool wants permission" system-info marker, a permission
+// grant/deny receipt, or a patch onto the user bubble that opened the turn
+// (attached images, elapsed turn time).
+//
+// Its own kind, never a transport's — same reasoning as chatUserKind: a line
+// on claude-data or acp-data is something the PROVIDER said, and nothing a
+// provider says should be mistaken for something the app authored (or vice
+// versa). A stream reader that only knows one kind can never misfile the
+// other.
+const chatNoteKind = "chat-note"
+
+// chatNoteRow and chatNotePatch are the two JSON forms recorded under
+// chatNoteKind, discriminated by the "form" field. Unlike chatUserKind (plain
+// text, because there is nothing to structure), a note carries a role and
+// optional images/timing, which needs a real envelope:
+//
+//	{"form":"row",   "role":"system-info", "text":"...", "images":[...]}
+//	{"form":"patch", "turnMs":180000, "images":[...]}
+//
+// A "row" becomes one new ChatMessage (message.note); a "patch" amends the
+// last "user" bubble already in the transcript (message.patch_user) rather
+// than adding a row of its own — turnMs and attached images are properties OF
+// the prompt that opened the turn, not a new thing that happened.
+type chatNoteEnvelope struct {
+	Form   string   `json:"form"`
+	Role   string   `json:"role,omitempty"`
+	Text   string   `json:"text,omitempty"`
+	Images []string `json:"images,omitempty"`
+	TurnMs int      `json:"turnMs,omitempty"`
+}
+
+// chatNoteRoles are the ONLY ChatMessage roles (src/lib/chatTypes.ts) a "row"
+// note may carry: "system-info" and "permission". Deliberately NOT the wider
+// ChatMessage union minus "queued" — "user"/"assistant"/"tool"/"thinking" are
+// produced by the fold from real provider events, which carry a MessageID or
+// ToolCallID the fold uses to RECONCILE them (append a delta into the same
+// bubble, route a tool result back to its call). A message.note carries
+// neither, so one of those four roles would land as an unreconcilable SECOND
+// bubble rather than joining the one the provider is building — corrupting
+// the transcript, not just duplicating a line. It also widens who can inject
+// one: publish_chat_note is scopeOrchOperate, so any paired device could
+// otherwise render a bubble indistinguishable from a real assistant/tool/user
+// message — the exact confusion chatNoteKind's own-kind-not-a-transport's
+// design exists to prevent, mirrored onto roles. Widen this only for a role
+// that argues past both problems; today nothing does. "queued" is excluded
+// for its own reason: it is a transient marker that resolves inside the turn
+// that created it, so persisting it would leave a dead row after a restart
+// mid-turn.
+var chatNoteRoles = map[string]bool{
+	"permission":  true,
+	"system-info": true,
+}
+
+// normalizeChatNote turns a recorded client-authored note into the neutral
+// event(s) the fold understands. Malformed JSON, an unknown form, or a row
+// with an unusable role yields NO events — a bad line must not become a
+// partial or broken bubble.
+func normalizeChatNote(line string, ord int64) []ProviderRuntimeEvent {
+	var env chatNoteEnvelope
+	if err := json.Unmarshal([]byte(line), &env); err != nil {
+		return nil
+	}
+	switch env.Form {
+	case "row":
+		if !chatNoteRoles[env.Role] || env.Text == "" {
+			return nil
+		}
+		return []ProviderRuntimeEvent{{
+			Type:   EvtMessageNote,
+			Role:   env.Role,
+			Text:   env.Text,
+			Images: env.Images,
+		}}
+	case "patch":
+		if env.TurnMs == 0 && len(env.Images) == 0 {
+			// A patch that changes nothing is not an event — same rule as an
+			// empty text delta: nothing downstream should render for it.
+			return nil
+		}
+		return []ProviderRuntimeEvent{{
+			Type:   EvtMessagePatchUser,
+			TurnMs: env.TurnMs,
+			Images: env.Images,
+		}}
+	default:
 		return nil
 	}
 }

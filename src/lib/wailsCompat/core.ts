@@ -1,361 +1,219 @@
-// Shim for "@tauri-apps/api/core"'s invoke(), backed by the Wails-generated
-// Go bindings (src-wails/frontend/wailsjs/go/main/App). Vue
-// call-sites pass a Tauri-style snake_case command name + named-args
-// object; this dispatches to the corresponding Go method with positional
-// args. Only commands implemented on the Go side so far are mapped — see
-// docs/plans for the remaining src-tauri/src/lib.rs command surface.
-import * as App from "../../../src-wails/frontend/wailsjs/go/main/App";
+// Shim for "@tauri-apps/api/core"'s invoke(), backed by the /v2/ws transport.
+//
+// This used to be a switch over ~130 commands calling Wails-generated
+// bindings. It is now a thin pass-through: the command table lives in Go
+// (src-wails/remoteapi.go), which is also what decides what a remote client
+// may reach. One dispatch, one place to audit — remote access stops being a
+// second API surface that can drift.
+//
+// What stays here is the handful of cases that are client-side decisions
+// rather than backend calls, plus the desktop-only Wails-event protocol the
+// wire deliberately does not carry (see CLIENT_SIDE_COMMANDS below).
+import {
+  LocalEndpoint,
+  NotifyFloatGrid,
+  OpenGitPanelWindow,
+  SendFloatSnapshot,
+} from "../../../src-wails/frontend/wailsjs/go/main/App";
+import { createTransport, type Transport } from "@/runtime/transport";
+import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource } from "@/runtime/remoteEndpoint";
 
 type Args = Record<string, any>;
 
-export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise<T> {
-  return dispatch(cmd, args) as Promise<T>;
+/**
+ * Wire names that never travel over /v2/ws — answered here, or handed to a
+ * Wails binding because the reply comes back on a desktop-only Wails event
+ * (see the cases below). Go's `remoteAllowed` therefore neither has nor needs
+ * an entry for them.
+ *
+ * Exported because commandSurface.test.ts checks every `invoke("...")` call
+ * site in src/ against that table, and this is the list of legitimate
+ * absences — anything else missing is a real gap.
+ */
+export const CLIENT_SIDE_COMMANDS: ReadonlySet<string> = new Set([
+  "detach_pty",
+  "send_float_snapshot",
+  "notify_float_grid",
+  "open_git_panel_window",
+]);
+
+let transport: Transport | null = null;
+let remote: Transport | null = null;
+
+/**
+ * Whether we are running inside the Wails webview at all.
+ *
+ * vite.config.ts aliases `@tauri-apps/api/core` to this file for BOTH bundles,
+ * and the mobile PWA reaches it through `@/lib/config` — which invokes
+ * `read_config` at module scope. Letting that call fall into the desktop
+ * transport means `LocalEndpoint()` throws, the transport retries forever, and
+ * `configReady` never settles: the phone never restores its saved state.
+ */
+function hasWailsRuntime(): boolean {
+  return typeof window !== "undefined" && (window as any).go !== undefined;
 }
 
-async function dispatch(cmd: string, args: Args): Promise<any> {
+/** The desktop's authorization is that it is in-process: it asks the binding
+ *  for a fresh single-use ticket, including on every reconnect. */
+export function desktopTransport(): Transport {
+  if (!transport) {
+    transport = createTransport(async () => {
+      const info = await LocalEndpoint();
+      return { wsUrl: info.ws_url, ticket: info.ticket };
+    });
+  }
+  return transport;
+}
+
+/**
+ * The paired device's transport. Same transport, same command table, same
+ * event names — the ONLY difference from the desktop is where the ticket
+ * comes from, which is the entire point of the rewrite.
+ *
+ * Built lazily and read through `loadRemoteCredentials()` on every attempt
+ * rather than closing over a value: pairing happens while the app is already
+ * running, and a source that captured `null` at module load would never see
+ * the credentials appear.
+ */
+export function remoteTransport(): Transport {
+  if (!remote) remote = createTransport(remoteEndpointSource(loadRemoteCredentials));
+  return remote;
+}
+
+/** Which transport this context can use, or null before pairing. */
+function activeTransport(): Transport | null {
+  if (hasWailsRuntime()) {
+    // A desktop window is always in-process to ITS OWN backend, but the
+    // point of pairing one to a remote Burrow (Settings → Remote access →
+    // "Connect to another Burrow") is that the window drives that machine
+    // instead. desktopUsesRemote() is the switch; without paired credentials
+    // to back it up, fall back to local rather than throw "not paired" at a
+    // window that has a perfectly good backend one call away.
+    if (desktopUsesRemote() && loadRemoteCredentials()) return remoteTransport();
+    return desktopTransport();
+  }
+  if (loadRemoteCredentials()) return remoteTransport();
+  return null;
+}
+
+/**
+ * The transport for whichever client this is. Used by event.ts and by the
+ * mobile store, both of which need the socket itself rather than one call —
+ * listeners have to outlive a reconnect, and `onResync`/`noteSeq` are how a
+ * client rejoins after a gap.
+ *
+ * Unlike invoke(), this does not tolerate "not paired": a caller asking for
+ * the socket is asking to subscribe, and there is nothing to subscribe to.
+ */
+export function appTransport(): Transport {
+  const t = activeTransport();
+  if (!t) throw new Error("no endpoint in this context: this device is not paired");
+  return t;
+}
+
+export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise<T> {
+  // Before the switch, so no case can be reached with nothing to dispatch on.
+  // An unpaired phone lands here — @/lib/config invokes `read_config` at
+  // module scope, before the pairing screen has been through — and config.ts's
+  // catch is written for exactly this throw.
+  const t = activeTransport();
+  if (!t) {
+    // The message deliberately does not spell out a call in the shape
+    // commandSurface.test.ts scans for, or it would be reported as a command
+    // name built at runtime.
+    throw new Error(`no endpoint in this context; cannot dispatch "${cmd}"`);
+  }
+
   switch (cmd) {
-    // PTY — id is the frontend's own numeric counter (props.ptyId), always
-    // stringified for the Go/daemon side, which treats ids as opaque keys.
-    case "create_pty":
-      return App.CreatePty(String(args.id), args.cwd ?? "", args.cols, args.rows);
-    case "write_pty":
-      return App.WritePty(String(args.id), args.data);
-    case "resize_pty":
-      return App.ResizePty(String(args.id), args.cols, args.rows);
-    case "kill_pty":
-      return App.KillPty(String(args.id));
-    // No-op, and deliberately NOT left to fall through to the default: the
-    // default throws, and XTerm.onBeforeUnmount awaits this call before
-    // disposing — so the throw skipped renderAddon.dispose() + term.dispose()
-    // and leaked an xterm instance (with its WebGL context) on every closed
-    // terminal.
-    //
-    // There is nothing to detach. The Rust backend closed a per-client stream;
-    // the Go daemon broadcasts frames to every attached client and a closed
-    // XTerm simply stops listening, while the PTY keeps running for the next
-    // reattach — which is exactly what the caller wants to happen.
+    // Nothing to detach. The Go daemon broadcasts frames to every attached
+    // client and a closed XTerm simply stops listening, while the PTY keeps
+    // running for the next reattach. Deliberately NOT left to fall through:
+    // XTerm.onBeforeUnmount awaits this before disposing, so a throw here
+    // skipped renderAddon.dispose() + term.dispose() and leaked an xterm
+    // instance (with its WebGL context) on every closed terminal.
     case "detach_pty":
-      return Promise.resolve();
-    case "get_pty_foreground":
-      return App.GetPtyForeground(String(args.id));
-    case "list_pty_sessions":
-      // The daemon binding exposes live IDs (`string[]`), while the legacy
-      // Tauri UI contract expects session records. Normalize here so restored
-      // terminal threads reattach to their existing PTY instead of allocating a
-      // new one and consequently missing its status hooks.
-      return App.ListPtySessions().then((ids) => ids
+      return undefined as T;
+
+    // The daemon binding exposes live ids (string[]), while the legacy UI
+    // contract expects session records. Normalize here so restored terminal
+    // threads reattach to their existing PTY instead of allocating a new one
+    // and consequently missing its status hooks. (`?? []`: a nil Go slice
+    // arrives as JSON null, and a reply frame with no result at all arrives
+    // as undefined — neither is a list to map over.)
+    case "list_pty_sessions": {
+      const ids = await t.invoke<string[] | null>("list_pty_sessions");
+      return (ids ?? [])
         .map((id) => Number(id))
         .filter((pty_id) => Number.isFinite(pty_id))
-        .map((pty_id) => ({ pty_id, cwd: "", title: "", alive: true })));
+        .map((pty_id) => ({ pty_id, cwd: "", title: "", alive: true })) as T;
+    }
 
-    // Workspaces / tabs
-    case "list_workspaces":
-      return App.ListWorkspaces();
-    case "create_workspace":
-      return App.CreateWorkspace(args.name, args.path);
-    case "delete_workspace":
-      return App.DeleteWorkspace(args.id);
-    case "rename_workspace":
-      return App.RenameWorkspace(args.id, args.name);
-    case "touch_workspace":
-      return App.TouchWorkspace(args.id);
-    case "set_workspace_icon":
-      return App.SetWorkspaceIcon(args.id, args.icon);
-    case "set_workspace_order":
-      return App.SetWorkspaceOrder(args.ids);
-    case "list_terminal_tabs":
-      return App.ListTerminalTabs(args.workspaceId ?? args.workspace_id);
-    case "save_terminal_tabs":
-      return App.SaveTerminalTabs(args.workspaceId ?? args.workspace_id, args.tabs ?? []);
-
-    // Worktrees
-    case "create_worktree":
-      return App.CreateWorktree(args.repoPath ?? args.repo_path, args.name, args.path, args.branch, args.baseRef ?? args.base_ref ?? "");
-    case "remove_worktree":
-      return App.RemoveWorktree(args.id, !!args.force);
-
-    // Git / gh
-    case "run_git":
-      return App.RunGit(args.cwd, args.args ?? []);
-    case "run_gh":
-      return App.RunGh(args.cwd, args.args ?? []);
-    case "generate_commit_message":
-      return App.GenerateCommitMessage(args.cwd, args.model ?? "", args.policy ?? "");
-    case "generate_chat_title":
-      return App.GenerateChatTitle(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.text ?? "");
-    case "generate_branch_name":
-      return App.GenerateBranchName(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.message ?? "");
-    case "generate_pr_content":
-      return App.GeneratePrContent(args.cwd ?? "", args.model ?? "", args.policy ?? "", args.baseBranch ?? args.base_branch ?? "", args.headBranch ?? args.head_branch ?? "");
-
-    // Checkpoints — pre-turn worktree snapshots (src-wails/checkpoints.go)
-    case "create_checkpoint":
-      return App.CreateCheckpoint(args.cwd, String(args.ptyId ?? ""), args.label ?? "");
-    case "list_checkpoints":
-      return App.ListCheckpoints(args.cwd, args.limit ?? 50);
-    case "checkpoint_diff":
-      return App.CheckpointDiff(args.cwd, args.commit);
-    case "restore_checkpoint":
-      return App.RestoreCheckpoint(args.cwd, args.commit);
-
-    // Workspace search (⌘P)
-    case "search_files":
-      return App.SearchFiles(args.cwd, args.query, args.limit ?? 30);
-
-    // FS / misc
-    case "write_text_file":
-      return App.WriteTextFile(args.path, args.content);
-    case "read_text_file":
-    case "read_text_file_checked":
-      return App.ReadTextFile(args.path);
-    case "read_file_base64":
-      return App.ReadFileBase64(args.path);
-    case "home_dir":
-      return App.HomeDir();
-    case "config_file_path":
-      return App.ConfigFilePath();
-    case "create_dir":
-      return App.CreateDir(args.path);
-    case "read_dir_shallow":
-      return App.ReadDirShallow(args.path);
-    case "open_path_in":
-      return App.OpenPathIn(args.path, args.target);
-    case "list_open_targets":
-      return App.ListOpenTargets();
-    case "get_app_version":
-      return App.GetAppVersion();
-    case "set_sleep_inhibit":
-      return App.SetSleepInhibit(!!args.active);
-    case "get_hook_server_port":
-      return App.GetHookServerPort();
-    case "set_http_enabled":
-      return App.SetHttpEnabled(!!args.enabled);
-
-    // Claude Code — `id` is the frontend's chat id; the Go side emits
-    // `claude-data-<id>` under exactly that name, so it must round-trip.
-    case "claude_start":
-      return App.ClaudeStart(
-        String(args.id),
-        args.cwd ?? "",
-        args.resumeSessionId ?? args.resume_session_id ?? "",
-        args.permissionMode ?? args.permission_mode ?? "",
-        args.appendSystemPrompt ?? args.append_system_prompt ?? "",
-        args.model ?? "",
-        args.effort ?? "",
-        args.configDir ?? args.config_dir ?? "",
-        args.profileCommand ?? args.profile_command ?? "",
-        args.profileArgs ?? args.profile_args ?? "",
-      );
-    case "claude_send":
-      return App.ClaudeSend(String(args.id), args.text ?? "", args.sessionId ?? args.session_id ?? "", args.images ?? []);
-    case "claude_stop":
-      return App.ClaudeStop(String(args.id));
-    case "claude_abort":
-      return App.ClaudeAbort(String(args.id));
-
-    // ACP / Codex — the Go bridge owns the JSON-RPC handshake and emits
-    // `acp-data-<id>` / `acp-req-<id>` under the frontend's chat id.
+    // AcpStart takes ONE Go struct (AcpStartOpts), so the wire carries the
+    // whole options object under a single key — remoteapi.go's `acp_start`
+    // names exactly one argument, `opts`, because one Go parameter cannot be
+    // spread across several table entries. Call sites pass the fields flat
+    // (AgentChat.acpStartPayload), which is the shape the old switch
+    // assembled the struct from, so that assembly lives here now.
+    //
+    // `id` must be stringified on this side: callApp's number->string
+    // coercion only looks at the TOP-LEVEL args the table names — here that
+    // is `opts` itself — and never reaches inside the object, so a bare
+    // numeric id would fail to unmarshal into AcpStartOpts.ID.
     case "acp_start":
-      return App.AcpStart({
-        id: String(args.id),
-        cwd: args.cwd ?? "",
-        command: args.command ?? "",
-        args: args.args ?? [],
-        env: args.env ?? {},
-        kind: args.kind ?? "custom",
-        configDir: args.configDir ?? args.config_dir ?? "",
-        envFile: args.envFile ?? args.env_file ?? "",
-        resumeSessionId: args.resumeSessionId ?? args.resume_session_id ?? "",
-        emitHistory: !!(args.emitHistory ?? args.emit_history),
-      } as any);
-    case "codex_start":
-      return App.CodexStart(String(args.id), args.cwd ?? "", args.env ?? {}, args.resumeSessionId ?? args.resume_session_id ?? "");
-    case "acp_send":
-      return App.AcpSend(String(args.id), args.text ?? "", args.images ?? []);
-    case "codex_send":
-      return App.CodexSend(String(args.id), args.text ?? "", args.images ?? []);
-    case "acp_set_mode":
-      return App.AcpSetMode(String(args.id), args.modeId ?? args.mode_id ?? "");
-    case "acp_set_config":
-      return App.AcpSetConfig(String(args.id), args.configId ?? args.config_id ?? "", args.value ?? "");
-    case "acp_list_sessions":
-      return App.AcpListSessions(String(args.id), args.cwd ?? "");
-    case "acp_stop":
-      return App.AcpStop(String(args.id));
-    case "codex_stop":
-      return App.CodexStop(String(args.id));
-    case "codex_list_models":
-      return App.CodexListModels(args.cwd ?? "");
+      return t.invoke<T>("acp_start", { opts: { ...args, id: String(args.id) } });
 
-    // LSP
-    case "lsp_start":
-      return App.LspStart(args.id, args.command, args.args ?? [], args.cwd ?? "");
-    case "lsp_send":
-      return App.LspSend(args.id, args.message);
-    case "lsp_stop":
-      return App.LspStop(args.id);
-
-    // Providers
-    case "probe_provider":
-      return App.ProbeProvider(args.binary ?? "", args.cwd ?? "");
-    case "latest_npm_version":
-      return App.LatestNpmVersion(args.pkg ?? "");
-
-    // Skills / MCP servers
-    case "list_skills":
-      return App.ListSkills();
-    case "set_skill_enabled":
-      return App.SetSkillEnabled(args.dir, !!args.enabled);
-    case "delete_skill":
-      return App.DeleteSkill(args.dir);
-    case "list_mcp_servers":
-      return App.ListMcpServers();
-    case "add_mcp_server":
-      return App.AddMcpServer(args.name, args.config);
-    case "remove_mcp_server":
-      return App.RemoveMcpServer(args.name);
-
-    // Local extensions (manifest registry + explicit user-run commands).
-    case "list_extensions":
-      return App.ListExtensions();
-    case "set_extension_enabled":
-      return App.SetExtensionEnabled(args.id, !!args.enabled);
-    case "extensions_directory":
-      return App.ExtensionsDirectory();
-    case "get_extension_settings":
-      return App.GetExtensionSettings(args.extensionId);
-    case "install_extension":
-      return App.InstallExtension(args.source);
-    case "save_extension_settings":
-      return App.SaveExtensionSettings(args.extensionId, args.values ?? {});
-    case "run_extension_command":
-      return App.RunExtensionCommand(args.extensionId, args.commandId, args.cwd ?? "");
-
-    // Claude session reading
-    case "list_claude_sessions":
-      return App.ListClaudeSessions(args.cwd);
-    case "read_claude_transcript":
-      return App.ReadClaudeTranscript(args.cwd, args.sessionId ?? args.session_id);
-    case "read_claude_activity":
-      return App.ReadClaudeActivity(args.cwd, args.sessionId ?? args.session_id);
-
-    // Control/permission responses
-    case "claude_respond_control":
-      return App.ClaudeRespondControl(String(args.id), args.requestId ?? args.request_id, args.response);
-    case "acp_respond_permission":
-      return App.AcpRespondPermission(String(args.id), args.rpcId ?? args.rpc_id, args.optionId ?? args.option_id);
-    case "acp_respond_user_input":
-      return App.AcpRespondUserInput(String(args.id), args.rpcId ?? args.rpc_id, args.answers);
-
-    // Misc
-    case "system_stats":
-      return App.SystemStats();
-    case "list_fonts":
-      return App.ListFonts();
-    case "save_temp_image":
-      return App.SaveTempImage(args.b64 ?? args.data, args.ext);
-    case "is_pid_alive":
-      return App.IsPidAlive(args.pid);
-    case "set_tab_live_status":
-      return App.SetTabLiveStatus(String(args.ptyId ?? args.pty_id), args.status);
-    case "set_max_agents":
-      return App.SetMaxAgents(args.n ?? args.max);
-    case "set_burrow_mcp_max_depth":
-      return App.SetBurrowMcpMaxDepth(args.n ?? args.depth);
-
-    // Chat transcripts (SQLite — they outgrew config.json)
-    case "load_chat_messages":
-      return App.LoadChatMessages(args.chatId ?? args.chat_id);
+    // foldedOrd -1 is the "don't know" sentinel, which leaves the existing
+    // fold mark alone (chatstore.go writes it only when >= 0). An absent
+    // argument is the zero value 0 on the Go side — a real ordinal — and one
+    // call site (AgentChat's localStorage migration) omits it, so the
+    // sentinel has to be supplied here, exactly as the old switch did.
     case "save_chat_messages":
-      // foldedOrd: how far into chat_stream this transcript accounts for.
-      // -1 = "don't know", which leaves the existing mark alone (see chatstore.go).
-      return App.SaveChatMessages(args.chatId ?? args.chat_id, args.messages, args.foldedOrd ?? -1);
-    case "chat_folded_ord":
-      return App.ChatFoldedOrd(String(args.chatId ?? args.chat_id));
-    case "load_chat_events_since":
-      return App.LoadChatEventsSince(String(args.chatId ?? args.chat_id), args.since ?? 0);
-    case "load_chat_stream_since":
-      return App.LoadChatStreamSince(String(args.chatId ?? args.chat_id), args.since ?? 0);
-    case "delete_chat_messages":
-      return App.DeleteChatMessages(args.chatId ?? args.chat_id);
+      return t.invoke<T>("save_chat_messages", {
+        ...args,
+        foldedOrd: args.foldedOrd ?? -1,
+      });
 
-    // App config file
-    case "read_config":
-      return App.ReadConfig();
-    case "write_config":
-      return App.WriteConfig(args.content);
-
-    // Float bubble windows were removed (Wails v2 has no multi-window
-    // support; see plan). request_float_snapshot/send_float_snapshot/
-    // notify_float_grid stay — TaskLiveTerm.vue's task live-view reuses
-    // the same event protocol and isn't a float window.
-    // Wails bindings are typed, and these take the pty id as a STRING (Go
-    // builds an event topic out of it: "float-grid-"+ptyID). Callers pass the
-    // numeric leaf id, which the bridge rejected outright with
-    // `json: cannot unmarshal number into Go value of type string` on every
-    // terminal resize. Stringify here — the topic the frontend listens on is
-    // built by the same coercion, so the names still match.
-    case "request_float_snapshot":
-      return App.RequestFloatSnapshot(String(args.ptyId ?? args.pty_id));
+    // The desktop-only snapshot/window protocol stays on the Wails bindings —
+    // the only calls that still do, apart from LocalEndpoint above, which is
+    // the socket's own bootstrap rather than an app action.
+    //
+    // These three are in remoteapi.go's `remoteDenied`, with a reason that is
+    // still true: they answer over runtime.EventsEmit (stubs.go), which only
+    // the native window receives, so a client reaching them over the wire
+    // could never see the reply. event.ts keeps the matching `float-*`
+    // listeners on the Wails runtime for the same reason — the emitters and
+    // the listeners of that channel move together, or it half-works.
+    //
+    // Go builds an event topic out of the pty id ("float-grid-"+ptyID), so
+    // these take it as a STRING; callers pass the numeric leaf id, which the
+    // typed bridge rejected outright with `json: cannot unmarshal number into
+    // Go value of type string` on every terminal resize.
+    // On a paired device there is no Wails runtime to call, and these three
+    // could not answer over the wire even if there were. Named error rather
+    // than a TypeError on an undefined binding, so a phone that somehow
+    // reaches one says what happened.
     case "send_float_snapshot":
-      return App.SendFloatSnapshot(String(args.ptyId ?? args.pty_id), args.data, args.cols, args.rows);
     case "notify_float_grid":
-      return App.NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows);
     case "open_git_panel_window":
-      return App.OpenGitPanelWindow();
-    case "register_tmux_win":
-      return App.RegisterTmuxWin(String(args.winId ?? args.win_id), String(args.ptyId ?? args.pty_id));
-
-    // Claude account/usage (stubbed — "unavailable" until reverse-engineered)
-    case "claude_get_account":
-      return App.ClaudeGetAccount(args.cwd);
-    case "claude_plan_usage":
-      return App.ClaudePlanUsage(args.configDir ?? args.config_dir, !!args.force);
-    case "claude_usage_5h":
-      return App.ClaudeUsage5h(args.configDir ?? args.config_dir);
-
-    // Remote chat sync (stubbed — no transport yet)
-    case "remote_sync_chat":
-      return App.RemoteSyncChat(args.chat);
-    case "remote_list_chats":
-      return App.RemoteListChats();
-    case "remote_create_chat":
-      return App.RemoteCreateChat(args.workspaceId ?? args.workspace_id ?? 0, args.cwd ?? "");
-
-    // Daemon admin (stubbed)
-    case "daemon_stats":
-      return App.DaemonStats();
-    case "clean_daemon":
-      return App.CleanDaemon();
-    case "kill_orphan_sessions":
-      return App.KillOrphanSessions(args.keepIds ?? args.keep_ids ?? []);
-    case "restart_daemon":
-      return App.RestartDaemon();
-    case "ack_control_action":
-      return App.AckControlAction(args.id, args.resultJson ?? "", args.errMsg ?? "");
-    case "control_verbs":
-      return App.ControlVerbs();
-    case "repair_agent_status":
-      return App.RepairAgentStatus();
-    case "reinstall_status_hooks":
-      return App.ReinstallStatusHooks();
-    case "remove_status_hooks":
-      return App.RemoveStatusHooks();
-    case "format_source":
-      return App.FormatSource(args.path, args.content, args.cwd);
-
-    // Remote HTTP server / Tailscale
-    case "get_http_server_status":
-      return App.GetHttpServerStatus();
-    case "regenerate_pair_code":
-      return App.RegeneratePairCode();
-    case "get_tailscale_status":
-      return App.GetTailscaleStatus();
-    case "set_tailscale_serve":
-      return App.SetTailscaleServe(!!args.enabled, args.port);
-
-    default:
-      console.warn(`[wails-compat] invoke("${cmd}") has no Go binding yet`);
-      throw new Error(`command not implemented in Go backend: ${cmd}`);
+      if (!hasWailsRuntime()) {
+        throw new Error(`${cmd} is desktop-only: it answers on the Wails event channel`);
+      }
+      break;
   }
+
+  switch (cmd) {
+    case "send_float_snapshot":
+      return SendFloatSnapshot(
+        String(args.ptyId ?? args.pty_id),
+        args.data,
+        args.cols,
+        args.rows,
+      ) as Promise<T>;
+    case "notify_float_grid":
+      return NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows) as Promise<T>;
+    case "open_git_panel_window":
+      return OpenGitPanelWindow() as Promise<T>;
+  }
+
+  return t.invoke<T>(cmd, args);
 }

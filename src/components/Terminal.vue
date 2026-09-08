@@ -60,7 +60,7 @@
           :data-leaf-id="pane.leaf.id"
           @mousedown.capture="activateLeaf(pane.leaf.id)"
         >
-          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[26px] shrink-0 items-center gap-[5px] border-b border-[#1e1e1e] bg-[#111111] px-2 text-[11px] text-secondary-foreground" @mousedown.stop>
+          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[26px] shrink-0 items-center gap-[5px] border-b border-border bg-[var(--surface)] px-2 text-[11px] text-secondary-foreground" @mousedown.stop>
             <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="10" class="shrink-0 text-muted-foreground" />
             <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="10" class="shrink-0 text-muted-foreground" />
             <PhRobot v-else-if="pane.leaf.isAgent" :size="10" class="shrink-0 text-accent" />
@@ -122,12 +122,6 @@
             :initially-titled="!isDefaultTitle(pane.leaf.title)"
             :ref="(el) => registerLeaf(pane.leaf.id, el)"
             @title="(t) => onLeafTitle(pane.leaf.id, t)"
-            @busy="(b) => onLeafBusy(pane.leaf.id, b)"
-            @agent="(b) => onLeafAgent(pane.leaf.id, b)"
-            @agent-state="(s, d) => onAgentState(pane.leaf.id, s, d)"
-            @agent-meta="(m) => onAgentMeta(pane.leaf.id, m)"
-            @needs-input="(b) => onLeafNeedsInput(pane.leaf.id, b)"
-            @interrupt="() => onLeafInterrupt(pane.leaf.id)"
             @spawn="(req) => addTab(req.cmd, { cwd: req.cwd || undefined, resultToken: req.token || undefined })"
             @cwd="(p) => onLeafCwd(pane.leaf.id, p)"
           />
@@ -185,8 +179,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import { createActor, type Actor } from "xstate";
-import { agentStatusMachine, isBusyStatus } from "@/machines/agentStatus";
+import { displayStatus, shouldMarkSeen, DONE_AUTOCLEAR_MS, type Phase } from "@/runtime/displayStatus";
 import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe } from "@phosphor-icons/vue";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useProvidersStore } from "@/stores/providers";
@@ -566,8 +559,163 @@ function shouldMountChat(tab: Tab, leaf: Leaf): boolean {
 // ── Per-leaf hook-server event listeners ─────────────────────────────────────
 // Keyed by ptyId. Registered when a leaf is created, cleaned up when closed.
 const leafUnlisteners = new Map<number, UnlistenFn[]>();
-// XState actors for agent status — one per terminal leaf.
-const leafActors = new Map<number, Actor<typeof agentStatusMachine>>();
+// Server-owned phase per leaf, keyed by pty id. The status shown is a pure
+// function of (phase, seenAt, watching) — there is no client state machine any
+// more, so "I looked at it" can no longer race a transition.
+const leafPhases = reactive(new Map<number, Phase>());
+const leafSeenAt = reactive(new Map<number, number>());
+const doneTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const SEEN_AT_KEY = "burrow.seenAt";
+
+function loadSeenAt() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SEEN_AT_KEY) ?? "{}") as Record<string, number>;
+    for (const [k, v] of Object.entries(raw)) {
+      if (Number.isFinite(Number(k)) && typeof v === "number") leafSeenAt.set(Number(k), v);
+    }
+  } catch { /* a corrupt receipt file just means everything looks unread */ }
+}
+
+// Read-modify-write, because one localStorage key is shared by every mounted
+// workspace and each Terminal instance holds only its own leaves. Writing our
+// map wholesale would delete the other workspaces' receipts.
+function persistSeenAt(remove?: number) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SEEN_AT_KEY) ?? "{}") as Record<string, number>;
+    for (const [id, at] of leafSeenAt) stored[id] = at;
+    if (remove !== undefined) delete stored[remove];
+    localStorage.setItem(SEEN_AT_KEY, JSON.stringify(stored));
+  } catch { /* corrupt/quota: the receipts just don't survive this restart */ }
+}
+
+loadSeenAt();
+
+// When this Terminal came up. A phase whose last update predates us is HISTORY
+// — the replay Go sends after `create_pty` re-attaches (or rehydrates from
+// SQLite on a cold start). Its dot must appear, but its side effects must not
+// fire again: no "task complete" toast, no sound, no checkpoint for a turn that
+// started before this window existed.
+const mountedAt = Date.now();
+function isFresh(phase: Phase): boolean {
+  return phase.updated_at >= mountedAt;
+}
+
+/** Phase state → the vocabulary agentHistory's timeline speaks. */
+function historyEventFor(state: Phase["state"]): string | null {
+  switch (state) {
+    case "running": return "running";
+    case "waiting_input": return "waiting";
+    case "waiting_approval": return "permission";
+    case "done": return "done";
+    case "failed": return "error";
+    // A turn the user cancelled (idle) or whose process went away (stale) is
+    // over too. Without a closing event its segment stays open and the panel
+    // shows a turn that runs forever. "done" is the store's neutral close —
+    // "error" would paint a red segment for a turn that did not fail.
+    case "idle":
+    case "stale":
+      return "done";
+    default: return null;
+  }
+}
+
+/**
+ * Adopt one phase for one leaf: recompute the dot, then fire the side effects
+ * that belong to ENTERING a status.
+ *
+ * Called from the `phase-pty:{id}` listener and again from markLeafSeen, which
+ * changes nothing on the server but changes this client's answer.
+ */
+function applyPhase(leafId: number, phase: Phase) {
+  const prevState = leafPhases.get(leafId)?.state;
+  leafPhases.set(leafId, phase);
+  const found = locateLeaf(leafId);
+  if (!found) return;
+  const { tab, leaf } = found;
+  const prevStatus = leaf.status;
+  const watching = isWatching(tab);
+  const status = displayStatus(phase, leafSeenAt.get(leafId) ?? 0, watching);
+
+  leaf.status = status;
+  leaf.statusDetail = phase.detail || undefined;
+  leaf.busy = status === "running" || status === "waiting" || status === "permission";
+  // Mirrored, never remembered. Go is the authority in BOTH directions: a
+  // status hook sets IsAgent (agentphase.Next) and the poll clears it when the
+  // shell returns to the foreground. A leaf is a long-lived PTY that commonly
+  // runs an agent and then ordinary commands, so a sticky flag here would mark
+  // it an agent forever.
+  leaf.isAgent = phase.is_agent;
+  if (phase.model) leaf.model = phase.model;
+  // SessionStart metadata: fill in a generic "Terminal N" only, so an
+  // agent-set descriptive title is never clobbered.
+  if (phase.title) {
+    leaf.sessionTitle = phase.title;
+    if (isDefaultTitle(leaf.title)) leaf.title = phase.title;
+  }
+
+  // The History timeline records AGENT turns that happen while this window is
+  // up. Both gates earn their keep: a replayed `running` from the previous
+  // session would open a segment stamped at app launch that nothing ever
+  // closes, and a poll-driven running/done from a plain `npm test` is not a
+  // turn at all — the old hook-only channel never saw one.
+  if (prevState !== phase.state && isFresh(phase) && phase.is_agent) {
+    const ev = historyEventFor(phase.state);
+    if (ev) historyStore.addEvent(leafId, ev);
+  }
+
+  // Side effects fire on ENTERING a status, exactly as the machine's entry
+  // actions did — comparing against the previous status is what keeps a
+  // repeated phase event from re-notifying.
+  if (status !== prevStatus && isFresh(phase)) {
+    if (status === "waiting" || status === "permission") playSound("waiting");
+    if (status === "done") onTurnSettled(leafId);
+    if (status === "review") { playSound("done"); onTurnSettled(leafId); }
+    if (status === "error") maybeNtfy("error", leaf.title);
+    // Agent turns only: a plain `npm test` must not cut a checkpoint or bump
+    // the turn counter. The hook that starts an agent turn sets is_agent
+    // itself, so this does not have to wait for the 2 s poll tick.
+    if (status === "running" && phase.is_agent) {
+      leaf.round = (leaf.round ?? 0) + 1;
+      // Snapshot the worktree before the agent touches it, so this turn is
+      // revertable from the History panel. No-op outside a git repo, and
+      // best-effort: never block a turn on the snapshot.
+      invoke("create_checkpoint", {
+        cwd: leaf.cwd ?? props.cwd,
+        ptyId: leaf.id,
+        label: leaf.title || "Agent turn",
+      }).catch(() => {});
+    }
+  }
+
+  // A finished turn the user is watching marks itself seen after 4 s. This is
+  // the transient `done` from the old machine, expressed as a receipt.
+  // The `status === "done"` half matters: shouldMarkSeen does not know whether
+  // this turn has already been read, so on the recompute markLeafSeen triggers
+  // it would still be true and re-arm the timer forever. A displayed `done` is
+  // exactly "finished, watched, and not yet read".
+  clearTimeout(doneTimers.get(leafId));
+  doneTimers.delete(leafId);
+  if (status === "done" && shouldMarkSeen(phase, watching)) {
+    doneTimers.set(leafId, setTimeout(() => markLeafSeen(leafId), DONE_AUTOCLEAR_MS));
+  }
+}
+
+/**
+ * This client has now looked at this leaf's latest turn. Idempotent: with
+ * nothing unread there is nothing to receipt, which matters because every
+ * window focus and every tab activation calls this for every leaf.
+ */
+function markLeafSeen(leafId: number) {
+  const phase = leafPhases.get(leafId);
+  if (!phase) return;
+  if (phase.turn_ended_at <= (leafSeenAt.get(leafId) ?? 0)) return;
+  clearTimeout(doneTimers.get(leafId));
+  doneTimers.delete(leafId);
+  leafSeenAt.set(leafId, Math.max(leafSeenAt.get(leafId) ?? 0, phase.turn_ended_at, Date.now()));
+  persistSeenAt();
+  applyPhase(leafId, phase); // recompute the dot with the new receipt
+}
+
 const flashingLeafs = ref(new Set<number>());
 // Log strip: last N entries per tab (keyed by tab.id, NOT leaf.id).
 const tabLogs = ref<Record<number, LogEntry[]>>({});
@@ -598,37 +746,13 @@ function onTurnSettled(leafId: number) {
 }
 
 function registerLeafListeners(leafId: number) {
-  // XState actor — the SOLE owner of leaf.status. Every channel (hooks, foreground
-  // poll, interrupt/watchdog) sends it events; nothing else writes leaf.status.
-  // Side effects are machine actions, so a transition and its sound/notification
-  // can never drift apart.
-  const actor = createActor(
-    agentStatusMachine.provide({
-      actions: {
-        playWaiting: () => playSound("waiting"),
-        onDone: () => onTurnSettled(leafId),
-        onReview: () => { playSound("done"); onTurnSettled(leafId); },
-        onError: () => maybeNtfy("error", locateLeaf(leafId)?.leaf.title ?? ""),
-      },
-    }),
-    { input: {} },
-  );
-  actor.subscribe((snapshot) => {
-    const leaf = locateLeaf(leafId)?.leaf;
-    if (!leaf) return;
-    leaf.status = snapshot.value as TermStatus;
-    leaf.statusDetail = snapshot.context.detail;
-    leaf.busy = isBusyStatus(leaf.status);
-    // Mirror to disk so `burrow list-tabs` / MCP `list_tabs` (pure Rust/DB
-    // reads, no frontend round-trip) can report whether the agent actually
-    // finished instead of just pty id + title.
-    invoke("set_tab_live_status", { ptyId: leafId, status: leaf.status }).catch(() => {});
-  });
-  actor.start();
-  leafActors.set(leafId, actor);
-
   const unlisteners: UnlistenFn[] = [];
   Promise.all([
+    // The agent's phase, derived in Go (src-wails/internal/agentphase) from the
+    // hooks, the foreground poll and the dead-PTY watchdog alike. One event,
+    // the whole phase — nothing here arbitrates channels any more, and the
+    // status mirror in terminal_tabs is written by PhaseStore, not from here.
+    listen<Phase>(`phase-pty:${leafId}`, (ev) => applyPhase(leafId, ev.payload)),
     listen<string>(`pty-status-text-${leafId}`, (ev) => {
       for (const tab of tabs.value) {
         const leaf = findLeaf(tab.root, leafId);
@@ -688,8 +812,13 @@ function registerLeafListeners(leafId: number) {
 function unregisterLeafListeners(leafId: number) {
   leafUnlisteners.get(leafId)?.forEach((fn) => fn());
   leafUnlisteners.delete(leafId);
-  const actor = leafActors.get(leafId);
-  if (actor) { actor.stop(); leafActors.delete(leafId); }
+  clearTimeout(doneTimers.get(leafId));
+  doneTimers.delete(leafId);
+  leafPhases.delete(leafId);
+  // The leaf is gone for good, so its read receipt has nothing left to answer
+  // for — drop it rather than growing the persisted map forever.
+  leafSeenAt.delete(leafId);
+  persistSeenAt(leafId);
 }
 
 function makeLeaf(initialCmd?: string, extra?: { cwd?: string; resultToken?: string; id?: number }): Leaf {
@@ -723,17 +852,6 @@ function onLeafTitle(id: number, title: string) {
   }
 }
 
-// Whether this leaf is currently running an agent — driven by the foreground
-// poll (authoritative), independent of the title text.
-function onLeafAgent(id: number, isAgent: boolean) {
-  const leaf = locateLeaf(id)?.leaf;
-  if (!leaf) return;
-  leaf.isAgent = isAgent;
-  // The machine gates its poll channel on this: once a leaf is an agent, only
-  // hooks may drive its status.
-  leafActors.get(id)?.send({ type: "SET_AGENT", isAgent });
-}
-
 // OSC 7 CWD update: shell emits \e]7;file://host/path\a after each `cd`.
 // Update the leaf's live cwd so `burrow spawn` and restore get accurate paths.
 function onLeafCwd(id: number, cwd: string) {
@@ -743,18 +861,6 @@ function onLeafCwd(id: number, cwd: string) {
     leaf.cwd = cwd;
     break;
   }
-}
-
-// busy comes from the foreground-process poll only — NOT from OSC titles
-// (the shell sets the title to the cwd, which must not count as "running").
-// The machine's `notAgent` guard drops these for agent leaves: hooks are the
-// sole status authority there.
-function onLeafBusy(id: number, busy: boolean) {
-  const found = locateLeaf(id);
-  if (!found) return;
-  leafActors.get(id)?.send(
-    busy ? { type: "BUSY" } : { type: "NOT_BUSY", watching: isWatching(found.tab) },
-  );
 }
 
 // True when the user is actively looking at this tab: the terminal host is
@@ -774,68 +880,12 @@ function isWatching(tab: Tab): boolean {
 // says "on screen" — this is where that gets decided for them.
 function markTabSeen(tab: Tab) {
   for (const leaf of getAllLeaves(tab.root)) {
-    // Chats are not marked here any more: a chat is mounted only when it is on
-    // screen, so it marks ITSELF seen on mount. Marking from out here was the
-    // bug — this code had to guess at visibility, and a tab behind the welcome
+    // Chats are not marked here: a chat is mounted only when it is on screen,
+    // so it marks ITSELF seen on mount. Marking from out here was the bug —
+    // this code had to guess at visibility, and a tab behind the welcome
     // composer looked watched.
     if (leaf.leafType === "chat") continue;
-    // MARK_SEEN is only handled in done/review/error — a no-op elsewhere.
-    leafActors.get(leaf.id)?.send({ type: "MARK_SEEN" });
-  }
-}
-
-// The agent's hook state (running | waiting | done), forwarded verbatim from
-// XTerm. ONE semantic event → one clean transition via the XState actor, so a
-// trailing "waiting" can never clobber a fresh "done".
-function onAgentState(id: number, s: string, detail?: string) {
-  const found = locateLeaf(id);
-  if (!found) return;
-  const { tab, leaf } = found;
-  // Track turn count before sending (subscription updates leaf.status after send).
-  if (s === "running" && leaf.status !== "running") {
-    leaf.round = (leaf.round ?? 0) + 1;
-    // Snapshot the worktree before the agent touches it, so this turn is
-    // revertable from the History panel. No-op outside a git repo.
-    invoke("create_checkpoint", {
-      cwd: leaf.cwd ?? props.cwd,
-      ptyId: leaf.id,
-      label: leaf.title || "Agent turn",
-    }).catch(() => {}); // best-effort: never block a turn on the snapshot
-  }
-  historyStore.addEvent(leaf.id, s);
-  const actor = leafActors.get(id);
-  if (!actor) return;
-
-  // A terminal thread can be attached after its first hook already fired. The
-  // Wails hook server replays that latest state, but the status machine begins
-  // at idle and normally only accepts START there. Rebuild the minimal valid
-  // transition path so replayed waiting/done/error states reach the sidebar
-  // mirror just like their live counterparts.
-  if (leaf.status === "idle") {
-    if (s === "waiting") actor.send({ type: "START" });
-    else if (s === "done") actor.send({ type: "START" });
-    else if (s === "error") actor.send({ type: "START" });
-  }
-  if (s === "running") actor.send({ type: "START" });
-  else if (s === "waiting") actor.send({ type: "WAIT" });
-  else if (s === "permission") actor.send({ type: "PERMISSION_REQUEST" });
-  else if (s === "done") actor.send({ type: "STOP", watching: isWatching(tab) });
-  else if (s === "error") actor.send({ type: "FAIL", detail: detail || undefined });
-}
-
-// SessionStart metadata (model + title) — NOT a status. Stash the model for an
-// unobtrusive tab tooltip; prefer the session title only over a generic
-// "Terminal N" default so an agent-set descriptive title is never clobbered.
-function onAgentMeta(id: number, meta: { model: string; source: string; title: string }) {
-  for (const tab of tabs.value) {
-    const leaf = findLeaf(tab.root, id);
-    if (!leaf) continue;
-    if (meta.model) leaf.model = meta.model;
-    if (meta.title) {
-      leaf.sessionTitle = meta.title;
-      if (isDefaultTitle(leaf.title)) leaf.title = meta.title;
-    }
-    break;
+    markLeafSeen(leaf.id);
   }
 }
 
@@ -867,24 +917,6 @@ async function notifyDone(leafTitle: string, tabId?: number) {
     }
     if (granted) sendNotification({ title: "Burrow", body: `✓ ${body}` });
   }
-}
-
-// User pressed ESC / Ctrl+C in the PTY — an agent interrupt. Agents emit no Stop
-// hook when a turn is cancelled and the foreground poll never clears an agent's
-// "running" (it stays foreground at its prompt), so without this the dot sticks
-// orange. The turn was CANCELLED, not completed → settle straight to idle (no
-// "done"/"review" badge, no sound). Only act on a live running/waiting leaf so a
-// stray ESC at an idle prompt is a harmless no-op.
-function onLeafInterrupt(id: number) {
-  // Only handled in running/waiting/permission — a stray ESC at an idle prompt
-  // is a no-op by construction.
-  leafActors.get(id)?.send({ type: "INTERRUPT" });
-}
-
-// Output-buffer heuristic from the poll (plain commands only — the machine's
-// `notAgent` guard drops it for agent leaves).
-function onLeafNeedsInput(id: number, needs: boolean) {
-  leafActors.get(id)?.send({ type: "NEEDS_INPUT", needs });
 }
 
 function tabStatus(tab: Tab): TermStatus {
@@ -981,12 +1013,15 @@ function activateTab(id: number) {
   nextTick(() => xtermRefs.get(leaf.id)?.focus());
 }
 
-function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[], model?: string) {
+// async since chats.create() now gets its id from the database rather than
+// inventing one client-side. Every caller here is a fire-and-forget handler.
+async function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[], model?: string) {
   let session: import("@/stores/claudeChats").ClaudeSession;
   if (chatId != null) {
-    session = chatsStore.sessions.find((s) => s.id === chatId) ?? chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
+    session = chatsStore.sessions.find((s) => s.id === chatId)
+      ?? await chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   } else {
-    session = chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
+    session = await chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   }
   // Reopening an archived chat (e.g. from the Sidebar's Archived shelf) always
   // un-archives it — a chat with an open tab is never archived.
@@ -1241,16 +1276,16 @@ function openFileInTab(path: string, name: string, line?: number) {
   nextTick(() => xtermRefs.get(id)?.focus());
 }
 
-function makeChatLeaf(agentId?: string): Leaf {
-  const session = chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
+async function makeChatLeaf(agentId?: string): Promise<Leaf> {
+  const session = await chatsStore.create(props.workspaceId, { agentKind: agentId ?? uiStore.defaultChatAgent });
   const id = nextPtyId();
   return { type: "leaf", id, title: session.title, defaultTitle: session.title, isAgent: false, busy: false, status: "idle", leafType: "chat", chatId: session.id, cwd: props.cwd };
 }
 
-function splitFocused(kind: "terminal" | "chat", direction: "h" | "v") {
+async function splitFocused(kind: "terminal" | "chat", direction: "h" | "v") {
   const tab = tabs.value.find((t) => t.id === activeTabId.value);
   if (!tab) return;
-  const newLeaf = kind === "chat" ? makeChatLeaf() : makeLeaf();
+  const newLeaf = kind === "chat" ? await makeChatLeaf() : makeLeaf();
   tab.root = insertSplit(tab.root, focusedLeafId.value, direction, newLeaf);
   focusedLeafId.value = newLeaf.id;
   if (kind === "terminal") registerLeafListeners(newLeaf.id);
@@ -1671,12 +1706,22 @@ onMounted(async () => {
   // arrive behind configReady — reading before that resolves finds none of them
   // and silently drops every chat thread.
   await configReady;
-  // The sessions ARE the threads — no separate "which tabs were open" list to
-  // fall out of sync (a stale empty one used to hide every thread on restart).
-  // Skip the hidden Manager session and never-used blanks left by older builds.
+  // The sessions ARE the threads — thread = chat = tab, with no separate
+  // "which tabs were open" list to fall out of sync (a stale empty one used to
+  // hide every thread on restart).
+  //
+  // The only skip is the Manager, which is hidden by design (control: true).
+  // There used to be a second one — `!s.claudeSessionId && !s.messageCount`,
+  // meant for "never-used blanks left by older builds" — and it was asking a
+  // question those two fields cannot answer: a brand-new chat looks exactly
+  // like an abandoned one. It hid every chat the user created and did not
+  // immediately talk to (visible until the next restart, then gone), and it
+  // hid every chat created from the phone, which by definition has no session
+  // id and no messages yet. An empty thread showing up empty is correct;
+  // clutter is what `isSettled` is for, and an untouched one settles on its
+  // own after AUTO_SETTLE_AFTER_DAYS.
   for (const s of chatsStore.sessionsForWs(props.workspaceId)) {
     if (s.control) continue;
-    if (!s.claudeSessionId && !s.messageCount) continue;
     openClaudeChat(s.id);
   }
 

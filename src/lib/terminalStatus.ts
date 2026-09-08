@@ -4,8 +4,9 @@
  * Pure helpers for terminal status: the TermStatus type, the priority ordering,
  * the aggregation used by Terminal.vue + Sidebar.vue, and tab-title derivation.
  *
- * The status TRANSITIONS live in src/machines/agentStatus.ts — this file holds no
- * state logic. Pure lib: no Vue/Tauri imports.
+ * The status TRANSITIONS live in Go (src-wails/internal/agentphase); what a
+ * client turns that phase into is src/runtime/displayStatus.ts. This file holds
+ * no state logic. Pure lib: no Vue/Tauri imports.
  */
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -25,9 +26,6 @@ export const STATUS_PRIORITY: readonly TermStatus[] = [
   "done",
   "idle",
 ] as const;
-
-/** Semantic agent hook event forwarded from XTerm.vue → Terminal.vue → here. */
-export type AgentEvent = "running" | "waiting" | "permission" | "done" | "error";
 
 /**
  * Sidebar-facing attention hierarchy. `review` is the durable machine state for

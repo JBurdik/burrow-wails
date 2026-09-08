@@ -111,9 +111,9 @@ func (d *DaemonClient) readLoop(conn net.Conn) {
 			f := env.Frame
 			switch f.Event {
 			case "pty-data":
-				emitAll(d.ctx, "pty-data-"+f.ID, f.Data)
+				busEmit("pty-data-"+f.ID, f.Data)
 			case "pty-exit":
-				emitAll(d.ctx, "pty-exit-"+f.ID, nil)
+				busEmit("pty-exit-"+f.ID, nil)
 			}
 		}
 	}

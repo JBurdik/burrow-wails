@@ -112,9 +112,8 @@ type uiAck struct {
 // unlike the sidebar's single-slot request ref, where a burst would clobber.
 type uiBridge struct {
 	// emit delivers the action to the frontend. Injected rather than calling
-	// emitAll directly: the Wails runtime needs a live app context, so a verb
-	// invoked before startup finished (or in a test) would otherwise panic
-	// inside the event system instead of failing as a timeout.
+	// busEmit directly so a test can substitute a fake and assert on it
+	// without touching the process-wide bus.
 	emit    func(event string, payload any)
 	mu      sync.Mutex
 	pending map[string]chan uiAck
@@ -123,7 +122,7 @@ type uiBridge struct {
 
 func newUIBridge(app *App) *uiBridge {
 	return &uiBridge{
-		emit:    func(event string, payload any) { emitAll(app.ctx, event, payload) },
+		emit:    func(event string, payload any) { busEmit(event, payload) },
 		pending: map[string]chan uiAck{},
 	}
 }
@@ -242,6 +241,23 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 		verb := strings.TrimPrefix(r.URL.Path, "/v1/")
 		if verb == "_verbs" {
 			writeJSONFileResponse(w, a.ControlVerbs())
+			return
+		}
+		// Pairing lives outside the Deps-based verb registry (RemotePairStatus/
+		// RemoteRegeneratePairCode need a.remoteAuth, which control.Deps has no
+		// business knowing about — it's git/exec/worktree shaped). Special-cased
+		// here, same as _verbs above, rather than widening Deps for two calls.
+		//
+		// This is what makes a headless deployment pairable at all: the code
+		// only ever lived in Settings, which is a window. `burrow pair-status`/
+		// `burrow pair-regenerate` reach it from a bare SSH session instead —
+		// the only "screen" a VPS operator has.
+		if verb == "pair_status" {
+			writeJSONFileResponse(w, a.RemotePairStatus())
+			return
+		}
+		if verb == "pair_regenerate" {
+			writeJSONFileResponse(w, a.RemoteRegeneratePairCode())
 			return
 		}
 

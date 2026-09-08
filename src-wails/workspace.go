@@ -62,27 +62,56 @@ func (a *App) CreateWorkspace(name, path string) (Workspace, error) {
 		return Workspace{}, err
 	}
 	row := a.db.QueryRow("SELECT "+workspaceCols+" FROM workspaces WHERE id = ?", id)
-	return scanWorkspace(row)
+	w, err := scanWorkspace(row)
+	if err != nil {
+		return Workspace{}, err
+	}
+	emitWorkspacesChanged()
+	return w, nil
 }
 
 func (a *App) DeleteWorkspace(id int64) error {
-	_, err := a.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id)
-	return err
+	res, err := a.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if changed, err := res.RowsAffected(); err != nil || changed == 0 {
+		return err
+	}
+	emitWorkspacesChanged()
+	return nil
 }
 
 func (a *App) RenameWorkspace(id int64, name string) error {
-	_, err := a.db.Exec(`UPDATE workspaces SET name = ? WHERE id = ?`, name, id)
-	return err
+	res, err := a.db.Exec(`UPDATE workspaces SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return err
+	}
+	if changed, err := res.RowsAffected(); err != nil || changed == 0 {
+		return err
+	}
+	emitWorkspacesChanged()
+	return nil
 }
 
+// TouchWorkspace records last_opened only — not a change to the list, and it
+// fires on every workspace switch, so it deliberately does not emit
+// workspaces-changed (that would flood both clients on every switch).
 func (a *App) TouchWorkspace(id int64) error {
 	_, err := a.db.Exec(`UPDATE workspaces SET last_opened = ? WHERE id = ?`, nowMillis(), id)
 	return err
 }
 
 func (a *App) SetWorkspaceIcon(id int64, icon string) error {
-	_, err := a.db.Exec(`UPDATE workspaces SET icon = ? WHERE id = ?`, icon, id)
-	return err
+	res, err := a.db.Exec(`UPDATE workspaces SET icon = ? WHERE id = ?`, icon, id)
+	if err != nil {
+		return err
+	}
+	if changed, err := res.RowsAffected(); err != nil || changed == 0 {
+		return err
+	}
+	emitWorkspacesChanged()
+	return nil
 }
 
 func (a *App) SetWorkspaceOrder(ids []int64) error {
@@ -96,7 +125,11 @@ func (a *App) SetWorkspaceOrder(ids []int64) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	emitWorkspacesChanged()
+	return nil
 }
 
 // --- terminal tabs ---

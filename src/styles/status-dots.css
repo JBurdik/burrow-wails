@@ -4,12 +4,15 @@
  * Shared status dot styles for Terminal.vue, Sidebar.vue, and FloatBubble.vue.
  * Single definition — no more byte-for-byte duplication across files.
  *
- * Color tokens:
- *   --status-running: orange glow for the braille spinner / PhSpinner
- *   --status-waiting: blue solid dot
- *   --status-done:    lime solid dot (transient, auto-clears)
- *   --status-review:  green pulsing dot (agent finished while away, persists)
- *   --status-error:   red pulsing dot (turn FAILED — StopFailure; most urgent, persists)
+ * Color tokens (pen.dev visual language — running→green, waiting/permission→
+ * yellow, done/review→blue, error→red; same mapping used for AgentChat's own
+ * status pill so a TermStatus and a chat status read as the same vocabulary):
+ *   --status-running:    green glow for the braille spinner / PhSpinner
+ *   --status-waiting:    yellow solid dot
+ *   --status-permission: yellow solid dot, pulsing (agent needs a decision)
+ *   --status-done:       blue solid dot (transient, auto-clears)
+ *   --status-review:     blue pulsing dot (agent finished while away, persists)
+ *   --status-error:      red pulsing dot (turn FAILED — StopFailure; most urgent, persists)
  *
  * Tokens fall back to the hardcoded values so FloatBubble (which doesn't mount
  * under App.vue's :root) also gets the right colors.
@@ -17,12 +20,12 @@
 
 /* ── Tokens (override per theme via themes.ts → App.vue) ── */
 :root {
-  --status-running:    #fb923c;
-  --status-waiting:    #3b82f6;   /* same as --accent */
-  --status-permission: #f59e0b;   /* amber — agent needs user decision */
-  --status-done:       #84cc16;
-  --status-review:     #22c55e;   /* same as --green */
-  --status-error:      #ef4444;   /* red — turn failed (rate limit, overload, auth…) */
+  --status-running:    #4ADE80;
+  --status-waiting:    #FBBF24;
+  --status-permission: #FBBF24;   /* agent needs user decision */
+  --status-done:       #60A5FA;
+  --status-review:     #60A5FA;
+  --status-error:      #F87171;   /* turn failed (rate limit, overload, auth…) */
 }
 
 /* ── Base dot ── */
@@ -34,80 +37,80 @@
   position: relative;
 }
 
-/* running: braille glyph with orange glow (Terminal/Sidebar use spinnerFrame text
+/* running: braille glyph with green glow (Terminal/Sidebar use spinnerFrame text
    content; FloatBubble uses PhSpinner separately but shares the color token) */
 .status-dot.status-running {
   background: transparent;
   border-radius: 0;
   width: auto;
   height: auto;
-  color: var(--status-running, #fb923c);
+  color: var(--status-running, #4ADE80);
   font-size: 14px;
   line-height: 1;
   font-family: monospace;
   font-weight: 700;
   text-shadow:
-    0 0 6px rgba(249, 115, 22, 0.9),
-    0 0 12px rgba(249, 115, 22, 0.5);
+    0 0 6px rgba(74, 222, 128, 0.9),
+    0 0 12px rgba(74, 222, 128, 0.5);
   animation: status-running-glow 1.4s ease-in-out infinite;
 }
 
 @keyframes status-running-glow {
   0%, 100% {
     opacity: 0.7;
-    text-shadow: 0 0 4px rgba(249, 115, 22, 0.7);
+    text-shadow: 0 0 4px rgba(74, 222, 128, 0.7);
   }
   50% {
     opacity: 1;
     text-shadow:
-      0 0 8px rgba(249, 115, 22, 1),
-      0 0 14px rgba(249, 115, 22, 0.6);
+      0 0 8px rgba(74, 222, 128, 1),
+      0 0 14px rgba(74, 222, 128, 0.6);
   }
 }
 
 .status-dot.status-waiting {
-  background: var(--status-waiting, #3b82f6);
+  background: var(--status-waiting, #FBBF24);
 }
 
 .status-dot.status-permission {
-  background: var(--status-permission, #f59e0b);
-  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+  background: var(--status-permission, #FBBF24);
+  box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7);
   animation: status-permission-pulse 1.2s ease-out infinite;
 }
 
 @keyframes status-permission-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(245, 158, 11, 0.7); }
-  70%  { box-shadow: 0 0 0 5px rgba(245, 158, 11, 0);   }
-  100% { box-shadow: 0 0 0 0   rgba(245, 158, 11, 0);   }
+  0%   { box-shadow: 0 0 0 0   rgba(251, 191, 36, 0.7); }
+  70%  { box-shadow: 0 0 0 5px rgba(251, 191, 36, 0);   }
+  100% { box-shadow: 0 0 0 0   rgba(251, 191, 36, 0);   }
 }
 
 .status-dot.status-done {
-  background: var(--status-done, #84cc16);
+  background: var(--status-done, #60A5FA);
 }
 
 /* review = agent finished while you weren't watching; persists until the tab is seen */
 .status-dot.status-review {
-  background: var(--status-review, #22c55e);
-  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+  background: var(--status-review, #60A5FA);
+  box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.6);
   animation: status-review-pulse 1.8s ease-out infinite;
 }
 
 @keyframes status-review-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(34, 197, 94, 0.6); }
-  70%  { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0);   }
-  100% { box-shadow: 0 0 0 0   rgba(34, 197, 94, 0);   }
+  0%   { box-shadow: 0 0 0 0   rgba(96, 165, 250, 0.6); }
+  70%  { box-shadow: 0 0 0 5px rgba(96, 165, 250, 0);   }
+  100% { box-shadow: 0 0 0 0   rgba(96, 165, 250, 0);   }
 }
 
 /* error = the agent's turn FAILED (StopFailure: rate limit, overload, auth, billing).
    Most urgent state — red, pulsing, persists until the tab is seen (like review). */
 .status-dot.status-error {
-  background: var(--status-error, #ef4444);
-  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  background: var(--status-error, #F87171);
+  box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.7);
   animation: status-error-pulse 1.2s ease-out infinite;
 }
 
 @keyframes status-error-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(239, 68, 68, 0.7); }
-  70%  { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0);   }
-  100% { box-shadow: 0 0 0 0   rgba(239, 68, 68, 0);   }
+  0%   { box-shadow: 0 0 0 0   rgba(248, 113, 113, 0.7); }
+  70%  { box-shadow: 0 0 0 5px rgba(248, 113, 113, 0);   }
+  100% { box-shadow: 0 0 0 0   rgba(248, 113, 113, 0);   }
 }

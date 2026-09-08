@@ -219,6 +219,14 @@ func (a *App) ClaudeSend(id, text, sessionID string, images []string) error {
 	if err != nil {
 		return err
 	}
+	// Publish what the human sent BEFORE handing it to the CLI. Everything the
+	// agent says comes back through emitChatLine, so it reaches every client
+	// and survives a restart; the prompt used to go straight to stdin and be
+	// published nowhere, which is why a message typed on the phone stayed on
+	// the phone and one typed on the desktop stayed there. The prompt is the
+	// only part of a transcript this app authors rather than parses, and it was
+	// the only part not going through the door.
+	a.emitChatLine(id, chatUserKind, text)
 	return a.claudeWrite(id, string(msg))
 }
 

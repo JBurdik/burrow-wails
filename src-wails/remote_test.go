@@ -2,130 +2,144 @@ package main
 
 import (
 	"encoding/json"
-	"os"
+	"fmt"
+	"strings"
 	"testing"
 )
 
-// The phone renders whatever this returns, so the contract is the shape in
-// src/mobile/store.ts: camelCase session keys plus an always-present
-// `messages` array pulled from the separate history map.
-func TestRemoteChatsFromConfig(t *testing.T) {
-	raw := `{
-	  "chatSessions": [
-	    {"id": 8, "workspaceId": 2, "title": "Chat 8", "busy": false, "transport": "claude-cli", "claudeSessionId": "abc"},
-	    {"id": 9, "workspaceId": 2, "title": "Chat 9", "busy": true,  "transport": "acp",        "claudeSessionId": ""},
-	    {"id": 99, "workspaceId": 2, "title": "Manager", "control": true, "transport": "claude-cli"}
-	  ],
-	  "chatMessageHistory": {
-	    "8": [{"id": 0, "role": "user", "text": "ahoj"}, {"id": 1, "role": "assistant", "text": "čau"}]
-	  }
-	}`
-	chats, err := remoteChatsFromConfig(raw)
+// The config.json-parsing tests that used to live here are gone with the code
+// they covered (remoteChatsFromConfig, remoteCreateChatSession and its
+// chatIdCounter bump). The chat list is a SQLite table now — chats_test.go
+// covers the store, and what is left here is the SHAPING this file still owns.
+
+func TestRemoteChatShapeCarriesWhatThePhoneReads(t *testing.T) {
+	names := map[int64]string{2: "Burrow GO"}
+	paths := map[int64]string{2: "/repo/path"}
+	got := remoteChatShape(Chat{
+		ID: 86, WorkspaceID: 2, Title: "Chat 56 (phone)",
+		AgentKind: "claude", Transport: "claude-cli", MessageCount: 3,
+		LastActivityAt: 1234,
+	}, names, paths)
+
+	for key, want := range map[string]any{
+		"id":             int64(86),
+		"workspaceId":    int64(2),
+		"title":          "Chat 56 (phone)",
+		"transport":      "claude-cli",
+		"agentKind":      "claude",
+		"messageCount":   int64(3),
+		"lastActivityAt": int64(1234),
+		"workspaceName":  "Burrow GO",
+		"workspacePath":  "/repo/path",
+		"busy":           false,
+	} {
+		if got[key] != want {
+			t.Errorf("%s = %#v, want %#v", key, got[key], want)
+		}
+	}
+	// The phone indexes this without a guard and fills it from the event
+	// stream; a missing key is a crash on first paint.
+	if _, ok := got["messages"]; !ok {
+		t.Error("messages missing")
+	}
+}
+
+func TestRemoteChatShapeDefaultsAnEmptyTransport(t *testing.T) {
+	// The phone picks its permission channel off `transport`
+	// (claude-data-* vs acp-req-*), so an empty value routes a Claude chat's
+	// approval requests to a channel nothing publishes on — the prompt simply
+	// never appears and the turn hangs.
+	got := remoteChatShape(Chat{ID: 1, WorkspaceID: 1}, nil, nil)
+	if got["transport"] != "claude-cli" {
+		t.Fatalf("transport = %#v, want claude-cli", got["transport"])
+	}
+}
+
+func TestRemoteListChatsHidesTheManagerSession(t *testing.T) {
+	// Mission Control's session is not a user-facing chat; the desktop
+	// sidebar hides it for the same reason.
+	a, _ := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+
+	if _, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "real"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "Manager", Control: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := a.RemoteListChats()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(chats) != 2 {
-		t.Fatalf("got %d chats, want 2 — the control:true Manager session must be hidden", len(chats))
-	}
-	msgs, ok := chats[0]["messages"].([]map[string]any)
-	if !ok || len(msgs) != 2 {
-		t.Fatalf("chat 8 messages: %#v", chats[0]["messages"])
-	}
-	if msgs[1]["text"] != "čau" {
-		t.Fatalf("transcript not inlined: %#v", msgs[1])
-	}
-	// A chat with no history must still carry an array, never null — store.ts
-	// only guards with Array.isArray, and null would blank the transcript.
-	empty, ok := chats[1]["messages"].([]map[string]any)
-	if !ok || len(empty) != 0 {
-		t.Fatalf("chat 9 messages: %#v", chats[1]["messages"])
-	}
-	if b, _ := json.Marshal(chats[1]["messages"]); string(b) != "[]" {
-		t.Fatalf("empty transcript must marshal to [], got %s", b)
+	if len(list) != 1 || list[0]["title"] != "real" {
+		t.Fatalf("want only the user-facing chat, got %+v", list)
 	}
 }
 
-func TestRemoteChatsFromConfigTolerantOfEmpty(t *testing.T) {
-	for _, raw := range []string{`{}`, `{"chatSessions": []}`} {
-		chats, err := remoteChatsFromConfig(raw)
-		if err != nil || len(chats) != 0 {
-			t.Fatalf("%s: got %v / %v", raw, chats, err)
-		}
-	}
-	if _, err := remoteChatsFromConfig("not json"); err == nil {
-		t.Fatal("expected a parse error")
-	}
-}
-
-// Guards against drift in the real file: whatever the desktop has actually
-// written must still parse. Skipped when there is no config yet.
-func TestRemoteChatsFromLiveConfig(t *testing.T) {
-	dir, err := appDataDir()
-	if err != nil {
-		t.Skip(err)
-	}
-	raw, err := os.ReadFile(dir + "/config.json")
-	if err != nil {
-		t.Skip("no config.json on this machine")
-	}
-	if _, err := remoteChatsFromConfig(string(raw)); err != nil {
-		t.Fatalf("live config.json no longer parses: %v", err)
-	}
-}
-
-func TestRemoteCreateChatSessionBumpsCounterAndPreservesConfig(t *testing.T) {
-	cfg := map[string]any{
-		"someUnrelatedSetting": "keep-me",
-		"chatIdCounter":        float64(6),
-		"chatSessions": []any{
-			map[string]any{"id": float64(5), "workspaceId": float64(2), "title": "Chat 1"},
-		},
-	}
-	session, id := remoteCreateChatSession(cfg, 2, "claude")
-
-	if id != 6 {
-		t.Fatalf("id = %d, want 6 (must bump the counter, not reuse the last id)", id)
-	}
-	if cfg["chatIdCounter"] != float64(7) {
-		t.Fatalf("chatIdCounter = %v, want 7", cfg["chatIdCounter"])
-	}
-	if cfg["someUnrelatedSetting"] != "keep-me" {
-		t.Fatal("unrelated config keys must survive — config.json is a grab-bag, not just chat state")
-	}
-	if session["title"] != "Chat 2" {
-		t.Fatalf("title = %v, want \"Chat 2\" (second chat for this workspace)", session["title"])
-	}
-	if session["transport"] != "claude-cli" {
-		t.Fatalf("transport = %v, want claude-cli", session["transport"])
-	}
-	sessions, ok := cfg["chatSessions"].([]any)
-	if !ok || len(sessions) != 2 {
-		t.Fatalf("chatSessions = %#v, want 2 entries", cfg["chatSessions"])
-	}
-	history, ok := cfg["chatMessageHistory"].(map[string]any)
-	if !ok {
-		t.Fatal("chatMessageHistory was not created")
-	}
-	if msgs, ok := history["6"].([]any); !ok || len(msgs) != 0 {
-		t.Fatalf("chatMessageHistory[6] = %#v, want []", history["6"])
-	}
-}
-
-func TestRemoteCreateChatRejectsNonClaude(t *testing.T) {
+func TestRemoteCreateChatRejectsUnsupportedAgentKind(t *testing.T) {
 	a := &App{}
-	if _, err := a.RemoteCreateChat(1, "codex"); err == nil {
-		t.Fatal("expected an error — remote chat creation only supports agentKind claude for now")
+	if _, err := a.RemoteCreateChat(1, "gemini", "", "", ""); err == nil {
+		t.Fatal("expected an error — remote chat creation only supports agentKind claude and codex")
 	}
 }
 
-// RemoteCreateChat itself can't be exercised end-to-end here with an unknown
-// workspace id: resolving it goes through workspaceLabels() ->
-// ListWorkspaces(), which calls a.db.Query on the real *sql.DB — a bare
-// &App{} has a nil db, and database/sql panics (nil pointer dereference in
-// DB.conn) rather than returning an error. That's a pre-existing nil-DB
-// safety gap in ListWorkspaces/workspaceLabels, unrelated to this fix, and
-// out of scope here. So this tests the pure resolution logic RemoteCreateChat
-// added instead, which needs no DB at all.
+// The rejection test above only proves an UNRELATED kind ("gemini") is
+// rejected — it would not notice "codex" being typo'd, or dropped from the
+// allowlist entirely, since a rejection is still an error either way. This
+// proves "codex" specifically clears the agentKind guard.
+//
+// Whether a real "codex" binary is on PATH varies by machine — a CI runner
+// likely has none (CodexStart fails, the chat row must be rolled back, same
+// guarantee a failed ClaudeStart already has), but a dev box with the CLI
+// installed can genuinely succeed. Both outcomes are asserted; a real
+// success is torn down (process killed, chat deleted) so the test has no
+// environment-dependent side effects.
+func TestRemoteCreateChatAcceptsCodexPastTheAgentKindGuard(t *testing.T) {
+	a, dir := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+
+	ws, err := a.CreateWorkspace("codex-test", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := a.ListChats()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, createErr := a.RemoteCreateChat(ws.ID, "codex", "", "", "")
+	if createErr != nil {
+		if strings.Contains(createErr.Error(), "only supports") {
+			t.Fatalf("codex was rejected by the agentKind guard, not by CodexStart: %v", createErr)
+		}
+		after, err := a.ListChats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(after) != len(before) {
+			t.Fatalf("a failed codex start left a ghost chat row: before=%d after=%d", len(before), len(after))
+		}
+		return
+	}
+
+	// codex really is installed here and CodexStart genuinely succeeded —
+	// assert the row is shaped right, then tear the live process down.
+	if result["transport"] != "codex-app-server" {
+		t.Fatalf("transport = %#v, want codex-app-server", result["transport"])
+	}
+	if result["agentKind"] != "codex" {
+		t.Fatalf("agentKind = %#v, want codex", result["agentKind"])
+	}
+	chatID, _ := result["id"].(int64)
+	if sess := a.acpReg().drop(fmt.Sprint(chatID)); sess != nil && sess.cmd != nil && sess.cmd.Process != nil {
+		_ = sess.cmd.Process.Kill()
+	}
+	_ = a.DeleteChat(chatID)
+}
+
 func TestResolveWorkspaceCwdRejectsUnknownWorkspace(t *testing.T) {
 	paths := map[int64]string{2: "/repo/path"}
 	if _, err := resolveWorkspaceCwd(paths, 999999); err == nil {
@@ -151,6 +165,7 @@ func TestEmptyListsMarshalAsArrays(t *testing.T) {
 		"skills":          []SkillInfo{},
 		"control verbs":   []ControlVerb{},
 		"pty sessions":    []string{},
+		"chats":           []Chat{},
 	} {
 		b, err := json.Marshal(v)
 		if err != nil {

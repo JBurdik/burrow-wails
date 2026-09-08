@@ -1,51 +1,81 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
-// Remote (mobile) read surface.
+// The phone's chat surface.
 //
-// Everything the phone needs is already on disk: chats and their transcripts
-// live in config.json (the desktop's `setConfig` store), workspaces and tabs
-// in SQLite. So these commands are plain readers — no new persistence, no
-// second source of truth.
+// It used to read and write the chat list in config.json, and its own doc
+// comments carried the caveat that a concurrent desktop `setConfig` could
+// clobber anything written here. That caveat is gone: the list is a SQLite
+// table Go owns (chats.go), so this file is now a thin shaping layer — take
+// a Chat row, dress it in the camelCase keys src/mobile/store.ts's RemoteChat
+// expects, and hand it over.
 //
-// Writing is deliberately rare. The desktop rewrites config.json wholesale
-// on every setConfig, so a concurrent write from here can be clobbered on
-// the next save — RemoteCreateChat below accepts that risk for the one
-// mutation the phone needs (see its comment for why).
+// The one thing still shaped rather than stored is `messages`: the phone
+// fills a transcript from the `chat-event-*` stream, so the list hands it an
+// empty array to index into rather than a body. Transcripts live in
+// chat_stream and are replayed from `folded_ord` — a second copy in this
+// reply would be a second replay log for the same data.
 
-// remoteConfig is the slice of config.json the phone cares about. Keys match
-// claudeChats.ts's SESSIONS_KEY / HISTORY_KEY exactly.
-type remoteConfig struct {
-	ChatSessions       []map[string]any            `json:"chatSessions"`
-	ChatMessageHistory map[string][]map[string]any `json:"chatMessageHistory"`
+// RemoteListChats returns every user-facing chat in the shape
+// src/mobile/store.ts expects.
+func (a *App) RemoteListChats() ([]map[string]any, error) {
+	chats, err := a.ListChats()
+	if err != nil {
+		return nil, err
+	}
+	// The table stores only workspace_id. Resolve the label here so the phone
+	// can name a chat without having loaded the workspace list first.
+	names, paths := a.workspaceLabels()
+
+	out := make([]map[string]any, 0, len(chats))
+	for _, c := range chats {
+		// Mission Control's hidden session is not a user-facing chat — the
+		// desktop sidebar hides it for the same reason.
+		if c.Control {
+			continue
+		}
+		out = append(out, remoteChatShape(c, names, paths))
+	}
+	return out, nil
 }
 
-// RemoteListChats returns every chat with its transcript inlined, in the shape
-// src/mobile/store.ts's RemoteChat expects. The persisted keys are already
-// camelCase, so the session objects pass through untouched.
-func (a *App) RemoteListChats() ([]map[string]any, error) {
-	raw, err := a.ReadConfig()
-	if err != nil {
-		return nil, err
+// remoteChatShape maps one row onto the phone's camelCase keys. Split out as a
+// pure function because it is the seam where the Go column names and the
+// client's field names meet, and a silent mismatch there shows up as a chat
+// with no title rather than as an error.
+func remoteChatShape(c Chat, names, paths map[int64]string) map[string]any {
+	transport := c.Transport
+	if transport == "" {
+		// The phone picks its permission channel off this (`claude-data-*` vs
+		// `acp-req-*`), so an empty value would route a Claude chat's approval
+		// requests to a channel nothing publishes on and the prompt would
+		// never appear. Default to the only transport RemoteCreateChat makes.
+		transport = "claude-cli"
 	}
-	chats, err := remoteChatsFromConfig(raw)
-	if err != nil {
-		return nil, err
+	return map[string]any{
+		"id":              c.ID,
+		"workspaceId":     c.WorkspaceID,
+		"title":           c.Title,
+		"claudeSessionId": c.ClaudeSessionID,
+		// Always false: whether a turn is running is the phase, which the
+		// phone learns from the event stream. A value here would be a stale
+		// snapshot of it.
+		"busy":           false,
+		"messageCount":   c.MessageCount,
+		"agentKind":      c.AgentKind,
+		"transport":      transport,
+		"model":          c.Model,
+		"archivedAt":     c.ArchivedAt,
+		"lastActivityAt": c.LastActivityAt,
+		"workspaceName":  names[c.WorkspaceID],
+		"workspacePath":  paths[c.WorkspaceID],
+		"messages":       []map[string]any{},
 	}
-	// config.json stores only workspaceId. Resolve the name here so the phone
-	// can label a chat without having loaded the workspace list first.
-	names, paths := a.workspaceLabels()
-	for _, chat := range chats {
-		id, _ := numericID(chat["workspaceId"])
-		chat["workspaceName"] = names[id]
-		chat["workspacePath"] = paths[id]
-	}
-	return chats, nil
 }
 
 func (a *App) workspaceLabels() (map[int64]string, map[int64]string) {
@@ -61,96 +91,10 @@ func (a *App) workspaceLabels() (map[int64]string, map[int64]string) {
 	return names, paths
 }
 
-// remoteChatsFromConfig is the pure half, so the shape contract with
-// src/mobile/store.ts can be tested without an app data dir.
-func remoteChatsFromConfig(raw string) ([]map[string]any, error) {
-	var cfg remoteConfig
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return nil, fmt.Errorf("parse config.json: %w", err)
-	}
-	out := make([]map[string]any, 0, len(cfg.ChatSessions))
-	for _, chat := range cfg.ChatSessions {
-		// Mission Control's hidden session is not a user-facing chat — the
-		// desktop sidebar hides it for the same reason.
-		if ctrl, ok := chat["control"].(bool); ok && ctrl {
-			continue
-		}
-		id, ok := numericID(chat["id"])
-		if !ok {
-			continue
-		}
-		msgs := cfg.ChatMessageHistory[fmt.Sprint(id)]
-		if msgs == nil {
-			msgs = []map[string]any{}
-		}
-		chat["messages"] = msgs
-		out = append(out, chat)
-	}
-	return out, nil
-}
-
-// remoteCreateChatSession mutates cfg (config.json already decoded into a
-// generic map — NOT the narrow remoteConfig struct, which would drop every
-// other settings key on write-back) in place: bumps chatIdCounter, appends a
-// new session row in the exact shape src/stores/claudeChats.ts#create()
-// builds client-side, and seeds an empty transcript. Pure function so the
-// id-allocation and shape logic is testable without a real app data dir.
-func remoteCreateChatSession(cfg map[string]any, workspaceID int64, agentKind string) (map[string]any, int64) {
-	// claudeChats.ts's nextId is post-increment (`const id = nextId++`), so
-	// the persisted counter always equals (max used id) + 1 — mirror that
-	// invariant exactly rather than reserving extra headroom against a race
-	// that RemoteCreateChat's own doc comment already accepts as-is.
-	counter := int64(1)
-	if v, ok := cfg["chatIdCounter"].(float64); ok {
-		counter = int64(v)
-	}
-	id := counter
-	cfg["chatIdCounter"] = float64(id + 1)
-
-	sessions, _ := cfg["chatSessions"].([]any)
-	countForWs := 0
-	for _, raw := range sessions {
-		if s, ok := raw.(map[string]any); ok {
-			if wsID, ok := numericID(s["workspaceId"]); ok && wsID == workspaceID {
-				countForWs++
-			}
-		}
-	}
-
-	transport := "claude-cli"
-	if agentKind != "claude" {
-		transport = "acp"
-	}
-	session := map[string]any{
-		"id":              float64(id),
-		"workspaceId":     float64(workspaceID),
-		"claudeSessionId": "",
-		"title":           fmt.Sprintf("Chat %d", countForWs+1),
-		"busy":            false,
-		"messageCount":    0,
-		"agentKind":       agentKind,
-		"transport":       transport,
-		"lastActivityAt":  float64(time.Now().UnixMilli()),
-	}
-	cfg["chatSessions"] = append(sessions, session)
-
-	history, _ := cfg["chatMessageHistory"].(map[string]any)
-	if history == nil {
-		history = map[string]any{}
-	}
-	history[fmt.Sprint(id)] = []any{}
-	cfg["chatMessageHistory"] = history
-
-	return session, id
-}
-
 // resolveWorkspaceCwd fails closed on an unknown workspace id — a request
 // naming a workspace the app doesn't know about must error instead of
 // silently resolving to cwd="" and letting ClaudeStart spawn the CLI in an
-// empty working directory (the spec's Error Handling section names this
-// case explicitly). Split out as a pure function so it can be unit-tested
-// without going through workspaceLabels()/ListWorkspaces(), which need a
-// live DB.
+// empty working directory.
 func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, error) {
 	cwd, ok := paths[workspaceID]
 	if !ok || cwd == "" {
@@ -159,83 +103,155 @@ func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, err
 	return cwd, nil
 }
 
-// RemoteCreateChat is the one write RemoteListChats's read-only comment
-// above deliberately excluded. The risk here is broader than "one HTTP round
-// trip": the desktop frontend caches the whole of config.json in memory and
-// rewrites it wholesale on every setConfig, so ANY desktop write during this
-// read-modify-write — a font preference change, a panel resize, anything,
-// not just another chat mutation — can silently revert this call's new
-// session row and its chatIdCounter bump. In the worst case a
-// subsequently-created desktop chat reuses the id this call just "took" (the
-// counter reverted to its pre-bump value), silently attaching the desktop's
-// new chat UI to this call's still-running CLI process. remoteCreateMu below
-// only serializes concurrent RemoteCreateChat calls against each other
-// (e.g. two phones, or a rapid double-tap) — it does nothing to prevent the
-// desktop-side staleness, which needs the desktop frontend to reload chat
-// state after a remote-triggered creation (a larger change, tracked as a
-// follow-up, not attempted here).
+// RemoteCreateChat creates a chat and starts its CLI.
 //
-// Claude-only for now: an ACP/Codex session needs command/args/configDir
-// resolved from provider config that today only exists in
-// AgentChat.vue's acpStartPayload() — porting that is future work, not
-// wired here.
-func (a *App) RemoteCreateChat(workspaceID int64, agentKind string) (map[string]any, error) {
-	if agentKind != "claude" {
-		return nil, fmt.Errorf("remote chat creation only supports Claude for now (got %q)", agentKind)
+// The long warning that used to sit here is obsolete: the id comes from the
+// database, so it cannot be reissued to somebody else, and no other client's
+// save can revert this row (see chats.go). `remoteCreateMu` went with it —
+// it only ever serialized two RemoteCreateChat calls against a hazard the
+// database now owns, and its own comment admitted it never closed the real
+// one.
+//
+// Claude and Codex only: a plain-ACP session (gemini, opencode, a custom
+// adapter) needs command/args/configDir resolved from provider config that
+// today only exists in AgentChat.vue's acpStartPayload(). Codex is exempt —
+// CodexStart (acp.go) resolves its own binary and needs nothing beyond
+// cwd, exactly like ClaudeStart.
+//
+// model/effort/permissionMode come straight from WelcomeView's composer.
+// This is the ONLY place they can take effect for Claude: ClaudeStart
+// (below) is what actually spawns the CLI, and it is a no-op on every later
+// call once the session is alive — a value threaded in afterwards, on the
+// first sendChat, is threaded in too late to matter. ClaudeStart itself
+// validates/defaults each of the three (an empty or unrecognized value is
+// simply dropped), so this passes them through unchecked. Codex is
+// different: CodexStart takes no model/effort/mode params at all (a fresh
+// thread always starts in its own Auto default), so those three are applied
+// as a follow-up via AcpSetConfig/AcpSetMode once the thread exists — see
+// below. model/effort are best-effort there; permissionMode is not, because
+// Auto is more permissive than most of the composer's other modes and
+// swallowing a failed mode change would fail OPEN, not narrow anything.
+// codexModeSettings (acp.go) deliberately aliases Claude's own permissionMode
+// ids ("default", "acceptEdits", …), so the
+// SAME composer value works for both agents without a second mode list.
+func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, permissionMode string) (map[string]any, error) {
+	if agentKind != "claude" && agentKind != "codex" {
+		return nil, fmt.Errorf("remote chat creation only supports claude and codex (got %q)", agentKind)
 	}
 
-	a.remoteCreateMu.Lock()
-	defer a.remoteCreateMu.Unlock()
-
-	// Resolve and validate the workspace BEFORE touching config.json, so an
-	// invalid request never mutates it.
+	// Resolve and validate the workspace BEFORE creating anything, so an
+	// invalid request never leaves a row behind.
 	names, paths := a.workspaceLabels()
 	cwd, err := resolveWorkspaceCwd(paths, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	raw, err := a.ReadConfig()
+	existing, err := a.ListChats()
 	if err != nil {
 		return nil, err
 	}
-	var cfg map[string]any
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return nil, fmt.Errorf("parse config.json: %w", err)
-	}
-	if cfg == nil {
-		cfg = map[string]any{}
+	countForWs := 0
+	for _, c := range existing {
+		if c.WorkspaceID == workspaceID && !c.Control {
+			countForWs++
+		}
 	}
 
-	session, id := remoteCreateChatSession(cfg, workspaceID, agentKind)
+	transport := "claude-cli"
+	if agentKind == "codex" {
+		transport = "codex-app-server"
+	}
 
-	out, err := json.Marshal(cfg)
+	chat, err := a.CreateChat(Chat{
+		WorkspaceID: workspaceID,
+		// The " (phone)" is not decoration. The desktop names chats
+		// `Chat <n>` too, so a remotely-created one used to be
+		// indistinguishable from the fifty above it in the sidebar — a chat
+		// that exists and cannot be found is not much better than one that
+		// does not.
+		Title:          fmt.Sprintf("Chat %d (phone)", countForWs+1),
+		AgentKind:      agentKind,
+		Transport:      transport,
+		Model:          model,
+		LastActivityAt: time.Now().UnixMilli(),
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := a.WriteConfig(string(out)); err != nil {
-		return nil, err
-	}
 
-	chatID := fmt.Sprint(id)
-	if err := a.ClaudeStart(chatID, cwd, "", "default", "", "", "", "", "", ""); err != nil {
+	id := fmt.Sprint(chat.ID)
+	if agentKind == "codex" {
+		if err := a.CodexStart(id, cwd, nil, ""); err != nil {
+			// Roll the row back. A chat whose CLI never started is a ghost in
+			// both sidebars that can only be removed by hand — and under
+			// config.json that is exactly what a failed start used to leave.
+			if delErr := a.DeleteChat(chat.ID); delErr != nil {
+				return nil, fmt.Errorf("start codex: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
+			}
+			return nil, fmt.Errorf("start codex: %w", err)
+		}
+		// model/effort are genuinely best-effort: AcpSetConfig only ever
+		// stashes them as local session state (sess.model/sess.effort) for
+		// Codex, so the only way it can fail post-CodexStart is "adapter not
+		// running" — which cannot happen right after a successful start,
+		// since the session is registered before CodexStart returns.
+		if model != "" {
+			_, _ = a.AcpSetConfig(id, "model", model)
+		}
+		if effort != "" {
+			_, _ = a.AcpSetConfig(id, "effort", effort)
+		}
+		// permissionMode is NOT best-effort: CodexStart's own startParams
+		// always launch the thread in Auto (workspace-write, auto-reviewed),
+		// which is more permissive than most of the composer's other modes
+		// (Supervised/Plan are read-only). Swallowing a failure here would
+		// silently hand back a chat running MORE permissively than what the
+		// user explicitly asked for — a fail-open, not a narrowing — so a
+		// failed mode change is treated exactly like a failed CodexStart.
+		if permissionMode != "" {
+			if _, err := a.AcpSetMode(id, permissionMode); err != nil {
+				if delErr := a.DeleteChat(chat.ID); delErr != nil {
+					return nil, fmt.Errorf("set codex permission mode: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
+				}
+				return nil, fmt.Errorf("set codex permission mode: %w", err)
+			}
+		}
+	} else if err := a.ClaudeStart(id, cwd, "", permissionMode, "", model, effort, "", "", ""); err != nil {
+		if delErr := a.DeleteChat(chat.ID); delErr != nil {
+			return nil, fmt.Errorf("start claude: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
+		}
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
 
-	session["messages"] = []map[string]any{}
-	session["workspaceName"] = names[workspaceID]
-	session["workspacePath"] = cwd
-	return session, nil
+	return remoteChatShape(chat, names, paths), nil
 }
 
-// numericID copes with JSON numbers arriving as float64.
-func numericID(v any) (int64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return int64(n), true
-	case int64:
-		return n, true
-	default:
-		return 0, false
+// RemoteSetChatTitle upgrades a chat's title from the phone — first the cheap
+// local heuristic off the prompt, then (fire-and-forget) the model-written one
+// from generate_chat_title, mirroring AgentChat.vue's smartTitle→refineTitle
+// two-step. expectTitle is a compare-and-swap: only replace the title this
+// caller actually saw, so a slower of two concurrent refinements (or a real
+// rename, once one exists) cannot stomp on a newer title with a stale one.
+//
+// Deliberately narrower than save_chats: that upserts a full desktop-shaped
+// Chat row, and RemoteListChats's shape the phone actually holds never carries
+// pinned_title/branch/model/settled_override/control — building a full row
+// from what the phone has would silently blank every one of them.
+func (a *App) RemoteSetChatTitle(id int64, title, expectTitle string) error {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return fmt.Errorf("title must not be empty")
 	}
+	res, err := a.db.Exec(
+		`UPDATE chats SET title = ? WHERE id = ? AND pinned_title = 0 AND title = ?`,
+		title, id, expectTitle,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		busEmit("chats-changed", nil)
+	}
+	return nil
 }

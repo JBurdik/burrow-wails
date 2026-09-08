@@ -936,6 +936,12 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 	}
 	rpc := sess.rpcID()
 
+	// Published once here rather than in each branch below: Codex-app-server
+	// and plain ACP both return early, and a prompt that only reached the
+	// stream on one of them would be a transport-shaped hole in the
+	// transcript. Same reasoning as ClaudeSend — see chatUserKind.
+	a.emitChatLine(id, chatUserKind, text)
+
 	if sess.proto == protoCodexAppServer {
 		input := []any{}
 		if text != "" {

@@ -141,7 +141,8 @@ function rememberSession(repoId: number, sessionId: number) {
  * `control` so it stays out of the Sidebar's chat list — the Manager has its
  * own home in the right panel.
  */
-function ensureThread() {
+// async since chats.create() takes its id from the database now.
+async function ensureThread() {
   const repoId = rootId.value;
   if (!repoId) return;
   if (threads.value.some((t) => t.repoId === repoId)) return;
@@ -161,7 +162,7 @@ function ensureThread() {
   // create() makes the new chat that workspace's active one; the Manager is a
   // side panel, not the workspace's chat, so put the previous one back.
   const previousActive = chats.activeByWs[repoId];
-  const session = chats.create(repoId, { agentKind: newThreadAgent.value });
+  const session = await chats.create(repoId, { agentKind: newThreadAgent.value });
   chats.sync(session.id, { title: "Manager", control: true });
   if (previousActive) chats.setActive(repoId, previousActive);
 

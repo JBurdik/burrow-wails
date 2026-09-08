@@ -114,6 +114,10 @@ export function ControlVerbs() {
   return window['go']['main']['App']['ControlVerbs']();
 }
 
+export function CreateChat(arg1) {
+  return window['go']['main']['App']['CreateChat'](arg1);
+}
+
 export function CreateCheckpoint(arg1, arg2, arg3) {
   return window['go']['main']['App']['CreateCheckpoint'](arg1, arg2, arg3);
 }
@@ -138,6 +142,10 @@ export function DaemonStats() {
   return window['go']['main']['App']['DaemonStats']();
 }
 
+export function DeleteChat(arg1) {
+  return window['go']['main']['App']['DeleteChat'](arg1);
+}
+
 export function DeleteChatMessages(arg1) {
   return window['go']['main']['App']['DeleteChatMessages'](arg1);
 }
@@ -148,6 +156,10 @@ export function DeleteSkill(arg1) {
 
 export function DeleteWorkspace(arg1) {
   return window['go']['main']['App']['DeleteWorkspace'](arg1);
+}
+
+export function EnvironmentID() {
+  return window['go']['main']['App']['EnvironmentID']();
 }
 
 export function ExtensionsDirectory() {
@@ -230,6 +242,10 @@ export function LatestNpmVersion(arg1) {
   return window['go']['main']['App']['LatestNpmVersion'](arg1);
 }
 
+export function ListChats() {
+  return window['go']['main']['App']['ListChats']();
+}
+
 export function ListCheckpoints(arg1, arg2) {
   return window['go']['main']['App']['ListCheckpoints'](arg1, arg2);
 }
@@ -282,6 +298,10 @@ export function LoadChatStreamSince(arg1, arg2) {
   return window['go']['main']['App']['LoadChatStreamSince'](arg1, arg2);
 }
 
+export function LocalEndpoint() {
+  return window['go']['main']['App']['LocalEndpoint']();
+}
+
 export function LspSend(arg1, arg2) {
   return window['go']['main']['App']['LspSend'](arg1, arg2);
 }
@@ -322,6 +342,10 @@ export function ProbeProvider(arg1, arg2) {
   return window['go']['main']['App']['ProbeProvider'](arg1, arg2);
 }
 
+export function PublishChatNote(arg1, arg2) {
+  return window['go']['main']['App']['PublishChatNote'](arg1, arg2);
+}
+
 export function ReadClaudeActivity(arg1, arg2) {
   return window['go']['main']['App']['ReadClaudeActivity'](arg1, arg2);
 }
@@ -350,10 +374,6 @@ export function ReadTextFile(arg1) {
   return window['go']['main']['App']['ReadTextFile'](arg1);
 }
 
-export function RegeneratePairCode() {
-  return window['go']['main']['App']['RegeneratePairCode']();
-}
-
 export function RegisterTmuxWin(arg1, arg2) {
   return window['go']['main']['App']['RegisterTmuxWin'](arg1, arg2);
 }
@@ -366,12 +386,32 @@ export function RelaunchApp() {
   return window['go']['main']['App']['RelaunchApp']();
 }
 
-export function RemoteCreateChat(arg1, arg2) {
-  return window['go']['main']['App']['RemoteCreateChat'](arg1, arg2);
+export function RemoteCreateChat(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['RemoteCreateChat'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function RemoteDevices() {
+  return window['go']['main']['App']['RemoteDevices']();
+}
+
+export function RemoteEndpoints() {
+  return window['go']['main']['App']['RemoteEndpoints']();
 }
 
 export function RemoteListChats() {
   return window['go']['main']['App']['RemoteListChats']();
+}
+
+export function RemotePairStatus() {
+  return window['go']['main']['App']['RemotePairStatus']();
+}
+
+export function RemoteRegeneratePairCode() {
+  return window['go']['main']['App']['RemoteRegeneratePairCode']();
+}
+
+export function RemoteSetChatTitle(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RemoteSetChatTitle'](arg1, arg2, arg3);
 }
 
 export function RemoteSyncChat(arg1) {
@@ -414,6 +454,10 @@ export function RestoreCheckpoint(arg1, arg2) {
   return window['go']['main']['App']['RestoreCheckpoint'](arg1, arg2);
 }
 
+export function RevokeRemoteDevice(arg1) {
+  return window['go']['main']['App']['RevokeRemoteDevice'](arg1);
+}
+
 export function RunExtensionCommand(arg1, arg2, arg3) {
   return window['go']['main']['App']['RunExtensionCommand'](arg1, arg2, arg3);
 }
@@ -428,6 +472,10 @@ export function RunGit(arg1, arg2) {
 
 export function SaveChatMessages(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveChatMessages'](arg1, arg2, arg3);
+}
+
+export function SaveChats(arg1) {
+  return window['go']['main']['App']['SaveChats'](arg1);
 }
 
 export function SaveExtensionSettings(arg1, arg2) {
@@ -474,10 +522,6 @@ export function SetSleepInhibit(arg1) {
   return window['go']['main']['App']['SetSleepInhibit'](arg1);
 }
 
-export function SetTabLiveStatus(arg1, arg2) {
-  return window['go']['main']['App']['SetTabLiveStatus'](arg1, arg2);
-}
-
 export function SetTailscaleServe(arg1, arg2) {
   return window['go']['main']['App']['SetTailscaleServe'](arg1, arg2);
 }
@@ -488,6 +532,10 @@ export function SetWorkspaceIcon(arg1, arg2) {
 
 export function SetWorkspaceOrder(arg1) {
   return window['go']['main']['App']['SetWorkspaceOrder'](arg1);
+}
+
+export function ShellSnapshot() {
+  return window['go']['main']['App']['ShellSnapshot']();
 }
 
 export function SystemStats() {

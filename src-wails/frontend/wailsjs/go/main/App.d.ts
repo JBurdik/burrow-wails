@@ -58,6 +58,8 @@ export function ConfigFilePath():Promise<string>;
 
 export function ControlVerbs():Promise<Array<main.ControlVerb>>;
 
+export function CreateChat(arg1:main.Chat):Promise<main.Chat>;
+
 export function CreateCheckpoint(arg1:string,arg2:string,arg3:string):Promise<main.Checkpoint>;
 
 export function CreateDir(arg1:string):Promise<void>;
@@ -70,11 +72,15 @@ export function CreateWorktree(arg1:string,arg2:string,arg3:string,arg4:string,a
 
 export function DaemonStats():Promise<Record<string, any>>;
 
+export function DeleteChat(arg1:number):Promise<void>;
+
 export function DeleteChatMessages(arg1:number):Promise<void>;
 
 export function DeleteSkill(arg1:string):Promise<void>;
 
 export function DeleteWorkspace(arg1:number):Promise<void>;
+
+export function EnvironmentID():Promise<string>;
 
 export function ExtensionsDirectory():Promise<string>;
 
@@ -116,6 +122,8 @@ export function KillPty(arg1:string):Promise<void>;
 
 export function LatestNpmVersion(arg1:string):Promise<main.ProviderLatest>;
 
+export function ListChats():Promise<Array<main.Chat>>;
+
 export function ListCheckpoints(arg1:string,arg2:number):Promise<Array<main.Checkpoint>>;
 
 export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSessionInfo>>;
@@ -142,6 +150,8 @@ export function LoadChatMessages(arg1:number):Promise<string>;
 
 export function LoadChatStreamSince(arg1:string,arg2:number):Promise<Array<main.ChatStreamLine>>;
 
+export function LocalEndpoint():Promise<main.LocalEndpointInfo>;
+
 export function LspSend(arg1:string,arg2:string):Promise<void>;
 
 export function LspStart(arg1:string,arg2:string,arg3:Array<string>,arg4:string):Promise<void>;
@@ -162,6 +172,8 @@ export function PickFiles(arg1:string,arg2:Array<string>):Promise<Array<string>>
 
 export function ProbeProvider(arg1:string,arg2:string):Promise<main.ProviderProbe>;
 
+export function PublishChatNote(arg1:string,arg2:string):Promise<void>;
+
 export function ReadClaudeActivity(arg1:string,arg2:string):Promise<string>;
 
 export function ReadClaudeTranscript(arg1:string,arg2:string):Promise<Array<string>>;
@@ -176,17 +188,25 @@ export function ReadKeybindings():Promise<string>;
 
 export function ReadTextFile(arg1:string):Promise<string>;
 
-export function RegeneratePairCode():Promise<string>;
-
 export function RegisterTmuxWin(arg1:string,arg2:string):Promise<void>;
 
 export function ReinstallStatusHooks():Promise<void>;
 
 export function RelaunchApp():Promise<void>;
 
-export function RemoteCreateChat(arg1:number,arg2:string):Promise<Record<string, any>>;
+export function RemoteCreateChat(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Record<string, any>>;
+
+export function RemoteDevices():Promise<Array<main.RemoteDevice>>;
+
+export function RemoteEndpoints():Promise<Array<main.AdvertisedEndpoint>>;
 
 export function RemoteListChats():Promise<Array<Record<string, any>>>;
+
+export function RemotePairStatus():Promise<main.PairStatus>;
+
+export function RemoteRegeneratePairCode():Promise<main.PairStatus>;
+
+export function RemoteSetChatTitle(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function RemoteSyncChat(arg1:Record<string, any>):Promise<void>;
 
@@ -208,6 +228,8 @@ export function RestartDaemon():Promise<void>;
 
 export function RestoreCheckpoint(arg1:string,arg2:string):Promise<main.Checkpoint>;
 
+export function RevokeRemoteDevice(arg1:string):Promise<void>;
+
 export function RunExtensionCommand(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
@@ -215,6 +237,8 @@ export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function SaveChatMessages(arg1:number,arg2:string,arg3:number):Promise<void>;
+
+export function SaveChats(arg1:Array<main.Chat>):Promise<void>;
 
 export function SaveExtensionSettings(arg1:string,arg2:Record<string, string>):Promise<void>;
 
@@ -238,13 +262,13 @@ export function SetSkillEnabled(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetSleepInhibit(arg1:boolean):Promise<void>;
 
-export function SetTabLiveStatus(arg1:string,arg2:string):Promise<void>;
-
 export function SetTailscaleServe(arg1:boolean,arg2:number):Promise<main.TailscaleStatus>;
 
 export function SetWorkspaceIcon(arg1:number,arg2:string):Promise<void>;
 
 export function SetWorkspaceOrder(arg1:Array<number>):Promise<void>;
+
+export function ShellSnapshot():Promise<main.ShellSnapshot>;
 
 export function SystemStats():Promise<main.SystemStats>;
 

@@ -1,0 +1,253 @@
+package agentphase
+
+import "testing"
+
+const now = int64(1_000)
+
+func apply(p Phase, evs ...Event) Phase {
+	for _, ev := range evs {
+		p = Next(p, ev, now)
+	}
+	return p
+}
+
+func TestStartsIdle(t *testing.T) {
+	var p Phase
+	if p.State != "" && p.State != Idle {
+		t.Fatalf("zero value is not idle: %q", p.State)
+	}
+	if got := Next(p, Event{Kind: HookRunning}, now); got.State != Running {
+		t.Fatalf("idle → running failed: %q", got.State)
+	}
+}
+
+func TestHookTransitions(t *testing.T) {
+	p := apply(Phase{}, Event{Kind: HookRunning})
+	if p.State != Running {
+		t.Fatalf("want running, got %q", p.State)
+	}
+	if p = apply(p, Event{Kind: HookWaiting}); p.State != WaitingInput {
+		t.Fatalf("want waiting_input, got %q", p.State)
+	}
+	if p = apply(p, Event{Kind: HookPermission}); p.State != WaitingApproval {
+		t.Fatalf("want waiting_approval, got %q", p.State)
+	}
+	if p = apply(p, Event{Kind: HookRunning}); p.State != Running {
+		t.Fatalf("resume failed, got %q", p.State)
+	}
+}
+
+func TestPermissionFromIdle(t *testing.T) {
+	// A native app-server agent can deliver an approval RPC before its first
+	// visible output; it is still actionable.
+	if got := apply(Phase{}, Event{Kind: HookPermission}); got.State != WaitingApproval {
+		t.Fatalf("want waiting_approval, got %q", got.State)
+	}
+}
+
+func TestDoneRecordsTurnEnd(t *testing.T) {
+	p := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookDone})
+	if p.State != Done {
+		t.Fatalf("want done, got %q", p.State)
+	}
+	if p.TurnEndedAt != now {
+		t.Fatalf("turn end not recorded: %d", p.TurnEndedAt)
+	}
+}
+
+func TestFailCarriesDetailAndClearsOnNewTurn(t *testing.T) {
+	p := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookError, Detail: "billing_error"})
+	if p.State != Failed || p.Detail != "billing_error" {
+		t.Fatalf("want failed/billing_error, got %q/%q", p.State, p.Detail)
+	}
+	if p.TurnEndedAt != now {
+		t.Fatalf("failed turn must record its end: %d", p.TurnEndedAt)
+	}
+	p = apply(p, Event{Kind: HookRunning})
+	if p.State != Running || p.Detail != "" {
+		t.Fatalf("new turn must clear detail: %q/%q", p.State, p.Detail)
+	}
+}
+
+func TestSessionIsMetadataNotStatus(t *testing.T) {
+	p := apply(Phase{}, Event{Kind: HookRunning})
+	got := apply(p, Event{Kind: HookSession, Model: "opus", Title: "Fix the parser"})
+	if got.State != Running {
+		t.Fatalf("session must not change state: %q", got.State)
+	}
+	if got.Model != "opus" || got.Title != "Fix the parser" {
+		t.Fatalf("session metadata lost: %+v", got)
+	}
+}
+
+func TestHookMarksTheLeafAnAgent(t *testing.T) {
+	// The hook is the authoritative IsAgent signal: an agent whose binary the
+	// poll's name list does not know (copilot was the real case) must still be
+	// an agent the moment it reports. Every Hook* kind carries it, because a
+	// turn can be joined at any point (a replayed done, a permission before
+	// any output, a SessionStart before the first prompt).
+	for _, k := range []Kind{HookRunning, HookWaiting, HookPermission, HookDone, HookError, HookSession} {
+		if got := apply(Phase{}, Event{Kind: k}); !got.IsAgent {
+			t.Fatalf("%q did not mark the leaf an agent: %+v", k, got)
+		}
+	}
+}
+
+func TestShellReturnStillClearsTheAgentFlag(t *testing.T) {
+	// How a leaf goes back to poll-driven once its agent exits: the poll's
+	// shell branch applies PollAgent{false} and then PollNotBusy, which is what
+	// settles an agent the user Ctrl+C'd (it fires no Stop hook). The hook's
+	// IsAgent must not make that unreachable.
+	p := apply(Phase{}, Event{Kind: HookRunning})
+	if !p.IsAgent || p.State != Running {
+		t.Fatalf("setup wrong: %+v", p)
+	}
+	p = apply(p, Event{Kind: PollAgent, Bool: false})
+	if p.IsAgent {
+		t.Fatalf("shell return did not clear the agent flag: %+v", p)
+	}
+	if got := apply(p, Event{Kind: PollNotBusy}); got.State != Done || got.TurnEndedAt != now {
+		t.Fatalf("interrupted agent did not settle: %+v", got)
+	}
+}
+
+func TestPollNeverDrivesAnAgent(t *testing.T) {
+	// The whole "stuck orange dot" rule: an agent is foreground whether it is
+	// thinking or sitting at its prompt, so presence is not busy.
+	agent := apply(Phase{}, Event{Kind: PollAgent, Bool: true})
+	if got := apply(agent, Event{Kind: PollBusy}); got.State == Running {
+		t.Fatal("poll fabricated running for an agent leaf")
+	}
+	live := apply(agent, Event{Kind: HookRunning})
+	if got := apply(live, Event{Kind: PollNotBusy}); got.State != Running {
+		t.Fatalf("poll settled a live agent turn: %q", got.State)
+	}
+	if got := apply(live, Event{Kind: PollNeedsInput}); got.State != Running {
+		t.Fatalf("poll dragged a running agent into waiting: %q", got.State)
+	}
+}
+
+func TestPollDrivesPlainCommands(t *testing.T) {
+	p := apply(Phase{}, Event{Kind: PollBusy})
+	if p.State != Running {
+		t.Fatalf("want running, got %q", p.State)
+	}
+	if got := apply(p, Event{Kind: PollNeedsInput}); got.State != WaitingInput {
+		t.Fatalf("want waiting_input, got %q", got.State)
+	}
+	waiting := apply(p, Event{Kind: PollNeedsInput})
+	if got := apply(waiting, Event{Kind: PollGotInput}); got.State != Running {
+		t.Fatalf("want running, got %q", got.State)
+	}
+	if got := apply(waiting, Event{Kind: PollNotBusy}); got.State != Done {
+		t.Fatalf("a waiting command that exits must still settle: %q", got.State)
+	}
+}
+
+func TestNeedsInputAtIdlePromptIsNoop(t *testing.T) {
+	if got := apply(Phase{}, Event{Kind: PollNeedsInput}); got.State != Idle && got.State != "" {
+		t.Fatalf("idle prompt produced a dot: %q", got.State)
+	}
+}
+
+func TestSetAgentFlipsTheGuardMidFlight(t *testing.T) {
+	p := apply(Phase{}, Event{Kind: PollBusy})
+	p = apply(p, Event{Kind: PollAgent, Bool: true})
+	if got := apply(p, Event{Kind: PollNotBusy}); got.State != Running {
+		t.Fatalf("guard did not flip: %q", got.State)
+	}
+}
+
+func TestInterruptSettlesToIdle(t *testing.T) {
+	for _, start := range []Kind{HookRunning, HookWaiting, HookPermission} {
+		p := apply(Phase{}, Event{Kind: start})
+		if got := apply(p, Event{Kind: Interrupt}); got.State != Idle {
+			t.Fatalf("interrupt from %q left %q", start, got.State)
+		}
+	}
+}
+
+func TestDeadOnlySettlesInFlight(t *testing.T) {
+	live := apply(Phase{}, Event{Kind: HookRunning})
+	if got := apply(live, Event{Kind: Dead}); got.State != Stale {
+		t.Fatalf("want stale, got %q", got.State)
+	}
+	finished := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookDone})
+	if got := apply(finished, Event{Kind: Dead}); got.State != Done {
+		t.Fatalf("dead must not overwrite a finished turn: %q", got.State)
+	}
+}
+
+func TestNoopReturnsAnUnchangedPhase(t *testing.T) {
+	// The store relies on this to skip a write and an emit.
+	p := apply(Phase{}, Event{Kind: HookRunning})
+	if got := Next(p, Event{Kind: HookRunning}, now+5); got != p {
+		t.Fatalf("repeated event produced a change: %+v vs %+v", got, p)
+	}
+}
+
+func TestTerminalEventsNoopOnRedelivery(t *testing.T) {
+	// HookDone and HookError are prone to redelivery (burrow status retries
+	// 3× by design). A redelivered terminal event at a later wall-clock time
+	// must be a no-op, or the store will spuriously write and emit.
+
+	// Redelivered HookDone at a later now must not change the phase.
+	p := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookDone})
+	laterNow := now + 1000
+	if got := Next(p, Event{Kind: HookDone}, laterNow); got != p {
+		t.Fatalf("redelivered HookDone produced a change: %+v vs %+v", got, p)
+	}
+
+	// Redelivered HookError with the same detail must be a no-op.
+	p = apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookError, Detail: "billing_error"})
+	if got := Next(p, Event{Kind: HookError, Detail: "billing_error"}, laterNow); got != p {
+		t.Fatalf("redelivered HookError with same detail produced a change: %+v vs %+v", got, p)
+	}
+
+	// HookError with a DIFFERENT detail is still a transition (rare but valid).
+	p = apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookError, Detail: "billing_error"})
+	if got := apply(p, Event{Kind: HookError, Detail: "server_error"}); got.State != Failed || got.Detail != "server_error" {
+		t.Fatalf("error with new detail must register: %q/%q", got.State, got.Detail)
+	} else if got.TurnEndedAt != now {
+		// The receipt, not just the label: TurnEndedAt is what the client
+		// compares against its own seenAt, so a re-stamped failure that forgot
+		// it would show no dot at all.
+		t.Fatalf("a new failure did not re-stamp TurnEndedAt: %+v", got)
+	}
+}
+
+// TestInterruptSettlesOnlyAnInFlightTurn pins both halves of the cancel
+// channel: ESC/Ctrl+C on a live turn is the ONLY thing that ends it (no Stop
+// hook fires, and the poll may not speak for an agent), while the same
+// keystroke at an idle prompt must not touch a read receipt nobody has read.
+func TestInterruptSettlesOnlyAnInFlightTurn(t *testing.T) {
+	for _, from := range []Event{{Kind: HookRunning}, {Kind: HookWaiting}, {Kind: HookPermission}} {
+		p := apply(Phase{}, Event{Kind: HookRunning}, from)
+		got := apply(p, Event{Kind: Interrupt})
+		if got.State != Idle {
+			t.Fatalf("interrupt from %v did not settle: %q", from.Kind, got.State)
+		}
+		if got.TurnEndedAt != 0 {
+			t.Fatalf("a cancelled turn must not leave a receipt: %+v", got)
+		}
+		if !got.IsAgent {
+			t.Fatal("interrupt must not un-agent the leaf")
+		}
+	}
+
+	// A settled turn keeps its receipt: a stray ESC at the prompt cannot erase
+	// the review dot of a turn that finished while the user was away.
+	done := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookDone})
+	if done.TurnEndedAt == 0 {
+		t.Fatal("precondition: done must stamp TurnEndedAt")
+	}
+	if got := Next(done, Event{Kind: Interrupt}, now+5_000); got != done {
+		t.Fatalf("interrupt on a settled phase changed it: %+v vs %+v", got, done)
+	}
+
+	// Same for a failed turn, whose dot also persists until seen.
+	failed := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookError, Detail: "rate_limit"})
+	if got := Next(failed, Event{Kind: Interrupt}, now+5_000); got != failed {
+		t.Fatalf("interrupt on a failed phase changed it: %+v vs %+v", got, failed)
+	}
+}

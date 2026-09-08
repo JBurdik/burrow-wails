@@ -1,10 +1,10 @@
 // LSP bridge for the CodeMirror editor.
 //
-// The webview can't spawn processes, so the Rust side (`lsp_start`/`lsp_send`/
-// `lsp_stop` in lib.rs) runs each language server as a child process and bridges
-// its stdio JSON-RPC: server→app via `lsp-msg-{id}` events, app→server via
-// `lsp_send`. Here we wrap that as a CodeMirror lsp-client Transport and hand out
-// per-file editor extensions. One server is shared per (workspace root, server
+// The webview can't spawn processes, so the Go side (`LspStart`/`LspSend`/
+// `LspStop` in src-wails/lsp.go) runs each language server as a child process
+// and bridges its stdio JSON-RPC: server→app via `lsp-msg-{id}` events, app→server
+// via `lsp_send`. Here we wrap that as a CodeMirror lsp-client Transport and hand
+// out per-file editor extensions. One server is shared per (workspace root, server
 // kind) and kept alive for the session.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -128,7 +128,7 @@ async function makeClient(root: string, server: ServerDef): Promise<ClientEntry 
     for (const h of handlers) h(ev.payload);
   });
   try {
-    await invoke("lsp_start", { id, name: server.name, args: server.args, rootPath: root });
+    await invoke("lsp_start", { id, command: server.name, args: server.args, cwd: root });
   } catch (e) {
     console.warn(`[lsp] ${server.name} failed to start:`, e);
     return null;

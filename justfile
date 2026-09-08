@@ -46,8 +46,15 @@ web:
     pnpm dev
 
 # Type-check frontend + backend, run tests. No bundle.
+#
+# `pnpm test` belongs here, not only in a habit: there is no CI workflow in
+# this repo, so a vitest that nobody runs guards nothing — and one of them,
+# src/lib/wailsCompat/commandSurface.test.ts, is the only thing stopping an
+# invoke("…") for a command the backend does not know from shipping as a
+# runtime rejection in whatever corner of the UI calls it.
 check:
     pnpm vue-tsc --noEmit
+    pnpm test
     cd src-wails && go vet ./... && go build ./... && go test ./...
 
 # ── beta (local-only, never signed/notarized/released) ─────────────────────────

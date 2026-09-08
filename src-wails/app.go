@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"burrow/internal/agentphase"
 	"burrow/internal/agentproc"
 	"burrow/internal/control"
 )
@@ -21,6 +22,8 @@ type App struct {
 	ctx    context.Context
 	db     *sql.DB
 	daemon *DaemonClient
+	phases *PhaseStore
+	poller *phasePoller
 
 	streamOnce sync.Once
 	streamW    *chatStreamWriter
@@ -29,26 +32,36 @@ type App struct {
 	acpSessions  *acpRegistry
 	lspMgr       *lspManager
 
-	hookSrv      *HookServer
-	control      *control.Core
-	ui           *uiBridge
-	controlToken string
-	burrowBinDir string
-	sessionDir   string
+	hookSrv       *HookServer
+	control       *control.Core
+	ui            *uiBridge
+	controlToken  string
+	burrowBinDir  string
+	sessionDir    string
+	environmentID string
+
+	endpointProviders []EndpointProvider
+
+	tickets *ticketStore
+	// remoteWS is held so RevokeRemoteDevice can reach the live connections
+	// and so the tailnet server can mount the SAME handler with the SAME
+	// ticket store — a second store would mean a ticket minted by
+	// /v2/ws-ticket is unknown to the handler that redeems it.
+	remoteWS *remoteWS
+	// remoteAuth owns the pairing code and the /v2/pair + /v2/ws-ticket hops.
+	// One instance for the app, not one per listener: the code the user reads
+	// in Settings has to be the code the phone types.
+	remoteAuth *remoteAuth
+	// hookPort mirrors hookSrv.port, assigned once at startup. It exists as
+	// its own field so LocalEndpoint is testable without standing up a real
+	// hook server; hookSrv stays the source of truth everywhere else.
+	hookPort int
 
 	httpSrv        *HTTPServer
 	httpSrvRunning bool
 
 	maxAgents         int
 	burrowMcpMaxDepth int
-
-	// Guards RemoteCreateChat's read-modify-write of config.json end to end
-	// (through the ClaudeStart call) so two concurrent remote callers (two
-	// phones, or a rapid double-tap) can't interleave their own reads and
-	// writes and corrupt each other's chatIdCounter bump. It does NOT protect
-	// against a concurrent desktop setConfig save — see RemoteCreateChat's
-	// comment in remote.go for that risk, which this mutex does not close.
-	remoteCreateMu sync.Mutex
 }
 
 const httpServerPort = 37892
@@ -91,17 +104,35 @@ func (a *App) setHttpEnabled(enabled bool) error {
 		return nil
 	}
 	if enabled {
+		addr := fmt.Sprintf("127.0.0.1:%d", httpServerPort)
+		// Both guards fail CLOSED, before the listener exists (spec §4
+		// invariants 1 and 2). A warning in a log nobody reads is not a
+		// guard: funnel would publish this exact handler — same host, same
+		// :443, same /burrow path — on the open internet, where a six-digit
+		// pairing code is not a defence.
+		if err := assertLoopbackAddr(addr); err != nil {
+			return err
+		}
+		funnel := a.funnelEnabled
+		if funnelCheckHook != nil {
+			funnel = funnelCheckHook
+		}
+		if funnel() {
+			return fmt.Errorf("remote access refused: `tailscale funnel` is on for this node, which would publish Burrow on the public internet. Turn funnel off (`tailscale funnel off`) and try again")
+		}
+		// No bus sink to publish any more: a remote client subscribes to the
+		// bus through its own /v2/ws connection, exactly like the desktop's,
+		// so there is nothing for this listener to fan out.
 		a.httpSrv = NewHTTPServer(a)
-		// Publish it so emitAll fans events out to browser clients too.
-		wsBroadcaster.Store(a.httpSrv)
 		srv := a.httpSrv
 		go func() {
-			if err := srv.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", httpServerPort)); err != nil && err != http.ErrServerClosed {
+			// The very addr assertLoopbackAddr just cleared — not a second
+			// format string that could drift away from the one checked.
+			if err := srv.ListenAndServe(addr); err != nil && err != http.ErrServerClosed {
 				log.Printf("http server: %v", err)
 			}
 		}()
 	} else {
-		wsBroadcaster.Store(nil)
 		// Actually close the listener. "Remote access: off" that leaves the
 		// port open until the next restart is not off.
 		if a.httpSrv != nil {
@@ -115,40 +146,19 @@ func (a *App) setHttpEnabled(enabled bool) error {
 	return nil
 }
 
-// HttpServerStatus mirrors Settings.vue's local httpStatus shape exactly
-// (camelCase — that's what the original Rust command actually returned).
+// HttpServerStatus is what Settings reads to render the remote-access block.
+//
+// There is no Token field any more. The shared http.token is gone (phase 6):
+// every device has its own, none of them is readable after pairing, and the
+// pairing code lives in RemotePairStatus. A field here that showed a
+// credential was also a credential in a screenshot.
 type HttpServerStatus struct {
-	Enabled   bool   `json:"enabled"`
-	Port      int    `json:"port"`
-	TokenPath string `json:"tokenPath"`
-	Token     string `json:"token"`
-	// PairCode is the six-digit code the phone types on the Connect screen.
-	// Empty while pairing is locked out after too many wrong guesses.
-	PairCode   string `json:"pairCode"`
-	PairLocked bool   `json:"pairLocked"`
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port"`
 }
 
 func (a *App) GetHttpServerStatus() HttpServerStatus {
-	dataDir, _ := appDataDir()
-	s := HttpServerStatus{
-		Enabled:   a.httpSrvRunning,
-		Port:      httpServerPort,
-		TokenPath: filepath.Join(dataDir, "http.token"),
-	}
-	if a.httpSrv != nil {
-		s.Token = a.httpSrv.token
-		s.PairCode = a.httpSrv.PairCode()
-		s.PairLocked = s.PairCode == ""
-	}
-	return s
-}
-
-// RegeneratePairCode issues a fresh pairing code and clears the lockout.
-func (a *App) RegeneratePairCode() string {
-	if a.httpSrv == nil {
-		return ""
-	}
-	return a.httpSrv.RegeneratePairCode()
+	return HttpServerStatus{Enabled: a.httpSrvRunning, Port: httpServerPort}
 }
 
 func NewApp() *App {
@@ -157,11 +167,33 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// The bus has exactly ONE sink now: remotews.handle's per-connection
+	// subscription. It is still the single door for every event a client may
+	// care about — what went away is the second delivery path, not the door.
+	//
+	// The v1 tailnet broadcaster is gone with the client that needed it, and
+	// there is deliberately no bus -> Wails-runtime sink either: every src/
+	// subscription that is not one of the desktop-only names (menu-*,
+	// lsp-msg-*, float-*, extension-task:*, update:*, all emitted with
+	// runtime.EventsEmit directly and on events_test.go's allowlist) goes
+	// through src/lib/wailsCompat/event.ts to the socket, and the desktop's
+	// own connection subscribes for itself. Feeding the webview as well
+	// marshalled every bus event — including every pty-data-<id> chunk —
+	// across the JS bridge for no consumer.
 
 	dataDir, err := appDataDir()
 	if err != nil {
 		log.Printf("app data dir: %v", err)
 		return
+	}
+	if id, err := environmentID(dataDir); err != nil {
+		log.Printf("environment id: %v", err)
+	} else {
+		a.environmentID = id
+	}
+	a.endpointProviders = []EndpointProvider{
+		newLoopbackProvider(httpServerPort),
+		newTailscaleProvider(a.GetTailscaleStatus),
 	}
 	db, err := openDB(dataDir)
 	if err != nil {
@@ -169,10 +201,19 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.db = db
+	if ps, err := NewPhaseStore(db); err != nil {
+		log.Printf("phase store: %v", err)
+	} else {
+		a.phases = ps
+	}
 
 	// Chat transcripts used to live in config.json; move them into SQLite before
 	// the frontend reads either store.
 	a.migrateChatHistoryToSQLite()
+	// Before anything can serve a client: the chat LIST moves out of
+	// config.json here, and a client that read the old key first would then
+	// write it back over the new source of truth.
+	a.migrateChatsFromConfig()
 
 	a.daemon = NewDaemonClient(ctx, filepath.Join(dataDir, "daemon.sock"))
 	if err := a.daemon.Ensure(); err != nil {
@@ -200,12 +241,26 @@ func (a *App) startup(ctx context.Context) {
 
 	a.initControl(dataDir)
 
-	hookSrv, err := StartHookServer(ctx, a.registerControlRoutes)
+	// Hard cutover (spec §4): the shared tailnet token is deleted rather than
+	// migrated. A token with no scopes, no device identity and no revocation
+	// cannot be translated honestly into a scoped per-device session, and
+	// leaving the file on disk would leave a credential nothing reads and
+	// nobody can revoke. Devices paired against it must pair again — which is
+	// also true because the surface it authenticated no longer exists.
+	if err := os.Remove(filepath.Join(dataDir, "http.token")); err == nil {
+		log.Printf("removed the legacy shared http.token; devices pair per-device now")
+	}
+
+	a.tickets = newTicketStore()
+	a.remoteWS = newRemoteWS(a, a.tickets)
+	a.remoteAuth = newRemoteAuth(a, a.tickets)
+	hookSrv, err := StartHookServer(ctx, a.phases, a.registerControlRoutes, a.remoteWS.register)
 	if err != nil {
 		log.Printf("hook server: %v", err)
 		return
 	}
 	a.hookSrv = hookSrv
+	a.hookPort = a.hookSrv.port
 	if err := os.WriteFile(filepath.Join(dataDir, "hook.port"), []byte(fmt.Sprintf("%d", hookSrv.port)), 0o644); err != nil {
 		log.Printf("write hook.port: %v", err)
 	}
@@ -218,6 +273,10 @@ func (a *App) startup(ctx context.Context) {
 				log.Printf("restore http server: %v", err)
 			}
 		}
+	}
+
+	if a.phases != nil {
+		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground)
 	}
 }
 
@@ -242,6 +301,28 @@ func appDataDir() (string, error) {
 // passes it in; the backend never generates one.
 
 func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
+	// Fresh spawn or reattach? The daemon already knows: it holds every live
+	// pty, so an id it does not list is a brand-new one. That distinction is
+	// the whole pty lifecycle we have — ids are REUSED (the frontend's counter
+	// reseeds from max(saved, daemon-alive) on restart), so without it a new
+	// "Terminal 2" inherits the phase of whatever held id 2 last: a green
+	// review dot for a turn that ended days ago, and that session's task title
+	// pasted over the tab name.
+	// A failed List means we do not KNOW, and the conservative answer is
+	// "reattach": keeping a phase we should have dropped costs a stale dot
+	// until the next hook, dropping one we should have kept loses a live
+	// agent's state outright.
+	fresh := false
+	if live, err := a.daemon.List(); err == nil {
+		fresh = true
+		for _, s := range live {
+			if s == id {
+				fresh = false
+				break
+			}
+		}
+	}
+
 	env := []string{
 		"PATH=" + a.burrowBinDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BURROW_SESSION_DIR=" + a.sessionDir,
@@ -253,6 +334,17 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	if err := a.daemon.CreatePty(id, cwd, cols, rows, env); err != nil {
 		return err
 	}
+	if fresh {
+		if a.phases != nil {
+			a.phases.Forget("pty:" + id)
+		}
+		if a.poller != nil {
+			a.poller.forget(id)
+		}
+		if a.hookSrv != nil {
+			a.hookSrv.ForgetStatus(id)
+		}
+	}
 	// An externally spawned terminal may have sent its first hook before this
 	// frontend view attached. Replay the cached state now that XTerm is listening.
 	if a.hookSrv != nil {
@@ -261,7 +353,31 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	return nil
 }
 
+// ctrlC / escByte are the two keystrokes that cancel an agent turn.
+const (
+	ctrlC   = 0x03
+	escByte = 0x1b
+)
+
+// WritePty forwards keystrokes to the PTY, and watches for the one keystroke
+// that is also a phase event.
+//
+// Cancelling a turn fires NO Stop hook, and the foreground poll cannot settle
+// an agent either — an agent is foreground whether it is thinking or idle at
+// its prompt, which is exactly why agentphase.Next refuses to let the poll
+// speak for one. The dead-PTY watchdog can't help either: the PTY is alive.
+// So this write is the only evidence the turn ended, and without it the dot
+// sticks orange until the next turn starts.
+//
+// It lives here rather than in XTerm.vue's onData (where it used to) so the
+// phase stays derivable server-side — phase 4's phone gets it for free.
+// A lone 0x03/0x1b only: arrow keys and every other escape sequence arrive as
+// ESC plus more bytes in one write, so length is what separates a cancel from
+// a cursor key.
 func (a *App) WritePty(id string, data []int) error {
+	if a.phases != nil && len(data) == 1 && (data[0] == ctrlC || data[0] == escByte) {
+		a.phases.Apply("pty:"+id, agentphase.Event{Kind: agentphase.Interrupt})
+	}
 	return a.daemon.Write(id, data)
 }
 
@@ -329,5 +445,36 @@ func (a *App) cleanupOnShutdown() {
 		for _, id := range a.acpSessions.ids() {
 			_ = a.AcpStop(id)
 		}
+	}
+}
+
+// LocalEndpointInfo is the desktop's bootstrap: where to connect and the
+// one-shot credential to connect with.
+type LocalEndpointInfo struct {
+	WSURL         string `json:"ws_url"`
+	Ticket        string `json:"ticket"`
+	EnvironmentID string `json:"environment_id"`
+}
+
+// LocalEndpoint hands the desktop frontend a fresh single-use ticket for
+// /v2/ws. This is the one thing the desktop still needs a Wails binding for,
+// and the reason it needs one: being in-process IS the desktop's
+// authorization, and that is not a claim anything on the network can make.
+// The frontend calls this again on every reconnect, since a ticket is spent
+// by the handshake that uses it.
+func (a *App) LocalEndpoint() LocalEndpointInfo {
+	if a.tickets == nil {
+		return LocalEndpointInfo{}
+	}
+	// The desktop is the app; it gets every scope — including scopeUIAck,
+	// which nothing else may ever hand out. That scope is not authority, it
+	// is the claim "I am the UI a control verb is waiting for" (see its
+	// comment in remoteapi.go); being in-process is the only thing that
+	// substantiates it, and this is the only issuer that knows it.
+	all := []remoteScope{scopeOrchRead, scopeOrchOperate, scopeTerminal, scopeAccessRead, scopeAccessWrite, scopeUIAck}
+	return LocalEndpointInfo{
+		WSURL:         fmt.Sprintf("ws://127.0.0.1:%d/v2/ws", a.hookPort),
+		Ticket:        a.tickets.issue(all),
+		EnvironmentID: a.environmentID,
 	}
 }

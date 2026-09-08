@@ -2,8 +2,13 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
+	"strconv"
 	"sync"
+	"time"
+
+	"burrow/internal/agentphase"
 )
 
 // Live chat stream log. Phase 1 of docs/plans/003-view-state-routes.md.
@@ -11,7 +16,7 @@ import (
 // chat_messages holds the *rendered* transcript, written once per turn by the
 // frontend. That is fine while a chat component stays mounted forever, but it
 // is not enough to unmount one: deltas emitted while nothing is listening are
-// gone, because emitAll is fire-and-forget. So every raw agent line also lands
+// gone, because busEmit is fire-and-forget. So every raw agent line also lands
 // here, append-only under a monotonic per-chat `ord`, and can be replayed from
 // any point.
 //
@@ -39,10 +44,13 @@ const (
 	// If replay ever comes up short, trim on turn boundaries instead.
 	chatStreamKeep = 20000
 	// chatStreamHardKeep is the ceiling that applies even to lines nobody has
-	// folded yet. Without it a chat that never saves its transcript grows the
-	// DB forever; with it, such a chat loses its oldest lines instead. Losing
-	// them is bad, so the limit is far above anything a real session reaches —
-	// it is a backstop against a bug, not a routine trim.
+	// folded yet. Without it a chat whose fold never advances (a stuck
+	// noPersist latch in chattranscript.go, say — see trim's comment) grows
+	// the DB forever; with it, such a chat loses its oldest lines instead.
+	// Losing them is bad, so the limit is far above anything a real session
+	// reaches, and trim logs every time this ceiling is what did the
+	// deleting — it is a backstop against a bug, not a routine trim, and
+	// reaching it should always be investigated, not just tolerated.
 	chatStreamHardKeep = 200000
 	// chatStreamTrimEvery keeps the DELETE off the hot path — one trim per
 	// this many appends per chat.
@@ -97,15 +105,26 @@ type chatStreamWriter struct {
 	mu      sync.Mutex
 	nextOrd map[string]int64
 	appends map[string]int
-	dropped int
+	// tails holds each chat's folded transcript (chattranscript.go). There is
+	// ONE writer for the app, so this is keyed by chat id like nextOrd and
+	// appends, and guarded by the same mu. mu IS held across one SQLite call
+	// — loadMaxOrdLocked's QueryRow in append, only the first time a given
+	// chat is seen this run, since nextOrd caches the result after that — but
+	// it is never taken while a chatTail's own mu is held (see the t.mu →
+	// w.mu lock-order note on lockChatTail in chattranscript.go).
+	tails       map[string]*chatTail
+	dropped     int
+	hardCapHits map[string]int
 }
 
 func newChatStreamWriter(db *sql.DB) *chatStreamWriter {
 	w := &chatStreamWriter{
 		db:      db,
 		ch:      make(chan chatStreamRow, chatStreamQueue),
-		nextOrd: map[string]int64{},
-		appends: map[string]int{},
+		nextOrd:     map[string]int64{},
+		appends:     map[string]int{},
+		tails:       map[string]*chatTail{},
+		hardCapHits: map[string]int{},
 	}
 	go w.run()
 	return w
@@ -182,14 +201,53 @@ func (w *chatStreamWriter) run() {
 }
 
 // trim drops lines that are both old and already folded into chat_messages.
-// "Already folded" is the binding constraint: an unfolded line is the only copy
-// of that part of the transcript, so age alone must never delete it.
+// "Already folded" is the routine constraint: age alone does not delete an
+// unfolded line, because it is the only copy of that part of the transcript.
+//
+// The one deliberate exception is chatStreamHardKeep: if a chat's fold never
+// advances at all (see the constant's comment — most likely a latched
+// noPersist in chattranscript.go), folded_ord protects unfolded rows forever
+// and the table grows without bound. The hard cap overrides that protection
+// so growth stays bounded, but only once a chat is far enough past normal
+// that reaching it is itself a bug, not routine trimming — and when it fires,
+// it says so loudly (see the log below) rather than deleting silently.
 func (w *chatStreamWriter) trim(chatID string, latestOrd int64) {
 	cutoff := latestOrd - chatStreamKeep
-	if folded := w.foldedOrd(chatID) - 1; folded < cutoff {
-		cutoff = folded
+	// An absent marker means nothing has been folded, which is the same
+	// cutoff as folded_ord = 0 — but the two are NOT the same thing to
+	// adoption, which is why foldedOrd reports absence separately.
+	marker, _, readErr := w.foldedOrd(chatID)
+	foldProtected := marker - 1
+	if foldProtected < cutoff {
+		cutoff = foldProtected
 	}
-	if hard := latestOrd - chatStreamHardKeep; hard > cutoff {
+	// readErr genuinely absent (no row) reads the same as readErr transient
+	// (a SELECT failure) above — both give foldProtected = -1 — but they must
+	// NOT be treated the same below: a transient error is not evidence the
+	// fold is stuck, only that this one read failed, and for any chat whose
+	// ord has passed chatStreamHardKeep that would otherwise fire the "fold
+	// has likely stopped advancing" diagnostic about a perfectly healthy
+	// chat. Skip the hard-cap escalation entirely on a read error — the next
+	// scheduled trim gets a fresh read — rather than guess.
+	if hard := latestOrd - chatStreamHardKeep; readErr == nil && hard > cutoff {
+		w.mu.Lock()
+		w.hardCapHits[chatID]++
+		hits := w.hardCapHits[chatID]
+		w.mu.Unlock()
+		if hits == 1 || hits%1000 == 0 {
+			// The hard cap is raising the cutoff above what the fold marker
+			// would protect, i.e. it is about to delete lines nobody has
+			// folded yet. That is only supposed to happen as a bounded
+			// backstop against a stuck fold, so name what is being lost and
+			// why, loudly enough that someone can go fix the chat whose fold
+			// got stuck — but only once per 1000 hits per chat, the same
+			// treatment append (above) gives its own drop counter, so a
+			// permanently stuck fold logs a message instead of a flood.
+			log.Printf(
+				"chat stream: hard cap trimming chat %s past the fold marker — dropping unfolded ord <= %d (fold-protected cutoff would have been %d, folded_ord=%d, hit #%d); this chat's fold has likely stopped advancing (check for a latched noPersist)",
+				chatID, hard, foldProtected, marker, hits,
+			)
+		}
 		cutoff = hard
 	}
 	if cutoff < 0 {
@@ -202,13 +260,33 @@ func (w *chatStreamWriter) trim(chatID string, latestOrd int64) {
 	}
 }
 
-func (w *chatStreamWriter) foldedOrd(chatID string) int64 {
+// foldedOrd reports the chat's fold marker, whether the row exists at all,
+// and whether the read itself failed. The second return is load-bearing: a
+// chat that has never had a marker written (the config.json import and every
+// client save that passes foldedOrd = -1) reads back as 0, which is
+// indistinguishable from "folded nothing" — and adoption folding a whole
+// surviving stream on top of rows that already account for it duplicates the
+// transcript permanently. The third return matters to exactly one caller,
+// trim's hard-cap branch: for the ROUTINE cutoff below, a genuinely absent
+// marker and a failed read both mean "protect everything, don't trim" and
+// that is the right call either way — but the hard cap treats a stuck fold as
+// a bug worth logging loudly, and a transient SELECT failure is not that; it
+// is not "no trim" the way the routine branch's absence is.
+func (w *chatStreamWriter) foldedOrd(chatID string) (int64, bool, error) {
 	var ord int64
 	err := w.db.QueryRow(`SELECT folded_ord FROM chat_stream_state WHERE chat_id = ?`, chatID).Scan(&ord)
-	if err != nil && err != sql.ErrNoRows {
-		log.Printf("chat stream: folded ord for %s: %v", chatID, err)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
 	}
-	return ord
+	if err != nil {
+		log.Printf("chat stream: folded ord for %s: %v", chatID, err)
+		// Unknown, so treat it as absent for the routine cutoff (the
+		// cautious reading — no trim, no catch-up — rather than "nothing
+		// folded"), but report the error so the hard-cap branch can tell
+		// this apart from a chat that really has never been folded.
+		return 0, false, err
+	}
+	return ord, true, nil
 }
 
 // emitChatLine is the single door for agent output: persist, then emit. Both
@@ -225,16 +303,84 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 	if w := a.chatStream(); w != nil {
 		ord = w.append(chatID, kind, line)
 	}
-	emitAll(a.ctx, kind+"-"+chatID, ChatStreamLine{Ord: ord, Kind: kind, Line: line})
+	busEmit(kind+"-"+chatID, ChatStreamLine{Ord: ord, Kind: kind, Line: line})
 
 	// Also publish the provider-neutral reading of the line (providerruntime.go).
 	// Running alongside the raw channel rather than replacing it: the desktop
 	// still reduces raw lines, so this can be adopted one consumer at a time
 	// instead of in one flip. The remote client is the first that wants it — it
 	// has been re-implementing the protocol to a shallower depth.
-	if events := NormalizeChatLine(kind, line); len(events) > 0 {
-		emitAll(a.ctx, "chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: events})
+	if events := NormalizeChatLine(kind, line, ord); len(events) > 0 {
+		busEmit("chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: events})
+
+		if a.phases != nil {
+			for _, e := range events {
+				if pev, ok := chatPhaseEvent(e); ok {
+					a.phases.Apply("chat:"+chatID, pev)
+				}
+			}
+			if a.phases.Get("chat:"+chatID).State == agentphase.Running {
+				a.clearSettledOverrideOnRunning(chatID)
+			}
+		}
+
+		// Fold the SAME events into the server-owned transcript
+		// (chattranscript.go). Handing the events over rather than the line
+		// keeps NormalizeChatLine at one call per line: two readings of the
+		// same line that had to agree anyway.
+		a.foldChatLine(chatID, ord, events)
 	}
+}
+
+// clearSettledOverrideOnRunning drops a stale "settled" pin the moment a chat
+// re-enters Running. This used to be exclusively client-side (claudeChats.ts's
+// sync(), which clears its LOCAL settledOverride on a "running" patch) — fine
+// while only the desktop existed, but that only fires when SOME desktop
+// AgentChat.vue instance has that exact chat mounted to receive the patch. A
+// turn driven from the phone, or from a desktop that simply isn't looking at
+// this chat, never clears it, so a chat pinned "settled" earlier stays parked
+// in the Settled shelf forever even while it is actively streaming — it does
+// not vanish, it is just buried where nobody looks. Doing it here means every
+// activity path (phone, desktop, hook-driven) unsettles the same shared row.
+//
+// last_activity_at moves together with the override, same as sync()'s
+// `s.lastActivityAt = Date.now()` alongside its own clear: settledFor()'s
+// fallback re-settles by age once the override no longer forces true, so
+// clearing the override without a fresh timestamp would just trade one
+// permanently-settled reason for another the instant a client reloads the
+// list — the row would look untouched in years to whichever client asks.
+func (a *App) clearSettledOverrideOnRunning(chatID string) {
+	id, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return
+	}
+	res, err := a.db.Exec(`UPDATE chats SET settled_override = '', last_activity_at = ? WHERE id = ? AND settled_override = 'settled'`,
+		time.Now().UnixMilli(), id)
+	if err != nil {
+		log.Printf("clear settled override for chat %d: %v", id, err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		busEmit("chats-changed", nil)
+	}
+}
+
+// PublishChatNote records a client-authored transcript row or patch (a
+// system-info marker, a permission receipt, attached images / elapsed turn
+// time on a user bubble) through the same door agent output uses. Publishing
+// through emitChatLine buys the live fan-out, the chat_stream row and the
+// folded_ord replay for free — the same three properties chatUserKind's
+// ClaudeSend/AcpSend publication got in the commit this one follows.
+//
+// The JSON is validated before it is handed to emitChatLine: a malformed note
+// here is an error the CALLER sees, rather than a line that gets written to
+// chat_stream and then silently normalizes to nothing on every future replay.
+func (a *App) PublishChatNote(chatID string, note string) error {
+	if normalizeChatNote(note, 0) == nil {
+		return fmt.Errorf("publish_chat_note: not a valid chat note: %s", note)
+	}
+	a.emitChatLine(chatID, chatNoteKind, note)
+	return nil
 }
 
 // ChatEventBatch is one raw line's worth of domain events. Batched rather than
@@ -254,7 +400,7 @@ func (a *App) LoadChatEventsSince(chatID string, since int64) ([]ChatEventBatch,
 	}
 	out := []ChatEventBatch{}
 	for _, l := range lines {
-		if events := NormalizeChatLine(l.Kind, l.Line); len(events) > 0 {
+		if events := NormalizeChatLine(l.Kind, l.Line, l.Ord); len(events) > 0 {
 			out = append(out, ChatEventBatch{Ord: l.Ord, Events: events})
 		}
 	}
@@ -314,6 +460,11 @@ func (a *App) deleteChatStream(chatID string) error {
 		w.mu.Lock()
 		delete(w.nextOrd, chatID)
 		delete(w.appends, chatID)
+		// The folded transcript goes with it, or a deleted-then-recreated
+		// chat inherits the old one. Anything still folding against the
+		// removed tail can no longer persist — persistChatTail checks that
+		// its tail is still the map's.
+		delete(w.tails, chatID)
 		w.mu.Unlock()
 	}
 	_, err := a.db.Exec(`DELETE FROM chat_stream WHERE chat_id = ?`, chatID)
