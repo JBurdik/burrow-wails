@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +83,61 @@ func TestRemoteCreateChatRejectsUnsupportedAgentKind(t *testing.T) {
 	if _, err := a.RemoteCreateChat(1, "gemini", "", "", ""); err == nil {
 		t.Fatal("expected an error — remote chat creation only supports agentKind claude and codex")
 	}
+}
+
+// The rejection test above only proves an UNRELATED kind ("gemini") is
+// rejected — it would not notice "codex" being typo'd, or dropped from the
+// allowlist entirely, since a rejection is still an error either way. This
+// proves "codex" specifically clears the agentKind guard.
+//
+// Whether a real "codex" binary is on PATH varies by machine — a CI runner
+// likely has none (CodexStart fails, the chat row must be rolled back, same
+// guarantee a failed ClaudeStart already has), but a dev box with the CLI
+// installed can genuinely succeed. Both outcomes are asserted; a real
+// success is torn down (process killed, chat deleted) so the test has no
+// environment-dependent side effects.
+func TestRemoteCreateChatAcceptsCodexPastTheAgentKindGuard(t *testing.T) {
+	a, dir := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+
+	ws, err := a.CreateWorkspace("codex-test", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := a.ListChats()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, createErr := a.RemoteCreateChat(ws.ID, "codex", "", "", "")
+	if createErr != nil {
+		if strings.Contains(createErr.Error(), "only supports") {
+			t.Fatalf("codex was rejected by the agentKind guard, not by CodexStart: %v", createErr)
+		}
+		after, err := a.ListChats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(after) != len(before) {
+			t.Fatalf("a failed codex start left a ghost chat row: before=%d after=%d", len(before), len(after))
+		}
+		return
+	}
+
+	// codex really is installed here and CodexStart genuinely succeeded —
+	// assert the row is shaped right, then tear the live process down.
+	if result["transport"] != "codex-app-server" {
+		t.Fatalf("transport = %#v, want codex-app-server", result["transport"])
+	}
+	if result["agentKind"] != "codex" {
+		t.Fatalf("agentKind = %#v, want codex", result["agentKind"])
+	}
+	chatID, _ := result["id"].(int64)
+	if sess := a.acpReg().drop(fmt.Sprint(chatID)); sess != nil && sess.cmd != nil && sess.cmd.Process != nil {
+		_ = sess.cmd.Process.Kill()
+	}
+	_ = a.DeleteChat(chatID)
 }
 
 func TestResolveWorkspaceCwdRejectsUnknownWorkspace(t *testing.T) {

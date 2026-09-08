@@ -127,9 +127,12 @@ func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, err
 // simply dropped), so this passes them through unchecked. Codex is
 // different: CodexStart takes no model/effort/mode params at all (a fresh
 // thread always starts in its own Auto default), so those three are applied
-// as a best-effort follow-up via AcpSetConfig/AcpSetMode once the thread
-// exists — see below. codexModeSettings (acp.go) deliberately aliases
-// Claude's own permissionMode ids ("default", "acceptEdits", …), so the
+// as a follow-up via AcpSetConfig/AcpSetMode once the thread exists — see
+// below. model/effort are best-effort there; permissionMode is not, because
+// Auto is more permissive than most of the composer's other modes and
+// swallowing a failed mode change would fail OPEN, not narrow anything.
+// codexModeSettings (acp.go) deliberately aliases Claude's own permissionMode
+// ids ("default", "acceptEdits", …), so the
 // SAME composer value works for both agents without a second mode list.
 func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, permissionMode string) (map[string]any, error) {
 	if agentKind != "claude" && agentKind != "codex" {
@@ -188,18 +191,31 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 			}
 			return nil, fmt.Errorf("start codex: %w", err)
 		}
-		// Best-effort refinements: the thread already exists and runs on
-		// Codex's own Auto default (CodexStart's startParams), so a failure
-		// here only narrows what the composer's choice did — it is not a
-		// reason to throw away a chat that already started successfully.
+		// model/effort are genuinely best-effort: AcpSetConfig only ever
+		// stashes them as local session state (sess.model/sess.effort) for
+		// Codex, so the only way it can fail post-CodexStart is "adapter not
+		// running" — which cannot happen right after a successful start,
+		// since the session is registered before CodexStart returns.
 		if model != "" {
 			_, _ = a.AcpSetConfig(id, "model", model)
 		}
 		if effort != "" {
 			_, _ = a.AcpSetConfig(id, "effort", effort)
 		}
+		// permissionMode is NOT best-effort: CodexStart's own startParams
+		// always launch the thread in Auto (workspace-write, auto-reviewed),
+		// which is more permissive than most of the composer's other modes
+		// (Supervised/Plan are read-only). Swallowing a failure here would
+		// silently hand back a chat running MORE permissively than what the
+		// user explicitly asked for — a fail-open, not a narrowing — so a
+		// failed mode change is treated exactly like a failed CodexStart.
 		if permissionMode != "" {
-			_, _ = a.AcpSetMode(id, permissionMode)
+			if _, err := a.AcpSetMode(id, permissionMode); err != nil {
+				if delErr := a.DeleteChat(chat.ID); delErr != nil {
+					return nil, fmt.Errorf("set codex permission mode: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
+				}
+				return nil, fmt.Errorf("set codex permission mode: %w", err)
+			}
 		}
 	} else if err := a.ClaudeStart(id, cwd, "", permissionMode, "", model, effort, "", "", ""); err != nil {
 		if delErr := a.DeleteChat(chat.ID); delErr != nil {
