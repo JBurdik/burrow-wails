@@ -55,6 +55,12 @@
       :description="activeExtensionSurface.description"
     />
 
+    <ExtensionNativeSurface
+      v-else-if="activeExtensionSurface?.kind === 'native' && activeExtensionSurface.ui"
+      :title="activeExtensionSurface.title"
+      :node="activeExtensionSurface.ui"
+    />
+
     <!-- Explorer tab -->
     <div v-else-if="activeTab === 'explorer'" class="flex flex-1 flex-col overflow-y-auto">
       <div v-if="!props.cwd" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
@@ -437,6 +443,7 @@ import CommitPushMenu from "./CommitPushMenu.vue";
 import BrowserPane from "./BrowserPane.vue";
 import XTerm from "./XTerm.vue";
 import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
+import ExtensionNativeSurface from "./ExtensionNativeSurface.vue";
 import { nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
 

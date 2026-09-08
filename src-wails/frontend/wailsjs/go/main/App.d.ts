@@ -194,7 +194,7 @@ export function ReinstallStatusHooks():Promise<void>;
 
 export function RelaunchApp():Promise<void>;
 
-export function RemoteCreateChat(arg1:number,arg2:string):Promise<Record<string, any>>;
+export function RemoteCreateChat(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Record<string, any>>;
 
 export function RemoteDevices():Promise<Array<main.RemoteDevice>>;
 

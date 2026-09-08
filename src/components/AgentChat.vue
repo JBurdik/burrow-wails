@@ -352,6 +352,14 @@
     <!-- New-style input bar -->
     <div v-if="!hideComposer" class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
       <div class="mx-auto w-full max-w-[760px]">
+      <!-- Branch-changed banner: session.branch (created-on snapshot) vs. current workspace branch -->
+      <div v-if="branchChanged && !branchBannerDismissed" class="mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
+        <PhGitBranch :size="13" weight="bold" class="flex-shrink-0" />
+        <span class="flex-1 truncate">Branch changed — was <span class="font-mono text-foreground">{{ activeSession?.branch }}</span></span>
+        <span v-if="restoreBranchError" class="flex-shrink-0 text-destructive">{{ restoreBranchError }}</span>
+        <button class="flex-shrink-0 font-medium text-foreground hover:underline disabled:opacity-50" :disabled="restoringBranch" @click="restoreBranch">{{ restoringBranch ? 'Restoring…' : 'Restore branch' }}</button>
+        <button class="flex-shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss" @click="branchBannerDismissed = true"><PhX :size="11" weight="bold" /></button>
+      </div>
       <div class="chat-input-box overflow-hidden rounded-[var(--radius-composer)] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, var(--accent)) 4%, var(--chat-surface));">
         <!-- Queued messages panel (Zed-style) -->
         <div v-if="messageQueue.length > 0" class="border-b border-border bg-[color-mix(in_srgb,var(--chat-accent)_5%,transparent)]">
@@ -672,7 +680,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { parseAcpPermRequest } from "@/lib/acpParser";
 import {
@@ -807,6 +815,38 @@ const chatAgents = useProvidersStore();
 const editorCtx = useEditorContextStore();
 const chatWorkspace = computed(() => workspaces.workspaces.find((workspace) => workspace.id === props.workspaceId));
 const chatBranch = computed(() => chatWorkspace.value?.worktree_branch || git.branchByWs[props.workspaceId] || "HEAD");
+
+// Branch-changed banner: the branch a chat was created on (session.branch,
+// a one-time snapshot) vs. the workspace's current branch.
+const activeSession = computed(() => chats.sessions.find((s) => s.id === props.chatId));
+const branchChanged = computed(() => {
+  const created = activeSession.value?.branch;
+  return !!created && created !== chatBranch.value;
+});
+const branchBannerDismissed = ref(false);
+const restoringBranch = ref(false);
+const restoreBranchError = ref("");
+// Purely informational per product decision — dismiss on close or on send,
+// and reappear if the branch drifts again (e.g. after a restore, then a
+// further switch away).
+watch(() => [props.chatId, chatBranch.value], () => {
+  branchBannerDismissed.value = false;
+  restoreBranchError.value = "";
+});
+async function restoreBranch() {
+  const created = activeSession.value?.branch;
+  const ws = chatWorkspace.value;
+  if (!created || !ws || restoringBranch.value) return;
+  restoringBranch.value = true;
+  restoreBranchError.value = "";
+  try {
+    await git.checkoutBranchForWorkspace(ws.id, ws.path, created);
+  } catch (e) {
+    restoreBranchError.value = e instanceof Error ? e.message : "checkout failed";
+  } finally {
+    restoringBranch.value = false;
+  }
+}
 
 // Local mirror of the session's agentKind (a chatAgents id), drives the switcher.
 const agentKind = ref<string>(
@@ -2491,6 +2531,7 @@ async function sendInitialPrompt(prompt: string, images?: string[]) {
 async function sendMessage(forcedText?: string, extraImages?: string[]) {
   let text = (forcedText ?? inputText.value).trim();
   if (!text) return;
+  branchBannerDismissed.value = true;
   // A cold chat (never opened this launch) has no process yet — start it now.
   if (await ensureRuntime()) return;
   const images = [...pendingImages.value, ...(extraImages ?? [])];

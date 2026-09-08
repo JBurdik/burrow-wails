@@ -386,8 +386,8 @@ export function RelaunchApp() {
   return window['go']['main']['App']['RelaunchApp']();
 }
 
-export function RemoteCreateChat(arg1, arg2) {
-  return window['go']['main']['App']['RemoteCreateChat'](arg1, arg2);
+export function RemoteCreateChat(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['RemoteCreateChat'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function RemoteDevices() {

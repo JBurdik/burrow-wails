@@ -396,6 +396,15 @@ export const useGitStore = defineStore("git", () => {
     await refresh();
   }
 
+  // Checkout a branch in a SPECIFIC workspace's directory, independent of the
+  // store's single shared `cwd` (which tracks whichever workspace last called
+  // setCwd, not necessarily the workspace this chat lives in).
+  async function checkoutBranchForWorkspace(wsId: number, path: string, name: string) {
+    await runGit(path, ["checkout", name]);
+    branchByWs.value[wsId] = name;
+    if (path === cwd.value) await refresh();
+  }
+
   async function createBranch(name: string) {
     await runGit(cwd.value, ["checkout", "-b", name]);
     await refresh();
@@ -445,7 +454,7 @@ export const useGitStore = defineStore("git", () => {
     ahead, behind, hasUpstream, pushing, pulling, generating, generateError, committing, hasWorkingTreeChanges, log, logLoading,
     setCwd, refresh, stageFile, unstageFile, unstageAll, stageAll, commit, showDiff, clearDiff, fetchAllDiff, gitInit,
     push, pull, refreshLog, generateCommitMessage,
-    branches, fetching, fetchBranches, switchBranch, createBranch, fetch, discardFile,
+    branches, fetching, fetchBranches, switchBranch, checkoutBranchForWorkspace, createBranch, fetch, discardFile,
     prByWs, branchByWs, fetchPr, fetchPrs,
   };
 });

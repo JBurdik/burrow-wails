@@ -25,7 +25,8 @@ export default defineExtension({
 });
 ```
 
-`createHost(process.env)` provides capability-scoped workspace access, macOS
-Keychain secrets, and task progress reporting through a short-lived loopback
-bridge. It does not permit custom UI, terminal control, or arbitrary host file
-access. The complete contract is documented in `docs/extensions.md`.
+`createHost(process.env)` provides capability-scoped workspace access, declared
+extension settings, macOS Keychain secrets, and task progress reporting through
+a short-lived loopback bridge. It does not permit custom UI, terminal control,
+or arbitrary host file access. The complete contract is documented in
+`docs/extensions.md`.

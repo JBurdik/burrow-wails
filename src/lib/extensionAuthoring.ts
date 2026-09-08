@@ -9,7 +9,7 @@ Manifest requirements:
 - name and version are non-empty.
 - Each command has id, title and command. command is a bare executable on PATH (such as node, python3, git, rg); never ./script, /path/to/script, sh -c, pipes, redirects, or shell syntax.
 - args is an array of literal arguments. A command runs from the extension folder and has a 15 second time limit.
-- An optional surface can only use kind "workspace-pulse". It is a native host-rendered RP surface; extensions cannot supply HTML, CSS or JavaScript for it.
+- An optional surface can use kind "workspace-pulse" or kind "native". Native surfaces provide a JSON ui tree made only from @burrow/sdk-vue primitives; Burrow renders it in RP. Extensions cannot supply HTML, CSS or JavaScript.
 - Optional settings are host-rendered text fields. Each has id, title, type: "text", optional description/placeholder, and optional required. A command reads declared fields with createHost(process.env).settings.get(id) and must declare settings.read.
 
 Runtime context:
@@ -22,7 +22,7 @@ Safety and scope:
 - Permissions are informational in v1, not an OS sandbox.
 - BURROW_EXTENSION_BRIDGE_URL and BURROW_EXTENSION_BRIDGE_TOKEN: use only through createHost(process.env) from @burrow/sdk; valid for one command run.
 - The SDK host offers workspace() with workspace.read, Keychain secrets with secrets.read/secrets.write, and tasks.report() with tasks.report. Network is disclosed through network.connect but is not OS-sandboxed.
-- v1 has no direct API for tabs, terminals, arbitrary host files, settings, notifications, or custom right-panel UI. Do not invent calls such as window.burrow or a reusable localhost service.
+- v1 has no direct API for tabs, terminals, arbitrary host files, notifications, or custom HTML/CSS/JS UI. Declared extension settings are the only settings API. @burrow/sdk-vue can declare a static native RP surface, but cannot mount a Vue SFC or publish reactive updates yet. Do not invent calls such as window.burrow or a reusable localhost service.
 - Handle an empty BURROW_EXTENSION_CWD cleanly.
 
 Produce extension.json, the executable script, and a concise README with install steps: Settings → Extensions → Choose folder or Install ZIP. Prefer one useful deterministic task such as repository hygiene, branch checks, project diagnostics, changelog preparation, or a code generator.`;

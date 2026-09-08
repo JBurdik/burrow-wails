@@ -391,6 +391,7 @@ export namespace main {
 	    title: string;
 	    description: string;
 	    kind: string;
+	    ui?: number[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ExtensionSurface(source);
@@ -402,6 +403,7 @@ export namespace main {
 	        this.title = source["title"];
 	        this.description = source["description"];
 	        this.kind = source["kind"];
+	        this.ui = source["ui"];
 	    }
 	}
 	export class ExtensionCommand {
