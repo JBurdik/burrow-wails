@@ -229,6 +229,28 @@ func TestRevokedDeviceCannotGetATicket(t *testing.T) {
 	}
 }
 
+func TestRevokeInvalidatesAnAlreadyIssuedTicket(t *testing.T) {
+	// TestRevokedDeviceCannotGetATicket covers a ticket requested AFTER the
+	// revoke. This covers the race: a ticket minted BEFORE the revoke is
+	// still inside its 30s window and unredeemed, so RevokeRemoteDevice's
+	// remoteWS.dropDevice (which only closes sockets that already exist)
+	// cannot reach it — only purging the ticket store itself can.
+	f := newAuthFixture(t)
+	tok := f.pairedToken(t)
+	_, ticket := f.wsTicket(t, tok)
+
+	devs, _ := f.app.RemoteDevices()
+	if err := f.app.RevokeRemoteDevice(devs[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	url := strings.Replace(f.srv.URL, "http://", "ws://", 1) + "/v2/ws?ticket=" + ticket
+	if conn, _, err := websocket.DefaultDialer.Dial(url, nil); err == nil {
+		conn.Close()
+		t.Fatal("a ticket issued before the revoke still opened a connection after it")
+	}
+}
+
 func TestAPairedDeviceGetsTheScopesItsRowSays(t *testing.T) {
 	// Spec §7 test 8: a session without access:write cannot reach a pairing
 	// verb. Enforced per command by remoteWS.serve, so this asserts the

@@ -190,13 +190,23 @@ func (a *App) RevokeRemoteDevice(id string) error {
 	if err != nil {
 		return err
 	}
+	notFound := false
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
-		return sql.ErrNoRows
+		notFound = true
 	}
 	// After the row is gone, so a connection racing this cannot re-authorize
-	// itself against a row that still exists.
+	// itself against a row that still exists. Both run even when the row was
+	// already gone (notFound): a ticket minted for this device before an
+	// earlier revoke can still be sitting unredeemed inside its 30s window,
+	// and this is the only remaining place that can invalidate it.
+	if a.tickets != nil {
+		a.tickets.dropDevice(id)
+	}
 	if a.remoteWS != nil {
 		a.remoteWS.dropDevice(id)
+	}
+	if notFound {
+		return sql.ErrNoRows
 	}
 	return nil
 }

@@ -115,7 +115,15 @@ func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, err
 // Claude-only for now: an ACP/Codex session needs command/args/configDir
 // resolved from provider config that today only exists in AgentChat.vue's
 // acpStartPayload().
-func (a *App) RemoteCreateChat(workspaceID int64, agentKind string) (map[string]any, error) {
+//
+// model/effort/permissionMode come straight from WelcomeView's composer.
+// This is the ONLY place they can take effect: ClaudeStart (below) is what
+// actually spawns the CLI, and it is a no-op on every later call once the
+// session is alive — a value threaded in afterwards, on the first sendChat,
+// is threaded in too late to matter. ClaudeStart itself validates/defaults
+// each of the three (an empty or unrecognized value is simply dropped), so
+// this passes them through unchecked.
+func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, permissionMode string) (map[string]any, error) {
 	if agentKind != "claude" {
 		return nil, fmt.Errorf("remote chat creation only supports Claude for now (got %q)", agentKind)
 	}
@@ -149,13 +157,14 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind string) (map[string]
 		Title:          fmt.Sprintf("Chat %d (phone)", countForWs+1),
 		AgentKind:      agentKind,
 		Transport:      "claude-cli",
+		Model:          model,
 		LastActivityAt: time.Now().UnixMilli(),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if err := a.ClaudeStart(fmt.Sprint(chat.ID), cwd, "", "default", "", "", "", "", "", ""); err != nil {
+	if err := a.ClaudeStart(fmt.Sprint(chat.ID), cwd, "", permissionMode, "", model, effort, "", "", ""); err != nil {
 		// Roll the row back. A chat whose CLI never started is a ghost in
 		// both sidebars that can only be removed by hand — and under
 		// config.json that is exactly what a failed start used to leave.

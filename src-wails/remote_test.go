@@ -78,7 +78,7 @@ func TestRemoteListChatsHidesTheManagerSession(t *testing.T) {
 
 func TestRemoteCreateChatRejectsNonClaude(t *testing.T) {
 	a := &App{}
-	if _, err := a.RemoteCreateChat(1, "codex"); err == nil {
+	if _, err := a.RemoteCreateChat(1, "codex", "", "", ""); err == nil {
 		t.Fatal("expected an error — remote chat creation only supports agentKind claude for now")
 	}
 }

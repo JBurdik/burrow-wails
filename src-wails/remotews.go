@@ -128,6 +128,27 @@ func (s *ticketStore) issueFor(deviceID string, scopes []remoteScope) string {
 	return tok
 }
 
+// dropDevice invalidates every outstanding (unredeemed) ticket minted for
+// deviceID. Called by RevokeRemoteDevice alongside remoteWS.dropDevice — that
+// closes already-open sockets, this stops a ticket issued moments before the
+// revoke (and still inside its 30s window) from opening a new one afterwards.
+// Without it, a revoke racing an in-flight /v2/ws-ticket → /v2/ws handshake
+// leaves a full-authority connection that the row deletion can no longer
+// reach, since handle() authorizes purely off the redeemed ticket and never
+// re-reads the device row.
+func (s *ticketStore) dropDevice(deviceID string) {
+	if deviceID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, v := range s.m {
+		if v.deviceID == deviceID {
+			delete(s.m, k)
+		}
+	}
+}
+
 // redeem consumes a ticket. Single use: a replayed handshake credential is
 // worthless even if it leaks into a proxy log.
 func (s *ticketStore) redeem(tok string) (ticket, bool) {

@@ -70,6 +70,10 @@ export interface RemoteChat {
   agentKind?: string | null;
   transport: "claude-cli" | "codex-app-server" | "acp";
   claudeSessionId: string;
+  // The model picked when this chat was created (remoteChatShape's "model"
+  // column) — echoed back on every refresh, unlike effort/permissionMode
+  // which aren't persisted per-chat anywhere.
+  model?: string;
   workspaceName?: string;
   workspacePath?: string;
   messages: RemoteMessage[];
@@ -80,16 +84,6 @@ export interface RemoteChat {
   // Set when the agent is blocked on an allow/deny decision — mirrors
   // desktop's "permission" status. Cleared by respondChatPermission().
   pendingPermission?: PendingPermission | null;
-  // Client-only, never persisted or round-tripped through
-  // remote_create_chat/remote_list_chats: set locally right after
-  // createChat() returns (WelcomeView's picker choices), read once by
-  // sendChat()'s first claude_start call. A refresh()/loadChats() can never
-  // wipe these — applyChats's Object.assign source is the server's chat
-  // record, which carries no such keys, so an absent key never overwrites
-  // one already set here.
-  initialModel?: string;
-  initialEffort?: string;
-  initialPermissionMode?: string;
 }
 
 export type View = "connect" | "chats" | "chat" | "welcome";
@@ -649,25 +643,29 @@ export const useRemoteStore = defineStore("remote", () => {
         // "unknown agent session" while the prompt still broadcast fine,
         // because ClaudeSend publishes it before writing to stdin. ClaudeStart
         // is a no-op if the session is already alive, so this is safe on
-        // every send, not just the first.
-        // permissionMode/model/effort come from WelcomeView's composer
-        // (chat.initialPermissionMode/initialModel/initialEffort, set once
-        // right after createChat() returns) — they only actually apply on
-        // THIS very first claude_start, since every later call finds the
-        // session already alive and is a no-op.
-        // ponytail: appendSystemPrompt/configDir/profileCommand/profileArgs
-        // still aren't threaded — mobile has no per-instance provider config
-        // (custom binary/config dir/system prompt) to draw them from. Fine
-        // for a resume, would under-configure a process this backend never
-        // started at all. Thread real chat config through if that matters.
+        // every send, not just the first. It does NOT apply the model/
+        // effort/permissionMode picked in WelcomeView's composer — those
+        // only take effect once, inside RemoteCreateChat's own ClaudeStart
+        // call (remote.go), which is what actually spawns a brand-new
+        // chat's CLI. This later call is purely a resume path: chat.model
+        // is the one piece of that original config the server persists and
+        // echoes back (remoteChatShape's "model" key), so it's the
+        // best-effort value to resume with if this backend never started
+        // the process at all.
+        // ponytail: permissionMode/effort/appendSystemPrompt/configDir/
+        // profileCommand/profileArgs aren't threaded on resume — mobile has
+        // no per-chat persistence for them (only `model` is a real column).
+        // Fine for a resume of an already-alive session (no-op regardless);
+        // would under-configure a resume of a session this backend never
+        // started. Thread real chat config through if that matters.
         await transport.invoke("claude_start", {
           id: String(chat.id),
           cwd: workspaces.value.find((w) => w.id === chat.workspaceId)?.path ?? "",
           resumeSessionId: chat.claudeSessionId || "",
-          permissionMode: chat.initialPermissionMode ?? "",
+          permissionMode: "",
           appendSystemPrompt: "",
-          model: chat.initialModel ?? "",
-          effort: chat.initialEffort ?? "",
+          model: chat.model ?? "",
+          effort: "",
           configDir: "",
           profileCommand: "",
           profileArgs: "",
@@ -708,16 +706,38 @@ export const useRemoteStore = defineStore("remote", () => {
     }
   }
 
-  async function createChat(workspaceId: number, agentKind: "codex" | "claude"): Promise<RemoteChat> {
+  // agentKind is "claude" only — RemoteCreateChat (remote.go) rejects
+  // anything else today (an ACP/Codex session needs command/args/configDir
+  // that only exist in the desktop's per-project agent config). WelcomeView's
+  // model picker only offers Claude models for the same reason: a Codex
+  // choice would reach this call and fail every time.
+  //
+  // model/effort/permissionMode are WelcomeView's composer choices, passed
+  // straight through to remote_create_chat so they reach the SAME
+  // ClaudeStart call that spawns the CLI (see remote.go) — the only place
+  // they can take effect, since every later claude_start (sendChat, below)
+  // is a no-op once the session is alive.
+  async function createChat(
+    workspaceId: number,
+    agentKind: "claude",
+    model = "",
+    effort = "",
+    permissionMode = "",
+  ): Promise<RemoteChat> {
     if (!transport) throw new Error("not connected");
-    const chat = await transport.invoke<RemoteChat>("remote_create_chat", { workspaceId, agentKind });
+    const chat = await transport.invoke<RemoteChat>("remote_create_chat", {
+      workspaceId,
+      agentKind,
+      model,
+      effort,
+      permissionMode,
+    });
     chats.value.push({ ...chat, messages: [] });
     watchChat(chat);
     const stored = chatFor(chat.id)!;
     openChat(stored);
-    // Returned so a caller (WelcomeView) can attach its picker choices
-    // (initialModel/initialEffort/initialPermissionMode) to the SAME reactive
-    // object this store now holds, before its own sendChat() reads them.
+    // Returned so a caller (WelcomeView) can immediately sendChat() the
+    // prompt into the SAME reactive object this store now holds.
     return stored;
   }
 
