@@ -109,10 +109,10 @@ func collectSkills(root, source string) []SkillInfo {
 	}
 	out := []SkillInfo{}
 	for _, e := range entries {
-		if !e.IsDir() {
+		dir := filepath.Join(root, e.Name())
+		if !isDir(dir) { // e.IsDir() doesn't follow symlinks; a symlinked skill dir needs Stat
 			continue
 		}
-		dir := filepath.Join(root, e.Name())
 		if skill, ok := readSkillDir(dir, e.Name(), source); ok {
 			out = append(out, skill)
 			continue
@@ -122,16 +122,22 @@ func collectSkills(root, source string) []SkillInfo {
 			continue
 		}
 		for _, sub := range subs {
-			if !sub.IsDir() {
+			subDir := filepath.Join(dir, sub.Name())
+			if !isDir(subDir) {
 				continue
 			}
 			rel := filepath.Join(e.Name(), sub.Name())
-			if skill, ok := readSkillDir(filepath.Join(dir, sub.Name()), rel, source); ok {
+			if skill, ok := readSkillDir(subDir, rel, source); ok {
 				out = append(out, skill)
 			}
 		}
 	}
 	return out
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // ListSkills reports the user's own skills plus, when `cwd` names a repo, that

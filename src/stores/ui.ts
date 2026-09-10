@@ -744,7 +744,7 @@ export const useUIStore = defineStore("ui", () => {
   }
 
   function openWelcome() {
-    void router.push("/");
+    return router.push("/");
   }
   // Dismissing the composer is an explicit "show me the tabs", so it goes there
   // even when the workspace has nothing live yet — a tab being opened in the

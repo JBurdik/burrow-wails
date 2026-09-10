@@ -1,5 +1,5 @@
 <template>
-  <div class="claude-chat flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }">
+  <div class="claude-chat flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
     <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
 
     <!-- Chat title bar -->
@@ -2914,6 +2914,13 @@ let unmounted = false;
 // onWindowFocus/seeActiveTab. Without this, a turn that finished while the app
 // was backgrounded left the review dot up even after refocusing on this exact
 // chat, since finishTurn() only checks document.hasFocus() at the instant STOP fires.
+//
+// Also bound to `mousedown` on the chat root: the `window` "focus" DOM event is
+// not a reliable signal that the user is back on THIS thread specifically — the
+// user may return to the app via Cmd+Tab/Dock without the event firing before
+// they start reading, or with this same tab already active so nothing else
+// re-checks it. A click anywhere in the pane is unambiguous proof of "looking at
+// it" and clears a dot that would otherwise sit lit until the next tab switch.
 function onWindowFocus() {
   if ((props.isWatching ?? true) && document.hasFocus()) chats.markSeen(props.chatId);
 }

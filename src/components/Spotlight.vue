@@ -186,9 +186,15 @@ const projectItems = computed<SpotlightItem[]>(() => {
       color: "#a78bfa",
       badge: w.id === activeId ? "current" : undefined,
       action: () => {
-        wsStore.open(w);
         close();
-        if (projectOnly.value) ui.openWelcome();
+        // Navigate to welcome BEFORE flipping the active workspace: App.vue's
+        // watcher on ws.active?.id force-navigates to /ws/:id whenever the
+        // active workspace changes while a workspace/tab route is showing.
+        // Calling wsStore.open() first raced that watcher's router.replace
+        // against this push, and whichever resolved last decided whether you
+        // landed on welcome or back on that workspace's last (old) tab.
+        if (projectOnly.value) void ui.openWelcome().then(() => wsStore.open(w));
+        else wsStore.open(w);
       },
     }));
 });

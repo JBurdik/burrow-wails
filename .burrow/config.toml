@@ -1,3 +1,16 @@
 [settings]
 claude_config_dir = "/Users/jirkab/claude-work"
 
+[[scripts]]
+id = "script-1-20-36"
+name = "DEV"
+steps = ["just dev"]
+continueOnError = false
+color = "#60a5fa"
+
+[[scripts]]
+id = "script-2-27-67"
+name = "New Script"
+steps = [""]
+continueOnError = false
+color = "#34d399"

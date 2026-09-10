@@ -848,10 +848,16 @@ function prTitle(info: PrInfo): string {
 function pickProject(repo: Workspace) {
   filterProjectId.value = repo.id;
   filterOpen.value = false;
-  store.open(repo);
-  const parent = repo.parent_id ?? repo.id;
-  for (const wt of store.worktreesByParent[parent] || []) store.ensureOpen(wt);
-  ui.openWelcome(); // picking a project is an explicit "compose something new"
+  // Navigate to welcome BEFORE store.open(): App.vue's watcher on
+  // ws.active?.id force-navigates to /ws/:id whenever the active workspace
+  // changes while a workspace/tab route is showing, so opening the workspace
+  // first raced that watcher's router.replace against this push and could
+  // land back on the workspace's last (old) tab instead of welcome.
+  void ui.openWelcome().then(() => { // picking a project is an explicit "compose something new"
+    store.open(repo);
+    const parent = repo.parent_id ?? repo.id;
+    for (const wt of store.worktreesByParent[parent] || []) store.ensureOpen(wt);
+  });
 }
 
 function selectWs(ws: Workspace) {

@@ -122,14 +122,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, computed, watch, nextTick } from "vue";
+import { ref, shallowRef, computed, watch, nextTick, onMounted } from "vue";
 import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhSparkle, PhPencilSimple, PhListChecks, PhFastForward, PhShieldWarning } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
 import { useGitStore } from "@/stores/git";
 import { useProvidersStore, binaryFor } from "@/stores/providers";
-import { getConfig, setConfig } from "@/lib/config";
+import { configReady, getConfig, setConfig } from "@/lib/config";
 import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { modelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
@@ -455,6 +455,19 @@ function pickCodexPermMode(id: string) { saveAcp("mode", id); }
 type LaunchMode = "chat" | "terminal";
 const launchMode = ref<LaunchMode>(getConfig<LaunchMode>("welcomeLaunchMode", "chat") === "terminal" ? "terminal" : "chat");
 function pickMode(m: string) { launchMode.value = m as LaunchMode; setConfig("welcomeLaunchMode", m); }
+
+// App.vue keeps this screen mounted from the very start of boot, before
+// read_config resolves — every pill above was seeded from getConfig()'s
+// fallback, not the persisted value. Re-sync once config lands.
+onMounted(async () => {
+  await configReady;
+  selectedAgentId.value = ui.defaultChatAgent;
+  selectedModel.value = getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id);
+  selectedEffort.value = getConfig<string>("chatClaudeEffort", "high");
+  const lastPerm = getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }).last;
+  if ((PERM_MODES as string[]).includes(lastPerm ?? "")) selectedPermMode.value = lastPerm as PermMode;
+  launchMode.value = getConfig<LaunchMode>("welcomeLaunchMode", "chat") === "terminal" ? "terminal" : "chat";
+});
 const terminalProgram = computed(() => terminalProgramFor({ kind: selectedAgent.value.kind, command: binaryFor(selectedAgent.value) }));
 const launchItems = computed<ComposerPillItem[]>(() => [
   { id: "chat", label: "Chat UI — rich conversation" },
