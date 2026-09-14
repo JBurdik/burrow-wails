@@ -29,6 +29,23 @@ Then keep working:
     burrow collect-results          # every finished result, non-blocking, consumed as it prints
     burrow wait <token> [--timeout S]   # block for one result; use sparingly
 
+## Sub-agents of your thread
+
+A `spawn` you make from a chat creates a sub-agent that belongs to **your
+thread**: it does not appear in the sidebar, it lives in the right panel, and it
+is deleted when your thread is. You do not pass the relationship — the app knows
+which chat you are.
+
+- `burrow agent-status` — your children are the `children` ids on your own row.
+- `burrow chat-send --chat-id <id> --text "..."` — correct a child mid-task.
+  (`chat-send` has no positional argument; pass `--chat-id` and `--text` both.)
+- `burrow wait --chat-id <id>` — block until it finishes and read its answer
+  (an alternative to `wait <token>` — `wait` takes either a token or a
+  `--chat-id`, not both).
+
+A sub-agent may not spawn sub-agents of its own — `spawn` from inside one fails
+with `sub-agent cannot spawn sub-agents`.
+
 ## Supervise
 
     burrow agent-status             # every agent in the app and what it's doing

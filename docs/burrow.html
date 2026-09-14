@@ -112,8 +112,9 @@
     <tr><td>agent_status</td><td>Every agent in the app (tabs and chats) with its live status.</td></tr>
     <tr><td>tab_output</td><td>Tail of a tab's terminal output — how you check on an agent mid-task.</td></tr>
     <tr><td>send_to_tab</td><td>Type a follow-up into a running agent's tab and submit it.</td></tr>
-    <tr><td>wait_result</td><td>Block until a spawned agent finishes; returns its final message.</td></tr>
-    <tr><td>collect_results</td><td>Take every finished result that hasn't been collected yet.</td></tr>
+    <tr><td>chat_send</td><td>Send a follow-up message into a chat sub-agent and submit it — the chat equivalent of <code>send_to_tab</code>, reachable even when nobody has that chat's view open. Args: <code>chat_id*</code>, <code>text*</code> (both named; <code>chat_send</code> has no positional argument).</td></tr>
+    <tr><td>wait_result</td><td>Block until a spawned agent finishes; returns its final message. Args: <code>token</code> <em>or</em> <code>chat_id</code> (one or the other — a chat sub-agent has no result token, so this resolves it by polling that chat's phase instead), <code>timeout</code>.</td></tr>
+    <tr><td>collect_results</td><td>Take every finished result that hasn't been collected yet — both file-captured tab results and, via <code>parent_chat_id</code> (set automatically from <code>BURROW_CHAT_ID</code>), this thread's finished chat sub-agents.</td></tr>
   </table>
 
   <h3>Navigation</h3>
@@ -228,6 +229,7 @@
     <tr><td>BURROW_CWD</td><td>The workspace dir this shell belongs to — every verb's default <code>cwd</code>.</td></tr>
     <tr><td>BURROW_PTY_ID</td><td>This tab's pty id. Set in PTYs only; its absence is what makes the global status hooks a no-op outside Burrow (and in chats, which are not tabs).</td></tr>
     <tr><td>BURROW_HOOK_PORT</td><td>Port baked in at PTY creation; the <code>hook.port</code> file wins when they disagree.</td></tr>
+    <tr><td>BURROW_CHAT_ID</td><td>Set only inside a chat session (Claude/ACP), never a plain PTY. <code>bin/burrow</code> sends it as <code>parent_chat_id</code> on every verb call, and <code>burrow-mcp</code> injects it the same way into every MCP tool call whose caller didn't already supply one — this is what lets <code>spawn</code> attribute a new sub-agent to the chat that asked for it without the agent naming its own chat id. The server never trusts a request's own <code>caller_is_subagent</code> field; it recomputes it itself by looking up whether <code>parent_chat_id</code> already has a parent, so a sub-agent's own transcript can't talk it into spawning a grandchild by sending <code>"caller_is_subagent":false</code>.</td></tr>
   </table>
   <p>
     Chat sessions (Claude and ACP alike) get the <code>burrow</code> bin on PATH and the same <code>BURROW_*</code> values

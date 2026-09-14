@@ -154,6 +154,16 @@
       </ul>
     </div>
     <div class="card">
+      <h3>Right Panel — Sub-agents</h3>
+      <ul>
+        <li>A thread's child chats (spawned via <code>spawn --target chat</code>, one level deep) plus its Task-tool calls, scoped to whichever chat is active</li>
+        <li>Mounting is <strong>not</strong> owned by the panel: <code>src/components/SubAgentHost.vue</code>, mounted once in <code>App.vue</code>, keeps one always-on hidden <code>AgentChat</code> per child of every open workspace, so closing the panel never restarts a child's CLI process</li>
+        <li>The panel renders an empty <code>#subagent-slot</code> and <code>&lt;Teleport&gt;</code>s the selected child's already-running instance into it — opening the panel is a view change, not a process start</li>
+        <li>A clickable row in the parent transcript (a "Spawned sub-agent…" marker) opens the panel straight to that child; each child row carries a live phase dot from <code>phase-chat:{id}</code> — the first frontend consumer of the chat phase</li>
+        <li>A manual "spawn a sub-agent" dialog in the panel goes through the same <code>spawn</code> verb an agent's own CLI call would</li>
+      </ul>
+    </div>
+    <div class="card">
       <h3>Right Panel — Git</h3>
       <ul>
         <li>Branch display, refresh</li>
@@ -167,7 +177,8 @@
     <div class="card">
       <h3>App control — one verb registry, three doors</h3>
       <ul>
-        <li>Every app action an agent may take is a verb in <code>src-wails/internal/control</code>: delegation + supervision (<code>spawn</code>, <code>agent_status</code>, <code>tab_output</code>, <code>send_to_tab</code>, <code>wait_result</code>, <code>collect_results</code>), navigation, worktrees, git reads, PRs</li>
+        <li>Every app action an agent may take is a verb in <code>src-wails/internal/control</code>: delegation + supervision (<code>spawn</code>, <code>agent_status</code>, <code>tab_output</code>, <code>send_to_tab</code>, <code>chat_send</code>, <code>wait_result</code>, <code>collect_results</code>), navigation, worktrees, git reads, PRs</li>
+        <li><code>spawn</code> made from inside a chat (a caller carrying <code>parent_chat_id</code>, via <code>BURROW_CHAT_ID</code>) creates a <strong>chat sub-agent</strong> instead of a tab: a child chat with <code>chats.parent_chat_id</code> set, invisible in the Sidebar, owned by the thread that spawned it, one level deep only — a sub-agent's own <code>spawn</code> is refused server-side, not by convention. <code>chat_send</code> steers a child whose view isn't open; <code>wait_result</code>/<code>collect_results</code> accept a chat id instead of a result token, resolving from that chat's phase (<code>PhaseStore</code>, key <code>chat:&lt;id&gt;</code>) rather than a capture file</li>
         <li>Reachable as <code>burrow &lt;verb&gt; [--arg v]</code> (loopback HTTP + <code>control.token</code>), as MCP tools via <code>burrow-mcp</code>, and from the UI — one implementation, so they can't drift</li>
         <li><code>spawn</code> takes a <strong>task</strong>, not a command line; the frontend builds the command from Settings → Providers. Subscription-safe: interactive only, never <code>claude -p</code></li>
         <li>UI-only verbs emit <code>control:action</code> and block for the frontend's ack, so <code>spawn</code> returns the new tab's <code>pty_id</code> (this replaced the 1 Hz request-dir poll)</li>
