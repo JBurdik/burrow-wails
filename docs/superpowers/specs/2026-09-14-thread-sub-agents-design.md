@@ -69,7 +69,9 @@ chat, and letting it be a terminal tab would put it back in the Sidebar.
 **not** call `terminalTabs.openChat(...)` — that call is what puts a chat in the
 Sidebar. It then appends a `kind: "subagent"` message to the *parent's*
 transcript carrying `{ chatId, title, agentName }`, and the existing
-`chats-changed` event repaints the panel.
+`chats-changed` event repaints the panel. The title shown for a child is the
+first line of its task until the provider reports a `session.title`, which the
+existing chat-title path then overwrites — a child is titled like any chat.
 
 **Errors.** Spawning from a child is refused (see depth, above). Spawning from a
 terminal tab is unchanged — a tab has `BURROW_PTY_ID`, not a chat id, so it has
