@@ -439,10 +439,16 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     // Pass the REACTIVE array element (not the raw `session`) so the actor's
     // status mutations go through Vue's proxy and actually trigger reactivity.
     spawnActor(sessions.value[sessions.value.length - 1]);
-    activeByWs.value[workspaceId] = session.id;
-    // Only the per-device selection needs writing — the row is already in the
-    // database, and a save_chats here would be a redundant round trip.
-    setConfig(ACTIVE_KEY, activeByWs.value);
+    // A sub-agent is never the workspace's selected THREAD — it lives in the
+    // Right Panel. Writing it here would go around setActive's guard (this
+    // assignment is direct, not a call), which is exactly how a spawn left
+    // `chatActiveByWs` pointing at a child.
+    if (!session.parentChatId) {
+      activeByWs.value[workspaceId] = session.id;
+      // Only the per-device selection needs writing — the row is already in
+      // the database, and a save_chats here would be a redundant round trip.
+      setConfig(ACTIVE_KEY, activeByWs.value);
+    }
     return sessions.value[sessions.value.length - 1];
   }
 
