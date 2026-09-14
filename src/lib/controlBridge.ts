@@ -21,11 +21,32 @@ import { router } from "@/router";
 import { useDiagram } from "@/composables/useDiagram";
 import { buildTerminalCommand } from "@/lib/agentCommand";
 import { readTermOutput } from "@/lib/termRegistry";
+import { subagentMessage, type ChatMessage } from "@/lib/chatTypes";
+import { childrenOf } from "@/stores/chatTree";
+import { chatSession, liveChatSessionIds } from "@/lib/chatSession";
 
 type ControlAction = { id: string; action: string; args: Record<string, unknown> };
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 const num = (v: unknown) => (typeof v === "number" ? v : Number(str(v)) || 0);
+
+// One-shot handoff from `spawn` to `SubAgentHost.vue`: a sub-agent's CLI is
+// started by mounting its AgentChat (see the component for why), and the
+// mount is what needs the first prompt — not this module, which has no view
+// to send it from. A Pinia store would outlive the handoff and leak entries
+// for chats nobody ever mounts; a plain Map keyed by chat id, consumed once,
+// cannot.
+const pendingSubagentPrompts = new Map<number, string>();
+
+/** Read (and clear) the task text queued for a just-created sub-agent chat.
+ *  Called once by SubAgentHost when it notices the chat, never again — a
+ *  second read after the host has already mounted the chat must not replay
+ *  the prompt. */
+export function takePendingSubagentPrompt(chatId: number): string | undefined {
+  const task = pendingSubagentPrompts.get(chatId);
+  pendingSubagentPrompts.delete(chatId);
+  return task;
+}
 
 export async function installControlBridge(): Promise<() => void> {
   return listen<ControlAction>("control:action", async (event) => {
@@ -182,9 +203,21 @@ async function spawn(args: Record<string, unknown>) {
   // No explicit target → the user's Settings preference ("Spawn sub-agents as",
   // where "terminal" is this API's "tab").
   const openAs = str(args.target) || (ui.spawnMode === "chat" ? "chat" : "tab");
+  const parentChatId = num(args.parent_chat_id);
   if (openAs === "chat") {
     const chats = useClaudeChatsStore();
-    const session = await chats.create(target.id, { agentKind: instance.id });
+    const session = await chats.create(target.id, { agentKind: instance.id, parentChatId: parentChatId || undefined });
+    if (parentChatId) {
+      // A sub-agent belongs to its thread, not the Sidebar, so it does NOT go
+      // through openChat() — that is what puts a chat there. Its CLI starts
+      // when SubAgentHost.vue mounts an AgentChat for it (a chat's process is
+      // started on mount, not here — see AgentChat.vue's "Lazy runtime start"),
+      // so the task text is queued for that mount to pick up and send, and the
+      // parent's transcript gets a row recording the delegation.
+      pendingSubagentPrompts.set(session.id, task);
+      await appendSubagentMessage(parentChatId, session.id, task, instance.name);
+      return { chat_id: session.id, workspace_id: target.id, parent_chat_id: parentChatId };
+    }
     useTerminalTabsStore().openChat(target.id, session.id, instance.id, task);
     return { chat_id: session.id, workspace_id: target.id };
   }
@@ -200,6 +233,40 @@ async function spawn(args: Record<string, unknown>) {
   });
   if (ptyId === undefined) throw new Error("the workspace did not open a tab (is it still loading?)");
   return { pty_id: ptyId, workspace_id: target.id, agent: instance.name };
+}
+
+/**
+ * Record a spawn in the parent's transcript.
+ *
+ * Hazard: `AgentChat.vue` destructures `messages` straight off its
+ * `chatSession(chatId)` (`const { messages, ... } = S`), so that Ref — not a
+ * component-local copy — is the transcript, and it outlives an unmounted view
+ * (see chatSession.ts). A blind load→push→save here would race the parent's
+ * OWN next `saveMessages()` call, which serializes whatever is in that Ref at
+ * the time and would silently drop our row if it lands between our load and
+ * our save. `spawn` only ever runs mid-turn for the chat that called it, so
+ * the parent's session already exists (`chatSession()` was created at mount);
+ * pushing straight into that shared Ref, then saving from it, makes our
+ * append indistinguishable from one the parent made itself — nothing to race.
+ * Only a parent with no live session (spawned via the control API with no
+ * view ever mounted for it) falls back to a direct read-modify-write.
+ */
+async function appendSubagentMessage(parentChatId: number, childChatId: number, task: string, agentName: string) {
+  const msg = subagentMessage(childChatId, task, agentName);
+  if (liveChatSessionIds().includes(parentChatId)) {
+    const S = chatSession(parentChatId);
+    S.messages.value.push(msg);
+    // Mirrors AgentChat.vue's own saveMessages(): drop partials, cap history,
+    // and hand foldedOrd = lastOrd + 1 so the chat_stream trim stays safe.
+    const toSave = S.messages.value.filter((m) => !m.partial).slice(-2000);
+    const foldedOrd = S.lastOrd >= 0 ? S.lastOrd + 1 : -1;
+    await invoke("save_chat_messages", { chatId: parentChatId, messages: JSON.stringify(toSave), foldedOrd });
+    return;
+  }
+  const raw = await invoke<string>("load_chat_messages", { chatId: parentChatId }).catch(() => "[]");
+  const messages: ChatMessage[] = JSON.parse(raw || "[]");
+  messages.push(msg);
+  await invoke("save_chat_messages", { chatId: parentChatId, messages: JSON.stringify(messages), foldedOrd: -1 });
 }
 
 /** A follow-up into a child's session — the same call the composer makes, so a
@@ -260,6 +327,8 @@ function agentStatus() {
       status: s.status ?? (s.busy ? "running" : "idle"),
       workspace: nameOf(s.workspaceId),
       workspace_id: s.workspaceId,
+      parent_chat_id: s.parentChatId ?? 0,
+      children: childrenOf(chats.sessions, s.id).map((c) => c.id),
     });
   }
   return out;

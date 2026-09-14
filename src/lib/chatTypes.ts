@@ -19,6 +19,11 @@ export interface ChatMessage {
   toolRawName?: boolean; // true when `text` is a raw tool name (native transport) vs already-human ACP title
   turnMs?: number;      // on a user message: how long the turn it opened took (persisted with the message)
   _acpMsgId?: string;   // ACP messageId — identity for incremental chunk append
+  // Set on a "system-info" row that records a spawn: the thread delegated, and
+  // this is the child it created. The id is what makes the row clickable —
+  // clicking opens the Right Panel on that sub-agent.
+  subagentChatId?: number;
+  subagentAgent?: string;
 }
 
 /** A user prompt held until the active turn reaches a terminal boundary. */
@@ -58,4 +63,18 @@ export interface AcpConfigOption {
   type: string;
   currentValue: string;
   options: AcpConfigChoice[];
+}
+
+let subagentMsgSeq = 0;
+
+/** The transcript row a thread gets when it spawns a sub-agent. */
+export function subagentMessage(chatId: number, title: string, agentName: string): ChatMessage {
+  const label = title.split("\n")[0].trim();
+  return {
+    id: Date.now() * 1000 + (subagentMsgSeq++ % 1000),
+    role: "system-info",
+    text: label ? `Spawned sub-agent: ${label}` : "Spawned Sub-agent",
+    subagentChatId: chatId,
+    subagentAgent: agentName,
+  };
 }
