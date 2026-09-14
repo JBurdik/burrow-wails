@@ -13,8 +13,8 @@
         <button
           class="flex rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-40"
           :disabled="store.probing"
-          title="Re-check installed versions"
-          @click="store.probeAll()"
+          title="Re-check installed and published versions"
+          @click="recheck"
         >
           <PhArrowsClockwise :size="13" :class="store.probing && 'animate-spin'" />
         </button>
@@ -43,6 +43,44 @@
       </div>
     </div>
     <div class="h-px bg-border" />
+
+    <!-- Out-of-date providers, one row each with its own Update button. Grouped
+         by CATALOG provider, not instance: one npm package (or brew formula)
+         backs every instance of a provider, so a per-instance button would run
+         the same install two or three times over for someone who keeps a
+         second Claude instance on a different config dir. -->
+    <div v-if="outdatedProviders.length" class="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3">
+      <div class="flex items-center gap-2">
+        <PhWarning :size="14" weight="fill" class="shrink-0 text-amber-500" />
+        <span class="text-[12px] font-semibold text-foreground">
+          {{ outdatedProviders.length }} provider{{ outdatedProviders.length === 1 ? "" : "s" }} out of date
+        </span>
+      </div>
+      <div
+        v-for="p in outdatedProviders"
+        :key="p.id"
+        class="flex items-center gap-2.5 rounded-md bg-panel/60 px-2.5 py-2"
+      >
+        <component :is="agentIconComp(p.icon)" :size="15" class="shrink-0" :style="{ color: p.color }" />
+        <span class="shrink-0 text-[12.5px] text-foreground">{{ p.label }}</span>
+        <code class="shrink-0 font-mono text-[10.5px] text-muted-foreground">
+          v{{ p.current }} → <span class="text-success">v{{ p.latest }}</span>
+        </code>
+        <span
+          v-if="updateError[p.id]"
+          class="min-w-0 flex-1 truncate text-[11px] text-destructive"
+          :title="updateError[p.id]"
+        >{{ updateError[p.id] }}</span>
+        <div v-else class="flex-1" />
+        <Button
+          variant="outline"
+          size="sm"
+          class="shrink-0 px-2.5"
+          :disabled="updating[p.id]"
+          @click="updateOne(p.id)"
+        >{{ updating[p.id] ? "Updating…" : "Update" }}</Button>
+      </div>
+    </div>
 
     <div class="flex min-h-[420px] gap-3.5">
       <!-- Instance rail -->
@@ -258,7 +296,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
-import { PhPlus, PhX, PhTrash, PhArrowsClockwise, PhArrowCounterClockwise, PhCaretRight, PhStar, PhFolderOpen } from "@phosphor-icons/vue";
+import { PhPlus, PhX, PhTrash, PhArrowsClockwise, PhArrowCounterClockwise, PhCaretRight, PhStar, PhFolderOpen, PhWarning } from "@phosphor-icons/vue";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
@@ -308,7 +346,53 @@ watch(() => store.instances.length, () => {
   if (!store.instances.some((a) => a.id === selectedId.value)) selectedId.value = store.instances[0]?.id ?? "";
 });
 
-onMounted(() => { void store.probeAll(); });
+onMounted(() => { void recheck(); });
+
+// --- Updates ----------------------------------------------------------------
+
+/** Installed versions AND the published ones — the outdated banner needs both,
+ *  and App.vue only ever checks the registry once, 3s after launch. */
+async function recheck() {
+  await store.probeAll();
+  await store.checkLatest();
+}
+
+/** One row per outdated CATALOG provider, deduped across its instances. */
+const outdatedProviders = computed(() => {
+  const rows = new Map<string, { id: string; label: string; icon: string; color: string; current: string; latest: string }>();
+  for (const a of store.outdated) {
+    if (rows.has(a.providerId)) continue;
+    rows.set(a.providerId, {
+      id: a.providerId,
+      label: providerFor(a.providerId).label,
+      icon: a.icon,
+      color: a.color,
+      current: store.status[a.id]?.version ?? "",
+      latest: store.latest[a.providerId]?.version ?? "",
+    });
+  }
+  return [...rows.values()];
+});
+
+const updating = ref<Record<string, boolean>>({});
+const updateError = ref<Record<string, string>>({});
+
+async function updateOne(providerId: string) {
+  updating.value = { ...updating.value, [providerId]: true };
+  updateError.value = { ...updateError.value, [providerId]: "" };
+  const r = await store.installLatest(providerId);
+  if (!r.ok) {
+    updateError.value = { ...updateError.value, [providerId]: r.error || "Update failed." };
+  } else {
+    // Re-probe EVERY instance of this provider, not just one: they share the
+    // package, and a row still showing the old version reads as a failed
+    // update. The banner row disappears on its own once the probe lands.
+    await Promise.all(
+      store.instances.filter((a) => a.providerId === providerId).map((a) => store.probe(a.id)),
+    );
+  }
+  updating.value = { ...updating.value, [providerId]: false };
+}
 
 // --- Status line ------------------------------------------------------------
 const probe = computed(() => (inst.value ? store.status[inst.value.id] : undefined));

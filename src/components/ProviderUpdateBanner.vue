@@ -14,13 +14,15 @@
         </div>
       </div>
 
-      <div class="flex shrink-0 flex-col gap-1.5 self-center">
+      <!-- mt, not self-center: centred, the column's top-right corner landed
+           underneath the absolutely-positioned dismiss X below. -->
+      <div class="mt-3.5 flex shrink-0 flex-col gap-1.5">
         <button class="whitespace-nowrap rounded-lg border border-transparent bg-accent px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110 disabled:opacity-60" :disabled="updating" @click="installUpdates">{{ updating ? "Updating…" : "Update" }}</button>
         <button class="whitespace-nowrap rounded-lg border border-border bg-transparent px-3 py-1 text-[11.5px] font-semibold text-secondary-foreground hover:bg-hover" @click="ui.openSettings('providers')">Settings</button>
       </div>
 
-      <button class="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Dismiss" @click="dismiss">
-        <PhX :size="12" />
+      <button class="absolute right-2 top-2 rounded p-1 text-secondary-foreground hover:bg-hover hover:text-foreground" title="Dismiss" @click="dismiss">
+        <PhX :size="14" />
       </button>
     </div>
   </Transition>
