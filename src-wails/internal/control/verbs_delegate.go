@@ -253,13 +253,30 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 		return Result{Token: fmt.Sprintf("chat:%d", chatID), Text: text}, nil
 	}
 
+	// Whether this wait has EVER observed the phase in flight
+	// (running/waiting_input/waiting_approval). This is evidence a new turn
+	// genuinely started, as opposed to a clock running out — a fixed grace
+	// window here is wrong: chat_send does not move the phase to `running`
+	// synchronously, and a CLI can take well past a few seconds to start
+	// producing output (cold start, model queueing, a busy machine), which
+	// is the common case, not an edge one. A time-based escape fired mid
+	// cold-start and handed back the PREVIOUS turn's answer — the exact bug
+	// this baseline rule exists to prevent — plus MarkCollected, hiding the
+	// real answer from collect_results once it actually lands. Once
+	// in-flight has been seen, there is no more excuse: an advance past the
+	// baseline is required, with no time limit other than the caller's own
+	// `deadline` below.
+	seenInFlight := false
+
 	for {
 		if chatID > 0 {
 			// A chat writes no capture files; the phase Go derives IS the
 			// completion signal, and it is derived with no client attached.
 			state, turnEndedAt := c.deps.Phases.Phase(fmt.Sprintf("chat:%d", chatID))
-			switch {
-			case state == "stale":
+			switch state {
+			case "running", "waiting_input", "waiting_approval":
+				seenInFlight = true
+			case "stale":
 				// Dead process, not a turn boundary — chat_send can never
 				// move a dead pipe's phase to Running, so requiring an
 				// ADVANCE here (the rule below is for done/failed) would
@@ -268,20 +285,26 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 				// baseline or not — this used to answer immediately and
 				// must keep doing so.
 				return finishChat()
-			case state == "done" || state == "failed":
-				// The turn genuinely advanced past the baseline: definitely
-				// this call's own answer. OR: the baseline grace window has
-				// elapsed with the phase never budging — the common case for
-				// a fast child whose first (and only) turn already finished
-				// before this wait's baseline was even captured, so there
-				// was never a "previous" turn to confuse it with; blocking
-				// such a call for the whole (often 10-minute) timeout is
-				// worse than the small chance of an early answer. A chat
-				// mid-race with a JUST-sent chat_send whose CLI is slow to
-				// start typically clears this by advancing turn_ended_at (or
-				// passing through running/waiting) well inside the grace
-				// window — see TestWaitResult* for both shapes.
-				if turnEndedAt > baselineTurnEndedAt || time.Since(waitStart) >= waitResultBaselineGrace {
+			case "done", "failed":
+				switch {
+				case turnEndedAt > baselineTurnEndedAt:
+					// The turn genuinely advanced past the baseline:
+					// definitely this call's own answer.
+					return finishChat()
+				case seenInFlight:
+					// A new turn was seen starting (or waiting) but hasn't
+					// produced a fresh turn_ended_at yet — keep polling, no
+					// time escape. Evidence of a real turn beats a clock.
+				case time.Since(waitStart) >= waitResultIdleGrace:
+					// In flight was NEVER observed, and the idle grace
+					// window has elapsed: this is a child that was already
+					// done/failed before the wait even started and never
+					// budged — a genuinely idle child, not one whose new
+					// turn just hasn't started producing output yet. The
+					// window is wide (30s default) specifically so a normal
+					// CLI cold start clears it by transitioning through
+					// running/waiting first, landing in the branch above
+					// instead of this one.
 					return finishChat()
 				}
 			}
@@ -299,12 +322,20 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 	}
 }
 
-// waitResultBaselineGrace bounds how long waitResult will hold a chat's
-// answer back solely because turn_ended_at hasn't advanced past its baseline
-// (see baselineTurnEndedAt in waitResult) — after this, a done/failed phase
-// is trusted even without an observed advance. A var, not a const, so a test
-// can shrink it instead of sleeping for the real duration.
-var waitResultBaselineGrace = 3 * time.Second
+// waitResultIdleGrace bounds how long waitResult will hold a done/failed
+// chat's answer back when the phase was ALREADY at that state and never once
+// observed in flight (running/waiting_input/waiting_approval) during the
+// wait — i.e. a child that looks like it was already idle before this wait
+// even started, not one whose new turn just hasn't produced output yet. It
+// is deliberately wide: a normal CLI cold start (queueing, a busy machine)
+// can easily take several seconds to transition into running, and this
+// window exists so that transition — not the clock — is what usually
+// resolves the ambiguity; only a child that stays silent for this whole
+// window is treated as genuinely idle. Once in flight HAS been observed,
+// this grace does not apply at all — turn_ended_at must advance, however
+// long that takes (bounded only by the caller's own timeout). A var, not a
+// const, so a test can shrink it instead of sleeping for the real duration.
+var waitResultIdleGrace = 30 * time.Second
 
 func firstNonEmpty(a, b string) string {
 	if a != "" {

@@ -439,25 +439,24 @@ func TestWaitResultOnStaleChildAnswersPromptly(t *testing.T) {
 // bound, that correctly-strict rule became "block for the FULL timeout" (often
 // 10 minutes) even for the common case — a fast child whose only turn already
 // finished before wait_result's baseline was even captured, so there never was
-// a "previous" turn to confuse it with. waitResultBaselineGrace bounds that:
-// stuck-at-baseline is trusted after a short window rather than the whole
-// timeout.
+// a "previous" turn to confuse it with, AND was never observed in flight
+// during the whole wait. waitResultIdleGrace bounds that: stuck-at-baseline
+// with no in-flight sighting at all is trusted after a window rather than the
+// whole timeout.
 //
 // This test shrinks the grace window (rather than sleeping for the real one)
 // and checks BOTH directions: the answer is not handed back before the grace
 // window elapses (finding-4's actual guarantee — no INSTANT stale read), and
 // it IS handed back once the grace window passes rather than blocking for the
 // full 5s timeout configured below.
-func TestWaitResultGraceWindowBoundsTheBaselineWait(t *testing.T) {
-	old := waitResultBaselineGrace
-	waitResultBaselineGrace = 300 * time.Millisecond
-	t.Cleanup(func() { waitResultBaselineGrace = old })
+func TestWaitResultIdleGraceBoundsTheBaselineWait(t *testing.T) {
+	old := waitResultIdleGrace
+	waitResultIdleGrace = 300 * time.Millisecond
+	t.Cleanup(func() { waitResultIdleGrace = old })
 
 	c := newTestCore(t, Deps{
-		// Pinned at the baseline for the whole wait — the same "never
-		// advances" shape TestWaitResultRequiresTheTurnToAdvance uses, just
-		// with a timeout generous enough to prove the grace window fires
-		// before it, not the deadline.
+		// Pinned at the baseline for the whole wait, NEVER running — the
+		// "genuinely idle child" case the grace window exists for.
 		Phases: &fakePhases{state: "done", endedAt: 100, baselineEndedAt: 100},
 		Chats:  &fakeChats{last: "settled before this wait ever started"},
 	})
@@ -467,14 +466,79 @@ func TestWaitResultGraceWindowBoundsTheBaselineWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	elapsed := time.Since(start)
-	if elapsed < waitResultBaselineGrace {
-		t.Fatalf("returned after %s, before its own %s grace window — an unadvanced baseline must not resolve instantly", elapsed, waitResultBaselineGrace)
+	if elapsed < waitResultIdleGrace {
+		t.Fatalf("returned after %s, before its own %s grace window — an unadvanced, never-in-flight baseline must not resolve instantly", elapsed, waitResultIdleGrace)
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("took %s to answer — the grace window must cap the wait, not the 5s timeout", elapsed)
 	}
 	if got := out.(Result).Text; got != "settled before this wait ever started" {
 		t.Fatalf("text = %q", got)
+	}
+}
+
+// timedPhases scripts a phase sequence by ELAPSED WALL-CLOCK TIME (rather
+// than call count), so it can model a specific interleaving against
+// wait_result's real 500ms poll ticks: a cold start that looks idle for
+// longer than a naive grace window, THEN is observed running, THEN drops
+// back to a `done` reading with the SAME turn_ended_at (a poll simply
+// catching a stale snapshot) for a while, and only later genuinely advances.
+type timedPhases struct{ start time.Time }
+
+func (p *timedPhases) Phase(string) (string, int64) {
+	switch e := time.Since(p.start); {
+	case e < 200*time.Millisecond:
+		return "done", 100 // baseline + first poll: looks idle
+	case e < 600*time.Millisecond:
+		return "running", 0 // the CLI finally picked up the prompt
+	case e < 1200*time.Millisecond:
+		return "done", 100 // a poll catches it between output bursts, unadvanced
+	default:
+		return "done", 200 // the turn genuinely finishes
+	}
+}
+
+// timedChats hands back a different "current answer" before and after the
+// point timedPhases' turn genuinely completes — standing in for a real
+// transcript, whose content actually differs before/after a turn finishes.
+type timedChats struct{ start time.Time }
+
+func (c *timedChats) LastAssistantMessage(int64) (string, error) {
+	if time.Since(c.start) < 1200*time.Millisecond {
+		return "the previous turn's answer", nil
+	}
+	return "this turn's real answer", nil
+}
+func (c *timedChats) UncollectedChildren(int64) ([]int64, error) { return nil, nil }
+func (c *timedChats) MarkCollected(int64) error                  { return nil }
+
+// This is the interleaving the coordinator's re-review flagged: a plain
+// elapsed-time grace fires the moment it expires regardless of what has
+// happened since, so a poll that catches the phase back at `done` with its
+// UNCHANGED turn_ended_at — after already having been seen `running` once —
+// used to be treated exactly like a child that was never going to start a
+// new turn at all, returning chat_send's PREVIOUS answer and marking the
+// child collected before its real answer ever lands. Requiring an observed
+// in-flight sighting to permanently disable the grace escape (no matter how
+// much more time passes at `done` afterward) is what closes this: only
+// turn_ended_at actually advancing can end the wait once running has been
+// seen even once.
+func TestWaitResultDoesNotReturnStaleAnswerAfterBeingSeenInFlight(t *testing.T) {
+	old := waitResultIdleGrace
+	waitResultIdleGrace = 400 * time.Millisecond
+	t.Cleanup(func() { waitResultIdleGrace = old })
+
+	start := time.Now()
+	c := newTestCore(t, Deps{
+		Phases: &timedPhases{start: start},
+		Chats:  &timedChats{start: start},
+	})
+	out, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(5)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.(Result).Text; got != "this turn's real answer" {
+		t.Fatalf("text = %q, want this turn's real answer — a stale previous answer slipped through", got)
 	}
 }
 
