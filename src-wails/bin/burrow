@@ -81,6 +81,12 @@ _call() {
   # Caller's directory: every verb that acts on "this repo" resolves it from
   # here, so an agent never has to know workspace row ids.
   json="\"cwd\":\"$(_esc "${BURROW_CWD:-$PWD}")\""
+  # A CLI running inside a chat (spawned agent, Manager) carries the chat's id
+  # so the control API can attribute this call to that thread; a plain shell
+  # has no BURROW_CHAT_ID, and the field is omitted rather than sent empty.
+  if [ -n "$BURROW_CHAT_ID" ]; then
+    json="$json,\"parent_chat_id\":\"$(_esc "$BURROW_CHAT_ID")\""
+  fi
   positional=$(_primary "$verb")
 
   while [ $# -gt 0 ]; do

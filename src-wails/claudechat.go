@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -180,6 +181,12 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 	}
 	// NOTE: deliberately no BURROW_PTY_ID — a chat is not a tab, so the global
 	// status hook stays a no-op for it.
+	// BURROW_CHAT_ID tells a `burrow spawn` made from inside this chat which
+	// thread to attribute it to (see addBurrowEnvForChat) — omitted, not "0",
+	// when id doesn't parse, same reasoning as there.
+	if chatID := chatIDOf(id); chatID > 0 {
+		env = append(env, "BURROW_CHAT_ID="+strconv.FormatInt(chatID, 10))
+	}
 
 	return a.claudeMgr().Start(id, bin, args, cwd, env,
 		func(line string) { a.emitChatLine(id, "claude-data", line) },

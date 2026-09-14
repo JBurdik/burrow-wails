@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -383,4 +384,25 @@ func (a *App) addBurrowEnv(env map[string]string, cwd string) {
 	if a.hookSrv != nil {
 		env["BURROW_HOOK_PORT"] = fmt.Sprintf("%d", a.hookSrv.port)
 	}
+}
+
+// addBurrowEnvForChat is addBurrowEnv plus the chat id, so a `spawn` made from
+// inside this chat can be attributed to it. Zero is left unset rather than
+// exported as "0" — an absent variable says "not a chat", a zero says "child of
+// chat 0", and only one of those is true.
+func (a *App) addBurrowEnvForChat(env map[string]string, cwd string, chatID int64) {
+	a.addBurrowEnv(env, cwd)
+	if chatID > 0 {
+		env["BURROW_CHAT_ID"] = strconv.FormatInt(chatID, 10)
+	}
+}
+
+// chatIDOf parses the string chat id the chat managers key on. A non-numeric id
+// yields 0, i.e. "not a chat", which is the safe direction.
+func chatIDOf(id string) int64 {
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }

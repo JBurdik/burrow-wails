@@ -645,7 +645,7 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 			env[k] = v
 		}
 	}
-	a.addBurrowEnv(env, opts.Cwd)
+	a.addBurrowEnvForChat(env, opts.Cwd, chatIDOf(opts.ID))
 
 	cmd, stdin, reader, stderrTail, err := spawnStdio(bin, args, opts.Cwd, env)
 	if err != nil {
@@ -758,7 +758,7 @@ func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID 
 	for k, v := range env {
 		e[k] = v
 	}
-	a.addBurrowEnv(e, cwd)
+	a.addBurrowEnvForChat(e, cwd, chatIDOf(id))
 
 	cmd, stdin, reader, stderrTail, err := spawnStdio(bin, []string{"app-server"}, cwd, e)
 	if err != nil {

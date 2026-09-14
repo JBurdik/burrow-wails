@@ -198,6 +198,30 @@ func post(t *testing.T, url, token, body string) *http.Response {
 	return resp
 }
 
+// A chat agent has no BURROW_PTY_ID (a chat is not a tab), so the chat id is
+// the only thing that can tell the control API which thread a spawn came from.
+// burrow-mcp is a child of the CLI process and inherits this, so both doors
+// agree without a second mechanism.
+func TestAddBurrowEnvCarriesChatID(t *testing.T) {
+	a := &App{}
+	env := map[string]string{}
+	a.addBurrowEnvForChat(env, t.TempDir(), 42)
+	if env["BURROW_CHAT_ID"] != "42" {
+		t.Fatalf("BURROW_CHAT_ID = %q, want \"42\"", env["BURROW_CHAT_ID"])
+	}
+}
+
+// A chat id of 0 means "not a chat" — exporting it would make every tab look
+// like a child of chat 0.
+func TestAddBurrowEnvOmitsZeroChatID(t *testing.T) {
+	a := &App{}
+	env := map[string]string{}
+	a.addBurrowEnv(env, t.TempDir())
+	if _, ok := env["BURROW_CHAT_ID"]; ok {
+		t.Fatal("BURROW_CHAT_ID was exported with no chat")
+	}
+}
+
 func waitForIDs(t *testing.T, mu *sync.Mutex, seen map[string]string, actions ...string) map[string]string {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
