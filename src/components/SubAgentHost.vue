@@ -1,10 +1,16 @@
 <template>
   <!-- No visible chrome of its own: each child renders through AgentChat,
-       either hidden here or teleported into the Right Panel's slot. -->
+       either hidden here or teleported into the Right Panel's slot.
+       `compact` for the same reason ManagerPanel uses it — the panel is a
+       narrow column, and a chat's changes panel and diff sidebar inside it
+       are a second sidebar nested in a sidebar. The surface is a list, one
+       child's stream, and the way back. -->
+
   <template v-for="child in children" :key="child.id">
     <Teleport to="#subagent-slot" :disabled="subAgentViewTarget !== child.id">
       <AgentChat
         v-show="subAgentViewTarget === child.id"
+        compact
         :chat-id="child.id"
         :workspace-id="child.workspaceId"
         :cwd="cwdOf(child.workspaceId)"
