@@ -1009,6 +1009,13 @@ function cancelTabRename() {
 // ── PR + branch polling ──────────────────────────────────────────────────────
 // gh/git run out of process and failures cache null, so this never blocks the UI.
 let prTimer: number | undefined;
+// Branches only. Cheap local git, so unlike the gh sweep below it runs on
+// mount rather than behind requestIdleCallback — a branch chip that says
+// "HEAD" for the first 2.5s is a wrong answer, not a pending one.
+function refreshAllBranches() {
+  for (const ws of store.workspaces) if (ws.path) git.ensureBranch(ws.id, ws.path);
+}
+
 function refreshAllPrs() {
   // Concurrency-capped pool (max 3 in flight) so a many-workspace sweep can't
   // spawn N blocking gh subprocesses at once.
@@ -1061,6 +1068,7 @@ onMounted(() => {
   document.addEventListener("click", onDocClick);
   document.addEventListener("keydown", onKeydown);
   mountSections();
+  refreshAllBranches();
   clock = window.setInterval(() => { now.value = Date.now(); }, 15_000);
   // Defer the first PR sweep off the critical startup path. Firing gh for every
   // workspace synchronously here saturated the command workers and stalled the
@@ -1082,7 +1090,7 @@ onUnmounted(() => {
 
 // Watch only the STRUCTURE of the workspace set (its id list), not every nested
 // property — a deep watch re-ran the mount sweep on any tab/PR mutation.
-watch(() => store.workspaces.map((ws) => ws.id).join(","), () => { mountSections(); refreshAllPrs(); });
+watch(() => store.workspaces.map((ws) => ws.id).join(","), () => { mountSections(); refreshAllBranches(); refreshAllPrs(); });
 watch(() => active.value?.id, mountSections);
 
 // ── branch helpers (worktree dialog) ─────────────────────────────────────────

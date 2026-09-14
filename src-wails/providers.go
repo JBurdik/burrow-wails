@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -61,7 +62,9 @@ func (a *App) ProbeProvider(binary string, cwd string) ProviderProbe {
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	probeCmd := exec.CommandContext(ctx, path, "--version")
+	probeCmd.Env = updateEnv(cwd) // a node-shim CLI needs node on PATH to print anything
+	out, err := probeCmd.CombinedOutput()
 	probe := ProviderProbe{Installed: true, Path: path}
 	if ctx.Err() != nil {
 		probe.Error = "version check timed out"
@@ -124,6 +127,12 @@ func (a *App) LatestNpmVersion(pkg string) ProviderLatest {
 // package rather than just answering a question — a plain probe's 3s budget
 // would fail every time.
 const updateTimeout = 120 * time.Second
+
+// updateEnv is the app's own environment with PATH widened the same way
+// resolveAgentBin searches, so an npm/brew child can find its interpreter.
+func updateEnv(cwd string) []string {
+	return append(os.Environ(), "PATH="+augmentedPath(cwd))
+}
 
 type ProviderUpdateResult struct {
 	Ok    bool   `json:"ok"`
@@ -188,7 +197,9 @@ func (a *App) UpdateProvider(binary string, pkg string, homebrewFormula string, 
 					// already there, so this is safe to run unconditionally.
 					if tap, ok := homebrewTapFor(homebrewFormula); ok {
 						tapCtx, tapCancel := context.WithTimeout(context.Background(), updateTimeout)
-						exec.CommandContext(tapCtx, brewPath, "tap", tap).Run()
+						tapCmd := exec.CommandContext(tapCtx, brewPath, "tap", tap)
+						tapCmd.Env = updateEnv(cwd)
+						tapCmd.Run()
 						tapCancel()
 					}
 					exe, args = brewPath, []string{"upgrade", homebrewFormula}
@@ -211,7 +222,14 @@ func (a *App) UpdateProvider(binary string, pkg string, homebrewFormula string, 
 	ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, exe, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, exe, args...)
+	// resolveAgentBin finds npm by walking known toolchain dirs, but the child
+	// inherits OUR env — and a GUI-launched app's PATH is bare. npm is a node
+	// script (`#!/usr/bin/env node`), so it dies with "env: node: No such file
+	// or directory" before it ever runs: finding the binary is not the same as
+	// being able to run it. brew shells out too, so it gets the same env.
+	cmd.Env = updateEnv(cwd)
+	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		return ProviderUpdateResult{Error: "update timed out"}
 	}

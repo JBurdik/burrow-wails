@@ -84,8 +84,22 @@ func (d *DaemonClient) staleAndReplaced() bool {
 		return false // dev fallback: nothing built to compare against
 	}
 	resp, err := d.call(daemonproto.Request{Kind: "version"})
-	if err != nil {
+	if err != nil && resp == nil {
+		// No answer at all (timeout, dead socket): we do not KNOW, so keep it.
+		// Killing a healthy daemon on a transient hiccup costs every live PTY.
 		return false
+	}
+	if err != nil {
+		// An ANSWERED error is "unknown request kind: version" — a daemon that
+		// predates this request, i.e. exactly the orphan we are hunting. The
+		// original code returned false here and so could never replace the one
+		// generation of daemon that needs it most: a pre-version daemon owning
+		// the socket makes every later app reattach to it forever, and since
+		// ptycore.Create is a no-op for an id it already holds, a "new"
+		// terminal silently adopts that daemon's months-old dead session —
+		// a tab that opens with no shell and accepts no input.
+		log.Printf("daemon: pid %d does not answer version (%v) — pre-version orphan, replacing", resp.Pid, err)
+		resp.ExePath = ""
 	}
 	if resp.ExePath == want {
 		if _, err := os.Stat(resp.ExePath); err == nil {
