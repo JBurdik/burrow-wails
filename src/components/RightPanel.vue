@@ -512,7 +512,7 @@ import { useFileTreeStore } from "@/stores/fileTree";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
-import { childrenOf } from "@/stores/chatTree";
+import { activeChatIdFor, childrenOf } from "@/stores/chatTree";
 import { subAgentViewTarget, nextSubAgentView } from "@/lib/subAgentView";
 import { perform } from "@/lib/controlBridge";
 import type { Phase } from "@/runtime/displayStatus";
@@ -568,7 +568,15 @@ function subagentTime(ts: number): string {
 }
 
 // ── Sub-agents section (chat-tree children of the active thread) ──────────────
-const activeChatId = computed(() => (props.workspaceId ? chats.activeSession(props.workspaceId)?.id ?? null : null));
+// The thread on screen is whichever TAB is active, not `claudeChats.activeByWs`
+// — that slot is only ever written by ManagerPanel, so opening a chat from the
+// Sidebar or a route left it pointing at nothing and this panel said "open a
+// chat to see its sub-agents" while a chat was open. The tabs mirror already
+// carries `chatId` for chat tabs (Terminal.vue is its writer), so it is the
+// same source of truth the user is actually looking at.
+const activeChatId = computed(() =>
+  activeChatIdFor(terminalTabs.tabsByWs, terminalTabs.activeByWs, props.workspaceId),
+);
 const childList = computed(() => (activeChatId.value ? childrenOf(chats.sessions, activeChatId.value) : []));
 
 // Which child is shown in #subagent-slot, per workspace (so switching

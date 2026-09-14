@@ -34,3 +34,22 @@ export function allChildrenOf(sessions: ClaudeSession[], parentChatId: number): 
 export function topLevel(sessions: ClaudeSession[], workspaceId: number): ClaudeSession[] {
   return sessions.filter((s) => s.workspaceId === workspaceId && !s.parentChatId);
 }
+
+/** The chat a workspace is CURRENTLY showing, read off the tabs mirror.
+ *
+ *  Not `claudeChats.activeByWs`: that slot is written only by ManagerPanel, so
+ *  a chat opened from the Sidebar or a route never reaches it and anything
+ *  asking it "which thread is on screen" gets null while a thread is plainly
+ *  open. The active TAB is what the user is looking at, and the mirror carries
+ *  `chatId` for chat tabs. Returns null for a terminal tab, which is correct —
+ *  no thread is on screen. */
+export function activeChatIdFor(
+  tabsByWs: Record<number, Array<{ id: number; chatId?: number }>>,
+  activeByWs: Record<number, number>,
+  workspaceId: number | undefined,
+): number | null {
+  if (!workspaceId) return null;
+  const activeTab = activeByWs[workspaceId];
+  if (activeTab == null) return null;
+  return tabsByWs[workspaceId]?.find((t) => t.id === activeTab)?.chatId ?? null;
+}
