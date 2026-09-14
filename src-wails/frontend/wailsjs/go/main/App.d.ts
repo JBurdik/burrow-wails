@@ -124,6 +124,8 @@ export function KillOrphanSessions(arg1:Array<string>):Promise<number>;
 
 export function KillPty(arg1:string):Promise<void>;
 
+export function LastAssistantMessage(arg1:number):Promise<string>;
+
 export function LatestNpmVersion(arg1:string):Promise<main.ProviderLatest>;
 
 export function ListChats():Promise<Array<main.Chat>>;
@@ -161,6 +163,8 @@ export function LspSend(arg1:string,arg2:string):Promise<void>;
 export function LspStart(arg1:string,arg2:string,arg3:Array<string>,arg4:string):Promise<void>;
 
 export function LspStop(arg1:string):Promise<void>;
+
+export function MarkCollected(arg1:number):Promise<void>;
 
 export function NotifyFloatGrid(arg1:string,arg2:number,arg3:number):Promise<void>;
 
@@ -283,6 +287,8 @@ export function TailscaleServe(arg1:number):Promise<string>;
 export function TailscaleServeStop():Promise<void>;
 
 export function TouchWorkspace(arg1:number):Promise<void>;
+
+export function UncollectedChildren(arg1:number):Promise<Array<number>>;
 
 export function UpdateProvider(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.ProviderUpdateResult>;
 

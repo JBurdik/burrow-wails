@@ -118,6 +118,7 @@ export namespace main {
 	    settled_override: string;
 	    archived_at: number;
 	    last_activity_at: number;
+	    parent_chat_id: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chat(source);
@@ -139,6 +140,7 @@ export namespace main {
 	        this.settled_override = source["settled_override"];
 	        this.archived_at = source["archived_at"];
 	        this.last_activity_at = source["last_activity_at"];
+	        this.parent_chat_id = source["parent_chat_id"];
 	    }
 	}
 	export class ProviderRuntimeEvent {

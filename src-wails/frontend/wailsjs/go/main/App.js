@@ -246,6 +246,10 @@ export function KillPty(arg1) {
   return window['go']['main']['App']['KillPty'](arg1);
 }
 
+export function LastAssistantMessage(arg1) {
+  return window['go']['main']['App']['LastAssistantMessage'](arg1);
+}
+
 export function LatestNpmVersion(arg1) {
   return window['go']['main']['App']['LatestNpmVersion'](arg1);
 }
@@ -320,6 +324,10 @@ export function LspStart(arg1, arg2, arg3, arg4) {
 
 export function LspStop(arg1) {
   return window['go']['main']['App']['LspStop'](arg1);
+}
+
+export function MarkCollected(arg1) {
+  return window['go']['main']['App']['MarkCollected'](arg1);
 }
 
 export function NotifyFloatGrid(arg1, arg2, arg3) {
@@ -564,6 +572,10 @@ export function TailscaleServeStop() {
 
 export function TouchWorkspace(arg1) {
   return window['go']['main']['App']['TouchWorkspace'](arg1);
+}
+
+export function UncollectedChildren(arg1) {
+  return window['go']['main']['App']['UncollectedChildren'](arg1);
 }
 
 export function UpdateProvider(arg1, arg2, arg3, arg4) {
