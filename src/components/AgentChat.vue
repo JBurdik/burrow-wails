@@ -2921,8 +2921,20 @@ let unmounted = false;
 // they start reading, or with this same tab already active so nothing else
 // re-checks it. A click anywhere in the pane is unambiguous proof of "looking at
 // it" and clears a dot that would otherwise sit lit until the next tab switch.
+//
+// Asks watchingNow(), NOT props.isWatching. Terminal.isWatching() reads
+// document.hasFocus() inside a plain function feeding a template prop, and
+// focus is not reactive — so the prop is a snapshot of whatever focus was at
+// the last render, not what it is now. Anything reactive that re-rendered
+// while the user was away (a streaming message, a tab title, a phase dot)
+// froze `isWatching` at false, and this guard then refused to mark the chat
+// seen on the very focus event that exists to clear it. The mousedown
+// fallback shared the guard, so clicking into the thread did not help either:
+// the dot sat lit until a tab switch. watchingNow() reads the session's own
+// refCount plus a LIVE document.hasFocus(), which is what finishTurn already
+// trusts to tell done from review.
 function onWindowFocus() {
-  if ((props.isWatching ?? true) && document.hasFocus()) chats.markSeen(props.chatId);
+  if (watchingNow()) chats.markSeen(props.chatId);
 }
 
 onMounted(async () => {
