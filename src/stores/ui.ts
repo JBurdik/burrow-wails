@@ -607,14 +607,6 @@ export const useUIStore = defineStore("ui", () => {
   function toggleRightPanel() {
     rightPanelVisible.value = !rightPanelVisible.value;
   }
-  // The panel and which surface it shows are separate pieces of state (the
-  // surface lives per-workspace in RightPanel). This is the one call a caller
-  // outside the panel needs: show it, and say what to show.
-  const pendingRightPanelSurface = ref<string | null>(null);
-  function openRightPanelSurface(tabId: string) {
-    rightPanelVisible.value = true;
-    pendingRightPanelSurface.value = tabId;
-  }
 
   // The scheme currently in force: "system" asks the OS, the other modes are
   // themselves.
@@ -785,8 +777,6 @@ export const useUIStore = defineStore("ui", () => {
     swapPanels,
     rightPanelVisible,
     toggleRightPanel,
-    pendingRightPanelSurface,
-    openRightPanelSurface,
     theme,
     themeMode,
     setThemeMode,

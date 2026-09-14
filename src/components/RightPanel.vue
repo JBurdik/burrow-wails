@@ -512,9 +512,8 @@ import { useFileTreeStore } from "@/stores/fileTree";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
-import { useUIStore } from "@/stores/ui";
 import { childrenOf } from "@/stores/chatTree";
-import { subAgentViewTarget } from "@/lib/subAgentView";
+import { subAgentViewTarget, nextSubAgentView } from "@/lib/subAgentView";
 import { perform } from "@/lib/controlBridge";
 import type { Phase } from "@/runtime/displayStatus";
 import FileTreeNode from "./FileTreeNode.vue";
@@ -549,7 +548,6 @@ type DiffScope = { kind: "workspace" } | { kind: "branch" } | { kind: "turn"; ch
 interface WsUiState { openedTabIds: string[]; activeTab: string | null; diffScope: DiffScope; openChildId: number | null }
 const wsUiStates = reactive<Record<number, WsUiState>>({});
 const wsKey = computed(() => props.workspaceId ?? NO_WS);
-const ui = useUIStore();
 
 // Task-tool invocations, narrowed to the thread that's actually open (was:
 // every chat in the workspace) — both this and the Sub-agents list below
@@ -594,16 +592,46 @@ function closeChildDetail() {
 
 // Phase per child, straight off the bus — the same event Terminal.vue's
 // applyPhase listens to for tabs. First frontend consumer of phase-chat:.
+//
+// Unlike AgentChat.vue's own subagentPhase (safe because a transcript's list
+// of spawn rows only ever grows), childList shrinks on every chat and
+// workspace switch — so listeners are torn down when a child leaves the
+// list, not just on RightPanel's own unmount (which never happens; it is
+// mounted once for the app's lifetime).
 const childPhase = reactive<Record<number, string>>({});
-const phaseUnsubs: Array<() => void> = [];
+const phaseUnsubs = new Map<number, () => void>();
 watch(childList, (list) => {
+  const liveIds = new Set(list.map((c) => c.id));
+  for (const [id, un] of phaseUnsubs) {
+    if (liveIds.has(id)) continue;
+    un();
+    phaseUnsubs.delete(id);
+    delete childPhase[id];
+  }
   for (const child of list) {
-    if (child.id in childPhase) continue;
+    if (phaseUnsubs.has(child.id)) continue;
     childPhase[child.id] = "idle";
-    listen<Phase>(`phase-chat:${child.id}`, (ev) => { childPhase[child.id] = ev.payload?.state ?? "idle"; }).then((un) => phaseUnsubs.push(un));
+    listen<Phase>(`phase-chat:${child.id}`, (ev) => { childPhase[child.id] = ev.payload?.state ?? "idle"; }).then((un) => {
+      // The child may have left the list again while listen() was still
+      // resolving — don't resurrect a subscription for one already torn down.
+      if (!childList.value.some((c) => c.id === child.id)) { un(); return; }
+      phaseUnsubs.set(child.id, un);
+    });
   }
 }, { immediate: true });
 onBeforeUnmount(() => phaseUnsubs.forEach((un) => un()));
+
+// The open child must never survive a thread switch, or point at a child
+// that no longer exists in the store (deleted directly, or cascade-deleted
+// with its parent thread) — see nextSubAgentView's own doc for the three
+// rules. Runs on every activeChatId/childList change; closeChildDetail()
+// below covers the other close triggers (back button, leaving the surface,
+// panel closing, workspace switching).
+let prevActiveChatIdForView: number | null = activeChatId.value;
+watch([activeChatId, childList], ([cur, list]) => {
+  openChildId.value = nextSubAgentView(openChildId.value, cur, prevActiveChatIdForView, list.map((c) => c.id));
+  prevActiveChatIdForView = cur;
+});
 
 // Manual spawn dialog — the app has no window.prompt() anywhere else
 // (a Wails window has no native prompt chrome), so this follows Sidebar.vue's
@@ -646,13 +674,6 @@ const openedTabIds = computed<string[]>({
   set: (v) => { wsUi(wsKey.value).openedTabIds = v; },
 });
 
-// The one call a caller outside the panel needs to open a surface (task-9
-// brief). RightPanel owns which workspace's surface list that lands in.
-watch(() => ui.pendingRightPanelSurface, (tabId) => {
-  if (!tabId) return;
-  openSurface(tabId);
-  ui.pendingRightPanelSurface = null;
-});
 watch(activeTab, (cur, prev) => { if (prev === "agents" && cur !== "agents") closeChildDetail(); });
 watch(() => props.open, (open) => { if (!open) closeChildDetail(); });
 watch(wsKey, (_cur, old) => {
