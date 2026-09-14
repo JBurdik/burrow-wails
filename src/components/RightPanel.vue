@@ -559,8 +559,16 @@ const subagentList = computed(() => {
 function chatTitle(chatId: number): string {
   return chats.sessions.find((s) => s.id === chatId)?.title ?? `Chat ${chatId}`;
 }
+// A Task-tool row names a chat this thread spawned through Claude's own Task
+// tool. Those are real chats but not chat-tree children, so they have no
+// SubAgentHost instance to teleport — opening one as a tab is still right.
 function openSubagentChat(chatId: number) {
   if (!props.workspaceId) return;
+  // A chat-tree child belongs to the panel; only a Task-tool chat becomes a tab.
+  if (chats.sessions.find((s) => s.id === chatId)?.parentChatId) {
+    openChild(chatId);
+    return;
+  }
   terminalTabs.openChat(props.workspaceId, chatId);
 }
 function subagentTime(ts: number): string {
