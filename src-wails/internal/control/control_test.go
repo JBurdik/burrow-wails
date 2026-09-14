@@ -310,8 +310,12 @@ func TestWaitResultResolvesFromChatPhase(t *testing.T) {
 // until the timeout tells it nothing it can act on.
 func TestWaitResultReturnsOnFailedPhase(t *testing.T) {
 	c := newTestCore(t, Deps{Phases: &fakePhases{state: "failed", endedAt: 1}, Chats: &fakeChats{last: "could not build"}})
-	if _, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(5)}); err != nil {
+	out, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(5)})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if got := out.(Result).Text; got != "could not build" {
+		t.Fatalf("text = %q, want the failed turn's transcript tail", got)
 	}
 }
 
@@ -364,5 +368,24 @@ func TestCollectResultsTakesEachChildOnce(t *testing.T) {
 	}
 	if chats.marked != 1 {
 		t.Fatalf("MarkCollected called %d times, want 1", chats.marked)
+	}
+}
+
+// A child still mid-turn is not a result yet: the sweep must skip it and must
+// not mark it collected, or a Manager polling collect_results would lose the
+// answer the moment the turn does finish (nothing would ever ask again).
+func TestCollectResultsSkipsRunningChild(t *testing.T) {
+	chats := &countingChats{children: []int64{5}, last: "should not be read"}
+	c := newTestCore(t, Deps{Phases: &fakePhases{state: "running", endedAt: 0}, Chats: chats})
+
+	out, err := c.Call(context.Background(), ScopeLocal, "collect_results", Params{"parent_chat_id": float64(7)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.([]Result); len(got) != 0 {
+		t.Fatalf("collect_results returned %+v for a still-running child, want none", got)
+	}
+	if chats.marked != 0 {
+		t.Fatalf("MarkCollected called %d times for a still-running child, want 0", chats.marked)
 	}
 }

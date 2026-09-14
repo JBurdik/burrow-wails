@@ -186,6 +186,11 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 	if token == "" && chatID <= 0 {
 		return nil, fmt.Errorf("wait_result needs a token or a chat_id")
 	}
+	// Both capabilities are needed for the chat_id branch below; check once,
+	// up front, rather than dereferencing a possibly-nil interface every poll.
+	if chatID > 0 && (c.deps.Phases == nil || c.deps.Chats == nil) {
+		return nil, fmt.Errorf("wait_result: chat_id needs Phases and Chats wired into Deps")
+	}
 	timeout := time.Duration(p.Int("timeout")) * time.Second
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
@@ -229,7 +234,7 @@ func (c *Core) collectResults(p Params) (any, error) {
 	out := []Result{}
 	// Chat sub-agents first: they write no .done file, so collected_at is what
 	// stops this from returning the same answer on every call.
-	if parent := p.Int("parent_chat_id"); parent > 0 && c.deps.Chats != nil {
+	if parent := p.Int("parent_chat_id"); parent > 0 && c.deps.Chats != nil && c.deps.Phases != nil {
 		ids, err := c.deps.Chats.UncollectedChildren(parent)
 		if err != nil {
 			return out, err

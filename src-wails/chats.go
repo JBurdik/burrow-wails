@@ -393,7 +393,13 @@ func (a *App) LastAssistantMessage(chatID int64) (string, error) {
 	if a.db == nil {
 		return "", fmt.Errorf("no database")
 	}
-	rows, err := a.db.Query(`SELECT payload_json FROM chat_messages WHERE chat_id = ? ORDER BY ord DESC LIMIT 50`, chatID)
+	// No LIMIT: the loop below returns on the first assistant row it finds, and
+	// database/sql streams rows rather than materializing them all up front, so
+	// the scan stops there in practice. A LIMIT here previously meant a chat
+	// with 50+ trailing tool/system rows after its real answer returned "", nil
+	// — which wait_result/collect_results both treat as success, marking the
+	// chat collected and handing the caller nothing. Do not re-add one.
+	rows, err := a.db.Query(`SELECT payload_json FROM chat_messages WHERE chat_id = ? ORDER BY ord DESC`, chatID)
 	if err != nil {
 		return "", err
 	}

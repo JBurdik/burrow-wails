@@ -39,8 +39,12 @@ func main() {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
+	// BURROW_CHAT_ID is set only when this process was spawned inside a chat
+	// session (claudechat.go); a plain shell or a top-level tab leaves it
+	// unset, and mcpserver treats that as "no thread to attribute calls to".
+	chatID := os.Getenv("BURROW_CHAT_ID")
 
-	srv := mcpserver.New(port, strings.TrimSpace(string(token)), cwd, version())
+	srv := mcpserver.New(port, strings.TrimSpace(string(token)), cwd, chatID, version())
 	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {
 		log.Fatalf("mcp serve: %v", err)
 	}

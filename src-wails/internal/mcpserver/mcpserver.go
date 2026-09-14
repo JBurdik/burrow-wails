@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -62,18 +63,24 @@ type Server struct {
 	baseURL string
 	token   string
 	cwd     string
+	// chatID is BURROW_CHAT_ID, verbatim — "" outside a chat session. Kept as
+	// the raw string and parsed at call time rather than in New, so a garbage
+	// value degrades to "not injected" instead of a startup failure.
+	chatID  string
 	version string
 	client  *http.Client
 }
 
 // New returns a server for the app listening on port, authenticating with
-// token. cwd is the directory verbs resolve "this repo" from — the MCP process
-// inherits it from the agent session that spawned it.
-func New(port int, token, cwd, version string) *Server {
+// token. cwd is the directory verbs resolve "this repo" from, and chatID is
+// BURROW_CHAT_ID — both inherited from the agent session that spawned this
+// process, the same way `bin/burrow` reads them for the CLI door.
+func New(port int, token, cwd, chatID, version string) *Server {
 	return &Server{
 		baseURL: fmt.Sprintf("http://127.0.0.1:%d/v1/", port),
 		token:   token,
 		cwd:     cwd,
+		chatID:  chatID,
 		version: version,
 		// No timeout: wait_result blocks for as long as a sub-agent takes, and
 		// the verb enforces its own deadline.
@@ -174,6 +181,18 @@ func (s *Server) callTool(req rpcRequest) *rpcResponse {
 	// Every verb resolves "this repo" from cwd; the model never has to pass it.
 	if _, ok := call.Arguments["cwd"]; !ok && s.cwd != "" {
 		call.Arguments["cwd"] = s.cwd
+	}
+	// MCP is the primary door for the agents this exists for — Burrow injects
+	// this server into every chat session — so this has to carry the thread's
+	// id the same way bin/burrow does for the loopback CLI, or `spawn`/
+	// `wait_result`/`collect_results` called as tools never see it. Only when
+	// the caller didn't already supply one, and only a positive integer: a
+	// stray/garbage BURROW_CHAT_ID should degrade to "not injected", not to a
+	// verb call carrying a value it can't use.
+	if _, ok := call.Arguments["parent_chat_id"]; !ok {
+		if id, err := strconv.ParseInt(strings.TrimSpace(s.chatID), 10, 64); err == nil && id > 0 {
+			call.Arguments["parent_chat_id"] = id
+		}
 	}
 
 	var result json.RawMessage
