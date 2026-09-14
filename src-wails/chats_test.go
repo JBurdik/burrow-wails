@@ -439,3 +439,34 @@ func TestSaveChatsKeepsParent(t *testing.T) {
 		}
 	}
 }
+
+// Deleting a thread takes its sub-agents with it: they exist only under it, so
+// leaving them behind leaves rows nothing in the UI can reach.
+func TestDeleteChatCascadesToChildren(t *testing.T) {
+	a, _ := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+
+	parent, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "parent"})
+	childA, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "a", ParentChatID: parent.ID})
+	childB, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "b", ParentChatID: parent.ID})
+	bystander, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "unrelated"})
+
+	if err := a.DeleteChat(parent.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	list, _ := a.ListChats()
+	alive := map[int64]bool{}
+	for _, c := range list {
+		alive[c.ID] = true
+	}
+	for _, gone := range []int64{parent.ID, childA.ID, childB.ID} {
+		if alive[gone] {
+			t.Errorf("chat %d survived the cascade", gone)
+		}
+	}
+	if !alive[bystander.ID] {
+		t.Error("the cascade took an unrelated chat")
+	}
+}

@@ -194,9 +194,17 @@ func (a *App) SaveChats(chats []Chat) error {
 	return nil
 }
 
+// DeleteChat removes a chat and, with it, every sub-agent spawned under it. A
+// child exists only underneath its thread, so leaving it behind leaves a row no
+// surface can reach. One statement each rather than a foreign key: the table is
+// created without one on existing installs, and ON DELETE CASCADE needs
+// PRAGMA foreign_keys per connection to fire at all.
 func (a *App) DeleteChat(id int64) error {
 	if a.db == nil {
 		return fmt.Errorf("no database")
+	}
+	if _, err := a.db.Exec(`DELETE FROM chats WHERE parent_chat_id = ?`, id); err != nil {
+		return err
 	}
 	res, err := a.db.Exec(`DELETE FROM chats WHERE id = ?`, id)
 	if err != nil {
