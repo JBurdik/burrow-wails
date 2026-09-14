@@ -723,16 +723,82 @@ func (p phasesAdapter) Phase(key string) (string, int64) {
 
 Wire both into the `control.Deps{...}` literal: `Phases: phasesAdapter{s: a.phases}, Chats: a`.
 
-- [ ] **Step 6: Run the whole suite**
+- [ ] **Step 6: Make `collect_results` sweep chat children too**
+
+`collectResults` today reads `.done` files only, so a parent whose children are
+all chats gets an empty list forever. Add the chat sweep at the top of
+`Core.collectResults` — it needs the caller's own chat id, so add
+`parent_chat_id` to the `collect_results` verb's args (set from
+`BURROW_CHAT_ID` by the same server-side path as `spawn`):
+
+```go
+func (c *Core) collectResults(p Params) (any, error) {
+	out := []Result{}
+	// Chat sub-agents first: they write no .done file, so collected_at is what
+	// stops this from returning the same answer on every call.
+	if parent := p.Int("parent_chat_id"); parent > 0 && c.deps.Chats != nil {
+		ids, err := c.deps.Chats.UncollectedChildren(parent)
+		if err != nil {
+			return out, err
+		}
+		for _, id := range ids {
+			state, _ := c.deps.Phases.Phase(fmt.Sprintf("chat:%d", id))
+			if state != "done" && state != "failed" && state != "stale" {
+				continue // still working — not a result yet
+			}
+			text, err := c.deps.Chats.LastAssistantMessage(id)
+			if err != nil {
+				return out, err
+			}
+			_ = c.deps.Chats.MarkCollected(id)
+			out = append(out, Result{Token: fmt.Sprintf("chat:%d", id), Text: text})
+		}
+	}
+	// ...then the existing .done file sweep, appending into the same `out`.
+```
+
+Change the verb's `Fn` to `func(ctx context.Context, p Params) (any, error) { return c.collectResults(p) }`.
+
+- [ ] **Step 7: Test the chat sweep**
+
+Append to `src-wails/internal/control/control_test.go`:
+
+```go
+// Without collected_at, every call would hand back the same finished child —
+// which is how a supervising loop turns into an infinite one.
+func TestCollectResultsTakesEachChildOnce(t *testing.T) {
+	chats := &countingChats{children: []int64{5}, last: "done deal"}
+	c := New(Deps{Phases: &fakePhases{state: "done", endedAt: 1}, Chats: chats})
+
+	first, err := c.Dispatch(context.Background(), "collect_results", Params{"parent_chat_id": float64(7)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.([]Result)) != 1 {
+		t.Fatalf("first sweep returned %d results, want 1", len(first.([]Result)))
+	}
+	if chats.marked != 1 {
+		t.Fatalf("MarkCollected called %d times, want 1", chats.marked)
+	}
+}
+```
+
+with `countingChats` a `ChatReader` whose `UncollectedChildren` returns its
+`children` slice until `MarkCollected` empties it, incrementing `marked`.
+
+Run: `cd src-wails && go test ./internal/control/ -run TestCollectResults -v`
+Expected: PASS.
+
+- [ ] **Step 8: Run the whole suite**
 
 Run: `cd src-wails && go test ./...`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src-wails/internal/control src-wails/controlapi.go src-wails/chats.go src-wails/db.go
-git commit -m "Let a parent wait on a chat sub-agent"
+git commit -m "Let a parent wait on and collect chat sub-agents"
 ```
 
 ---
@@ -943,16 +1009,34 @@ In `remove(id)`, before stopping the chat itself, recurse into children so their
 
 In `archive(id)`, archive children in the same pass (same reasoning — an archived thread whose helpers keep running is not archived).
 
-- [ ] **Step 6: Filter the Sidebar**
+- [ ] **Step 6: Keep a child out of the active-chat slot**
+
+`activeByWs` records which THREAD a workspace is showing, and a sub-agent is not
+a thread — if one ever lands there the workspace's main view switches to a chat
+the Sidebar does not even list. Guard `setActive`:
+
+```ts
+  function setActive(workspaceId: number, sessionId: number) {
+    // A sub-agent lives in the Right Panel; it is never the workspace's chat.
+    if (sessions.value.find((s) => s.id === sessionId)?.parentChatId) return;
+    activeByWs.value[workspaceId] = sessionId;
+    persist();
+  }
+```
+
+Also check `ensureSession`/`activeSession` (around line 355) so a workspace whose
+only chats are children still creates a real thread rather than adopting one.
+
+- [ ] **Step 7: Filter the Sidebar**
 
 In `src/components/Sidebar.vue`, the chat list for a workspace must use `topLevel(...)` instead of filtering on `workspaceId` alone. Find it with `grep -n 'sessions' src/components/Sidebar.vue`.
 
-- [ ] **Step 7: Verify**
+- [ ] **Step 8: Verify**
 
 Run: `pnpm test && pnpm build`
 Expected: all tests pass, no type errors.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/stores/chatTree.ts src/stores/claudeChats.test.ts src/stores/claudeChats.ts src/components/Sidebar.vue
@@ -1206,6 +1290,16 @@ watch(childList, (list) => {
 }, { immediate: true });
 onUnmounted(() => phaseUnsubs.forEach((un) => un()));
 ```
+
+A child's `AgentChat` is a second consumer of the same chat-id-keyed session
+registry the main view uses. The registry only evicts idle sessions, so a busy
+child survives an unmount — but the component must still `release()` its
+handlers when the panel drops it, or a finished child streams into a view that
+no longer exists. `AgentChat` does this in its own `onUnmounted`; the thing to
+get right here is that `engagedChildIds` is **per workspace key** like
+`terminalPtyByWs`, so switching projects does not leave another project's child
+mounted. Store it in `WsUiState` alongside `openedTabIds` rather than as a bare
+`ref`, and make `openChildId` a `WsUiState` field too.
 
 Use the file's existing event-listener import (check with `grep -n 'listen\|EventsOn' src/components/RightPanel.vue src/components/Terminal.vue | head`) and the real payload field name for the phase state (`grep -n 'applyPhase' -A 10 src/components/Terminal.vue`).
 
