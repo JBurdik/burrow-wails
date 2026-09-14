@@ -226,6 +226,31 @@ export const useProvidersStore = defineStore("providers", () => {
     }
   }
 
+  /**
+   * Install a provider AND reconcile the store with what is now on disk.
+   *
+   * The install alone changes nothing either surface can see: `outdated` is
+   * derived from the cached probe, so a provider updated on disk stays listed
+   * in BOTH the Settings banner and the toast until something re-probes it.
+   * Having one function own "install, then re-probe" is what makes an update
+   * from either place clear the row in both — they read the same computed, so
+   * the only way they can disagree is if one of them forgets this step.
+   *
+   * Re-probes every instance backed by this provider, not just the outdated
+   * ones: they share a package, so they all moved.
+   *
+   * Re-probes on FAILURE too. A partly-applied install (npm unpacked the
+   * package, then a postinstall exited non-zero) has still moved the version,
+   * and the row must say what is on disk rather than what we asked for.
+   */
+  async function updateProvider(providerId: string, cwd = ""): Promise<{ ok: boolean; error: string }> {
+    const r = await installLatest(providerId, cwd);
+    await Promise.all(
+      instances.value.filter((a) => a.providerId === providerId).map((a) => probe(a.id, cwd)),
+    );
+    return r;
+  }
+
   /** Enabled, installed instances whose version trails the latest published npm release. */
   const outdated = computed(() =>
     active.value.filter((a) => {
@@ -237,7 +262,7 @@ export const useProvidersStore = defineStore("providers", () => {
 
   return {
     instances, aliases, status, latest, ready, probing, active, chatAgents, outdated,
-    byId, resolve, add, update, remove, reset, move, setStatus, probe, probeAll, checkLatest, installLatest,
+    byId, resolve, add, update, remove, reset, move, setStatus, probe, probeAll, checkLatest, installLatest, updateProvider,
     binaryFor, commandLine,
     catalog: PROVIDER_CATALOG,
   };

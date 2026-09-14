@@ -380,17 +380,10 @@ const updateError = ref<Record<string, string>>({});
 async function updateOne(providerId: string) {
   updating.value = { ...updating.value, [providerId]: true };
   updateError.value = { ...updateError.value, [providerId]: "" };
-  const r = await store.installLatest(providerId);
-  if (!r.ok) {
-    updateError.value = { ...updateError.value, [providerId]: r.error || "Update failed." };
-  } else {
-    // Re-probe EVERY instance of this provider, not just one: they share the
-    // package, and a row still showing the old version reads as a failed
-    // update. The banner row disappears on its own once the probe lands.
-    await Promise.all(
-      store.instances.filter((a) => a.providerId === providerId).map((a) => store.probe(a.id)),
-    );
-  }
+  // updateProvider owns the re-probe, so this row and the toast's count drop
+  // off the same state change instead of each clearing itself its own way.
+  const r = await store.updateProvider(providerId);
+  if (!r.ok) updateError.value = { ...updateError.value, [providerId]: r.error || "Update failed." };
   updating.value = { ...updating.value, [providerId]: false };
 }
 

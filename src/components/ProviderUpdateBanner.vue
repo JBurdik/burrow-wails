@@ -59,21 +59,26 @@ const error = ref("");
 
 /** Runs the install in-process (Go side) and re-probes, instead of typing a
  * command into a terminal tab — that required a mounted workspace and never
- * reflected whether the install actually worked. */
+ * reflected whether the install actually worked.
+ *
+ * store.updateProvider re-probes per provider, so one failure no longer
+ * strands its neighbours: this used to bail on the first bad result before
+ * probing ANYTHING, leaving a provider that updated fine still listed as out
+ * of date here and in Settings. Each provider now leaves `outdated` on its
+ * own merit, and the two surfaces shrink together because they read the same
+ * computed. */
 async function installUpdates() {
   updating.value = true;
   error.value = "";
-  const targets = [...outdated.value];
-  const providerIds = [...new Set(targets.map((a) => a.providerId))];
-  const results = await Promise.all(providerIds.map((id) => providers.installLatest(id)));
+  const providerIds = [...new Set(outdated.value.map((a) => a.providerId))];
+  const results = await Promise.all(providerIds.map((id) => providers.updateProvider(id)));
+  updating.value = false;
   const failed = results.find((r) => !r.ok);
   if (failed) {
+    // Not dismissed: whatever is still listed is genuinely still out of date.
     error.value = failed.error || "Update failed.";
-    updating.value = false;
     return;
   }
-  await Promise.all(targets.map((a) => providers.probe(a.id)));
-  updating.value = false;
   dismiss();
 }
 </script>
