@@ -30,24 +30,6 @@ type ControlAction = { id: string; action: string; args: Record<string, unknown>
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 const num = (v: unknown) => (typeof v === "number" ? v : Number(str(v)) || 0);
 
-// One-shot handoff from `spawn` to `SubAgentHost.vue`: a sub-agent's CLI is
-// started by mounting its AgentChat (see the component for why), and the
-// mount is what needs the first prompt — not this module, which has no view
-// to send it from. A Pinia store would outlive the handoff and leak entries
-// for chats nobody ever mounts; a plain Map keyed by chat id, consumed once,
-// cannot.
-const pendingSubagentPrompts = new Map<number, string>();
-
-/** Read (and clear) the task text queued for a just-created sub-agent chat.
- *  Called once by SubAgentHost when it notices the chat, never again — a
- *  second read after the host has already mounted the chat must not replay
- *  the prompt. */
-export function takePendingSubagentPrompt(chatId: number): string | undefined {
-  const task = pendingSubagentPrompts.get(chatId);
-  pendingSubagentPrompts.delete(chatId);
-  return task;
-}
-
 export async function installControlBridge(): Promise<() => void> {
   return listen<ControlAction>("control:action", async (event) => {
     const { id, action, args } = event.payload;
@@ -209,15 +191,22 @@ async function spawn(args: Record<string, unknown>) {
   const parentChatId = num(args.parent_chat_id);
   if (openAs === "chat") {
     const chats = useClaudeChatsStore();
-    const session = await chats.create(target.id, { agentKind: instance.id, parentChatId: parentChatId || undefined });
+    // A sub-agent belongs to its thread, not the Sidebar, so it does NOT go
+    // through openChat() — that is what puts a chat there. Its CLI starts
+    // when SubAgentHost.vue mounts an AgentChat for it (a chat's process is
+    // started on mount, not here — see AgentChat.vue's "Lazy runtime start"),
+    // so the task text rides through `create()`'s `initialPrompt` for that
+    // mount to pick up and send — queued THERE, before the new session is
+    // pushed into `sessions.value`, so SubAgentHost's watcher can never
+    // observe the session before its prompt is ready. See
+    // pendingSubagentPrompts' comment in claudeChats.ts.
+    const session = await chats.create(target.id, {
+      agentKind: instance.id,
+      parentChatId: parentChatId || undefined,
+      initialPrompt: parentChatId ? task : undefined,
+    });
     if (parentChatId) {
-      // A sub-agent belongs to its thread, not the Sidebar, so it does NOT go
-      // through openChat() — that is what puts a chat there. Its CLI starts
-      // when SubAgentHost.vue mounts an AgentChat for it (a chat's process is
-      // started on mount, not here — see AgentChat.vue's "Lazy runtime start"),
-      // so the task text is queued for that mount to pick up and send, and the
-      // parent's transcript gets a row recording the delegation.
-      pendingSubagentPrompts.set(session.id, task);
+      // The parent's transcript gets a row recording the delegation.
       await appendSubagentMessage(parentChatId, session.id, task, instance.name);
       return { chat_id: session.id, workspace_id: target.id, parent_chat_id: parentChatId };
     }

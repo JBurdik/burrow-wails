@@ -288,6 +288,11 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 			params = control.Params{}
 		}
 		params["caller_is_subagent"] = a.chatIsSubagent(params.Int("parent_chat_id"))
+		// Same reasoning, same shape: a Manager spawn (from a `control` chat)
+		// is exempt from the parent-forces-chat rule in the spawn verb — see
+		// chatIsControl's comment. Derived here, not trusted from the request,
+		// for the same reason caller_is_subagent is.
+		params["parent_is_control"] = a.chatIsControl(params.Int("parent_chat_id"))
 		if a.control == nil {
 			http.Error(w, "control surface not ready", http.StatusServiceUnavailable)
 			return

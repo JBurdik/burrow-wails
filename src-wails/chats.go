@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -86,6 +87,19 @@ func chatsSchema() []string {
 			collected_at      INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS chats_workspace ON chats(workspace_id)`,
+	}
+}
+
+// chatsPostAlterSchema is the part of the chats schema that references a
+// column added by `alters` in db.go's migrate(). It must run AFTER those
+// ALTER TABLEs: on a fresh DB, chatsSchema()'s CREATE TABLE already carries
+// parent_chat_id, so this index would succeed even run early — but on an
+// upgraded install the table pre-dates the column, chatsSchema()'s CREATE
+// TABLE IF NOT EXISTS is a no-op, and an index on a column that does not
+// exist yet fails with "no such column: parent_chat_id", which used to abort
+// migrate() and leave a.db nil for every existing user.
+func chatsPostAlterSchema() []string {
+	return []string{
 		`CREATE INDEX IF NOT EXISTS chats_parent ON chats(parent_chat_id)`,
 	}
 }
@@ -241,6 +255,23 @@ func (a *App) chatIsSubagent(id int64) bool {
 	return parent > 0
 }
 
+// chatIsControl reports whether id is a `control` chat (the per-repo Manager
+// — see ManagerPanel.vue): used to exempt a Manager spawn from the
+// parent-forces-chat rule in the spawn verb (verbs_delegate.go). Same shape
+// as chatIsSubagent right above, and derived the same way for the same
+// reason — the server knows which chat is control (it's a column on `chats`),
+// so it decides this rather than trusting the caller.
+func (a *App) chatIsControl(id int64) bool {
+	if a.db == nil || id <= 0 {
+		return false
+	}
+	var control bool
+	if err := a.db.QueryRow(`SELECT control FROM chats WHERE id = ?`, id).Scan(&control); err != nil {
+		return false
+	}
+	return control
+}
+
 // migrateChatsFromConfig moves the config.json chat list into SQLite, once.
 //
 // Ids are PRESERVED, not reassigned: chat_stream(chat_id), chat_messages and
@@ -389,10 +420,39 @@ func chatFromConfigSession(s map[string]any) Chat {
 // LastAssistantMessage is a finished sub-agent's answer: the last assistant
 // entry in its transcript. The transcript is JSON payloads, so this decodes
 // rather than querying a column that does not exist.
+//
+// `chat_messages` is written by the FRONTEND (AgentChat.vue's saveMessages).
+// A sub-agent's parent workspace can be closed while the child keeps running
+// — SubAgentHost.vue only mounts children of OPENED workspaces — and Go still
+// drives that chat's phase to `done` from `chat_stream`, which IT owns and
+// which needs no mounted view. Reading only `chat_messages` in that case
+// returns "", nil: a silent, unrecoverable empty "success" that both
+// wait_result and collect_results used to treat as a real (if empty) answer,
+// marking the child collected with nothing to show for it. When the frontend
+// table has nothing, this falls back to replaying Go's own chat_stream log —
+// the same fold `foldChatLine` applies as lines arrive, done here from cold
+// storage — before finally giving up with an explicit error rather than
+// another empty success.
 func (a *App) LastAssistantMessage(chatID int64) (string, error) {
 	if a.db == nil {
 		return "", fmt.Errorf("no database")
 	}
+	if text, ok, err := a.lastAssistantMessageFromChatMessages(chatID); err != nil {
+		return "", err
+	} else if ok {
+		return text, nil
+	}
+	if text, ok, err := a.lastAssistantMessageFromChatStream(chatID); err != nil {
+		return "", err
+	} else if ok {
+		return text, nil
+	}
+	return "", fmt.Errorf("chat %d has no assistant reply to return (transcript and stream log are both empty)", chatID)
+}
+
+// lastAssistantMessageFromChatMessages is LastAssistantMessage's primary
+// source: the frontend-written transcript.
+func (a *App) lastAssistantMessageFromChatMessages(chatID int64) (text string, ok bool, err error) {
 	// No LIMIT: the loop below returns on the first assistant row it finds, and
 	// database/sql streams rows rather than materializing them all up front, so
 	// the scan stops there in practice. A LIMIT here previously meant a chat
@@ -401,23 +461,47 @@ func (a *App) LastAssistantMessage(chatID int64) (string, error) {
 	// chat collected and handing the caller nothing. Do not re-add one.
 	rows, err := a.db.Query(`SELECT payload_json FROM chat_messages WHERE chat_id = ? ORDER BY ord DESC`, chatID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
-			return "", err
+			return "", false, err
 		}
 		var msg struct {
 			Role string `json:"role"`
 			Text string `json:"text"`
 		}
 		if json.Unmarshal([]byte(raw), &msg) == nil && msg.Role == "assistant" && strings.TrimSpace(msg.Text) != "" {
-			return msg.Text, nil
+			return msg.Text, true, nil
 		}
 	}
-	return "", rows.Err()
+	return "", false, rows.Err()
+}
+
+// lastAssistantMessageFromChatStream is the fallback: replay chat_stream —
+// which Go writes regardless of whether any client ever mounted this chat —
+// through the same event fold `foldChatLine` uses live, then take the last
+// assistant bubble. Built from cold storage rather than reading the in-memory
+// tail (chatTailMessages), because the whole point is to answer correctly
+// even after a restart, with no fold resident in memory for this chat at all.
+func (a *App) lastAssistantMessageFromChatStream(chatID int64) (text string, ok bool, err error) {
+	events, err := a.LoadChatEventsSince(strconv.FormatInt(chatID, 10), 0)
+	if err != nil {
+		return "", false, err
+	}
+	all := make([]ProviderRuntimeEvent, 0, len(events))
+	for _, batch := range events {
+		all = append(all, batch.Events...)
+	}
+	msgs := foldEvents(all)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" && strings.TrimSpace(msgs[i].Text) != "" {
+			return msgs[i].Text, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // UncollectedChildren is collect_results' chat half: finished sub-agents of this

@@ -174,6 +174,15 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	// Must run after alters: chatsPostAlterSchema() indexes a column the
+	// alters above just added, and an upgraded install's chats table won't
+	// have it until then. See chatsPostAlterSchema's comment.
+	for _, s := range chatsPostAlterSchema() {
+		if _, err := db.Exec(s); err != nil {
+			return err
+		}
+	}
+
 	return migratePtyPhaseColumns(db)
 }
 

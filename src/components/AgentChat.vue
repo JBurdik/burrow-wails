@@ -1198,18 +1198,32 @@ function openSubagentFromTranscript(chatId: number) {
 // never disappears, so there is nothing to unsubscribe until unmount).
 const subagentPhase = reactive<Record<number, string>>({});
 const subagentPhaseUnsubs: Array<() => void> = [];
+// `listen()` is async; a component unmounted before it resolves would have
+// already run onBeforeUnmount's forEach below by the time the `.then()`
+// finally pushes an unsub function in — nothing left to call it, so that
+// listener (and the closure it holds) leaks for the app's remaining life.
+// Same hazard RightPanel.vue's own phase-chat: subscription guards against,
+// just a different shape: there, a child can leave the list while listen()
+// is in flight; here, it's this component itself going away.
+let subagentPhaseUnmounted = false;
 watch(
   () => messages.value.filter((m) => m.role === "system-info" && m.subagentChatId).map((m) => m.subagentChatId as number),
   (ids) => {
     for (const id of ids) {
       if (id in subagentPhase) continue;
       subagentPhase[id] = "idle";
-      listen<Phase>(`phase-chat:${id}`, (ev) => { subagentPhase[id] = ev.payload?.state ?? "idle"; }).then((un) => subagentPhaseUnsubs.push(un));
+      listen<Phase>(`phase-chat:${id}`, (ev) => { subagentPhase[id] = ev.payload?.state ?? "idle"; }).then((un) => {
+        if (subagentPhaseUnmounted) { un(); return; }
+        subagentPhaseUnsubs.push(un);
+      });
     }
   },
   { immediate: true, deep: true },
 );
-onBeforeUnmount(() => subagentPhaseUnsubs.forEach((un) => un()));
+onBeforeUnmount(() => {
+  subagentPhaseUnmounted = true;
+  subagentPhaseUnsubs.forEach((un) => un());
+});
 
 function subagentDotClass(chatId: number): string {
   const state = subagentPhase[chatId];

@@ -58,6 +58,47 @@ export interface ClaudeSession {
 export const AUTO_SETTLE_AFTER_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// One-shot handoff from `create()` to `SubAgentHost.vue`: a sub-agent's CLI
+// is started by mounting its AgentChat (see that component for why), and the
+// mount is what needs the first prompt — not this store, which has no view to
+// send it from. A plain module-level Map, consumed once, does the job without
+// a Pinia store outliving the handoff and leaking entries for chats nobody
+// ever mounts.
+//
+// Registered HERE, inside `create()`, before `sessions.value.push(session)` —
+// not by the caller after `create()` resolves. `push` triggers Vue's reactive
+// effects (SubAgentHost's `watch(children, …)`) synchronously as a queued
+// microtask job, which used to run and read this map BEFORE the caller's own
+// `await chats.create(...)` continuation got a turn to fill it in: the host
+// read `undefined`, cached that as "no prompt", and the sub-agent's CLI never
+// started. Filling the map before the push closes that window entirely.
+const pendingSubagentPrompts = new Map<number, string>();
+
+// Every child chat id `create()` has ever produced locally, independent of
+// whether it got a prompt. `SubAgentHost.vue` uses this to tell "this id came
+// through create() in THIS process, so pendingSubagentPrompts is already
+// final for it" from "this id showed up from ListChats/a shell snapshot
+// (another client, or this one after a restart), so no local handoff was
+// EVER going to be queued for it" — the latter is legitimately absent, not a
+// race, and is safe to cache as `undefined` on first read.
+const locallyCreatedSubagentIds = new Set<number>();
+
+/** Read (and clear) the task text queued for a just-created sub-agent chat.
+ *  Called once by SubAgentHost when it notices the chat, never again — a
+ *  second read after the host has already mounted the chat must not replay
+ *  the prompt. */
+export function takePendingSubagentPrompt(chatId: number): string | undefined {
+  const task = pendingSubagentPrompts.get(chatId);
+  pendingSubagentPrompts.delete(chatId);
+  return task;
+}
+
+/** Whether `chatId` is a sub-agent this process's own `create()` produced —
+ *  see `locallyCreatedSubagentIds` above for why that matters to the caller. */
+export function isLocallyCreatedSubagent(chatId: number): boolean {
+  return locallyCreatedSubagentIds.has(chatId);
+}
+
 /**
  * Whether a chat needs no more attention right now. Ported from t3code's
  * settle decision: pending work always wins (not settled), then a manual pin,
@@ -342,7 +383,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
    */
   async function create(
     workspaceId: number,
-    opts?: { agentKind?: string; parentChatId?: number },
+    opts?: { agentKind?: string; parentChatId?: number; initialPrompt?: string },
   ): Promise<ClaudeSession> {
     const agentKind = opts?.agentKind ?? 'claude';
     const transport: ChatTransport =
@@ -369,6 +410,13 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     });
 
     const session = sessionFromRow(row);
+    // Register the prompt handoff (and this id's local-create provenance)
+    // BEFORE the push below — see pendingSubagentPrompts' comment for why
+    // the order matters.
+    if (opts?.parentChatId) {
+      locallyCreatedSubagentIds.add(session.id);
+      if (opts.initialPrompt) pendingSubagentPrompts.set(session.id, opts.initialPrompt);
+    }
     sessions.value.push(session);
     // Pass the REACTIVE array element (not the raw `session`) so the actor's
     // status mutations go through Vue's proxy and actually trigger reactivity.
@@ -398,12 +446,19 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     persist();
   }
 
-  async function remove(id: number) {
+  async function remove(id: number, seen: Set<number> = new Set()): Promise<void> {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
+    // parent_chat_id rides SaveChats' last-writer-wins path (see chats.go's
+    // comment), so two clients racing writes to it can leave a genuine
+    // cycle on disk (A's parent is B, B's parent is A) — a `seen` guard is
+    // what stops that from recursing forever instead of relying on the
+    // shape of the data being a tree.
+    if (seen.has(id)) return;
+    seen.add(id);
     // A thread's sub-agents go with it. Go cascades the ROWS; the processes are
     // ours to stop, because which stop verb applies depends on the transport.
-    for (const child of childrenOfSessions(sessions.value, id)) await remove(child.id);
+    for (const child of childrenOfSessions(sessions.value, id)) await remove(child.id, seen);
     actors.get(id)?.stop();
     actors.delete(id);
     // The chat is gone, so its stream session must go with it — otherwise its
@@ -430,12 +485,15 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
 
   // Soft-hide: stop the process like remove(), but keep the row (and its
   // history) so it can be found again in the Archived shelf and unarchived.
-  async function archive(id: number) {
+  async function archive(id: number, seen: Set<number> = new Set()): Promise<void> {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
+    // Same cycle guard as remove() — see its comment.
+    if (seen.has(id)) return;
+    seen.add(id);
     // Same reasoning as remove(): an archived thread whose helpers keep
     // running is not archived.
-    for (const child of childrenOfSessions(sessions.value, id)) await archive(child.id);
+    for (const child of childrenOfSessions(sessions.value, id)) await archive(child.id, seen);
     actors.get(id)?.stop();
     actors.delete(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});

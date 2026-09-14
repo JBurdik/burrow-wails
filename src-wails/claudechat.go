@@ -226,15 +226,21 @@ func (a *App) ClaudeSend(id, text, sessionID string, images []string) error {
 	if err != nil {
 		return err
 	}
-	// Publish what the human sent BEFORE handing it to the CLI. Everything the
-	// agent says comes back through emitChatLine, so it reaches every client
-	// and survives a restart; the prompt used to go straight to stdin and be
-	// published nowhere, which is why a message typed on the phone stayed on
-	// the phone and one typed on the desktop stayed there. The prompt is the
-	// only part of a transcript this app authors rather than parses, and it was
-	// the only part not going through the door.
+	// Hand it to the CLI FIRST, publish what the human sent only once that
+	// succeeds. This used to run in the opposite order — publish, then write —
+	// so the transcript recorded a user turn even when the write failed with
+	// "unknown agent session" (the CLI never started, or agentproc.ReapIdle
+	// stopped it for being quiet). The line was unrecoverable and a waiting
+	// caller (chat_send / wait_result) hung on a turn nothing would ever
+	// answer. Everything the agent SAYS still comes back through
+	// emitChatLine so it reaches every client and survives a restart; the
+	// prompt is the only part of a transcript this app authors rather than
+	// parses, and it must only be authored once it is actually in flight.
+	if err := a.claudeWrite(id, string(msg)); err != nil {
+		return fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
+	}
 	a.emitChatLine(id, chatUserKind, text)
-	return a.claudeWrite(id, string(msg))
+	return nil
 }
 
 // claudeWrite puts one raw JSON line on the CLI's stdin (control responses are

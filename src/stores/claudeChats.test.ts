@@ -94,4 +94,16 @@ describe("chat tree", () => {
   it("treats an unknown parent as no children", () => {
     expect(childrenOf(treeSessions, 99)).toEqual([]);
   });
+
+  it("drops an archived child — archive() already stopped its process", () => {
+    // MINOR fix: archive(parent) stops each child's CLI (claudeChats.ts), so
+    // a still-listed archived child is a dead entry that would restart its
+    // process the moment something mounts it again (SubAgentHost.vue).
+    const withArchived = [
+      { id: 1, workspaceId: 1, parentChatId: undefined },
+      { id: 2, workspaceId: 1, parentChatId: 1 },
+      { id: 3, workspaceId: 1, parentChatId: 1, archivedAt: 12345 },
+    ] as any[];
+    expect(childrenOf(withArchived, 1).map((s) => s.id)).toEqual([2]);
+  });
 });

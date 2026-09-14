@@ -321,6 +321,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 			}
 			if a.phases.Get("chat:"+chatID).State == agentphase.Running {
 				a.clearSettledOverrideOnRunning(chatID)
+				a.clearCollectedOnRunning(chatID)
 			}
 		}
 
@@ -362,6 +363,24 @@ func (a *App) clearSettledOverrideOnRunning(chatID string) {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		busEmit("chats-changed", nil)
+	}
+}
+
+// clearCollectedOnRunning un-collects a chat sub-agent the moment its phase
+// re-enters Running: collected_at only exists so collect_results doesn't
+// return the same finished answer forever (chats.go's UncollectedChildren),
+// but a child steered with chat_send into a NEW turn after already being
+// collected has a fresh answer coming — one collect_results would otherwise
+// never see again, since UncollectedChildren filters on collected_at = 0.
+// Same trigger and same shape as clearSettledOverrideOnRunning right above:
+// both are stale per-chat bookkeeping a new turn invalidates.
+func (a *App) clearCollectedOnRunning(chatID string) {
+	id, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return
+	}
+	if _, err := a.db.Exec(`UPDATE chats SET collected_at = 0 WHERE id = ? AND collected_at != 0`, id); err != nil {
+		log.Printf("clear collected_at for chat %d: %v", id, err)
 	}
 }
 

@@ -217,7 +217,11 @@ func TestAddBurrowEnvCarriesChatID(t *testing.T) {
 func TestAddBurrowEnvOmitsZeroChatID(t *testing.T) {
 	a := &App{}
 	env := map[string]string{}
-	a.addBurrowEnv(env, t.TempDir())
+	// addBurrowEnv itself never touches BURROW_CHAT_ID at all — that's
+	// addBurrowEnvForChat's job (see its comment: zero is left unset rather
+	// than exported as "0"). Calling addBurrowEnv here tested a tautology and
+	// would keep passing even if addBurrowEnvForChat started exporting "0".
+	a.addBurrowEnvForChat(env, t.TempDir(), 0)
 	if _, ok := env["BURROW_CHAT_ID"]; ok {
 		t.Fatal("BURROW_CHAT_ID was exported with no chat")
 	}

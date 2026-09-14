@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -234,6 +235,32 @@ func TestSpawnFromChatForcesChatTargetAndCarriesParent(t *testing.T) {
 	}
 }
 
+// IMPORTANT 6: a spawn made from the Manager (a `control` chat) is exempt
+// from the parent-forces-chat rule above. The Manager is control:true and
+// never the active session, and the Right Panel's Sub-agents list is scoped
+// to the active session, so a Manager-spawned CHAT sub-agent would land in no
+// list anywhere. `parent_is_control` is set server-side the same way
+// caller_is_subagent is (controlapi.go derives both from the DB, never trusts
+// the request) — this test exercises the verb with it already set, which is
+// the contract the verb owns; controlapi.go's derivation is that param's
+// wiring, not the verb's behaviour.
+func TestSpawnFromControlChatKeepsTabTarget(t *testing.T) {
+	ui := &fakeUI{result: SpawnResult{PtyID: 3, Target: "tab"}}
+	c := newTestCore(t, Deps{UI: ui})
+
+	if _, err := c.Call(context.Background(), ScopeLocal, "spawn", Params{
+		"task":              "investigate the cache bug",
+		"target":            "tab",
+		"parent_chat_id":    float64(7),
+		"parent_is_control": true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ui.args["target"] != "tab" {
+		t.Errorf("target = %v, want tab — a Manager spawn must not be forced to chat", ui.args["target"])
+	}
+}
+
 // Depth is capped at one level: recursive agent trees run away in cost and the
 // panel that shows them is a flat list.
 func TestSubAgentCannotSpawn(t *testing.T) {
@@ -274,15 +301,31 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// fakePhases is a Phases test double: every key reports the same canned state,
-// which is all wait_result/collect_results need to decide whether a chat
-// sub-agent is finished.
+// fakePhases is a Phases test double: every key reports the same canned
+// state, which is all wait_result/collect_results need to decide whether a
+// chat sub-agent is finished.
+//
+// `endedAt` is what every call from the SECOND one onward reports;
+// `baselineEndedAt` is reported on the very first call only — wait_result's
+// own baseline snapshot, taken before its poll loop starts (see
+// TestWaitResultRequiresTheTurnToAdvance). Defaults to 0, which is lower than
+// any endedAt an existing test cares about, so a test that never sets it
+// keeps resolving on the loop's first check exactly as before that baseline
+// was added.
 type fakePhases struct {
-	state   string
-	endedAt int64
+	state           string
+	endedAt         int64
+	baselineEndedAt int64
+	calls           int
 }
 
-func (f *fakePhases) Phase(key string) (string, int64) { return f.state, f.endedAt }
+func (f *fakePhases) Phase(key string) (string, int64) {
+	f.calls++
+	if f.calls == 1 {
+		return f.state, f.baselineEndedAt
+	}
+	return f.state, f.endedAt
+}
 
 // fakeChats is a ChatReader test double with a single canned transcript tail.
 type fakeChats struct{ last string }
@@ -316,6 +359,52 @@ func TestWaitResultReturnsOnFailedPhase(t *testing.T) {
 	}
 	if got := out.(Result).Text; got != "could not build" {
 		t.Fatalf("text = %q, want the failed turn's transcript tail", got)
+	}
+}
+
+// IMPORTANT 4: the documented workflow is chat_send then
+// wait_result --chat-id, but chat_send does not move the phase to `running`
+// synchronously — the CLI has to pick the prompt up first. A phase already
+// sitting `done` from the PREVIOUS turn (or one that was never going to
+// start a new turn at all) must not be mistaken for this call's answer: it
+// has to be a real timeout, not an instant stale result plus a wrongly
+// collected child. `endedAt == baselineEndedAt` here models exactly that —
+// the phase never advances past what wait_result saw when it started.
+func TestWaitResultRequiresTheTurnToAdvance(t *testing.T) {
+	c := newTestCore(t, Deps{
+		Phases: &fakePhases{state: "done", endedAt: 100, baselineEndedAt: 100},
+		Chats:  &fakeChats{last: "the previous turn's answer"},
+	})
+	start := time.Now()
+	_, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(1)})
+	if err == nil {
+		t.Fatal("want a timeout error — the phase never advanced past its baseline")
+	}
+	if !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("err = %v, want a timeout message", err)
+	}
+	if elapsed := time.Since(start); elapsed < time.Second {
+		t.Fatalf("returned after %s, before its own 1s timeout — it must have accepted the stale phase", elapsed)
+	}
+}
+
+// The mirror image: once the phase's turn_ended_at genuinely advances past
+// the baseline wait_result captured at the start, it must resolve — this is
+// what stops the fix above from becoming "chat sub-agents never finish".
+func TestWaitResultResolvesOnceTheTurnAdvancesPastBaseline(t *testing.T) {
+	c := newTestCore(t, Deps{
+		// baselineEndedAt (0, the default) < endedAt (200): the wait starts
+		// before this turn's phase has settled, exactly like a real
+		// chat_send whose phase hasn't flipped to running yet.
+		Phases: &fakePhases{state: "done", endedAt: 200},
+		Chats:  &fakeChats{last: "this turn's real answer"},
+	})
+	out, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(5)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.(Result).Text; got != "this turn's real answer" {
+		t.Fatalf("text = %q", got)
 	}
 }
 
