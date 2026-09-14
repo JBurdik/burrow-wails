@@ -225,23 +225,32 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
-	deadline := time.Now().Add(timeout)
+	waitStart := time.Now()
+	deadline := waitStart.Add(timeout)
 
 	// The documented workflow is chat_send then wait_result --chat-id, but
-	// chat_send does not move the phase to `running` synchronously — the CLI
-	// has to pick the prompt up first. Without a baseline, a phase left
-	// `done` by the PREVIOUS turn (or one that was already idle before this
-	// wait even started) reads as "finished" on the very first poll below,
-	// so wait_result returns the previous turn's stale answer immediately
-	// and marks the child collected — a caller never sees its own turn's
-	// result. Capturing turn_ended_at up front and requiring it to ADVANCE
-	// is what a spawned token already gets for free (a token is per-spawn,
-	// so it has no previous answer to be confused with); this gives a chat
-	// the same guarantee. A chat idle with no new turn still times out via
-	// `deadline` below rather than waiting forever.
+	// chat_send does not always move the phase to `running` synchronously —
+	// the CLI has to pick the prompt up first. Without a baseline, a phase
+	// left `done` by the PREVIOUS turn (or one that was already idle before
+	// this wait even started) reads as "finished" on the very first poll
+	// below, so wait_result returns the previous turn's stale answer
+	// immediately and marks the child collected — a caller never sees its
+	// own turn's result. Capturing turn_ended_at up front and requiring it
+	// to ADVANCE is what a spawned token already gets for free (a token is
+	// per-spawn, so it has no previous answer to be confused with); this
+	// gives a chat the same guarantee.
 	var baselineTurnEndedAt int64
 	if chatID > 0 {
 		_, baselineTurnEndedAt = c.deps.Phases.Phase(fmt.Sprintf("chat:%d", chatID))
+	}
+
+	finishChat := func() (any, error) {
+		text, err := c.deps.Chats.LastAssistantMessage(chatID)
+		if err != nil {
+			return nil, err
+		}
+		_ = c.deps.Chats.MarkCollected(chatID)
+		return Result{Token: fmt.Sprintf("chat:%d", chatID), Text: text}, nil
 	}
 
 	for {
@@ -249,14 +258,32 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 			// A chat writes no capture files; the phase Go derives IS the
 			// completion signal, and it is derived with no client attached.
 			state, turnEndedAt := c.deps.Phases.Phase(fmt.Sprintf("chat:%d", chatID))
-			finished := state == "done" || state == "failed" || state == "stale"
-			if finished && turnEndedAt > baselineTurnEndedAt {
-				text, err := c.deps.Chats.LastAssistantMessage(chatID)
-				if err != nil {
-					return nil, err
+			switch {
+			case state == "stale":
+				// Dead process, not a turn boundary — chat_send can never
+				// move a dead pipe's phase to Running, so requiring an
+				// ADVANCE here (the rule below is for done/failed) would
+				// only turn "instantly wrong" into "block the whole
+				// timeout, then wrong anyway". Return the moment it's seen,
+				// baseline or not — this used to answer immediately and
+				// must keep doing so.
+				return finishChat()
+			case state == "done" || state == "failed":
+				// The turn genuinely advanced past the baseline: definitely
+				// this call's own answer. OR: the baseline grace window has
+				// elapsed with the phase never budging — the common case for
+				// a fast child whose first (and only) turn already finished
+				// before this wait's baseline was even captured, so there
+				// was never a "previous" turn to confuse it with; blocking
+				// such a call for the whole (often 10-minute) timeout is
+				// worse than the small chance of an early answer. A chat
+				// mid-race with a JUST-sent chat_send whose CLI is slow to
+				// start typically clears this by advancing turn_ended_at (or
+				// passing through running/waiting) well inside the grace
+				// window — see TestWaitResult* for both shapes.
+				if turnEndedAt > baselineTurnEndedAt || time.Since(waitStart) >= waitResultBaselineGrace {
+					return finishChat()
 				}
-				_ = c.deps.Chats.MarkCollected(chatID)
-				return Result{Token: fmt.Sprintf("chat:%d", chatID), Text: text}, nil
 			}
 		} else if text, ok := c.takeResult(token); ok {
 			return Result{Token: token, Text: text}, nil
@@ -271,6 +298,13 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 		}
 	}
 }
+
+// waitResultBaselineGrace bounds how long waitResult will hold a chat's
+// answer back solely because turn_ended_at hasn't advanced past its baseline
+// (see baselineTurnEndedAt in waitResult) — after this, a done/failed phase
+// is trusted even without an observed advance. A var, not a const, so a test
+// can shrink it instead of sleeping for the real duration.
+var waitResultBaselineGrace = 3 * time.Second
 
 func firstNonEmpty(a, b string) string {
 	if a != "" {

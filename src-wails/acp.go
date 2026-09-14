@@ -936,12 +936,14 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 	}
 	rpc := sess.rpcID()
 
-	// Published once here rather than in each branch below: Codex-app-server
-	// and plain ACP both return early, and a prompt that only reached the
-	// stream on one of them would be a transport-shaped hole in the
-	// transcript. Same reasoning as ClaudeSend — see chatUserKind.
-	a.emitChatLine(id, chatUserKind, text)
-
+	// Published AFTER each branch's write succeeds, not once up front —
+	// `acpReg().get(id)` above only proves the session is REGISTERED, not
+	// that its pipe is still alive; a registered-but-broken session (the
+	// process died, the pipe closed, and the registry hasn't reaped it yet)
+	// used to still record a user turn nothing ever received, the same
+	// data-loss shape fixed in ClaudeSend for Claude — see chatUserKind and
+	// ClaudeSend's comment. Both branches below publish right after their
+	// own successful write, since they return independently.
 	if sess.proto == protoCodexAppServer {
 		input := []any{}
 		if text != "" {
@@ -967,8 +969,10 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		err := sess.write(map[string]any{"jsonrpc": "2.0", "id": rpc, "method": "turn/start", "params": params})
 		if err != nil {
 			a.finishCodexTurn(id, sess, func(any) {}, "")
+			return rpc, fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
 		}
-		return rpc, err
+		a.emitChatLine(id, chatUserKind, text)
+		return rpc, nil
 	}
 
 	prompt := []any{}
@@ -984,10 +988,14 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		}
 		prompt = append(prompt, map[string]any{"type": "image", "mimeType": mime, "data": data})
 	}
-	return rpc, sess.write(map[string]any{
+	if err := sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpc, "method": "session/prompt",
 		"params": map[string]any{"sessionId": sess.sessionID, "prompt": prompt},
-	})
+	}); err != nil {
+		return rpc, fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
+	}
+	a.emitChatLine(id, chatUserKind, text)
+	return rpc, nil
 }
 
 func (a *App) CodexSend(id, text string, images []string) (int64, error) {

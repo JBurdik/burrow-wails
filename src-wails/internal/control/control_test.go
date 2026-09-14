@@ -408,6 +408,76 @@ func TestWaitResultResolvesOnceTheTurnAdvancesPastBaseline(t *testing.T) {
 	}
 }
 
+// Regression from the fix above: `stale` (the dead-PTY-equivalent watchdog
+// for a chat — its CLI process died) is NOT a turn boundary the way
+// done/failed are, so it must never be gated on the baseline advancing. A
+// dead process can't send anything that would advance turn_ended_at, so
+// requiring an advance here would turn "instantly wrong" (the original
+// finding-4 bug) into "block for the whole timeout, then STILL wrong" — worse,
+// not better. `endedAt == baselineEndedAt` here is deliberate: even with no
+// advance at all, a stale phase must resolve immediately.
+func TestWaitResultOnStaleChildAnswersPromptly(t *testing.T) {
+	c := newTestCore(t, Deps{
+		Phases: &fakePhases{state: "stale", endedAt: 100, baselineEndedAt: 100},
+		Chats:  &fakeChats{last: "whatever it left behind"},
+	})
+	start := time.Now()
+	out, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(30)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.(Result).Text; got != "whatever it left behind" {
+		t.Fatalf("text = %q", got)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("took %s to answer a dead child — want near-instant, not a poll-cycle-scale wait", elapsed)
+	}
+}
+
+// Another regression from the fix above: TestWaitResultRequiresTheTurnToAdvance
+// proved a same-baseline done/failed phase is not an instant match. Without a
+// bound, that correctly-strict rule became "block for the FULL timeout" (often
+// 10 minutes) even for the common case — a fast child whose only turn already
+// finished before wait_result's baseline was even captured, so there never was
+// a "previous" turn to confuse it with. waitResultBaselineGrace bounds that:
+// stuck-at-baseline is trusted after a short window rather than the whole
+// timeout.
+//
+// This test shrinks the grace window (rather than sleeping for the real one)
+// and checks BOTH directions: the answer is not handed back before the grace
+// window elapses (finding-4's actual guarantee — no INSTANT stale read), and
+// it IS handed back once the grace window passes rather than blocking for the
+// full 5s timeout configured below.
+func TestWaitResultGraceWindowBoundsTheBaselineWait(t *testing.T) {
+	old := waitResultBaselineGrace
+	waitResultBaselineGrace = 300 * time.Millisecond
+	t.Cleanup(func() { waitResultBaselineGrace = old })
+
+	c := newTestCore(t, Deps{
+		// Pinned at the baseline for the whole wait — the same "never
+		// advances" shape TestWaitResultRequiresTheTurnToAdvance uses, just
+		// with a timeout generous enough to prove the grace window fires
+		// before it, not the deadline.
+		Phases: &fakePhases{state: "done", endedAt: 100, baselineEndedAt: 100},
+		Chats:  &fakeChats{last: "settled before this wait ever started"},
+	})
+	start := time.Now()
+	out, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(5)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	if elapsed < waitResultBaselineGrace {
+		t.Fatalf("returned after %s, before its own %s grace window — an unadvanced baseline must not resolve instantly", elapsed, waitResultBaselineGrace)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("took %s to answer — the grace window must cap the wait, not the 5s timeout", elapsed)
+	}
+	if got := out.(Result).Text; got != "settled before this wait ever started" {
+		t.Fatalf("text = %q", got)
+	}
+}
+
 // Neither a token nor a chat id is a caller error, not a ten-minute block.
 func TestWaitResultNeedsATarget(t *testing.T) {
 	c := newTestCore(t, Deps{})

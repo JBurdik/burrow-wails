@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -188,4 +190,77 @@ func TestCodexListModelsLive(t *testing.T) {
 		}
 	}
 	t.Logf("codex models: %+v", models)
+}
+
+// failingWriteCloser simulates a registered-but-dead ACP/Codex pipe: the
+// session is still in the registry (acpReg().get succeeds), but the process
+// on the other end is gone, so every Write fails the way a broken stdin pipe
+// would.
+type failingWriteCloser struct{}
+
+func (failingWriteCloser) Write([]byte) (int, error) { return 0, fmt.Errorf("broken pipe") }
+func (failingWriteCloser) Close() error              { return nil }
+
+// TestAcpSendDoesNotRecordAnUndeliveredMessage covers the same data-loss
+// shape fixed in ClaudeSend (IMPORTANT 3), for the plain-ACP branch:
+// acpReg().get(id) only proves the session is REGISTERED, not that its pipe
+// is alive, so AcpSend used to call emitChatLine BEFORE sess.write — a
+// registered-but-broken session recorded a user turn nothing ever received.
+func TestAcpSendDoesNotRecordAnUndeliveredMessage(t *testing.T) {
+	a := newTestApp(t)
+	const chatID = "55"
+	sess := &acpSession{stdin: failingWriteCloser{}, proto: protoACP, sessionID: "sess-1"}
+	a.acpReg().put(chatID, sess)
+
+	if _, err := a.AcpSend(chatID, "are you there?", nil); err == nil {
+		t.Fatal("want an error sending on a broken pipe, got nil")
+	} else if !strings.Contains(err.Error(), "not running") {
+		t.Fatalf("error doesn't name the dead process clearly: %q", err)
+	}
+
+	msgs := loadFolded(t, a, 55)
+	if len(msgs) != 0 {
+		t.Fatalf("want no transcript rows for an undelivered send, got %d: %v", len(msgs), msgs)
+	}
+}
+
+// Same coverage for the Codex-app-server branch, which takes a different
+// early-return path (turn/start, finishCodexTurn on failure) than plain ACP.
+func TestCodexAppServerSendDoesNotRecordAnUndeliveredMessage(t *testing.T) {
+	a := newTestApp(t)
+	const chatID = "56"
+	sess := &acpSession{stdin: failingWriteCloser{}, proto: protoCodexAppServer, sessionID: "thread-1"}
+	a.acpReg().put(chatID, sess)
+
+	if _, err := a.AcpSend(chatID, "are you there?", nil); err == nil {
+		t.Fatal("want an error sending on a broken pipe, got nil")
+	} else if !strings.Contains(err.Error(), "not running") {
+		t.Fatalf("error doesn't name the dead process clearly: %q", err)
+	}
+
+	msgs := loadFolded(t, a, 56)
+	if len(msgs) != 0 {
+		t.Fatalf("want no transcript rows for an undelivered send, got %d: %v", len(msgs), msgs)
+	}
+}
+
+// The ordinary path must still work: a live pipe records the user line and
+// AcpSend returns no error.
+func TestAcpSendRecordsOnASuccessfulWrite(t *testing.T) {
+	a := newTestApp(t)
+	const chatID = "57"
+	r, w := io.Pipe()
+	defer r.Close()
+	go io.Copy(io.Discard, r) // drain so writes don't block
+	sess := &acpSession{stdin: w, proto: protoACP, sessionID: "sess-2"}
+	a.acpReg().put(chatID, sess)
+
+	if _, err := a.AcpSend(chatID, "hello there", nil); err != nil {
+		t.Fatalf("AcpSend: %v", err)
+	}
+
+	msgs := loadFolded(t, a, 57)
+	if len(msgs) == 0 || msgs[len(msgs)-1].Role != "user" {
+		t.Fatalf("want the user line recorded on a successful write, got %v", msgs)
+	}
 }

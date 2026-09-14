@@ -104,4 +104,43 @@ describe("sub-agent prompt handoff is race-free", () => {
     expect(isLocallyCreatedSubagent(999)).toBe(false);
     expect(takePendingSubagentPrompt(999)).toBeUndefined();
   });
+
+  // MINOR fix: locallyCreatedSubagentIds is a module-level Set that used to
+  // grow for the whole process's life — nothing ever deleted from it. Two
+  // ways an id should stop being tracked: consumed (SubAgentHost read its
+  // prompt) or removed (the session went away before that happened).
+  it("prunes locallyCreatedSubagentIds once the prompt is consumed", async () => {
+    const { useClaudeChatsStore, takePendingSubagentPrompt, isLocallyCreatedSubagent } = await import("./claudeChats");
+    const chats = useClaudeChatsStore();
+
+    const session = await chats.create(1, { agentKind: "claude", parentChatId: 42, initialPrompt: "do the thing" });
+
+    expect(isLocallyCreatedSubagent(session.id)).toBe(true);
+    takePendingSubagentPrompt(session.id);
+    expect(isLocallyCreatedSubagent(session.id)).toBe(false);
+  });
+
+  it("prunes locallyCreatedSubagentIds when the sub-agent is removed before its prompt is ever consumed", async () => {
+    const { useClaudeChatsStore, isLocallyCreatedSubagent, forgetLocallyCreatedSubagent } = await import("./claudeChats");
+    const chats = useClaudeChatsStore();
+
+    const session = await chats.create(1, { agentKind: "claude", parentChatId: 42, initialPrompt: "do the thing" });
+    expect(isLocallyCreatedSubagent(session.id)).toBe(true);
+
+    // remove() calls forgetLocallyCreatedSubagent itself; exercised directly
+    // here too since it's the exported half of the contract.
+    forgetLocallyCreatedSubagent(session.id);
+    expect(isLocallyCreatedSubagent(session.id)).toBe(false);
+  });
+
+  it("remove() itself prunes locallyCreatedSubagentIds, end to end", async () => {
+    const { useClaudeChatsStore, isLocallyCreatedSubagent } = await import("./claudeChats");
+    const chats = useClaudeChatsStore();
+
+    const session = await chats.create(1, { agentKind: "claude", parentChatId: 42, initialPrompt: "do the thing" });
+    expect(isLocallyCreatedSubagent(session.id)).toBe(true);
+
+    await chats.remove(session.id);
+    expect(isLocallyCreatedSubagent(session.id)).toBe(false);
+  });
 });

@@ -13,7 +13,7 @@
 import { describe, it, expect } from "vitest";
 import { AUTO_SETTLE_AFTER_DAYS, settledFor } from "./claudeChats";
 import type { ClaudeSession } from "./claudeChats";
-import { childrenOf, topLevel } from "./chatTree";
+import { childrenOf, topLevel, allChildrenOf } from "./chatTree";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
@@ -105,5 +105,20 @@ describe("chat tree", () => {
       { id: 3, workspaceId: 1, parentChatId: 1, archivedAt: 12345 },
     ] as any[];
     expect(childrenOf(withArchived, 1).map((s) => s.id)).toEqual([2]);
+  });
+
+  it("allChildrenOf includes archived children — teardown must still reach them", () => {
+    // Regression fix: childrenOf() gained the archivedAt filter above for
+    // DISPLAY, but remove()/archive()'s own recursion (claudeChats.ts) used
+    // to run on the same function — so removing a parent skipped an
+    // already-archived child, leaving its session/actor/chatSession alive on
+    // the frontend after Go had already deleted its row. allChildrenOf is
+    // the teardown-only variant that does not filter archivedAt.
+    const withArchived = [
+      { id: 1, workspaceId: 1, parentChatId: undefined },
+      { id: 2, workspaceId: 1, parentChatId: 1 },
+      { id: 3, workspaceId: 1, parentChatId: 1, archivedAt: 12345 },
+    ] as any[];
+    expect(allChildrenOf(withArchived, 1).map((s) => s.id)).toEqual([2, 3]);
   });
 });

@@ -12,7 +12,7 @@ import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/li
 import { listen } from "@tauri-apps/api/event";
 import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
-import { childrenOf as childrenOfSessions } from "@/stores/chatTree";
+import { childrenOf as childrenOfSessions, allChildrenOf as allChildrenOfSessions } from "@/stores/chatTree";
 
 export interface ClaudeSession {
   id: number;
@@ -86,10 +86,19 @@ const locallyCreatedSubagentIds = new Set<number>();
 /** Read (and clear) the task text queued for a just-created sub-agent chat.
  *  Called once by SubAgentHost when it notices the chat, never again — a
  *  second read after the host has already mounted the chat must not replay
- *  the prompt. */
+ *  the prompt.
+ *
+ *  Also prunes `locallyCreatedSubagentIds`: this is the "consumed" half of
+ *  that id's life — SubAgentHost calls `isLocallyCreatedSubagent` then this,
+ *  together, exactly once per id (see its watcher) — so once the prompt is
+ *  taken there is nothing left for the id to still be tracked for. The other
+ *  half, `forgetLocallyCreatedSubagent`, covers an id that never gets this
+ *  far (removed before the host ever noticed it). Without either, the set
+ *  grows for the life of the process. */
 export function takePendingSubagentPrompt(chatId: number): string | undefined {
   const task = pendingSubagentPrompts.get(chatId);
   pendingSubagentPrompts.delete(chatId);
+  locallyCreatedSubagentIds.delete(chatId);
   return task;
 }
 
@@ -97,6 +106,15 @@ export function takePendingSubagentPrompt(chatId: number): string | undefined {
  *  see `locallyCreatedSubagentIds` above for why that matters to the caller. */
 export function isLocallyCreatedSubagent(chatId: number): boolean {
   return locallyCreatedSubagentIds.has(chatId);
+}
+
+/** Drops `chatId` from `locallyCreatedSubagentIds` (and any still-queued
+ *  prompt) without reading it — the removal-time half of pruning that set,
+ *  for a sub-agent removed before SubAgentHost ever consumed it via
+ *  `takePendingSubagentPrompt` above. Called from `remove()`. */
+export function forgetLocallyCreatedSubagent(chatId: number): void {
+  pendingSubagentPrompts.delete(chatId);
+  locallyCreatedSubagentIds.delete(chatId);
 }
 
 /**
@@ -456,14 +474,23 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     // shape of the data being a tree.
     if (seen.has(id)) return;
     seen.add(id);
-    // A thread's sub-agents go with it. Go cascades the ROWS; the processes are
-    // ours to stop, because which stop verb applies depends on the transport.
-    for (const child of childrenOfSessions(sessions.value, id)) await remove(child.id, seen);
+    // A thread's sub-agents go with it — ALL of them, archived included
+    // (allChildrenOf, not childrenOf: an already-archived child still needs
+    // its row deleted and its listeners dropped, or it's a session/actor/
+    // chatSession left dangling with no row behind it until the next
+    // reload). Go cascades the ROWS; the processes are ours to stop, because
+    // which stop verb applies depends on the transport.
+    for (const child of allChildrenOfSessions(sessions.value, id)) await remove(child.id, seen);
     actors.get(id)?.stop();
     actors.delete(id);
     // The chat is gone, so its stream session must go with it — otherwise its
     // listeners outlive it (they are deliberately kept across an unmount).
     dropChatSession(id);
+    // Prunes locallyCreatedSubagentIds (and any still-queued prompt) for a
+    // sub-agent removed before SubAgentHost ever consumed it via
+    // takePendingSubagentPrompt — otherwise that id sits in the set for the
+    // rest of the process's life. A no-op for a non-subagent id.
+    forgetLocallyCreatedSubagent(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
     // Explicit delete: save_chats never removes, so a row only goes when
     // somebody says so — which is what stops a stale client from deleting a
@@ -492,8 +519,11 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     if (seen.has(id)) return;
     seen.add(id);
     // Same reasoning as remove(): an archived thread whose helpers keep
-    // running is not archived.
-    for (const child of childrenOfSessions(sessions.value, id)) await archive(child.id, seen);
+    // running is not archived. allChildrenOf, not childrenOf, for the same
+    // reason as remove() — an already-archived child (a no-op archive() call
+    // below) still needs its actor stopped and process killed if somehow
+    // still alive.
+    for (const child of allChildrenOfSessions(sessions.value, id)) await archive(child.id, seen);
     actors.get(id)?.stop();
     actors.delete(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
