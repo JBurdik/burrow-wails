@@ -163,6 +163,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE mission_tasks ADD COLUMN session_id TEXT`,
 		`ALTER TABLE mission_tasks ADD COLUMN board_order REAL DEFAULT 0`,
 		`ALTER TABLE mission_tasks ADD COLUMN updated_at INTEGER`,
+		`ALTER TABLE chats ADD COLUMN parent_chat_id INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {

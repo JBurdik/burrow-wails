@@ -56,6 +56,11 @@ type Chat struct {
 	// one UPDATE.
 	ArchivedAt     int64 `json:"archived_at"`
 	LastActivityAt int64 `json:"last_activity_at"`
+	// 0 means top-level. A sub-agent spawned by a thread carries that thread's
+	// id here: the Sidebar filters on it, the Right Panel scopes on it, and
+	// DeleteChat cascades on it. A column rather than a title tag, because all
+	// three of those would otherwise rest on a string.
+	ParentChatID int64 `json:"parent_chat_id"`
 }
 
 func chatsSchema() []string {
@@ -74,21 +79,23 @@ func chatsSchema() []string {
 			branch            TEXT    NOT NULL DEFAULT '',
 			settled_override  TEXT    NOT NULL DEFAULT '',
 			archived_at       INTEGER NOT NULL DEFAULT 0,
-			last_activity_at  INTEGER NOT NULL DEFAULT 0
+			last_activity_at  INTEGER NOT NULL DEFAULT 0,
+			parent_chat_id    INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS chats_workspace ON chats(workspace_id)`,
+		`CREATE INDEX IF NOT EXISTS chats_parent ON chats(parent_chat_id)`,
 	}
 }
 
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, control, agent_kind, transport, model, branch,
-	settled_override, archived_at, last_activity_at`
+	settled_override, archived_at, last_activity_at, parent_chat_id`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
 		&c.MessageCount, &c.Control, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
-		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt)
+		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID)
 	return c, err
 }
 
@@ -126,11 +133,11 @@ func (a *App) CreateChat(c Chat) (Chat, error) {
 	res, err := a.db.Exec(
 		`INSERT INTO chats (workspace_id, title, pinned_title, claude_session_id,
 			message_count, control, agent_kind, transport, model, branch,
-			settled_override, archived_at, last_activity_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			settled_override, archived_at, last_activity_at, parent_chat_id)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID, c.MessageCount,
 		c.Control, c.AgentKind, c.Transport, c.Model, c.Branch,
-		c.SettledOverride, c.ArchivedAt, c.LastActivityAt,
+		c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID,
 	)
 	if err != nil {
 		return Chat{}, err
@@ -164,7 +171,7 @@ func (a *App) SaveChats(chats []Chat) error {
 	stmt, err := tx.Prepare(
 		`UPDATE chats SET workspace_id=?, title=?, pinned_title=?, claude_session_id=?,
 			message_count=?, control=?, agent_kind=?, transport=?, model=?, branch=?,
-			settled_override=?, archived_at=?, last_activity_at=? WHERE id=?`)
+			settled_override=?, archived_at=?, last_activity_at=?, parent_chat_id=? WHERE id=?`)
 	if err != nil {
 		return err
 	}
@@ -176,7 +183,7 @@ func (a *App) SaveChats(chats []Chat) error {
 		}
 		if _, err := stmt.Exec(c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID,
 			c.MessageCount, c.Control, c.AgentKind, c.Transport, c.Model, c.Branch,
-			c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ID); err != nil {
+			c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID, c.ID); err != nil {
 			return err
 		}
 	}

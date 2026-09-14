@@ -380,3 +380,62 @@ func TestMigrationToleratesAMissingOrGarbageKey(t *testing.T) {
 		t.Fatalf("want only the well-formed row, got %+v", list)
 	}
 }
+
+// A child chat's parent must survive the round trip, or the Right Panel has no
+// way to tell a sub-agent from a thread.
+func TestParentChatIDRoundTrips(t *testing.T) {
+	a, _ := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+
+	parent, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.ParentChatID != 0 {
+		t.Errorf("a top-level chat got parent %d, want 0", parent.ParentChatID)
+	}
+	child, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "child", ParentChatID: parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.ParentChatID != parent.ID {
+		t.Fatalf("CreateChat returned parent %d, want %d", child.ParentChatID, parent.ID)
+	}
+
+	list, err := a.ListChats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got int64 = -1
+	for _, c := range list {
+		if c.ID == child.ID {
+			got = c.ParentChatID
+		}
+	}
+	if got != parent.ID {
+		t.Fatalf("ListChats reported parent %d, want %d", got, parent.ID)
+	}
+}
+
+// SaveChats is the only path a client has for editing a row, so it has to carry
+// the parent too — otherwise the first save after a spawn orphans the child.
+func TestSaveChatsKeepsParent(t *testing.T) {
+	a, _ := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+
+	parent, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "parent"})
+	child, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "child", ParentChatID: parent.ID})
+
+	child.Title = "renamed"
+	if err := a.SaveChats([]Chat{child}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := a.ListChats()
+	for _, c := range list {
+		if c.ID == child.ID && c.ParentChatID != parent.ID {
+			t.Fatalf("parent became %d after SaveChats, want %d", c.ParentChatID, parent.ID)
+		}
+	}
+}
