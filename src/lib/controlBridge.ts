@@ -60,7 +60,10 @@ export async function installControlBridge(): Promise<() => void> {
   });
 }
 
-async function perform(action: string, args: Record<string, unknown>): Promise<unknown> {
+// Exported so a caller inside the app — e.g. RightPanel's manual spawn button
+// — can go through the same verb dispatch a remote control-API caller would,
+// rather than duplicating spawn()'s target/agent resolution.
+export async function perform(action: string, args: Record<string, unknown>): Promise<unknown> {
   switch (action) {
     case "focus_workspace":
       return focusWorkspace(num(args.workspaceId));

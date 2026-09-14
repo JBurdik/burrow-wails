@@ -321,35 +321,90 @@
       Open a project to start a Manager thread.
     </div>
 
-    <!-- Sub-agents tab: Task-tool invocations from this workspace's chats, newest first -->
-    <div v-else-if="activeTab === 'agents'" class="flex flex-1 flex-col overflow-y-auto">
-      <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
-        <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sub-agents</span>
-      </div>
-
-      <div v-if="!subagentList.length" class="m-2 rounded-[var(--radius-card)] border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
-        No sub-agents spawned yet.<br />Shows up when a chat uses the Task tool.
-      </div>
-
-      <div
-        v-for="entry in subagentList"
-        :key="entry.toolUseId"
-        class="flex cursor-pointer items-start gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
-        @click="openSubagentChat(entry.chatId)"
-      >
-        <PhRobot :size="12" class="mt-[1px] shrink-0 text-muted-foreground" />
-        <div class="flex min-w-0 flex-1 flex-col">
-          <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ entry.description }}</span>
-          <span class="font-mono text-[9.5px] text-muted-foreground">{{ chatTitle(entry.chatId) }}{{ entry.subagentType ? ` · ${entry.subagentType}` : "" }} · {{ subagentTime(entry.startedAt) }}</span>
+    <!-- Sub-agents tab: this thread's chat sub-agents + its Task-tool invocations -->
+    <div v-else-if="activeTab === 'agents'" class="flex min-h-0 flex-1 flex-col">
+      <!-- Detail: the open child's chat. It is NOT mounted here — SubAgentHost.vue
+           keeps one AgentChat alive per child for its whole life (a CLI process
+           starts on mount, and it must run whether or not this panel is open),
+           and teleports the open one into this slot. -->
+      <template v-if="openChildId">
+        <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
+          <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" aria-label="Back to sub-agents" @click="closeChildDetail"><PhCaretLeft :size="12" /></button>
+          <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold text-foreground">{{ chatTitle(openChildId) }}</span>
         </div>
-        <span
-          class="mt-0.5 shrink-0 rounded-full px-1.5 py-[1px] text-[9px] font-medium"
-          :class="{
-            'bg-accent/15 text-accent': entry.status === 'running',
-            'bg-success/15 text-success': entry.status === 'done',
-            'bg-destructive/15 text-destructive': entry.status === 'failed',
-          }"
-        >{{ entry.status }}</span>
+        <div id="subagent-slot" class="flex min-h-0 flex-1 flex-col"></div>
+      </template>
+
+      <template v-else>
+        <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
+          <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sub-agents</span>
+          <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Spawn a sub-agent under this thread" aria-label="Spawn a sub-agent" @click="openSpawnDialog"><PhPlus :size="12" /></button>
+        </div>
+        <div v-if="!activeChatId" class="m-2 rounded-[var(--radius-card)] border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
+          Open a chat to see its sub-agents.
+        </div>
+        <template v-else>
+          <div v-if="!childList.length" class="m-2 rounded-[var(--radius-card)] border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
+            No sub-agents yet.<br />This thread's agent can spawn one, or use +.
+          </div>
+          <div
+            v-for="child in childList"
+            :key="child.id"
+            class="flex cursor-pointer items-center gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
+            @click="openChild(child.id)"
+          >
+            <PhRobot :size="12" class="shrink-0 text-muted-foreground" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ child.title }}</span>
+            <span class="shrink-0 text-[9px] text-muted-foreground">{{ childPhase[child.id] ?? "idle" }}</span>
+          </div>
+
+          <!-- Task-tool invocations by this thread, newest first -->
+          <div class="flex shrink-0 items-center gap-1.5 border-y border-border px-2 py-1.5">
+            <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Task tool</span>
+          </div>
+          <div v-if="!subagentList.length" class="m-2 rounded-[var(--radius-card)] border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
+            No Task-tool calls yet.<br />Shows up when this chat uses the Task tool.
+          </div>
+          <div
+            v-for="entry in subagentList"
+            :key="entry.toolUseId"
+            class="flex cursor-pointer items-start gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
+            @click="openSubagentChat(entry.chatId)"
+          >
+            <PhRobot :size="12" class="mt-[1px] shrink-0 text-muted-foreground" />
+            <div class="flex min-w-0 flex-1 flex-col">
+              <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ entry.description }}</span>
+              <span class="font-mono text-[9.5px] text-muted-foreground">{{ chatTitle(entry.chatId) }}{{ entry.subagentType ? ` · ${entry.subagentType}` : "" }} · {{ subagentTime(entry.startedAt) }}</span>
+            </div>
+            <span
+              class="mt-0.5 shrink-0 rounded-full px-1.5 py-[1px] text-[9px] font-medium"
+              :class="{
+                'bg-accent/15 text-accent': entry.status === 'running',
+                'bg-success/15 text-success': entry.status === 'done',
+                'bg-destructive/15 text-destructive': entry.status === 'failed',
+              }"
+            >{{ entry.status }}</span>
+          </div>
+        </template>
+      </template>
+    </div>
+
+    <!-- Manual sub-agent spawn dialog — same shape as Sidebar.vue's rename dialog -->
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="spawnDialogOpen" @click.self="spawnDialogOpen = false">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+        <h3 class="text-sm font-semibold text-foreground">Spawn a sub-agent</h3>
+        <textarea
+          v-model="spawnTask"
+          class="h-24 w-full resize-none rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
+          placeholder="What should the sub-agent do?"
+          autofocus
+          @keydown.esc="spawnDialogOpen = false"
+          @keydown.enter.meta.prevent="confirmSpawnDialog"
+        />
+        <div class="flex justify-end gap-2">
+          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="spawnDialogOpen = false">Cancel</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmSpawnDialog" :disabled="!spawnTask.trim()">Spawn</button>
+        </div>
       </div>
     </div>
 
@@ -445,10 +500,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, inject, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
-  PhArrowUp, PhArrowDown, PhCaretRight,
+  PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe, PhTerminal, PhRobot,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
@@ -456,6 +512,11 @@ import { useFileTreeStore } from "@/stores/fileTree";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
+import { useUIStore } from "@/stores/ui";
+import { childrenOf } from "@/stores/chatTree";
+import { subAgentViewTarget } from "@/lib/subAgentView";
+import { perform } from "@/lib/controlBridge";
+import type { Phase } from "@/runtime/displayStatus";
 import FileTreeNode from "./FileTreeNode.vue";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useContainerQuery } from "@/composables/useContainerQuery";
@@ -485,14 +546,17 @@ const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensio
 // projects shows the other project's open tabs.
 const NO_WS = -1;
 type DiffScope = { kind: "workspace" } | { kind: "branch" } | { kind: "turn"; checkpointId: number };
-interface WsUiState { openedTabIds: string[]; activeTab: string | null; diffScope: DiffScope }
+interface WsUiState { openedTabIds: string[]; activeTab: string | null; diffScope: DiffScope; openChildId: number | null }
 const wsUiStates = reactive<Record<number, WsUiState>>({});
 const wsKey = computed(() => props.workspaceId ?? NO_WS);
+const ui = useUIStore();
 
+// Task-tool invocations, narrowed to the thread that's actually open (was:
+// every chat in the workspace) — both this and the Sub-agents list below
+// answer "what did THIS thread delegate".
 const subagentList = computed(() => {
-  if (!props.workspaceId) return [];
-  const chatIds = chats.sessions.filter((s) => s.workspaceId === props.workspaceId).map((s) => s.id);
-  return subagents.forChats(chatIds);
+  if (!activeChatId.value) return [];
+  return subagents.forChats([activeChatId.value]);
 });
 function chatTitle(chatId: number): string {
   return chats.sessions.find((s) => s.id === chatId)?.title ?? `Chat ${chatId}`;
@@ -504,8 +568,74 @@ function openSubagentChat(chatId: number) {
 function subagentTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+
+// ── Sub-agents section (chat-tree children of the active thread) ──────────────
+const activeChatId = computed(() => (props.workspaceId ? chats.activeSession(props.workspaceId)?.id ?? null : null));
+const childList = computed(() => (activeChatId.value ? childrenOf(chats.sessions, activeChatId.value) : []));
+
+// Which child is shown in #subagent-slot, per workspace (so switching
+// projects doesn't carry a detail view over). Setting it also drives
+// subAgentViewTarget — the module-level ref SubAgentHost.vue's <Teleport>
+// reads — so the two can never point at different chats.
+const openChildId = computed<number | null>({
+  get: () => wsUi(wsKey.value).openChildId,
+  set: (v) => { wsUi(wsKey.value).openChildId = v; subAgentViewTarget.value = v; },
+});
+function openChild(id: number) {
+  openChildId.value = id;
+}
+// A stale target pointing at a child of a workspace nobody is looking at
+// must not leave it teleported into this (possibly different) workspace's
+// slot — called on the back button, on leaving the agents surface, on the
+// panel closing, and on a workspace switch, below.
+function closeChildDetail() {
+  if (openChildId.value !== null) openChildId.value = null;
+}
+
+// Phase per child, straight off the bus — the same event Terminal.vue's
+// applyPhase listens to for tabs. First frontend consumer of phase-chat:.
+const childPhase = reactive<Record<number, string>>({});
+const phaseUnsubs: Array<() => void> = [];
+watch(childList, (list) => {
+  for (const child of list) {
+    if (child.id in childPhase) continue;
+    childPhase[child.id] = "idle";
+    listen<Phase>(`phase-chat:${child.id}`, (ev) => { childPhase[child.id] = ev.payload?.state ?? "idle"; }).then((un) => phaseUnsubs.push(un));
+  }
+}, { immediate: true });
+onBeforeUnmount(() => phaseUnsubs.forEach((un) => un()));
+
+// Manual spawn dialog — the app has no window.prompt() anywhere else
+// (a Wails window has no native prompt chrome), so this follows Sidebar.vue's
+// own small rename-dialog pattern instead of introducing a browser dialog.
+const spawnDialogOpen = ref(false);
+const spawnTask = ref("");
+function openSpawnDialog() {
+  if (!activeChatId.value || !props.workspaceId) return;
+  spawnTask.value = "";
+  spawnDialogOpen.value = true;
+}
+async function confirmSpawnDialog() {
+  const task = spawnTask.value.trim();
+  if (!task || !activeChatId.value || !props.workspaceId) return;
+  spawnDialogOpen.value = false;
+  // Same door as the agent's own spawn verb: one implementation, two callers.
+  await perform("spawn", { task, target: "chat", parent_chat_id: activeChatId.value, cwd: props.cwd });
+}
+
+/** Open a sub-agent chat's detail view from outside the panel (a transcript
+ *  row's click handler in AgentChat.vue) — shows the panel, opens the Sub-agents
+ *  surface, and drives the same slot the list's own row click does. `workspaceId`
+ *  is the CHILD's workspace, not necessarily whichever one is currently active. */
+function openSubagent(chatId: number, workspaceId: number) {
+  const state = wsUi(workspaceId);
+  if (!state.openedTabIds.includes("agents")) state.openedTabIds.push("agents");
+  state.activeTab = "agents";
+  state.openChildId = chatId;
+  if (workspaceId === wsKey.value) subAgentViewTarget.value = chatId;
+}
 function wsUi(id: number): WsUiState {
-  return (wsUiStates[id] ??= { openedTabIds: [], activeTab: null, diffScope: { kind: "workspace" } });
+  return (wsUiStates[id] ??= { openedTabIds: [], activeTab: null, diffScope: { kind: "workspace" }, openChildId: null });
 }
 const activeTab = computed<string | null>({
   get: () => wsUi(wsKey.value).activeTab,
@@ -515,6 +645,21 @@ const openedTabIds = computed<string[]>({
   get: () => wsUi(wsKey.value).openedTabIds,
   set: (v) => { wsUi(wsKey.value).openedTabIds = v; },
 });
+
+// The one call a caller outside the panel needs to open a surface (task-9
+// brief). RightPanel owns which workspace's surface list that lands in.
+watch(() => ui.pendingRightPanelSurface, (tabId) => {
+  if (!tabId) return;
+  openSurface(tabId);
+  ui.pendingRightPanelSurface = null;
+});
+watch(activeTab, (cur, prev) => { if (prev === "agents" && cur !== "agents") closeChildDetail(); });
+watch(() => props.open, (open) => { if (!open) closeChildDetail(); });
+watch(wsKey, (_cur, old) => {
+  if (old !== undefined && old !== NO_WS && wsUiStates[old]?.openChildId != null) wsUiStates[old].openChildId = null;
+  subAgentViewTarget.value = null;
+});
+
 const diffScope = computed<DiffScope>({
   get: () => wsUi(wsKey.value).diffScope,
   set: (v) => { wsUi(wsKey.value).diffScope = v; },
@@ -563,7 +708,7 @@ const tabs = computed(() => {
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
     { id: "manager", label: "Manager", icon: PhSparkle, description: "Plan and coordinate agent work for this project." },
-    { id: "agents", label: "Sub-agents", icon: PhRobot, description: "See sub-agents spawned by chats in this workspace." },
+    { id: "agents", label: "Sub-agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
@@ -624,7 +769,7 @@ function openGitTab() {
   openSurface("git");
 }
 
-defineExpose({ openManager, openGitTab });
+defineExpose({ openManager, openGitTab, openSubagent });
 
 // --- Checkpoints (History tab) ---
 interface Checkpoint {

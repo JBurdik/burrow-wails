@@ -247,6 +247,21 @@
           </template>
         </template>
 
+        <!-- Sub-agent spawn marker: a pointer into the Right Panel, not just a note -->
+        <template v-else-if="msg.role === 'system-info' && msg.subagentChatId">
+          <div class="flex justify-center px-4 py-1">
+            <button
+              class="flex items-center gap-1.5 rounded-[20px] border border-border bg-hover px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-accent/45 hover:text-foreground"
+              @click="openSubagentFromTranscript(msg.subagentChatId)"
+            >
+              <PhRobot :size="11" class="shrink-0" />
+              <span>{{ msg.text }}</span>
+              <span v-if="msg.subagentAgent" class="text-secondary-foreground">· {{ msg.subagentAgent }}</span>
+              <span class="status-dot" :class="subagentDotClass(msg.subagentChatId)" />
+            </button>
+          </div>
+        </template>
+
         <!-- System info marker (permission requested, plan ready, etc.) -->
         <template v-else-if="msg.role === 'system-info'">
           <div class="flex justify-center px-4 py-1">
@@ -566,6 +581,8 @@
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch, inject } from "vue";
 import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { Phase } from "@/runtime/displayStatus";
 import { parseAcpPermRequest } from "@/lib/acpParser";
 import {
   applyChatEvent, isProjectedEvent, settleTranscript,
@@ -1166,6 +1183,41 @@ const openRightPanelGitTab = inject<() => void>("openRightPanelGitTab", () => {}
 function openChangedFileDiff(path: string) {
   git.showDiff(path, false);
   openRightPanelGitTab();
+}
+
+// The panel is where a sub-agent lives; a transcript row recording a spawn is
+// just a pointer to it.
+const openRightPanelSubagent = inject<(chatId: number, workspaceId: number) => void>("openRightPanelSubagent", () => {});
+function openSubagentFromTranscript(chatId: number) {
+  openRightPanelSubagent(chatId, props.workspaceId);
+}
+
+// Live dot on a transcript's spawn row, straight off the bus — same event and
+// field RightPanel's Sub-agents list reads. Listeners are set up lazily, one
+// per distinct subagentChatId this transcript has ever shown (a spawn row
+// never disappears, so there is nothing to unsubscribe until unmount).
+const subagentPhase = reactive<Record<number, string>>({});
+const subagentPhaseUnsubs: Array<() => void> = [];
+watch(
+  () => messages.value.filter((m) => m.role === "system-info" && m.subagentChatId).map((m) => m.subagentChatId as number),
+  (ids) => {
+    for (const id of ids) {
+      if (id in subagentPhase) continue;
+      subagentPhase[id] = "idle";
+      listen<Phase>(`phase-chat:${id}`, (ev) => { subagentPhase[id] = ev.payload?.state ?? "idle"; }).then((un) => subagentPhaseUnsubs.push(un));
+    }
+  },
+  { immediate: true, deep: true },
+);
+onBeforeUnmount(() => subagentPhaseUnsubs.forEach((un) => un()));
+
+function subagentDotClass(chatId: number): string {
+  const state = subagentPhase[chatId];
+  if (state === "running") return "status-running";
+  if (state === "waiting_input" || state === "waiting_approval") return "status-waiting";
+  if (state === "done") return "status-done";
+  if (state === "failed") return "status-error";
+  return ""; // idle/stale: plain dot, nothing to flag
 }
 function toolSummary(name: string, input: Record<string, unknown> | undefined): string {
   const inp = input ?? {};

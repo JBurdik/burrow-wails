@@ -395,6 +395,16 @@ function openRightPanelGitTab() {
 
 provide('openRightPanelGitTab', openRightPanelGitTab);
 
+// A transcript row that names a sub-agent chat is a pointer into the panel,
+// not a mini-view of its own — clicking it opens (and shows the panel) the
+// same way the git-tab shortcut above does.
+function openRightPanelSubagent(chatId: number, workspaceId: number) {
+  ui.rightPanelVisible = true;
+  rightPanelRef.value?.openSubagent(chatId, workspaceId);
+}
+
+provide('openRightPanelSubagent', openRightPanelSubagent);
+
 
 async function openNewWorkspace() {
   const dir = await pickDir({ title: "Add project", start: ui.defaultProjectDir || "~/" });
