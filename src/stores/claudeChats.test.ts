@@ -13,6 +13,7 @@
 import { describe, it, expect } from "vitest";
 import { AUTO_SETTLE_AFTER_DAYS, settledFor } from "./claudeChats";
 import type { ClaudeSession } from "./claudeChats";
+import { childrenOf, topLevel } from "./chatTree";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
@@ -68,5 +69,29 @@ describe("settledFor", () => {
     // Callers look a session up by id and may miss; `undefined` must not read
     // as "settled" and hide a row whose data simply has not arrived yet.
     expect(settledFor(undefined, NOW)).toBe(false);
+  });
+});
+
+const treeSessions = [
+  { id: 1, workspaceId: 1, parentChatId: undefined },
+  { id: 2, workspaceId: 1, parentChatId: 1 },
+  { id: 3, workspaceId: 1, parentChatId: 1 },
+  { id: 4, workspaceId: 1, parentChatId: undefined },
+  { id: 5, workspaceId: 2, parentChatId: 4 },
+] as any[];
+
+describe("chat tree", () => {
+  it("lists a thread's children in id order", () => {
+    expect(childrenOf(treeSessions, 1).map((s) => s.id)).toEqual([2, 3]);
+  });
+
+  it("keeps sub-agents out of the top-level list", () => {
+    // This is what stops a thread that spawned three helpers from showing four
+    // sibling entries in the Sidebar.
+    expect(topLevel(treeSessions, 1).map((s) => s.id)).toEqual([1, 4]);
+  });
+
+  it("treats an unknown parent as no children", () => {
+    expect(childrenOf(treeSessions, 99)).toEqual([]);
   });
 });

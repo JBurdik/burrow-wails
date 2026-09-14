@@ -12,6 +12,7 @@ import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/li
 import { listen } from "@tauri-apps/api/event";
 import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
+import { childrenOf as childrenOfSessions } from "@/stores/chatTree";
 
 export interface ClaudeSession {
   id: number;
@@ -47,6 +48,9 @@ export interface ClaudeSession {
   lastActivityAt?: number;
   // Branch checked out when the chat was created — a snapshot, not live.
   branch?: string;
+  // The thread that spawned this sub-agent. Undefined for a normal thread; a
+  // sub-agent lives in the Right Panel and is filtered out of the Sidebar.
+  parentChatId?: number;
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -103,6 +107,7 @@ interface ChatRow {
   settled_override: string;
   archived_at: number;
   last_activity_at: number;
+  parent_chat_id: number;
 }
 
 // The one place the column names and the client's field names meet. `busy`
@@ -124,6 +129,7 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     settledOverride: (r.settled_override || null) as ClaudeSession["settledOverride"],
     archivedAt: r.archived_at || null,
     lastActivityAt: r.last_activity_at || undefined,
+    parentChatId: r.parent_chat_id || undefined,
     busy: false,
   };
 }
@@ -144,6 +150,7 @@ function rowFromSession(s: ClaudeSession): ChatRow {
     settled_override: s.settledOverride ?? "",
     archived_at: s.archivedAt ?? 0,
     last_activity_at: s.lastActivityAt ?? 0,
+    parent_chat_id: s.parentChatId ?? 0,
   };
 }
 const TURNS_KEY = "chatTurns";
@@ -296,19 +303,34 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     setConfig(ACTIVE_KEY, activeByWs.value);
   }
 
+  // Threads only: a sub-agent (`parentChatId` set) is reached through
+  // `childrenOf`, never listed here. This is the chokepoint every caller in
+  // this file and Terminal.vue's tab restore go through, so a sub-agent
+  // cannot show up as a sibling tab or a sibling Sidebar entry of the thread
+  // that spawned it.
   function sessionsForWs(workspaceId: number): ClaudeSession[] {
-    return sessions.value.filter((s) => s.workspaceId === workspaceId && !s.archivedAt);
+    return sessions.value.filter((s) => s.workspaceId === workspaceId && !s.archivedAt && !s.parentChatId);
   }
 
+  function childrenOf(parentChatId: number): ClaudeSession[] {
+    return childrenOfSessions(sessions.value, parentChatId);
+  }
+
+  // Threads only, same reasoning as sessionsForWs: archive() cascades onto a
+  // thread's children, and an archived sub-agent must not show up as a
+  // sibling entry in the Archived shelf either.
   function archivedSessionsForWs(workspaceId: number): ClaudeSession[] {
     return sessions.value
-      .filter((s) => s.workspaceId === workspaceId && !!s.archivedAt)
+      .filter((s) => s.workspaceId === workspaceId && !!s.archivedAt && !s.parentChatId)
       .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0));
   }
 
   function activeSession(workspaceId: number): ClaudeSession | undefined {
     const activeId = activeByWs.value[workspaceId];
-    return sessions.value.find((s) => s.id === activeId && s.workspaceId === workspaceId);
+    // Never a sub-agent: the active slot is the workspace's THREAD (see
+    // setActive's guard below). Filtered here too in case `activeByWs` was
+    // written before this field existed or by a future bug.
+    return sessions.value.find((s) => s.id === activeId && s.workspaceId === workspaceId && !s.parentChatId);
   }
 
   // Create and activate a new session for this workspace.
@@ -318,12 +340,18 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
    * id to two different chats, one of which then adopted the other's running
    * CLI process.
    */
-  async function create(workspaceId: number, opts?: { agentKind?: string }): Promise<ClaudeSession> {
+  async function create(
+    workspaceId: number,
+    opts?: { agentKind?: string; parentChatId?: number },
+  ): Promise<ClaudeSession> {
     const agentKind = opts?.agentKind ?? 'claude';
     const transport: ChatTransport =
       (() => { const a = useProvidersStore().byId(agentKind); return a ? chatTransportFor(a) : (agentKind === 'claude' ? 'claude-cli' : 'acp'); })();
     const ws = useWorkspaceStore().workspaces.find((w) => w.id === workspaceId);
     const branch = ws?.worktree_branch || useGitStore().branchByWs[workspaceId] || undefined;
+    // Threads-only numbering: a sub-agent must not push the next thread's
+    // number up, and its own title comes from the caller (e.g. the spawning
+    // verb), not this counter.
     const row = await invoke<ChatRow>("create_chat", {
       chat: rowFromSession({
         id: 0, // ignored — CreateChat assigns it
@@ -336,6 +364,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
         transport,
         lastActivityAt: Date.now(),
         branch,
+        parentChatId: opts?.parentChatId,
       }),
     });
 
@@ -363,6 +392,8 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   }
 
   function setActive(workspaceId: number, sessionId: number) {
+    // A sub-agent lives in the Right Panel; it is never the workspace's chat.
+    if (sessions.value.find((s) => s.id === sessionId)?.parentChatId) return;
     activeByWs.value[workspaceId] = sessionId;
     persist();
   }
@@ -370,6 +401,9 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   async function remove(id: number) {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
+    // A thread's sub-agents go with it. Go cascades the ROWS; the processes are
+    // ours to stop, because which stop verb applies depends on the transport.
+    for (const child of childrenOfSessions(sessions.value, id)) await remove(child.id);
     actors.get(id)?.stop();
     actors.delete(id);
     // The chat is gone, so its stream session must go with it — otherwise its
@@ -399,6 +433,9 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
   async function archive(id: number) {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
+    // Same reasoning as remove(): an archived thread whose helpers keep
+    // running is not archived.
+    for (const child of childrenOfSessions(sessions.value, id)) await archive(child.id);
     actors.get(id)?.stop();
     actors.delete(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
@@ -510,6 +547,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     windowStart,
     recordTurn,
     sessionsForWs,
+    childrenOf,
     archivedSessionsForWs,
     activeSession,
     create,
