@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -258,5 +259,60 @@ func TestCallerIsSubagentIsServerDerived(t *testing.T) {
 	}
 	if !a.chatIsSubagent(child.ID) {
 		t.Error("a child chat was not recognised as a sub-agent")
+	}
+}
+
+// spawnStubUI answers /v1/spawn requests that make it past the sub-agent
+// guard, so a positive-control POST has something to succeed against instead
+// of erroring for an unrelated reason ("no UI attached").
+type spawnStubUI struct{}
+
+func (spawnStubUI) Do(ctx context.Context, action string, args map[string]any) (json.RawMessage, error) {
+	return json.Marshal(control.SpawnResult{ChatID: 99, Target: "chat"})
+}
+
+// The unforgeability of caller_is_subagent is the whole point of deriving it
+// server-side rather than trusting the request body — so this has to go
+// through the actual HTTP handler, not just Core.Call or chatIsSubagent in
+// isolation. A weakened handler (e.g. "default caller_is_subagent to the
+// client's value when present") would still pass every other test in this
+// file while a forged "caller_is_subagent": false defeated the depth guard.
+func TestSpawnCallerIsSubagentCannotBeForgedOverHTTP(t *testing.T) {
+	a, _ := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+	parent, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "parent"})
+	child, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "child", ParentChatID: parent.ID})
+
+	a.controlToken = "t"
+	a.control = control.New(control.Deps{DB: a.db, UI: spawnStubUI{}})
+	srv := httptest.NewServer(controlMux(a))
+	defer srv.Close()
+
+	// The caller IS a sub-agent (its own parent_chat_id is non-zero), but the
+	// request body lies and says caller_is_subagent: false. The server must
+	// still refuse, because it derives the flag itself from parent_chat_id
+	// rather than trusting the one in the body.
+	forged := fmt.Sprintf(`{"task":"do more work","parent_chat_id":%d,"caller_is_subagent":false}`, child.ID)
+	resp := post(t, srv.URL+"/v1/spawn", "t", forged)
+	defer resp.Body.Close()
+	var out map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode == http.StatusOK || !strings.Contains(out["error"], "sub-agent cannot spawn sub-agents") {
+		t.Fatalf("forged caller_is_subagent: status=%d body=%v, want the sub-agent guard", resp.StatusCode, out)
+	}
+
+	// Positive control: a genuinely top-level chat is not refused with that
+	// message. Without this, a handler that refuses every /v1/spawn call would
+	// also pass the assertion above for the wrong reason.
+	legit := fmt.Sprintf(`{"task":"do more work","parent_chat_id":%d}`, parent.ID)
+	resp2 := post(t, srv.URL+"/v1/spawn", "t", legit)
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		var errOut map[string]string
+		_ = json.NewDecoder(resp2.Body).Decode(&errOut)
+		t.Fatalf("top-level spawn: status=%d body=%v, want success", resp2.StatusCode, errOut)
 	}
 }
