@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 )
 
 // The chat list, owned by Go and stored in SQLite alongside workspaces and
@@ -80,7 +82,8 @@ func chatsSchema() []string {
 			settled_override  TEXT    NOT NULL DEFAULT '',
 			archived_at       INTEGER NOT NULL DEFAULT 0,
 			last_activity_at  INTEGER NOT NULL DEFAULT 0,
-			parent_chat_id    INTEGER NOT NULL DEFAULT 0
+			parent_chat_id    INTEGER NOT NULL DEFAULT 0,
+			collected_at      INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS chats_workspace ON chats(workspace_id)`,
 		`CREATE INDEX IF NOT EXISTS chats_parent ON chats(parent_chat_id)`,
@@ -381,4 +384,66 @@ func chatFromConfigSession(s map[string]any) Chat {
 		ArchivedAt:      num("archivedAt"),
 		LastActivityAt:  num("lastActivityAt"),
 	}
+}
+
+// LastAssistantMessage is a finished sub-agent's answer: the last assistant
+// entry in its transcript. The transcript is JSON payloads, so this decodes
+// rather than querying a column that does not exist.
+func (a *App) LastAssistantMessage(chatID int64) (string, error) {
+	if a.db == nil {
+		return "", fmt.Errorf("no database")
+	}
+	rows, err := a.db.Query(`SELECT payload_json FROM chat_messages WHERE chat_id = ? ORDER BY ord DESC LIMIT 50`, chatID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return "", err
+		}
+		var msg struct {
+			Role string `json:"role"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal([]byte(raw), &msg) == nil && msg.Role == "assistant" && strings.TrimSpace(msg.Text) != "" {
+			return msg.Text, nil
+		}
+	}
+	return "", rows.Err()
+}
+
+// UncollectedChildren is collect_results' chat half: finished sub-agents of this
+// thread that nobody has taken yet. collected_at plays the role the .done files
+// play for a PTY capture — without it collect_results returns the same answer
+// forever.
+func (a *App) UncollectedChildren(parentChatID int64) ([]int64, error) {
+	out := []int64{}
+	if a.db == nil {
+		return out, nil
+	}
+	rows, err := a.db.Query(`SELECT id FROM chats WHERE parent_chat_id = ? AND collected_at = 0 ORDER BY id`, parentChatID)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return out, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// MarkCollected records that a chat sub-agent's result has been taken, so
+// UncollectedChildren stops returning it.
+func (a *App) MarkCollected(chatID int64) error {
+	if a.db == nil {
+		return fmt.Errorf("no database")
+	}
+	_, err := a.db.Exec(`UPDATE chats SET collected_at = ? WHERE id = ?`, time.Now().UnixMilli(), chatID)
+	return err
 }

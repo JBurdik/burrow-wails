@@ -189,8 +189,22 @@ func (a *App) initControl(dataDir string) {
 		Worktrees:    worktreeAdapter{a},
 		UI:           a.ui,
 		WorktreesDir: worktreesDirPref,
+		Phases:       phasesAdapter{s: a.phases},
+		Chats:        a,
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")
+}
+
+// phasesAdapter is PhaseStore behind control's Phases interface — the control
+// package takes capabilities, so the store itself never crosses the boundary.
+type phasesAdapter struct{ s *PhaseStore }
+
+func (p phasesAdapter) Phase(key string) (string, int64) {
+	if p.s == nil {
+		return "idle", 0
+	}
+	ph := p.s.Get(key)
+	return string(ph.State), ph.TurnEndedAt
 }
 
 // ControlVerbs exposes the registry to the frontend, which generates the

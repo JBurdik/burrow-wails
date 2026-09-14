@@ -128,6 +128,21 @@ type UIBridge interface {
 	Do(ctx context.Context, action string, args map[string]any) (json.RawMessage, error)
 }
 
+// Phases reports the derived agent phase for a key ("chat:<id>", "pty:<id>").
+// A chat sub-agent writes no capture files, so this — not a file on disk — is
+// what tells wait_result/collect_results it finished.
+type Phases interface {
+	Phase(key string) (state string, turnEndedAt int64)
+}
+
+// ChatReader reads a chat's transcript tail and tracks which children have
+// been collected — the chat equivalent of the <token>.result/.done files.
+type ChatReader interface {
+	LastAssistantMessage(chatID int64) (string, error)
+	UncollectedChildren(parentChatID int64) ([]int64, error)
+	MarkCollected(chatID int64) error
+}
+
 // Deps is everything the verbs need from the host app.
 type Deps struct {
 	DB         *sql.DB
@@ -141,6 +156,12 @@ type Deps struct {
 	// WorktreesDir is where a worktree lands when the caller doesn't say:
 	// <dir>/<repo>/<branch>, the same convention as the New-worktree dialog.
 	WorktreesDir func() string
+	// Phases reports the derived agent phase for a key ("chat:<id>", "pty:<id>").
+	// An interface, not the store: this package takes capabilities, never the app.
+	Phases Phases
+	// Chats reads a chat's transcript tail and tracks which children have
+	// been collected — the chat equivalent of the <token>.result/.done files.
+	Chats ChatReader
 }
 
 // Core is the verb registry plus the dependencies verbs run against.

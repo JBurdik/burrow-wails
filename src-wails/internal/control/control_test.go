@@ -139,7 +139,7 @@ func TestCollectResultsDrainsEachResultOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := c.collectResults()
+	first, err := c.collectResults(Params{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestCollectResultsDrainsEachResultOnce(t *testing.T) {
 		t.Fatalf("first collect: %+v", results)
 	}
 
-	second, _ := c.collectResults()
+	second, _ := c.collectResults(Params{})
 	if got := second.([]Result); len(got) != 0 {
 		t.Errorf("second collect should be empty, got %+v", got)
 	}
@@ -272,4 +272,97 @@ func openTestDB(t *testing.T) *sql.DB {
 		}
 	}
 	return db
+}
+
+// fakePhases is a Phases test double: every key reports the same canned state,
+// which is all wait_result/collect_results need to decide whether a chat
+// sub-agent is finished.
+type fakePhases struct {
+	state   string
+	endedAt int64
+}
+
+func (f *fakePhases) Phase(key string) (string, int64) { return f.state, f.endedAt }
+
+// fakeChats is a ChatReader test double with a single canned transcript tail.
+type fakeChats struct{ last string }
+
+func (f *fakeChats) LastAssistantMessage(int64) (string, error) { return f.last, nil }
+func (f *fakeChats) UncollectedChildren(int64) ([]int64, error) { return nil, nil }
+func (f *fakeChats) MarkCollected(int64) error                  { return nil }
+
+// A chat sub-agent writes no capture files, so waiting on one has to read the
+// phase Go already derives — which also means waiting works with no view of
+// the child mounted anywhere.
+func TestWaitResultResolvesFromChatPhase(t *testing.T) {
+	c := newTestCore(t, Deps{Phases: &fakePhases{state: "done", endedAt: 123}, Chats: &fakeChats{last: "found it: an off-by-one"}})
+
+	out, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(5)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.(Result).Text; got != "found it: an off-by-one" {
+		t.Fatalf("text = %q", got)
+	}
+}
+
+// A failed turn still ends the wait: the caller wants to know, and blocking
+// until the timeout tells it nothing it can act on.
+func TestWaitResultReturnsOnFailedPhase(t *testing.T) {
+	c := newTestCore(t, Deps{Phases: &fakePhases{state: "failed", endedAt: 1}, Chats: &fakeChats{last: "could not build"}})
+	if _, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{"chat_id": float64(9), "timeout": float64(5)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Neither a token nor a chat id is a caller error, not a ten-minute block.
+func TestWaitResultNeedsATarget(t *testing.T) {
+	c := newTestCore(t, Deps{})
+	_, err := c.Call(context.Background(), ScopeLocal, "wait_result", Params{})
+	if err == nil || !strings.Contains(err.Error(), "needs a token or a chat_id") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// countingChats is a ChatReader test double whose UncollectedChildren returns
+// its children slice until MarkCollected empties it — enough to prove
+// collect_results doesn't hand back the same finished child forever.
+type countingChats struct {
+	children []int64
+	last     string
+	marked   int
+}
+
+func (c *countingChats) LastAssistantMessage(int64) (string, error) { return c.last, nil }
+
+func (c *countingChats) UncollectedChildren(int64) ([]int64, error) { return c.children, nil }
+
+func (c *countingChats) MarkCollected(id int64) error {
+	c.marked++
+	remaining := c.children[:0]
+	for _, existing := range c.children {
+		if existing != id {
+			remaining = append(remaining, existing)
+		}
+	}
+	c.children = remaining
+	return nil
+}
+
+// Without collected_at, every call would hand back the same finished child —
+// which is how a supervising loop turns into an infinite one.
+func TestCollectResultsTakesEachChildOnce(t *testing.T) {
+	chats := &countingChats{children: []int64{5}, last: "done deal"}
+	c := newTestCore(t, Deps{Phases: &fakePhases{state: "done", endedAt: 1}, Chats: chats})
+
+	first, err := c.Call(context.Background(), ScopeLocal, "collect_results", Params{"parent_chat_id": float64(7)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.([]Result)) != 1 {
+		t.Fatalf("first sweep returned %d results, want 1", len(first.([]Result)))
+	}
+	if chats.marked != 1 {
+		t.Fatalf("MarkCollected called %d times, want 1", chats.marked)
+	}
 }

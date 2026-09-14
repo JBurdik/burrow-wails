@@ -100,7 +100,8 @@ func delegationVerbs(c *Core) []Verb {
 		Name:    "wait_result",
 		Summary: "Block until a spawned agent finishes and return its final message",
 		Args: []Arg{
-			{Name: "token", Type: "string", Desc: "Token returned by spawn", Required: true},
+			{Name: "token", Type: "string", Desc: "Token returned by spawn"},
+			{Name: "chat_id", Type: "integer", Desc: "Chat sub-agent to wait on, instead of a token"},
 			{Name: "timeout", Type: "integer", Desc: "Seconds to wait (default 600)"},
 		},
 		Scope: ScopeLocal,
@@ -108,8 +109,11 @@ func delegationVerbs(c *Core) []Verb {
 	}, {
 		Name:    "collect_results",
 		Summary: "Take every finished sub-agent result that hasn't been collected yet",
-		Scope:   ScopeLocal,
-		Fn:      func(ctx context.Context, p Params) (any, error) { return c.collectResults() },
+		Args: []Arg{
+			{Name: "parent_chat_id", Type: "integer", Desc: "Set automatically from BURROW_CHAT_ID — sweeps this thread's finished chat sub-agents too"},
+		},
+		Scope: ScopeLocal,
+		Fn:    func(ctx context.Context, p Params) (any, error) { return c.collectResults(p) },
 	}}
 }
 
@@ -171,11 +175,17 @@ func (c *Core) sendToTab(p Params) (any, error) {
 	return map[string]any{"sent": true}, nil
 }
 
-// waitResult polls for the capture file. Polling (not inotify) because the
-// writer is a hook in another process and the wait is measured in minutes —
-// a 500ms tick is free at that scale and has no watcher lifecycle to leak.
+// waitResult polls for the capture file, or — for a chat sub-agent — for the
+// phase Go already derives. Polling (not inotify) because the writer is a
+// hook (or the provider-runtime parser) in another process and the wait is
+// measured in minutes — a 500ms tick is free at that scale and has no watcher
+// lifecycle to leak.
 func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 	token := p.Str("token")
+	chatID := p.Int("chat_id")
+	if token == "" && chatID <= 0 {
+		return nil, fmt.Errorf("wait_result needs a token or a chat_id")
+	}
 	timeout := time.Duration(p.Int("timeout")) * time.Second
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
@@ -183,11 +193,22 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 	deadline := time.Now().Add(timeout)
 
 	for {
-		if text, ok := c.takeResult(token); ok {
+		if chatID > 0 {
+			// A chat writes no capture files; the phase Go derives IS the
+			// completion signal, and it is derived with no client attached.
+			if state, _ := c.deps.Phases.Phase(fmt.Sprintf("chat:%d", chatID)); state == "done" || state == "failed" || state == "stale" {
+				text, err := c.deps.Chats.LastAssistantMessage(chatID)
+				if err != nil {
+					return nil, err
+				}
+				_ = c.deps.Chats.MarkCollected(chatID)
+				return Result{Token: fmt.Sprintf("chat:%d", chatID), Text: text}, nil
+			}
+		} else if text, ok := c.takeResult(token); ok {
 			return Result{Token: token, Text: text}, nil
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("wait_result: %s did not finish within %s (it may still be working — check agent_status)", token, timeout)
+			return nil, fmt.Errorf("wait_result: %s did not finish within %s (it may still be working — check agent_status)", firstNonEmpty(token, fmt.Sprintf("chat:%d", chatID)), timeout)
 		}
 		select {
 		case <-ctx.Done():
@@ -197,13 +218,42 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 	}
 }
 
-func (c *Core) collectResults() (any, error) {
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func (c *Core) collectResults(p Params) (any, error) {
+	out := []Result{}
+	// Chat sub-agents first: they write no .done file, so collected_at is what
+	// stops this from returning the same answer on every call.
+	if parent := p.Int("parent_chat_id"); parent > 0 && c.deps.Chats != nil {
+		ids, err := c.deps.Chats.UncollectedChildren(parent)
+		if err != nil {
+			return out, err
+		}
+		for _, id := range ids {
+			state, _ := c.deps.Phases.Phase(fmt.Sprintf("chat:%d", id))
+			if state != "done" && state != "failed" && state != "stale" {
+				continue // still working — not a result yet
+			}
+			text, err := c.deps.Chats.LastAssistantMessage(id)
+			if err != nil {
+				return out, err
+			}
+			_ = c.deps.Chats.MarkCollected(id)
+			out = append(out, Result{Token: fmt.Sprintf("chat:%d", id), Text: text})
+		}
+	}
+
 	if c.deps.SessionDir == "" {
-		return []Result{}, nil
+		return out, nil
 	}
 	entries, err := os.ReadDir(c.deps.SessionDir)
 	if err != nil {
-		return []Result{}, nil // no session dir yet = nothing has ever been spawned
+		return out, nil // no session dir yet = nothing has ever been spawned
 	}
 	tokens := []string{}
 	for _, e := range entries {
@@ -213,7 +263,6 @@ func (c *Core) collectResults() (any, error) {
 	}
 	sort.Strings(tokens) // tokens are time-ordered, so this is chronological
 
-	out := []Result{}
 	for _, t := range tokens {
 		if text, ok := c.takeResult(t); ok {
 			out = append(out, Result{Token: t, Text: text})

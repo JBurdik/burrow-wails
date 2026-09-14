@@ -538,4 +538,14 @@ var remoteDenied = map[string]string{
 	"RequestFloatSnapshot": "float/task-live snapshot protocol relayed via desktop-only Wails events (see wailsRuntimeAllowlist in events_test.go); a remote client would never see the reply",
 	"SendFloatSnapshot":    "float/task-live snapshot protocol relayed via desktop-only Wails events (see wailsRuntimeAllowlist in events_test.go); a remote client would never see the reply",
 	"NotifyFloatGrid":      "float/task-live snapshot protocol relayed via desktop-only Wails events (see wailsRuntimeAllowlist in events_test.go); a remote client would never see the reply",
+
+	// control.ChatReader adapter methods (App implements ChatReader directly,
+	// wired into control.Deps.Chats in initControl). Internal capabilities the
+	// wait_result/collect_results verbs call through the control package, not
+	// client-callable verbs of their own — a remote client already reaches the
+	// same data through wait_result/collect_results, which apply the phase
+	// check and collected_at bookkeeping these skip.
+	"LastAssistantMessage": "internal ChatReader capability used by wait_result/collect_results, not a verb of its own; a remote client reaches the same data through those verbs, which also apply the phase check this skips",
+	"UncollectedChildren":  "internal ChatReader capability used by collect_results, not a verb of its own; calling it directly would skip collect_results' phase check and hand back children still mid-turn",
+	"MarkCollected":        "internal ChatReader capability used by wait_result/collect_results, not a verb of its own; calling it directly would let a caller mark a child collected without ever reading its result",
 }
