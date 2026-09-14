@@ -203,6 +203,12 @@ func (a *App) DeleteChat(id int64) error {
 	if a.db == nil {
 		return fmt.Errorf("no database")
 	}
+	// Reject non-positive ids: parent_chat_id = 0 is the top-level marker, so a
+	// cascade on id 0 would delete every thread in the database. A bad id has to
+	// stay the harmless ErrNoRows it was before the cascade existed.
+	if id <= 0 {
+		return sql.ErrNoRows
+	}
 	if _, err := a.db.Exec(`DELETE FROM chats WHERE parent_chat_id = ?`, id); err != nil {
 		return err
 	}

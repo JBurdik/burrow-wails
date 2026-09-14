@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -468,5 +469,24 @@ func TestDeleteChatCascadesToChildren(t *testing.T) {
 	}
 	if !alive[bystander.ID] {
 		t.Error("the cascade took an unrelated chat")
+	}
+}
+
+// parent_chat_id = 0 is the top-level marker, so a cascade keyed on it would
+// treat DeleteChat(0) as "delete every thread in the database". A bad id has to
+// stay the harmless ErrNoRows it was before the cascade existed.
+func TestDeleteChatRejectsNonPositiveID(t *testing.T) {
+	a, _ := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+
+	kept, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "top level"})
+
+	if err := a.DeleteChat(0); err != sql.ErrNoRows {
+		t.Fatalf("DeleteChat(0) = %v, want sql.ErrNoRows", err)
+	}
+	list, _ := a.ListChats()
+	if len(list) != 1 || list[0].ID != kept.ID {
+		t.Fatalf("DeleteChat(0) destroyed top-level chats: %+v", list)
 	}
 }
