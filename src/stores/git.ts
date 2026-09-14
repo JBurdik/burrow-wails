@@ -119,6 +119,17 @@ export const useGitStore = defineStore("git", () => {
   // PR status cache, keyed by workspace id. null = checked, no open PR (or gh
   // missing/unauthed). undefined (absent key) = never checked.
   const prByWs = ref<Record<number, PrInfo | null>>({});
+
+  // One store, one cwd, but a workspace switch can land in the middle of any
+  // git op — every call here is async and `refresh` alone runs four of them.
+  // So each op PINS the directory it started in and stamps this counter, which
+  // setCwd bumps; a result that comes back for a directory the app has since
+  // left is dropped instead of written over the new workspace's state. Without
+  // it, workspace A's slow status landed after B's and the titlebar's
+  // Commit & push button acted on the wrong project — armed with A's changes
+  // in B, or (worse) finding "nothing staged" in A and silently doing nothing.
+  let gen = 0;
+  const stale = (g: number) => g !== gen;
   // Per-workspace in-flight guard so the 60s poll never stacks gh calls.
   const prInFlight = new Set<number>();
   // Current branch per workspace, filled by the same 60s sweep as the PR badges.
@@ -129,12 +140,22 @@ export const useGitStore = defineStore("git", () => {
   // Fetch PR status for one workspace via `gh pr view`. Never throws — any
   // failure (no gh, not authed, no PR, not a GitHub repo) caches null so the
   // Sidebar simply shows no badge. Cheap + non-blocking; safe to call on a poll.
+  // The branch read used to live inside fetchPr, which meant a chip showing
+  // `branchByWs` only ever got a value once the gh PR sweep ran — deferred
+  // 2.5s off the startup path, then every 60s. Until then AgentChat's header
+  // fell back to the literal "HEAD". Reading a ref is a local git call with
+  // none of gh's cost, so it is its own thing and callers can ask for it eagerly.
+  async function ensureBranch(wsId: number, cwd: string) {
+    if (!cwd) return;
+    const head = await invoke<GitOutput>("run_git", { cwd, args: ["branch", "--show-current"] }).catch(() => null);
+    if (head?.code === 0) branchByWs.value[wsId] = head.stdout.trim();
+  }
+
   async function fetchPr(wsId: number, cwd: string) {
     if (!cwd || prInFlight.has(wsId)) return;
     prInFlight.add(wsId);
     try {
-      const head = await invoke<GitOutput>("run_git", { cwd, args: ["branch", "--show-current"] }).catch(() => null);
-      if (head?.code === 0) branchByWs.value[wsId] = head.stdout.trim();
+      await ensureBranch(wsId, cwd);
       const out = await invoke<GitOutput>("run_gh", {
         cwd,
         args: ["pr", "view", "--json", "number,state,isDraft,statusCheckRollup,url"],
@@ -179,23 +200,27 @@ export const useGitStore = defineStore("git", () => {
   }
 
   async function refresh(silent = false) {
-    if (!cwd.value) return;
+    const dir = cwd.value;
+    const g = gen;
+    if (!dir) return;
     if (!silent) loading.value = true;
     error.value = null;
     try {
       const [statusOut, branchOut] = await Promise.all([
-        runGit(cwd.value, ["status", "--porcelain"]),
-        runGit(cwd.value, ["branch", "--show-current"]),
+        runGit(dir, ["status", "--porcelain"]),
+        runGit(dir, ["branch", "--show-current"]),
       ]);
+      if (stale(g)) return;
       const parsed = parseStatus(statusOut);
       staged.value = parsed.staged;
       unstaged.value = parsed.unstaged;
       untracked.value = parsed.untracked;
       branch.value = branchOut.trim();
-      await refreshUpstream();
-      await refreshLog();
-      await fetchBranches();
+      await refreshUpstream(dir, g);
+      await refreshLog(dir, g);
+      await fetchBranches(dir, g);
     } catch (e: unknown) {
+      if (stale(g)) return;
       error.value = e instanceof Error ? e.message : "git error";
       staged.value = [];
       unstaged.value = [];
@@ -206,21 +231,23 @@ export const useGitStore = defineStore("git", () => {
       hasUpstream.value = false;
       log.value = [];
     } finally {
-      if (!silent) loading.value = false;
+      if (!silent && !stale(g)) loading.value = false;
     }
   }
 
-  async function refreshUpstream() {
+  async function refreshUpstream(dir = cwd.value, g = gen) {
     try {
       // counts: "<behind>\t<ahead>" relative to upstream
-      const out = await runGit(cwd.value, [
+      const out = await runGit(dir, [
         "rev-list", "--left-right", "--count", "@{upstream}...HEAD",
       ]);
+      if (stale(g)) return;
       const [b, a] = out.trim().split(/\s+/);
       behind.value = parseInt(b, 10) || 0;
       ahead.value = parseInt(a, 10) || 0;
       hasUpstream.value = true;
     } catch {
+      if (stale(g)) return;
       // no upstream configured
       ahead.value = 0;
       behind.value = 0;
@@ -228,11 +255,12 @@ export const useGitStore = defineStore("git", () => {
     }
   }
 
-  async function refreshLog() {
+  async function refreshLog(dir = cwd.value, g = gen) {
     try {
-      const out = await runGit(cwd.value, [
+      const out = await runGit(dir, [
         "log", "-30", "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%cr",
       ]);
+      if (stale(g)) return;
       log.value = out
         .split("\n")
         .filter((l) => l.length > 0)
@@ -241,19 +269,31 @@ export const useGitStore = defineStore("git", () => {
           return { hash, shortHash, subject, author, relTime };
         });
     } catch {
-      log.value = [];
+      if (!stale(g)) log.value = [];
     }
   }
 
-  async function push() {
-    if (!cwd.value) return;
+  // `branch`/`hasUpstream` describe whatever cwd points at now, so a push for
+  // some OTHER directory has to ask git about that one instead.
+  async function branchStateOf(dir: string) {
+    const branchName = await runGit(dir, ["branch", "--show-current"]).then((o) => o.trim()).catch(() => "");
+    const upstream = await runGit(dir, ["rev-parse", "--abbrev-ref", "@{upstream}"]).then(() => true).catch(() => false);
+    return { branchName, upstream };
+  }
+
+  // "Commit & push" pins the repo it started in: generating a commit message
+  // can take up to 180 s, and a workspace switch during it used to leave the
+  // commit unpushed and push the newly-selected project instead.
+  async function push(dir = cwd.value) {
+    if (!dir) return;
     pushing.value = true;
     error.value = null;
     try {
-      const args = hasUpstream.value
-        ? ["push"]
-        : ["push", "-u", "origin", branch.value];
-      await runGit(cwd.value, args);
+      const { branchName, upstream } = dir === cwd.value
+        ? { branchName: branch.value, upstream: hasUpstream.value }
+        : await branchStateOf(dir);
+      const args = upstream ? ["push"] : ["push", "-u", "origin", branchName];
+      await runGit(dir, args);
       await refresh();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : "git push failed";
@@ -264,10 +304,11 @@ export const useGitStore = defineStore("git", () => {
 
   async function pull() {
     if (!cwd.value || !hasUpstream.value) return;
+    const dir = cwd.value;
     pulling.value = true;
     error.value = null;
     try {
-      await runGit(cwd.value, ["pull", "--ff-only"]);
+      await runGit(dir, ["pull", "--ff-only"]);
       await refresh();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : "git pull failed";
@@ -284,13 +325,13 @@ export const useGitStore = defineStore("git", () => {
     return { model: ui.textGenerationModel, policy: ui.textGenerationPolicy };
   }
 
-  async function generateCommitMessage() {
-    if (!cwd.value || !hasWorkingTreeChanges.value || generating.value) return;
+  async function generateCommitMessage(dir = cwd.value) {
+    if (!dir || !hasWorkingTreeChanges.value || generating.value) return;
     generating.value = true;
     generateError.value = null;
     try {
-      await stageAllIfNeeded();
-      const out = await invoke<GitOutput>("generate_commit_message", { cwd: cwd.value, ...textGenPrefs() });
+      await stageAllIfNeeded(dir);
+      const out = await invoke<GitOutput>("generate_commit_message", { cwd: dir, ...textGenPrefs() });
       if (out.code !== 0) throw new Error(out.stderr || "commit message generation failed");
       commitMsg.value = out.stdout.trim();
     } catch (e: unknown) {
@@ -312,6 +353,7 @@ export const useGitStore = defineStore("git", () => {
 
   function setCwd(path: string) {
     if (path === cwd.value) return;
+    gen++;
     cwd.value = path;
     diff.value = "";
     diffFile.value = null;
@@ -341,10 +383,10 @@ export const useGitStore = defineStore("git", () => {
     () => staged.value.length > 0 || unstaged.value.length > 0 || untracked.value.length > 0,
   );
 
-  async function stageAllIfNeeded() {
+  async function stageAllIfNeeded(dir = cwd.value) {
     if (staged.value.length > 0) return;
     if (unstaged.value.length === 0 && untracked.value.length === 0) return;
-    await runGit(cwd.value, ["add", "-A"]);
+    await runGit(dir, ["add", "-A"]);
     await refresh(true);
   }
 
@@ -368,19 +410,31 @@ export const useGitStore = defineStore("git", () => {
 
   async function commit() {
     if (committing.value) return;
+    // The whole commit belongs to the repo it started in, and it decides WHAT
+    // to do before it awaits anything: the refs below describe `dir` only until
+    // the first await, after which a workspace switch may have refreshed them
+    // for another repo. Re-reading them mid-commit is what made "Commit & push"
+    // do nothing after switching workspaces — it asked the new workspace
+    // whether the old one had anything staged, got "no", and returned.
+    const dir = cwd.value;
+    let msg = commitMsg.value.trim();
+    const needsStaging = staged.value.length === 0
+      && (unstaged.value.length > 0 || untracked.value.length > 0);
+    if (!dir || (staged.value.length === 0 && !needsStaging)) return;
     committing.value = true;
     try {
-      await stageAllIfNeeded();
-      if (staged.value.length === 0) return;
-      if (!commitMsg.value.trim()) {
-        await generateCommitMessage();
-        if (!commitMsg.value.trim()) return;
+      if (needsStaging) await runGit(dir, ["add", "-A"]);
+      if (!msg) {
+        await generateCommitMessage(dir);
+        msg = commitMsg.value.trim();
+        if (!msg) return;
       }
-      await runGit(cwd.value, ["commit", "-m", commitMsg.value.trim()]);
+      await runGit(dir, ["commit", "-m", msg]);
       commitMsg.value = "";
       diff.value = "";
       diffFile.value = null;
       await refresh();
+      return dir;
     } finally {
       committing.value = false;
     }
@@ -413,13 +467,14 @@ export const useGitStore = defineStore("git", () => {
     }
   }
 
-  async function fetchBranches() {
-    if (!cwd.value) return;
+  async function fetchBranches(dir = cwd.value, g = gen) {
+    if (!dir) return;
     try {
-      const out = await runGit(cwd.value, ["branch", "--format=%(refname:short)"]);
+      const out = await runGit(dir, ["branch", "--format=%(refname:short)"]);
+      if (stale(g)) return;
       branches.value = out.split("\n").map((b) => b.trim()).filter(Boolean);
     } catch {
-      branches.value = [];
+      if (!stale(g)) branches.value = [];
     }
   }
 
@@ -487,6 +542,6 @@ export const useGitStore = defineStore("git", () => {
     setCwd, refresh, stageFile, unstageFile, unstageAll, stageAll, stageAllIfNeeded, commit, showDiff, clearDiff, fetchAllDiff, gitInit,
     push, pull, refreshLog, generateCommitMessage, stagedFileStats, generateBranchName,
     branches, fetching, fetchBranches, switchBranch, checkoutBranchForWorkspace, createBranch, fetch, discardFile,
-    prByWs, branchByWs, fetchPr, fetchPrs,
+    prByWs, branchByWs, ensureBranch, fetchPr, fetchPrs,
   };
 });

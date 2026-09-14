@@ -338,7 +338,20 @@ async function popout() {
 }
 const selectedWsId = ref<number | null>(wsStore.active?.id ?? null);
 const selectedWsIdModel = computed<string | undefined>({ get: () => selectedWsId.value?.toString(), set: (id) => { selectedWsId.value = id ? Number(id) : null; } });
-const workspaceOptions = computed(() => wsStore.topLevel.map((workspace) => ({ value: String(workspace.id), label: workspace.name })));
+// Worktrees belong in here too: they are separate checkouts with their own
+// status, and listing only topLevel meant that whenever the active workspace
+// was a worktree the picker showed nothing, the lookups below found nothing,
+// and the panel kept displaying the previously selected repo's git.
+const workspaceOptions = computed(() =>
+  wsStore.topLevel.flatMap((w) => [
+    { value: String(w.id), label: w.name },
+    ...(wsStore.worktreesByParent[w.id] ?? []).map((t) => ({
+      value: String(t.id),
+      label: `${w.name} / ${t.worktree_branch || t.name}`,
+    })),
+  ]),
+);
+const selectedWs = computed(() => wsStore.workspaces.find((w) => w.id === selectedWsId.value) ?? null);
 const showBranchDropdown = ref(false);
 const newBranchMode = ref(false);
 const newBranchName = ref("");
@@ -362,9 +375,8 @@ const activeType = computed(() => {
 });
 
 // When workspace selection changes, point git store at that workspace
-watch(selectedWsId, (id) => {
-  const w = wsStore.topLevel.find((w) => w.id === id);
-  if (w) git.setCwd(w.path);
+watch(selectedWsId, () => {
+  if (selectedWs.value) git.setCwd(selectedWs.value.path);
 }, { immediate: true });
 
 // When active workspace changes externally, follow it
@@ -420,12 +432,11 @@ function applyType(t: string) {
 }
 
 async function commitAndPush() {
-  await git.commit();
-  await git.push();
+  await git.push(await git.commit());
 }
 
 async function openCommitDiff(c: GitCommit) {
-  const w = wsStore.topLevel.find((w) => w.id === selectedWsId.value);
+  const w = selectedWs.value;
   if (!w) return;
 
   if (selectedCommit.value?.hash === c.hash) {
@@ -468,7 +479,7 @@ async function openCommitDiff(c: GitCommit) {
 
 async function openCommitFileDiff(f: CommitFile) {
   if (!selectedCommit.value) return;
-  const w = wsStore.topLevel.find((w) => w.id === selectedWsId.value);
+  const w = selectedWs.value;
   if (!w) return;
   if (commitDiff.value?.filePath === f.path) { commitDiff.value = null; return; }
   const out = await invoke<{ stdout: string; code: number }>("run_git", {

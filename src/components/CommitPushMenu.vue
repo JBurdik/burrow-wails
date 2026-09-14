@@ -120,8 +120,9 @@ async function runPrimary() {
   if (primaryDisabled.value) return;
   if (primaryMode.value === "pull") return void (await git.pull());
   if (primaryMode.value === "push") return void (await git.push());
-  await git.commit();
-  await git.push();
+  // Push the repo the commit landed in, not whichever one is selected by
+  // the time an auto-generated message has come back.
+  await git.push(await git.commit());
 }
 
 async function doCommit() {
