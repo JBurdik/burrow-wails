@@ -223,6 +223,21 @@ func (a *App) DeleteChat(id int64) error {
 	return nil
 }
 
+// chatIsSubagent reports whether id belongs to another chat — the guard the
+// control API uses to refuse a sub-agent's own spawn calls. An unknown chat
+// is not a sub-agent: false on any error, never a client-visible failure for
+// what is really just "can't tell".
+func (a *App) chatIsSubagent(id int64) bool {
+	if a.db == nil {
+		return false
+	}
+	var parent int64
+	if err := a.db.QueryRow(`SELECT parent_chat_id FROM chats WHERE id = ?`, id).Scan(&parent); err != nil {
+		return false
+	}
+	return parent > 0
+}
+
 // migrateChatsFromConfig moves the config.json chat list into SQLite, once.
 //
 // Ids are PRESERVED, not reassigned: chat_stream(chat_id), chat_messages and

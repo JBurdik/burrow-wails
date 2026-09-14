@@ -267,6 +267,13 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 			http.Error(w, "bad request body: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		// caller_is_subagent is never trusted from the request: a prompt can put
+		// anything in the body, so the app — not the caller — decides whether the
+		// calling chat is itself somebody's sub-agent.
+		if params == nil {
+			params = control.Params{}
+		}
+		params["caller_is_subagent"] = a.chatIsSubagent(params.Int("parent_chat_id"))
 		if a.control == nil {
 			http.Error(w, "control surface not ready", http.StatusServiceUnavailable)
 			return

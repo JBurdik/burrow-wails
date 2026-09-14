@@ -243,3 +243,20 @@ func waitForIDs(t *testing.T, mu *sync.Mutex, seen map[string]string, actions ..
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// The guard has to be server-side: a prompt can say anything, so the app is
+// what decides whether the caller is already somebody's sub-agent.
+func TestCallerIsSubagentIsServerDerived(t *testing.T) {
+	a, _ := newChatApp(t)
+	t.Cleanup(busReset)
+	busReset()
+	parent, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "parent"})
+	child, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "child", ParentChatID: parent.ID})
+
+	if a.chatIsSubagent(parent.ID) {
+		t.Error("a top-level chat was called a sub-agent")
+	}
+	if !a.chatIsSubagent(child.ID) {
+		t.Error("a child chat was not recognised as a sub-agent")
+	}
+}

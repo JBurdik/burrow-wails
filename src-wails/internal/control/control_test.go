@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -194,6 +195,58 @@ func TestRepoOfClimbsToRoot(t *testing.T) {
 	}
 	if id != 1 || path != "/tmp/repo" {
 		t.Errorf("got %d %s, want the parent repo", id, path)
+	}
+}
+
+// fakeUI is a UIBridge test double: it records the action and args it was
+// called with and hands back a canned result, so a verb's args map can be
+// asserted on without a real frontend to ack it.
+type fakeUI struct {
+	action string
+	args   map[string]any
+	result any
+}
+
+func (f *fakeUI) Do(ctx context.Context, action string, args map[string]any) (json.RawMessage, error) {
+	f.action, f.args = action, args
+	return json.Marshal(f.result)
+}
+
+// A spawn made from inside a thread produces a sub-agent OF that thread, and a
+// sub-agent is a chat: a terminal tab would put it back in the Sidebar, which
+// is the arrangement this feature exists to replace.
+func TestSpawnFromChatForcesChatTargetAndCarriesParent(t *testing.T) {
+	ui := &fakeUI{result: SpawnResult{ChatID: 9, Target: "chat"}}
+	c := newTestCore(t, Deps{UI: ui})
+
+	if _, err := c.Call(context.Background(), ScopeLocal, "spawn", Params{
+		"task":           "investigate the cache bug",
+		"target":         "tab",
+		"parent_chat_id": float64(7),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ui.args["target"] != "chat" {
+		t.Errorf("target = %v, want chat", ui.args["target"])
+	}
+	if ui.args["parent_chat_id"] != int64(7) {
+		t.Errorf("parent_chat_id = %v, want 7", ui.args["parent_chat_id"])
+	}
+}
+
+// Depth is capped at one level: recursive agent trees run away in cost and the
+// panel that shows them is a flat list.
+func TestSubAgentCannotSpawn(t *testing.T) {
+	ui := &fakeUI{result: SpawnResult{ChatID: 9, Target: "chat"}}
+	c := newTestCore(t, Deps{UI: ui})
+
+	_, err := c.Call(context.Background(), ScopeLocal, "spawn", Params{
+		"task":               "do more work",
+		"parent_chat_id":     float64(7),
+		"caller_is_subagent": true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "sub-agent cannot spawn sub-agents") {
+		t.Fatalf("err = %v, want the sub-agent guard", err)
 	}
 }
 

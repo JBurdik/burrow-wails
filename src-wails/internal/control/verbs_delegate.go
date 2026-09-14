@@ -46,6 +46,8 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work; defaults to the caller's"},
 			{Name: "target", Type: "string", Desc: "tab (default; live terminal, result capture) or chat (structured, in the sidebar)"},
 			{Name: "capture", Type: "boolean", Desc: "Capture the agent's final message for wait_result (tab target only, default true)"},
+			{Name: "parent_chat_id", Type: "integer", Desc: "Set automatically from BURROW_CHAT_ID — the thread this sub-agent belongs to"},
+			{Name: "caller_is_subagent", Type: "boolean", Desc: "Set automatically — a sub-agent may not spawn further sub-agents"},
 		},
 		Scope: ScopeLocal,
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.spawn(ctx, p) },
@@ -112,9 +114,19 @@ func delegationVerbs(c *Core) []Verb {
 }
 
 func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
+	if p.Bool("caller_is_subagent") {
+		return nil, fmt.Errorf("sub-agent cannot spawn sub-agents")
+	}
+	parent := p.Int("parent_chat_id")
+
 	target := p.Str("target")
 	if target == "" {
 		target = "tab"
+	}
+	// A sub-agent that belongs to a thread IS a chat: a terminal tab would put
+	// it back in the Sidebar as a peer, which is the arrangement this replaces.
+	if parent > 0 {
+		target = "chat"
 	}
 	if target != "tab" && target != "chat" {
 		return nil, fmt.Errorf("spawn: target must be tab or chat, got %q", target)
@@ -129,12 +141,13 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	}
 
 	args := map[string]any{
-		"task":   p.Str("task"),
-		"agent":  p.Str("agent"),
-		"model":  p.Str("model"),
-		"cwd":    p.Str("cwd"),
-		"target": target,
-		"token":  token,
+		"task":           p.Str("task"),
+		"agent":          p.Str("agent"),
+		"model":          p.Str("model"),
+		"cwd":            p.Str("cwd"),
+		"target":         target,
+		"token":          token,
+		"parent_chat_id": parent,
 	}
 	var res SpawnResult
 	if err := c.ui(ctx, "spawn", args, &res); err != nil {
