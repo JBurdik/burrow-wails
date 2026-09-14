@@ -389,3 +389,21 @@ func TestCollectResultsSkipsRunningChild(t *testing.T) {
 		t.Fatalf("MarkCollected called %d times for a still-running child, want 0", chats.marked)
 	}
 }
+
+// send_to_tab types into a PTY, which a chat sub-agent does not have. Without
+// this verb a parent can only start a child and wait — it cannot correct one
+// that is heading the wrong way.
+func TestChatSendReachesTheUI(t *testing.T) {
+	ui := &fakeUI{}
+	c := newTestCore(t, Deps{UI: ui})
+
+	if _, err := c.Call(context.Background(), ScopeLocal, "chat_send", Params{"chat_id": float64(9), "text": "stop and summarise"}); err != nil {
+		t.Fatal(err)
+	}
+	if ui.action != "chat_send" {
+		t.Fatalf("action = %q", ui.action)
+	}
+	if ui.args["chatId"] != int64(9) || ui.args["text"] != "stop and summarise" {
+		t.Fatalf("args = %v", ui.args)
+	}
+}

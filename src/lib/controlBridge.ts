@@ -58,6 +58,8 @@ async function perform(action: string, args: Record<string, unknown>): Promise<u
       return { ok: true };
     case "spawn":
       return spawn(args);
+    case "chat_send":
+      return chatSendFollowUp(num(args.chatId), str(args.text));
     case "list_agents":
       return listAgents();
     case "agent_status":
@@ -198,6 +200,27 @@ async function spawn(args: Record<string, unknown>) {
   });
   if (ptyId === undefined) throw new Error("the workspace did not open a tab (is it still loading?)");
   return { pty_id: ptyId, workspace_id: target.id, agent: instance.name };
+}
+
+/** A follow-up into a child's session — the same call the composer makes, so a
+ *  steered child is indistinguishable from one the user typed into. Goes
+ *  straight to the provider bindings, matching AgentChat.vue's own send call
+ *  for each transport, rather than through chatSession (which owns the
+ *  transcript stream, not sending) — deliberately, since the whole point is
+ *  reaching a sub-agent whose AgentChat view is NOT mounted. */
+async function chatSendFollowUp(chatId: number, text: string) {
+  if (!chatId) throw new Error("chat_send needs a chat_id");
+  if (!text.trim()) throw new Error("chat_send needs text");
+  const session = useClaudeChatsStore().sessions.find((s) => s.id === chatId);
+  if (!session) throw new Error(`no chat with id ${chatId}`);
+  if (session.transport === "claude-cli") {
+    await invoke("claude_send", { id: chatId, text, sessionId: session.claudeSessionId || null, images: [] });
+  } else if (session.transport === "codex-app-server") {
+    await invoke("codex_send", { id: chatId, text, images: [] });
+  } else {
+    await invoke("acp_send", { id: chatId, text, images: [] });
+  }
+  return { chat_id: chatId, sent: true };
 }
 
 function listAgents() {

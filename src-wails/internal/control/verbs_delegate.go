@@ -97,6 +97,24 @@ func delegationVerbs(c *Core) []Verb {
 		Scope: ScopeLocal,
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.sendToTab(p) },
 	}, {
+		Name:    "chat_send",
+		Summary: "Send a follow-up message to a chat sub-agent and submit it",
+		Args: []Arg{
+			{Name: "chat_id", Type: "integer", Desc: "Chat to send to — a sub-agent id from agent_status", Required: true},
+			{Name: "text", Type: "string", Desc: "Message to send", Required: true},
+		},
+		Scope: ScopeLocal,
+		Fn: func(ctx context.Context, p Params) (any, error) {
+			if p.Int("chat_id") <= 0 {
+				return nil, fmt.Errorf("chat_send needs a chat_id")
+			}
+			if strings.TrimSpace(p.Str("text")) == "" {
+				return nil, fmt.Errorf("chat_send needs text")
+			}
+			var out any
+			return out, c.ui(ctx, "chat_send", map[string]any{"chatId": p.Int("chat_id"), "text": p.Str("text")}, &out)
+		},
+	}, {
 		Name:    "wait_result",
 		Summary: "Block until a spawned agent finishes and return its final message",
 		Args: []Arg{
