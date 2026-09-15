@@ -292,6 +292,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
       }
     }
     sessions.value = next;
+    pruneActiveByWs();
     // ONLY for sessions that do not have an actor yet. Spawning
     // unconditionally re-created every actor on every reload, which reset
     // every chat's status to idle and orphaned the previous actor without
@@ -382,6 +383,28 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     return sessions.value
       .filter((s) => s.workspaceId === workspaceId && !!s.archivedAt && !s.parentChatId)
       .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0));
+  }
+
+  /** Drop any saved selection that is not a live THREAD of its workspace.
+   *
+   *  `activeSession` filters sub-agents out, so a slot holding one resolves to
+   *  `undefined` — and every caller reads that as "nothing selected here".
+   *  `ensureSession` then falls back to `existing[0]`, which is why a stale
+   *  entry made clicking a thread land on the workspace's FIRST one instead.
+   *  A spawn used to write children here (fixed where create() assigns), but
+   *  the value it already wrote lives on in config.json until something
+   *  removes it — deleted chats leave the same wreckage. */
+  function pruneActiveByWs() {
+    let changed = false;
+    for (const [wsKey, chatId] of Object.entries(activeByWs.value)) {
+      const wsId = Number(wsKey);
+      const ok = sessions.value.some((s) => s.id === chatId && s.workspaceId === wsId && !s.parentChatId);
+      if (!ok) {
+        delete activeByWs.value[wsId];
+        changed = true;
+      }
+    }
+    if (changed) setConfig(ACTIVE_KEY, activeByWs.value);
   }
 
   function activeSession(workspaceId: number): ClaudeSession | undefined {
