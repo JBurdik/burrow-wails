@@ -355,13 +355,18 @@
           >
             <PhRobot :size="12" class="shrink-0 text-muted-foreground" />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ child.title }}</span>
-            <span class="shrink-0 text-[9px] text-muted-foreground group-hover:hidden">{{ childPhase[child.id] ?? "idle" }}</span>
-            <button
-              class="hidden shrink-0 rounded-[var(--radius-nav)] p-[3px] text-muted-foreground hover:bg-hover hover:text-destructive group-hover:block"
-              :title="`Close ${child.title}`"
-              :aria-label="`Close ${child.title}`"
-              @click.stop="askCloseChild(child.id)"
-            ><PhX :size="11" /></button>
+            <!-- Phase label reserves the slot's width (invisible, not hidden, so the box stays); the
+                 close button overlays it via absolute + opacity, so it never resizes the row and stays
+                 focusable (unlike display:none) for keyboard/AX users. -->
+            <span class="relative shrink-0 text-[9px] text-muted-foreground">
+              <span class="group-hover:invisible">{{ childPhase[child.id] ?? "idle" }}</span>
+              <button
+                class="absolute inset-0 flex items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground opacity-0 pointer-events-none transition-opacity hover:bg-hover hover:text-destructive group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+                :title="`Close ${child.title}`"
+                :aria-label="`Close ${child.title}`"
+                @click.stop="askCloseChild(child.id)"
+              ><PhX :size="11" /></button>
+            </span>
           </div>
 
           <!-- Task-tool invocations by this thread, newest first -->
