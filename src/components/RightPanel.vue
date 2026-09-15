@@ -332,7 +332,6 @@
           <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" aria-label="Back to sub-agents" @click="closeChildDetail"><PhCaretLeft :size="12" /></button>
           <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold text-foreground">{{ chatTitle(openChildId) }}</span>
         </div>
-        <div id="subagent-slot" class="flex min-h-0 flex-1 flex-col"></div>
       </template>
 
       <template v-else>
@@ -497,6 +496,21 @@
       class="min-h-0 flex-1"
     />
     <div v-if="activeTab === 'terminal' && !terminalWsIds.includes(wsKey)" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
+
+    <!-- Where SubAgentHost.vue teleports the open sub-agent's chat.
+         PERMANENT, and `v-show` rather than `v-if` on purpose: Vue resolves a
+         Teleport's `to` selector once, when the Teleport MOUNTS, and caches the
+         element. Those Teleports mount as soon as a child chat exists — long
+         before anyone opens one — so if this slot only existed while a child
+         was open, they would cache "not found" and later render their chat in
+         place instead: beside the panel, with the panel's own body left empty.
+         A display:none element is still found by the selector, so keeping it in
+         the DOM at all times is what makes the teleport land here. -->
+    <div
+      v-show="activeTab === 'agents' && openChildId !== null"
+      id="subagent-slot"
+      class="flex min-h-0 flex-1 flex-col"
+    ></div>
 
     <!-- Restore confirm — overwrites files on disk, so it always asks first -->
     <Teleport to="body">
