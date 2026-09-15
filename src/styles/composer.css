@@ -61,51 +61,58 @@ textarea {
 /* An inline chip. contenteditable="false" in the markup, which is what makes
    one Backspace take the whole thing and stops the caret landing inside.
 
-   Sized to sit INSIDE a line of 13px text without changing its height: no
-   vertical padding, 1.05em line-box, inherited font-size. A chip that is taller
-   than the line it lives in pushes the line apart and stops reading as text. */
+   inline-flex, not inline: an icon + label built as two separate DOM nodes
+   inside a plain `display: inline` box are two separate inline-level boxes,
+   and a contenteditable=false region gives Chrome's line-breaker an atomic
+   boundary *between* them it is willing to use when the composer is narrow —
+   the icon lands on one line and the label wraps to the next, even under
+   `white-space: nowrap`. inline-flex makes icon+label one atomic inline box
+   that cannot be split, while still sitting inline with surrounding text.
+   `line-height: 1` + `vertical-align: -0.15em` keep it from taller than the
+   13px text line it lives in. */
 .composer-inline-chip {
-  display: inline;
-  padding: 0 3px;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  line-height: 1;
+  vertical-align: -0.15em;
+  border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 15%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--accent);
-  font-weight: 550;
+  font-weight: 600;
   white-space: nowrap;
 }
-/* Small diamond marks a skill; a command keeps its slash instead (see
-   ComposerTextInput's render), so the two never need the same glyph. */
+/* Small diamond marks a skill; a command/file keep their icon instead (see
+   ComposerTextInput's render), so the three never need the same glyph. */
 .composer-inline-chip[data-chip="skill"]::before {
   content: "◆";
-  margin-right: 3px;
   font-size: 0.72em;
-  opacity: 0.7;
+  opacity: 0.75;
 }
-/* A built-in command is app plumbing, not something the user installed — muted
-   surface rather than the accent, so a `/compact` cannot be mistaken for a
-   skill that is about to run. */
+/* A command and a file mention each get their own hue — same colored-pill
+   treatment as a skill, not the older muted/grey surface, so all three read
+   as equally "alive" mentions rather than command/file looking like disabled
+   chrome next to a skill. */
 .composer-inline-chip[data-chip="command"] {
-  background: var(--surface-elevated);
-  box-shadow: inset 0 0 0 1px var(--border);
-  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--blue, #3b82f6) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue, #3b82f6) 32%, transparent);
+  color: var(--blue, #3b82f6);
   font-family: var(--font-mono);
 }
-/* A file mention is a reference, not app plumbing or an installed skill — same
-   muted treatment as a command, distinguished only by its icon. */
 .composer-inline-chip[data-chip="file"] {
-  background: var(--surface-elevated);
-  box-shadow: inset 0 0 0 1px var(--border);
-  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--green, #22c55e) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green, #22c55e) 32%, transparent);
+  color: var(--green, #22c55e);
 }
 /* PhTerminal / PhFile path data inlined by ComposerTextInput's render(). */
 .composer-chip-icon {
   width: 0.72em;
   height: 0.72em;
-  margin-right: 3px;
-  vertical-align: -0.05em;
+  flex: none;
   fill: currentColor;
-  opacity: 0.85;
+  opacity: 0.9;
 }
 /* The browser paints a non-editable node as one selected block; keep it legible
    rather than accent-on-accent. */

@@ -572,7 +572,7 @@ import BrowserPane from "./BrowserPane.vue";
 import XTerm from "./XTerm.vue";
 import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
 import ExtensionNativeSurface from "./ExtensionNativeSurface.vue";
-import { nextPtyId } from "@/lib/ptyId";
+import { initPtyCounter, nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
@@ -834,10 +834,35 @@ const activeExtensionSurface = computed(() =>
 const terminalPtyByWs = reactive<Record<number, number>>({});
 const terminalCwdByWs = reactive<Record<number, string>>({});
 const terminalWsIds = computed(() => Object.keys(terminalPtyByWs).map(Number));
-function ensureTerminalPty(id: number) {
-  if (!(id in terminalPtyByWs)) {
+const terminalPtyStarts = new Map<number, Promise<void>>();
+
+// The main terminal restores its saved/daemon sessions asynchronously. The RP
+// can be opened before that restore has advanced the shared id counter, which
+// used to let it reuse a live id. The daemon treats that as an attach, so the
+// fresh RP xterm had no shell output and looked like a permanently blank pane.
+async function ensureTerminalPty(id: number) {
+  if (id in terminalPtyByWs) return;
+  const running = terminalPtyStarts.get(id);
+  if (running) return running;
+
+  const start = (async () => {
+    const sessions = await invoke<Array<{ pty_id: number }>>("list_pty_sessions").catch(() => []);
+    // Keep the retired Mission Control id range from pushing ordinary tabs up.
+    const maxLiveId = sessions.reduce(
+      (max, session) => session.pty_id < 1_000_000 ? Math.max(max, session.pty_id) : max,
+      0,
+    );
+    initPtyCounter(maxLiveId);
+    // Another open may have completed while the daemon request was in flight.
+    if (id in terminalPtyByWs) return;
     terminalPtyByWs[id] = nextPtyId();
     terminalCwdByWs[id] = props.cwd;
+  })();
+  terminalPtyStarts.set(id, start);
+  try {
+    await start;
+  } finally {
+    terminalPtyStarts.delete(id);
   }
 }
 
@@ -852,16 +877,32 @@ const openedTabs = computed(() => openedTabIds.value
   .map((id) => tabs.value.find((tab) => tab.id === id))
   .filter((tab): tab is NonNullable<typeof tab> => Boolean(tab)));
 
-function openSurface(id: string) {
+async function openSurface(id: string) {
+  if (!props.open) emit("openPanel");
+  // Allocate the PTY before activating the surface. Otherwise Vue can mount
+  // XTerm with an id that has not been checked against the daemon yet.
+  if (id === "terminal") await ensureTerminalPty(wsKey.value);
   if (!openedTabIds.value.includes(id)) openedTabIds.value.push(id);
   activeTab.value = id;
-  if (id === "terminal") ensureTerminalPty(wsKey.value);
   if (id === "browser") ensureBrowserPane(wsKey.value);
-  if (!props.open) emit("openPanel");
   if (id === "manager") emit("managerOpen");
 }
 
 function closeSurface(id: string) {
+  if (id === "terminal") {
+    const workspaceId = wsKey.value;
+    const ptyId = terminalPtyByWs[workspaceId];
+    // Closing the RP Terminal means close it, not merely hide a live scratch
+    // shell forever. Remove it from the render list first so its XTerm listener
+    // is disposed; the daemon kill then makes the PTY unrecoverably gone.
+    if (ptyId !== undefined) {
+      delete terminalPtyByWs[workspaceId];
+      delete terminalCwdByWs[workspaceId];
+      void invoke("kill_pty", { id: ptyId }).catch((error) =>
+        console.warn("[right-panel] could not close terminal", error),
+      );
+    }
+  }
   openedTabIds.value = openedTabIds.value.filter((openedId) => openedId !== id);
   if (activeTab.value === id) activeTab.value = openedTabs.value[0]?.id ?? null;
 }
