@@ -350,12 +350,18 @@
           <div
             v-for="child in childList"
             :key="child.id"
-            class="flex cursor-pointer items-center gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
+            class="group flex cursor-pointer items-center gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
             @click="openChild(child.id)"
           >
             <PhRobot :size="12" class="shrink-0 text-muted-foreground" />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ child.title }}</span>
-            <span class="shrink-0 text-[9px] text-muted-foreground">{{ childPhase[child.id] ?? "idle" }}</span>
+            <span class="shrink-0 text-[9px] text-muted-foreground group-hover:hidden">{{ childPhase[child.id] ?? "idle" }}</span>
+            <button
+              class="hidden shrink-0 rounded-[var(--radius-nav)] p-[3px] text-muted-foreground hover:bg-hover hover:text-destructive group-hover:block"
+              :title="`Close ${child.title}`"
+              :aria-label="`Close ${child.title}`"
+              @click.stop="askCloseChild(child.id)"
+            ><PhX :size="11" /></button>
           </div>
 
           <!-- Task-tool invocations by this thread, newest first -->
@@ -404,6 +410,23 @@
         <div class="flex justify-end gap-2">
           <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="spawnDialogOpen = false">Cancel</button>
           <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmSpawnDialog" :disabled="!spawnTask.trim()">Spawn</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Closing a sub-agent deletes it: an archived child would be reachable
+         from nowhere (archivedSessionsForWs filters children out), so it asks
+         rather than hiding the work somewhere the user cannot get it back. -->
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="closeChildId !== null" @click.self="closeChildId = null">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+        <h3 class="text-sm font-semibold text-foreground">Close this sub-agent?</h3>
+        <p class="m-0 text-[12px] leading-relaxed text-muted-foreground">
+          <span class="text-secondary-foreground">{{ chatTitle(closeChildId) }}</span> and its transcript are deleted, and its
+          agent is stopped if it is still working. What it already reported stays in this thread.
+        </p>
+        <div class="flex justify-end gap-2">
+          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="closeChildId = null">Cancel</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" @click="confirmCloseChild">Close</button>
         </div>
       </div>
     </div>
@@ -604,6 +627,22 @@ function openChild(id: number) {
 // panel closing, and on a workspace switch, below.
 function closeChildDetail() {
   if (openChildId.value !== null) openChildId.value = null;
+}
+
+// Closing a sub-agent removes it. `remove()` stops its process, drops its
+// stream session and deletes the row (Go cascades any of its own children),
+// so the detail view has to let go of it first or it would sit on an id that
+// no longer exists.
+const closeChildId = ref<number | null>(null);
+function askCloseChild(id: number) {
+  closeChildId.value = id;
+}
+async function confirmCloseChild() {
+  const id = closeChildId.value;
+  closeChildId.value = null;
+  if (id === null) return;
+  if (openChildId.value === id) closeChildDetail();
+  await chats.remove(id);
 }
 
 // Phase per child, straight off the bus — the same event Terminal.vue's
