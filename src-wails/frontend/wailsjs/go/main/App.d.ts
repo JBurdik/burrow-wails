@@ -112,6 +112,8 @@ export function GetTailscaleStatus():Promise<main.TailscaleStatus>;
 
 export function HomeDir():Promise<string>;
 
+export function InstallAgentDocs():Promise<void>;
+
 export function InstallExtension(arg1:string):Promise<void>;
 
 export function InstallUpdate(arg1:string,arg2:string):Promise<void>;

@@ -222,6 +222,10 @@ export function HomeDir() {
   return window['go']['main']['App']['HomeDir']();
 }
 
+export function InstallAgentDocs() {
+  return window['go']['main']['App']['InstallAgentDocs']();
+}
+
 export function InstallExtension(arg1) {
   return window['go']['main']['App']['InstallExtension'](arg1);
 }

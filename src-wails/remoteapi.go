@@ -529,6 +529,8 @@ var remoteDenied = map[string]string{
 	"InstallUpdate": "swaps the running .app bundle; must not be triggerable over the network",
 	"RelaunchApp":   "swaps the running .app bundle; must not be triggerable over the network",
 
+	"InstallAgentDocs": "writes agent config files (~/.claude, ~/.codex, ~/.copilot) on this host; meaningless and potentially harmful triggered from a remote client",
+
 	// Float/task-live snapshot protocol (stubs.go). These call
 	// runtime.EventsEmit directly rather than busEmit — events_test.go's own
 	// wailsRuntimeAllowlist documents stubs.go's EventsEmit calls as "float

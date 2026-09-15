@@ -935,6 +935,17 @@
 
         <!-- Skills -->
         <section v-else-if="active === 'skills'" class="flex flex-col gap-3.5">
+          <div class="flex items-start gap-3 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3">
+            <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] bg-hover text-secondary-foreground"><PhSparkle :size="15" /></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[13px] font-semibold text-foreground">Burrow agent docs</div>
+              <div class="mt-0.75 text-[11.5px] leading-snug text-secondary-foreground">Reinstall the <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> skill and CLI rules for Claude, Codex and Copilot — normally happens automatically on app start, use this after a Burrow update if an agent seems out of date.</div>
+            </div>
+            <Button variant="outline" size="sm" class="shrink-0" :disabled="installingDocs" @click="installAgentDocs">
+              <PhArrowClockwise :size="11" :class="{ 'animate-spin': installingDocs }" /> {{ installDocsStatus || "Update skills" }}
+            </Button>
+          </div>
+
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
               <h2 class="text-[15px] font-semibold text-foreground">Skills</h2>
@@ -1423,6 +1434,26 @@ const blurControls = [
 
 // Deep-link target set by the caller (⌘P → "Keyboard Shortcuts" etc.).
 const active = ref(ui.settingsSection || "general");
+
+// ── Burrow agent docs (skill install/update) ────────────────────────────────
+const installingDocs = ref(false);
+const installDocsStatus = ref("");
+
+async function installAgentDocs() {
+  installingDocs.value = true;
+  installDocsStatus.value = "";
+  try {
+    const App = await import("../../src-wails/frontend/wailsjs/go/main/App");
+    await App.InstallAgentDocs();
+    installDocsStatus.value = "Updated";
+  } catch (e) {
+    console.error("InstallAgentDocs failed", e);
+    installDocsStatus.value = "Failed";
+  } finally {
+    installingDocs.value = false;
+    setTimeout(() => (installDocsStatus.value = ""), 2500);
+  }
+}
 
 // ── Skills manager ────────────────────────────────────────────────────────────
 type SkillInfo = { name: string; description: string; dir: string; enabled: boolean };

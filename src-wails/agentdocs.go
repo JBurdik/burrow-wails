@@ -29,6 +29,13 @@ const (
 	docEndMarker   = "<!-- BURROW:END -->"
 )
 
+// InstallAgentDocs re-runs the agent-docs install on demand (Settings /
+// command palette), so a user can pick up a skill update without restarting
+// the app.
+func (a *App) InstallAgentDocs() {
+	installAgentDocs()
+}
+
 func installAgentDocs() {
 	claude, codex, copilot := hookDirs()
 

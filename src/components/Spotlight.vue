@@ -241,6 +241,7 @@ const commandItems = computed<SpotlightItem[]>(() => {
     { id: "cmd-theme", title: "Change Theme", icon: PhPalette as Component, color: "#fbbf24", action: () => { openSettingsAt("appearance"); } },
     { id: "cmd-darklight", title: "Toggle Dark/Light Mode", icon: PhMoonStars as Component, color: "#a78bfa", action: () => { ui.toggleDarkLight(); close(); } },
     { id: "cmd-keys", title: "Keyboard Shortcuts", icon: PhKeyboard as Component, color: MUTED, keyId: "cheatsheet", action: () => { openSettingsAt("keybindings"); } },
+    { id: "cmd-update-skills", title: "Update Agent Skills (Claude/Codex/Copilot)", icon: PhSparkle as Component, color: "#f472b6", action: () => { openSettingsAt("skills"); } },
     { id: "cmd-repaint", title: "Repaint Terminals (un-scramble)", icon: PhArrowsClockwise as Component, color: "#fbbf24", keyId: "repaint", action: () => { emit("repaint"); close(); } },
   ];
   return defs
