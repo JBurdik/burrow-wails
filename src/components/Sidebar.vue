@@ -871,9 +871,12 @@ function selectWs(ws: Workspace) {
 }
 
 function selectTab(row: ActivityRow) {
-  if (store.active?.id !== row.ws.id) store.open(row.ws);
-  // The tab is part of the address, so this one navigation replaces the old
-  // setMode + closeWelcome + activate dance — and a deep link to it works.
+  // Navigate only. Opening the workspace here first would set `ws.active`
+  // synchronously while the route still named the OLD workspace, and App.vue's
+  // `ws.active` watcher reads that as a stale URL and replaces it with a bare
+  // `/ws/<id>` — dropping the tab. That is why clicking a thread in another
+  // project used to take two clicks: the first one only switched projects.
+  // The route watcher opens the workspace itself, in the right order.
   void router.push(`/ws/${row.ws.id}/tab/${row.tab.id}`);
 }
 
