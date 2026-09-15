@@ -149,6 +149,20 @@ export function useComposerCompletion(opts: ComposerCompletionOptions) {
   }
   void ensureSkills();
 
+  // The full repo file list, for ComposerTextInput to chip an `@path` the user
+  // already typed or picked — the suggestion list above is only the filtered
+  // top 8, not enough to recognize an arbitrary already-inserted mention.
+  const files = ref<string[]>([]);
+  const filesLoadedFor = ref<string | null>(null);
+  async function ensureFiles() {
+    const cwd = opts.cwd();
+    if (filesLoadedFor.value === cwd) return;
+    filesLoadedFor.value = cwd;
+    const list = await loadFiles(cwd);
+    if (filesLoadedFor.value === cwd) files.value = list;
+  }
+  void ensureFiles();
+
   const suggestions = ref<ComposerSuggestion[]>([]);
   const activeIndex = ref(0);
 
@@ -174,12 +188,13 @@ export function useComposerCompletion(opts: ComposerCompletionOptions) {
     const q = t.q.toLowerCase();
 
     if (t.kind === "@") {
-      const files = await loadFiles(opts.cwd());
+      void ensureFiles();
+      const fileList = await loadFiles(opts.cwd());
       // The cursor may have moved while git was running — a stale list landing
       // on top of a different query is worse than no list.
       const now = triggerAtCursor();
       if (now?.kind !== "@" || now.q !== t.q) return;
-      suggestions.value = files
+      suggestions.value = fileList
         .filter((p) => p.toLowerCase().includes(q))
         .sort((a, b) => {
           const ab = a.slice(a.lastIndexOf("/") + 1).toLowerCase();
@@ -281,7 +296,7 @@ export function useComposerCompletion(opts: ComposerCompletionOptions) {
   }
 
   return {
-    suggestions, activeIndex, skills,
+    suggestions, activeIndex, skills, files,
     update, apply, close, handleKeydown,
   };
 }

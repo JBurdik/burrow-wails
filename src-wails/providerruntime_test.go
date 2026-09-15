@@ -75,6 +75,19 @@ func TestNormalizeClaudeStreamLine(t *testing.T) {
 			want: []ProviderRuntimeEvent{{Type: EvtTurnCompleted, InputTokens: 12, OutputTokens: 34, CostUSD: 0.5}},
 		},
 		{
+			name: "the result reports the model's context window",
+			line: `{"type":"result","modelUsage":{"claude-opus-4":{"contextWindow":1000000},"claude-haiku":{"contextWindow":200000}}}`,
+			want: []ProviderRuntimeEvent{{Type: EvtTurnCompleted, ContextWindow: 1000000}},
+		},
+		{
+			name: "an assistant message reports the window it was sent with",
+			line: `{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":12,"output_tokens":34,"cache_read_input_tokens":5000,"cache_creation_input_tokens":700},"content":[{"type":"text","text":"hi"}]}}`,
+			want: []ProviderRuntimeEvent{
+				{Type: EvtContextUsage, ContextTokens: 5746, InputTokens: 12, OutputTokens: 34, CacheReadTokens: 5000, CacheCreationTokens: 700},
+				{Type: EvtTextDelta, MessageID: "m1", Text: "hi"},
+			},
+		},
+		{
 			name: "a generated title rides along with the turn boundary",
 			line: `{"type":"result","session_title":"Fix the parser"}`,
 			want: []ProviderRuntimeEvent{

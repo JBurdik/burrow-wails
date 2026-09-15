@@ -28,6 +28,10 @@ export interface ChatEvent {
   failed?: boolean;
   inputTokens?: number;
   outputTokens?: number;
+  contextTokens?: number;
+  contextWindow?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
   costUsd?: number;
   message?: string;
   title?: string;

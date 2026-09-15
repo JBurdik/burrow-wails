@@ -21,7 +21,7 @@
 import { nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import {
   chipSignature, flatOffset, isChip, locateOffset, serializeNodes, tokenize,
-  type FlatNode,
+  type ChipKind, type FlatNode,
 } from "@/lib/composerDom";
 
 defineOptions({ inheritAttrs: false });
@@ -47,7 +47,9 @@ const props = withDefaults(defineProps<{
   skills?: readonly { name: string; label: string }[];
   /** Built-in commands to chip. Rendered as `/name`, since that IS the name. */
   commands?: readonly { name: string }[];
-}>(), { autofocus: false, placeholder: "", skills: () => [], commands: () => [] });
+  /** Repo file paths to chip. Rendered with just the basename as the label. */
+  files?: readonly string[];
+}>(), { autofocus: false, placeholder: "", skills: () => [], commands: () => [], files: () => [] });
 
 const emit = defineEmits<{
   input: [event: Event];
@@ -59,9 +61,24 @@ const rootEl = useTemplateRef<HTMLDivElement>("rootEl");
 // An IME candidate window is open: the DOM must not be rebuilt under it.
 const composing = ref(false);
 
+// Raw Phosphor bold-weight path data (PhTerminal / PhFile), the same icons
+// ComposerSuggestions.vue and FileTreeNode.vue already use elsewhere. Chips
+// are built with raw DOM calls rather than Vue's render tree, so the path
+// data is inlined instead of mounting a live icon component per chip.
+const CHIP_ICON_PATH: Partial<Record<ChipKind, string>> = {
+  command: "M120,137,48,201A12,12,0,1,1,32,183l61.91-55L32,73A12,12,0,1,1,48,55l72,64A12,12,0,0,1,120,137Zm96,43H120a12,12,0,0,0,0,24h96a12,12,0,0,0,0-24Z",
+  file: "M216.49,79.52l-56-56A12,12,0,0,0,152,20H56A20,20,0,0,0,36,40V216a20,20,0,0,0,20,20H200a20,20,0,0,0,20-20V88A12,12,0,0,0,216.49,79.52ZM160,57l23,23H160ZM60,212V44h76V92a12,12,0,0,0,12,12h48V212Z",
+};
+function chipIconSvg(kind: ChipKind): string | null {
+  const path = CHIP_ICON_PATH[kind];
+  if (!path) return null;
+  return `<svg class="composer-chip-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="${path}"/></svg>`;
+}
+
 const known = () => ({
   skills: props.skills.map((s) => s.name),
   commands: props.commands.map((c) => c.name),
+  files: props.files,
 });
 
 /** The editable's current children, as the model-shaped node list. */
@@ -77,7 +94,11 @@ function readNodes(): FlatNode[] {
     }
     const el = node as HTMLElement;
     const name = el.dataset?.skill;
-    if (name) { out.push({ kind: el.dataset.chip === "command" ? "command" : "skill", name }); return; }
+    if (name) {
+      const kind = el.dataset.chip === "command" ? "command" : el.dataset.chip === "file" ? "file" : "skill";
+      out.push({ kind, name });
+      return;
+    }
     // A trailing <br> is the browser's own filler for an empty last line, not
     // a newline the user typed — counting it would append a phantom "\n" to
     // the model on every render.
@@ -91,19 +112,31 @@ function readNodes(): FlatNode[] {
   return out;
 }
 
-/** Caret offset in the model, the way a textarea's selectionStart reads. */
-function caret(): number {
+/** A DOM (container, offset) pair as a model offset. */
+function modelOffset(container: Node, offset: number): number {
   const root = rootEl.value;
-  const sel = window.getSelection();
-  if (!root || !sel || sel.rangeCount === 0) return model.value.length;
-  const range = sel.getRangeAt(0);
-  if (!root.contains(range.startContainer)) return model.value.length;
+  if (!root || !root.contains(container)) return model.value.length;
   const nodes = readNodes();
   // Selection anchored on the root itself addresses a child index, not text.
-  if (range.startContainer === root) return flatOffset(nodes, range.startOffset, 0);
-  const index = Array.prototype.indexOf.call(root.childNodes, childOf(root, range.startContainer));
+  if (container === root) return flatOffset(nodes, offset, 0);
+  const index = Array.prototype.indexOf.call(root.childNodes, childOf(root, container));
   if (index < 0) return model.value.length;
-  return flatOffset(nodes, index, range.startOffset);
+  return flatOffset(nodes, index, offset);
+}
+
+/** Caret offset in the model, the way a textarea's selectionStart reads. */
+function caret(): number {
+  return selectionRange()[0];
+}
+
+/** [start, end] in the model — equal when the selection is collapsed. */
+function selectionRange(): [number, number] {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return [model.value.length, model.value.length];
+  const range = sel.getRangeAt(0);
+  const from = modelOffset(range.startContainer, range.startOffset);
+  const to = range.collapsed ? from : modelOffset(range.endContainer, range.endOffset);
+  return from <= to ? [from, to] : [to, from];
 }
 
 /** The root's direct child that contains `node`. */
@@ -158,10 +191,19 @@ function render(keepCaret = true) {
     chip.dataset.skill = node.name;
     chip.dataset.chip = node.kind;
     // A command's name IS `/compact` — dropping the slash would make it read
-    // like prose. A skill gets its display name and an icon instead.
-    chip.textContent = node.kind === "command" ? `/${node.name}` : (label.get(node.name) ?? node.name);
+    // like prose. A skill gets its display name, a file its basename.
+    const text = node.kind === "command" ? `/${node.name}`
+      : node.kind === "file" ? node.name.slice(node.name.lastIndexOf("/") + 1)
+      : (label.get(node.name) ?? node.name);
+    const icon = chipIconSvg(node.kind);
+    if (icon) chip.insertAdjacentHTML("afterbegin", icon);
+    chip.appendChild(document.createTextNode(text));
     root.appendChild(chip);
   }
+  // A text node ending in "\n" renders no visible last line, so the caret on a
+  // freshly opened line would sit nowhere. The browser's own filler <br> is what
+  // readNodes already ignores in last position.
+  if (model.value.endsWith("\n")) root.appendChild(document.createElement("br"));
   if (offset >= 0) setCaret(offset);
 }
 
@@ -209,6 +251,15 @@ function applySnapshot(snap: Snapshot) {
     setCaret(snap.caret);
     applyingHistory = false;
   });
+}
+
+/** Replace the current selection with `text`, in the model. */
+function insertText(text: string) {
+  const [from, to] = selectionRange();
+  const next = model.value.slice(0, from) + text + model.value.slice(to);
+  const at = from + text.length;
+  pushHistory(next, at, false);
+  applySnapshot({ text: next, caret: at });
 }
 
 function undo(): boolean {
@@ -262,11 +313,13 @@ function onKeydown(e: KeyboardEvent) {
   }
   if (e.key === "Enter") {
     // Newlines live in the model as "\n" (the element is white-space:pre-wrap),
-    // never as <div>/<br> blocks — those would have to be flattened back out
-    // on every read. ponytail: execCommand is deprecated but it is the only
-    // insertion path that keeps the caret and selection handling native.
+    // never as <div>/<br> blocks. execCommand("insertText", "\n") used to do
+    // this, but the browser decides for itself whether that becomes a "\n", a
+    // <br> or a block split — and a <br> the editor then read back as nothing
+    // is how every line break the user typed vanished from the sent message.
+    // Inserting into the model and re-rendering leaves nothing to guess at.
     e.preventDefault();
-    document.execCommand("insertText", false, "\n");
+    insertText("\n");
   }
 }
 
@@ -275,7 +328,7 @@ function onPaste(e: ClipboardEvent) {
   if (e.defaultPrevented) return; // the host claimed it (an image)
   e.preventDefault();
   const plain = e.clipboardData?.getData("text/plain");
-  if (plain) document.execCommand("insertText", false, plain);
+  if (plain) insertText(plain);
 }
 
 function focus() {

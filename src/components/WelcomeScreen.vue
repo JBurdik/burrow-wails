@@ -37,6 +37,7 @@
           class="welcome-input composer-input block w-full min-h-[60px]"
           placeholder="Ask for changes, send follow-ups, or attach images"
           :skills="completion.skills.value"
+          :files="completion.files.value"
           autofocus
           @input="completion.update"
           @keydown="onComposerKeydown"

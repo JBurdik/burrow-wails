@@ -16,8 +16,8 @@
 // testable without a DOM environment. ComposerTextInput.vue maps its real child
 // nodes onto this shape.
 
-/** What a `/token` in the model turned out to be. */
-export type ChipKind = "skill" | "command";
+/** What a `/token` or `@token` in the model turned out to be. */
+export type ChipKind = "skill" | "command" | "file";
 
 /** One child of the editable root: a run of text, or a chip. */
 export type FlatNode =
@@ -29,51 +29,75 @@ export function isChip(n: FlatNode): n is { kind: ChipKind; name: string } {
 }
 
 /**
- * Split the model into plain runs and `/token` chips, matched against the known
- * names. A token only counts at a word start, so a path like `src/foo` is never
- * mistaken for one, and an unknown `/whatever` stays plain text — which is the
- * point: only things that will actually resolve get to look resolved.
+ * Split the model into plain runs and `/token`/`@token` chips, matched against
+ * the known names. A token only counts at a word start, so a path like
+ * `src/foo` is never mistaken for one, and an unknown `/whatever` or `@whatever`
+ * stays plain text — which is the point: only things that will actually
+ * resolve get to look resolved.
  *
  * Skills win over commands on a name collision: the command list is a handful
  * of built-ins, a skill is something the user installed on purpose.
  */
 export function tokenize(
   text: string,
-  known: { skills?: readonly string[]; commands?: readonly string[] },
+  known: { skills?: readonly string[]; commands?: readonly string[]; files?: readonly string[] },
 ): FlatNode[] {
   const skills = new Set(known.skills ?? []);
   const commands = new Set(known.commands ?? []);
+  const files = new Set(known.files ?? []);
   if (!text) return [];
-  if (skills.size === 0 && commands.size === 0) return [{ kind: "text", text }];
+  if (skills.size === 0 && commands.size === 0 && files.size === 0) return [{ kind: "text", text }];
 
-  const out: FlatNode[] = [];
+  interface Match { start: number; end: number; kind: ChipKind; name: string }
+  const matches: Match[] = [];
   // The leading group is start-of-string or the whitespace before the token —
   // it belongs to the preceding text run, not to the chip.
-  const re = /(^|\s)\/([^\s/]+)/g;
-  let last = 0;
+  const slashRe = /(^|\s)\/([^\s/]+)/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+  while ((m = slashRe.exec(text)) !== null) {
     const name = m[2];
     const kind: ChipKind | null = skills.has(name) ? "skill" : commands.has(name) ? "command" : null;
     if (!kind) continue;
     const start = m.index + m[1].length;
-    if (start > last) out.push({ kind: "text", text: text.slice(last, start) });
-    out.push({ kind, name });
-    last = start + name.length + 1; // + the "/"
+    matches.push({ start, end: start + name.length + 1, kind, name }); // + the "/"
+  }
+  // A file path can contain "/", unlike a skill or command name, so its body
+  // only excludes whitespace.
+  const atRe = /(^|\s)@([^\s]+)/g;
+  while ((m = atRe.exec(text)) !== null) {
+    const name = m[2];
+    if (!files.has(name)) continue;
+    const start = m.index + m[1].length;
+    matches.push({ start, end: start + name.length + 1, kind: "file", name }); // + the "@"
+  }
+  matches.sort((a, b) => a.start - b.start);
+
+  const out: FlatNode[] = [];
+  let last = 0;
+  for (const match of matches) {
+    if (match.start < last) continue; // overlapping match, first one wins
+    if (match.start > last) out.push({ kind: "text", text: text.slice(last, match.start) });
+    out.push({ kind: match.kind, name: match.name });
+    last = match.end;
   }
   if (last < text.length) out.push({ kind: "text", text: text.slice(last) });
   return out;
 }
 
+/** The trigger character a chip's name is prefixed with in the model. */
+function triggerChar(kind: ChipKind): "/" | "@" {
+  return kind === "file" ? "@" : "/";
+}
+
 /** How many characters of the MODEL this node accounts for. */
 export function nodeLength(node: FlatNode): number {
-  return isChip(node) ? node.name.length + 1 : node.text.length; // + the "/"
+  return isChip(node) ? node.name.length + 1 : node.text.length; // + the trigger char
 }
 
 /** The plain-text model the host's v-model sees. */
 export function serializeNodes(nodes: readonly FlatNode[]): string {
   let out = "";
-  for (const n of nodes) out += isChip(n) ? `/${n.name}` : n.text;
+  for (const n of nodes) out += isChip(n) ? `${triggerChar(n.kind)}${n.name}` : n.text;
   return out;
 }
 

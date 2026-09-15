@@ -50,6 +50,12 @@ type ProviderRuntimeEvent struct {
 	// turn.completed
 	InputTokens  int     `json:"inputTokens,omitempty"`
 	OutputTokens int     `json:"outputTokens,omitempty"`
+
+	// context.usage — the window total plus the split behind it
+	ContextTokens       int `json:"contextTokens,omitempty"`
+	ContextWindow       int `json:"contextWindow,omitempty"`
+	CacheReadTokens     int `json:"cacheReadTokens,omitempty"`
+	CacheCreationTokens int `json:"cacheCreationTokens,omitempty"`
 	CostUSD      float64 `json:"costUsd,omitempty"`
 
 	// turn.failed / session.title / session.id
@@ -76,6 +82,8 @@ const (
 	EvtToolStarted   = "tool.started"
 	EvtToolCompleted = "tool.completed"
 	EvtTurnCompleted = "turn.completed"
+	// How full the model's context window was on the last request of the turn.
+	EvtContextUsage = "context.usage"
 	EvtTurnFailed    = "turn.failed"
 	EvtSessionTitle  = "session.title"
 	EvtSessionID     = "session.id"
@@ -176,6 +184,24 @@ func claudeAssistant(event map[string]any) []ProviderRuntimeEvent {
 	}
 
 	out := []ProviderRuntimeEvent{}
+	// Context occupancy, and the only honest source for it: one assistant
+	// message's usage is one API request's prompt, so input + both cache halves
+	// + output IS what sat in the window. The `result` record's usage looks
+	// similar but sums every request of the turn, which on a long turn adds up
+	// to several times the window.
+	if usage := mapField(msg["usage"]); usage != nil {
+		ev := ProviderRuntimeEvent{
+			Type:                EvtContextUsage,
+			InputTokens:         intOf(usage["input_tokens"]),
+			OutputTokens:        intOf(usage["output_tokens"]),
+			CacheReadTokens:     intOf(usage["cache_read_input_tokens"]),
+			CacheCreationTokens: intOf(usage["cache_creation_input_tokens"]),
+		}
+		ev.ContextTokens = ev.InputTokens + ev.OutputTokens + ev.CacheReadTokens + ev.CacheCreationTokens
+		if ev.ContextTokens > 0 {
+			out = append(out, ev)
+		}
+	}
 	// Thinking blocks are concatenated into one delta, as the frontend did:
 	// they arrive split mid-sentence and are rendered as a single bubble.
 	thinking := ""
@@ -275,6 +301,16 @@ func claudeResult(event map[string]any) []ProviderRuntimeEvent {
 	if usage := mapField(event["usage"]); usage != nil {
 		done.InputTokens = intOf(usage["input_tokens"])
 		done.OutputTokens = intOf(usage["output_tokens"])
+	}
+	// The window is the model's, not a constant: a [1m] model has five times the
+	// room of a 200k one, and the CLI already reports which it used. Ported from
+	// t3code's maxClaudeContextWindowFromModelUsage.
+	if mu := mapField(event["modelUsage"]); mu != nil {
+		for _, v := range mu {
+			if w := intOf(mapField(v)["contextWindow"]); w > done.ContextWindow {
+				done.ContextWindow = w
+			}
+		}
 	}
 	if cost, ok := event["cost_usd"].(float64); ok {
 		done.CostUSD = cost

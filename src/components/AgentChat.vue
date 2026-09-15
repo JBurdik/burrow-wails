@@ -440,6 +440,7 @@
           :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
           :skills="completion.skills.value"
           :commands="allCommands"
+          :files="completion.files.value"
           @keydown="onKeydown"
           @input="onInput"
           @paste="onPaste"
@@ -523,6 +524,58 @@
 
           <!-- Right: cost badge + abort/send -->
           <div class="composer-sendgroup">
+            <HoverCardRoot v-if="contextUsageRatio > 0" v-model:open="ctxCardOpen" :open-delay="120" :close-delay="120">
+              <HoverCardTrigger as-child>
+                <div class="ctx-ring" :class="contextUsageClass">
+                  <svg viewBox="0 0 16 16" class="h-4 w-4 -rotate-90">
+                    <circle cx="8" cy="8" :r="CTX_R" fill="none" stroke="currentColor" stroke-width="2" class="opacity-20" />
+                    <circle cx="8" cy="8" :r="CTX_R" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" :stroke-dasharray="contextDash" />
+                  </svg>
+                  <span class="ctx-ring-pct font-mono text-[10px]">{{ contextPct }}%</span>
+                </div>
+              </HoverCardTrigger>
+              <HoverCardPortal>
+                <HoverCardContent
+                  side="top"
+                  align="end"
+                  :side-offset="6"
+                  class="z-50 w-[248px] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md"
+                >
+                  <div class="flex items-baseline justify-between">
+                    <span class="text-[11px] font-medium">Context</span>
+                    <span class="font-mono text-[11px]" :class="contextUsageClass">{{ contextPct }}%</span>
+                  </div>
+                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">
+                    {{ contextTokens.toLocaleString() }} / {{ contextMax.toLocaleString() }} tokens
+                  </div>
+                  <div class="mt-2 h-1 overflow-hidden rounded-full bg-hover">
+                    <div class="ctx-card-bar h-full rounded-full" :class="contextUsageClass" :style="{ width: (contextUsageRatio * 100) + '%' }" />
+                  </div>
+                  <!-- The CLI's own breakdown once asked for, ours until then -->
+                  <dl v-if="contextReport" class="mt-2.5 space-y-1">
+                    <div v-for="row in contextReport" :key="row.label" class="flex items-baseline justify-between gap-2">
+                      <dt class="truncate text-[10px] text-muted-foreground">{{ row.label }}</dt>
+                      <dd class="whitespace-nowrap font-mono text-[10px]">{{ row.tokens }} <span class="opacity-50">{{ row.pct }}</span></dd>
+                    </div>
+                  </dl>
+                  <dl v-else-if="contextRows.length" class="mt-2.5 space-y-1">
+                    <div v-for="row in contextRows" :key="row.label" class="flex items-baseline justify-between gap-2">
+                      <dt class="text-[10px] text-muted-foreground" :title="row.hint">{{ row.label }}</dt>
+                      <dd class="font-mono text-[10px]">{{ row.value.toLocaleString() }}</dd>
+                    </div>
+                  </dl>
+                  <div class="mt-3 flex gap-1.5">
+                    <button class="ctx-card-btn" :disabled="!canCompact || busy || contextReportPending" @click="loadContextReport">
+                      {{ contextReportPending ? "Loading…" : contextReport ? "Refresh" : "Breakdown" }}
+                    </button>
+                    <button class="ctx-card-btn" :disabled="!canCompact || busy" @click="compactContext">Compact</button>
+                  </div>
+                  <p v-if="!contextReport" class="mt-1.5 text-[9px] leading-tight text-muted-foreground">
+                    Breakdown asks the CLI's /context — local, no tokens.
+                  </p>
+                </HoverCardContent>
+              </HoverCardPortal>
+            </HoverCardRoot>
             <span v-if="sessionCost > 0 && !busy" class="px-1 font-mono text-[10px] text-muted-foreground">${{ sessionCost.toFixed(4) }}</span>
             <button
               v-if="busy"
@@ -556,11 +609,6 @@
         wide
         readonly
       />
-      </div>
-
-      <!-- Context usage bar -->
-      <div v-if="contextUsageRatio > 0" class="h-0.5 overflow-hidden bg-hover" :title="`${turnStats?.inputTokens.toLocaleString()} / ${CONTEXT_MAX.toLocaleString()} tokens`">
-        <div class="ctx-usage-bar h-full rounded-[1px] transition-[width]" :class="contextUsageClass" :style="{ width: (contextUsageRatio * 100) + '%' }" />
       </div>
 
       <!-- Status line below input — hidden when nothing to show -->
@@ -597,6 +645,8 @@ import { useGitStore } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useProvidersStore, chatTransportFor, binaryFor, type ChatTransport } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
+import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } from "reka-ui";
+import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
@@ -1737,18 +1787,90 @@ function sendQueuedNext(id: number) {
   saveMessages(props.chatId, messages.value);
 }
 
-// Context usage bar — 200k for all current models
-const CONTEXT_MAX = 200_000;
-const contextUsageRatio = computed(() => {
-  if (!turnStats.value) return 0;
-  return Math.min(turnStats.value.inputTokens / CONTEXT_MAX, 1);
-});
+// Context meter. The window is whatever the CLI says the model had on the last
+// turn (a [1m] model is five times a 200k one); 200k until it has said.
+const CONTEXT_FALLBACK = 200_000;
+// Remembered per chat, because a leaf unmounts on a thread switch and
+// replayChatStream only replays from folded_ord — the usage that filled the
+// ring is usually behind that mark, so nothing would re-emit it and the ring
+// would vanish until the next turn. Stale after an external /clear, and
+// self-healing on the next turn, which is the trade a display cache can make.
+// ponytail: one unpruned map; revisit if someone keeps thousands of chats.
+const CTX_STORE_KEY = "burrow.ctxTokens";
+function readCtxStore(): Record<string, { tokens: number; window: number; split?: CtxSplit | null }> {
+  try { return JSON.parse(localStorage.getItem(CTX_STORE_KEY) || "{}"); } catch { return {}; }
+}
+type CtxSplit = { cached: number; fresh: number; output: number };
+const contextTokens = ref(0);
+const contextWindow = ref(0);
+const contextSplit = ref<CtxSplit | null>(null);
+function rememberContext() {
+  const all = readCtxStore();
+  all[String(props.chatId)] = {
+    tokens: contextTokens.value,
+    window: contextWindow.value,
+    split: contextSplit.value,
+  };
+  try { localStorage.setItem(CTX_STORE_KEY, JSON.stringify(all)); } catch { /* quota */ }
+}
+const contextMax = computed(() => contextWindow.value || CONTEXT_FALLBACK);
+const contextUsageRatio = computed(() => Math.min(contextTokens.value / contextMax.value, 1));
 const contextUsageClass = computed(() => {
   const r = contextUsageRatio.value;
   if (r >= 0.9) return "ctx-exceeded";
   if (r >= 0.75) return "ctx-warning";
   return "ctx-ok";
 });
+
+const contextPct = computed(() => Math.round(contextUsageRatio.value * 100));
+const contextFree = computed(() => Math.max(contextMax.value - contextTokens.value, 0));
+const contextRows = computed(() => {
+  const sp = contextSplit.value;
+  if (!sp) return [];
+  return [
+    { label: "Cached prompt", value: sp.cached, hint: "served from the prompt cache" },
+    { label: "New this turn", value: sp.fresh, hint: "sent uncached or written to the cache" },
+    { label: "Model output", value: sp.output, hint: "" },
+    { label: "Free", value: contextFree.value, hint: "" },
+  ].filter((r) => r.value > 0);
+});
+const ctxCardOpen = ref(false);
+
+// `/context` is the CLI's own accounting of what fills the window, and it costs
+// nothing to ask (local command, num_turns 0). It answers with a markdown
+// report whose useful part is one small table and whose bulk is a row per MCP
+// tool — well over a thousand of them — so it is sent out of band and the
+// table is lifted into the card instead of landing in the transcript.
+const contextReport = ref<CtxReportRow[] | null>(null);
+const contextReportPending = ref(false);
+const awaitingContextReport = ref(false);
+
+async function loadContextReport() {
+  if (!canCompact.value || busy.value || contextReportPending.value) return;
+  contextReportPending.value = true;
+  awaitingContextReport.value = true;
+  try {
+    await invoke("claude_send", { id: props.chatId, text: "/context", sessionId: sessionId.value || null, images: [] });
+  } catch {
+    contextReportPending.value = false;
+    awaitingContextReport.value = false;
+  }
+}
+const CTX_R = 6;
+const CTX_C = 2 * Math.PI * CTX_R;
+const contextDash = computed(() => `${contextUsageRatio.value * CTX_C} ${CTX_C}`);
+// ponytail: /compact is the CLI's own command, so nothing here has to know how
+// compaction works — it is only supported by the native Claude transport.
+const canCompact = computed(() => effectiveTransport.value === "claude-cli");
+// Not a `disabled` button: a disabled element gets no hover events, so the
+// tooltip — the whole point of the ring — would vanish exactly when it cannot
+// be clicked. It stays hoverable and refuses the click instead.
+function compactContext() {
+  if (!canCompact.value || busy.value) return;
+  ctxCardOpen.value = false;
+  void sendMessage("/compact");
+}
+
 
 // Permission dropdown
 const permDropdownOpen = ref(false);
@@ -2017,6 +2139,17 @@ function onEvents(batch: ChatEventBatch) {
     // Our own prompt coming back. Consumed before the projection sees it, so
     // it neither duplicates the bubble nor counts as agent activity.
     if (event.type === "user.delta" && pendingSends.delete(event.text ?? "")) continue;
+    // The /context report the card asked for, lifted out of the stream before
+    // the projection can turn it into a wall of a message.
+    if (awaitingContextReport.value && event.type === "text.delta") {
+      const rows = parseContextReport(event.text ?? "");
+      if (rows) {
+        contextReport.value = rows;
+        awaitingContextReport.value = false;
+        contextReportPending.value = false;
+        continue;
+      }
+    }
     if (isProjectedEvent(event.type)) {
       // Native transport only, per markAgentActive's own caveat: an ACP
       // session/load replays its whole history through this same feed with no
@@ -2036,14 +2169,34 @@ function onEvents(batch: ChatEventBatch) {
     switch (event.type) {
       case "turn.completed":
       case "turn.failed":
-        if (event.type === "turn.completed" && (event.inputTokens || event.outputTokens)) {
+        awaitingContextReport.value = false;
+        contextReportPending.value = false;
+        if (event.type === "turn.completed" && (event.inputTokens || event.outputTokens || event.contextWindow)) {
           const inp = event.inputTokens ?? 0;
           const out = event.outputTokens ?? 0;
           turnStats.value = { inputTokens: inp, outputTokens: out, costUsd: event.costUsd ?? 0 };
+          if (event.contextWindow) {
+            contextWindow.value = event.contextWindow;
+            rememberContext();
+          }
           sessionCost.value += event.costUsd ?? 0;
           chats.recordTurn(inp, out);
         }
         finishTurn();
+        break;
+      case "context.usage":
+        if (event.contextTokens) {
+          contextTokens.value = event.contextTokens;
+          contextSplit.value = {
+            // What the prompt cache served, what had to be sent or written to
+            // it this turn, and what the model produced. The three add up to
+            // the ring.
+            cached: event.cacheReadTokens ?? 0,
+            fresh: (event.inputTokens ?? 0) + (event.cacheCreationTokens ?? 0),
+            output: event.outputTokens ?? 0,
+          };
+          rememberContext();
+        }
         break;
       case "session.title":
         // Once Claude has named the thread, a later result repeating the title
@@ -3004,6 +3157,12 @@ function onWindowFocus() {
 }
 
 onMounted(async () => {
+  const savedCtx = readCtxStore()[String(props.chatId)];
+  if (savedCtx) {
+    contextTokens.value = savedCtx.tokens ?? 0;
+    contextWindow.value = savedCtx.window ?? 0;
+    contextSplit.value = savedCtx.split ?? null;
+  }
   // Install this mount's reducers into the session and take a reference. The
   // session already holds the listeners; setHandlers just points them at the
   // live view, so no stream is ever torn down and re-attached on a remount.
@@ -3446,9 +3605,34 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .queue-item-btn:hover { color: var(--chat-text); border-color: color-mix(in srgb, var(--chat-text) 25%, transparent); }
 
 /* Context usage bar fill colors */
-.ctx-usage-bar.ctx-ok { background: color-mix(in srgb, var(--chat-accent) 55%, transparent); }
-.ctx-usage-bar.ctx-warning { background: color-mix(in srgb, var(--chat-warn) 75%, transparent); }
-.ctx-usage-bar.ctx-exceeded { background: color-mix(in srgb, var(--red, #ef4444) 80%, transparent); }
+/* Context ring — the meter is the button that empties it */
+.ctx-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px 2px 3px;
+  border-radius: 999px;
+  transition: background 120ms, color 120ms;
+}
+.ctx-ring:hover { background: var(--hover); }
+.ctx-ring-pct { opacity: 0.75; }
+.ctx-ring.ctx-ok { color: color-mix(in srgb, var(--chat-accent) 75%, var(--muted-foreground)); }
+.ctx-ring.ctx-warning { color: var(--chat-warn); }
+.ctx-ring.ctx-exceeded { color: var(--red, #ef4444); }
+.ctx-card-bar.ctx-ok { background: color-mix(in srgb, var(--chat-accent) 75%, transparent); }
+.ctx-card-bar.ctx-warning { background: var(--chat-warn); }
+.ctx-card-bar.ctx-exceeded { background: var(--red, #ef4444); }
+.ctx-card-btn {
+  flex: 1;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  transition: background 120ms, color 120ms;
+}
+.ctx-card-btn:hover:not(:disabled) { background: var(--hover); color: var(--foreground); }
+.ctx-card-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* Permission log bubble */
 .bubble-permission {

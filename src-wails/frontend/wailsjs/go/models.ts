@@ -154,6 +154,10 @@ export namespace main {
 	    failed?: boolean;
 	    inputTokens?: number;
 	    outputTokens?: number;
+	    contextTokens?: number;
+	    contextWindow?: number;
+	    cacheReadTokens?: number;
+	    cacheCreationTokens?: number;
 	    costUsd?: number;
 	    message?: string;
 	    title?: string;
@@ -178,6 +182,10 @@ export namespace main {
 	        this.failed = source["failed"];
 	        this.inputTokens = source["inputTokens"];
 	        this.outputTokens = source["outputTokens"];
+	        this.contextTokens = source["contextTokens"];
+	        this.contextWindow = source["contextWindow"];
+	        this.cacheReadTokens = source["cacheReadTokens"];
+	        this.cacheCreationTokens = source["cacheCreationTokens"];
 	        this.costUsd = source["costUsd"];
 	        this.message = source["message"];
 	        this.title = source["title"];

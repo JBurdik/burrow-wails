@@ -91,6 +91,22 @@ textarea {
   color: var(--text-secondary);
   font-family: var(--font-mono);
 }
+/* A file mention is a reference, not app plumbing or an installed skill — same
+   muted treatment as a command, distinguished only by its icon. */
+.composer-inline-chip[data-chip="file"] {
+  background: var(--surface-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-secondary);
+}
+/* PhTerminal / PhFile path data inlined by ComposerTextInput's render(). */
+.composer-chip-icon {
+  width: 0.72em;
+  height: 0.72em;
+  margin-right: 3px;
+  vertical-align: -0.05em;
+  fill: currentColor;
+  opacity: 0.85;
+}
 /* The browser paints a non-editable node as one selected block; keep it legible
    rather than accent-on-accent. */
 .composer-inline-chip::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
