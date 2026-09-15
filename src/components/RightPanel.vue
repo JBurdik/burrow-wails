@@ -616,13 +616,23 @@ const activeChatId = computed(() =>
 const childList = computed(() => (activeChatId.value ? childrenOf(chats.sessions, activeChatId.value) : []));
 
 // Which child is shown in #subagent-slot, per workspace (so switching
-// projects doesn't carry a detail view over). Setting it also drives
-// subAgentViewTarget — the module-level ref SubAgentHost.vue's <Teleport>
-// reads — so the two can never point at different chats.
+// projects doesn't carry a detail view over).
 const openChildId = computed<number | null>({
   get: () => wsUi(wsKey.value).openChildId,
-  set: (v) => { wsUi(wsKey.value).openChildId = v; subAgentViewTarget.value = v; },
+  set: (v) => { wsUi(wsKey.value).openChildId = v; },
 });
+
+// subAgentViewTarget — the module-level ref SubAgentHost.vue's <Teleport>
+// reads — follows openChildId, but only AFTER the DOM has been patched.
+//
+// It used to be set in the same tick, and `#subagent-slot` only exists while
+// a child is open, so the Teleport went looking for a target that had not
+// been rendered yet. A Teleport that cannot find its target renders its
+// content in place instead — which is inside SubAgentHost, i.e. NEXT TO the
+// panel: the whole chat appeared as a second column while the panel's own
+// slot stayed empty. `flush: "post"` runs after the patch, so the slot is
+// always there by the time the Teleport looks for it.
+watch(openChildId, (v) => { subAgentViewTarget.value = v; }, { flush: "post" });
 function openChild(id: number) {
   openChildId.value = id;
 }
@@ -719,8 +729,11 @@ function openSubagent(chatId: number, workspaceId: number) {
   const state = wsUi(workspaceId);
   if (!state.openedTabIds.includes("agents")) state.openedTabIds.push("agents");
   state.activeTab = "agents";
+  // No subAgentViewTarget here: the watcher above carries it across once the
+  // surface and the slot have actually rendered. Setting it now would be the
+  // same too-early Teleport the watcher exists to avoid — and this path is
+  // the worse one, because it may also be switching the surface to "agents".
   state.openChildId = chatId;
-  if (workspaceId === wsKey.value) subAgentViewTarget.value = chatId;
 }
 function wsUi(id: number): WsUiState {
   return (wsUiStates[id] ??= { openedTabIds: [], activeTab: null, diffScope: { kind: "workspace" }, openChildId: null });
