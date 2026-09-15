@@ -1,15 +1,16 @@
 // Which sub-agent chat, if any, the Right Panel currently wants to show.
 //
 // A module-level ref rather than Pinia state: it is view routing for exactly
-// one component (`SubAgentHost.vue`'s `<Teleport>` target), not app state
+// one component (which child `SubAgentHost.vue` hands to the panel), not app state
 // anything else needs to read, persist or react to across a reload. The Right
-// Panel (task 9) sets it; SubAgentHost only reads it to decide which mounted
-// child, if any, to teleport into its `#subagent-slot`.
+// Panel sets it; SubAgentHost only reads it to decide which child to leave to
+// the panel — the panel renders that one, the host keeps all the others alive.
 import { ref } from "vue";
 
 /** Chat id of the sub-agent the panel wants on screen, or `null` when none is
- *  open. Every other mounted child stays hidden (`v-show="false"`) rather
- *  than unmounted — see SubAgentHost.vue for why. */
+ *  open. The panel mounts that one; SubAgentHost mounts every OTHER child,
+ *  hidden, so their CLIs keep running — see SubAgentHost.vue for why exactly
+ *  one side may hold a given chat id. */
 export const subAgentViewTarget = ref<number | null>(null);
 
 /**

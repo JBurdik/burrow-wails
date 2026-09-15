@@ -332,6 +332,21 @@
           <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" aria-label="Back to sub-agents" @click="closeChildDetail"><PhCaretLeft :size="12" /></button>
           <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold text-foreground">{{ chatTitle(openChildId) }}</span>
         </div>
+        <!-- The panel owns the open child's view; SubAgentHost keeps every
+             OTHER child alive so their CLIs keep running with the panel shut.
+             Exactly one of the two renders a given chat id, so their reducers
+             cannot overwrite each other in the chat-session registry. -->
+        <AgentChat
+          v-if="openChildSession"
+          :key="openChildSession.id"
+          compact
+          class="min-h-0 flex-1"
+          :chat-id="openChildSession.id"
+          :workspace-id="openChildSession.workspaceId"
+          :cwd="props.cwd"
+          :agent-kind="openChildSession.agentKind"
+          is-watching
+        />
       </template>
 
       <template v-else>
@@ -497,20 +512,6 @@
     />
     <div v-if="activeTab === 'terminal' && !terminalWsIds.includes(wsKey)" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
 
-    <!-- Where SubAgentHost.vue teleports the open sub-agent's chat.
-         PERMANENT, and `v-show` rather than `v-if` on purpose: Vue resolves a
-         Teleport's `to` selector once, when the Teleport MOUNTS, and caches the
-         element. Those Teleports mount as soon as a child chat exists — long
-         before anyone opens one — so if this slot only existed while a child
-         was open, they would cache "not found" and later render their chat in
-         place instead: beside the panel, with the panel's own body left empty.
-         A display:none element is still found by the selector, so keeping it in
-         the DOM at all times is what makes the teleport land here. -->
-    <div
-      v-show="activeTab === 'agents' && openChildId !== null"
-      id="subagent-slot"
-      class="flex min-h-0 flex-1 flex-col"
-    ></div>
 
     <!-- Restore confirm — overwrites files on disk, so it always asks first -->
     <Teleport to="body">
@@ -564,6 +565,7 @@ import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
 import ManagerPanel from "./ManagerPanel.vue";
+import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
 import CommitPushMenu from "./CommitPushMenu.vue";
 import BrowserPane from "./BrowserPane.vue";
@@ -629,24 +631,23 @@ const activeChatId = computed(() =>
 );
 const childList = computed(() => (activeChatId.value ? childrenOf(chats.sessions, activeChatId.value) : []));
 
-// Which child is shown in #subagent-slot, per workspace (so switching
+// Which child the panel is showing, per workspace (so switching
 // projects doesn't carry a detail view over).
 const openChildId = computed<number | null>({
   get: () => wsUi(wsKey.value).openChildId,
   set: (v) => { wsUi(wsKey.value).openChildId = v; },
 });
 
-// subAgentViewTarget — the module-level ref SubAgentHost.vue's <Teleport>
-// reads — follows openChildId, but only AFTER the DOM has been patched.
-//
-// It used to be set in the same tick, and `#subagent-slot` only exists while
-// a child is open, so the Teleport went looking for a target that had not
-// been rendered yet. A Teleport that cannot find its target renders its
-// content in place instead — which is inside SubAgentHost, i.e. NEXT TO the
-// panel: the whole chat appeared as a second column while the panel's own
-// slot stayed empty. `flush: "post"` runs after the patch, so the slot is
-// always there by the time the Teleport looks for it.
+// subAgentViewTarget tells SubAgentHost which child NOT to render, because
+// this panel is rendering it. `flush: "post"` so the host gives the child up
+// only once this panel's own AgentChat has been patched in — handing over in
+// the same tick would unmount the host's instance before the panel's exists.
 watch(openChildId, (v) => { subAgentViewTarget.value = v; }, { flush: "post" });
+/** The open child's session — the panel renders its AgentChat itself. */
+const openChildSession = computed(() =>
+  openChildId.value === null ? undefined : chats.sessions.find((s) => s.id === openChildId.value),
+);
+
 function openChild(id: number) {
   openChildId.value = id;
 }

@@ -6,21 +6,27 @@
        are a second sidebar nested in a sidebar. The surface is a list, one
        child's stream, and the way back. -->
 
-  <template v-for="child in children" :key="child.id">
-    <Teleport to="#subagent-slot" :disabled="subAgentViewTarget !== child.id">
-      <AgentChat
-        v-show="subAgentViewTarget === child.id"
-        compact
-        :chat-id="child.id"
-        :workspace-id="child.workspaceId"
-        :cwd="cwdOf(child.workspaceId)"
-        :agent-kind="child.agentKind"
-        :is-watching="subAgentViewTarget === child.id"
-        :initial-prompt="initialPrompts[child.id]"
-        @prompt-sent="initialPrompts[child.id] = undefined"
-      />
-    </Teleport>
-  </template>
+  <!-- Hidden. The child the panel is SHOWING is rendered by the panel itself;
+       this host only keeps the others alive. There is no <Teleport> any more:
+       Vue resolves a Teleport's target once at mount and caches it, and these
+       mount the moment a child chat exists — so the target was routinely
+       cached as "not found" and the chat rendered here, beside the panel,
+       while the panel showed an empty body. Handing the panel its own
+       instance has no such ordering to get wrong. -->
+  <div class="hidden">
+    <AgentChat
+      v-for="child in hostedChildren"
+      :key="child.id"
+      compact
+      :chat-id="child.id"
+      :workspace-id="child.workspaceId"
+      :cwd="cwdOf(child.workspaceId)"
+      :agent-kind="child.agentKind"
+      :is-watching="false"
+      :initial-prompt="initialPrompts[child.id]"
+      @prompt-sent="initialPrompts[child.id] = undefined"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -35,7 +41,7 @@
 // it. Closing/reopening the panel therefore never restarts a child — the
 // <Teleport> just moves the same instance in and out of the DOM slot the
 // panel exposes.
-import { computed, reactive, watch } from "vue";
+import { computed, onMounted, reactive, watch } from "vue";
 import AgentChat from "@/components/AgentChat.vue";
 import { useClaudeChatsStore, takePendingSubagentPrompt, isLocallyCreatedSubagent } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -58,6 +64,21 @@ const children = computed(() =>
   chats.sessions.filter((s) => s.parentChatId && !s.archivedAt && openWsIds.value.has(s.workspaceId)),
 );
 
+/** The children this host renders: everything except the one the Right Panel
+ *  is currently showing, which mounts its own instance there.
+ *
+ *  Two instances of the same chat id would install their reducers over each
+ *  other in the shared chat-session registry, so exactly one of us may hold a
+ *  given child at a time. Handing it over remounts the view, which is cheap
+ *  and safe: the session keeps streaming while unmounted (it is only evicted
+ *  when idle) and the transcript replays from `chat_stream`.
+ *
+ *  ponytail: a child opened in the very first moments after `spawn` — before
+ *  its initial prompt has been sent — hands over with the prompt still queued
+ *  here, and the prompt is lost; `chat_send` recovers it. Narrow enough to
+ *  leave rather than add a second piece of handover state. */
+const hostedChildren = computed(() => children.value.filter((c) => c.id !== subAgentViewTarget.value));
+
 function cwdOf(workspaceId: number): string {
   return workspace.workspaces.find((w) => w.id === workspaceId)?.path ?? "";
 }
@@ -78,6 +99,17 @@ function cwdOf(workspaceId: number): string {
 // or this one after a restart) was never going to have a local handoff
 // queued for it, so `undefined` there is correct by design, not a race — also
 // safe to cache. What's deliberately NOT cached is anything in between.
+// DEBUG(subagent): remove once the start path is confirmed.
+onMounted(() => console.log("[subagent] host mounted"));
+watch(
+  [children, openWsIds],
+  ([list, ws]) => {
+    console.log("[subagent] openWsIds", [...ws], "children", list.map((c) => ({ id: c.id, ws: c.workspaceId, parent: c.parentChatId, archivedAt: c.archivedAt })));
+    console.log("[subagent] all sessions", chats.sessions.map((s) => ({ id: s.id, ws: s.workspaceId, parent: s.parentChatId })));
+  },
+  { immediate: true, deep: true },
+);
+
 const initialPrompts = reactive<Record<number, string | undefined>>({});
 watch(
   children,
@@ -89,6 +121,7 @@ watch(
       } else {
         initialPrompts[c.id] = undefined;
       }
+      console.log("[subagent] prompt for", c.id, "=", JSON.stringify(initialPrompts[c.id]));
     }
   },
   { immediate: true },
