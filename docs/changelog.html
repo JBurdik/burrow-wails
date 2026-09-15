@@ -79,11 +79,44 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.3 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.3</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">září 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Přehled kontextového okna a zmínky souborů v composeru</div>
+      <ul>
+        <li><strong>Prstencový ukazatel využití kontextu</strong> — composer teď zobrazuje, kolik z kontextového okna aktuální chat spotřeboval, i kartu s rozpadem (systémový prompt, nástroje, zprávy, cache) a zkratky na <code>/context</code> a <code>/compact</code>. Data jdou z <code>ProviderRuntimeEvent</code> (tokeny, velikost okna, cache statistiky za turn), Claude Code navíc posílá tabulku v odpovědi na <code>/context</code>, kterou <code>src/lib/contextReport.ts</code> rozparsuje na detailní přehled. Využití se ukládá per chat do <code>localStorage</code>, takže zůstane i po přepnutí vlákna.</li>
+        <li><strong>Zmínky souborů přes <code>@</code></strong> — psaní <code>@</code> v composeru nabídne našeptávač souborů z repozitáře a vloží je jako samostatné chipy, stejně jako existující skill/command tokeny.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Podvláken (sub-agenti) je v panelu vidět jejich hierarchie</div>
+      <ul>
+        <li><strong>Sub-agent spuštěný z vlákna se zobrazí vnořený pod svým rodičem</strong> v pravém panelu místo aby ležel vedle něj v Sidebaru — panel teď renderuje otevřeného sub-agenta přímo, bez dřívějšího <code>Teleport</code> triku, který mohl v DOMu nechat zaseknutý prázdný slot. Otevření vlákna z jiného projektu už nevyžaduje dvojité kliknutí.</li>
+        <li><strong>Sub-agenta lze z panelu i zavřít</strong> — kompaktní řádek nese zavírací tlačítko, které se při najetí myší už neposouvá.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Ruční obnovení skillů v nastavení</div>
+      <ul>
+        <li><strong>Nové tlačítko „Update skills“ v Nastavení → Skills</strong> — spustí <code>InstallAgentDocs</code> na vyžádání, tedy stejnou instalaci Claude/Codex/Copilot skillu a CLI pravidel, jaká dřív běžela jen jednou při startu aplikace. Užitečné, když agentovy znalosti <code>burrow</code> CLI zaostávají po aktualizaci Burrow. Dostupné i ze Spotlightu (<code>Update Agent Skills</code>) a zůstává jen lokální akcí — bez cesty přes vzdálené API.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.2 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.2</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">září 2026</span>
     </div>
 
