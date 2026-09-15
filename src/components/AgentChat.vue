@@ -668,6 +668,7 @@ import { useUIStore, type NtfyEvent } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { getAcpChatSetting, getLastAcpSetting, setAcpChatSetting, type AcpChatSettings } from "@/lib/acpSettings";
 import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 
 function renderMd(text: string): string {
@@ -877,24 +878,6 @@ function acpOptClass(kind: string) {
 // JSON-RPC id of the in-flight session/prompt — correlates the turn-done response.
 // rpc ids of in-flight control calls (set_mode/set_config/list) → refresh UI on reply.
 // Legacy per-chat localStorage key prefixes (kept only for the one-time migration below).
-type AcpChatSettings = { mode?: string; model?: string; effort?: string };
-function getAcpSetting(cid: number, field: keyof AcpChatSettings): string | undefined {
-  const rec = getConfig<Record<string, AcpChatSettings>>("chatAcpSettings", {});
-  return rec[String(cid)]?.[field];
-}
-function setAcpSetting(cid: number, field: keyof AcpChatSettings, value: string) {
-  const rec = { ...getConfig<Record<string, AcpChatSettings>>("chatAcpSettings", {}) };
-  rec[String(cid)] = { ...rec[String(cid)], [field]: value };
-  setConfig("chatAcpSettings", rec);
-  // Also remember it per agent kind, so a brand-new chat starts where the last
-  // one left off instead of at the adapter's default.
-  const last = { ...getConfig<Record<string, AcpChatSettings>>("chatAcpLast", {}) };
-  last[agentKind.value] = { ...last[agentKind.value], [field]: value };
-  setConfig("chatAcpLast", last);
-}
-function lastAcpSetting(field: keyof AcpChatSettings): string | undefined {
-  return getConfig<Record<string, AcpChatSettings>>("chatAcpLast", {})[agentKind.value]?.[field];
-}
 const acpModelOption = computed(() => acpConfigOptions.value.find((o) => o.id === "model"));
 const acpEffortOption = computed(() => acpConfigOptions.value.find((o) => o.id === "effort"));
 const acpModeLabel = computed(() => acpModes.value?.availableModes.find((m) => m.id === acpModes.value?.currentModeId)?.name ?? "Mode");
@@ -922,7 +905,7 @@ const acpRestorePushIds = new Set<number>();
 
 async function acpSelectMode(modeId: string, userPick = true) {
   if (acpModes.value) acpModes.value.currentModeId = modeId;
-  setAcpSetting(props.chatId, "mode", modeId);
+  setAcpChatSetting(props.chatId, agentKind.value, "mode", modeId);
   try {
     const rid = await invoke<number>("acp_set_mode", { id: props.chatId, modeId });
     acpControlIds.add(rid);
@@ -933,7 +916,7 @@ async function acpSelectMode(modeId: string, userPick = true) {
 }
 async function acpSelectModel(value: string, userPick = true) {
   if (acpModelOption.value) acpModelOption.value.currentValue = value;
-  setAcpSetting(props.chatId, "model", value);
+  setAcpChatSetting(props.chatId, agentKind.value, "model", value);
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "model", value });
     acpControlIds.add(rid);
@@ -944,7 +927,7 @@ async function acpSelectModel(value: string, userPick = true) {
 }
 async function acpSelectEffort(value: string, userPick = true) {
   if (acpEffortOption.value) acpEffortOption.value.currentValue = value;
-  setAcpSetting(props.chatId, "effort", value);
+  setAcpChatSetting(props.chatId, agentKind.value, "effort", value);
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "effort", value });
     acpControlIds.add(rid);
@@ -958,21 +941,19 @@ async function acpSelectEffort(value: string, userPick = true) {
 // selectors to defaults on (re)start AND in the reply to a model switch, which
 // is what used to silently drop the effort and permission mode the user picked.
 function restoreAcpSelections() {
-  // Fallback is the per-agent-kind memory setAcpSetting writes ("chatAcpLast");
-  // the old code read a "chatAcpLastModel" key that nothing ever wrote.
-  const savedModel = getAcpSetting(props.chatId, "model") ?? lastAcpSetting("model");
+  const savedModel = getAcpChatSetting(props.chatId, "model") ?? getLastAcpSetting(agentKind.value, "model");
   const modelOffered = acpModelOption.value?.options.some((o) => o.value === savedModel);
   if (savedModel && modelOffered && acpModelOption.value && acpModelOption.value.currentValue !== savedModel) {
     acpSelectModel(savedModel, false);
   }
-  const savedMode = getAcpSetting(props.chatId, "mode") ?? lastAcpSetting("mode");
+  const savedMode = getAcpChatSetting(props.chatId, "mode") ?? getLastAcpSetting(agentKind.value, "mode");
   const modeOffered = acpModes.value?.availableModes.some((m) => m.id === savedMode);
   if (savedMode && modeOffered && acpModes.value && acpModes.value.currentModeId !== savedMode) {
     acpSelectMode(savedMode, false);
   }
   // Only push a value the adapter actually offers — a saved effort can be stale
   // after a model switch (Codex publishes its efforts per model).
-  const savedEffort = getAcpSetting(props.chatId, "effort") ?? lastAcpSetting("effort");
+  const savedEffort = getAcpChatSetting(props.chatId, "effort") ?? getLastAcpSetting(agentKind.value, "effort");
   const effortOffered = acpEffortOption.value?.options.some((o) => o.value === savedEffort);
   if (savedEffort && effortOffered && acpEffortOption.value && acpEffortOption.value.currentValue !== savedEffort) {
     acpSelectEffort(savedEffort, false);

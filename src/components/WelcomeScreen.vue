@@ -131,6 +131,7 @@ import { useUIStore } from "@/stores/ui";
 import { useGitStore } from "@/stores/git";
 import { useProvidersStore, binaryFor } from "@/stores/providers";
 import { configReady, getConfig, setConfig } from "@/lib/config";
+import { getLastAcpSetting, setLastAcpSetting } from "@/lib/acpSettings";
 import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { modelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
@@ -245,9 +246,12 @@ function onModelSelect(agentId: string, modelId: string) {
   if (providers.resolve(agentId).kind === "claude") {
     setConfig("chatLastUsedModel", modelId);
   } else {
-    // ACP / Codex models can only be applied once the session exists, so the
-    // new chat picks this up when its selectors arrive (ClaudeChat.vue).
-    setConfig("chatAcpLastModel", { ...getConfig<Record<string, string>>("chatAcpLastModel", {}), [agentId]: modelId });
+    // Codex can only apply a model once its app-server thread exists. Keep the
+    // welcome pick in the same per-agent record that AgentChat restores after
+    // that thread publishes its selectors. The former chatAcpLastModel key was
+    // never read, so this choice (and its model-specific effort picker) was
+    // silently lost as soon as the chat opened.
+    saveAcp("model", modelId);
   }
 }
 
@@ -306,15 +310,29 @@ function pickPermMode(mode: string) {
 // Both are stashed in "chatAcpLast", which AgentChat.restoreAcpSelections()
 // applies to the new chat as soon as its session comes up.
 const isCodex = computed(() => selectedAgent.value.kind === "codex");
-type AcpChatSettings = { mode?: string; model?: string; effort?: string };
-function lastAcp(field: keyof AcpChatSettings): string | undefined {
-  return getConfig<Record<string, AcpChatSettings>>("chatAcpLast", {})[selectedAgentId.value]?.[field];
+function lastAcp(field: "mode" | "model" | "effort"): string | undefined {
+  return getLastAcpSetting(selectedAgentId.value, field);
 }
-function saveAcp(field: keyof AcpChatSettings, value: string) {
-  const rec = { ...getConfig<Record<string, AcpChatSettings>>("chatAcpLast", {}) };
-  rec[selectedAgentId.value] = { ...rec[selectedAgentId.value], [field]: value };
-  setConfig("chatAcpLast", rec);
+function saveAcp(field: "mode" | "model" | "effort", value: string) {
+  setLastAcpSetting(selectedAgentId.value, field, value);
 }
+
+// Codex's catalog arrives asynchronously. Until then ModelPicker can only
+// select its provider-default empty id, which used to leave the welcome
+// composer without a model-specific effort control even after the catalog was
+// ready. Resolve that empty/stale selection once real options arrive, preferring
+// the user's last Codex pick and otherwise the CLI-advertised default.
+const selectedAgentModels = computed(() => modelsFor(selectedAgentId.value).filter((model) => model.id));
+watch([isCodex, selectedAgentModels], () => {
+  if (!isCodex.value || !selectedAgentModels.value.length) return;
+  const saved = lastAcp("model");
+  const next = selectedAgentModels.value.some((model) => model.id === selectedModel.value)
+    ? selectedModel.value
+    : selectedAgentModels.value.find((model) => model.id === saved)?.id
+      ?? selectedAgentModels.value[0].id;
+  if (selectedModel.value !== next) selectedModel.value = next;
+  if (saved !== next) saveAcp("model", next);
+}, { immediate: true });
 
 // Active workspace, else the most recently opened one, unless the user picked
 // a different one from the dropdown.
