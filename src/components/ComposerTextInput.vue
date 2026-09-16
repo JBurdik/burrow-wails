@@ -16,13 +16,21 @@
     @compositionend="onCompositionEnd"
   />
   <Teleport to="body">
-    <div v-if="pasteDialogText !== null" class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70" @click.self="pasteDialogText = null">
-      <div class="flex max-h-[90vh] w-[90vw] max-w-[900px] flex-col overflow-hidden rounded-lg bg-[var(--chat-surface)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
-        <div class="flex items-center justify-between border-b border-border px-3 py-2">
-          <span class="text-sm text-muted-foreground">Pasted text</span>
-          <button class="flex items-center rounded p-1 hover:bg-white/10" @click="pasteDialogText = null"><PhX :size="16" /></button>
+    <div v-if="pasteDialogText !== null" class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70" @click.self="closePasteDialog">
+      <div
+        class="flex max-h-[90vh] w-[90vw] max-w-[900px] flex-col overflow-hidden rounded-lg shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
+        style="background: var(--bg-panel, #18181c); border: 1px solid var(--border, rgba(255,255,255,0.08));"
+      >
+        <div class="flex shrink-0 items-center justify-between border-b px-3 py-2" style="border-color: var(--border, rgba(255,255,255,0.08));">
+          <span class="text-sm" style="color: var(--text-secondary, rgba(255,255,255,0.6));">Pasted text</span>
+          <button class="flex items-center rounded p-1 hover:bg-white/10" style="color: var(--text-secondary, rgba(255,255,255,0.6));" @click="closePasteDialog">
+            <PhX :size="16" />
+          </button>
         </div>
-        <pre class="flex-1 overflow-auto whitespace-pre-wrap p-3 font-mono text-sm">{{ pasteDialogText }}</pre>
+        <pre
+          class="m-0 flex-1 overflow-auto whitespace-pre-wrap p-3 font-mono text-sm"
+          style="color: var(--text-primary, rgba(255,255,255,0.88));"
+        >{{ pasteDialogText }}</pre>
       </div>
     </div>
   </Teleport>
@@ -366,6 +374,10 @@ function onPaste(e: ClipboardEvent) {
 
 const pasteDialogText = ref<string | null>(null);
 
+function closePasteDialog() {
+  pasteDialogText.value = null;
+}
+
 function focus() {
   rootEl.value?.focus();
 }
@@ -390,7 +402,7 @@ watch(model, (next) => {
 watch(() => [props.skills, props.commands], () => render(), { deep: true });
 
 function onDialogEscape(e: KeyboardEvent) {
-  if (e.key === "Escape" && pasteDialogText.value !== null) pasteDialogText.value = null;
+  if (e.key === "Escape" && pasteDialogText.value !== null) closePasteDialog();
 }
 
 onMounted(() => {
