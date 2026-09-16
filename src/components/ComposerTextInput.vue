@@ -15,14 +15,29 @@
     @compositionstart="composing = true"
     @compositionend="onCompositionEnd"
   />
+  <Teleport to="body">
+    <div v-if="pasteDialogText !== null" class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70" @click.self="pasteDialogText = null">
+      <div class="flex max-h-[90vh] w-[90vw] max-w-[900px] flex-col overflow-hidden rounded-lg bg-[var(--chat-surface)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+        <div class="flex items-center justify-between border-b border-border px-3 py-2">
+          <span class="text-sm text-muted-foreground">Pasted text</span>
+          <button class="flex items-center rounded p-1 hover:bg-white/10" @click="pasteDialogText = null"><PhX :size="16" /></button>
+        </div>
+        <pre class="flex-1 overflow-auto whitespace-pre-wrap p-3 font-mono text-sm">{{ pasteDialogText }}</pre>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
+import { PhX } from "@phosphor-icons/vue";
 import {
-  chipSignature, flatOffset, isChip, locateOffset, serializeNodes, tokenize,
+  chipSignature, flatOffset, isChip, locateOffset, serializeNodes, tokenize, wrapPaste,
   type ChipKind, type FlatNode,
 } from "@/lib/composerDom";
+
+/** A pasted block collapses into a chip once it's longer than this many lines. */
+const PASTE_COLLAPSE_LINES = 4;
 
 defineOptions({ inheritAttrs: false });
 
@@ -65,11 +80,13 @@ const composing = ref(false);
 // ComposerSuggestions.vue and FileTreeNode.vue already use elsewhere. Chips
 // are built with raw DOM calls rather than Vue's render tree, so the path
 // data is inlined instead of mounting a live icon component per chip.
-const CHIP_ICON_PATH: Partial<Record<ChipKind, string>> = {
+const CHIP_ICON_PATH: Partial<Record<ChipKind | "paste", string>> = {
   command: "M120,137,48,201A12,12,0,1,1,32,183l61.91-55L32,73A12,12,0,1,1,48,55l72,64A12,12,0,0,1,120,137Zm96,43H120a12,12,0,0,0,0,24h96a12,12,0,0,0,0-24Z",
   file: "M216.49,79.52l-56-56A12,12,0,0,0,152,20H56A20,20,0,0,0,36,40V216a20,20,0,0,0,20,20H200a20,20,0,0,0,20-20V88A12,12,0,0,0,216.49,79.52ZM160,57l23,23H160ZM60,212V44h76V92a12,12,0,0,0,12,12h48V212Z",
+  // Ph "Clipboard Text" bold.
+  paste: "M196,32H164.62a44,44,0,0,0-73.24,0H60A20,20,0,0,0,40,52V216a20,20,0,0,0,20,20H196a20,20,0,0,0,20-20V52A20,20,0,0,0,196,32Zm-4,180H64V56H84v8a12,12,0,0,0,12,12h64a12,12,0,0,0,12-12V56h20ZM88,132a12,12,0,0,1,12-12h56a12,12,0,0,1,0,24H100A12,12,0,0,1,88,132Zm0,40a12,12,0,0,1,12-12h56a12,12,0,0,1,0,24H100A12,12,0,0,1,88,172Z",
 };
-function chipIconSvg(kind: ChipKind): string | null {
+function chipIconSvg(kind: ChipKind | "paste"): string | null {
   const path = CHIP_ICON_PATH[kind];
   if (!path) return null;
   return `<svg class="composer-chip-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="${path}"/></svg>`;
@@ -93,6 +110,10 @@ function readNodes(): FlatNode[] {
       return;
     }
     const el = node as HTMLElement;
+    if (el.dataset?.chip === "paste") {
+      out.push({ kind: "paste", text: el.dataset.pasteText ?? "" });
+      return;
+    }
     const name = el.dataset?.skill;
     if (name) {
       const kind = el.dataset.chip === "command" ? "command" : el.dataset.chip === "file" ? "file" : "skill";
@@ -188,14 +209,24 @@ function render(keepCaret = true) {
     const chip = document.createElement("span");
     chip.className = "composer-inline-chip";
     chip.contentEditable = "false";
-    chip.dataset.skill = node.name;
     chip.dataset.chip = node.kind;
-    // A command's name IS `/compact` — dropping the slash would make it read
-    // like prose. A skill gets its display name, a file its basename.
-    const text = node.kind === "command" ? `/${node.name}`
-      : node.kind === "file" ? node.name.slice(node.name.lastIndexOf("/") + 1)
-      : (label.get(node.name) ?? node.name);
-    const icon = chipIconSvg(node.kind);
+    let text: string;
+    let icon: string | null;
+    if (node.kind === "paste") {
+      chip.dataset.pasteText = node.text;
+      chip.title = "Click to view full text";
+      chip.addEventListener("click", () => { pasteDialogText.value = node.text; });
+      text = `Pasted text (${node.text.split("\n").length} lines)`;
+      icon = chipIconSvg("paste");
+    } else {
+      chip.dataset.skill = node.name;
+      // A command's name IS `/compact` — dropping the slash would make it read
+      // like prose. A skill gets its display name, a file its basename.
+      text = node.kind === "command" ? `/${node.name}`
+        : node.kind === "file" ? node.name.slice(node.name.lastIndexOf("/") + 1)
+        : (label.get(node.name) ?? node.name);
+      icon = chipIconSvg(node.kind);
+    }
     if (icon) chip.insertAdjacentHTML("afterbegin", icon);
     chip.appendChild(document.createTextNode(text));
     root.appendChild(chip);
@@ -328,8 +359,12 @@ function onPaste(e: ClipboardEvent) {
   if (e.defaultPrevented) return; // the host claimed it (an image)
   e.preventDefault();
   const plain = e.clipboardData?.getData("text/plain");
-  if (plain) insertText(plain);
+  if (!plain) return;
+  const collapse = plain.split("\n").length > PASTE_COLLAPSE_LINES;
+  insertText(collapse ? wrapPaste(plain) : plain);
 }
+
+const pasteDialogText = ref<string | null>(null);
 
 function focus() {
   rootEl.value?.focus();
@@ -354,11 +389,17 @@ watch(model, (next) => {
 // localStorage holding `/burrow` has to get its chip once the names are known.
 watch(() => [props.skills, props.commands], () => render(), { deep: true });
 
+function onDialogEscape(e: KeyboardEvent) {
+  if (e.key === "Escape" && pasteDialogText.value !== null) pasteDialogText.value = null;
+}
+
 onMounted(() => {
   render(false);
   history[0] = { text: model.value, caret: model.value.length };
   if (props.autofocus) nextTick(focus);
+  window.addEventListener("keydown", onDialogEscape);
 });
+onBeforeUnmount(() => window.removeEventListener("keydown", onDialogEscape));
 
 defineExpose({ focus, caret, setCaret, element: rootEl });
 </script>

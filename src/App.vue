@@ -78,6 +78,7 @@
     <UpdateBanner />
     <ProviderUpdateBanner />
     <DiagramModal v-if="diagramContent !== null" />
+    <ImageLightbox v-if="lightboxSrc !== null" />
     <Teleport to="body"><PetOverlay v-if="ui.petsEnabled" /></Teleport>
 
     <!-- Keyboard cheatsheet overlay (⌘/) -->
@@ -141,7 +142,9 @@ import { pickDir } from "@/lib/pickPath";
 import { installControlBridge } from "@/lib/controlBridge";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import DiagramModal from "@/components/DiagramModal.vue";
+import ImageLightbox from "@/components/ImageLightbox.vue";
 import { useDiagram } from "@/composables/useDiagram";
+import { useImageLightbox } from "@/composables/useImageLightbox";
 import { configReady, getConfig, setConfig } from "@/lib/config";
 
 let resizing: 'left' | 'right' | null = null;
@@ -161,6 +164,7 @@ const ws = useWorkspaceStore();
 const ui = useUIStore();
 const git = useGitStore();
 const { diagramContent } = useDiagram();
+const { lightboxSrc } = useImageLightbox();
 const providers = useProvidersStore();
 const keys = useKeybindingsStore();
 const update = useUpdateStore();

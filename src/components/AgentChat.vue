@@ -207,8 +207,9 @@
                   v-for="(img, i) in msg.images"
                   :key="i"
                   :src="img"
-                  class="block max-h-40 max-w-[200px] rounded object-cover"
+                  class="block max-h-40 max-w-[200px] cursor-pointer rounded object-cover"
                   :alt="`Image ${i + 1}`"
+                  @click="showImage(img)"
                 />
               </div>
               <div class="md-body" v-html="renderUserMd(msg.text)" />
@@ -640,6 +641,7 @@ import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useEditorContextStore } from "@/stores/editorContext";
+import { useImageLightbox } from "@/composables/useImageLightbox";
 import { useScriptsStore } from "@/stores/scripts";
 import { useGitStore } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -649,6 +651,7 @@ import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } fr
 import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
+import { stripPasteMarkers } from "@/lib/composerDom";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
@@ -769,6 +772,7 @@ const uiStore = useUIStore();
 const scriptsStore = useScriptsStore();
 const chatAgents = useProvidersStore();
 const editorCtx = useEditorContextStore();
+const { showImage } = useImageLightbox();
 const chatWorkspace = computed(() => workspaces.workspaces.find((workspace) => workspace.id === props.workspaceId));
 const chatBranch = computed(() => chatWorkspace.value?.worktree_branch || git.branchByWs[props.workspaceId] || "HEAD");
 
@@ -2545,7 +2549,7 @@ async function sendInitialPrompt(prompt: string, images?: string[]) {
 }
 
 async function sendMessage(forcedText?: string, extraImages?: string[]) {
-  let text = (forcedText ?? inputText.value).trim();
+  let text = stripPasteMarkers(forcedText ?? inputText.value).trim();
   if (!text) return;
   branchBannerDismissed.value = true;
   // A cold chat (never opened this launch) has no process yet — start it now.

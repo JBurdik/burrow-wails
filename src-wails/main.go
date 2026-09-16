@@ -21,6 +21,7 @@ func main() {
 	// Create an instance of the app structure
 	app := NewApp()
 	appMenu := menu.NewMenu()
+	appMenu.Append(menu.AppMenu()) // standard macOS app menu (Quit bound to Cmd+Q)
 	burrowMenu := appMenu.AddSubmenu("Burrow")
 	burrowMenu.AddText("Check for Updates…", nil, func(_ *menu.CallbackData) {
 		runtime.EventsEmit(app.ctx, "menu-check-update")

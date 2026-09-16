@@ -80,6 +80,7 @@ import { useProvidersStore } from "@/stores/providers";
 import { useScriptsStore } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
+import { useNotificationsStore } from "@/stores/notifications";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { pickDir } from "@/lib/pickPath";
 import type { Component } from "vue";
@@ -100,6 +101,7 @@ const scriptsStore = useScriptsStore();
 const wsStore = useWorkspaceStore();
 const keys = useKeybindingsStore();
 const ui = useUIStore();
+const notifStore = useNotificationsStore();
 
 const isOpen = ref(false);
 const query = ref("");
@@ -241,7 +243,7 @@ const commandItems = computed<SpotlightItem[]>(() => {
     { id: "cmd-theme", title: "Change Theme", icon: PhPalette as Component, color: "#fbbf24", action: () => { openSettingsAt("appearance"); } },
     { id: "cmd-darklight", title: "Toggle Dark/Light Mode", icon: PhMoonStars as Component, color: "#a78bfa", action: () => { ui.toggleDarkLight(); close(); } },
     { id: "cmd-keys", title: "Keyboard Shortcuts", icon: PhKeyboard as Component, color: MUTED, keyId: "cheatsheet", action: () => { openSettingsAt("keybindings"); } },
-    { id: "cmd-update-skills", title: "Update Agent Skills (Claude/Codex/Copilot)", icon: PhSparkle as Component, color: "#f472b6", action: () => { openSettingsAt("skills"); } },
+    { id: "cmd-update-skills", title: "Update Agent Skills (Claude/Codex/Copilot)", icon: PhSparkle as Component, color: "#f472b6", action: updateSkills },
     { id: "cmd-repaint", title: "Repaint Terminals (un-scramble)", icon: PhArrowsClockwise as Component, color: "#fbbf24", keyId: "repaint", action: () => { emit("repaint"); close(); } },
   ];
   return defs
@@ -314,6 +316,27 @@ function activate() {
 function openSettingsAt(section: string) {
   ui.openSettings(section);
   close();
+}
+
+// Same reinstall Settings' "Update skills" button runs (installAgentDocs in
+// Settings.vue), triggered straight from the palette instead of deep-linking
+// into the Skills tab first. Imports the wailsjs App module directly rather
+// than going through wailsCompat/`/v2/ws` — it writes to local
+// ~/.claude/~/.codex/~/.copilot, which only the in-process desktop should do
+// (see remoteapi.go's LOAD-BEARING NOTE on UI-only, non-remote verbs).
+async function updateSkills() {
+  close();
+  const loadingId = notifStore.push({ type: "info", title: "Updating skills…" });
+  try {
+    const App = await import("../../src-wails/frontend/wailsjs/go/main/App");
+    await App.InstallAgentDocs();
+    notifStore.dismiss(loadingId);
+    notifStore.push({ type: "done", title: "Skills updated" });
+  } catch (e) {
+    console.error("InstallAgentDocs failed", e);
+    notifStore.dismiss(loadingId);
+    notifStore.push({ type: "error", title: "Failed to update skills", body: String(e) });
+  }
 }
 
 // Project creation goes through the in-app directory picker (PathPicker.vue) —

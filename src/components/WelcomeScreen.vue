@@ -138,6 +138,7 @@ import { modelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/cha
 import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
+import { stripPasteMarkers } from "@/lib/composerDom";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
@@ -511,7 +512,7 @@ watch(() => target.value?.id, (id) => {
 
 
 async function submit() {
-  const prompt = text.value.trim();
+  const prompt = stripPasteMarkers(text.value).trim();
   let t = target.value;
   if (!prompt || !t) return;
   if (worktreeMode.value === "new") {

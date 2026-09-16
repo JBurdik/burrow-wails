@@ -1,7 +1,7 @@
 <template>
   <div v-if="images.length > 0" class="composer-images">
     <div v-for="(img, i) in images" :key="i" class="composer-image">
-      <img :src="img" :alt="`Attached image ${i + 1}`" />
+      <img :src="img" :alt="`Attached image ${i + 1}`" @click="showImage(img)" />
       <button
         type="button"
         class="composer-image-remove"
@@ -17,8 +17,11 @@
 
 <script setup lang="ts">
 import { PhX } from "@phosphor-icons/vue";
+import { useImageLightbox } from "@/composables/useImageLightbox";
 
 // Data URIs. Mutated in place so removing one is a splice at the call site's
 // own ref — the host still owns the list and sends it with the message.
 const images = defineModel<string[]>({ required: true });
+
+const { showImage } = useImageLightbox();
 </script>

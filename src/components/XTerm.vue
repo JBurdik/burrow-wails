@@ -419,10 +419,51 @@ onMounted(async () => {
     } catch { /* MCP unavailable (browser-only dev) — launch without tools */ }
   }
 
-  // Register both listeners in parallel before creating the PTY — they are
-  // independent and each round-trips to the Tauri IPC bridge, so sequencing them
-  // added double the latency for no reason.
-  [unlistenWrite, unlistenSnapReq] = await Promise.all([
+  // Register every listener BEFORE creating the PTY. All bus events (incl. the
+  // daemon's ring-buffer replay on reattach) travel over one shared websocket to
+  // every connected client, dispatched to whatever JS listener map exists at the
+  // moment the frame arrives (src/runtime/transport.ts's `dispatch`) — there is
+  // no per-listener backlog. `pty-data-*` is also excluded from the server's
+  // replay ring (it's the daemon's own ring, replayed once as part of the spawn
+  // round-trip), so a frame dispatched with no listener yet is gone for good.
+  // create_pty's response can arrive AFTER the daemon has already streamed the
+  // whole ring-buffer replay back down the same connection (readLoop in
+  // daemonclient.go processes "frame" envelopes as they're decoded, before the
+  // matching "response" envelope for the spawn call) — registering pty-data-*
+  // only after `await invoke("create_pty", ...)` resolved dropped that replay
+  // silently, showing a blank terminal until the next live byte arrived.
+  [unlisten, unlistenWrite, unlistenSnapReq] = await Promise.all([
+    // Stream output from Rust → xterm
+    listen<number[]>(`pty-data-${props.ptyId}`, (event) => {
+      const bytes = new Uint8Array(event.payload);
+      // Capture stick BEFORE the write grows the buffer; re-pin in the parse
+      // callback so a fast agent flood can't leave the viewport stranded.
+      const stick = isAtBottom();
+      term.write(bytes, () => { if (stick) term.scrollToBottom(); });
+      bytesRx += bytes.length;
+      writes++;
+      const text = new TextDecoder().decode(bytes);
+
+      // `burrow spawn` requests: decode base64 fields → open a new tab.
+      // Loop, since one chunk may carry several.
+      SPAWN_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = SPAWN_RE.exec(text)) !== null) {
+        try {
+          const cmd = b64decode(m[1]).trim();
+          if (cmd) emit("spawn", { cmd, token: b64decode(m[2]).trim(), cwd: b64decode(m[3]).trim() });
+        } catch { /* ignore malformed payload */ }
+      }
+
+      // OSC 7: shell CWD hint. Passive — no-op if the user's shell doesn't emit it.
+      OSC7_RE.lastIndex = 0;
+      while ((m = OSC7_RE.exec(text)) !== null) {
+        const p = decodeURIComponent(m[1]);
+        if (p) emit("cwd", p);
+      }
+
+      lastDataAt = performance.now();
+    }),
     // tmux send-keys path: the shim POSTs /write → hook server emits this event →
     // we forward to the daemon as regular PTY input.
     listen<string>(`pty-write-${props.ptyId}`, (event) => {
@@ -455,38 +496,6 @@ onMounted(async () => {
     cwd: props.cwd,
     cols: term.cols,
     rows: term.rows,
-  });
-
-  // Stream output from Rust → xterm
-  unlisten = await listen<number[]>(`pty-data-${props.ptyId}`, (event) => {
-    const bytes = new Uint8Array(event.payload);
-    // Capture stick BEFORE the write grows the buffer; re-pin in the parse
-    // callback so a fast agent flood can't leave the viewport stranded.
-    const stick = isAtBottom();
-    term.write(bytes, () => { if (stick) term.scrollToBottom(); });
-    bytesRx += bytes.length;
-    writes++;
-    const text = new TextDecoder().decode(bytes);
-
-    // `burrow spawn` requests: decode base64 fields → open a new tab.
-    // Loop, since one chunk may carry several.
-    SPAWN_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = SPAWN_RE.exec(text)) !== null) {
-      try {
-        const cmd = b64decode(m[1]).trim();
-        if (cmd) emit("spawn", { cmd, token: b64decode(m[2]).trim(), cwd: b64decode(m[3]).trim() });
-      } catch { /* ignore malformed payload */ }
-    }
-
-    // OSC 7: shell CWD hint. Passive — no-op if the user's shell doesn't emit it.
-    OSC7_RE.lastIndex = 0;
-    while ((m = OSC7_RE.exec(text)) !== null) {
-      const p = decodeURIComponent(m[1]);
-      if (p) emit("cwd", p);
-    }
-
-    lastDataAt = performance.now();
   });
 
   // Send initial command once the shell is actually ready (inject --settings for

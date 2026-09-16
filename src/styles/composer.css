@@ -20,6 +20,7 @@ textarea {
 /* Vertical growth still scrolls once the composer hits its max height. Keep
    that affordance visible, while the rule above prevents a horizontal bar. */
 .composer-input {
+  max-height: 40vh;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--text-muted) 55%, transparent) transparent;
@@ -42,6 +43,7 @@ textarea {
 .composer-editable {
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  max-height: 40vh;
   overflow-y: auto;
   cursor: text;
   scrollbar-width: thin;
@@ -398,6 +400,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 7px;
   object-fit: cover;
+  cursor: pointer;
 }
 .composer-image-remove {
   position: absolute;

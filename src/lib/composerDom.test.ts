@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  chipSignature, flatOffset, locateOffset, nodeLength, serializeNodes, tokenize,
+  chipSignature, flatOffset, locateOffset, nodeLength, serializeNodes, stripPasteMarkers, tokenize, wrapPaste,
   type FlatNode,
 } from "./composerDom";
 
@@ -159,5 +159,29 @@ describe("chipSignature", () => {
     expect(chipSignature([skill("a"), skill("b")])).not.toBe(chipSignature([skill("b"), skill("a")]));
     // So does kind: a name that becomes a skill needs a rebuild to change look.
     expect(chipSignature([command("pr")])).not.toBe(chipSignature([skill("pr")]));
+  });
+});
+
+describe("paste chip", () => {
+  const paste = (t: string): FlatNode => ({ kind: "paste", text: t });
+
+  it("round-trips a wrapped paste through tokenize/serializeNodes", () => {
+    const body = "line1\nline2\nline3";
+    const wrapped = `before ${wrapPaste(body)} after`;
+    const nodes = tokenize(wrapped, KNOWN);
+    expect(nodes).toEqual([text("before "), paste(body), text(" after")]);
+    expect(serializeNodes(nodes)).toBe(wrapped);
+  });
+
+  it("nodeLength accounts for both invisible markers", () => {
+    expect(nodeLength(paste("abc"))).toBe(5);
+  });
+
+  it("chipSignature includes the pasted text", () => {
+    expect(chipSignature([paste("abc")])).toBe("paste:abc");
+  });
+
+  it("stripPasteMarkers removes the markers but keeps the content", () => {
+    expect(stripPasteMarkers(wrapPaste("hello\nworld"))).toBe("hello\nworld");
   });
 });
