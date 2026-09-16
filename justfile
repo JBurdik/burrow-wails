@@ -9,6 +9,13 @@ export APPLE_ID      := "bc.jakubgal@email.cz"
 export APPLE_TEAM_ID := "9QY36KZ8JP"
 profile := "BURROW_NOTARY"
 
+# `codesign --sign "Developer ID Application: <name> (<team>)"` can fail with
+# "no identity found" even though `security find-identity` lists the exact
+# same string — a name-lookup/encoding mismatch inside the Security framework
+# that shows up on some keychains when the name has non-ASCII characters.
+# Signing by the certificate's SHA-1 hash sidesteps the name lookup entirely.
+sign_id := `security find-identity -v -p codesigning | grep "Developer ID Application" | grep "$APPLE_TEAM_ID" | head -1 | awk '{print $2}'`
+
 # GitHub repo hosting releases + the updater manifest (latest.json).
 # Must match updateRepo in src-wails/updater.go.
 repo := "JBurdik/burrow-wails"
@@ -120,7 +127,7 @@ build: build-web build-mobile
 sign:
     #!/usr/bin/env bash
     set -euo pipefail
-    ID="Developer ID Application: Jakub Gál ({{APPLE_TEAM_ID}})"
+    ID="{{sign_id}}"
     ENT="src-wails/build/darwin/entitlements.plist"
     for bin in burrow-daemon burrow-mcp Burrow; do
       codesign --force --timestamp --options runtime --entitlements "$ENT" \
@@ -173,7 +180,7 @@ dmg:
     # The dmg needs its own Developer ID signature, not just a notarization
     # ticket: Gatekeeper checks the disk image itself on download, and an
     # unsigned one is rejected with "no usable signature" even when stapled.
-    codesign --force --timestamp --sign "Developer ID Application: Jakub Gál ({{APPLE_TEAM_ID}})" "{{dmg}}"
+    codesign --force --timestamp --sign "{{sign_id}}" "{{dmg}}"
     echo "dmg: {{dmg}} (signed)"
 
 # Notarize + staple the .dmg (Gatekeeper checks the dmg itself on download,
