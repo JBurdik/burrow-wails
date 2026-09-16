@@ -79,11 +79,85 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.4 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.4</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">září 2026</span>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Prázdná obrazovka terminálu po znovupřipojení</div>
+      <ul>
+        <li><strong>Poslech <code>pty-data-{id}</code> se registruje před <code>create_pty</code></strong> — <code>XTerm.vue</code> dřív nejdřív zavolal <code>create_pty</code> a listener zaregistroval až po něm. Daemon ale při reattachi hned přehraje svůj ring buffer přes sdílený <code>/v2/ws</code> socket, a protože <code>pty-data-*</code> se schválně nedrží ve server-side replay ring bufferu (má ho už daemon), byty bez zaregistrovaného posluchače nenávratně zmizely. Terminál se ukázal prázdný, dokud agent nevyprodukoval nový výstup.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Vložení dlouhého textu a obrázky na fullscreen</div>
+      <ul>
+        <li><strong>Dlouhý paste se sbalí do chipu „Pasted text (N lines)“</strong> — composer teď dlouhý vložený text (přes 4 řádky) nahradí kompaktním tokenem stejně jako u skill/command zmínek, klik otevře fullscreen dialog s celým obsahem.</li>
+        <li><strong>Obrázky v composeru i chatu se otevřou na celou obrazovku</strong> — nová komponenta <code>ImageLightbox.vue</code> (a <code>useImageLightbox</code>) po kliknutí na náhled v composeru nebo na obrázek v chatové zprávě zobrazí zvětšenou verzi místo malého náhledu.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Composer už nemůže přetéct obrazovku</div>
+      <ul>
+        <li><strong>Max výška 40vh s vnitřním scrollem</strong> — psací pole composeru dřív rostlo neomezeně s víceřádkovým textem; teď má stanovený strop a dál se scroluje uvnitř sebe.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Rozbitý dialog s vloženým textem</div>
+      <ul>
+        <li><strong>Barva pozadí se počítala z <code>var(--chat-surface)</code>, která mimo <code>.claude-chat</code> neexistuje</strong> — dialog se do stromu DOM přesouvá přes <code>Teleport</code> na <code>&lt;body&gt;</code>, takže se dostal mimo scope, kde je proměnná definovaná (a <code>ComposerTextInput</code> se navíc používá i z <code>WelcomeScreen.vue</code>, kde <code>.claude-chat</code> vůbec není). Neplatný <code>var()</code> spočítal pozadí jako průhledné a text composeru pod dialogem prosvítal skrz. Oprava přepnula na kořenové proměnné (<code>--bg-panel</code>, <code>--border</code>, <code>--text-primary</code>/<code>--text-secondary</code>) definované v <code>App.vue</code>, které fungují odkudkoliv.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Cmd+Q konečně ukončí aplikaci</div>
+      <ul>
+        <li><strong>Chybělo nativní systémové menu</strong> — na macOS bez zaregistrovaného app menu nemá <code>Cmd+Q</code> co spustit. Přidán <code>menu.AppMenu()</code> ve <code>main.go</code>, standardní menu (About/Hide/Quit) s klávesovou zkratkou zdarma.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Update skillů ze Spotlightu bez odbočky do Nastavení</div>
+      <ul>
+        <li><strong>„Update Agent Skills“ v paletce teď rovnou spustí <code>InstallAgentDocs</code></strong> — dřív jen otevřel Nastavení na záložce Skills a kliknutí zbylo na uživateli. Paletka teď ukáže toast „Updating skills…“ a po dokončení ho nahradí za úspěch nebo chybu.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Sdílená perzistence nastavení ACP napříč composery</div>
+      <ul>
+        <li><strong>Volba modelu, režimu a efortu se přesunula do <code>acpSettings.ts</code></strong> — Welcome i AgentChat composer teď sdílí stejnou vrstvu ukládání, což opravilo ztrátu vybraného Codex modelu při přechodu z uvítací obrazovky do vlákna.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Terminál v pravém panelu si nepůjčoval cizí PTY id</div>
+      <ul>
+        <li><strong>Nová alokace se dřív ptá daemona na živé session</strong> — pravý panel si mohl přidělit ID, které daemon ještě drží pro jiný terminál, a zdědit tak jeho historii i titulek. Dotaz na aktivní session před alokací tomu zabrání.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Zastaralá dokumentace <code>burrow spawn</code></div>
+      <ul>
+        <li><strong>Globální skill soubor popisoval starou syntaxi <code>burrow spawn [--token T] &lt;cmd...&gt;</code></strong> — aktuální verb-based API bere jeden pojmenovaný argument <code>task</code> (textový prompt), ne shell příkaz ke spuštění. Opraveno v <code>~/.claude/skills/burrow-wails/SKILL.md</code>; dokumentace v samotném repozitáři (<code>docs/burrow.html</code>, baked-in skill instalovaný agentům) už byla správně.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.3 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.3</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">září 2026</span>
     </div>
 
