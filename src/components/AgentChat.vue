@@ -283,7 +283,7 @@
           <div class="flex items-end justify-end gap-2 px-4 py-[3px]">
             <div class="inline-flex max-w-[min(460px,85%)] items-center gap-1.5 rounded-[14px] border border-dashed border-border bg-hover px-3 py-2 text-right text-[13px] text-muted-foreground opacity-70">
               <PhClock :size="11" class="flex-shrink-0" />
-              {{ msg.text }}
+              <span v-html="renderUserMd(msg.text)" />
             </div>
             <div class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-border bg-hover text-[11px] font-bold text-secondary-foreground opacity-35">U</div>
           </div>
@@ -3443,7 +3443,11 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
   border-radius: var(--radius-avatar);
 }
 
-.mention-pill {
+/* :deep() — this span is built by pillifyMentions() via DOMParser/createElement
+   and injected through v-html, so it never gets the scoped data-v-* attribute
+   a template-authored element would; a plain scoped selector silently never
+   matches it and the pill renders as unstyled text. */
+:deep(.mention-pill) {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -3458,7 +3462,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 /* Icon as a mask instead of an <svg> child: the pill is now built by
    pillifyMentions() into an HTML string, where a Vue icon component can't go.
    Path is phosphor "file", regular weight. */
-.mention-pill::before {
+:deep(.mention-pill::before) {
   content: "";
   width: 0.85em;
   height: 0.85em;
@@ -3467,7 +3471,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
   -webkit-mask: var(--mention-pill-icon) center / contain no-repeat;
   mask: var(--mention-pill-icon) center / contain no-repeat;
 }
-.mention-pill {
+:deep(.mention-pill) {
   --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></svg>');
 }
 

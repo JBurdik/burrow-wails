@@ -21,4 +21,17 @@ describe("splitMentions", () => {
     expect(splitMentions("plain")).toEqual([{ mention: false, v: "plain" }]);
     expect(splitMentions("")).toEqual([{ mention: false, v: "" }]);
   });
+
+  it("strips trailing sentence punctuation from the mention", () => {
+    expect(splitMentions("check @src/app.ts.")).toEqual([
+      { mention: false, v: "check " },
+      { mention: true, v: "@src/app.ts" },
+      { mention: false, v: "." },
+    ]);
+    expect(splitMentions("see @README.md, thanks")).toEqual([
+      { mention: false, v: "see " },
+      { mention: true, v: "@README.md" },
+      { mention: false, v: ", thanks" },
+    ]);
+  });
 });

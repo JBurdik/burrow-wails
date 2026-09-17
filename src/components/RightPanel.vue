@@ -369,11 +369,17 @@
           >
             <PhRobot :size="12" class="shrink-0 text-muted-foreground" />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ child.title }}</span>
-            <!-- Phase label reserves the slot's width (invisible, not hidden, so the box stays); the
+            <!-- Phase dot reserves the slot's size (invisible, not hidden, so the box stays); the
                  close button overlays it via absolute + opacity, so it never resizes the row and stays
                  focusable (unlike display:none) for keyboard/AX users. -->
-            <span class="relative shrink-0 text-[9px] text-muted-foreground">
-              <span class="group-hover:invisible">{{ childPhase[child.id] ?? "idle" }}</span>
+            <span class="relative flex h-[13px] w-[13px] shrink-0 items-center justify-center">
+              <span
+                v-if="childPhase[child.id] && childPhase[child.id] !== 'idle'"
+                class="status-dot group-hover:invisible"
+                :class="`status-${childPhase[child.id]}`"
+                :title="statusLabel(childPhase[child.id])"
+                role="status"
+              >{{ childPhase[child.id] === "running" ? spinnerFrame : "" }}</span>
               <button
                 class="absolute inset-0 flex items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground opacity-0 pointer-events-none transition-opacity hover:bg-hover hover:text-destructive group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
                 :title="`Close ${child.title}`"
@@ -558,7 +564,10 @@ import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { activeChatIdFor, childrenOf } from "@/stores/chatTree";
 import { subAgentViewTarget, nextSubAgentView } from "@/lib/subAgentView";
 import { perform } from "@/lib/controlBridge";
-import type { Phase } from "@/runtime/displayStatus";
+import { displayStatus, type Phase } from "@/runtime/displayStatus";
+import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
+import { statusLabel, type TermStatus } from "@/lib/terminalStatus";
+import { spinnerFrame } from "@/lib/spinner";
 import FileTreeNode from "./FileTreeNode.vue";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useContainerQuery } from "@/composables/useContainerQuery";
@@ -683,20 +692,40 @@ async function confirmCloseChild() {
 // workspace switch — so listeners are torn down when a child leaves the
 // list, not just on RightPanel's own unmount (which never happens; it is
 // mounted once for the app's lifetime).
-const childPhase = reactive<Record<number, string>>({});
+const childPhase = reactive<Record<number, TermStatus>>({});
 const phaseUnsubs = new Map<number, () => void>();
+// Ids whose phase has already arrived LIVE. The seed below is a round trip, so
+// it can resolve after the first `phase-chat:` event for the same child and put
+// a stale snapshot back over a newer state; this is what makes the seed lose.
+const phaseFromEvent = new Set<number>();
 watch(childList, (list) => {
   const liveIds = new Set(list.map((c) => c.id));
   for (const [id, un] of phaseUnsubs) {
     if (liveIds.has(id)) continue;
     un();
     phaseUnsubs.delete(id);
+    phaseFromEvent.delete(id);
     delete childPhase[id];
   }
-  for (const child of list) {
-    if (phaseUnsubs.has(child.id)) continue;
-    childPhase[child.id] = "idle";
-    listen<Phase>(`phase-chat:${child.id}`, (ev) => { childPhase[child.id] = ev.payload?.state ?? "idle"; }).then((un) => {
+  const fresh = list.filter((c) => !phaseUnsubs.has(c.id));
+  if (fresh.length) {
+    // PhaseStore only emits on a CHANGE (phasestore.go), so a child whose
+    // phase already flipped to running/done before this panel subscribed
+    // would otherwise sit on the "idle" placeholder until its next
+    // transition. Seed it from the server's current state instead of guessing.
+    invoke<ShellSnapshotData>("shell_snapshot").then((snap) => {
+      for (const child of fresh) {
+        const phase = snap.phases[`chat:${child.id}`];
+        if (phase && !phaseFromEvent.has(child.id)) childPhase[child.id] = displayStatus(phase, 0, true);
+      }
+    });
+  }
+  for (const child of fresh) {
+    childPhase[child.id] = childPhase[child.id] ?? "idle";
+    listen<Phase>(`phase-chat:${child.id}`, (ev) => {
+      phaseFromEvent.add(child.id);
+      childPhase[child.id] = ev.payload ? displayStatus(ev.payload, 0, true) : "idle";
+    }).then((un) => {
       // The child may have left the list again while listen() was still
       // resolving — don't resurrect a subscription for one already torn down.
       if (!childList.value.some((c) => c.id === child.id)) { un(); return; }

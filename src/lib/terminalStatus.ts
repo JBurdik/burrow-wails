@@ -70,6 +70,19 @@ export function aggregateStatus<T>(
   return "idle";
 }
 
+/** Human label for a TermStatus. Same wording Sidebar.vue uses for its rows. */
+export function statusLabel(status: TermStatus): string {
+  switch (status) {
+    case "running": return "Working";
+    case "permission": return "Needs input";
+    case "waiting": return "Waiting";
+    case "error": return "Error";
+    case "review":
+    case "done": return "Done";
+    default: return "Idle";
+  }
+}
+
 // ── Name derivation ───────────────────────────────────────────────────────────
 
 /** True when the title is a generic auto-generated default (e.g. "Terminal 3"). */

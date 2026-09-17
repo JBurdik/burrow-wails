@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useUIStore } from "./ui";
+import { useNotificationsStore } from "./notifications";
 
 export interface GitFile {
   path: string;
@@ -92,6 +93,7 @@ function parseStatus(raw: string): { staged: GitFile[]; unstaged: GitFile[]; unt
 }
 
 export const useGitStore = defineStore("git", () => {
+  const notif = useNotificationsStore();
   const cwd = ref("");
   const branch = ref("");
   const staged = ref<GitFile[]>([]);
@@ -288,6 +290,7 @@ export const useGitStore = defineStore("git", () => {
     if (!dir) return;
     pushing.value = true;
     error.value = null;
+    const toastId = notif.push({ type: "pending", title: "Pushing…" });
     try {
       const { branchName, upstream } = dir === cwd.value
         ? { branchName: branch.value, upstream: hasUpstream.value }
@@ -295,8 +298,10 @@ export const useGitStore = defineStore("git", () => {
       const args = upstream ? ["push"] : ["push", "-u", "origin", branchName];
       await runGit(dir, args);
       await refresh();
+      notif.resolve(toastId, { type: "done", title: "Pushed" });
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : "git push failed";
+      notif.resolve(toastId, { type: "error", title: "Push failed", body: error.value ?? undefined });
     } finally {
       pushing.value = false;
     }
@@ -307,11 +312,14 @@ export const useGitStore = defineStore("git", () => {
     const dir = cwd.value;
     pulling.value = true;
     error.value = null;
+    const toastId = notif.push({ type: "pending", title: "Pulling…" });
     try {
       await runGit(dir, ["pull", "--ff-only"]);
       await refresh();
+      notif.resolve(toastId, { type: "done", title: "Pulled" });
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : "git pull failed";
+      notif.resolve(toastId, { type: "error", title: "Pull failed", body: error.value ?? undefined });
     } finally {
       pulling.value = false;
     }
@@ -329,13 +337,16 @@ export const useGitStore = defineStore("git", () => {
     if (!dir || !hasWorkingTreeChanges.value || generating.value) return;
     generating.value = true;
     generateError.value = null;
+    const toastId = notif.push({ type: "pending", title: "Generating commit message…" });
     try {
       await stageAllIfNeeded(dir);
       const out = await invoke<GitOutput>("generate_commit_message", { cwd: dir, ...textGenPrefs() });
       if (out.code !== 0) throw new Error(out.stderr || "commit message generation failed");
       commitMsg.value = out.stdout.trim();
+      notif.resolve(toastId, { type: "done", title: "Commit message generated" });
     } catch (e: unknown) {
       generateError.value = e instanceof Error ? e.message : "commit message generation failed";
+      notif.resolve(toastId, { type: "error", title: "Commit message generation failed", body: generateError.value ?? undefined });
     } finally {
       generating.value = false;
     }
@@ -435,6 +446,13 @@ export const useGitStore = defineStore("git", () => {
       diffFile.value = null;
       await refresh();
       return dir;
+    } catch (e: unknown) {
+      // Not caught before: a failed commit threw past every caller (GitPanel's
+      // "Commit & Push" awaits this with no try/catch) and vanished as an
+      // unhandled rejection, so the button just went quiet with no feedback.
+      error.value = e instanceof Error ? e.message : "git commit failed";
+      notif.push({ type: "error", title: "Commit failed", body: error.value });
+      throw e;
     } finally {
       committing.value = false;
     }

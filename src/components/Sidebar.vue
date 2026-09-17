@@ -1,5 +1,15 @@
 <template>
   <aside class="flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-panel [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
+    <!-- Search: filters workspaces/chats/tabs below by substring -->
+    <div class="px-1.5 pt-1.5">
+      <input
+        v-model="searchQuery"
+        type="text"
+        placeholder="Filter…"
+        class="w-full rounded-md border border-border/65 bg-transparent px-2 py-1 text-[11.5px] text-foreground outline-none placeholder:text-muted-foreground focus:border-accent/60"
+        @keydown.esc="clearSearch"
+      />
+    </div>
     <!-- Project filter: "All projects" or one repo, narrows the feed below -->
     <div class="flex shrink-0 items-center gap-1 p-1.5 pb-1" ref="filterEl">
       <button
@@ -58,7 +68,7 @@
     <div class="flex-1 overflow-y-auto pb-2" @scroll="cancelHoverCard">
       <!-- Live feed: every open project's tabs, newest activity first -->
       <div
-        v-for="row in feed.live"
+        v-for="row in filteredLive"
         :key="rowKey(row)"
         class="group relative cursor-pointer border-b border-border/40 px-2.5 py-[7px] transition-colors hover:rounded-lg hover:bg-hover"
         :class="[
@@ -74,8 +84,8 @@
 
         <!-- line 1: project + when -->
         <div class="flex items-center gap-1.5">
-          <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-3 w-3 shrink-0 rounded-[3px] object-cover" />
-          <PhFolder v-else :size="11" weight="fill" class="shrink-0 text-accent/80" />
+          <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-3.5 w-3.5 shrink-0 rounded-[3px] object-cover" />
+          <PhFolder v-else :size="14" weight="fill" class="shrink-0 text-accent/80" />
           <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[10.5px] text-muted-foreground">{{ repoName(row.ws) }}</span>
           <!-- Status ↔ Settle swap via visibility in one grid cell — display
                swapping resized the row and made it jump on hover. -->
@@ -97,13 +107,13 @@
           <component
             v-if="row.tab.agentIcon"
             :is="agentIconComp(row.tab.agentIcon)"
-            :size="11"
+            :size="14"
             class="shrink-0"
             :class="[row.tab.isChat ? 'text-[var(--yellow)]' : 'ws-term-icon-agent text-accent']"
           />
-          <PhChatCenteredText v-else-if="row.tab.isChat" :size="11" class="shrink-0 text-[var(--yellow)]" />
-          <PhRobot v-else-if="row.tab.isAgent" :size="11" class="ws-term-icon-agent shrink-0 text-accent" />
-          <PhTerminal v-else :size="11" class="shrink-0 text-muted-foreground" />
+          <PhChatCenteredText v-else-if="row.tab.isChat" :size="14" class="shrink-0 text-[var(--yellow)]" />
+          <PhRobot v-else-if="row.tab.isAgent" :size="14" class="ws-term-icon-agent shrink-0 text-accent" />
+          <PhTerminal v-else :size="14" class="shrink-0 text-muted-foreground" />
           <input
             v-if="editingTab?.wsId === row.ws.id && editingTab?.tabId === row.tab.id"
             v-model="editingTabTitle"
@@ -130,7 +140,7 @@
         <!-- line 3: branch + badges -->
         <div class="mt-[3px] flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <PhGitBranch v-if="row.ws.parent_id" :size="9" class="shrink-0 text-accent" />
-          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ row.tab.branch || branchOf(row.ws) }}</span>
+          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ branchOf(row.ws) || row.tab.branch }}</span>
           <span class="ml-auto flex shrink-0 items-center gap-1">
             <span v-if="row.tab.model" class="rounded bg-hover px-1 font-mono text-[9px] leading-[1.5] text-muted-foreground" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
             <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
@@ -158,18 +168,19 @@
         </div>
       </div>
 
-      <div v-if="!feed.live.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
-        <template v-if="store.workspaces.length === 0">No projects.<br />Open a folder to start.</template>
+      <div v-if="!filteredLive.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
+        <template v-if="searchQuery.trim()">No matches for “{{ searchQuery.trim() }}”.</template>
+        <template v-else-if="store.workspaces.length === 0">No projects.<br />Open a folder to start.</template>
         <template v-else-if="active">No threads here yet.<br />Start one above.</template>
         <template v-else>Nothing open.<br />Pick a project up top.</template>
       </div>
 
       <!-- Settled: chats the agent finished with, no attention needed right now -->
-      <template v-if="feed.settledChats.length">
+      <template v-if="filteredSettled.length">
         <button class="section-header" @click="toggleSection('settled')">
           <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('settled') && '-rotate-90'" />
           Settled
-          <span class="opacity-60">{{ feed.settledChats.length }}</span>
+          <span class="opacity-60">{{ filteredSettled.length }}</span>
         </button>
         <template v-if="!collapsed.includes('settled')">
           <div
@@ -204,12 +215,12 @@
             </div>
           </div>
           <button
-            v-if="feed.settledChats.length > settledChatsLimit"
+            v-if="filteredSettled.length > settledChatsLimit"
             class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
             @click="settledChatsLimit += 25"
           >
             <PhPlus :size="10" />
-            Show {{ feed.settledChats.length - settledChatsLimit }} more
+            Show {{ filteredSettled.length - settledChatsLimit }} more
           </button>
         </template>
       </template>
@@ -323,9 +334,14 @@
           <span class="min-w-0 truncate text-foreground/80">{{ repoName(hoverInfo.ws) }}</span>
         </div>
         <div class="min-w-0 truncate font-mono text-[9.5px] text-muted-foreground" :title="hoverInfo.ws.path">{{ hoverInfo.ws.path }}</div>
-        <div v-if="hoverInfo.branch || branchOf(hoverInfo.ws)" class="flex min-w-0 items-center gap-1.5">
+        <div v-if="branchOf(hoverInfo.ws) || hoverInfo.branch" class="flex min-w-0 items-center gap-1.5">
           <PhGitBranch :size="11" class="shrink-0" />
-          <span class="min-w-0 truncate font-mono text-foreground/80">{{ hoverInfo.branch || branchOf(hoverInfo.ws) }}</span>
+          <span class="min-w-0 truncate font-mono text-foreground/80">{{ branchOf(hoverInfo.ws) || hoverInfo.branch }}</span>
+        </div>
+        <!-- Only worth saying when the checkout moved under the thread. -->
+        <div v-if="hoverInfo.branch && branchOf(hoverInfo.ws) && hoverInfo.branch !== branchOf(hoverInfo.ws)" class="flex min-w-0 items-center gap-1.5">
+          <PhGitBranch :size="11" class="shrink-0 opacity-50" />
+          <span class="min-w-0 truncate font-mono text-[9.5px] opacity-70">started on {{ hoverInfo.branch }}</span>
         </div>
         <div v-if="hoverInfo.model" class="flex min-w-0 items-center gap-1.5">
           <PhRobot :size="11" class="shrink-0" />
@@ -570,6 +586,7 @@ import {
   type TermStatus,
 } from "@/lib/terminalStatus";
 import { useGitStore, type PrInfo } from "@/stores/git";
+import { useNotificationsStore } from "@/stores/notifications";
 import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
 import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
 import { buildActivityRows, type ActivityRow } from "@/lib/sidebarGroups";
@@ -590,6 +607,7 @@ const termTabs = useTerminalTabsStore();
 const chats = useClaudeChatsStore();
 const ui = useUIStore();
 const git = useGitStore();
+const notif = useNotificationsStore();
 const scriptsStore = useScriptsStore();
 
 const active = computed(() => store.active);
@@ -643,9 +661,29 @@ const feed = computed(() =>
   }),
 );
 
+// ── search ───────────────────────────────────────────────────────────────────
+// Plain substring match over workspace name + tab title; a row survives the
+// filter if either side matches, which is what keeps a project visible for a
+// matching thread inside it without a separate "workspace" row to filter.
+const searchQuery = ref("");
+function matchesSearch(ws: Workspace, title: string): boolean {
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) return true;
+  return repoName(ws).toLowerCase().includes(q) || title.toLowerCase().includes(q);
+}
+function clearSearch() {
+  searchQuery.value = "";
+}
+
+const filteredLive = computed(() => feed.value.live.filter((row) => matchesSearch(row.ws, row.tab.title)));
+const filteredSettled = computed(() => feed.value.settledChats.filter((row) => matchesSearch(row.ws, row.tab.title)));
+
 const settledChatsLimit = ref(12);
-const settledChatsVisible = computed(() => feed.value.settledChats.slice(0, settledChatsLimit.value));
-const archivedChats = computed(() => (active.value ? chats.archivedSessionsForWs(active.value.id) : []));
+const settledChatsVisible = computed(() => filteredSettled.value.slice(0, settledChatsLimit.value));
+const archivedChats = computed(() => {
+  const all = active.value ? chats.archivedSessionsForWs(active.value.id) : [];
+  return active.value ? all.filter((s) => matchesSearch(active.value!, s.title)) : all;
+});
 
 function unarchiveAndOpen(chatId: number) {
   if (!active.value) return;
@@ -675,13 +713,19 @@ function deleteThread(wsId: number, tab: TabSummary) {
   };
 }
 function toggleSettled(tab: TabSummary, wsId: number) {
+  // Settling the tab the user is currently looking at leaves nothing to show
+  // in its place — send them back to the composer. Settling any other row is
+  // a background action: the view must not move.
+  const wasFocused = store.active?.id === wsId && termTabs.activeByWs[wsId] === tab.id;
+  const wasSettled = tab.settled;
   if (tab.isChat) {
     if (tab.chatId == null) return;
-    if (tab.settled) chats.unsettle(tab.chatId);
+    if (wasSettled) chats.unsettle(tab.chatId);
     else chats.settle(tab.chatId);
   } else {
     toggleTabSettled(wsId, tab.id);
   }
+  if (!wasSettled && wasFocused) ui.openWelcome();
 }
 
 type SectionKey = "settled" | "archived";
@@ -772,6 +816,10 @@ function rowKey(row: ActivityRow): string {
   return `${row.ws.id}:${row.tab.id}`;
 }
 function isActiveRow(row: ActivityRow): boolean {
+  // termTabs.activeByWs keeps pointing at the last focused tab even once the
+  // welcome composer is up — gate on viewingTabs so "new thread" doesn't leave
+  // the thread it came from looking focused with nothing behind it.
+  if (!ui.viewingTabs) return false;
   return store.active?.id === row.ws.id && termTabs.activeByWs[row.ws.id] === row.tab.id;
 }
 
@@ -960,6 +1008,7 @@ let renameReadyAt = 0;
 async function regenerateTitle(ws: Workspace, tab: TabSummary) {
   if (!tab.isChat || tab.chatId == null) return;
   const chatId = tab.chatId;
+  const toastId = notif.push({ type: "pending", title: "Regenerating title…" });
   let text = tab.title;
   try {
     const raw = await invoke<string>("load_chat_messages", { chatId });
@@ -981,9 +1030,15 @@ async function regenerateTitle(ws: Workspace, tab: TabSummary) {
       text,
     });
   } catch {
+    notif.resolve(toastId, { type: "error", title: "Title regeneration failed" });
     return;
   }
-  if (title) chats.sync(chatId, { title });
+  if (title) {
+    chats.sync(chatId, { title });
+    notif.resolve(toastId, { type: "done", title: "Title regenerated" });
+  } else {
+    notif.resolve(toastId, { type: "error", title: "Title regeneration failed" });
+  }
 }
 
 function startTabRename(wsId: number, tab: TabSummary) {

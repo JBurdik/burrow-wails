@@ -14,6 +14,7 @@
               'bg-lime-500': toast.type === 'done',
               'bg-blue-500': toast.type === 'info',
               'bg-destructive': toast.type === 'error',
+              'animate-pulse bg-muted-foreground': toast.type === 'pending',
             }"
           />
           <div class="flex min-w-0 flex-col gap-0.5">
