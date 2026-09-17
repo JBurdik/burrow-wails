@@ -41,9 +41,58 @@ export function wrapPaste(text: string): string {
   return `${PASTE_START}${text}${PASTE_END}`;
 }
 
+/**
+ * Ph "Clipboard Text" bold path data — shared by the composer's own paste chip
+ * (`ComposerTextInput.vue`) and the transcript's read-only one (`PasteChip.vue`),
+ * so the two chips that mean "a pasted block collapsed here" stay visually
+ * identical rather than drifting into two icons over time.
+ */
+export const PASTE_CHIP_ICON_PATH =
+  "M196,32H164.62a44,44,0,0,0-73.24,0H60A20,20,0,0,0,40,52V216a20,20,0,0,0,20,20H196a20,20,0,0,0,20-20V52A20,20,0,0,0,196,32Zm-4,180H64V56H84v8a12,12,0,0,0,12,12h64a12,12,0,0,0,12-12V56h20ZM88,132a12,12,0,0,1,12-12h56a12,12,0,0,1,0,24H100A12,12,0,0,1,88,132Zm0,40a12,12,0,0,1,12-12h56a12,12,0,0,1,0,24H100A12,12,0,0,1,88,172Z";
+
+/** How many lines a pasted block needs before it collapses into a chip. */
+export const PASTE_COLLAPSE_LINES = 4;
+
 /** Undo `wrapPaste`, for the text actually sent to the agent. */
 export function stripPasteMarkers(text: string): string {
   return text.replaceAll(PASTE_START, "").replaceAll(PASTE_END, "");
+}
+
+/** Whether `text` still carries at least one `wrapPaste` block. */
+export function hasPasteMarkers(text: string): boolean {
+  return text.includes(PASTE_START);
+}
+
+function pasteMarkerRe(): RegExp {
+  // A fresh RegExp per call: a module-level `g` regex keeps `lastIndex` across
+  // calls, and a caller that re-enters mid-scan (this is used by both
+  // `tokenize()` and the transcript renderer) would silently skip matches.
+  return new RegExp(`${PASTE_START}([\\s\\S]*?)${PASTE_END}`, "g");
+}
+
+/** One run of a marked-up string: either plain text or a pasted block's raw text. */
+export type PasteSegment = { paste: false; text: string } | { paste: true; text: string };
+
+/**
+ * Split model text that may still carry `wrapPaste` markers into plain-text
+ * runs and pasted-block runs, without needing the skill/command/file tables
+ * `tokenize()` requires. Used to render a sent message's own pasted block as
+ * a collapsed chip in the transcript, the same way the composer collapses it
+ * while still being typed.
+ */
+export function splitPasteSegments(text: string): PasteSegment[] {
+  if (!text || !hasPasteMarkers(text)) return text ? [{ paste: false, text }] : [];
+  const out: PasteSegment[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  const re = pasteMarkerRe();
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push({ paste: false, text: text.slice(last, m.index) });
+    out.push({ paste: true, text: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ paste: false, text: text.slice(last) });
+  return out;
 }
 
 /**
@@ -69,7 +118,7 @@ export function tokenize(
   const matches: Match[] = [];
   let m: RegExpExecArray | null;
 
-  const pasteRe = new RegExp(`${PASTE_START}([\\s\\S]*?)${PASTE_END}`, "g");
+  const pasteRe = pasteMarkerRe();
   while ((m = pasteRe.exec(text)) !== null) {
     matches.push({ start: m.index, end: m.index + m[0].length, kind: "paste", name: m[1] });
   }

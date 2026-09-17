@@ -116,6 +116,14 @@ func delegationVerbs(c *Core) []Verb {
 			return out, c.ui(ctx, "chat_send", map[string]any{"chatId": p.Int("chat_id"), "text": p.Str("text")}, &out)
 		},
 	}, {
+		Name:    "close_chat",
+		Summary: "Delete a chat sub-agent and any children spawned under it. Destructive — confirm with the user first",
+		Args: []Arg{
+			{Name: "chat_id", Type: "integer", Desc: "Chat to delete — a sub-agent id from agent_status", Required: true},
+		},
+		Scope: ScopeLocal,
+		Fn:    func(ctx context.Context, p Params) (any, error) { return c.closeChat(p) },
+	}, {
 		Name:    "wait_result",
 		Summary: "Block until a spawned agent finishes and return its final message",
 		Args: []Arg{
@@ -203,6 +211,24 @@ func (c *Core) sendToTab(p Params) (any, error) {
 		return nil, fmt.Errorf("send_to_tab: %w", err)
 	}
 	return map[string]any{"sent": true}, nil
+}
+
+// closeChat deletes a chat sub-agent (and, by cascade, its own children) —
+// the plain DB op DeleteChat already performs; no UI round-trip needed since
+// a chat's ownership is a database row, not something only the frontend holds
+// (unlike tab_close, which has to reach a live PTY through the UI bridge).
+func (c *Core) closeChat(p Params) (any, error) {
+	if c.deps.Chats == nil {
+		return nil, fmt.Errorf("close_chat: no chat backend")
+	}
+	chatID := p.Int("chat_id")
+	if chatID <= 0 {
+		return nil, fmt.Errorf("close_chat needs a chat_id")
+	}
+	if err := c.deps.Chats.DeleteChat(chatID); err != nil {
+		return nil, fmt.Errorf("close_chat: %w", err)
+	}
+	return map[string]any{"closed": chatID}, nil
 }
 
 // waitResult polls for the capture file, or — for a chat sub-agent — for the

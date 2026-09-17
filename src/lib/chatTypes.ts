@@ -9,6 +9,13 @@ export interface ChatMessage {
   id: number;
   role: "user" | "assistant" | "tool" | "thinking" | "permission" | "system-info" | "queued";
   text: string;
+  // On a "user" message only: the composer text as the user actually typed it,
+  // still carrying `wrapPaste` markers (see composerDom.ts). `text` above is
+  // always the stripped copy — what the agent received and what an ACP/native
+  // echo is matched against — so a long pasted block can render as a collapsed
+  // chip in the transcript without changing what got sent. Absent (or equal to
+  // `text`) when the message has no paste chip to show.
+  displayText?: string;
   images?: string[]; // data URIs for user messages with attached images
   partial?: boolean;
   toolInput?: Record<string, unknown>; // full tool args for expandable tool calls

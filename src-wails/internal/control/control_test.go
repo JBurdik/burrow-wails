@@ -333,6 +333,7 @@ type fakeChats struct{ last string }
 func (f *fakeChats) LastAssistantMessage(int64) (string, error) { return f.last, nil }
 func (f *fakeChats) UncollectedChildren(int64) ([]int64, error) { return nil, nil }
 func (f *fakeChats) MarkCollected(int64) error                  { return nil }
+func (f *fakeChats) DeleteChat(int64) error                     { return nil }
 
 // A chat sub-agent writes no capture files, so waiting on one has to read the
 // phase Go already derives — which also means waiting works with no view of
@@ -511,6 +512,7 @@ func (c *timedChats) LastAssistantMessage(int64) (string, error) {
 }
 func (c *timedChats) UncollectedChildren(int64) ([]int64, error) { return nil, nil }
 func (c *timedChats) MarkCollected(int64) error                  { return nil }
+func (c *timedChats) DeleteChat(int64) error                     { return nil }
 
 // This is the interleaving the coordinator's re-review flagged: a plain
 // elapsed-time grace fires the moment it expires regardless of what has
@@ -575,6 +577,8 @@ func (c *countingChats) MarkCollected(id int64) error {
 	c.children = remaining
 	return nil
 }
+
+func (c *countingChats) DeleteChat(int64) error { return nil }
 
 // Without collected_at, every call would hand back the same finished child —
 // which is how a supervising loop turns into an infinite one.

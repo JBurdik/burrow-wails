@@ -212,7 +212,12 @@
                   @click="showImage(img)"
                 />
               </div>
-              <div class="md-body" v-html="renderUserMd(msg.text)" />
+              <div class="md-body">
+                <template v-for="(seg, segIdx) in userMsgSegments(msg)" :key="segIdx">
+                  <PasteChip v-if="seg.paste" :text="seg.text" />
+                  <span v-else v-html="renderUserMd(seg.text)" />
+                </template>
+              </div>
             </div>
             <div v-if="isLastOfRun(msgIdx)" class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-border bg-hover text-[11px] font-bold text-secondary-foreground">U</div>
             <div v-else class="w-[26px] flex-shrink-0" />
@@ -651,7 +656,8 @@ import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } fr
 import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
-import { stripPasteMarkers } from "@/lib/composerDom";
+import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
+import PasteChip from "@/components/composer/PasteChip.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
@@ -676,6 +682,16 @@ import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 
 function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string);
+}
+
+// A sent message that still carries a `wrapPaste` block (see composerDom.ts)
+// renders that block as the same collapsed "Pasted text (N lines)" chip the
+// composer showed while it was still being typed, instead of dumping the raw
+// paste inline — which is what used to overflow the bubble on a large paste.
+// `displayText` is the only field that can hold markers; `text` (what actually
+// reached the agent) never does, by the time it's pushed.
+function userMsgSegments(msg: ChatMessage) {
+  return splitPasteSegments(msg.displayText ?? msg.text);
 }
 
 // A sent message is rendered through markdown, exactly like an assistant one —
@@ -2549,7 +2565,13 @@ async function sendInitialPrompt(prompt: string, images?: string[]) {
 }
 
 async function sendMessage(forcedText?: string, extraImages?: string[]) {
-  let text = stripPasteMarkers(forcedText ?? inputText.value).trim();
+  const raw = forcedText ?? inputText.value;
+  // The stripped copy is what goes on the wire and what an echoed user.delta
+  // is matched against (`pendingSends`); `raw` still carries any `wrapPaste`
+  // markers, kept below only to give the TRANSCRIPT'S OWN rendering of this
+  // message something to collapse into a chip — never sent anywhere.
+  const strippedBaseline = stripPasteMarkers(raw).trim();
+  let text = strippedBaseline;
   if (!text) return;
   branchBannerDismissed.value = true;
   // A cold chat (never opened this launch) has no process yet — start it now.
@@ -2585,7 +2607,10 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   }
 
   const msgImages = images.length > 0 ? images : undefined;
-  messages.value.push({ id: S.nextMsgId++, role: "user", text, images: msgImages });
+  // Only set when the /pr rewrite above didn't replace `text` with a generated
+  // prompt — that one has no paste chip of its own to show.
+  const displayText = text === strippedBaseline && hasPasteMarkers(raw) ? raw.trim() : undefined;
+  messages.value.push({ id: S.nextMsgId++, role: "user", text, images: msgImages, ...(displayText ? { displayText } : {}) });
   // Claim the echo before the send goes out — a loopback round trip can land
   // user.delta before the next line runs.
   pendingSends.add(text);
@@ -3441,6 +3466,15 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 }
 .bubble-user .md-body :deep(code) { background: rgba(0, 0, 0, 0.25); color: inherit; }
 .bubble-user .md-body :deep(a) { color: inherit; }
+/* The paste chip's default styling (composer.css) is accent-on-transparent,
+   which disappears against a bubble whose own background IS the accent color —
+   invert to white-on-dark here so it still reads as a chip. */
+.bubble-user .md-body :deep(.composer-inline-chip) {
+  background: rgba(0, 0, 0, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  color: inherit;
+  cursor: pointer;
+}
 
 /* Tool row — quiet activity-log line, expandable */
 .tool-row {

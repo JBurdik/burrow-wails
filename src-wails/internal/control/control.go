@@ -141,6 +141,9 @@ type ChatReader interface {
 	LastAssistantMessage(chatID int64) (string, error)
 	UncollectedChildren(parentChatID int64) ([]int64, error)
 	MarkCollected(chatID int64) error
+	// DeleteChat removes a chat and cascades to its sub-agent children — the
+	// close_chat verb's cleanup counterpart to spawn(target: "chat").
+	DeleteChat(id int64) error
 }
 
 // Deps is everything the verbs need from the host app.

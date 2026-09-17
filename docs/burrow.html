@@ -113,6 +113,7 @@
     <tr><td>tab_output</td><td>Tail of a tab's terminal output — how you check on an agent mid-task.</td></tr>
     <tr><td>send_to_tab</td><td>Type a follow-up into a running agent's tab and submit it.</td></tr>
     <tr><td>chat_send</td><td>Send a follow-up message into a chat sub-agent and submit it — the chat equivalent of <code>send_to_tab</code>, reachable even when nobody has that chat's view open. Args: <code>chat_id*</code>, <code>text*</code> (both named; <code>chat_send</code> has no positional argument).</td></tr>
+    <tr><td>close_chat</td><td>Delete a chat sub-agent and any children spawned under it — the chat equivalent of <code>tab_close</code>. Cascades, so a thread's own sub-agents go with it. Destructive — confirm with the user first. Args: <code>chat_id*</code>.</td></tr>
     <tr><td>wait_result</td><td>Block until a spawned agent finishes; returns its final message. Args: <code>token</code> <em>or</em> <code>chat_id</code> (one or the other — a chat sub-agent has no result token, so this resolves it by polling that chat's phase instead), <code>timeout</code>.</td></tr>
     <tr><td>collect_results</td><td>Take every finished result that hasn't been collected yet — both file-captured tab results and, via <code>parent_chat_id</code> (set automatically from <code>BURROW_CHAT_ID</code>), this thread's finished chat sub-agents.</td></tr>
   </table>

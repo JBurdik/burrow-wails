@@ -430,7 +430,14 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     const transport: ChatTransport =
       (() => { const a = useProvidersStore().byId(agentKind); return a ? chatTransportFor(a) : (agentKind === 'claude' ? 'claude-cli' : 'acp'); })();
     const ws = useWorkspaceStore().workspaces.find((w) => w.id === workspaceId);
-    const branch = ws?.worktree_branch || useGitStore().branchByWs[workspaceId] || undefined;
+    // Read HEAD now, don't trust the cache: `branchByWs` is only refreshed on
+    // mount and by the 60s PR sweep, so a chat started right after a checkout
+    // was recorded on the PREVIOUS branch — the thread said "main" while its
+    // own composer said the feature branch. This is the branch it STARTED on;
+    // the sidebar shows the workspace's current one.
+    const git = useGitStore();
+    if (ws?.path && !ws.worktree_branch) await git.ensureBranch(workspaceId, ws.path);
+    const branch = ws?.worktree_branch || git.branchByWs[workspaceId] || undefined;
     // Threads-only numbering: a sub-agent must not push the next thread's
     // number up, and its own title comes from the caller (e.g. the spawning
     // verb), not this counter.

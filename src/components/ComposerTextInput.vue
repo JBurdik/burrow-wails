@@ -15,37 +15,17 @@
     @compositionstart="composing = true"
     @compositionend="onCompositionEnd"
   />
-  <Teleport to="body">
-    <div v-if="pasteDialogText !== null" class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70" @click.self="closePasteDialog">
-      <div
-        class="flex max-h-[90vh] w-[90vw] max-w-[900px] flex-col overflow-hidden rounded-lg shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
-        style="background: var(--bg-panel, #18181c); border: 1px solid var(--border, rgba(255,255,255,0.08));"
-      >
-        <div class="flex shrink-0 items-center justify-between border-b px-3 py-2" style="border-color: var(--border, rgba(255,255,255,0.08));">
-          <span class="text-sm" style="color: var(--text-secondary, rgba(255,255,255,0.6));">Pasted text</span>
-          <button class="flex items-center rounded p-1 hover:bg-white/10" style="color: var(--text-secondary, rgba(255,255,255,0.6));" @click="closePasteDialog">
-            <PhX :size="16" />
-          </button>
-        </div>
-        <pre
-          class="m-0 flex-1 overflow-auto whitespace-pre-wrap p-3 font-mono text-sm"
-          style="color: var(--text-primary, rgba(255,255,255,0.88));"
-        >{{ pasteDialogText }}</pre>
-      </div>
-    </div>
-  </Teleport>
+  <PasteTextDialog v-model="pasteDialogText" />
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
-import { PhX } from "@phosphor-icons/vue";
+import { nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import {
   chipSignature, flatOffset, isChip, locateOffset, serializeNodes, tokenize, wrapPaste,
+  PASTE_CHIP_ICON_PATH, PASTE_COLLAPSE_LINES,
   type ChipKind, type FlatNode,
 } from "@/lib/composerDom";
-
-/** A pasted block collapses into a chip once it's longer than this many lines. */
-const PASTE_COLLAPSE_LINES = 4;
+import PasteTextDialog from "@/components/composer/PasteTextDialog.vue";
 
 defineOptions({ inheritAttrs: false });
 
@@ -91,8 +71,8 @@ const composing = ref(false);
 const CHIP_ICON_PATH: Partial<Record<ChipKind | "paste", string>> = {
   command: "M120,137,48,201A12,12,0,1,1,32,183l61.91-55L32,73A12,12,0,1,1,48,55l72,64A12,12,0,0,1,120,137Zm96,43H120a12,12,0,0,0,0,24h96a12,12,0,0,0,0-24Z",
   file: "M216.49,79.52l-56-56A12,12,0,0,0,152,20H56A20,20,0,0,0,36,40V216a20,20,0,0,0,20,20H200a20,20,0,0,0,20-20V88A12,12,0,0,0,216.49,79.52ZM160,57l23,23H160ZM60,212V44h76V92a12,12,0,0,0,12,12h48V212Z",
-  // Ph "Clipboard Text" bold.
-  paste: "M196,32H164.62a44,44,0,0,0-73.24,0H60A20,20,0,0,0,40,52V216a20,20,0,0,0,20,20H196a20,20,0,0,0,20-20V52A20,20,0,0,0,196,32Zm-4,180H64V56H84v8a12,12,0,0,0,12,12h64a12,12,0,0,0,12-12V56h20ZM88,132a12,12,0,0,1,12-12h56a12,12,0,0,1,0,24H100A12,12,0,0,1,88,132Zm0,40a12,12,0,0,1,12-12h56a12,12,0,0,1,0,24H100A12,12,0,0,1,88,172Z",
+  // Shared with the transcript's read-only PasteChip.vue.
+  paste: PASTE_CHIP_ICON_PATH,
 };
 function chipIconSvg(kind: ChipKind | "paste"): string | null {
   const path = CHIP_ICON_PATH[kind];
@@ -374,10 +354,6 @@ function onPaste(e: ClipboardEvent) {
 
 const pasteDialogText = ref<string | null>(null);
 
-function closePasteDialog() {
-  pasteDialogText.value = null;
-}
-
 function focus() {
   rootEl.value?.focus();
 }
@@ -401,17 +377,11 @@ watch(model, (next) => {
 // localStorage holding `/burrow` has to get its chip once the names are known.
 watch(() => [props.skills, props.commands], () => render(), { deep: true });
 
-function onDialogEscape(e: KeyboardEvent) {
-  if (e.key === "Escape" && pasteDialogText.value !== null) closePasteDialog();
-}
-
 onMounted(() => {
   render(false);
   history[0] = { text: model.value, caret: model.value.length };
   if (props.autofocus) nextTick(focus);
-  window.addEventListener("keydown", onDialogEscape);
 });
-onBeforeUnmount(() => window.removeEventListener("keydown", onDialogEscape));
 
 defineExpose({ focus, caret, setCaret, element: rootEl });
 </script>

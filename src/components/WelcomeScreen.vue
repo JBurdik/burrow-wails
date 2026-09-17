@@ -512,7 +512,12 @@ watch(() => target.value?.id, (id) => {
 
 
 async function submit() {
-  const prompt = stripPasteMarkers(text.value).trim();
+  // `rawPrompt` still carries any `wrapPaste` markers — kept only for the chat
+  // path below, whose AgentChat.sendMessage strips them itself and keeps the
+  // marked-up copy to render its own paste chip. Everywhere else (worktree
+  // branch naming, the terminal launch command) wants the plain stripped text.
+  const rawPrompt = text.value.trim();
+  const prompt = stripPasteMarkers(rawPrompt);
   let t = target.value;
   if (!prompt || !t) return;
   if (worktreeMode.value === "new") {
@@ -556,7 +561,7 @@ async function submit() {
         { kind: agent.kind, command: binaryFor(agent), model, permMode },
         terminalPrompt,
       ))
-    : () => termTabs.openChat(t.id, undefined, agentId, prompt, images, model);
+    : () => termTabs.openChat(t.id, undefined, agentId, rawPrompt, images, model);
   wasOpen ? open() : nextTick(open); // freshly-mounted Terminal needs a tick to attach its request watcher
   text.value = "";
   pendingImages.value = [];
