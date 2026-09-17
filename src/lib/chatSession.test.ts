@@ -193,7 +193,7 @@ describe("queued follow-ups", () => {
     dropChatSession(40);
   });
 
-  it("restores persisted queue markers in FIFO order", () => {
+  it("reads persisted queue markers back in FIFO order with no restore step", () => {
     const s = chatSession(41);
     s.messages.value = [
       { id: 4, role: "queued", text: "first" },
@@ -201,9 +201,21 @@ describe("queued follow-ups", () => {
       { id: 6, role: "queued", text: "second", images: ["data:image/png;base64,x"] },
     ];
 
-    s.restoreQueuedMessages();
     expect(s.takeNextQueuedMessage()).toEqual({ id: 4, text: "first" });
     expect(s.takeNextQueuedMessage()).toEqual({ id: 6, text: "second", images: ["data:image/png;base64,x"] });
     dropChatSession(41);
+  });
+
+  it("moves a message to the head of the queue in the transcript too", () => {
+    const s = chatSession(42);
+    const first = s.enqueueMessage("first");
+    s.messages.value.push({ id: 900, role: "assistant", text: "working" });
+    const second = s.enqueueMessage("second");
+
+    s.moveQueuedMessageNext(second.id);
+    expect(s.messageQueue.value.map((e) => e.id)).toEqual([second.id, first.id]);
+    expect(s.messages.value.map((m) => m.id)).toEqual([second.id, first.id, 900]);
+    expect(s.takeNextQueuedMessage()).toEqual({ id: second.id, text: "second" });
+    dropChatSession(42);
   });
 });

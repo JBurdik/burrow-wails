@@ -1,4 +1,4 @@
-import { ref, type Ref } from "vue";
+import { computed, ref, type ComputedRef, type Ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -58,14 +58,21 @@ export interface ChatSession {
   busy: Ref<boolean>;
   lastActivityAt: Ref<number>;
   turnStartedAt: Ref<number>;
-  /** FIFO of follow-ups. Never send these to a provider while a turn is active. */
-  messageQueue: Ref<QueuedChatMessage[]>;
+  /**
+   * FIFO of follow-ups, DERIVED from the transcript's own `queued` entries.
+   * There is deliberately no second array: the queue and its placeholder
+   * bubbles used to be two structures synchronised by hand in five methods,
+   * and `moveQueuedMessageNext` only ever updated one of them — "Send Next"
+   * reordered what was sent while the transcript kept showing the old order.
+   * Deriving it also makes the queue survive a relaunch for free, since the
+   * placeholders are persisted with the transcript.
+   */
+  messageQueue: ComputedRef<QueuedChatMessage[]>;
   enqueueMessage(text: string, images?: string[]): QueuedChatMessage;
   removeQueuedMessage(id: number): void;
   clearQueuedMessages(): void;
   moveQueuedMessageNext(id: number): void;
   takeNextQueuedMessage(): QueuedChatMessage | undefined;
-  restoreQueuedMessages(): void;
   suppressNextDone: Ref<boolean>;
   sessionId: Ref<string>;
   turnStats: Ref<TurnStats | null>;
@@ -137,6 +144,12 @@ interface InternalSession extends ChatSession {
   claudeUL: UnlistenFn | null;
   acpDataUL: UnlistenFn | null;
   acpReqUL: UnlistenFn | null;
+}
+
+/** A transcript entry read back as a queue entry; [] for anything else. */
+function queuedEntry(message: ChatMessage): QueuedChatMessage[] {
+  if (message.role !== "queued") return [];
+  return [{ id: message.id, text: message.text, ...(message.images?.length ? { images: message.images } : {}) }];
 }
 
 const sessions = new Map<number, InternalSession>();
@@ -219,7 +232,7 @@ function create(chatId: number): InternalSession {
     busy: ref(false),
     lastActivityAt: ref(Date.now()),
     turnStartedAt: ref(0),
-    messageQueue: ref<QueuedChatMessage[]>([]),
+    messageQueue: computed(() => s.messages.value.flatMap(queuedEntry)),
     suppressNextDone: ref(false),
     sessionId: ref(""),
     turnStats: ref<TurnStats | null>(null),
@@ -246,34 +259,28 @@ function create(chatId: number): InternalSession {
 
     enqueueMessage(text, images) {
       const entry: QueuedChatMessage = { id: s.nextMsgId++, text, ...(images?.length ? { images } : {}) };
-      s.messageQueue.value.push(entry);
       s.messages.value.push({ id: entry.id, role: "queued", text, ...(entry.images ? { images: entry.images } : {}) });
       return entry;
     },
     removeQueuedMessage(id) {
-      s.messageQueue.value = s.messageQueue.value.filter((entry) => entry.id !== id);
       s.messages.value = s.messages.value.filter((message) => message.id !== id || message.role !== "queued");
     },
     clearQueuedMessages() {
-      s.messageQueue.value = [];
       s.messages.value = s.messages.value.filter((message) => message.role !== "queued");
     },
     moveQueuedMessageNext(id) {
-      const index = s.messageQueue.value.findIndex((entry) => entry.id === id);
-      if (index <= 0) return;
-      const [entry] = s.messageQueue.value.splice(index, 1);
-      s.messageQueue.value.unshift(entry);
+      const messages = s.messages.value;
+      const from = messages.findIndex((m) => m.id === id && m.role === "queued");
+      const head = messages.findIndex((m) => m.role === "queued");
+      if (from < 0 || from === head) return;
+      const [entry] = messages.splice(from, 1);
+      messages.splice(head, 0, entry);
     },
     takeNextQueuedMessage() {
-      const entry = s.messageQueue.value.shift();
-      if (entry) s.messages.value = s.messages.value.filter((message) => message.id !== entry.id || message.role !== "queued");
-      return entry;
-    },
-    restoreQueuedMessages() {
-      if (s.messageQueue.value.length > 0) return;
-      s.messageQueue.value = s.messages.value
-        .filter((message) => message.role === "queued")
-        .map((message) => ({ id: message.id, text: message.text, ...(message.images?.length ? { images: message.images } : {}) }));
+      const index = s.messages.value.findIndex((m) => m.role === "queued");
+      if (index < 0) return undefined;
+      const [message] = s.messages.value.splice(index, 1);
+      return queuedEntry(message)[0];
     },
 
     handlers: { ...NOOP_HANDLERS },

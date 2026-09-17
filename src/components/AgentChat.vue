@@ -860,7 +860,7 @@ const {
   pendingPermissionMsgId, pendingQuestionMsgId, pendingPlanMsgId, pendingDiffMsgId,
   settledControlRequestIds,
   acpPermReq, acpPermRpcId, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
-  enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext, takeNextQueuedMessage, restoreQueuedMessages,
+  enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext, takeNextQueuedMessage,
 } = S;
 const permissionResponsePending = ref(false);
 const codexUserInput = ref<{ rpcId: number; questions: CodexUserInputQuestion[] } | null>(null);
@@ -2240,20 +2240,30 @@ function finishTurn() {
     chats.sendStatusEvent(props.chatId, { type: "STOP", watching: watchingNow() });
     notifyDone();
   }
-  drainQueuedMessage();
   // The session outlives this component while a turn is running; now that the
   // turn is over it is only worth keeping if someone is still watching.
   S.maybeEvict();
 }
 
+// A turn ending is the ONLY thing that releases the queue, so watch the flag
+// rather than calling the drain from each place that clears it: `session.exited`
+// (the CLI died mid-turn) and the send-failure branches also clear `busy`, and
+// each of them used to leave the queue parked until the user typed something.
+watch(busy, (running) => { if (!running) drainQueuedMessage(); });
+
 function drainQueuedMessage() {
   if (busy.value) return;
-  const next = takeNextQueuedMessage();
-  if (!next) return;
-  saveMessages(props.chatId, messages.value);
-  // Finish handlers first: the next prompt starts only after the prior turn
-  // has fully settled its transcript, status and provider correlation.
-  nextTick(() => sendMessage(next.text, next.images));
+  // Let the finishing turn settle its transcript, status and provider
+  // correlation first, then re-check: Claude can resume the same session on its
+  // own in that gap (markAgentActive), and taking the message before the gap
+  // meant the re-queue on the far side put it back at the TAIL with a new id.
+  nextTick(() => {
+    if (busy.value) return;
+    const next = takeNextQueuedMessage();
+    if (!next) return;
+    saveMessages(props.chatId, messages.value);
+    void sendMessage(next.text, next.images);
+  });
 }
 
 function onLine(line: string) {
@@ -2857,7 +2867,6 @@ async function restartClaude() {
     if (lastAcp?.partial) lastAcp.partial = false;
     chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
     syncStore();
-    drainQueuedMessage();
     return;
   }
   // claude_stop removes the proc from the map so the subsequent claude_start actually spawns.
@@ -2886,7 +2895,6 @@ async function restartClaude() {
   if (last?.partial) last.partial = false;
   chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
   syncStore();
-  drainQueuedMessage();
 }
 
 async function abortTurn() {
@@ -3198,9 +3206,6 @@ onMounted(async () => {
     const loaded = await loadMessages(props.chatId);
     if (unmounted) return;
     messages.value = loaded;
-    // Queue markers are persisted with the transcript. Rebuild the in-memory
-    // scheduler after a relaunch before any runtime can dispatch a follow-up.
-    restoreQueuedMessages();
     // Ids must continue past the loaded history, or new messages collide with
     // old ones on the same `:key`.
     S.nextMsgId = messages.value.reduce((max, m) => Math.max(max, m.id + 1), 0);
