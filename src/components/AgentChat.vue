@@ -257,13 +257,16 @@
         <template v-else-if="msg.role === 'system-info' && msg.subagentChatId">
           <div class="flex justify-center px-4 py-1">
             <button
-              class="flex items-center gap-1.5 rounded-[20px] border border-border bg-hover px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-accent/45 hover:text-foreground"
+              class="flex max-w-[min(440px,85%)] items-center gap-1.5 rounded-[20px] border border-border bg-hover px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-accent/45 hover:text-foreground"
+              :title="msg.text"
               @click="openSubagentFromTranscript(msg.subagentChatId)"
             >
               <PhRobot :size="11" class="shrink-0" />
-              <span>{{ msg.text }}</span>
-              <span v-if="msg.subagentAgent" class="text-secondary-foreground">· {{ msg.subagentAgent }}</span>
-              <span class="status-dot" :class="subagentDotClass(msg.subagentChatId)" />
+              <!-- A spawn prompt is a paragraph, not a title: clamp it to one
+                   line so the marker stays a marker. Full text is the tooltip. -->
+              <span class="truncate">{{ subagentLabel(msg.text) }}</span>
+              <span v-if="msg.subagentAgent" class="shrink-0 text-secondary-foreground">· {{ msg.subagentAgent }}</span>
+              <span class="status-dot shrink-0" :class="subagentDotClass(msg.subagentChatId)" />
             </button>
           </div>
         </template>
@@ -1275,6 +1278,11 @@ onBeforeUnmount(() => {
   subagentPhaseUnmounted = true;
   subagentPhaseUnsubs.forEach((un) => un());
 });
+
+// The robot icon already says "sub-agent"; the stored prefix only eats width.
+function subagentLabel(text: string): string {
+  return text.replace(/^Spawned sub-agent:\s*/, "");
+}
 
 function subagentDotClass(chatId: number): string {
   const state = subagentPhase[chatId];
