@@ -41,11 +41,19 @@ func (g gitRunner) Run(cwd string, args []string) (string, string, int) {
 	return out.Stdout, out.Stderr, out.Code
 }
 
-type ghRunner struct{ app *App }
+type forgeClient struct{ app *App }
 
-func (g ghRunner) Run(cwd string, args []string) (string, string, int) {
-	out := runCmd("gh", cwd, args)
-	return out.Stdout, out.Stderr, out.Code
+func (f forgeClient) List(cwd, scope, state string) (any, error) {
+	return f.app.ForgePrList(cwd, scope, state)
+}
+func (f forgeClient) View(cwd string, number int) (any, error) {
+	return f.app.ForgePrView(cwd, number)
+}
+func (f forgeClient) Create(cwd, title, body, base, head string) (any, error) {
+	return f.app.ForgePrCreate(cwd, title, body, base, head)
+}
+func (f forgeClient) Merge(cwd string, number int, squash bool) error {
+	return f.app.ForgePrMerge(cwd, number, squash)
 }
 
 type execRunner struct{}
@@ -183,7 +191,7 @@ func (a *App) initControl(dataDir string) {
 		DB:           a.db,
 		SessionDir:   a.sessionDir,
 		Git:          gitRunner{a},
-		Gh:           ghRunner{a},
+		Forge:        forgeClient{a},
 		Exec:         execRunner{},
 		PTY:          ptyWriter{a},
 		Worktrees:    worktreeAdapter{a},

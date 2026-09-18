@@ -9,11 +9,12 @@ import (
 
 // Repo verbs: worktrees, read-only repo inspection, and pull requests.
 //
-// Everything here runs a binary the user already has (git, gh) in a working
-// directory. Nothing writes to the working tree — a Manager reads the repo to
+// The git/run verbs shell out to a binary the user already has in a working
+// directory; the pull request verbs go through the injected ForgeClient
+// instead. Nothing writes to the working tree — a Manager reads the repo to
 // decide what to delegate; the delegated agents are the ones who edit code.
 
-// CmdResult is what a client gets back from a git/gh/run verb. The exit code is
+// CmdResult is what a client gets back from a git/run verb. The exit code is
 // reported rather than swallowed: "no changes" and "not a repo" are both
 // non-zero, and only the caller can tell which one matters.
 type CmdResult struct {
@@ -113,7 +114,7 @@ func vcsVerbs(c *Core) []Verb {
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.run(p) },
 	}, {
 		Name:    "pr_create",
-		Summary: "Open a pull request with the gh CLI",
+		Summary: "Open a pull request (GitHub, GitLab, Azure DevOps or Gitea)",
 		Args: []Arg{
 			{Name: "title", Type: "string", Desc: "PR title", Required: true},
 			{Name: "body", Type: "string", Desc: "PR body", Required: true},
@@ -127,11 +128,7 @@ func vcsVerbs(c *Core) []Verb {
 			if base == "" {
 				base = "main"
 			}
-			args := []string{"pr", "create", "--title", p.Str("title"), "--body", p.Str("body"), "--base", base}
-			if head := p.Str("head"); head != "" {
-				args = append(args, "--head", head)
-			}
-			return c.gh(p, args...), nil
+			return c.deps.Forge.Create(p.Str("cwd"), p.Str("title"), p.Str("body"), base, p.Str("head"))
 		},
 	}, {
 		Name:    "pr_list",
@@ -146,7 +143,7 @@ func vcsVerbs(c *Core) []Verb {
 			if state == "" {
 				state = "open"
 			}
-			return c.gh(p, "pr", "list", "--state", state), nil
+			return c.deps.Forge.List(p.Str("cwd"), "", state)
 		},
 	}, {
 		Name:    "pr_view",
@@ -157,7 +154,7 @@ func vcsVerbs(c *Core) []Verb {
 		},
 		Scope: ScopeLocal | ScopeRemote,
 		Fn: func(ctx context.Context, p Params) (any, error) {
-			return c.gh(p, "pr", "view", p.Str("number")), nil
+			return c.deps.Forge.View(p.Str("cwd"), int(p.Int("number")))
 		},
 	}, {
 		Name:    "pr_merge",
@@ -169,22 +166,16 @@ func vcsVerbs(c *Core) []Verb {
 		},
 		Scope: ScopeLocal,
 		Fn: func(ctx context.Context, p Params) (any, error) {
-			args := []string{"pr", "merge", p.Str("number")}
-			if p.Bool("squash") {
-				args = append(args, "--squash")
+			if err := c.deps.Forge.Merge(p.Str("cwd"), int(p.Int("number")), p.Bool("squash")); err != nil {
+				return nil, err
 			}
-			return c.gh(p, args...), nil
+			return map[string]any{"ok": true, "number": p.Int("number")}, nil
 		},
 	}}
 }
 
 func (c *Core) git(p Params, args ...string) CmdResult {
 	stdout, stderr, code := c.deps.Git.Run(p.Str("cwd"), args)
-	return CmdResult{Stdout: stdout, Stderr: stderr, Code: code}
-}
-
-func (c *Core) gh(p Params, args ...string) CmdResult {
-	stdout, stderr, code := c.deps.Gh.Run(p.Str("cwd"), args)
 	return CmdResult{Stdout: stdout, Stderr: stderr, Code: code}
 }
 
