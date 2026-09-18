@@ -176,6 +176,8 @@ func New(p Provider, run Runner) (Forge, error) {
 		return &githubForge{run: run}, nil
 	case GitLab:
 		return &gitlabForge{run: run}, nil
+	case Azure:
+		return &azureForge{run: run}, nil
 	}
 	return nil, fmt.Errorf("forge: unknown provider %q", p)
 }
