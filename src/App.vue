@@ -464,30 +464,10 @@ function playStartupChime() {
 
 onMounted(async () => {
   await ws.load();
-  // Land where the last session left off. `replace` so the app does not open
-  // with a back entry pointing at nothing.
-  //
-  // The tab list is restored ASYNCHRONOUSLY (Terminal mounts, then answers with
-  // its tabs), so deciding this once here always saw zero live tabs and dumped
-  // every startup on the composer. Wait for the first non-empty list instead —
-  // and only act if the user has not navigated somewhere themselves meanwhile.
-  if (route.path === "/") {
-    if (ui.startupMode === "dashboard") {
-      void router.replace("/dashboard");
-    } else {
-      const stopStartupNav = watch(
-        () => allTabs.value.length,
-        (n) => {
-          if (n === 0) return;
-          stopStartupNav();
-          if (route.path === "/") ui.showTabs();
-        },
-        { immediate: true },
-      );
-      // Nothing to restore at all: stop waiting once the workspace list settled.
-      setTimeout(stopStartupNav, 10_000);
-    }
-  }
+  // Startup lands on the composer ("/"), never on the last session's thread —
+  // reopening the app is a fresh start, and restoring a thread also left it
+  // focused in the sidebar with nothing the user asked for behind it.
+  if (route.path === "/" && ui.startupMode === "dashboard") void router.replace("/dashboard");
   playStartupChime();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener('mousemove', onResizeMove);
