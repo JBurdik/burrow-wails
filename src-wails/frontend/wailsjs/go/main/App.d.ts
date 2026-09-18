@@ -244,8 +244,6 @@ export function RevokeRemoteDevice(arg1:string):Promise<void>;
 
 export function RunExtensionCommand(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function RunGh(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
-
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
 export function SaveChatMessages(arg1:number,arg2:string,arg3:number):Promise<void>;

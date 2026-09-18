@@ -48,22 +48,28 @@ export interface PrInfo {
   url: string;
 }
 
-// Collapse gh's statusCheckRollup array into a single CI verdict. Each entry is
-// either a CheckRun (status/conclusion) or a StatusContext (state).
-function rollupChecks(rollup: unknown): PrChecks {
-  if (!Array.isArray(rollup) || rollup.length === 0) return "none";
+// Collapse the forge's normalized checks array into a single CI verdict. Each
+// entry carries a conclusion (terminal) and/or a status (in-progress state).
+//
+// The vocabulary is per-provider, not per-field: github.go copies gh's own
+// conclusion verbatim (SUCCESS/FAILURE/…), gitlab.go copies GitLab's raw
+// pipeline status into Conclusion too (success/failed/canceled/…, lowercase).
+// Both must be recognized here — matching only GitHub's spelling means a
+// failed GitLab pipeline falls through to "pending", which is a worse answer
+// than "none" would have been. Azure/gitea adapters never populate Checks, so
+// they hit the empty-array branch above and never reach this loop.
+// GitLab's "canceled" (one L) is treated as pending, not failing: a canceled
+// pipeline didn't run to completion and prove anything broken, so it gets the
+// same "not settled yet" verdict as an in-progress GitHub check rather than
+// the same verdict as a proven failure.
+const FAILING_CONCLUSIONS = new Set(["FAILURE", "FAILED"]);
+export function rollupChecks(checks: Array<{ conclusion?: string; status?: string }> | undefined): PrChecks {
+  if (!Array.isArray(checks) || checks.length === 0) return "none";
   let pending = false;
-  for (const c of rollup as Array<Record<string, string>>) {
+  for (const c of checks) {
     const conclusion = (c.conclusion || "").toUpperCase();
-    const state = (c.state || "").toUpperCase();
-    const status = (c.status || "").toUpperCase();
-    if (["FAILURE", "TIMED_OUT", "CANCELLED", "ERROR", "ACTION_REQUIRED"].includes(conclusion)
-      || ["FAILURE", "ERROR"].includes(state)) {
-      return "fail";
-    }
-    if ((status && status !== "COMPLETED") || state === "PENDING" || state === "EXPECTED") {
-      pending = true;
-    }
+    if (FAILING_CONCLUSIONS.has(conclusion)) return "fail";
+    if (conclusion !== "SUCCESS") pending = true;
   }
   return pending ? "pending" : "pass";
 }
@@ -158,26 +164,16 @@ export const useGitStore = defineStore("git", () => {
     prInFlight.add(wsId);
     try {
       await ensureBranch(wsId, cwd);
-      const out = await invoke<GitOutput>("run_gh", {
-        cwd,
-        args: ["pr", "view", "--json", "number,state,isDraft,statusCheckRollup,url"],
-      });
-      if (out.code !== 0) {
-        prByWs.value[wsId] = null;
-        return;
-      }
-      const j = JSON.parse(out.stdout) as {
+      const pr = await invoke<{
         number: number; state: string; isDraft: boolean;
-        statusCheckRollup?: unknown; url: string;
-      };
-      prByWs.value[wsId] = {
-        number: j.number,
-        state: j.state,
-        isDraft: j.isDraft,
-        checks: rollupChecks(j.statusCheckRollup),
-        url: j.url,
-      };
+        checks?: Array<{ conclusion?: string; status?: string }>; url: string;
+      }>("forge_pr_view", { cwd, number: 0 });
+      prByWs.value[wsId] = pr?.number
+        ? { number: pr.number, state: pr.state, isDraft: pr.isDraft, checks: rollupChecks(pr.checks), url: pr.url }
+        : null;
     } catch {
+      // No PR for this branch, no CLI, not logged in, not a known forge — all
+      // the same answer for a badge: don't show one.
       prByWs.value[wsId] = null;
     } finally {
       prInFlight.delete(wsId);

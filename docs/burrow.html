@@ -138,8 +138,14 @@
     <tr><td>worktree_remove</td><td>Remove a worktree of <em>this</em> repo, by branch or path. Scoped to the repo on purpose — a same-named branch elsewhere is not a match.</td></tr>
     <tr><td>git_status / git_log / git_diff</td><td>Read the repo. Exit codes are reported, not swallowed.</td></tr>
     <tr><td>run</td><td>Read-only shell: an allow-list of programs (ls, cat, head, tail, wc, grep, rg, find, fd, tree, jq, …), no shell, so a pipeline or redirect is refused rather than half-executed. <code>git</code> is deliberately absent — the git_* verbs cover reads and can't be talked into <code>git push</code>.</td></tr>
-    <tr><td>pr_create / pr_list / pr_view / pr_merge</td><td>Pull requests via the <code>gh</code> CLI, in <code>cwd</code> (a worktree, so its branch is in context).</td></tr>
+    <tr><td>pr_create / pr_list / pr_view / pr_merge</td><td>Open, list, view and merge pull requests, in <code>cwd</code> (a worktree, so its branch is in context).</td></tr>
   </table>
+  <p>
+    <code>pr_*</code> works on GitHub, GitLab, Azure DevOps and Gitea — which one is used comes from
+    the repo's remote URL (a per-repo override exists for a self-hosted host a URL can't identify).
+    Each provider is reached through its own CLI (<code>gh</code>/<code>glab</code>/<code>az repos</code>/<code>tea</code>),
+    so a verb call still just shells out to a CLI the user already has authenticated.
+  </p>
 
   <h2>Verbs only the UI can perform</h2>
   <p>

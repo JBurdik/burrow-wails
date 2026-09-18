@@ -41,7 +41,7 @@ func (a *App) LspStart(id, command string, args []string, cwd string) error {
 	// so a bare "gopls"/"typescript-language-server"/etc. installed via
 	// Homebrew, ~/.local/bin or node_modules/.bin would fail to exec here —
 	// the exact PATH problem resolveAgentBin+augmentedPath exist for
-	// (claudechat.go), used already by RunGh. Resolve the binary the same
+	// (claudechat.go), used already by forge.go's runner. Resolve the binary the same
 	// way, falling back to the bare name so a PATH that genuinely does
 	// contain it (wails dev, a shell-launched build) keeps working.
 	bin := command

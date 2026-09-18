@@ -360,6 +360,7 @@ One file per subsystem:
 | `chatstore.go` | `chat_messages`, `SaveChatMessages(chatID, json, foldedOrd)` / `LoadChatMessages` |
 | `chatstream.go` | append-only `chat_stream` + `chat_stream_state`; `emitChatLine` is the single door for agent output (persist, then emit) |
 | `git.go` | `RunGit` wraps the system git binary |
+| `forge.go`, `internal/forge/` | Provider-neutral PR operations over each forge's own CLI (`gh`, `glab`, `az repos`, `tea`). `internal/forge` owns the `Forge` interface, one normalized `PullRequest` struct and the four adapters; it takes an injected `Runner` and never imports `main`, so every adapter is tested against captured JSON with no network. The provider is detected from the remote URL, with a per-repo override (`workspaces.forge_provider`) that a worktree inherits by climbing `parent_id`. Optional fields ARE the capability model: a provider that cannot supply checks leaves them empty and the panel hides that section, rather than the app keeping a capability registry that can drift |
 | `textgen.go` | `GenerateCommitMessage`, `GeneratePrContent`, `GenerateBranchName`, `GenerateChatTitle` |
 | `fs.go` | `ReadDirShallow`, `WriteTextFile` |
 | `bus.go` | `busEmit` is the single door for **every** client-visible event; numbers it into the ring unless `notRingable`; exactly **one** subscriber (`/v2/ws`'s per-connection subscription) |

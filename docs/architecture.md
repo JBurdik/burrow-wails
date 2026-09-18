@@ -148,8 +148,12 @@ Each `XTerm` creates a native PTY in Go (`CreatePty`), streams bytes via a Wails
 **One implementation of every app action, three doors.** `internal/control` holds a
 registry of *verbs* (`spawn`, `agent_status`, `focus_tab`, `create_worktree`,
 `pr_merge`, …) and knows nothing about HTTP, MCP or Wails — it takes its
-capabilities as interfaces (`Deps`: DB, git/gh/exec runners, PTY writer,
-worktrees, `UIBridge`). Transports sit on top:
+capabilities as interfaces (`Deps`: DB, a git runner, a `Forge` client, exec
+runner, PTY writer, worktrees, `UIBridge`). `Forge` replaced a raw `gh`
+runner (see "Pull requests go through each forge's own CLI" below) — the
+verbs below are the same surface the Manager, the `burrow` CLI and MCP all
+reach, so "Burrow can open a pull request" has to be true off GitHub too.
+Transports sit on top:
 
 | Transport | Client | Auth | Verbs |
 |-----------|--------|------|-------|
@@ -199,6 +203,53 @@ executable (a `wails dev` run) — the CLI still works.
 `BURROW_*` env exported into every PTY: `BURROW_SESSION_DIR`, `BURROW_CWD`,
 `BURROW_PTY_ID`, `BURROW_HOOK_PORT`, `BURROW_HOME_DIR` (app-data dir, which also
 holds `hook.port` and `control.token`).
+
+### Pull requests go through each forge's own CLI (`src-wails/internal/forge`, `forge.go`)
+
+`internal/forge` owns a `Forge` interface, one normalized `PullRequest` struct,
+and four adapters (`github.go`/`gitlab.go`/`azure.go`/`gitea.go`) reached
+through `gh`/`glab`/`az repos`/`tea` — the CLI the user already has installed
+and authenticated. That keeps auth, self-hosted URLs and token refresh the
+CLI's problem instead of ours, and every one of the four still has an `api`
+escape hatch for a field its porcelain doesn't surface. Like
+`internal/agentphase`, this package must not import `main`: IO arrives as an
+injected `Runner`, which is what lets all four adapters be tested against
+captured JSON with no network.
+
+**Optional fields ARE the capability model.** A provider that cannot supply
+checks (Gitea has none) just leaves that field empty, and the panel hides the
+section rather than the app carrying a capability registry that can drift out
+of sync with what a CLI actually returns.
+
+**Provider detection is the remote URL first, a per-repo override second.**
+`Detect()` maps a remote host to a provider; a self-hosted GitLab at, say,
+`git.firma.cz` is invisible from its hostname, so `workspaces.forge_provider`
+lets the user say so once, and a worktree inherits that override by climbing
+`parent_id` — the same climb the Manager uses to find its root repo's thread
+(see "Manager" above).
+
+**`Create` looks the new PR up by the number parsed out of the URL the CLI
+prints**, not by re-reading "the PR for the current branch": `gh`/`glab` print
+a URL, not JSON, on create, and re-reading the branch's PR answers about
+whatever is checked out in `cwd` — the wrong PR whenever the caller passed an
+explicit `head`.
+
+**Provider quirks the adapters exist to hide:** GitLab's merge request id is
+`iid`, not `id`; Gitea reports a merged PR as `closed` with `merged:true`, so
+reading `state` alone would file every merged PR under "closed"; Azure's CLI
+is not repo-aware from `cwd`, so `ParseAzureRemote` pulls org/project/repo out
+of the remote URL for every call; and Azure has no merge verb at all —
+completing a PR there is a status update (`az repos pr update --status
+completed`), not a merge.
+
+Bitbucket is deliberately not a fifth adapter: it has no official CLI, so
+supporting it would mean a REST client with its own token storage — breaking
+the assumption that makes every other provider cheap, that the CLI already
+solved auth.
+
+The old raw `gh`-only command was deleted rather than kept alongside `Forge`,
+so no second GitHub-only path could survive for a verb, a script or a future
+feature to drift onto.
 
 ### Desktop transport (`src/runtime/transport.ts` + `src-wails/remoteapi.go`/`remoteproto.go`/`remotews.go`)
 
@@ -509,6 +560,7 @@ Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem
 - **Chat transcripts** (`chatstore.go`) — `chat_messages`, `SaveChatMessages(chatID, json, foldedOrd)` / `LoadChatMessages`
 - **Chat stream log** (`chatstream.go`) — append-only `chat_stream` + `chat_stream_state`; `emitChatLine` is the single door for agent output (persist, then emit), used by both `claudechat.go` and `acp.go`
 - **Git** (`git.go`) — `RunGit` wraps the system git binary (checks known paths)
+- **Pull requests** (`forge.go`, `internal/forge/`) — provider-neutral PR operations over each forge's own CLI, and provider detection/override. See "Pull requests go through each forge's own CLI" below
 - **Text generation** (`textgen.go`) — `GenerateCommitMessage`, `GeneratePrContent`, `GenerateBranchName`, `GenerateChatTitle` (see below)
 - **FS** (`fs.go`) — `ReadDirShallow`, `WriteTextFile`
 - **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. `busEmit` **numbers** the event into the replay ring first (unless `notRingable` excludes it) and hands every sink the same `shellEvent{seq,name,payload}` — one struct rather than a growing parameter list, and the same `seq` for all sinks so the ring's order is the order clients receive. There is exactly **one** subscriber: `/v2/ws`'s per-connection subscription (`remotews.go`) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) reach a connected phone and the desktop's own socket by the same path. The v1 tailnet broadcaster went away in phase 6 with the client that needed it; `busEmit` being the single *door* is about where events are published, not about how many things happen to listen. There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own `/v2/ws` connection like any other client, and the only names still delivered on the Wails event channel (`menu-*`, `lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `runtime.EventsEmit` directly, never through `busEmit` (`src/lib/wailsCompat/event.ts` routes exactly those prefixes to `EventsOn`). `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did

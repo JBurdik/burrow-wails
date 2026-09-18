@@ -101,14 +101,25 @@ func (p Params) Bool(name string) bool {
 }
 
 // CmdRunner runs an external command in a working directory. Implemented by
-// the app over git/gh; injected so the package needs no exec of its own and
+// the app over git; injected so the package needs no exec of its own and
 // tests can assert on the argv instead of touching a real repo.
 type CmdRunner interface {
 	Run(cwd string, args []string) (stdout, stderr string, code int)
 }
 
+// ForgeClient is the pull request surface, injected so this package needs no
+// knowledge of which CLI backs it. `any` rather than a concrete type keeps the
+// forge package out of this one's imports — these values are marshalled
+// straight to the caller.
+type ForgeClient interface {
+	List(cwd, scope, state string) (any, error)
+	View(cwd string, number int) (any, error)
+	Create(cwd, title, body, base, head string) (any, error)
+	Merge(cwd string, number int, squash bool) error
+}
+
 // Exec runs an arbitrary allow-listed program — the read-only `run` verb. Kept
-// separate from CmdRunner so git/gh stay bound to their own binary and can't be
+// separate from CmdRunner so git stays bound to its own binary and can't be
 // redirected by a verb argument.
 type Exec interface {
 	RunProgram(prog, cwd string, args []string) (stdout, stderr string, code int)
@@ -151,11 +162,15 @@ type Deps struct {
 	DB         *sql.DB
 	SessionDir string
 	Git        CmdRunner
-	Gh         CmdRunner
-	Exec       Exec
-	PTY        PTYWriter
-	Worktrees  Worktrees
-	UI         UIBridge
+	// Forge is the provider-neutral pull request client. It replaced a raw gh
+	// CmdRunner: the verbs below are the same surface the Manager, the burrow
+	// CLI and MCP all reach, so "Burrow can open a pull request" has to be true
+	// off GitHub too.
+	Forge     ForgeClient
+	Exec      Exec
+	PTY       PTYWriter
+	Worktrees Worktrees
+	UI        UIBridge
 	// WorktreesDir is where a worktree lands when the caller doesn't say:
 	// <dir>/<repo>/<branch>, the same convention as the New-worktree dialog.
 	WorktreesDir func() string

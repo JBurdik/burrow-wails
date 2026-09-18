@@ -23,7 +23,7 @@ func expandHome(p string) string {
 	return filepath.Join(home, p[2:])
 }
 
-// GitOutput mirrors the Rust struct returned by run_git/run_gh.
+// GitOutput mirrors the Rust struct returned by run_git.
 type GitOutput struct {
 	Stdout  string `json:"stdout"`
 	Stderr  string `json:"stderr"`
@@ -52,14 +52,6 @@ func runCmd(name, cwd string, args []string) GitOutput {
 
 func (a *App) RunGit(cwd string, args []string) GitOutput {
 	return runCmd("git", cwd, args)
-}
-
-func (a *App) RunGh(cwd string, args []string) GitOutput {
-	bin := "gh"
-	if resolved := resolveAgentBin("gh", ""); resolved != "" {
-		bin = resolved
-	}
-	return runCmd(bin, cwd, args)
 }
 
 // --- worktrees ---
