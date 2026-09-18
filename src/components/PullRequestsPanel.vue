@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 const props = defineProps<{ cwd: string }>();
 const pr = usePullRequests(() => props.cwd);
 const scopes: Array<{ id: PrScope; label: string }> = [{ id: "assigned", label: "Assigned" }, { id: "created", label: "Created" }, { id: "all", label: "All" }];
-const stateLabel = computed(() => pr.selected.value?.isDraft ? "Draft" : pr.selected.value?.state === "MERGED" ? "Merged" : "Open");
+const stateLabel = computed(() => pr.selected.value?.isDraft ? "Draft" : pr.selected.value?.state === "merged" ? "Merged" : "Open");
 const checkCount = computed(() => pr.selected.value?.checks?.length ?? 0);
 
 watch(() => props.cwd, () => { pr.selected.value = null; pr.loadForge(); pr.refresh(); }, { immediate: true });
@@ -158,7 +158,7 @@ async function setProvider(provider: string) {
           <h3 class="mb-2 text-foreground">Checks · {{ checkCount }}</h3>
           <p v-if="!checkCount" class="text-muted-foreground">No checks reported.</p>
           <div v-for="check in pr.selected.value.checks" :key="check.name" class="flex items-center gap-1.5 py-0.5">
-            <PhCheck v-if="check.conclusion === 'SUCCESS'" :size="12" />
+            <PhCheck v-if="check.conclusion?.toUpperCase() === 'SUCCESS'" :size="12" />
             <PhX v-else :size="12" />
             <span>{{ check.name || 'Check' }}</span>
             <small class="ml-auto text-muted-foreground">{{ check.conclusion || check.status }}</small>

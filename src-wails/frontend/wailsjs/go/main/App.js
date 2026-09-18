@@ -486,10 +486,6 @@ export function RunExtensionCommand(arg1, arg2, arg3) {
   return window['go']['main']['App']['RunExtensionCommand'](arg1, arg2, arg3);
 }
 
-export function RunGh(arg1, arg2) {
-  return window['go']['main']['App']['RunGh'](arg1, arg2);
-}
-
 export function RunGit(arg1, arg2) {
   return window['go']['main']['App']['RunGit'](arg1, arg2);
 }

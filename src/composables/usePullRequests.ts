@@ -115,14 +115,30 @@ export function usePullRequests(cwd: () => string) {
     }
   }
 
+  // No text-generation model configured (or it failed/timed out) is not
+  // grounds to send an empty title — every adapter would fail at the CLI
+  // with a worse message than we can give. Fall back to the head commit,
+  // provider-neutrally: `gh pr create --fill` has no equivalent across
+  // glab/az repos/tea.
+  async function commitFallback(): Promise<{ title: string; body: string } | null> {
+    try {
+      const title = (await invoke<{ stdout: string }>("run_git", { cwd: cwd(), args: ["log", "-1", "--format=%s"] })).stdout.trim();
+      const body = (await invoke<{ stdout: string }>("run_git", { cwd: cwd(), args: ["log", "-1", "--format=%b"] })).stdout.trim();
+      return title ? { title, body } : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function create() {
     actionLoading.value = true; error.value = "";
     try {
-      const content = await generatedContent();
+      const content = (await generatedContent()) ?? (await commitFallback());
+      if (!content) { error.value = "Nelze vygenerovat obsah PR ani přečíst poslední commit."; return; }
       const created = await invoke<PullRequest>("forge_pr_create", {
         cwd: cwd(),
-        title: content?.title ?? "",
-        body: content?.body ?? "",
+        title: content.title,
+        body: content.body,
         base: "",
         head: "",
       });

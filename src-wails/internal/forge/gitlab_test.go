@@ -38,6 +38,12 @@ func TestGitlabList(t *testing.T) {
 	if !strings.Contains(argv, "--output json") {
 		t.Errorf("argv must ask for json: %s", argv)
 	}
+	// glab has no --opened flag; the default/open case must rely on glab's own
+	// default rather than passing one. A future re-add of a state flag here
+	// has to be a conscious change to this test.
+	if strings.Contains(argv, "--opened") {
+		t.Errorf("must not pass --opened, glab has no such flag: %s", argv)
+	}
 }
 
 const glViewJSON = `{"iid":7,"title":"Add forge package","description":"does things",

@@ -72,7 +72,9 @@ func (g *gitlabForge) List(cwd string, o ListOpts) ([]PullRequest, error) {
 	args := []string{"mr", "list", "--output", "json", "--per-page", "100"}
 	switch o.State {
 	case "", "open":
-		args = append(args, "--opened")
+		// No flag: glab's own default is open MRs, and glab has no --opened
+		// flag (only --closed/--merged/--all) — passing one would fail the
+		// most common call on this provider.
 	case "merged":
 		args = append(args, "--merged")
 	case "closed":

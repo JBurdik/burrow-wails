@@ -876,13 +876,13 @@ function attentionLabel(state: AgentAttentionState): string {
 function prClass(info: PrInfo): string {
   if (info.checks === "fail") return "text-destructive bg-[color-mix(in_srgb,var(--red)_14%,transparent)]";
   if (info.checks === "pending") return "text-[var(--yellow)] bg-[color-mix(in_srgb,var(--yellow)_14%,transparent)]";
-  if (info.state === "MERGED") return "text-accent bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]";
-  if (info.state === "CLOSED") return "text-destructive bg-[color-mix(in_srgb,var(--red)_12%,transparent)]";
+  if (info.state === "merged") return "text-accent bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]";
+  if (info.state === "closed") return "text-destructive bg-[color-mix(in_srgb,var(--red)_12%,transparent)]";
   if (info.isDraft) return "text-muted-foreground";
   return "text-[var(--green)] bg-[color-mix(in_srgb,var(--green)_12%,transparent)]";
 }
 function prTitle(info: PrInfo): string {
-  const state = info.isDraft && info.state === "OPEN" ? "draft" : info.state.toLowerCase();
+  const state = info.isDraft && info.state === "open" ? "draft" : info.state.toLowerCase();
   const checks = info.checks === "none" ? "" : ` · checks ${info.checks}`;
   return `PR #${info.number} (${state})${checks}`;
 }
