@@ -17,7 +17,7 @@ const wtA1 = mkWs(10, "feat", 1);
 describe("buildActivityRows", () => {
   const tabsByWs = { 1: [mkTab(100, "a1"), mkTab(101, "a2")], 10: [mkTab(200, "wt")], 2: [mkTab(300, "b1")] };
   const stamps: Record<number, number> = { 100: 50, 101: 90, 200: 70, 300: 10 };
-  const activityAt = (_ws: number, tabId: number) => stamps[tabId] ?? 0;
+  const activityAt = (_ws: number, tab: { id: number }) => stamps[tab.id] ?? 0;
   const open = [repoA, wtA1, repoB];
 
   it("flattens every open workspace's tabs, newest first", () => {

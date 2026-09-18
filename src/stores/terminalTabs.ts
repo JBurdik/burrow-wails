@@ -59,7 +59,18 @@ type TabRequest = {
 
 const ACTIVITY_KEY = "burrow.tab_activity";
 
-function loadActivity(): Record<number, Record<number, number>> {
+/**
+ * Stamp key for a tab. A chat tab's numeric id is re-minted from nextPtyId()
+ * every time Terminal restores it, so keying stamps by id made every thread
+ * look brand-new after an app restart ("now" everywhere) AND pruned yesterday's
+ * stamps as belonging to ids nothing listed any more. The chatId is the stable
+ * identity; a real PTY's id IS its identity for the life of the process.
+ */
+export function stampKey(tab: Pick<TabSummary, "id" | "chatId">): string {
+  return tab.chatId != null ? `c${tab.chatId}` : String(tab.id);
+}
+
+function loadActivity(): Record<number, Record<string, number>> {
   try {
     const parsed = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "");
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -99,7 +110,7 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   // deliberately NOT activation or mid-turn status churn, which would reshuffle
   // the feed under the cursor. The sidebar lists tabs from every open
   // project in one flat feed, so it needs a recency key per tab.
-  const activityByWs = ref<Record<number, Record<number, number>>>(loadActivity());
+  const activityByWs = ref<Record<number, Record<string, number>>>(loadActivity());
   const request = ref<TabRequest | null>(null);
   let nonce = 0;
   // Resolvers for add() calls waiting on Terminal to report the new tab's id.
@@ -120,15 +131,17 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     }
     seenCompletionsByWs.value[wsId] = seen;
 
-    const prevTabs = new Map((tabsByWs.value[wsId] ?? []).map((tab) => [tab.id, tab]));
+    const prevTabs = new Map((tabsByWs.value[wsId] ?? []).map((tab) => [stampKey(tab), tab]));
     const stamps = { ...(activityByWs.value[wsId] ?? {}) };
+    const currentKeys = new Set(tabs.map(stampKey));
     const now = Date.now();
     for (const tab of tabs) {
-      const before = prevTabs.get(tab.id);
-      if (shouldRestamp(before, tab, stamps[tab.id] != null)) stamps[tab.id] = now;
+      const key = stampKey(tab);
+      const before = prevTabs.get(key);
+      if (shouldRestamp(before, tab, stamps[key] != null)) stamps[key] = now;
     }
     for (const key of Object.keys(stamps)) {
-      if (!currentIds.has(Number(key))) delete stamps[Number(key)];
+      if (!currentKeys.has(key)) delete stamps[key];
     }
     activityByWs.value[wsId] = stamps;
     saveActivity();
@@ -151,8 +164,8 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   }
 
   /** Recency key for the sidebar feed; 0 for a tab we have never seen. */
-  function activityAt(wsId: number, tabId: number): number {
-    return activityByWs.value[wsId]?.[tabId] ?? 0;
+  function activityAt(wsId: number, tab: Pick<TabSummary, "id" | "chatId">): number {
+    return activityByWs.value[wsId]?.[stampKey(tab)] ?? 0;
   }
 
   function isCompletionUnseen(wsId: number, tabId: number): boolean {

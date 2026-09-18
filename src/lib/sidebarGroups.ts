@@ -15,7 +15,7 @@ export interface ActivityInput {
   /** workspaces with a mounted Terminal — the only ones that have live tabs */
   openedWorkspaces: Workspace[];
   tabsByWs: Record<number, TabSummary[]>;
-  activityAt: (wsId: number, tabId: number) => number;
+  activityAt: (wsId: number, tab: TabSummary) => number;
   /** repo id to restrict to, or null for all */
   filterProjectId: number | null;
 }
@@ -40,7 +40,7 @@ export function buildActivityRows(
     const repoId = ws.parent_id ?? ws.id;
     if (input.filterProjectId != null && repoId !== input.filterProjectId) continue;
     for (const tab of input.tabsByWs[ws.id] || []) {
-      const row: ActivityRow = { ws, tab, ts: input.activityAt(ws.id, tab.id) };
+      const row: ActivityRow = { ws, tab, ts: input.activityAt(ws.id, tab) };
       if (tab.settled) settledChats.push(row);
       else live.push(row);
     }
