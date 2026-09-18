@@ -18,18 +18,19 @@ type Workspace struct {
 	IsGit          bool    `json:"is_git"`
 	Icon           *string `json:"icon,omitempty"`
 	SortOrder      float64 `json:"sort_order"`
+	ForgeProvider  *string `json:"forge_provider,omitempty"`
 }
 
 func nowMillis() int64 { return time.Now().UnixMilli() }
 
-const workspaceCols = "id, name, path, created_at, last_opened, parent_id, worktree_branch, is_git, icon, sort_order"
+const workspaceCols = "id, name, path, created_at, last_opened, parent_id, worktree_branch, is_git, icon, sort_order, forge_provider"
 
 func scanWorkspace(row interface {
 	Scan(dest ...any) error
 }) (Workspace, error) {
 	var w Workspace
 	var isGit int
-	err := row.Scan(&w.ID, &w.Name, &w.Path, &w.CreatedAt, &w.LastOpened, &w.ParentID, &w.WorktreeBranch, &isGit, &w.Icon, &w.SortOrder)
+	err := row.Scan(&w.ID, &w.Name, &w.Path, &w.CreatedAt, &w.LastOpened, &w.ParentID, &w.WorktreeBranch, &isGit, &w.Icon, &w.SortOrder, &w.ForgeProvider)
 	w.IsGit = isGit != 0
 	return w, err
 }

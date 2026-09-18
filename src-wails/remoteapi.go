@@ -195,16 +195,21 @@ var remoteAllowed = map[string]remoteCmd{
 	"rename_worktree_branch": {Method: "RenameWorktreeBranch", Args: []string{"id", "oldBranch", "newBranch"}, Scope: scopeOrchOperate},
 	"remove_worktree":        {Method: "RemoveWorktree", Args: []string{"id", "force"}, Scope: scopeOrchOperate},
 
-	// Git / gh / text generation. RunGit/RunGh are generic passthroughs (they
-	// can run a write command like `commit` or `push`), so they get the
-	// mutating scope even though most calls in practice are reads. The
-	// generate_* calls don't mutate anything themselves, but each one shells
-	// out to a configured provider CLI with client-supplied prompt text and a
-	// 180s budget (textgen.go) — spawning a host process and billing
-	// inference is not what a read scope should authorize, so these are
-	// operate scope despite returning only a string.
+	// Git / forge / text generation. RunGit is a generic passthrough (it can
+	// run a write command like `commit` or `push`), so it gets the mutating
+	// scope even though most calls in practice are reads. The generate_*
+	// calls don't mutate anything themselves, but each one shells out to a
+	// configured provider CLI with client-supplied prompt text and a 180s
+	// budget (textgen.go) — spawning a host process and billing inference is
+	// not what a read scope should authorize, so these are operate scope
+	// despite returning only a string.
 	"run_git":                 {Method: "RunGit", Args: []string{"cwd", "args"}, Scope: scopeOrchOperate},
-	"run_gh":                  {Method: "RunGh", Args: []string{"cwd", "args"}, Scope: scopeOrchOperate},
+	"forge_info":              {Method: "ForgeInfo", Args: []string{"cwd"}, Scope: scopeOrchRead},
+	"forge_pr_list":           {Method: "ForgePrList", Args: []string{"cwd", "scope", "state"}, Scope: scopeOrchRead},
+	"forge_pr_view":           {Method: "ForgePrView", Args: []string{"cwd", "number"}, Scope: scopeOrchRead},
+	"forge_pr_create":         {Method: "ForgePrCreate", Args: []string{"cwd", "title", "body", "base", "head"}, Scope: scopeOrchOperate},
+	"forge_pr_merge":          {Method: "ForgePrMerge", Args: []string{"cwd", "number", "squash"}, Scope: scopeOrchOperate},
+	"set_forge_provider":      {Method: "SetForgeProvider", Args: []string{"wsId", "provider"}, Scope: scopeOrchOperate},
 	"generate_commit_message": {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy"}, Scope: scopeOrchOperate},
 	"generate_chat_title":     {Method: "GenerateChatTitle", Args: []string{"cwd", "model", "policy", "text"}, Scope: scopeOrchOperate},
 	"generate_branch_name":    {Method: "GenerateBranchName", Args: []string{"cwd", "model", "policy", "message"}, Scope: scopeOrchOperate},
@@ -241,7 +246,7 @@ var remoteAllowed = map[string]remoteCmd{
 	//     table can mean much next to a session that holds them.
 	//
 	//   * orchestration:operate is that same authority by other means:
-	//     run_git and run_gh take arbitrary argv (a `-c` override alone is an
+	//     run_git takes arbitrary argv (a `-c` override alone is an
 	//     exec primitive), install_extension and run_extension_command run
 	//     third-party code, and write_text_file is a bare
 	//     os.WriteFile(path, ...) (fs.go) with no root or workspace check —
