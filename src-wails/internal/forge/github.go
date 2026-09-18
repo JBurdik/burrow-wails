@@ -174,6 +174,8 @@ func New(p Provider, run Runner) (Forge, error) {
 	switch p {
 	case GitHub:
 		return &githubForge{run: run}, nil
+	case GitLab:
+		return &gitlabForge{run: run}, nil
 	}
 	return nil, fmt.Errorf("forge: unknown provider %q", p)
 }
