@@ -290,7 +290,7 @@ export const useGitStore = defineStore("git", () => {
     if (!dir) return;
     pushing.value = true;
     error.value = null;
-    const toastId = notif.push({ type: "pending", title: "Pushing…" });
+    const toastId = notif.push({ type: "pending", title: "Pushing…", source: "git" });
     try {
       const { branchName, upstream } = dir === cwd.value
         ? { branchName: branch.value, upstream: hasUpstream.value }
@@ -298,10 +298,10 @@ export const useGitStore = defineStore("git", () => {
       const args = upstream ? ["push"] : ["push", "-u", "origin", branchName];
       await runGit(dir, args);
       await refresh();
-      notif.resolve(toastId, { type: "done", title: "Pushed" });
+      notif.resolve(toastId, { type: "done", title: "Pushed", source: "git" });
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : "git push failed";
-      notif.resolve(toastId, { type: "error", title: "Push failed", body: error.value ?? undefined });
+      notif.resolve(toastId, { type: "error", title: "Push failed", body: error.value ?? undefined, source: "git" });
     } finally {
       pushing.value = false;
     }
@@ -312,14 +312,14 @@ export const useGitStore = defineStore("git", () => {
     const dir = cwd.value;
     pulling.value = true;
     error.value = null;
-    const toastId = notif.push({ type: "pending", title: "Pulling…" });
+    const toastId = notif.push({ type: "pending", title: "Pulling…", source: "git" });
     try {
       await runGit(dir, ["pull", "--ff-only"]);
       await refresh();
-      notif.resolve(toastId, { type: "done", title: "Pulled" });
+      notif.resolve(toastId, { type: "done", title: "Pulled", source: "git" });
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : "git pull failed";
-      notif.resolve(toastId, { type: "error", title: "Pull failed", body: error.value ?? undefined });
+      notif.resolve(toastId, { type: "error", title: "Pull failed", body: error.value ?? undefined, source: "git" });
     } finally {
       pulling.value = false;
     }
@@ -337,16 +337,16 @@ export const useGitStore = defineStore("git", () => {
     if (!dir || !hasWorkingTreeChanges.value || generating.value) return;
     generating.value = true;
     generateError.value = null;
-    const toastId = notif.push({ type: "pending", title: "Generating commit message…" });
+    const toastId = notif.push({ type: "pending", title: "Generating commit message…", source: "git" });
     try {
       await stageAllIfNeeded(dir);
       const out = await invoke<GitOutput>("generate_commit_message", { cwd: dir, ...textGenPrefs() });
       if (out.code !== 0) throw new Error(out.stderr || "commit message generation failed");
       commitMsg.value = out.stdout.trim();
-      notif.resolve(toastId, { type: "done", title: "Commit message generated" });
+      notif.resolve(toastId, { type: "done", title: "Commit message generated", source: "git" });
     } catch (e: unknown) {
       generateError.value = e instanceof Error ? e.message : "commit message generation failed";
-      notif.resolve(toastId, { type: "error", title: "Commit message generation failed", body: generateError.value ?? undefined });
+      notif.resolve(toastId, { type: "error", title: "Commit message generation failed", body: generateError.value ?? undefined, source: "git" });
     } finally {
       generating.value = false;
     }
@@ -435,14 +435,14 @@ export const useGitStore = defineStore("git", () => {
     committing.value = true;
     // The commit review dialog closes the moment it hands the work over, so the
     // toast is the only thing left reporting it.
-    const toastId = notif.push({ type: "pending", title: "Committing…" });
+    const toastId = notif.push({ type: "pending", title: "Committing…", source: "git" });
     try {
       if (needsStaging) await runGit(dir, ["add", "-A"]);
       if (!msg) {
         await generateCommitMessage(dir);
         msg = commitMsg.value.trim();
         if (!msg) {
-          notif.resolve(toastId, { type: "error", title: "Commit failed", body: "no commit message" });
+          notif.resolve(toastId, { type: "error", title: "Commit failed", body: "no commit message", source: "git" });
           return;
         }
       }
@@ -451,14 +451,14 @@ export const useGitStore = defineStore("git", () => {
       diff.value = "";
       diffFile.value = null;
       await refresh();
-      notif.resolve(toastId, { type: "done", title: "Committed", body: msg.split("\n")[0] });
+      notif.resolve(toastId, { type: "done", title: "Committed", body: msg.split("\n")[0], source: "git" });
       return dir;
     } catch (e: unknown) {
       // Not caught before: a failed commit threw past every caller (GitPanel's
       // "Commit & Push" awaits this with no try/catch) and vanished as an
       // unhandled rejection, so the button just went quiet with no feedback.
       error.value = e instanceof Error ? e.message : "git commit failed";
-      notif.resolve(toastId, { type: "error", title: "Commit failed", body: error.value });
+      notif.resolve(toastId, { type: "error", title: "Commit failed", body: error.value, source: "git" });
       throw e;
     } finally {
       committing.value = false;

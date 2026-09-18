@@ -326,16 +326,16 @@ function openSettingsAt(section: string) {
 // (see remoteapi.go's LOAD-BEARING NOTE on UI-only, non-remote verbs).
 async function updateSkills() {
   close();
-  const loadingId = notifStore.push({ type: "info", title: "Updating skills…" });
+  const loadingId = notifStore.push({ type: "info", title: "Updating skills…", source: "system" });
   try {
     const App = await import("../../src-wails/frontend/wailsjs/go/main/App");
     await App.InstallAgentDocs();
     notifStore.dismiss(loadingId);
-    notifStore.push({ type: "done", title: "Skills updated" });
+    notifStore.push({ type: "done", title: "Skills updated", source: "system" });
   } catch (e) {
     console.error("InstallAgentDocs failed", e);
     notifStore.dismiss(loadingId);
-    notifStore.push({ type: "error", title: "Failed to update skills", body: String(e) });
+    notifStore.push({ type: "error", title: "Failed to update skills", body: String(e), source: "system" });
   }
 }
 

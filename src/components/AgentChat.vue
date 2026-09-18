@@ -1695,7 +1695,7 @@ function watchingNow(): boolean {
 async function notifyDone() {
   const session = chats.sessions.find((s) => s.id === props.chatId);
   const body = session?.title || "Claude finished";
-  notifStore.push({ type: "done", title: "Claude", body, workspaceId: props.workspaceId });
+  notifStore.push({ type: "done", title: "Claude", body, workspaceId: props.workspaceId, source: "agent" });
   // Mirror Terminal.vue: no chime while the user is watching the turn finish.
   if (!watchingNow()) playSound("done");
   maybeNtfy("done", body);
@@ -1712,7 +1712,7 @@ async function notifyDone() {
 async function notifyPermission(cr: CanUseToolReq) {
   const target = (cr.input?.command ?? cr.input?.file_path ?? cr.input?.path ?? cr.description ?? "") as string;
   const body = target ? `${cr.toolName}: ${String(target).slice(0, 80)}` : cr.toolName;
-  notifStore.push({ type: "info", title: "Povolení", body, workspaceId: props.workspaceId });
+  notifStore.push({ type: "info", title: "Povolení", body, workspaceId: props.workspaceId, source: "agent" });
   playSound("waiting");
   maybeNtfy("permission", body);
   if (!document.hasFocus()) {

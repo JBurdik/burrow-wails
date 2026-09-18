@@ -40,7 +40,16 @@
             @click="notifStore.clearHistory()"
           >Clear all</button>
         </div>
-        <div v-if="!notifStore.history.length" class="px-3 py-5 text-center text-xs text-muted-foreground">No notifications</div>
+        <div class="flex items-center gap-1 border-b border-border px-2.5 py-1.5">
+          <button
+            v-for="f in notifFilters"
+            :key="f.id"
+            class="rounded-[var(--radius-nav)] border border-border px-1.5 py-0.5 text-[10px] hover:bg-hover"
+            :class="notifFilter === f.id ? 'border-accent bg-hover text-accent' : 'text-muted-foreground'"
+            @click="notifFilter = f.id"
+          >{{ f.label }}</button>
+        </div>
+        <div v-if="!groupedHistory.length" class="px-3 py-5 text-center text-xs text-muted-foreground">{{ notifStore.history.length ? "Nothing here" : "No notifications" }}</div>
         <div v-else class="max-h-[320px] overflow-y-auto p-1">
           <template v-for="group in groupedHistory" :key="group.key">
             <div class="sticky top-0 z-10 bg-panel px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{{ group.label }}</div>
@@ -55,8 +64,12 @@
               <PhCheckCircle v-if="item.type === 'done'" :size="13" class="mt-px shrink-0 text-success" />
               <PhWarning v-else-if="item.type === 'error'" :size="13" class="mt-px shrink-0 text-destructive" />
               <PhInfo v-else :size="13" class="mt-px shrink-0 text-accent" />
+              <component :is="sourceIcon(item)" :size="10" class="mt-[3px] shrink-0 text-muted-foreground" />
               <div class="min-w-0 flex-1">
-                <div class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px]" :class="isCapturedUnread(item.id) ? 'font-semibold text-foreground' : 'font-medium text-secondary-foreground'">{{ item.title }}</div>
+                <div class="flex items-baseline gap-1">
+                  <div class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px]" :class="isCapturedUnread(item.id) ? 'font-semibold text-foreground' : 'font-medium text-secondary-foreground'">{{ item.title }}</div>
+                  <span v-if="item.count && item.count > 1" class="shrink-0 text-[9px] text-muted-foreground">×{{ item.count }}</span>
+                </div>
                 <div v-if="item.body" class="mt-px overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-secondary-foreground">{{ item.body }}</div>
                 <div v-if="contextChip(item)" class="mt-px overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-muted-foreground">{{ contextChip(item) }}</div>
               </div>
@@ -177,8 +190,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhHouse, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhSkull, PhCopy } from "@phosphor-icons/vue";
-import { useNotificationsStore, type HistoryItem } from "@/stores/notifications";
+import { PhHouse, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhSkull, PhCopy, PhRobot, PhGitBranch, PhGear } from "@phosphor-icons/vue";
+import { useNotificationsStore, type HistoryItem, type NotifSource } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
@@ -275,12 +288,32 @@ function typeBorderClass(type: HistoryItem["type"]): string {
   return "border-l-accent";
 }
 
+const notifFilters: { id: "all" | NotifSource; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "agent", label: "Agents" },
+  { id: "git", label: "Git" },
+];
+const notifFilter = ref<"all" | NotifSource>("all");
+
+function sourceIcon(item: HistoryItem) {
+  const source = item.source ?? "system";
+  if (source === "agent") return PhRobot;
+  if (source === "git") return PhGitBranch;
+  return PhGear;
+}
+
+const filteredHistory = computed(() =>
+  notifFilter.value === "all"
+    ? notifStore.history
+    : notifStore.history.filter((i) => (i.source ?? "system") === notifFilter.value)
+);
+
 const NOTIF_GROUP_NOW_MS = 5 * 60_000;
 const groupedHistory = computed(() => {
   const now = Date.now();
   const startOfToday = new Date().setHours(0, 0, 0, 0);
   const buckets: { now: HistoryItem[]; today: HistoryItem[]; earlier: HistoryItem[] } = { now: [], today: [], earlier: [] };
-  for (const item of notifStore.history as HistoryItem[]) {
+  for (const item of filteredHistory.value as HistoryItem[]) {
     if (now - item.ts < NOTIF_GROUP_NOW_MS) buckets.now.push(item);
     else if (item.ts >= startOfToday) buckets.today.push(item);
     else buckets.earlier.push(item);

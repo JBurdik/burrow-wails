@@ -1,6 +1,8 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
+export type NotifSource = "agent" | "git" | "system";
+
 export interface Toast {
   id: number;
   title: string;
@@ -8,21 +10,57 @@ export interface Toast {
   type: "done" | "info" | "error" | "pending";
   workspaceId?: number;
   tabId?: number;
+  source?: NotifSource;
 }
 
 export interface HistoryItem extends Toast {
   ts: number;
+  // absent or 1 = a single occurrence; bumped by insertHistory's dedup.
+  count?: number;
 }
 
 let nextId = 0;
 
+const STORAGE_KEY = "burrow.notifications";
+
+function loadPersisted(): { history: HistoryItem[]; readTs: number } {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { history: [], readTs: 0 };
+    const parsed = JSON.parse(raw);
+    return {
+      history: Array.isArray(parsed.history) ? parsed.history : [],
+      readTs: typeof parsed.readTs === "number" ? parsed.readTs : 0,
+    };
+  } catch {
+    // corrupt or unavailable localStorage must never stop the store from constructing.
+    return { history: [], readTs: 0 };
+  }
+}
+
 export const useNotificationsStore = defineStore("notifications", () => {
+  const persisted = loadPersisted();
+  // Restored rows keep last run's ids, so a counter starting at 0 would hand a
+  // new toast an id already on screen — duplicate list keys, and dismiss(id)
+  // reaching for the wrong row.
+  for (const item of persisted.history) nextId = Math.max(nextId, item.id);
   const toasts = ref<Toast[]>([]);
-  const history = ref<HistoryItem[]>([]);
-  const readTs = ref(0);
+  const history = ref<HistoryItem[]>(persisted.history);
+  const readTs = ref(persisted.readTs);
   // pending toasts are sticky (no auto-dismiss) until resolve() gives them a
   // final type, so a long-running op's toast can't time out mid-flight.
   const timers = new Map<number, ReturnType<typeof setTimeout>>();
+
+  function persist() {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ history: history.value.slice(0, 50), readTs: readTs.value }),
+      );
+    } catch {
+      // private mode / quota exceeded — history just won't survive a restart.
+    }
+  }
 
   function isUnread(item: HistoryItem): boolean {
     return item.ts > readTs.value;
@@ -42,13 +80,35 @@ export const useNotificationsStore = defineStore("notifications", () => {
     timers.set(id, setTimeout(() => dismiss(id), 5000));
   }
 
+  // Repeated identical notifications (same type/title/source within 60s)
+  // collapse into the newest row instead of piling up — only the newest
+  // row is checked, not a scan of all 50.
+  function insertHistory(entry: Toast) {
+    const source = entry.source ?? "system";
+    const now = Date.now();
+    const newest = history.value[0];
+    if (
+      newest &&
+      newest.type === entry.type &&
+      newest.title === entry.title &&
+      newest.source === source &&
+      now - newest.ts < 60_000
+    ) {
+      newest.count = (newest.count ?? 1) + 1;
+      newest.ts = now;
+    } else {
+      history.value.unshift({ ...entry, source, ts: now });
+      if (history.value.length > 50) history.value.pop();
+    }
+    persist();
+  }
+
   function push(toast: Omit<Toast, "id">): number {
     const id = ++nextId;
     toasts.value.push({ ...toast, id });
     if (toast.type === "pending") return id;
     arm(id);
-    history.value.unshift({ ...toast, id, ts: Date.now() });
-    if (history.value.length > 50) history.value.pop();
+    insertHistory({ ...toast, id });
     return id;
   }
 
@@ -58,8 +118,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     const t = toasts.value.find((t) => t.id === id);
     if (!t) { push(patch); return; }
     Object.assign(t, patch);
-    history.value.unshift({ ...t, ts: Date.now() });
-    if (history.value.length > 50) history.value.pop();
+    insertHistory(t);
     arm(id);
   }
 
@@ -74,11 +133,13 @@ export const useNotificationsStore = defineStore("notifications", () => {
   // already-read. No sequence counter for this — millisecond races are fine.
   function markAllRead() {
     readTs.value = Date.now();
+    persist();
   }
 
   function clearHistory() {
     history.value = [];
     readTs.value = Date.now();
+    persist();
   }
 
   return {
