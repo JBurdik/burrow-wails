@@ -69,7 +69,7 @@ export async function perform(action: string, args: Record<string, unknown>): Pr
     case "list_agents":
       return listAgents();
     case "agent_status":
-      return agentStatus();
+      return agentStatus(args);
     case "tab_output":
       return tabOutput(num(args.ptyId), num(args.lines) || 80);
     case "diagram":
@@ -183,7 +183,16 @@ async function spawn(args: Record<string, unknown>) {
   // the worktree in the sidebar rather than under the parent repo.
   const target = (cwd && wsStore.workspaces.find((w) => w.path === cwd)) || wsStore.active;
   if (!target) throw new Error("no workspace to spawn into");
-  wsStore.open(target);
+  // ensureOpen, NOT open: a spawn is a background action (the tab branch below
+  // passes `background: true` for the same reason), and the caller's cwd is
+  // routinely a different workspace than the one on screen — an agent running
+  // in a worktree, or in a project the user has since switched away from.
+  // open() made that spawn steal the active workspace, and since a
+  // just-mounted Terminal has not reported its tabs yet, App.vue read the
+  // empty mirror as "this workspace has nothing to show" and bounced to the
+  // welcome composer mid-thread. Mounting is all we need: the Terminal has to
+  // exist to answer the `add` request, not to be in front.
+  wsStore.ensureOpen(target);
 
   // No explicit target → the user's Settings preference ("Spawn sub-agents as",
   // where "terminal" is this API's "tab").
@@ -289,29 +298,43 @@ function listAgents() {
 }
 
 /** Every agent in the app and what it's doing — tabs and chats in one list, the
- *  same two surfaces the Sidebar shows. */
-function agentStatus() {
+ *  same two surfaces the Sidebar shows. When only_children is true, filters to
+ *  show only chats where parent_chat_id matches the caller's chat id (injected
+ *  from BURROW_CHAT_ID). Tab-target sub-agents have no parent column and are
+ *  omitted from the filtered view. */
+function agentStatus(args: Record<string, unknown> = {}) {
+  const onlyChildren = args.onlyChildren === true;
+  const parentChatId = num(args.parent_chat_id);
+
   const tabs = useTerminalTabsStore();
   const chats = useClaudeChatsStore();
   const ws = useWorkspaceStore();
   const nameOf = (id: number) => ws.workspaces.find((w) => w.id === id)?.name ?? String(id);
 
   const out: unknown[] = [];
-  for (const [wsId, list] of Object.entries(tabs.tabsByWs)) {
-    for (const tab of list) {
-      if (!tab.isAgent && !tab.isChat) continue;
-      out.push({
-        kind: "tab",
-        pty_id: tab.id,
-        title: tab.title,
-        status: tab.status,
-        workspace: nameOf(Number(wsId)),
-        workspace_id: Number(wsId),
-      });
+
+  if (!onlyChildren || parentChatId <= 0) {
+    // Full listing: all agents
+    for (const [wsId, list] of Object.entries(tabs.tabsByWs)) {
+      for (const tab of list) {
+        if (!tab.isAgent && !tab.isChat) continue;
+        out.push({
+          kind: "tab",
+          pty_id: tab.id,
+          title: tab.title,
+          status: tab.status,
+          workspace: nameOf(Number(wsId)),
+          workspace_id: Number(wsId),
+        });
+      }
     }
   }
+
   for (const s of chats.sessions) {
     if (s.control) continue; // the Manager's own session
+    const isChild = s.parentChatId === parentChatId && parentChatId > 0;
+    if (onlyChildren && !isChild) continue; // skip non-children when filtering
+
     out.push({
       kind: "chat",
       chat_id: s.id,

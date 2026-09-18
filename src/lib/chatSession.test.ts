@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { nextTick } from "vue";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -204,6 +205,24 @@ describe("queued follow-ups", () => {
     expect(s.takeNextQueuedMessage()).toEqual({ id: 4, text: "first" });
     expect(s.takeNextQueuedMessage()).toEqual({ id: 6, text: "second", images: ["data:image/png;base64,x"] });
     dropChatSession(41);
+  });
+
+  it("asks the view to drain when a turn ends, even with nobody watching", async () => {
+    // The chat leaf is unmounted while the user looks at another tab, so the
+    // drain cannot live in a component watcher — the turn that releases the
+    // queue usually finishes right there.
+    const s = chatSession(43);
+    let drains = 0;
+    s.setHandlers({ onDrain: () => { drains++; } });
+    s.retain();
+    s.busy.value = true;
+    await nextTick(); // let the flag settle, as a real turn's start does
+    s.enqueueMessage("after this one");
+    s.release(); // view unmounted mid-turn
+    s.busy.value = false;
+    await nextTick();
+    expect(drains).toBe(1);
+    dropChatSession(43);
   });
 
   it("moves a message to the head of the queue in the transcript too", () => {

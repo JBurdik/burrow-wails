@@ -920,7 +920,7 @@ function maybeNtfy(event: NtfyEvent, leafTitle: string) {
 async function notifyDone(leafTitle: string, tabId?: number) {
   const toastTitle = "Task complete";
   const body = leafTitle || "Agent finished";
-  notifStore.push({ type: "done", title: toastTitle, body, workspaceId: props.workspaceId, tabId });
+  notifStore.push({ type: "done", title: toastTitle, body, workspaceId: props.workspaceId, tabId, source: "agent" });
   // System notification when window not focused.
   // Title = "Burrow" so the app name is visible even in dev mode
   // (where macOS shows the terminal emulator name instead of the bundle name).
@@ -1243,7 +1243,7 @@ function onLeafSaved(_id: number) {
 }
 
 function onLeafError(msg: string) {
-  notifStore.push({ type: "error", title: "Editor", body: msg });
+  notifStore.push({ type: "error", title: "Editor", body: msg, source: "system" });
 }
 
 // Prefer the live editor instance (authoritative), fall back to the leaf flag.

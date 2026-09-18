@@ -41,7 +41,7 @@
 // it. Closing/reopening the panel therefore never restarts a child — the
 // <Teleport> just moves the same instance in and out of the DOM slot the
 // panel exposes.
-import { computed, onMounted, reactive, watch } from "vue";
+import { computed, reactive, watch } from "vue";
 import AgentChat from "@/components/AgentChat.vue";
 import { useClaudeChatsStore, takePendingSubagentPrompt, isLocallyCreatedSubagent } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -99,17 +99,6 @@ function cwdOf(workspaceId: number): string {
 // or this one after a restart) was never going to have a local handoff
 // queued for it, so `undefined` there is correct by design, not a race — also
 // safe to cache. What's deliberately NOT cached is anything in between.
-// DEBUG(subagent): remove once the start path is confirmed.
-onMounted(() => console.log("[subagent] host mounted"));
-watch(
-  [children, openWsIds],
-  ([list, ws]) => {
-    console.log("[subagent] openWsIds", [...ws], "children", list.map((c) => ({ id: c.id, ws: c.workspaceId, parent: c.parentChatId, archivedAt: c.archivedAt })));
-    console.log("[subagent] all sessions", chats.sessions.map((s) => ({ id: s.id, ws: s.workspaceId, parent: s.parentChatId })));
-  },
-  { immediate: true, deep: true },
-);
-
 const initialPrompts = reactive<Record<number, string | undefined>>({});
 watch(
   children,
@@ -121,7 +110,6 @@ watch(
       } else {
         initialPrompts[c.id] = undefined;
       }
-      console.log("[subagent] prompt for", c.id, "=", JSON.stringify(initialPrompts[c.id]));
     }
   },
   { immediate: true },

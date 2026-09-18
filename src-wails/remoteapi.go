@@ -149,6 +149,13 @@ var remoteAllowed = map[string]remoteCmd{
 	"get_pty_foreground": {Method: "GetPtyForeground", Args: []string{"id"}, Scope: scopeOrchRead},
 	"list_pty_sessions":  {Method: "ListPtySessions", Args: nil, Scope: scopeOrchRead},
 
+	// Dev servers (devservers.go) — the Right Panel's Dev servers surface.
+	// Killing one signals a host process group, which is the same authority
+	// class as terminal:operate, so it gets the mutating orchestration scope
+	// rather than terminal:operate itself (it isn't a PTY).
+	"list_dev_servers": {Method: "ListDevServers", Args: []string{"workspacePath"}, Scope: scopeOrchRead},
+	"kill_dev_server":  {Method: "KillDevServer", Args: []string{"pid"}, Scope: scopeOrchOperate},
+
 	// Environment. environment_id is also what the WS handler test calls,
 	// because it is safe on a bare &App{} — most commands are not.
 	"environment_id":   {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
@@ -210,10 +217,10 @@ var remoteAllowed = map[string]remoteCmd{
 	"forge_pr_create":         {Method: "ForgePrCreate", Args: []string{"cwd", "title", "body", "base", "head"}, Scope: scopeOrchOperate},
 	"forge_pr_merge":          {Method: "ForgePrMerge", Args: []string{"cwd", "number", "squash"}, Scope: scopeOrchOperate},
 	"set_forge_provider":      {Method: "SetForgeProvider", Args: []string{"wsId", "provider"}, Scope: scopeOrchOperate},
-	"generate_commit_message": {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy"}, Scope: scopeOrchOperate},
+	"generate_commit_message": {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy", "rules"}, Scope: scopeOrchOperate},
 	"generate_chat_title":     {Method: "GenerateChatTitle", Args: []string{"cwd", "model", "policy", "text"}, Scope: scopeOrchOperate},
 	"generate_branch_name":    {Method: "GenerateBranchName", Args: []string{"cwd", "model", "policy", "message"}, Scope: scopeOrchOperate},
-	"generate_pr_content":     {Method: "GeneratePrContent", Args: []string{"cwd", "model", "policy", "baseBranch", "headBranch"}, Scope: scopeOrchOperate},
+	"generate_pr_content":     {Method: "GeneratePrContent", Args: []string{"cwd", "model", "policy", "rules", "baseBranch", "headBranch"}, Scope: scopeOrchOperate},
 
 	// Checkpoints — pre-turn worktree snapshots (checkpoints.go)
 	"create_checkpoint":  {Method: "CreateCheckpoint", Args: []string{"cwd", "ptyId", "label"}, Scope: scopeOrchOperate},

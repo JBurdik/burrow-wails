@@ -114,6 +114,7 @@ interface Prefs {
   // chat titles) — "kind::provider::model::effort", effort optional.
   textGenerationModel: string;
   textGenerationPolicy: TextGenerationPolicy; // house style folded into every generation prompt
+  textGenerationRules: string; // free-text house rule folded into commit + PR prompts
 }
 
 // t3code's TextGenerationPolicyKind, minus "custom" — that one needs per-op
@@ -210,6 +211,7 @@ const DEFAULT_PREFS: Prefs = {
   spawnMode: "terminal",
   textGenerationModel: DEFAULT_TEXT_GENERATION_MODEL,
   textGenerationPolicy: "default",
+  textGenerationRules: "",
 };
 
 function normalize(parsed: unknown): Prefs {
@@ -319,6 +321,7 @@ export const useUIStore = defineStore("ui", () => {
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
   const textGenerationModel = ref<string>(loaded.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL);
   const textGenerationPolicy = ref<TextGenerationPolicy>(loaded.textGenerationPolicy ?? "default");
+  const textGenerationRules = ref<string>(loaded.textGenerationRules ?? "");
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
 
@@ -380,6 +383,7 @@ export const useUIStore = defineStore("ui", () => {
     spawnMode.value = p.spawnMode ?? "terminal";
     textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
     textGenerationPolicy.value = p.textGenerationPolicy ?? "default";
+    textGenerationRules.value = p.textGenerationRules ?? "";
   });
 
   // Publish the soft sub-agent cap to a file the `burrow` CLI can read (it can't
@@ -540,6 +544,7 @@ export const useUIStore = defineStore("ui", () => {
         spawnMode: spawnMode.value,
         textGenerationModel: textGenerationModel.value,
         textGenerationPolicy: textGenerationPolicy.value,
+        textGenerationRules: textGenerationRules.value,
       } satisfies Prefs,
     );
   }
@@ -556,7 +561,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, textGenerationModel, textGenerationPolicy],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -852,5 +857,6 @@ export const useUIStore = defineStore("ui", () => {
     spawnMode,
     textGenerationModel,
     textGenerationPolicy,
+    textGenerationRules,
   };
 });

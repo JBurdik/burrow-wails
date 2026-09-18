@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref } from "vue";
+import { computed, effectScope, ref, watch, type ComputedRef, type EffectScope, type Ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -31,10 +31,21 @@ export interface ChatStreamHandlers {
   /** Raw ACP lines — session handshake, selector replies, rpc correlation. */
   onAcpData: (line: string) => void;
   onAcpReq: (line: string) => void;
+  /**
+   * A turn ended — send the next queued follow-up, if any. Called by the
+   * session, not by a `watch` inside the view: a chat leaf is unmounted the
+   * moment the user looks at another tab (Terminal.isChatVisible), and a
+   * component-owned watcher dies with it, so the turn that finished while the
+   * user was elsewhere left the queue parked forever — with the composer's
+   * send button disabled behind the queue count, the chat was stuck until
+   * "Clear All". The handlers themselves outlive the unmount (a queued message
+   * also keeps the session un-evictable), so the drain still has a sender.
+   */
+  onDrain: () => void;
 }
 
 const NOOP_HANDLERS: ChatStreamHandlers = {
-  onEvents: () => {}, onLine: () => {}, onAcpData: () => {}, onAcpReq: () => {},
+  onEvents: () => {}, onLine: () => {}, onAcpData: () => {}, onAcpReq: () => {}, onDrain: () => {},
 };
 
 export interface ChatSession {
@@ -138,6 +149,10 @@ export interface ChatSession {
 
 interface InternalSession extends ChatSession {
   handlers: ChatStreamHandlers;
+  /** Detached scope for the session's own watchers, so `create()` being called
+   *  from a view's setup() does not hand its effects to that view's scope —
+   *  they would then be disposed on unmount, which is the whole bug. */
+  scope: EffectScope;
   refCount: number;
   evictTimer: ReturnType<typeof setTimeout> | null;
   eventsUL: UnlistenFn | null;
@@ -222,6 +237,7 @@ function isIdle(s: InternalSession): boolean {
 }
 
 function create(chatId: number): InternalSession {
+  const scope = effectScope(true);
   const s: InternalSession = {
     chatId,
     messages: ref<ChatMessage[]>([]),
@@ -284,6 +300,7 @@ function create(chatId: number): InternalSession {
     },
 
     handlers: { ...NOOP_HANDLERS },
+    scope,
     refCount: 0,
     evictTimer: null,
     eventsUL: null,
@@ -325,6 +342,7 @@ function create(chatId: number): InternalSession {
       s.acpDataUL?.(); s.acpDataUL = null;
       s.acpReqUL?.(); s.acpReqUL = null;
       s.handlers = { ...NOOP_HANDLERS };
+      s.scope.stop();
     },
 
     isWatched() { return s.refCount > 0; },
@@ -354,6 +372,10 @@ function create(chatId: number): InternalSession {
       // session, and the next mount finds the result already here.
     },
   };
+  // A turn ending is the ONLY thing that releases the queue, so watch the flag
+  // rather than calling the drain from each place that clears it: `session.exited`
+  // (the CLI died mid-turn) and the send-failure branches also clear `busy`.
+  scope.run(() => watch(s.busy, (running) => { if (!running) s.handlers.onDrain(); }));
   return s;
 }
 

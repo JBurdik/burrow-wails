@@ -1008,7 +1008,7 @@ let renameReadyAt = 0;
 async function regenerateTitle(ws: Workspace, tab: TabSummary) {
   if (!tab.isChat || tab.chatId == null) return;
   const chatId = tab.chatId;
-  const toastId = notif.push({ type: "pending", title: "Regenerating title…" });
+  const toastId = notif.push({ type: "pending", title: "Regenerating title…", source: "agent" });
   let text = tab.title;
   try {
     const raw = await invoke<string>("load_chat_messages", { chatId });
@@ -1030,14 +1030,14 @@ async function regenerateTitle(ws: Workspace, tab: TabSummary) {
       text,
     });
   } catch {
-    notif.resolve(toastId, { type: "error", title: "Title regeneration failed" });
+    notif.resolve(toastId, { type: "error", title: "Title regeneration failed", source: "agent" });
     return;
   }
   if (title) {
     chats.sync(chatId, { title });
-    notif.resolve(toastId, { type: "done", title: "Title regenerated" });
+    notif.resolve(toastId, { type: "done", title: "Title regenerated", source: "agent" });
   } else {
-    notif.resolve(toastId, { type: "error", title: "Title regeneration failed" });
+    notif.resolve(toastId, { type: "error", title: "Title regeneration failed", source: "agent" });
   }
 }
 
