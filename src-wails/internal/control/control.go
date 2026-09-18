@@ -157,6 +157,13 @@ type ChatReader interface {
 	DeleteChat(id int64) error
 }
 
+// ChatStopper releases the live process behind a chat before its transcript is
+// deleted. It is separate from ChatReader so read-only consumers do not gain
+// process-management authority.
+type ChatStopper interface {
+	StopChat(id int64) error
+}
+
 // Deps is everything the verbs need from the host app.
 type Deps struct {
 	DB         *sql.DB
@@ -179,7 +186,8 @@ type Deps struct {
 	Phases Phases
 	// Chats reads a chat's transcript tail and tracks which children have
 	// been collected — the chat equivalent of the <token>.result/.done files.
-	Chats ChatReader
+	Chats       ChatReader
+	ChatStopper ChatStopper
 }
 
 // Core is the verb registry plus the dependencies verbs run against.

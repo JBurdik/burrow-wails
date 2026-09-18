@@ -18,12 +18,12 @@ import (
 // actual end-to-end run against a stub server rather than a careful reading.
 
 type capturedCall struct {
-	Path  string
-	Auth  string
-	Body  map[string]any
+	Path string
+	Auth string
+	Body map[string]any
 }
 
-func runBurrow(t *testing.T, args ...string) (stdout string, code int, call *capturedCall) {
+func runBurrowWithEnv(t *testing.T, env []string, args ...string) (stdout string, code int, call *capturedCall) {
 	t.Helper()
 
 	got := &capturedCall{}
@@ -45,13 +45,16 @@ func runBurrow(t *testing.T, args ...string) (stdout string, code int, call *cap
 	if err := os.WriteFile(filepath.Join(home, "control.token"), []byte("tok123"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	for i, value := range env {
+		env[i] = strings.ReplaceAll(value, "$BURROW_TEST_HOME", home)
+	}
 
 	cmd := exec.Command("sh", append([]string{"bin/burrow"}, args...)...)
-	cmd.Env = append(os.Environ(),
-		"BURROW_HOME_DIR="+home,
+	cmd.Env = append(os.Environ(), append([]string{
+		"BURROW_HOME_DIR=" + home,
 		"BURROW_CWD=/tmp/repo",
 		"BURROW_HOOK_PORT=",
-	)
+	}, env...)...)
 	out, err := cmd.CombinedOutput()
 	code = 0
 	if ee, ok := err.(*exec.ExitError); ok {
@@ -60,6 +63,11 @@ func runBurrow(t *testing.T, args ...string) (stdout string, code int, call *cap
 		t.Fatal(err)
 	}
 	return string(out), code, got
+}
+
+func runBurrow(t *testing.T, args ...string) (stdout string, code int, call *capturedCall) {
+	t.Helper()
+	return runBurrowWithEnv(t, nil, args...)
 }
 
 func TestCLISendsPositionalAndFlagsAsJSON(t *testing.T) {
@@ -129,5 +137,20 @@ func TestCLIRefusesExtraPositional(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "pass it as --name value") {
 		t.Errorf("error should say how to fix it: %q", stdout)
+	}
+}
+
+func TestCLIDerivesHomeFromSessionDirectory(t *testing.T) {
+	// Some external shells retain BURROW_SESSION_DIR but not BURROW_HOME_DIR.
+	// The CLI must still find the app's current port and control token.
+	stdout, code, call := runBurrowWithEnv(t, []string{
+		"BURROW_HOME_DIR=",
+		"BURROW_SESSION_DIR=$BURROW_TEST_HOME/sessions",
+	}, "spawn", "fix the cache bug")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stdout)
+	}
+	if call.Path != "/v1/spawn" || call.Auth != "Bearer tok123" {
+		t.Fatalf("CLI did not use the home derived from BURROW_SESSION_DIR: %+v", call)
 	}
 }

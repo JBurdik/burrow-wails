@@ -66,7 +66,7 @@ func delegationVerbs(c *Core) []Verb {
 		Args: []Arg{
 			{Name: "only_children", Type: "boolean", Desc: "When true, list only this caller's sub-agents (auto-detected from BURROW_CHAT_ID; if unset, returns all agents). Tab-target spawns without a parent column are omitted from this filtered view"},
 		},
-		Scope:   ScopeLocal | ScopeRemote,
+		Scope: ScopeLocal | ScopeRemote,
 		Fn: func(ctx context.Context, p Params) (any, error) {
 			onlyChildren := p.Bool("only_children")
 			parentChatID := p.Int("parent_chat_id")
@@ -222,10 +222,11 @@ func (c *Core) sendToTab(p Params) (any, error) {
 	return map[string]any{"sent": true}, nil
 }
 
-// closeChat deletes a chat sub-agent (and, by cascade, its own children) —
-// the plain DB op DeleteChat already performs; no UI round-trip needed since
-// a chat's ownership is a database row, not something only the frontend holds
-// (unlike tab_close, which has to reach a live PTY through the UI bridge).
+// closeChat stops a chat sub-agent before deleting its transcript (and, by
+// cascade, its children). Deleting only the database row used to leave the
+// agent CLI and its MCP children alive, consuming memory with no reachable UI
+// session. No UI round-trip is needed: both runtime ownership and chat
+// ownership live in the host app (unlike tab_close, which reaches a UI PTY).
 func (c *Core) closeChat(p Params) (any, error) {
 	if c.deps.Chats == nil {
 		return nil, fmt.Errorf("close_chat: no chat backend")
@@ -233,6 +234,11 @@ func (c *Core) closeChat(p Params) (any, error) {
 	chatID := p.Int("chat_id")
 	if chatID <= 0 {
 		return nil, fmt.Errorf("close_chat needs a chat_id")
+	}
+	if c.deps.ChatStopper != nil {
+		if err := c.deps.ChatStopper.StopChat(chatID); err != nil {
+			return nil, fmt.Errorf("close_chat: stop runtime: %w", err)
+		}
 	}
 	if err := c.deps.Chats.DeleteChat(chatID); err != nil {
 		return nil, fmt.Errorf("close_chat: %w", err)

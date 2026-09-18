@@ -41,6 +41,7 @@ func NewManager() *Manager {
 // line (JSONL agent event stream); onExit once the process exits.
 func (m *Manager) Start(id, command string, args []string, cwd string, env []string, onLine func(string), onExit func()) error {
 	c := exec.Command(command, args...)
+	configureProcessGroup(c)
 	if cwd != "" {
 		c.Dir = cwd
 	}
@@ -121,9 +122,7 @@ func (m *Manager) ReapIdle(idle time.Duration) []string {
 	ids := make([]string, 0, len(stale))
 	for _, sess := range stale {
 		sess.stdin.Close()
-		if sess.cmd.Process != nil {
-			_ = sess.cmd.Process.Kill()
-		}
+		_ = killProcessTree(sess.cmd)
 		ids = append(ids, sess.ID)
 	}
 	return ids
@@ -159,10 +158,7 @@ func (m *Manager) Stop(id string) error {
 	delete(m.sessions, id)
 	m.mu.Unlock()
 	sess.stdin.Close()
-	if sess.cmd.Process != nil {
-		return sess.cmd.Process.Kill()
-	}
-	return nil
+	return killProcessTree(sess.cmd)
 }
 
 func (m *Manager) get(id string) (*Session, bool) {
@@ -194,8 +190,6 @@ func (m *Manager) StopAll() {
 	m.mu.Unlock()
 	for _, sess := range sessions {
 		sess.stdin.Close()
-		if sess.cmd.Process != nil {
-			_ = sess.cmd.Process.Kill()
-		}
+		_ = killProcessTree(sess.cmd)
 	}
 }

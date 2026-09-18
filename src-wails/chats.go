@@ -3,8 +3,10 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -237,6 +239,53 @@ func (a *App) DeleteChat(id int64) error {
 		return sql.ErrNoRows
 	}
 	busEmit("chats-changed", nil)
+	return nil
+}
+
+// StopChat terminates every live runtime owned by a chat before its row is
+// removed. Child chats are included because DeleteChat removes them too; doing
+// this first prevents an invisible child process from surviving its parent.
+// A stopped or already-finished runtime is not an error: closing a settled
+// chat must still clean up its transcript.
+func (a *App) StopChat(id int64) error {
+	if a.db == nil {
+		return fmt.Errorf("no database")
+	}
+	if id <= 0 {
+		return sql.ErrNoRows
+	}
+
+	rows, err := a.db.Query(`SELECT id, agent_kind, transport FROM chats WHERE id = ? OR parent_chat_id = ?`, id, id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	found := false
+	for rows.Next() {
+		var chatID int64
+		var agentKind, transport string
+		if err := rows.Scan(&chatID, &agentKind, &transport); err != nil {
+			return err
+		}
+		found = true
+		sessionID := strconv.FormatInt(chatID, 10)
+		var stopErr error
+		if transport == "codex-app-server" || agentKind == "codex" {
+			stopErr = a.AcpStop(sessionID)
+		} else if a.claudeAgents != nil && a.claudeAgents.Alive(sessionID) {
+			stopErr = a.ClaudeStop(sessionID)
+		}
+		if stopErr != nil && !errors.Is(stopErr, os.ErrProcessDone) {
+			return stopErr
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !found {
+		return sql.ErrNoRows
+	}
 	return nil
 }
 

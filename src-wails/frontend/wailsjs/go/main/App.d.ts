@@ -94,9 +94,9 @@ export function GenerateBranchName(arg1:string,arg2:string,arg3:string,arg4:stri
 
 export function GenerateChatTitle(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
-export function GenerateCommitMessage(arg1:string,arg2:string,arg3:string):Promise<main.GitOutput>;
+export function GenerateCommitMessage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.GitOutput>;
 
-export function GeneratePrContent(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Record<string, string>>;
+export function GeneratePrContent(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<Record<string, string>>;
 
 export function GetAppVersion():Promise<string>;
 
@@ -122,6 +122,8 @@ export function IsPidAlive(arg1:number):Promise<boolean>;
 
 export function KeybindingsFilePath():Promise<string>;
 
+export function KillDevServer(arg1:number):Promise<void>;
+
 export function KillOrphanSessions(arg1:Array<string>):Promise<number>;
 
 export function KillPty(arg1:string):Promise<void>;
@@ -135,6 +137,8 @@ export function ListChats():Promise<Array<main.Chat>>;
 export function ListCheckpoints(arg1:string,arg2:number):Promise<Array<main.Checkpoint>>;
 
 export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSessionInfo>>;
+
+export function ListDevServers(arg1:string):Promise<Array<main.DevServer>>;
 
 export function ListExtensions():Promise<Array<main.ExtensionInfo>>;
 
@@ -279,6 +283,8 @@ export function SetWorkspaceIcon(arg1:number,arg2:string):Promise<void>;
 export function SetWorkspaceOrder(arg1:Array<number>):Promise<void>;
 
 export function ShellSnapshot():Promise<main.ShellSnapshot>;
+
+export function StopChat(arg1:number):Promise<void>;
 
 export function SystemStats():Promise<main.SystemStats>;
 

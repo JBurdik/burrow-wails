@@ -220,6 +220,7 @@ func envSlice(m map[string]string) []string {
 // tail kept, so a failed handshake can report the real cause.
 func spawnStdio(bin string, args []string, cwd string, env map[string]string) (*exec.Cmd, io.WriteCloser, *jsonRPCReader, func() string, error) {
 	c := exec.Command(bin, args...)
+	configureAgentProcessGroup(c)
 	c.Dir = cwd
 	c.Env = append(os.Environ(), envSlice(env)...)
 	stdin, err := c.StdinPipe()
@@ -661,13 +662,13 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 		select {
 		case <-done:
 		case <-time.After(120 * time.Second):
-			_ = cmd.Process.Kill()
+			_ = killAgentProcessTree(cmd)
 		}
 	}()
 
 	fail := func(err error) error {
 		close(done)
-		_ = cmd.Process.Kill()
+		_ = killAgentProcessTree(cmd)
 		if tail := stderrTail(); tail != "" {
 			return fmt.Errorf("%w\n--- adapter stderr ---\n%s", err, tail)
 		}
@@ -766,7 +767,7 @@ func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID 
 	}
 	sess := &acpSession{cmd: cmd, stdin: stdin, proto: protoCodexAppServer, nextID: 100}
 	fail := func(err error) error {
-		_ = cmd.Process.Kill()
+		_ = killAgentProcessTree(cmd)
 		if tail := stderrTail(); tail != "" {
 			return fmt.Errorf("%w\n--- codex stderr ---\n%s", err, tail)
 		}
@@ -1125,10 +1126,7 @@ func (a *App) AcpStop(id string) error {
 	}
 	sess.mu.Unlock()
 	_ = sess.stdin.Close()
-	if sess.cmd.Process != nil {
-		return sess.cmd.Process.Kill()
-	}
-	return nil
+	return killAgentProcessTree(sess.cmd)
 }
 
 func (a *App) CodexStop(id string) error {
@@ -1162,11 +1160,11 @@ func (a *App) CodexListModels(cwd string) ([]AgentModel, error) {
 		return nil, fmt.Errorf("failed to spawn codex app-server: %w", err)
 	}
 	// Killing the child is also how a blocked read unblocks.
-	stop := time.AfterFunc(20*time.Second, func() { _ = cmd.Process.Kill() })
+	stop := time.AfterFunc(20*time.Second, func() { _ = killAgentProcessTree(cmd) })
 	defer func() {
 		stop.Stop()
 		_ = stdin.Close()
-		_ = cmd.Process.Kill()
+		_ = killAgentProcessTree(cmd)
 	}()
 
 	sess := &acpSession{stdin: stdin, proto: protoCodexAppServer}

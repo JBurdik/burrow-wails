@@ -33,6 +33,15 @@ shift
 
 # --- control API client -------------------------------------------------------
 
+# Agent terminals receive both variables, but a CLI launched from an external
+# shell may only inherit BURROW_SESSION_DIR. The session directory is always
+# directly below the app data directory where hook.port and control.token live.
+# Derive the latter once so every CLI path (including legacy hook helpers below)
+# has the same authoritative home.
+if [ -z "$BURROW_HOME_DIR" ] && [ -n "$BURROW_SESSION_DIR" ]; then
+  BURROW_HOME_DIR=$(dirname "$BURROW_SESSION_DIR")
+fi
+
 # _port: the app's loopback port. The file is authoritative (rewritten every
 # launch, self-reclaimed when stale); the env var is baked into the PTY at
 # creation, so it's the one that goes stale after an app restart.

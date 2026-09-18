@@ -335,6 +335,48 @@ func (f *fakeChats) UncollectedChildren(int64) ([]int64, error) { return nil, ni
 func (f *fakeChats) MarkCollected(int64) error                  { return nil }
 func (f *fakeChats) DeleteChat(int64) error                     { return nil }
 
+type stoppingChats struct {
+	fakeChats
+	stopped []int64
+	deleted []int64
+	stopErr error
+}
+
+func (f *stoppingChats) StopChat(id int64) error {
+	f.stopped = append(f.stopped, id)
+	return f.stopErr
+}
+
+func (f *stoppingChats) DeleteChat(id int64) error {
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
+func TestCloseChatStopsRuntimeBeforeDeletingTranscript(t *testing.T) {
+	chats := &stoppingChats{}
+	c := newTestCore(t, Deps{Chats: chats, ChatStopper: chats})
+
+	if _, err := c.Call(context.Background(), ScopeLocal, "close_chat", Params{"chat_id": float64(17)}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(chats.stopped, []int64{17}) || !reflect.DeepEqual(chats.deleted, []int64{17}) {
+		t.Fatalf("stop/delete calls = stopped=%v deleted=%v", chats.stopped, chats.deleted)
+	}
+}
+
+func TestCloseChatPreservesTranscriptWhenStoppingFails(t *testing.T) {
+	chats := &stoppingChats{stopErr: errors.New("kill failed")}
+	c := newTestCore(t, Deps{Chats: chats, ChatStopper: chats})
+
+	_, err := c.Call(context.Background(), ScopeLocal, "close_chat", Params{"chat_id": float64(17)})
+	if err == nil || !strings.Contains(err.Error(), "stop runtime") {
+		t.Fatalf("error = %v, want runtime failure", err)
+	}
+	if len(chats.deleted) != 0 {
+		t.Fatalf("transcript was deleted after a failed stop: %v", chats.deleted)
+	}
+}
+
 // A chat sub-agent writes no capture files, so waiting on one has to read the
 // phase Go already derives — which also means waiting works with no view of
 // the child mounted anywhere.

@@ -79,11 +79,38 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.5 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.5</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">září 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Pull requesty napříč GitHubem, GitLabem, Giteou a Azure DevOps</div>
+      <ul>
+        <li><strong>Jednotné rozhraní forge</strong> — Burrow nově rozpozná poskytovatele z git remote a stejný panel pro pull requesty obslouží GitHub, GitLab, Giteu i Azure DevOps. Vytvoření, načtení, komentáře a stav kontrol už nejsou pevně svázané s <code>gh</code>.</li>
+        <li><strong>Nastavení integrací pro každý forge</strong> — v Nastavení lze vidět dostupný klient, ověřit přihlášení a otevřít odpovídající workflow bez falešné nabídky instalace tam, kde je klient už autorizovaný.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Ukončení agentů skutečně uvolní jejich procesy</div>
+      <ul>
+        <li><strong><code>close_chat</code> nejdřív zastaví runtime</strong> — smazání chatu už nemůže ponechat běžící Claude/Codex relaci bez viditelného vlákna; zastaví se také přímí podagenti.</li>
+        <li><strong>Agent a jeho MCP servery mají vlastní process group</strong> — idle cleanup, zavření chatu i shutdown aplikace ukončí celý strom procesu, ne pouze rodičovský CLI proces. Tím se zabrání orphaned MCP serverům, které zbytečně držely RAM.</li>
+        <li><strong>CLI najde řídicí API i z externího shellu</strong> — pokud je dostupné jen <code>BURROW_SESSION_DIR</code>, příkaz <code>burrow</code> si správně odvodí umístění portu a kontrolního tokenu.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.4 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.4</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">září 2026</span>
     </div>
 

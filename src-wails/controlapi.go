@@ -199,6 +199,7 @@ func (a *App) initControl(dataDir string) {
 		WorktreesDir: worktreesDirPref,
 		Phases:       phasesAdapter{s: a.phases},
 		Chats:        a,
+		ChatStopper:  a,
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")
 }

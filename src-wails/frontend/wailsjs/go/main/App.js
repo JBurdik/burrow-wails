@@ -186,12 +186,12 @@ export function GenerateChatTitle(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GenerateChatTitle'](arg1, arg2, arg3, arg4);
 }
 
-export function GenerateCommitMessage(arg1, arg2, arg3) {
-  return window['go']['main']['App']['GenerateCommitMessage'](arg1, arg2, arg3);
+export function GenerateCommitMessage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GenerateCommitMessage'](arg1, arg2, arg3, arg4);
 }
 
-export function GeneratePrContent(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['GeneratePrContent'](arg1, arg2, arg3, arg4, arg5);
+export function GeneratePrContent(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['GeneratePrContent'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GetAppVersion() {
@@ -242,6 +242,10 @@ export function KeybindingsFilePath() {
   return window['go']['main']['App']['KeybindingsFilePath']();
 }
 
+export function KillDevServer(arg1) {
+  return window['go']['main']['App']['KillDevServer'](arg1);
+}
+
 export function KillOrphanSessions(arg1) {
   return window['go']['main']['App']['KillOrphanSessions'](arg1);
 }
@@ -268,6 +272,10 @@ export function ListCheckpoints(arg1, arg2) {
 
 export function ListClaudeSessions(arg1) {
   return window['go']['main']['App']['ListClaudeSessions'](arg1);
+}
+
+export function ListDevServers(arg1) {
+  return window['go']['main']['App']['ListDevServers'](arg1);
 }
 
 export function ListExtensions() {
@@ -556,6 +564,10 @@ export function SetWorkspaceOrder(arg1) {
 
 export function ShellSnapshot() {
   return window['go']['main']['App']['ShellSnapshot']();
+}
+
+export function StopChat(arg1) {
+  return window['go']['main']['App']['StopChat'](arg1);
 }
 
 export function SystemStats() {
