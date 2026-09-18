@@ -55,11 +55,11 @@
 
         <div class="flex items-center justify-end gap-2 border-t border-border/70 px-5 py-3">
           <button class="btn-outline" @click="cancel">Cancel</button>
-          <button class="btn-outline" :disabled="noneSelected || busy" @click="commitOnNewBranch">
+          <button class="btn-outline" :disabled="noneSelected" @click="commitOnNewBranch">
             Commit on new branch
           </button>
-          <button class="btn-primary" :disabled="noneSelected || busy" @click="doCommit">
-            {{ busy ? "Committing…" : "Commit" }}
+          <button class="btn-primary" :disabled="noneSelected" @click="doCommit">
+            Commit
           </button>
         </div>
       </div>
@@ -78,7 +78,6 @@ const files = ref<GitFileStat[]>([]);
 const excluded = ref<Set<string>>(new Set());
 const message = ref("");
 const loading = ref(true);
-const busy = ref(false);
 
 const excludedCount = computed(() => excluded.value.size);
 const noneSelected = computed(() => files.value.length > 0 && excluded.value.size === files.value.length);
@@ -112,33 +111,28 @@ function cancel() {
 }
 
 async function runCommit() {
-  busy.value = true;
-  try {
-    if (message.value.trim()) git.commitMsg = message.value.trim();
-    await git.commit();
-  } finally {
-    busy.value = false;
-  }
+  if (message.value.trim()) git.commitMsg = message.value.trim();
+  // Toasted by the store; a rejection here is already reported and has no UI left.
+  await git.commit().catch(() => {});
 }
 
-async function doCommit() {
-  await runCommit();
+// Close first, work after: the toasts the store raises are the progress report,
+// so there is nothing left for the dialog to show while git runs.
+function doCommit() {
   emit("close");
+  void runCommit();
 }
 
-async function commitOnNewBranch() {
-  busy.value = true;
-  try {
+function commitOnNewBranch() {
+  emit("close");
+  void (async () => {
     git.commitMsg = message.value.trim();
     if (!git.commitMsg) await git.generateCommitMessage();
     const generated = await git.generateBranchName(git.commitMsg);
     const fallback = `wip/${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
     await git.createBranch(generated || fallback);
-  } finally {
-    busy.value = false;
-  }
-  await runCommit();
-  emit("close");
+    await runCommit();
+  })();
 }
 </script>
 

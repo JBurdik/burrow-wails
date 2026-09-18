@@ -433,25 +433,32 @@ export const useGitStore = defineStore("git", () => {
       && (unstaged.value.length > 0 || untracked.value.length > 0);
     if (!dir || (staged.value.length === 0 && !needsStaging)) return;
     committing.value = true;
+    // The commit review dialog closes the moment it hands the work over, so the
+    // toast is the only thing left reporting it.
+    const toastId = notif.push({ type: "pending", title: "Committing…" });
     try {
       if (needsStaging) await runGit(dir, ["add", "-A"]);
       if (!msg) {
         await generateCommitMessage(dir);
         msg = commitMsg.value.trim();
-        if (!msg) return;
+        if (!msg) {
+          notif.resolve(toastId, { type: "error", title: "Commit failed", body: "no commit message" });
+          return;
+        }
       }
       await runGit(dir, ["commit", "-m", msg]);
       commitMsg.value = "";
       diff.value = "";
       diffFile.value = null;
       await refresh();
+      notif.resolve(toastId, { type: "done", title: "Committed", body: msg.split("\n")[0] });
       return dir;
     } catch (e: unknown) {
       // Not caught before: a failed commit threw past every caller (GitPanel's
       // "Commit & Push" awaits this with no try/catch) and vanished as an
       // unhandled rejection, so the button just went quiet with no feedback.
       error.value = e instanceof Error ? e.message : "git commit failed";
-      notif.push({ type: "error", title: "Commit failed", body: error.value });
+      notif.resolve(toastId, { type: "error", title: "Commit failed", body: error.value });
       throw e;
     } finally {
       committing.value = false;
