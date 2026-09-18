@@ -19,7 +19,7 @@ Sub-agents run **interactively on the user's subscription** (never `claude -p`, 
 
 `spawn` takes the **task**, not a command line — Burrow builds the command from the user's configured agents. It prints the new tab's `pty_id` and a result `token`.
 
-- Put the whole brief in the task: what to do, which files or area, what NOT to touch, and what to report back. The sub-agent sees only that text.
+- Put the whole brief in the task: what to do, which files or area, what NOT to touch, and what to report back. The sub-agent sees only that text — but it already runs in your workspace's directory, so do NOT restate the repo path or `cd` anywhere. Say "this repo".
 - `--agent` picks which configured agent runs it (`burrow list-agents`); omit for the user's default.
 - `--model` matches the model to the difficulty: `claude-haiku-4-5-20251001` for mechanical work, `claude-sonnet-5` for normal coding, `claude-opus-5` for the hard cases.
 - `--cwd` runs it elsewhere — a worktree, when parallel agents would otherwise fight over one working tree.
@@ -42,6 +42,14 @@ which chat you are.
 - `burrow wait --chat-id <id>` — block until it finishes and read its answer
   (an alternative to `wait <token>` — `wait` takes either a token or a
   `--chat-id`, not both).
+
+**Nothing wakes you when a child finishes.** There is no notification, no
+harness callback, no auto-resume — if your turn ends, the results sit there
+until the user prompts you again. So a fan-out turn ends one of two ways: you
+`wait` on each child (they run in parallel regardless — the waiting is
+sequential, the work is not), or you `collect-results` and tell the user
+plainly that N children are still running and you'll pick them up next turn.
+Never end a turn claiming a result will arrive by itself.
 
 A sub-agent may not spawn sub-agents of its own — `spawn` from inside one fails
 with `sub-agent cannot spawn sub-agents`.
@@ -75,7 +83,7 @@ A new worktree appears in the Sidebar nested under its repo, and its path is wha
 
 ## Rules
 
-- Fan out, keep working, collect later. Don't sit blocked on a sub-agent.
+- Fan out, keep working, collect later — in a TERMINAL tab, where your turn doesn't end. In a CHAT thread there is no "later" without a user prompt: block on `wait` or say what is still running.
 - Prefer `burrow spawn` over your built-in Agent/fork tool: in-process agents get no tab, so the user can't watch or steer them.
 - `run` is read-only by design. Anything that changes files gets delegated to a sub-agent.
 - Destructive verbs (`tab-close`, `worktree-remove`, `pr-merge`) need the user's explicit confirmation first.

@@ -86,6 +86,7 @@ export function usePullRequests(cwd: () => string) {
         cwd: cwd(),
         model: ui.textGenerationModel,
         policy: ui.textGenerationPolicy,
+        rules: ui.textGenerationRules,
         baseBranch: base,
         headBranch: head,
       });

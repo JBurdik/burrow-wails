@@ -330,7 +330,7 @@ export const useGitStore = defineStore("git", () => {
   // argument (they all forgot the policy the moment it existed).
   function textGenPrefs() {
     const ui = useUIStore();
-    return { model: ui.textGenerationModel, policy: ui.textGenerationPolicy };
+    return { model: ui.textGenerationModel, policy: ui.textGenerationPolicy, rules: ui.textGenerationRules };
   }
 
   async function generateCommitMessage(dir = cwd.value) {

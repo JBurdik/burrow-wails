@@ -103,6 +103,18 @@
               </div>
               <Select v-model="ui.textGenerationPolicy" class="min-w-[200px]" :options="textGenPolicyOptions" />
             </div>
+            <div class="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">House rule</span>
+                <span class="text-[11px] text-muted-foreground">A short rule folded into every generated commit message and pull request. Left empty, nothing is added.</span>
+              </div>
+              <textarea
+                v-model="ui.textGenerationRules"
+                rows="3"
+                placeholder="e.g. Czech subjects, prefix with the ticket id, never mention file names"
+                class="w-full resize-y rounded-[var(--radius-input)] border border-border bg-background px-2.5 py-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-accent"
+              />
+            </div>
           </div>
 
           <div class="flex flex-col gap-2.5">

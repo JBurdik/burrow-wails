@@ -282,6 +282,8 @@
 
     <PullRequestsPanel v-else-if="activeTab === 'pull-requests'" :cwd="props.cwd" />
 
+    <DevServersSurface v-else-if="activeTab === 'dev-servers'" :cwd="props.cwd" />
+
     <div v-else-if="activeTab === 'diff'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <PhGitCommit :size="13" class="shrink-0 text-secondary-foreground" />
@@ -554,7 +556,7 @@ import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
-  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe, PhTerminal, PhRobot,
+  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
@@ -573,6 +575,7 @@ import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
+import DevServersSurface from "./DevServersSurface.vue";
 import ManagerPanel from "./ManagerPanel.vue";
 import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
@@ -848,6 +851,7 @@ const tabs = computed(() => {
     { id: "manager", label: "Manager", icon: PhSparkle, description: "Plan and coordinate agent work for this project." },
     { id: "agents", label: "Sub-agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
+    { id: "dev-servers", label: "Dev servers", icon: PhPlugsConnected, description: "See and kill dev servers running in this workspace." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
   return [...all, ...extensionSurfaces.value];

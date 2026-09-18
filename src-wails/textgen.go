@@ -401,7 +401,7 @@ func firstLine(raw string) string {
 const commitMessageSchema = `{"type":"object","properties":{"subject":{"type":"string"},"body":{"type":"string"}},"required":["subject","body"],"additionalProperties":false}`
 
 // GenerateCommitMessage drafts a commit message from the staged diff.
-func (a *App) GenerateCommitMessage(cwd, selection, policyKind string) GitOutput {
+func (a *App) GenerateCommitMessage(cwd, selection, policyKind, rules string) GitOutput {
 	diffOut := runCmd("git", cwd, []string{"diff", "--staged"})
 	if !diffOut.Success {
 		return diffOut
@@ -427,6 +427,7 @@ func (a *App) GenerateCommitMessage(cwd, selection, policyKind string) GitOutput
 		"- capture the primary user-visible or developer-visible change",
 	}
 	sections = append(sections, policyInstruction(policy.commitInstructions)...)
+	sections = append(sections, policyInstruction(rules)...)
 	if examples := recentCommitSubjects(cwd, policy); examples != "" {
 		sections = append(sections, "", "Recent commit subjects from this repository:", examples)
 	}
@@ -480,7 +481,7 @@ const prContentSchema = `{"type":"object","properties":{"title":{"type":"string"
 
 // GeneratePrContent drafts a pull request title and body from the commits and
 // diff between two branches. Keys of the result: title, body.
-func (a *App) GeneratePrContent(cwd, selection, policyKind, baseBranch, headBranch string) (map[string]string, error) {
+func (a *App) GeneratePrContent(cwd, selection, policyKind, rules, baseBranch, headBranch string) (map[string]string, error) {
 	if baseBranch == "" || headBranch == "" {
 		return nil, errors.New("pull request generation needs a base and a head branch")
 	}
@@ -506,6 +507,7 @@ func (a *App) GeneratePrContent(cwd, selection, policyKind, baseBranch, headBran
 		"- under Testing, include bullet points with concrete checks or 'Not run' where appropriate",
 	}
 	sections = append(sections, policyInstruction(policy.changeRequestInstructions)...)
+	sections = append(sections, policyInstruction(rules)...)
 	sections = append(sections,
 		"",
 		"Base branch: "+baseBranch,
