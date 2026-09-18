@@ -1,19 +1,30 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { PhArrowClockwise, PhArrowSquareOut, PhCheck, PhGitPullRequest, PhGitMerge, PhMagnifyingGlass, PhPlus, PhSealWarning, PhX } from "@phosphor-icons/vue";
 import { usePullRequests, type PrScope } from "@/composables/usePullRequests";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { cn } from "@/lib/utils";
 
 const props = defineProps<{ cwd: string }>();
 const pr = usePullRequests(() => props.cwd);
 const scopes: Array<{ id: PrScope; label: string }> = [{ id: "assigned", label: "Assigned" }, { id: "created", label: "Created" }, { id: "all", label: "All" }];
 const stateLabel = computed(() => pr.selected.value?.isDraft ? "Draft" : pr.selected.value?.state === "MERGED" ? "Merged" : "Open");
-const checkCount = computed(() => pr.selected.value?.statusCheckRollup?.length ?? 0);
-const comment = defineModel<string>("comment", { default: "" });
+const checkCount = computed(() => pr.selected.value?.checks?.length ?? 0);
 
-watch(() => props.cwd, () => { pr.selected.value = null; pr.refresh(); }, { immediate: true });
+watch(() => props.cwd, () => { pr.selected.value = null; pr.loadForge(); pr.refresh(); }, { immediate: true });
 watch(pr.scope, () => pr.refresh());
-function postComment() { const body = comment.value.trim(); if (!body || !pr.selected.value) return; comment.value = ""; pr.act(["pr", "comment", pr.selected.value.url, "--body", body]); }
+
+async function setProvider(provider: string) {
+  if (!provider) return;
+  const ws = useWorkspaceStore();
+  const row = ws.workspaces.find((w) => w.path === props.cwd);
+  if (!row) return;
+  await invoke("set_forge_provider", { wsId: row.id, provider });
+  await pr.loadForge();
+  await pr.refresh();
+}
 </script>
 
 <template>
@@ -45,7 +56,30 @@ function postComment() { const body = comment.value.trim(); if (!body || !pr.sel
       <p v-if="pr.error.value" class="flex gap-1.5 p-4 text-center text-destructive"><PhSealWarning :size="13" />{{ pr.error.value }}</p>
       <div v-if="pr.loading.value" class="p-4 text-center leading-relaxed text-muted-foreground">Načítám pull requesty…</div>
       <div v-else-if="!props.cwd" class="p-4 text-center leading-relaxed text-muted-foreground">Otevři Git workspace.</div>
-      <div v-else-if="pr.items.value.length === 0" class="p-4 text-center leading-relaxed text-muted-foreground">Žádné pull requesty. Přihlas se přes <code>gh auth login</code>.</div>
+      <div v-else-if="pr.items.value.length === 0" class="flex flex-col items-center gap-2 p-4 text-center leading-relaxed text-muted-foreground">
+        <template v-if="!pr.forge.value?.provider">
+          <span>Nepoznaný git hosting pro tento repozitář.</span>
+          <select
+            class="h-8 rounded-[var(--radius-chip)] border border-border bg-hover px-2 text-xs text-foreground"
+            @change="setProvider(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">Vyber providera…</option>
+            <option value="github">GitHub</option>
+            <option value="gitlab">GitLab</option>
+            <option value="azure">Azure DevOps</option>
+            <option value="gitea">Gitea / Forgejo</option>
+          </select>
+        </template>
+        <template v-else-if="!pr.forge.value.installed">
+          <span>Chybí <code>{{ pr.forge.value.bin }}</code>. Nainstaluj přes Settings → Integrations.</span>
+        </template>
+        <template v-else-if="!pr.forge.value.authed">
+          <span>Přihlas se přes <code>{{ pr.forge.value.authCmd }}</code>.</span>
+        </template>
+        <template v-else>
+          <span>Žádné pull requesty.</span>
+        </template>
+      </div>
       <button
         v-for="item in pr.items.value"
         v-else
@@ -65,7 +99,7 @@ function postComment() { const body = comment.value.trim(); if (!body || !pr.sel
     <template v-else>
       <header class="flex items-center justify-between border-b border-border p-2">
         <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" @click="pr.selected.value = null">← Pull requests</button>
-        <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open on GitHub" @click="pr.act(['pr', 'view', pr.selected.value.url, '--web'])"><PhArrowSquareOut :size="13" /></button>
+        <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open in browser" @click="shellOpen(pr.selected.value.url)"><PhArrowSquareOut :size="13" /></button>
       </header>
       <div class="border-b border-border p-2.5">
         <div class="flex justify-between">
@@ -73,7 +107,7 @@ function postComment() { const body = comment.value.trim(); if (!body || !pr.sel
           <span class="text-[10px]" :class="stateLabel === 'Draft' ? 'text-warning' : 'text-success'">{{ stateLabel }}</span>
         </div>
         <h2 class="my-1.5 text-[13px] leading-snug text-foreground">{{ pr.selected.value.title }}</h2>
-        <p class="truncate text-muted-foreground">{{ pr.selected.value.author?.login || 'Unknown' }} · {{ pr.selected.value.headRefName }} → {{ pr.selected.value.baseRefName }}</p>
+        <p class="truncate text-muted-foreground">{{ pr.selected.value.author || 'Unknown' }} · {{ pr.selected.value.headRefName }} → {{ pr.selected.value.baseRefName }}</p>
       </div>
       <div class="flex border-b border-border">
         <button
@@ -101,7 +135,7 @@ function postComment() { const body = comment.value.trim(); if (!body || !pr.sel
             <h3 class="mb-2 text-foreground">Comments</h3>
             <p v-if="!pr.selected.value.comments?.length" class="text-muted-foreground">No comments yet.</p>
             <article v-for="entry in pr.selected.value.comments" :key="entry.createdAt + entry.body" class="border-t border-border/70 py-1.5">
-              <b>{{ entry.author?.login || 'Unknown' }}</b>
+              <b>{{ entry.author || 'Unknown' }}</b>
               <p class="leading-relaxed">{{ entry.body }}</p>
             </article>
           </section>
@@ -118,26 +152,19 @@ function postComment() { const body = comment.value.trim(); if (!body || !pr.sel
         <section class="p-2.5">
           <h3 class="mb-2 text-foreground">Checks · {{ checkCount }}</h3>
           <p v-if="!checkCount" class="text-muted-foreground">No checks reported.</p>
-          <div v-for="check in pr.selected.value.statusCheckRollup" :key="check.name" class="flex items-center gap-1.5 py-0.5">
+          <div v-for="check in pr.selected.value.checks" :key="check.name" class="flex items-center gap-1.5 py-0.5">
             <PhCheck v-if="check.conclusion === 'SUCCESS'" :size="12" />
             <PhX v-else :size="12" />
             <span>{{ check.name || 'Check' }}</span>
             <small class="ml-auto text-muted-foreground">{{ check.conclusion || check.status }}</small>
           </div>
         </section>
-        <section class="p-2.5">
-          <h3 class="mb-2 text-foreground">Leave a comment</h3>
-          <textarea v-model="comment" placeholder="Leave a comment" rows="4" class="box-border w-full resize-y rounded border border-border bg-panel p-1.5 text-foreground outline-none" />
-          <button class="mt-1.5 rounded border border-border px-1.5 py-1 text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-40" :disabled="!comment.trim() || pr.actionLoading.value" @click="postComment">Comment</button>
-        </section>
       </div>
       <footer class="flex gap-1.5 border-t border-border p-1.5">
-        <button class="rounded border border-border px-1.5 py-1 text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-40" :disabled="pr.actionLoading.value" @click="pr.act(['pr', 'review', pr.selected.value.url, '--approve'])">Approve</button>
-        <button class="rounded border border-border px-1.5 py-1 text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-40" :disabled="pr.actionLoading.value" @click="pr.act(['pr', 'review', pr.selected.value.url, '--request-changes'])">Request changes</button>
         <button
           class="ml-auto flex items-center gap-1 rounded border border-border px-1.5 py-1 text-success hover:bg-hover disabled:opacity-40"
           :disabled="pr.actionLoading.value || pr.selected.value.isDraft"
-          @click="pr.act(['pr', 'merge', pr.selected.value.url, '--merge', '--delete-branch'])"
+          @click="pr.merge(false)"
         ><PhGitMerge :size="13" /> Merge</button>
       </footer>
     </template>

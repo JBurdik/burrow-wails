@@ -53,7 +53,7 @@
       <button
         class="menu-item"
         :disabled="prDisabled"
-        title="gh pr create --fill"
+        title="Create pull request"
         @click="doCreatePr"
       >
         <PhGitPullRequest :size="13" /> {{ pr.actionLoading.value ? "Creating…" : "Create PR" }}
@@ -81,7 +81,7 @@ const rootEl = ref<HTMLElement | null>(null);
 // an empty box gets auto-generated right before the commit (git.commit()).
 const commitDisabled = computed(() => !git.hasWorkingTreeChanges);
 const pushDisabled = computed(() => git.pushing || (git.hasUpstream && git.ahead === 0));
-// ponytail: PR gate is "has upstream" only — doesn't check gh auth/repo host, gh itself reports that on failure via pr.error.
+// ponytail: PR gate is "has upstream" only — doesn't check forge auth/repo host, the forge reports that on failure via pr.error.
 const prDisabled = computed(() => !git.hasUpstream || pr.actionLoading.value);
 
 // Dynamic primary action, priority: uncommitted changes > behind upstream > ahead of upstream > nothing to do.
