@@ -461,9 +461,9 @@
               <button
                 v-if="isMac"
                 class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs text-foreground hover:border-accent"
-                @click="runInTab(forgeStatus[f.provider]?.installed ? f.auth : f.install)"
+                @click="runInTab(forgeState(f.provider) === 'installed' ? f.auth : f.install)"
               >
-                {{ forgeStatus[f.provider]?.installed ? "Log in" : "Install" }}
+                {{ forgeState(f.provider) === 'installed' ? "Log in" : "Install" }}
               </button>
               <a
                 v-else
@@ -1766,8 +1766,15 @@ watch(active, (id) => {
   if (id === "skills" && skills.value.length === 0) loadSkills();
   if (id === "mcp" && mcpServers.value.length === 0) loadMcp();
   if (id === "extensions") loadExtensions();
-  if (id === "integrations") refreshForgeStatus();
 });
+
+// Refresh forge status whenever the Integrations tab is the one showing: on
+// mount too, since `active` can already be "integrations" from persisted
+// `ui.settingsSection` and a plain watch only fires on a *change* — and again
+// whenever the active workspace changes while the tab stays open, so the rows
+// don't keep showing the previous repo's provider.
+watch(active, (id) => { if (id === "integrations") refreshForgeStatus(); }, { immediate: true });
+watch(() => wsStore.active?.id, () => { if (active.value === "integrations") refreshForgeStatus(); });
 
 // --- App keybindings (Keybindings section) ---
 const keys = useKeybindingsStore();
