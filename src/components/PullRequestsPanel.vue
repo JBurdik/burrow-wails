@@ -20,7 +20,7 @@ async function setProvider(provider: string) {
   if (!provider) return;
   const ws = useWorkspaceStore();
   const row = ws.workspaces.find((w) => w.path === props.cwd);
-  if (!row) return;
+  if (!row) { pr.error.value = "Nelze najít workspace pro tento adresář."; return; }
   await invoke("set_forge_provider", { wsId: row.id, provider });
   await pr.loadForge();
   await pr.refresh();
@@ -56,6 +56,11 @@ async function setProvider(provider: string) {
       <p v-if="pr.error.value" class="flex gap-1.5 p-4 text-center text-destructive"><PhSealWarning :size="13" />{{ pr.error.value }}</p>
       <div v-if="pr.loading.value" class="p-4 text-center leading-relaxed text-muted-foreground">Načítám pull requesty…</div>
       <div v-else-if="!props.cwd" class="p-4 text-center leading-relaxed text-muted-foreground">Otevři Git workspace.</div>
+      <!-- forge.value === null means "not resolved yet" (initial state, or loadForge() failed) —
+           distinct from forge.value.provider === "" ("resolved, no host detected"). Rendering the
+           picker for the null case would flash "unknown provider" on every authenticated repo
+           whenever forge_pr_list beats forge_info back. -->
+      <div v-else-if="pr.forge.value === null" class="p-4 text-center leading-relaxed text-muted-foreground">Načítám pull requesty…</div>
       <div v-else-if="pr.items.value.length === 0" class="flex flex-col items-center gap-2 p-4 text-center leading-relaxed text-muted-foreground">
         <template v-if="!pr.forge.value?.provider">
           <span>Nepoznaný git hosting pro tento repozitář.</span>
