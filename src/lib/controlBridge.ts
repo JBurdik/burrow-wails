@@ -183,7 +183,16 @@ async function spawn(args: Record<string, unknown>) {
   // the worktree in the sidebar rather than under the parent repo.
   const target = (cwd && wsStore.workspaces.find((w) => w.path === cwd)) || wsStore.active;
   if (!target) throw new Error("no workspace to spawn into");
-  wsStore.open(target);
+  // ensureOpen, NOT open: a spawn is a background action (the tab branch below
+  // passes `background: true` for the same reason), and the caller's cwd is
+  // routinely a different workspace than the one on screen — an agent running
+  // in a worktree, or in a project the user has since switched away from.
+  // open() made that spawn steal the active workspace, and since a
+  // just-mounted Terminal has not reported its tabs yet, App.vue read the
+  // empty mirror as "this workspace has nothing to show" and bounced to the
+  // welcome composer mid-thread. Mounting is all we need: the Terminal has to
+  // exist to answer the `add` request, not to be in front.
+  wsStore.ensureOpen(target);
 
   // No explicit target → the user's Settings preference ("Spawn sub-agents as",
   // where "terminal" is this API's "tab").

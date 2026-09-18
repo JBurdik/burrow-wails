@@ -193,7 +193,11 @@ function openShortcutsFromDocs() {
 // Tabs of the active workspace (the Sidebar's shelves read them from here).
 const route = useRoute();
 
-const allTabs = computed(() => (ws.active ? tabsStore.tabsByWs[ws.active.id] ?? [] : []));
+// `undefined` means that workspace's Terminal has not synced its tabs yet (it
+// may have been mounted a tick ago); `[]` means it really has none. Collapsing
+// the two is what made the watcher below fire on a workspace that was merely
+// still loading.
+const activeTabs = computed(() => (ws.active ? tabsStore.tabsByWs[ws.active.id] : undefined));
 
 // The view state is the ROUTE (fáze 4, docs/plans/003-view-state-routes.md).
 // It used to be a computed local to App.vue, invisible to Terminal.vue's
@@ -255,7 +259,14 @@ watch(
 // composer back after an earlier dismissal.
 // The last live tab closing means there is nothing left to look at, so the
 // composer becomes the honest destination rather than an empty terminal host.
-watch(() => allTabs.value.length, (n) => { if (n === 0) ui.openWelcome(); });
+// Only within ONE workspace, though: a switch to a workspace that has not
+// reported its tabs yet is not an empty workspace, and treating it as one sent
+// the user to the composer every time something opened another workspace
+// underneath them (a `burrow spawn` from an agent running elsewhere).
+watch(
+  () => [ws.active?.id ?? null, activeTabs.value?.length ?? null] as const,
+  ([id, n], [prevId]) => { if (id === prevId && n === 0) ui.openWelcome(); },
+);
 
 // Screen stays mounted behind v-show, so re-focus its composer each time it shows.
 const welcomeEl = useTemplateRef<{ focus: () => void; cycleProvider: () => void; target: Workspace | null }>("welcomeEl");
