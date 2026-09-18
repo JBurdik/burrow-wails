@@ -63,10 +63,19 @@ func delegationVerbs(c *Core) []Verb {
 	}, {
 		Name:    "agent_status",
 		Summary: "Live status of every agent in the app: running, waiting, permission, review, done, idle",
+		Args: []Arg{
+			{Name: "only_children", Type: "boolean", Desc: "When true, list only this caller's sub-agents (auto-detected from BURROW_CHAT_ID; if unset, returns all agents). Tab-target spawns without a parent column are omitted from this filtered view"},
+		},
 		Scope:   ScopeLocal | ScopeRemote,
 		Fn: func(ctx context.Context, p Params) (any, error) {
+			onlyChildren := p.Bool("only_children")
+			parentChatID := p.Int("parent_chat_id")
 			var out any
-			return out, c.ui(ctx, "agent_status", nil, &out)
+			args := map[string]any{"onlyChildren": onlyChildren}
+			if parentChatID > 0 {
+				args["parent_chat_id"] = parentChatID
+			}
+			return out, c.ui(ctx, "agent_status", args, &out)
 		},
 	}, {
 		Name:    "tab_output",

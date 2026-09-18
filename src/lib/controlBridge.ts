@@ -69,7 +69,7 @@ export async function perform(action: string, args: Record<string, unknown>): Pr
     case "list_agents":
       return listAgents();
     case "agent_status":
-      return agentStatus();
+      return agentStatus(args);
     case "tab_output":
       return tabOutput(num(args.ptyId), num(args.lines) || 80);
     case "diagram":
@@ -298,29 +298,43 @@ function listAgents() {
 }
 
 /** Every agent in the app and what it's doing — tabs and chats in one list, the
- *  same two surfaces the Sidebar shows. */
-function agentStatus() {
+ *  same two surfaces the Sidebar shows. When only_children is true, filters to
+ *  show only chats where parent_chat_id matches the caller's chat id (injected
+ *  from BURROW_CHAT_ID). Tab-target sub-agents have no parent column and are
+ *  omitted from the filtered view. */
+function agentStatus(args: Record<string, unknown> = {}) {
+  const onlyChildren = args.onlyChildren === true;
+  const parentChatId = num(args.parent_chat_id);
+
   const tabs = useTerminalTabsStore();
   const chats = useClaudeChatsStore();
   const ws = useWorkspaceStore();
   const nameOf = (id: number) => ws.workspaces.find((w) => w.id === id)?.name ?? String(id);
 
   const out: unknown[] = [];
-  for (const [wsId, list] of Object.entries(tabs.tabsByWs)) {
-    for (const tab of list) {
-      if (!tab.isAgent && !tab.isChat) continue;
-      out.push({
-        kind: "tab",
-        pty_id: tab.id,
-        title: tab.title,
-        status: tab.status,
-        workspace: nameOf(Number(wsId)),
-        workspace_id: Number(wsId),
-      });
+
+  if (!onlyChildren || parentChatId <= 0) {
+    // Full listing: all agents
+    for (const [wsId, list] of Object.entries(tabs.tabsByWs)) {
+      for (const tab of list) {
+        if (!tab.isAgent && !tab.isChat) continue;
+        out.push({
+          kind: "tab",
+          pty_id: tab.id,
+          title: tab.title,
+          status: tab.status,
+          workspace: nameOf(Number(wsId)),
+          workspace_id: Number(wsId),
+        });
+      }
     }
   }
+
   for (const s of chats.sessions) {
     if (s.control) continue; // the Manager's own session
+    const isChild = s.parentChatId === parentChatId && parentChatId > 0;
+    if (onlyChildren && !isChild) continue; // skip non-children when filtering
+
     out.push({
       kind: "chat",
       chat_id: s.id,
