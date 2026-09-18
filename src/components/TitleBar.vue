@@ -22,16 +22,16 @@
     <div class="relative ml-1 flex shrink-0 [-webkit-app-region:no-drag]">
       <button
         class="notif-btn relative flex items-center rounded-[var(--radius-nav)] border border-border bg-panel p-[5px] text-secondary-foreground [-webkit-app-region:no-drag] hover:bg-hover hover:text-foreground"
-        :class="[notifOpen && 'text-accent', notifStore.unreadCount > 0 && 'text-success']"
+        :class="[notifOpen && 'text-accent', bellColorClass, bellPulse && 'notif-bell-pulse']"
         title="Notifications"
         @click.stop="toggleNotif"
       >
         <PhBell :size="14" />
-        <span v-if="notifStore.unreadCount > 0" class="absolute right-px top-px flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-success px-[3px] text-[8px] font-bold leading-[14px] text-black pointer-events-none">
+        <span v-if="notifStore.unreadCount > 0" class="absolute right-px top-px flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-[3px] text-[8px] font-bold leading-[14px] text-black pointer-events-none" :class="badgeColorClass">
           {{ notifStore.unreadCount > 9 ? "9+" : notifStore.unreadCount }}
         </span>
       </button>
-      <div v-if="notifOpen" class="tb-menu left-0 right-auto min-w-[280px] max-w-[320px] overflow-hidden p-0" @click.stop>
+      <div v-if="notifOpen" class="tb-menu left-0 right-auto min-w-[300px] max-w-[360px] overflow-hidden p-0" @click.stop>
         <div class="flex items-center justify-between border-b border-border px-2.5 pb-1.5 pt-2">
           <span class="text-[11px] font-semibold text-foreground">Notifications</span>
           <button
@@ -42,22 +42,27 @@
         </div>
         <div v-if="!notifStore.history.length" class="px-3 py-5 text-center text-xs text-muted-foreground">No notifications</div>
         <div v-else class="max-h-[320px] overflow-y-auto p-1">
-          <div
-            v-for="item in notifStore.history"
-            :key="item.id"
-            class="notif-item flex items-start gap-2 rounded p-[7px_8px] hover:bg-hover"
-            :class="[item.workspaceId && 'cursor-pointer']"
-            @click="navigateToNotif(item.workspaceId, item.tabId)"
-          >
-            <PhCheckCircle v-if="item.type === 'done'" :size="13" class="mt-px shrink-0 text-success" />
-            <PhWarning v-else-if="item.type === 'error'" :size="13" class="mt-px shrink-0 text-destructive" />
-            <PhInfo v-else :size="13" class="mt-px shrink-0 text-accent" />
-            <div class="min-w-0 flex-1">
-              <div class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium text-foreground">{{ item.title }}</div>
-              <div v-if="item.body" class="mt-px overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-secondary-foreground">{{ item.body }}</div>
+          <template v-for="group in groupedHistory" :key="group.key">
+            <div class="sticky top-0 z-10 bg-panel px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{{ group.label }}</div>
+            <div
+              v-for="item in group.items"
+              :key="item.id"
+              class="notif-item flex items-start gap-1.5 rounded border-l-2 p-[7px_8px] hover:bg-hover"
+              :class="[item.workspaceId && 'cursor-pointer', typeBorderClass(item.type), isCapturedUnread(item.id) ? 'bg-hover' : 'opacity-70']"
+              @click="navigateToNotif(item.workspaceId, item.tabId)"
+            >
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" :class="isCapturedUnread(item.id) ? 'bg-accent' : 'bg-transparent'" />
+              <PhCheckCircle v-if="item.type === 'done'" :size="13" class="mt-px shrink-0 text-success" />
+              <PhWarning v-else-if="item.type === 'error'" :size="13" class="mt-px shrink-0 text-destructive" />
+              <PhInfo v-else :size="13" class="mt-px shrink-0 text-accent" />
+              <div class="min-w-0 flex-1">
+                <div class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px]" :class="isCapturedUnread(item.id) ? 'font-semibold text-foreground' : 'font-medium text-secondary-foreground'">{{ item.title }}</div>
+                <div v-if="item.body" class="mt-px overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-secondary-foreground">{{ item.body }}</div>
+                <div v-if="contextChip(item)" class="mt-px overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-muted-foreground">{{ contextChip(item) }}</div>
+              </div>
+              <span class="mt-0.5 shrink-0 text-[9px] text-muted-foreground">{{ relTime(item.ts) }}</span>
             </div>
-            <span class="mt-0.5 shrink-0 text-[9px] text-muted-foreground">{{ relTime(item.ts) }}</span>
-          </div>
+          </template>
         </div>
       </div>
     </div>
@@ -170,10 +175,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { PhHouse, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhSkull, PhCopy } from "@phosphor-icons/vue";
-import { useNotificationsStore } from "@/stores/notifications";
+import { useNotificationsStore, type HistoryItem } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
@@ -223,6 +228,13 @@ const notifOpen = ref(false);
 const wsStore = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 
+// Rows opened this viewing stay marked as unread even after markAllRead() fires,
+// by rendering against a cutoff snapshot captured before the store clears it.
+const capturedUnreadIds = ref<Set<number>>(new Set());
+function isCapturedUnread(id: number): boolean {
+  return capturedUnreadIds.value.has(id);
+}
+
 function navigateToNotif(workspaceId?: number, tabId?: number) {
   if (!workspaceId) return;
   const ws = wsStore.workspaces.find((w) => w.id === workspaceId);
@@ -235,7 +247,10 @@ function navigateToNotif(workspaceId?: number, tabId?: number) {
 
 function toggleNotif() {
   notifOpen.value = !notifOpen.value;
-  if (notifOpen.value) notifStore.markAllRead();
+  if (notifOpen.value) {
+    capturedUnreadIds.value = new Set(notifStore.history.filter((i) => notifStore.isUnread(i)).map((i) => i.id));
+    notifStore.markAllRead();
+  }
 }
 
 function relTime(ts: number): string {
@@ -245,6 +260,69 @@ function relTime(ts: number): string {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
   return `${Math.floor(diff / 86_400_000)}d`;
 }
+
+function contextChip(item: HistoryItem): string | null {
+  if (!item.workspaceId) return null;
+  const wsName = wsStore.workspaces.find((w) => w.id === item.workspaceId)?.name;
+  if (!wsName) return null;
+  const tabTitle = item.tabId != null ? termTabs.tabsByWs[item.workspaceId]?.find((t) => t.id === item.tabId)?.title : undefined;
+  return tabTitle ? `${wsName} · ${tabTitle}` : wsName;
+}
+
+function typeBorderClass(type: HistoryItem["type"]): string {
+  if (type === "done") return "border-l-success";
+  if (type === "error") return "border-l-destructive";
+  return "border-l-accent";
+}
+
+const NOTIF_GROUP_NOW_MS = 5 * 60_000;
+const groupedHistory = computed(() => {
+  const now = Date.now();
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  const buckets: { now: HistoryItem[]; today: HistoryItem[]; earlier: HistoryItem[] } = { now: [], today: [], earlier: [] };
+  for (const item of notifStore.history as HistoryItem[]) {
+    if (now - item.ts < NOTIF_GROUP_NOW_MS) buckets.now.push(item);
+    else if (item.ts >= startOfToday) buckets.today.push(item);
+    else buckets.earlier.push(item);
+  }
+  return [
+    { key: "now", label: "Now", items: buckets.now },
+    { key: "today", label: "Today", items: buckets.today },
+    { key: "earlier", label: "Earlier", items: buckets.earlier },
+  ].filter((g) => g.items.length > 0);
+});
+
+const bellColorClass = computed(() => {
+  switch (notifStore.worstUnreadType) {
+    case "error": return "text-destructive";
+    case "done": return "text-success";
+    case "info": return "text-accent";
+    default: return "";
+  }
+});
+const badgeColorClass = computed(() => {
+  switch (notifStore.worstUnreadType) {
+    case "error": return "bg-destructive";
+    case "info": return "bg-accent";
+    default: return "bg-success";
+  }
+});
+
+// One-shot pulse when unreadCount rises, e.g. a new notification arrives while the panel is closed.
+const bellPulse = ref(false);
+let bellPulseTimer: number | undefined;
+watch(
+  () => notifStore.unreadCount,
+  (count, prev) => {
+    if (count <= prev) return;
+    bellPulse.value = false;
+    requestAnimationFrame(() => {
+      bellPulse.value = true;
+      clearTimeout(bellPulseTimer);
+      bellPulseTimer = window.setTimeout(() => (bellPulse.value = false), 300);
+    });
+  }
+);
 
 // ── Stats dropdown ──────────────────────────────────────────────────────────
 type SystemStats = { cpu_percent: number; mem_used: number; mem_total: number };
@@ -365,6 +443,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener("click", onDocClick);
   clearInterval(statsTimer);
+  clearTimeout(bellPulseTimer);
 });
 
 const isDev = import.meta.env.DEV;
@@ -421,4 +500,13 @@ const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
 .tb-menu-item:disabled { opacity: 0.4; cursor: default; }
 .tb-menu-item:disabled:hover { background: none; color: var(--text-secondary); }
 .tb-menu-item-danger:hover { background: color-mix(in srgb, var(--color-destructive) 15%, transparent); color: var(--color-destructive); }
+
+@keyframes notif-bell-pulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+.notif-bell-pulse :deep(svg) {
+  animation: notif-bell-pulse 300ms ease-out;
+}
 </style>
