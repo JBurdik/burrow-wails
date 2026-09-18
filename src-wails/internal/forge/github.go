@@ -145,12 +145,17 @@ func (g *githubForge) Create(cwd string, o CreateOpts) (PullRequest, error) {
 	if o.Head != "" {
 		args = append(args, "--head", o.Head)
 	}
-	if _, err := g.exec(cwd, args); err != nil {
+	out, err := g.exec(cwd, args)
+	if err != nil {
 		return PullRequest{}, err
 	}
-	// gh prints the new PR's URL, not its JSON. Re-reading the current branch's
-	// PR is one extra call and gives the caller the same full shape every other
-	// method returns, instead of a second half-populated code path.
+	// gh prints the new PR's URL, not its JSON. Its number is the only reliable
+	// handle on what was just created: re-reading "the PR for the branch in cwd"
+	// answers about the checked-out branch, which is the wrong one whenever the
+	// caller passed an explicit head.
+	if n := numberFromURL(string(out)); n > 0 {
+		return g.View(cwd, n)
+	}
 	return g.View(cwd, 0)
 }
 

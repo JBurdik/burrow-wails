@@ -103,3 +103,60 @@ func TestGithubErrorCarriesStderr(t *testing.T) {
 		t.Fatalf("err = %v, want the CLI's own stderr", err)
 	}
 }
+
+// seqRunner replays a different answer per call, for adapters that make more
+// than one call in a single method.
+type seqRunner struct {
+	calls [][]string
+	outs  []string
+	codes []int
+}
+
+func (s *seqRunner) run(bin, cwd string, args []string) (string, string, int) {
+	i := len(s.calls)
+	s.calls = append(s.calls, append([]string{bin}, args...))
+	out, code := "", 0
+	if i < len(s.outs) {
+		out = s.outs[i]
+	}
+	if i < len(s.codes) {
+		code = s.codes[i]
+	}
+	if code != 0 {
+		return "", "cli said no", code
+	}
+	return out, "", 0
+}
+
+func TestGithubCreateLooksUpTheCreatedPR(t *testing.T) {
+	// First call is `pr create` and prints a URL; second is the `pr view` that
+	// follows. The assertion is that the view carries the created PR's number,
+	// not a bare "current branch" view.
+	s := &seqRunner{outs: []string{"https://github.com/a/b/pull/99\n", ghViewJSON}}
+	f, _ := New(GitHub, s.run)
+	if _, err := f.Create("/repo", CreateOpts{Title: "t", Body: "b", Head: "other-branch"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.calls) != 2 {
+		t.Fatalf("expected create then view, got %v", s.calls)
+	}
+	argv := strings.Join(s.calls[1], " ")
+	if !strings.Contains(argv, "pr view 99") {
+		t.Errorf("view did not target the created PR: %s", argv)
+	}
+}
+
+func TestNumberFromURL(t *testing.T) {
+	cases := map[string]int{
+		"https://github.com/a/b/pull/42":            42,
+		"https://gitlab.com/a/b/-/merge_requests/7": 7,
+		"https://codeberg.org/a/b/pulls/3\n":        3,
+		"no number here":                            0,
+		"":                                          0,
+	}
+	for in, want := range cases {
+		if got := numberFromURL(in); got != want {
+			t.Errorf("numberFromURL(%q) = %d, want %d", in, got, want)
+		}
+	}
+}

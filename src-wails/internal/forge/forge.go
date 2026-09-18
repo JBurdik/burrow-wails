@@ -14,6 +14,7 @@ package forge
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 type Provider string
@@ -109,6 +110,20 @@ type Forge interface {
 // any of them exists would not.
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// numberFromURL pulls the trailing pull/merge request number out of the URL a
+// create command prints — .../pull/42, .../merge_requests/7, .../pulls/3 all
+// end the same way. Returns 0 when there is no number to find, which callers
+// treat as "ask the CLI instead".
+func numberFromURL(s string) int {
+	f := strings.FieldsFunc(strings.TrimSpace(s), func(r rune) bool { return r == '/' })
+	for i := len(f) - 1; i >= 0; i-- {
+		if n, err := strconv.Atoi(f[i]); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
 
 // cmdErr turns a non-zero CLI exit into an error carrying the CLI's own
 // stderr. The CLI is the one that knows whether this is "not logged in", "no
