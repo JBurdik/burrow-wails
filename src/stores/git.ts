@@ -50,12 +50,25 @@ export interface PrInfo {
 
 // Collapse the forge's normalized checks array into a single CI verdict. Each
 // entry carries a conclusion (terminal) and/or a status (in-progress state).
-function rollupChecks(checks: Array<{ conclusion?: string; status?: string }> | undefined): PrChecks {
+//
+// The vocabulary is per-provider, not per-field: github.go copies gh's own
+// conclusion verbatim (SUCCESS/FAILURE/…), gitlab.go copies GitLab's raw
+// pipeline status into Conclusion too (success/failed/canceled/…, lowercase).
+// Both must be recognized here — matching only GitHub's spelling means a
+// failed GitLab pipeline falls through to "pending", which is a worse answer
+// than "none" would have been. Azure/gitea adapters never populate Checks, so
+// they hit the empty-array branch above and never reach this loop.
+// GitLab's "canceled" (one L) is treated as pending, not failing: a canceled
+// pipeline didn't run to completion and prove anything broken, so it gets the
+// same "not settled yet" verdict as an in-progress GitHub check rather than
+// the same verdict as a proven failure.
+const FAILING_CONCLUSIONS = new Set(["FAILURE", "FAILED"]);
+export function rollupChecks(checks: Array<{ conclusion?: string; status?: string }> | undefined): PrChecks {
   if (!Array.isArray(checks) || checks.length === 0) return "none";
   let pending = false;
   for (const c of checks) {
     const conclusion = (c.conclusion || "").toUpperCase();
-    if (conclusion === "FAILURE") return "fail";
+    if (FAILING_CONCLUSIONS.has(conclusion)) return "fail";
     if (conclusion !== "SUCCESS") pending = true;
   }
   return pending ? "pending" : "pass";
