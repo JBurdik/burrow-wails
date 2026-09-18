@@ -103,6 +103,72 @@ func TestAzureMergeIsAnUpdateToCompleted(t *testing.T) {
 	}
 }
 
+func TestAzureCreate(t *testing.T) {
+	s := &seqRunner{outs: []string{
+		"https://dev.azure.com/acme/Platform/_git/api\n",
+		`{"pullRequestId":12,"title":"t","status":"active","sourceRefName":"refs/heads/feat/x","targetRefName":"refs/heads/main","repository":{"webUrl":"https://dev.azure.com/acme/Platform/_git/api"}}`,
+	}}
+	f, _ := New(Azure, s.run)
+	pr, err := f.Create("/repo", CreateOpts{Title: "t", Body: "b", Base: "main", Head: "feat/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Number != 12 || pr.HeadRef != "feat/x" || pr.BaseRef != "main" {
+		t.Errorf("bad mapping: %+v", pr)
+	}
+	if len(s.calls) != 2 {
+		t.Fatalf("expected a git remote read then an az call, got %v", s.calls)
+	}
+	argv := strings.Join(s.calls[1], " ")
+	for _, want := range []string{"az repos pr create", "--title t", "--target-branch main", "--source-branch feat/x", "--organization https://dev.azure.com/acme", "--project Platform", "--repository api"} {
+		if !strings.Contains(argv, want) {
+			t.Errorf("argv missing %q: %s", want, argv)
+		}
+	}
+}
+
+// View with number 0 means "the PR for the branch checked out in cwd". Azure has no
+// such query, so the adapter reads the branch from git and filters a list by it —
+// three calls, and the order is what this test pins.
+func TestAzureViewCurrentBranch(t *testing.T) {
+	s := &seqRunner{outs: []string{
+		"https://dev.azure.com/acme/Platform/_git/api\n",
+		"feat/x\n",
+		`[{"pullRequestId":13,"status":"active","sourceRefName":"refs/heads/feat/x","targetRefName":"refs/heads/main","repository":{"webUrl":"u"}}]`,
+	}}
+	f, _ := New(Azure, s.run)
+	pr, err := f.View("/repo", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Number != 13 {
+		t.Errorf("Number = %d, want 13", pr.Number)
+	}
+	if len(s.calls) != 3 {
+		t.Fatalf("expected remote, branch, list — got %v", s.calls)
+	}
+	if !strings.Contains(strings.Join(s.calls[1], " "), "branch --show-current") {
+		t.Errorf("second call should read the branch: %v", s.calls[1])
+	}
+	if !strings.Contains(strings.Join(s.calls[2], " "), "--source-branch feat/x") {
+		t.Errorf("list should filter by the branch: %v", s.calls[2])
+	}
+}
+
+// An empty list is "no pull request for this branch", not a zero-valued PR — the
+// sidebar badge distinguishes those and would otherwise render a PR numbered 0.
+func TestAzureViewCurrentBranchNoPR(t *testing.T) {
+	s := &seqRunner{outs: []string{
+		"https://dev.azure.com/acme/Platform/_git/api\n",
+		"feat/x\n",
+		`[]`,
+	}}
+	f, _ := New(Azure, s.run)
+	if _, err := f.View("/repo", 0); err == nil {
+		t.Fatal("expected an error when no PR exists for the branch")
+	}
+}
+
 func TestAzureUnparseableRemoteIsAnActionableError(t *testing.T) {
 	s := &seqRunner{outs: []string{"https://dev.azure.com/acme\n"}}
 	f, _ := New(Azure, s.run)

@@ -37,12 +37,15 @@ func (a *azureForge) coords(cwd string) (coords, error) {
 	return coords{org: org, project: project, repo: repo}, nil
 }
 
+// orgFlags is what `pr show` and `pr update` need: they take an id, so the project and
+// repository are implied. Separate from flags() rather than a slice of it, so reordering
+// flags() cannot silently change what these two calls send.
+func (c coords) orgFlags() []string {
+	return []string{"--organization", "https://dev.azure.com/" + c.org}
+}
+
 func (c coords) flags() []string {
-	return []string{
-		"--organization", "https://dev.azure.com/" + c.org,
-		"--project", c.project,
-		"--repository", c.repo,
-	}
+	return append(c.orgFlags(), "--project", c.project, "--repository", c.repo)
 }
 
 // Azure's GitPullRequest object.
@@ -137,7 +140,7 @@ func (a *azureForge) View(cwd string, number int) (PullRequest, error) {
 		// whose source ref is this branch and take the first.
 		return a.currentBranchPR(cwd, c)
 	}
-	args := append([]string{"repos", "pr", "show", "--id", itoa(number), "--output", "json"}, c.flags()[:2]...)
+	args := append([]string{"repos", "pr", "show", "--id", itoa(number), "--output", "json"}, c.orgFlags()...)
 	raw, err := a.exec(cwd, args)
 	if err != nil {
 		return PullRequest{}, err
@@ -206,7 +209,7 @@ func (a *azureForge) Merge(cwd string, number int, squash bool) error {
 	// Azure has no "merge" verb: completing a PR is an update of its status.
 	args := append([]string{
 		"repos", "pr", "update", "--id", itoa(number), "--status", "completed", "--output", "json",
-	}, c.flags()[:2]...)
+	}, c.orgFlags()...)
 	if squash {
 		args = append(args, "--squash", "true")
 	}
