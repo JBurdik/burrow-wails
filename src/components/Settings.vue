@@ -441,6 +441,37 @@
               </Button>
             </div>
           </div>
+
+          <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Git hosting — pull requests</span>
+            <div
+              v-for="f in FORGE_CLIS"
+              :key="f.provider"
+              class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"
+            >
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">{{ f.label }}</span>
+                <span class="text-[11px] text-muted-foreground">
+                  <template v-if="forgeState(f.provider) === 'authed'"><code>{{ f.bin }}</code> — ready</template>
+                  <template v-else-if="forgeState(f.provider) === 'installed'"><code>{{ f.bin }}</code> installed, but not logged in</template>
+                  <template v-else-if="forgeState(f.provider) === 'missing'"><code>{{ f.bin }}</code> not installed</template>
+                  <template v-else>Status unknown for this repo</template>
+                </span>
+              </div>
+              <button
+                v-if="isMac"
+                class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs text-foreground hover:border-accent"
+                @click="runInTab(forgeStatus[f.provider]?.installed ? f.auth : f.install)"
+              >
+                {{ forgeStatus[f.provider]?.installed ? "Log in" : "Install" }}
+              </button>
+              <a
+                v-else
+                class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs leading-8 text-foreground hover:border-accent"
+                :href="f.docs" target="_blank" rel="noopener"
+              >Docs</a>
+            </div>
+          </div>
         </section>
 
         <!-- Plugins -->
@@ -1112,6 +1143,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
 import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { perform } from "@/lib/controlBridge";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEXT_GENERATION_POLICIES, type NtfyEvent } from "@/stores/ui";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
@@ -1322,6 +1354,47 @@ async function sendNtfyTest() {
   } finally {
     ntfyTesting.value = false;
   }
+}
+
+// ── Integrations: git forge CLIs ──
+// The commands live here rather than in Go because they are install advice, not
+// behaviour: what Go owns is whether the binary is present (forge_info).
+const FORGE_CLIS = [
+  { provider: "github", label: "GitHub", bin: "gh", install: "brew install gh", auth: "gh auth login", docs: "https://cli.github.com" },
+  { provider: "gitlab", label: "GitLab", bin: "glab", install: "brew install glab", auth: "glab auth login", docs: "https://gitlab.com/gitlab-org/cli" },
+  { provider: "azure", label: "Azure DevOps", bin: "az", install: "brew install azure-cli && az extension add --name azure-devops", auth: "az login", docs: "https://learn.microsoft.com/cli/azure/repos/pr" },
+  { provider: "gitea", label: "Gitea / Forgejo", bin: "tea", install: "brew install tea", auth: "tea login add", docs: "https://gitea.com/gitea/tea" },
+] as const;
+
+const forgeStatus = ref<Record<string, { installed: boolean; authed: boolean }>>({});
+const isMac = navigator.platform.toLowerCase().includes("mac");
+
+// A provider with no entry has never been checked (forge_info only answers for
+// the active repo's own remote) — that is distinct from "checked, not installed",
+// and must not be shown as "missing" for a CLI we simply haven't looked for.
+function forgeState(provider: string): "authed" | "installed" | "missing" | "unknown" {
+  const s = forgeStatus.value[provider];
+  if (!s) return "unknown";
+  if (s.authed) return "authed";
+  if (s.installed) return "installed";
+  return "missing";
+}
+
+async function refreshForgeStatus() {
+  const cwd = wsStore.active?.path ?? "";
+  if (!cwd) return;
+  // forge_info answers for the repo's own provider; the other rows stay unset,
+  // which forgeState() reads as "unknown" rather than a false "not installed".
+  const info = await invoke<{ provider: string; installed: boolean; authed: boolean }>("forge_info", { cwd }).catch(() => null);
+  if (info?.provider) forgeStatus.value[info.provider] = { installed: info.installed, authed: info.authed };
+}
+
+// Runs the command in a terminal tab rather than silently in the background:
+// Homebrew can prompt, the output is worth seeing, and the user can kill it.
+async function runInTab(cmd: string) {
+  const wsId = wsStore.active?.id;
+  if (!wsId) return;
+  await perform("new_tab", { workspaceId: wsId, cmd });
 }
 
 // Resolved at mount from the Tauri runtime so the displayed version always
@@ -1693,6 +1766,7 @@ watch(active, (id) => {
   if (id === "skills" && skills.value.length === 0) loadSkills();
   if (id === "mcp" && mcpServers.value.length === 0) loadMcp();
   if (id === "extensions") loadExtensions();
+  if (id === "integrations") refreshForgeStatus();
 });
 
 // --- App keybindings (Keybindings section) ---
