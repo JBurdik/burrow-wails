@@ -459,14 +459,14 @@
                 </span>
               </div>
               <button
-                v-if="isMac"
+                v-if="isMac && forgeState(f.provider) !== 'authed'"
                 class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs text-foreground hover:border-accent"
                 @click="runInTab(forgeState(f.provider) === 'installed' ? f.auth : f.install)"
               >
                 {{ forgeState(f.provider) === 'installed' ? "Log in" : "Install" }}
               </button>
               <a
-                v-else
+                v-else-if="!isMac"
                 class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs leading-8 text-foreground hover:border-accent"
                 :href="f.docs" target="_blank" rel="noopener"
               >Docs</a>
