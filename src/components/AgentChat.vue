@@ -2253,11 +2253,11 @@ function finishTurn() {
   S.maybeEvict();
 }
 
-// A turn ending is the ONLY thing that releases the queue, so watch the flag
-// rather than calling the drain from each place that clears it: `session.exited`
-// (the CLI died mid-turn) and the send-failure branches also clear `busy`, and
-// each of them used to leave the queue parked until the user typed something.
-watch(busy, (running) => { if (!running) drainQueuedMessage(); });
+// The drain is triggered by the SESSION (`onDrain`, installed with the other
+// handlers), not by a watcher here: this component is unmounted whenever the
+// user looks at another tab, and a watcher in it dies with it — so a turn that
+// finished while the user was elsewhere left the queue parked forever, behind
+// a send button the queue itself disables.
 
 function drainQueuedMessage() {
   if (busy.value) return;
@@ -3192,7 +3192,7 @@ onMounted(async () => {
   // Install this mount's reducers into the session and take a reference. The
   // session already holds the listeners; setHandlers just points them at the
   // live view, so no stream is ever torn down and re-attached on a remount.
-  S.setHandlers({ onEvents, onLine, onAcpData, onAcpReq });
+  S.setHandlers({ onEvents, onLine, onAcpData, onAcpReq, onDrain: drainQueuedMessage });
   // The transcript arrives on this channel for BOTH transports, so it is
   // attached unconditionally — unlike the raw ones, which are per-runtime.
   await S.listenEvents();
@@ -3227,6 +3227,9 @@ onMounted(async () => {
   // do it: the active id is already this chat before the fresh instance mounts,
   // so it never fires and the view opened scrolled to the top of the history.
   scrollToBottom(true);
+  // A queue parked by an older build (or by a relaunch — the placeholders are
+  // persisted with the transcript) has no busy transition left to release it.
+  if (!busy.value) drainQueuedMessage();
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
   // Pin the resolved model to this chat on first mount, so it survives a
@@ -3257,7 +3260,8 @@ onMounted(async () => {
   if (shouldAutoStart()) {
     const startErr = await ensureRuntime();
     if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
-    else if (!startErr) drainQueuedMessage();
+    // No drain here: it already ran above, unconditionally. Two drains in one
+    // mount each take their own message and send both turns at once.
     if (usesRpcRuntime.value) return;
   }
 
