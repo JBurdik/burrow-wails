@@ -250,16 +250,42 @@ func (a *App) ControlVerbs() []ControlVerb {
 
 // registerControlRoutes mounts the control API on the loopback hook server:
 // POST /v1/<verb> with a JSON body, plus /v1/_verbs for the registry. The
+// non-verb /v1/skills/burrow endpoint serves the live agent guide. The
 // frontend's replies don't come back this way — it acks over its Wails binding
 // (AckControlAction), which needs no token and no port.
 func (a *App) registerControlRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		if !a.controlAuthorized(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/v1/skills/burrow" {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			if a.control == nil {
+				http.Error(w, "control surface not ready", http.StatusServiceUnavailable)
+				return
+			}
+			if r.URL.Query().Has("references") {
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				for _, name := range control.BurrowSkillReferences {
+					fmt.Fprintln(w, name)
+				}
+				return
+			}
+			guide, err := control.BurrowSkillGuide(a.control.Verbs(), r.URL.Query().Get("reference"))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+			_, _ = fmt.Fprint(w, guide)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		verb := strings.TrimPrefix(r.URL.Path, "/v1/")
