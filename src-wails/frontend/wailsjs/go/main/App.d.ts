@@ -21,6 +21,8 @@ export function AcpStart(arg1:main.AcpStartOpts):Promise<void>;
 
 export function AcpStop(arg1:string):Promise<void>;
 
+export function AddDiffComment(arg1:number,arg2:string,arg3:number,arg4:string,arg5:string):Promise<main.DiffComment>;
+
 export function AddMcpServer(arg1:string,arg2:Record<string, any>):Promise<void>;
 
 export function BranchDiff(arg1:string):Promise<string>;
@@ -58,6 +60,8 @@ export function CodexSend(arg1:string,arg2:string,arg3:Array<string>):Promise<nu
 export function CodexStart(arg1:string,arg2:string,arg3:Record<string, string>,arg4:string):Promise<void>;
 
 export function CodexStop(arg1:string):Promise<void>;
+
+export function ComposeDiffNotes(arg1:Array<number>):Promise<string>;
 
 export function ConfigFilePath():Promise<string>;
 
@@ -113,6 +117,8 @@ export function GeneratePrContent(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function GetAppVersion():Promise<string>;
 
+export function GetChatUsage():Promise<main.ChatUsageReport>;
+
 export function GetExtensionSettings(arg1:string):Promise<Record<string, string>>;
 
 export function GetHookServerPort():Promise<number>;
@@ -153,6 +159,8 @@ export function ListClaudeSessions(arg1:string):Promise<Array<main.ClaudeSession
 
 export function ListDevServers(arg1:string):Promise<Array<main.DevServer>>;
 
+export function ListDiffComments(arg1:number):Promise<Array<main.DiffComment>>;
+
 export function ListExtensions():Promise<Array<main.ExtensionInfo>>;
 
 export function ListFonts():Promise<Array<string>>;
@@ -184,6 +192,8 @@ export function LspStart(arg1:string,arg2:string,arg3:Array<string>,arg4:string)
 export function LspStop(arg1:string):Promise<void>;
 
 export function MarkCollected(arg1:number):Promise<void>;
+
+export function MarkDiffNotesSent(arg1:Array<number>):Promise<void>;
 
 export function NotifyFloatGrid(arg1:string,arg2:number,arg3:number):Promise<void>;
 

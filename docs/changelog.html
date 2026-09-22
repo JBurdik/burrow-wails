@@ -79,11 +79,52 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.6 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.6</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">září 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Konec Manageru — orchestruje obyčejné vlákno</div>
+      <ul>
+        <li><strong>Manager panel je pryč</strong> — skrytý per-repo Manager thread s vlastním modelem, primerem a schránkou skončil. Orchestruje vlákno, ve kterém už uživatel je: spustí podagenty (<code>parent_chat_id</code>) a ty se objeví v sekci Sub-agents v pravém panelu. Zmizel i <code>.burrow/manager.md</code>, záložka „Manager Prompt“ v nastavení projektu a klávesová zkratka <code>Cmd+Shift+J</code> se uvolnila.</li>
+        <li><strong>Staré Manager chaty se při startu archivují</strong> — Manager byl chat jako každý jiný, jen skrytý příznakem <code>control</code>. Ten už nikdo nečte, takže bez archivace by se po aktualizaci vzkřísil jeden Manager thread za každý projekt — jako obyčejné vlákno v Sidebaru a automaticky otevřený tab. Proběhne jednou; chat, který si uživatel později odarchivuje, zůstane odarchivovaný.</li>
+        <li><strong>Podagent ukazuje logo svého providera</strong> — děti jednoho vlákna mohou běžet na různých providerech, generický robot to zakrýval. Řádky nástroje Task robota ponechávají: běží uvnitř CLI rodiče.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Orchestrace: Run, Task, Dispatch</div>
+      <ul>
+        <li><strong>Stavový automat pro delegovanou práci</strong> — nové verby <code>run_create</code>, <code>task_dispatch</code>, <code>worker_done</code>, <code>worker_release</code>, <code>ask</code>, <code>reply</code> a <code>reclaimable_dispatches</code>. Task a Dispatch jsou odděleny, takže opakovaný pokus je nový Dispatch téhož Tasku, ne nový Task.</li>
+        <li><strong>Výsledek musí být explicitní</strong> — <code>worker_done</code> vynutí <code>succeeded</code> nebo <code>failed</code> a druhé volání na stejný Dispatch odmítne. Prozaické „hotovo“ neprojde.</li>
+        <li><strong>Nepřítomnost není důkaz</strong> — živost (live / unverifiable / exited) kombinuje fázi, kterou Go už odvozuje, s pozitivním ověřením existence v seznamu PTY démona nebo v řádku chatu. Uvolnění je odmítnuto jak pro neusazený, tak pro neověřitelný Dispatch.</li>
+        <li><strong>Dávkové poznámky k diffu</strong> — v panelu diffu lze označit řádky, uložit poznámku (tabulka <code>diff_comments</code>) a ta se vykreslí v okraji. Tlačítko „Send N notes“ pošle všechny jako jednu markdown zprávu do chatu workspace, s fallbackem na aktivní terminálový tab. Odeslané poznámky zůstanou viditelné (zašedlé), nemažou se.</li>
+        <li><strong>Trvalý odhad spotřeby chatu a živý průvodce dovedností Burrow</strong> — odhad přežije restart, průvodce se servíruje z běžící aplikace.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Klient démona se po přerušeném socketu znovu připojí</strong> — démon zavře klienta, jehož zápis blokoval 2 s (stačí záplava výstupu z PTY), a klient si toho nevšiml: <code>readLoop</code> skončil, encoder zůstal nenulový a každé další volání psalo do mrtvého socketu. Všechny terminály oněměly až do restartu aplikace. <code>ensureConn</code> vytočí spojení znovu, serializovaně přes <code>dialMu</code>, aby dva souběžní volající neskončili se dvěma živými spojeními a zdvojeným výstupem.</li>
+        <li><strong>Neúspěšný <code>create_pty</code> už nenechá tab prázdný</strong> — dřív to přerušilo <code>onMounted</code> a úvodní příkaz, poll popředí ani registrace terminálu se nikdy nespustily. Nově jeden opakovaný pokus a viditelná chyba v terminálu.</li>
+        <li><strong>Restart už neoznačí každý chat jako „aktivní teď“</strong> — obnova přehraje patch na každý chat kvůli evidenci (id relace, titulek, druh agenta), což zvedalo <code>lastActivityAt</code>. Skutečná aktivita je jen začátek tahu nebo nová zpráva. Razítka se navíc ztrácela; poslední aktivita chatu se nově čte z <code>last_activity_at</code> v databázi.</li>
+        <li><strong>Instalace forge CLI běží na pozadí</strong> — tlačítko Install otevíralo terminálový tab za překryvem Nastavení: z pohledu uživatele neudělalo nic a po zavření Nastavení se objevil terminál, který si nikdo nevyžádal. Homebrew tu běží neinteraktivně, takže <code>ForgeInstallCLI</code> to spustí v Go a Nastavení ukáže průběh i text chyby. Přihlášení tab dál otevírá — to opravdu interaktivní je.</li>
+        <li><strong>Codex má stejný stav a ovládání jako Claude</strong> a <code>StopChat</code> je doplněn do vzdáleného rozhraní.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.5 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.5</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">září 2026</span>
     </div>
 

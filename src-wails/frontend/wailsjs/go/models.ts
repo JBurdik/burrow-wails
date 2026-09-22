@@ -223,7 +223,6 @@ export namespace main {
 	    pinned_title: boolean;
 	    claude_session_id: string;
 	    message_count: number;
-	    control: boolean;
 	    agent_kind: string;
 	    transport: string;
 	    model: string;
@@ -245,7 +244,6 @@ export namespace main {
 	        this.pinned_title = source["pinned_title"];
 	        this.claude_session_id = source["claude_session_id"];
 	        this.message_count = source["message_count"];
-	        this.control = source["control"];
 	        this.agent_kind = source["agent_kind"];
 	        this.transport = source["transport"];
 	        this.model = source["model"];
@@ -355,6 +353,64 @@ export namespace main {
 	        this.kind = source["kind"];
 	        this.line = source["line"];
 	    }
+	}
+	export class ChatUsage {
+	    chat_id: number;
+	    model: string;
+	    input_tokens: number;
+	    output_tokens: number;
+	    cache_read_tokens: number;
+	    cache_creation_tokens: number;
+	    estimated_cost_usd: number;
+	    priced: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.chat_id = source["chat_id"];
+	        this.model = source["model"];
+	        this.input_tokens = source["input_tokens"];
+	        this.output_tokens = source["output_tokens"];
+	        this.cache_read_tokens = source["cache_read_tokens"];
+	        this.cache_creation_tokens = source["cache_creation_tokens"];
+	        this.estimated_cost_usd = source["estimated_cost_usd"];
+	        this.priced = source["priced"];
+	    }
+	}
+	export class ChatUsageReport {
+	    chats: ChatUsage[];
+	    estimated_cost_usd: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatUsageReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.chats = this.convertValues(source["chats"], ChatUsage);
+	        this.estimated_cost_usd = source["estimated_cost_usd"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Checkpoint {
 	    id: number;
@@ -489,6 +545,32 @@ export namespace main {
 	        this.port = source["port"];
 	        this.addr = source["addr"];
 	        this.command = source["command"];
+	    }
+	}
+	export class DiffComment {
+	    id: number;
+	    ws_id: number;
+	    file: string;
+	    line: number;
+	    side: string;
+	    body: string;
+	    created_at: number;
+	    sent_at: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiffComment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.ws_id = source["ws_id"];
+	        this.file = source["file"];
+	        this.line = source["line"];
+	        this.side = source["side"];
+	        this.body = source["body"];
+	        this.created_at = source["created_at"];
+	        this.sent_at = source["sent_at"];
 	    }
 	}
 	export class DirEntry {

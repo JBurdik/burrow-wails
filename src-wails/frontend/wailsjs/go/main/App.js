@@ -38,6 +38,10 @@ export function AcpStop(arg1) {
   return window['go']['main']['App']['AcpStop'](arg1);
 }
 
+export function AddDiffComment(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['AddDiffComment'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function AddMcpServer(arg1, arg2) {
   return window['go']['main']['App']['AddMcpServer'](arg1, arg2);
 }
@@ -112,6 +116,10 @@ export function CodexStart(arg1, arg2, arg3, arg4) {
 
 export function CodexStop(arg1) {
   return window['go']['main']['App']['CodexStop'](arg1);
+}
+
+export function ComposeDiffNotes(arg1) {
+  return window['go']['main']['App']['ComposeDiffNotes'](arg1);
 }
 
 export function ConfigFilePath() {
@@ -222,6 +230,10 @@ export function GetAppVersion() {
   return window['go']['main']['App']['GetAppVersion']();
 }
 
+export function GetChatUsage() {
+  return window['go']['main']['App']['GetChatUsage']();
+}
+
 export function GetExtensionSettings(arg1) {
   return window['go']['main']['App']['GetExtensionSettings'](arg1);
 }
@@ -302,6 +314,10 @@ export function ListDevServers(arg1) {
   return window['go']['main']['App']['ListDevServers'](arg1);
 }
 
+export function ListDiffComments(arg1) {
+  return window['go']['main']['App']['ListDiffComments'](arg1);
+}
+
 export function ListExtensions() {
   return window['go']['main']['App']['ListExtensions']();
 }
@@ -364,6 +380,10 @@ export function LspStop(arg1) {
 
 export function MarkCollected(arg1) {
   return window['go']['main']['App']['MarkCollected'](arg1);
+}
+
+export function MarkDiffNotesSent(arg1) {
+  return window['go']['main']['App']['MarkDiffNotesSent'](arg1);
 }
 
 export function NotifyFloatGrid(arg1, arg2, arg3) {
