@@ -6,7 +6,10 @@ vi.mock("@/lib/config", () => ({
   setConfig: (key: string, value: unknown) => { store[key] = value; },
 }));
 
-const { getAcpChatSetting, getLastAcpSetting, setAcpChatSetting, setLastAcpSetting } = await import("./acpSettings");
+const {
+  getAcpCapabilities, getAcpChatSetting, getLastAcpSetting,
+  setAcpCapabilities, setAcpChatSetting, setLastAcpSetting,
+} = await import("./acpSettings");
 
 beforeEach(() => { for (const key of Object.keys(store)) delete store[key]; });
 
@@ -29,5 +32,19 @@ describe("ACP composer settings", () => {
     expect(getAcpChatSetting(13, "mode")).toBe("read-only");
     expect(getLastAcpSetting("codex", "mode")).toBe("auto");
     expect(getLastAcpSetting("gemini", "mode")).toBe("read-only");
+  });
+
+  it("keeps the selector catalogue across a chat remount", () => {
+    setAcpCapabilities(12, {
+      agentId: "codex",
+      modes: { currentModeId: "auto", availableModes: [{ id: "auto", name: "Auto" }] },
+      configOptions: [{
+        id: "effort", name: "Effort", type: "select", currentValue: "high",
+        options: [{ value: "high", name: "High" }],
+      }],
+    });
+
+    expect(getAcpCapabilities(12, "codex")?.configOptions[0].currentValue).toBe("high");
+    expect(getAcpCapabilities(12, "gemini")).toBeUndefined();
   });
 });

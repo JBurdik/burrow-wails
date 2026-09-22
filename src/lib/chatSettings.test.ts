@@ -22,6 +22,7 @@ describe("forgetChatSettings", () => {
     store.chatModelByChat = { "7": "opus", "burrow.manager.model:7": "sonnet", "17": "haiku", "8": "opus" };
     store.chatEffortByChat = { "7": "high", "8": "low" };
     store.chatAcpSettings = { "7": { model: "gpt" }, "8": { model: "gpt" } };
+    store.chatAcpCapabilities = { "7": { agentId: "codex" }, "8": { agentId: "codex" } };
     store.chatPermissionMode = {
       byChat: { "7": "plan", "8": "default" },
       dangerousByChat: { "7": true },
@@ -34,6 +35,7 @@ describe("forgetChatSettings", () => {
     expect(store.chatModelByChat).toEqual({ "17": "haiku", "8": "opus" });
     expect(store.chatEffortByChat).toEqual({ "8": "low" });
     expect(store.chatAcpSettings).toEqual({ "8": { model: "gpt" } });
+    expect(store.chatAcpCapabilities).toEqual({ "8": { agentId: "codex" } });
     expect(store.chatPermissionMode).toEqual({
       byChat: { "8": "default" },
       dangerousByChat: {},
