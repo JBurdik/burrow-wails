@@ -181,10 +181,11 @@ var remoteAllowed = map[string]remoteCmd{
 	// reach it the same way — which is the point of moving it out of
 	// config.json, where each client kept its own copy of the truth and
 	// overwrote the other's.
-	"list_chats":  {Method: "ListChats", Args: nil, Scope: scopeOrchRead},
-	"create_chat": {Method: "CreateChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
-	"save_chats":  {Method: "SaveChats", Args: []string{"chats"}, Scope: scopeOrchOperate},
-	"delete_chat": {Method: "DeleteChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"list_chats":     {Method: "ListChats", Args: nil, Scope: scopeOrchRead},
+	"get_chat_usage": {Method: "GetChatUsage", Args: nil, Scope: scopeOrchRead},
+	"create_chat":    {Method: "CreateChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
+	"save_chats":     {Method: "SaveChats", Args: []string{"chats"}, Scope: scopeOrchOperate},
+	"delete_chat":    {Method: "DeleteChat", Args: []string{"id"}, Scope: scopeOrchOperate},
 
 	// Workspaces / tabs
 	"list_workspaces":     {Method: "ListWorkspaces", Args: nil, Scope: scopeOrchRead},
