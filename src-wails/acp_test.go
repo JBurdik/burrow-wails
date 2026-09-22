@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"burrow/internal/agentphase"
 )
 
 // Real `model/list` payload shape from codex-cli 0.149.1 (trimmed to two models).
@@ -71,6 +73,71 @@ func TestCodexTurnTerminalFailure(t *testing.T) {
 		"turn": map[string]any{"status": "failed"},
 	}); got != "The Codex app-server ended the turn without an error message." {
 		t.Fatalf("failed turn fallback = %q", got)
+	}
+}
+
+func TestCodexPhaseTracksRunPermissionResumeAndDone(t *testing.T) {
+	a := newTestApp(t)
+	store, err := NewPhaseStore(a.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.phases = store
+
+	var stdin bytes.Buffer
+	sess := &acpSession{stdin: nopWriteCloser{Writer: &stdin}, proto: protoCodexAppServer, sessionID: "thread-1"}
+	a.acpReg().put("91", sess)
+	if _, err := a.CodexSend("91", "fix it", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get("chat:91").State; got != "running" {
+		t.Fatalf("after send phase = %q, want running", got)
+	}
+
+	a.pumpCodexLine("91", map[string]any{
+		"id": float64(7), "method": "item/commandExecution/requestApproval",
+		"params": map[string]any{"command": "go test ./..."},
+	}, sess)
+	if got := store.Get("chat:91").State; got != "waiting_approval" {
+		t.Fatalf("during approval phase = %q, want waiting_approval", got)
+	}
+
+	a.pumpCodexLine("91", map[string]any{
+		"method": "serverRequest/resolved", "params": map[string]any{"requestId": float64(7)},
+	}, sess)
+	if got := store.Get("chat:91").State; got != "running" {
+		t.Fatalf("after approval phase = %q, want running", got)
+	}
+
+	a.pumpCodexLine("91", map[string]any{
+		"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "completed"}},
+	}, sess)
+	if got := store.Get("chat:91").State; got != "done" {
+		t.Fatalf("after completion phase = %q, want done", got)
+	}
+}
+
+func TestCodexFailedTurnKeepsTerminalErrorPhase(t *testing.T) {
+	a := newTestApp(t)
+	store, err := NewPhaseStore(a.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.phases = store
+
+	sess := &acpSession{pendingTurn: 4}
+	a.applyChatPhase("92", agentphase.Event{Kind: agentphase.HookRunning})
+	a.finishCodexTurn("92", sess, func(v any) {
+		line, marshalErr := json.Marshal(v)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		a.emitChatLine("92", "acp-data", string(line))
+	}, "rate limited")
+
+	phase := store.Get("chat:92")
+	if phase.State != "failed" || phase.Detail != "rate limited" {
+		t.Fatalf("failed turn phase = %+v, want failed with detail", phase)
 	}
 }
 
