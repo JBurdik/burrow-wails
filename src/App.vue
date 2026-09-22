@@ -49,7 +49,6 @@
         :is-git="displayWs?.is_git !== false"
         @open-panel="ui.rightPanelVisible = true"
         @close-panel="ui.rightPanelVisible = false"
-        @manager-open="ui.rightPanelWidth = Math.max(ui.rightPanelWidth, 440)"
         @open-project-config="showProjectConfig = true"
       />
       <!-- Keeps every sub-agent's CLI alive for its whole life, independent of
@@ -70,7 +69,6 @@
       @open-browser="activeTerm()?.openBrowserTab()"
       @repaint="activeTerm()?.repaintAll()"
       @split-terminal="activeTerm()?.splitPane('h')"
-      @toggle-manager="openManagerPanel"
       @open-file="openSearchHit"
     />
     <PathPicker />
@@ -153,12 +151,6 @@ let resizeStartWidth = 0;
 
 const showProjectConfig = ref(false);
 const rightPanelRef = useTemplateRef<InstanceType<typeof RightPanel>>("rightPanelRef");
-
-function openManagerPanel() {
-  ui.rightPanelVisible = true;
-  ui.rightPanelWidth = Math.max(ui.rightPanelWidth, 440);
-  nextTick(() => rightPanelRef.value?.openManager());
-}
 
 const ws = useWorkspaceStore();
 const ui = useUIStore();
@@ -499,7 +491,7 @@ onMounted(async () => {
   });
 
   // The control API's UI half: one app-wide listener performing the actions
-  // agents (and the Manager) ask for, and acking each with its result.
+  // agents ask for, and acking each with its result.
   unlistenControl = await installControlBridge();
 });
 onBeforeUnmount(() => {
@@ -523,7 +515,6 @@ const KEY_ACTIONS: Record<string, () => void> = {
   settings: () => ui.toggleSettings(),
   cheatsheet: () => { cheatsheetOpen.value = !cheatsheetOpen.value; },
   sidebar: () => ui.toggleSidebar(),
-  manager: () => openManagerPanel(),
   repaint: () => activeTerm()?.repaintAll(),
   newProject: () => openNewWorkspace(),
   pickProject: () => ui.pickProjectThenWelcome(),

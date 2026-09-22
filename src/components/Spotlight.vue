@@ -91,7 +91,6 @@ const emit = defineEmits<{
   openProjectConfig: [];
   openBrowser: [];
   repaint: [];
-  toggleManager: [];
   splitTerminal: [];
   openFile: [path: string, line: number];
 }>();
@@ -236,7 +235,6 @@ const commandItems = computed<SpotlightItem[]>(() => {
     { id: "cmd-newterm", title: "New Terminal Tab", icon: PhTerminal as Component, color: "#34d399", keyId: "newTab", action: () => { emit("newTerminal"); close(); } },
     { id: "cmd-split", title: "Split Terminal", icon: PhColumns as Component, color: "#34d399", keyId: "splitH", action: () => { emit("splitTerminal"); close(); } },
     { id: "cmd-browser", title: "New Browser Tab", icon: PhGlobe as Component, color: "#60a5fa", action: () => { emit("openBrowser"); close(); } },
-    { id: "cmd-manager", title: "Toggle Manager", icon: PhSparkle as Component, color: "#ec4899", keyId: "manager", action: () => { emit("toggleManager"); close(); } },
     { id: "cmd-new-project", title: "New Project…", icon: PhPlus as Component, color: "#a78bfa", keyId: "newProject", action: newProject },
     { id: "cmd-project-config", title: "Project Settings…", icon: PhGear as Component, color: MUTED, action: () => { emit("openProjectConfig"); close(); } },
     { id: "cmd-settings", title: "Settings", icon: PhGear as Component, color: MUTED, keyId: "settings", action: () => { openSettingsAt("general"); } },

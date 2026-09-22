@@ -30,7 +30,7 @@ const (
 	// `pending` and delivers whatever resultJSON it was handed. A client that
 	// could ack would not be exercising authority it already has; it would be
 	// lying to a third party blocked in UIBridge.Do — a fabricated pty_id
-	// from spawn, fabricated tab_output scrollback fed into the Manager
+	// from spawn, fabricated tab_output scrollback fed into the spawning thread
 	// agent's context, or a bare errMsg as denial of service. Filing it under
 	// orchestration:operate would have written that forgery path into the
 	// scope model, to be inherited by the first paired phone that gets the

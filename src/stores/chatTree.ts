@@ -37,7 +37,7 @@ export function topLevel(sessions: ClaudeSession[], workspaceId: number): Claude
 
 /** The chat a workspace is CURRENTLY showing, read off the tabs mirror.
  *
- *  Not `claudeChats.activeByWs`: that slot is written only by ManagerPanel, so
+ *  Not `claudeChats.activeByWs`: nothing writes that slot any more, so
  *  a chat opened from the Sidebar or a route never reaches it and anything
  *  asking it "which thread is on screen" gets null while a thread is plainly
  *  open. The active TAB is what the user is looking at, and the mirror carries

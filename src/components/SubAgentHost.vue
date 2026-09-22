@@ -1,7 +1,7 @@
 <template>
   <!-- No visible chrome of its own: each child renders through AgentChat,
        either hidden here or teleported into the Right Panel's slot.
-       `compact` for the same reason ManagerPanel uses it — the panel is a
+       `compact` because the panel is a
        narrow column, and a chat's changes panel and diff sidebar inside it
        are a second sidebar nested in a sidebar. The surface is a list, one
        child's stream, and the way back. -->

@@ -34,11 +34,6 @@ func (a *App) RemoteListChats() ([]map[string]any, error) {
 
 	out := make([]map[string]any, 0, len(chats))
 	for _, c := range chats {
-		// Mission Control's hidden session is not a user-facing chat — the
-		// desktop sidebar hides it for the same reason.
-		if c.Control {
-			continue
-		}
 		out = append(out, remoteChatShape(c, names, paths))
 	}
 	return out, nil
@@ -153,7 +148,7 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 	}
 	countForWs := 0
 	for _, c := range existing {
-		if c.WorkspaceID == workspaceID && !c.Control {
+		if c.WorkspaceID == workspaceID {
 			countForWs++
 		}
 	}

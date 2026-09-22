@@ -87,7 +87,7 @@ func (w worktreeAdapter) Remove(workspaceID int64, force bool) error {
 
 // worktreesDirPref reads the user's worktree parent dir out of config.json
 // (uiPrefs.worktreesDir) — the same value the New-worktree dialog uses, so a
-// Manager-made worktree lands where a hand-made one would.
+// verb-made worktree lands where a hand-made one would.
 func worktreesDirPref() string {
 	path, err := configFilePath()
 	if err != nil {
@@ -117,7 +117,7 @@ type uiAck struct {
 
 // uiBridge dispatches an action to the frontend and waits for its ack. One
 // pending entry per in-flight action, keyed by a request id, so several verbs
-// (a Manager spawning three agents at once) can be outstanding together —
+// (a thread spawning three agents at once) can be outstanding together —
 // unlike the sidebar's single-slot request ref, where a burst would clobber.
 type uiBridge struct {
 	// emit delivers the action to the frontend. Injected rather than calling
@@ -218,7 +218,7 @@ func (p phasesAdapter) Phase(key string) (string, int64) {
 }
 
 // ControlVerbs exposes the registry to the frontend, which generates the
-// Manager's primer from it — so the primer lists exactly the verbs that exist.
+// an agent's primer from it — so a primer lists exactly the verbs that exist.
 type ControlVerb struct {
 	Name    string           `json:"name"`
 	Summary string           `json:"summary"`
@@ -324,11 +324,6 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 			params = control.Params{}
 		}
 		params["caller_is_subagent"] = a.chatIsSubagent(params.Int("parent_chat_id"))
-		// Same reasoning, same shape: a Manager spawn (from a `control` chat)
-		// is exempt from the parent-forces-chat rule in the spawn verb — see
-		// chatIsControl's comment. Derived here, not trusted from the request,
-		// for the same reason caller_is_subagent is.
-		params["parent_is_control"] = a.chatIsControl(params.Int("parent_chat_id"))
 		if a.control == nil {
 			http.Error(w, "control surface not ready", http.StatusServiceUnavailable)
 			return
@@ -428,7 +423,7 @@ func acpMcpServers() []any {
 
 // addBurrowEnv puts the `burrow` CLI on an agent's PATH and tells it where the
 // app is: without this an ACP agent (Codex, Gemini) can't reach the control API
-// at all, so it could never act as a Manager. No BURROW_PTY_ID — a chat is not a
+// at all, so it could never orchestrate. No BURROW_PTY_ID — a chat is not a
 // tab, so the global status hook stays a no-op for it, same as claudechat.go.
 func (a *App) addBurrowEnv(env map[string]string, cwd string) {
 	path := augmentedPath(cwd)

@@ -49,7 +49,6 @@ type Chat struct {
 	PinnedTitle     bool   `json:"pinned_title"`
 	ClaudeSessionID string `json:"claude_session_id"`
 	MessageCount    int64  `json:"message_count"`
-	Control         bool   `json:"control"`
 	AgentKind       string `json:"agent_kind"`
 	Transport       string `json:"transport"`
 	Model           string `json:"model"`
@@ -106,14 +105,18 @@ func chatsPostAlterSchema() []string {
 	}
 }
 
+// The `control` column is deliberately absent: it flagged the old per-repo
+// Manager thread, which is gone. The column itself stays on the table — an
+// unused column costs nothing, and dropping it would need a migration on every
+// existing database.
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
-	message_count, control, agent_kind, transport, model, branch,
+	message_count, agent_kind, transport, model, branch,
 	settled_override, archived_at, last_activity_at, parent_chat_id`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
-		&c.MessageCount, &c.Control, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
+		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID)
 	return c, err
 }
@@ -151,11 +154,11 @@ func (a *App) CreateChat(c Chat) (Chat, error) {
 	}
 	res, err := a.db.Exec(
 		`INSERT INTO chats (workspace_id, title, pinned_title, claude_session_id,
-			message_count, control, agent_kind, transport, model, branch,
+			message_count, agent_kind, transport, model, branch,
 			settled_override, archived_at, last_activity_at, parent_chat_id)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID, c.MessageCount,
-		c.Control, c.AgentKind, c.Transport, c.Model, c.Branch,
+		c.AgentKind, c.Transport, c.Model, c.Branch,
 		c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID,
 	)
 	if err != nil {
@@ -189,7 +192,7 @@ func (a *App) SaveChats(chats []Chat) error {
 
 	stmt, err := tx.Prepare(
 		`UPDATE chats SET workspace_id=?, title=?, pinned_title=?, claude_session_id=?,
-			message_count=?, control=?, agent_kind=?, transport=?, model=?, branch=?,
+			message_count=?, agent_kind=?, transport=?, model=?, branch=?,
 			settled_override=?, archived_at=?, last_activity_at=?, parent_chat_id=? WHERE id=?`)
 	if err != nil {
 		return err
@@ -201,7 +204,7 @@ func (a *App) SaveChats(chats []Chat) error {
 			continue
 		}
 		if _, err := stmt.Exec(c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID,
-			c.MessageCount, c.Control, c.AgentKind, c.Transport, c.Model, c.Branch,
+			c.MessageCount, c.AgentKind, c.Transport, c.Model, c.Branch,
 			c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID, c.ID); err != nil {
 			return err
 		}
@@ -304,23 +307,6 @@ func (a *App) chatIsSubagent(id int64) bool {
 	return parent > 0
 }
 
-// chatIsControl reports whether id is a `control` chat (the per-repo Manager
-// — see ManagerPanel.vue): used to exempt a Manager spawn from the
-// parent-forces-chat rule in the spawn verb (verbs_delegate.go). Same shape
-// as chatIsSubagent right above, and derived the same way for the same
-// reason — the server knows which chat is control (it's a column on `chats`),
-// so it decides this rather than trusting the caller.
-func (a *App) chatIsControl(id int64) bool {
-	if a.db == nil || id <= 0 {
-		return false
-	}
-	var control bool
-	if err := a.db.QueryRow(`SELECT control FROM chats WHERE id = ?`, id).Scan(&control); err != nil {
-		return false
-	}
-	return control
-}
-
 // migrateChatsFromConfig moves the config.json chat list into SQLite, once.
 //
 // Ids are PRESERVED, not reassigned: chat_stream(chat_id), chat_messages and
@@ -378,11 +364,11 @@ func (a *App) migrateChatsFromConfig() {
 		}
 		if _, err := tx.Exec(
 			`INSERT OR IGNORE INTO chats (id, workspace_id, title, pinned_title,
-				claude_session_id, message_count, control, agent_kind, transport,
+				claude_session_id, message_count, agent_kind, transport,
 				model, branch, settled_override, archived_at, last_activity_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			c.ID, c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID,
-			c.MessageCount, c.Control, c.AgentKind, c.Transport, c.Model, c.Branch,
+			c.MessageCount, c.AgentKind, c.Transport, c.Model, c.Branch,
 			c.SettledOverride, c.ArchivedAt, c.LastActivityAt,
 		); err != nil {
 			log.Printf("chats migration: insert %d: %v", c.ID, err)
@@ -455,7 +441,6 @@ func chatFromConfigSession(s map[string]any) Chat {
 		PinnedTitle:     boolean("pinnedTitle"),
 		ClaudeSessionID: str("claudeSessionId"),
 		MessageCount:    num("messageCount"),
-		Control:         boolean("control"),
 		AgentKind:       str("agentKind"),
 		Transport:       str("transport"),
 		Model:           str("model"),

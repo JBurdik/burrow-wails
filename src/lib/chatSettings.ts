@@ -1,5 +1,5 @@
 // Per-chat settings records in config.json. Each is a flat map keyed by chat id
-// (optionally prefixed by an AgentChat `modelKey`, e.g. "burrow.manager.model:7"),
+// (optionally prefixed by an AgentChat `modelKey`, e.g. "some.host.model:7"),
 // so a chat's model / effort / permission mode belongs to THAT chat and can't be
 // moved by another chat's pick — see AgentChat.vue's loadModel/loadEffort.
 //

@@ -35,7 +35,7 @@ func forgeRun(bin, cwd string, args []string) (string, string, int) {
 }
 
 // providerOverride reads the per-repo choice, climbing parent_id so a worktree
-// inherits the root repo's provider — the same climb the Manager uses to keep
+// inherits the root repo's provider — the same climb the chat tree uses to keep
 // one thread per root repo. Returns "" when no ancestor has one.
 func (a *App) providerOverride(cwd string) string {
 	var id int64

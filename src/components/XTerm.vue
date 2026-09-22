@@ -698,13 +698,14 @@ onMounted(async () => {
   dbgTimer = setInterval(refreshDbg, 500);
 
   // Let the control API read this tab's output (`burrow tab-output`), which is
-  // how a Manager checks on an agent mid-task instead of waiting for its result.
+  // how an orchestrating thread checks on an agent mid-task instead of waiting
+  // for its result.
   registerTerm(props.ptyId, { readOutput });
 });
 
 /**
  * The tail of the buffer as plain text. Trailing blank rows are dropped (an
- * agent's TUI pads the screen, and a Manager reading 80 lines of padding learns
+ * agent's TUI pads the screen, and a reader taking 80 lines of padding learns
  * nothing), and each row is right-trimmed.
  */
 function readOutput(lines: number): string {

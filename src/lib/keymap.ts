@@ -23,7 +23,6 @@ export const KEY_COMMANDS: KeyCommand[] = [
   { id: "settings", label: "Settings", group: "Global", def: "⌘,", scope: "app" },
   { id: "cheatsheet", label: "Keyboard shortcuts cheatsheet", group: "Global", def: "⌘/", scope: "app" },
   { id: "sidebar", label: "Toggle sidebar", group: "Global", def: "⌘B", scope: "app" },
-  { id: "manager", label: "Toggle Manager", group: "Global", def: "⌘⇧J", scope: "app" },
   { id: "unread", label: "Jump to first unread tab", group: "Global", def: "⌘⇧U", scope: "app" },
 
   // ── Projects ──

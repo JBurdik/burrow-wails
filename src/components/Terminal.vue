@@ -1792,8 +1792,8 @@ onMounted(async () => {
   // "which tabs were open" list to fall out of sync (a stale empty one used to
   // hide every thread on restart).
   //
-  // The only skip is the Manager, which is hidden by design (control: true).
-  // There used to be a second one — `!s.claudeSessionId && !s.messageCount`,
+  // Nothing is skipped here any more. There used to be a skip —
+  // `!s.claudeSessionId && !s.messageCount`,
   // meant for "never-used blanks left by older builds" — and it was asking a
   // question those two fields cannot answer: a brand-new chat looks exactly
   // like an abandoned one. It hid every chat the user created and did not
@@ -1803,7 +1803,6 @@ onMounted(async () => {
   // clutter is what `isSettled` is for, and an untouched one settles on its
   // own after AUTO_SETTLE_AFTER_DAYS.
   for (const s of chatsStore.sessionsForWs(props.workspaceId)) {
-    if (s.control) continue;
     openClaudeChat(s.id);
   }
 

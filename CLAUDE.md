@@ -192,7 +192,7 @@ HTTP/MCP/Wails — it takes capabilities as interfaces (`Deps`). Transports:
 | Wails bindings | desktop UI | in-process | as needed |
 
 `Scope` is a field on the verb and a verb is **local-only unless it opts in**. The registry is also
-the source of the MCP tool schemas (`/v1/_verbs`), `burrow help` and the Manager's primer.
+the source of the MCP tool schemas (`/v1/_verbs`) and `burrow help`.
 
 **UI-performed verbs** (open a tab, focus a workspace, read scrollback) call `UIBridge.Do`, which emits
 `control:action` and **blocks for the frontend's ack** (`AckControlAction`, 15 s).
@@ -332,17 +332,14 @@ or revocation can't be translated honestly). `TestV1SurfaceIsGone` requires a **
 **No manual GUI verification of any of this has been done.** Try first: pair a phone; kill the socket
 mid-turn; revoke a device; heavy terminal output; ESC mid-turn.
 
-### Manager (`src/components/ManagerPanel.vue`)
+### Orchestration is the main thread's job
 
-A per-repository orchestrator chat in the right panel. One thread per **root repo** (climbs `parent_id`,
-so it survives hopping to a worktree), session flagged `control: true` so it stays out of the Sidebar,
-kept mounted per engaged repo and toggled with `v-show`. Stream, composer, permission gates and model
-picker all come from `AgentChat` — the panel owns only the thread lifecycle and the primer.
-
-Its primer (`src/utils/managerPrimer.ts`) is **generated from the verb registry** (`control_verbs`) plus
-the worktree-isolation toggle and the project's `.burrow/manager.md`: orchestrate, never implement, and
-both doors described (MCP tools if present, `burrow <verb>` otherwise — any agent can be the Manager,
-so the shell is the common denominator).
+There is **no Manager panel**. The per-repo orchestrator chat, its generated primer
+(`managerPrimer.ts`), the `.burrow/manager.md` project prompt and the `control: true` session flag are
+all gone — a normal thread orchestrates by spawning sub-agents, which land in the Right Panel's
+Sub-agents surface (`parent_chat_id`). The `chats.control` column is still on the table, unread, because
+dropping it would need a migration for nothing. Consequence in `spawn`: a call with a `parent_chat_id`
+**always** forces `target: "chat"` — the exemption for a control chat is gone with it.
 
 **Agent docs install** (`agentdocs.go`, at startup): Claude/Copilot get the `burrow` skill
 (`agentdocs/skills/burrow/SKILL.md`) plus an always-in-context rule in `~/.claude/CLAUDE.md`; Codex gets

@@ -48,7 +48,6 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "capture", Type: "boolean", Desc: "Capture the agent's final message for wait_result (tab target only, default true)"},
 			{Name: "parent_chat_id", Type: "integer", Desc: "Set automatically from BURROW_CHAT_ID — the thread this sub-agent belongs to"},
 			{Name: "caller_is_subagent", Type: "boolean", Desc: "Set automatically — a sub-agent may not spawn further sub-agents"},
-			{Name: "parent_is_control", Type: "boolean", Desc: "Set automatically — a Manager spawn is exempt from the parent-forces-chat rule"},
 		},
 		Scope: ScopeLocal,
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.spawn(ctx, p) },
@@ -165,18 +164,7 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	}
 	// A sub-agent that belongs to a thread IS a chat: a terminal tab would put
 	// it back in the Sidebar as a peer, which is the arrangement this replaces.
-	//
-	// EXEMPT: a `control` chat (the per-repo Manager — see ManagerPanel.vue).
-	// The Manager is control:true and never the active session, and the Right
-	// Panel's Sub-agents list is scoped to the active session, so a
-	// Manager-spawned CHAT sub-agent would land in no list at all: not the
-	// Sidebar (filtered out as a sub-agent), not the panel (wrong thread). A
-	// Manager spawn instead keeps behaving exactly as it does on `main` — a
-	// terminal tab, with result capture, `tab_output` and `send_to_tab` — which
-	// is also what its primer (managerPrimer.ts) still promises. Derived
-	// server-side (parent_is_control), never trusted from the request, same as
-	// caller_is_subagent just above.
-	if parent > 0 && !p.Bool("parent_is_control") {
+	if parent > 0 {
 		target = "chat"
 	}
 	if target != "tab" && target != "chat" {

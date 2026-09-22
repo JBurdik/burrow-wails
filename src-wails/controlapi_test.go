@@ -155,7 +155,7 @@ func TestSkillsGetBurrowNamesEveryControlVerb(t *testing.T) {
 }
 
 // The UI bridge is request/response: emit, block, deliver the frontend's ack to
-// the right waiter. Several actions can be outstanding at once (a Manager
+// the right waiter. Several actions can be outstanding at once (a thread
 // spawning three agents), so ids must not cross.
 func TestUIBridgeDeliversAcksToTheRightCaller(t *testing.T) {
 	app := &App{}

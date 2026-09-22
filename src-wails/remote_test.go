@@ -55,29 +55,6 @@ func TestRemoteChatShapeDefaultsAnEmptyTransport(t *testing.T) {
 	}
 }
 
-func TestRemoteListChatsHidesTheManagerSession(t *testing.T) {
-	// Mission Control's session is not a user-facing chat; the desktop
-	// sidebar hides it for the same reason.
-	a, _ := newChatApp(t)
-	t.Cleanup(busReset)
-	busReset()
-
-	if _, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "real"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "Manager", Control: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	list, err := a.RemoteListChats()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 || list[0]["title"] != "real" {
-		t.Fatalf("want only the user-facing chat, got %+v", list)
-	}
-}
-
 func TestRemoteCreateChatRejectsUnsupportedAgentKind(t *testing.T) {
 	a := &App{}
 	if _, err := a.RemoteCreateChat(1, "gemini", "", "", ""); err == nil {
