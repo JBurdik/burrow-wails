@@ -227,7 +227,20 @@ const WINDOW_MS = 5 * 60 * 60 * 1000; // 5 hours
 
 type SessionActor = ReturnType<typeof createActor<typeof agentStatusMachine>>;
 
-export const useClaudeChatsStore = defineStore("claudeChats", () => {
+/**
+ * Whether a sync() patch is real thread activity — a turn starting or a new
+ * message — as opposed to the bookkeeping (session id, title, agent kind,
+ * status settling) that a restore replays for every chat it restores.
+ */
+export function isActivitySync(
+  prev: Pick<ClaudeSession, "status" | "messageCount">,
+  patch: Pick<Partial<ClaudeSession>, "status" | "messageCount">,
+): boolean {
+  if (patch.status === "running" && prev.status !== "running") return true;
+  return patch.messageCount !== undefined && patch.messageCount > (prev.messageCount ?? 0);
+}
+
+  export const useClaudeChatsStore = defineStore("claudeChats", () => {
   const sessions = ref<ClaudeSession[]>([]);
   const activeByWs = ref<Record<number, number>>({});
   const turns = ref<TurnEvent[]>([]);
@@ -623,7 +636,7 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     return wt.length ? wt[0].ts : null;
   });
 
-  // Called by ClaudeChat.vue to sync live state back.
+// Called by ClaudeChat.vue to sync live state back.
   function sync(id: number, patch: Partial<Pick<ClaudeSession, "busy" | "messageCount" | "claudeSessionId" | "title" | "status" | "control" | "agentKind" | "transport">>) {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
@@ -631,9 +644,14 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     // so the next done/review transition auto-settles again instead of being
     // stuck (mirrors t3code clearing settledOverride on a system-triggered unsettle).
     if (patch.status === "running" && s.settledOverride) s.settledOverride = null;
-    s.lastActivityAt = Date.now();
+    // Only a real turn is activity. Bumping on EVERY sync meant a restart —
+    // which syncs each chat's session id / title / status as it restores —
+    // restamped every thread to now, so yesterday's threads all read "Last
+    // activity now". Same rule setModel already states for itself.
+    const isActivity = isActivitySync(s, patch);
+    if (isActivity) s.lastActivityAt = Date.now();
     Object.assign(s, patch);
-    if (patch.claudeSessionId !== undefined || patch.title !== undefined || patch.messageCount !== undefined || patch.control !== undefined || patch.agentKind !== undefined || patch.transport !== undefined) {
+    if (isActivity || patch.claudeSessionId !== undefined || patch.title !== undefined || patch.messageCount !== undefined || patch.control !== undefined || patch.agentKind !== undefined || patch.transport !== undefined) {
       persist();
     }
   }

@@ -1529,6 +1529,10 @@ function tabSettled(t: Tab): boolean {
 }
 
 function syncStore() {
+  // Same hazard as persist(): a sync that runs before the restore has added the
+  // chat tabs pushes a list missing them, and setTabs prunes the activity stamps
+  // of every key it doesn't see — so yesterday's threads came back stamped "now".
+  if (!restored) return;
   tabsStore.setTabs(
     props.workspaceId,
     tabs.value.map((t) => ({

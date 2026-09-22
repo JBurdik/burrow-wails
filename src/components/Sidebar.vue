@@ -656,7 +656,15 @@ const feed = computed(() =>
   buildActivityRows({
     openedWorkspaces: store.opened,
     tabsByWs: termTabs.tabsByWs,
-    activityAt: termTabs.activityAt,
+    // A chat's recency is the DB-backed `last_activity_at` on its row, not the
+    // localStorage stamp: the stamps are pruned for any key a setTabs list
+    // doesn't mention, so a restart (chat tabs restore after the pty ones) wiped
+    // them and every thread came back reading "now". Plain pty tabs have no
+    // durable row of their own, so they still use the stamp.
+    activityAt: (wsId, tab) =>
+      (tab.chatId != null
+        ? chats.sessions.find((s) => s.id === tab.chatId)?.lastActivityAt
+        : undefined) ?? termTabs.activityAt(wsId, tab),
     filterProjectId: filterProjectId.value,
   }),
 );

@@ -31,7 +31,7 @@
           {{ notifStore.unreadCount > 9 ? "9+" : notifStore.unreadCount }}
         </span>
       </button>
-      <div v-if="notifOpen" class="tb-menu left-0 right-auto min-w-[300px] max-w-[360px] overflow-hidden p-0" @click.stop>
+      <div v-if="notifOpen" class="tb-menu left-0 right-auto w-[440px] max-w-[calc(100vw-2rem)] overflow-hidden p-0" @click.stop>
         <div class="flex items-center justify-between border-b border-border px-2.5 pb-1.5 pt-2">
           <span class="text-[11px] font-semibold text-foreground">Notifications</span>
           <button
