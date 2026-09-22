@@ -151,7 +151,7 @@ registry of *verbs* (`spawn`, `agent_status`, `focus_tab`, `create_worktree`,
 capabilities as interfaces (`Deps`: DB, a git runner, a `Forge` client, exec
 runner, PTY writer, worktrees, `UIBridge`). `Forge` replaced a raw `gh`
 runner (see "Pull requests go through each forge's own CLI" below) — the
-verbs below are the same surface the Manager, the `burrow` CLI and MCP all
+verbs below are the same surface every agent, the `burrow` CLI and MCP all
 reach, so "Burrow can open a pull request" has to be true off GitHub too.
 Transports sit on top:
 
@@ -164,8 +164,8 @@ Transports sit on top:
 `Scope` is a field on the verb, and a verb is **local-only unless it opts in** —
 a new verb that never thought about the network stays off it. The registry is
 also the single source of truth for the MCP tool schemas (`/v1/_verbs`), the
-CLI's `burrow help`, and the Manager's primer, so none of them can drift from
-what the app supports.
+CLI's `burrow help` and the installed agent skill, so none of them can drift
+from what the app supports.
 
 **UI-performed verbs.** Opening a tab, focusing a workspace and reading a
 terminal's scrollback can only be done by the frontend, so those verbs call
@@ -225,8 +225,7 @@ of sync with what a CLI actually returns.
 `Detect()` maps a remote host to a provider; a self-hosted GitLab at, say,
 `git.firma.cz` is invisible from its hostname, so `workspaces.forge_provider`
 lets the user say so once, and a worktree inherits that override by climbing
-`parent_id` — the same climb the Manager uses to find its root repo's thread
-(see "Manager" above).
+`parent_id`.
 
 **`Create` looks the new PR up by the number parsed out of the URL the CLI
 prints**, not by re-reading "the PR for the current branch": `gh`/`glab` print
@@ -555,7 +554,11 @@ Two consequences worth knowing:
   active session. With no Manager, every parent is a listed thread.
 - The `control` column stays on the `chats` table, unread and unwritten. Dropping
   it would need a migration on every existing database to remove a column that
-  costs nothing.
+  costs nothing. The ROWS still carrying it do need handling, though:
+  `archiveLegacyManagerChats()` runs once at startup and archives them (clearing
+  the flag in the same statement, which is what makes it one-shot). Without it an
+  upgrade resurrects one Manager thread per project the user ever opened it in —
+  auto-opened as a tab on restart, in the Sidebar, in `agent_status`, on the phone.
 
 Worktree isolation is no longer a UI toggle. It only ever fed one paragraph of the
 primer; the orchestrating thread decides per task by calling `create_worktree` and

@@ -307,6 +307,37 @@ func (a *App) chatIsSubagent(id int64) bool {
 	return parent > 0
 }
 
+// archiveLegacyManagerChats retires the per-repo Manager threads of older
+// builds, once.
+//
+// The Manager was a chat like any other, kept out of every list by `control =
+// 1`. With the Manager removed, nothing reads that column any more — so
+// without this an upgrade would resurrect one Manager thread per project the
+// user ever opened it in: auto-opened as a tab on restart, listed in the
+// Sidebar, counted by agent_status, and shown on the phone.
+//
+// Archived rather than deleted: the row still owns a transcript, and the
+// Archived shelf is where a chat the user no longer needs already goes.
+// Clearing `control` in the same statement is what makes this one-shot —
+// nothing sets the flag any more, so no row can qualify twice, and a chat the
+// user later unarchives stays unarchived.
+func (a *App) archiveLegacyManagerChats() {
+	if a.db == nil {
+		return
+	}
+	res, err := a.db.Exec(
+		`UPDATE chats SET archived_at = ?, control = 0 WHERE control = 1 AND archived_at = 0`,
+		time.Now().UnixMilli(),
+	)
+	if err != nil {
+		log.Printf("chats: archiving legacy Manager threads: %v", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("chats: archived %d legacy Manager thread(s)", n)
+	}
+}
+
 // migrateChatsFromConfig moves the config.json chat list into SQLite, once.
 //
 // Ids are PRESERVED, not reassigned: chat_stream(chat_id), chat_messages and

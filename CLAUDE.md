@@ -338,7 +338,9 @@ There is **no Manager panel**. The per-repo orchestrator chat, its generated pri
 (`managerPrimer.ts`), the `.burrow/manager.md` project prompt and the `control: true` session flag are
 all gone — a normal thread orchestrates by spawning sub-agents, which land in the Right Panel's
 Sub-agents surface (`parent_chat_id`). The `chats.control` column is still on the table, unread, because
-dropping it would need a migration for nothing. Consequence in `spawn`: a call with a `parent_chat_id`
+dropping it would need a migration for nothing — but `archiveLegacyManagerChats()` (startup, once)
+archives the rows that still carry `control = 1` and clears the flag, or an upgrade would resurrect one
+Manager thread per project as an ordinary chat. Consequence in `spawn`: a call with a `parent_chat_id`
 **always** forces `target: "chat"` — the exemption for a control chat is gone with it.
 
 **Agent docs install** (`agentdocs.go`, at startup): Claude/Copilot get the `burrow` skill

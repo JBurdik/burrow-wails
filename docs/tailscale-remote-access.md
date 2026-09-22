@@ -168,8 +168,9 @@ from the tailnet, so nothing is exposed by reflection:
 
 **Read-only so far.** `RemoteListChats` (`src-wails/remote.go`) reads the
 desktop's own `config.json` — `chatSessions` for the list,
-`chatMessageHistory` for the transcripts, inlined as `messages` — and hides
-Mission Control's `control: true` session. Nothing on the remote side ever
+`chatMessageHistory` for the transcripts, inlined as `messages`. (It used to
+hide Mission Control's `control: true` session; the Manager is gone and so is
+that filter.) Nothing on the remote side ever
 *writes* `config.json`: the desktop rewrites the whole file on every
 `setConfig`, so a second writer would be silently clobbered on the next
 save. The desktop stays the single writer.

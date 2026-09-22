@@ -34,16 +34,18 @@ Every command below comes from this running Burrow binary. It has two doors: cal
 
 Choose deliberately for every delegation workflow. spawn --target chat creates a structured chat: use chat_send, wait_result --chat-id, and its transcript. spawn --target tab creates a visible terminal: use send_to_tab, tab_output, and its result token. agent_status and list_agents cover both target kinds; collect_results collects terminal results and, from a chat parent, completed chat children. Never address a chat with a PTY id or a terminal with a chat id.
 
+You only get that choice from a terminal tab. A spawn made FROM a chat thread is always a chat sub-agent belonging to that thread — target tab is ignored, and so is its result token, because the sub-agent lives in the Right Panel under its parent rather than as a tab of its own. Follow it up with chat_send, wait_result --chat-id and collect_results.
+
 ### Both doors for each delegation verb
 
-- spawn: choose target chat for a structured chat or target tab for a visible terminal.
+- spawn: from a tab, choose target chat for a structured chat or target tab for a visible terminal; from a chat, the sub-agent is always a chat.
 - list_agents: lists the configured agents that may be spawned into either a chat or a tab.
 - agent_status: reports both chat and tab agents; use its chat_id or pty_id with the matching follow-up verb.
 - tab_output: reads a tab by pty_id; for a chat, read its structured transcript or wait_result --chat-id instead.
 - send_to_tab: follows up with a tab by pty_id; use chat_send for the equivalent chat follow-up.
 - chat_send: follows up with a chat by chat_id; use send_to_tab for the equivalent tab follow-up.
 - close_chat: deletes a chat by chat_id; close a terminal tab with tab_close and its pty_id instead.
-- wait_result: waits on a tab result token or on a chat_id, depending on the target chosen at spawn time.
+- wait_result: waits on a tab result token or on a chat_id, depending on the target the spawn actually produced.
 - collect_results: takes completed tab results and, when called from a chat parent, its completed chat-child results.
 
 ## Optional references (load only when needed)

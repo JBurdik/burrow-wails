@@ -214,6 +214,9 @@ func (a *App) startup(ctx context.Context) {
 	// config.json here, and a client that read the old key first would then
 	// write it back over the new source of truth.
 	a.migrateChatsFromConfig()
+	// Upgrade path: the Manager is gone, so its `control = 1` rows would
+	// otherwise come back as ordinary chats.
+	a.archiveLegacyManagerChats()
 
 	a.daemon = NewDaemonClient(ctx, filepath.Join(dataDir, "daemon.sock"))
 	if err := a.daemon.Ensure(); err != nil {
