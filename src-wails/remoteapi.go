@@ -186,6 +186,10 @@ var remoteAllowed = map[string]remoteCmd{
 	"create_chat":    {Method: "CreateChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
 	"save_chats":     {Method: "SaveChats", Args: []string{"chats"}, Scope: scopeOrchOperate},
 	"delete_chat":    {Method: "DeleteChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// Chat-side equivalent of kill_pty: terminates the chat's live runtime
+	// (and its children's) without deleting the row. Same scope as kill_pty
+	// since it's the same action on the other half of the pty/chat pair.
+	"stop_chat": {Method: "StopChat", Args: []string{"id"}, Scope: scopeOrchOperate},
 
 	// Diff review notes (diffcomments.go) — DiffTab.vue's batch review flow.
 	"list_diff_comments":   {Method: "ListDiffComments", Args: []string{"wsId"}, Scope: scopeOrchRead},
