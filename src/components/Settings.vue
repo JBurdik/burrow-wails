@@ -470,12 +470,14 @@
                   <template v-else>Status unknown for this repo</template>
                 </span>
               </div>
+              <span v-if="forgeError[f.provider]" class="max-w-[280px] truncate text-[11px] text-destructive" :title="forgeError[f.provider]">{{ forgeError[f.provider] }}</span>
               <button
                 v-if="isMac && forgeState(f.provider) !== 'authed'"
-                class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs text-foreground hover:border-accent"
-                @click="runInTab(forgeState(f.provider) === 'installed' ? f.auth : f.install)"
+                class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs text-foreground hover:border-accent disabled:opacity-50"
+                :disabled="forgeInstalling === f.provider"
+                @click="forgeState(f.provider) === 'installed' ? logInToForge(f.auth) : installForge(f.provider)"
               >
-                {{ forgeState(f.provider) === 'installed' ? "Log in" : "Install" }}
+                {{ forgeState(f.provider) === 'installed' ? "Log in" : forgeInstalling === f.provider ? "Installing…" : "Install" }}
               </button>
               <a
                 v-else-if="!isMac"
@@ -1177,7 +1179,7 @@ import {
   type RemoteCredentials,
 } from "@/runtime/remoteEndpoint";
 
-defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: [] }>();
 
 // Deep-link into one provider instance (chat header → "configure this agent").
 const focusId = computed(() => ui.settingsFocusId);
@@ -1401,11 +1403,34 @@ async function refreshForgeStatus() {
   if (info?.provider) forgeStatus.value[info.provider] = { installed: info.installed, authed: info.authed };
 }
 
-// Runs the command in a terminal tab rather than silently in the background:
-// Homebrew can prompt, the output is worth seeing, and the user can kill it.
-async function runInTab(cmd: string) {
+const forgeInstalling = ref("");
+const forgeError = ref<Record<string, string>>({});
+
+// Installing runs in the background in Go. It used to open a terminal tab, but
+// the tab was born behind this overlay: the user saw nothing happen, and with
+// Settings closed afterwards, an untouched terminal. brew needs no input here.
+async function installForge(provider: string) {
+  forgeInstalling.value = provider;
+  forgeError.value = { ...forgeError.value, [provider]: "" };
+  try {
+    await invoke("forge_install_cli", { provider });
+    await refreshForgeStatus();
+    // forge_info only answers for the active repo's provider, so a successful
+    // install of any other CLI would still read "unknown" — record it directly.
+    if (!forgeStatus.value[provider]) forgeStatus.value[provider] = { installed: true, authed: false };
+  } catch (e) {
+    forgeError.value = { ...forgeError.value, [provider]: e instanceof Error ? e.message : String(e) };
+  } finally {
+    forgeInstalling.value = "";
+  }
+}
+
+// Logging in is interactive, so it stays a terminal tab — and Settings closes,
+// otherwise the tab is invisible behind this overlay.
+async function logInToForge(cmd: string) {
   const wsId = wsStore.active?.id;
   if (!wsId) return;
+  emit("close");
   await perform("new_tab", { workspaceId: wsId, cmd });
 }
 

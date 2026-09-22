@@ -174,6 +174,30 @@ export function ExtensionsDirectory() {
   return window['go']['main']['App']['ExtensionsDirectory']();
 }
 
+export function ForgeInfo(arg1) {
+  return window['go']['main']['App']['ForgeInfo'](arg1);
+}
+
+export function ForgeInstallCLI(arg1) {
+  return window['go']['main']['App']['ForgeInstallCLI'](arg1);
+}
+
+export function ForgePrCreate(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['ForgePrCreate'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function ForgePrList(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ForgePrList'](arg1, arg2, arg3);
+}
+
+export function ForgePrMerge(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ForgePrMerge'](arg1, arg2, arg3);
+}
+
+export function ForgePrView(arg1, arg2) {
+  return window['go']['main']['App']['ForgePrView'](arg1, arg2);
+}
+
 export function FormatSource(arg1, arg2, arg3) {
   return window['go']['main']['App']['FormatSource'](arg1, arg2, arg3);
 }
@@ -532,6 +556,10 @@ export function SetBurrowMcpMaxDepth(arg1) {
 
 export function SetExtensionEnabled(arg1, arg2) {
   return window['go']['main']['App']['SetExtensionEnabled'](arg1, arg2);
+}
+
+export function SetForgeProvider(arg1, arg2) {
+  return window['go']['main']['App']['SetForgeProvider'](arg1, arg2);
 }
 
 export function SetHttpEnabled(arg1) {
