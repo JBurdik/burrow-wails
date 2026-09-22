@@ -131,8 +131,14 @@ func orchVerbs(c *Core) []Verb {
 		Scope: ScopeLocal,
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.ask(ctx, p) },
 	}, {
-		Name:    "reply",
-		Summary: "Answer a pending ask — for a chat target the answer also flows over chat_send, for a tab over send_to_tab",
+		Name: "reply",
+		// The worker is parked in ask()'s poll loop, so writing the row IS the
+		// delivery to it. What is missing is the other direction: nothing tells a
+		// coordinator that a question is waiting, so today it has to already know
+		// the message_id. Discovery — a pending-ask listing, and pushing the
+		// question to the coordinator's own chat or tab — is still to be designed;
+		// do not describe it here as if it worked.
+		Summary: "Answer a pending ask, unblocking the worker that raised it",
 		Args: []Arg{
 			{Name: "message_id", Type: "integer", Desc: "Message returned by a pending ask", Required: true},
 			{Name: "body", Type: "string", Desc: "The answer", Required: true},
