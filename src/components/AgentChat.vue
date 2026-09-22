@@ -680,7 +680,10 @@ import { useUIStore, type NtfyEvent } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
-import { getAcpChatSetting, getLastAcpSetting, setAcpChatSetting, type AcpChatSettings } from "@/lib/acpSettings";
+import {
+  getAcpCapabilities, getAcpChatSetting, getLastAcpSetting,
+  setAcpCapabilities, setAcpChatSetting, type AcpChatSettings,
+} from "@/lib/acpSettings";
 import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 
 function renderMd(text: string): string {
@@ -917,6 +920,14 @@ const acpModeItems = computed<ComposerPillItem[]>(() =>
     id: m.id, label: m.name, description: m.description, icon: acpModeIcon(m.id),
   })),
 );
+
+// The runtime only publishes selector metadata during its handshake. Persist
+// the latest useful snapshot so an idle session eviction or view hand-off does
+// not make the effort and permission pills disappear until the next start.
+watch([acpModes, acpConfigOptions], ([modes, configOptions]) => {
+  if (!isAcpRuntime.value || (!modes && configOptions.length === 0)) return;
+  setAcpCapabilities(props.chatId, { agentId: agentKind.value, modes, configOptions });
+}, { deep: true });
 // Request ids of OUR OWN restore pushes. The reply to a restore carries the
 // adapter's selector set again, so re-restoring from it is what would ping-pong
 // forever — skipping just those replies breaks the loop, while every OTHER
@@ -3206,6 +3217,13 @@ onMounted(async () => {
   // if the user switched back in the meantime — race a fresh mount's own load.
   if (unmounted) return;
   migrateLegacyChatConfig();
+  if (isAcpRuntime.value && !acpModes.value && acpConfigOptions.value.length === 0) {
+    const cached = getAcpCapabilities(props.chatId, agentKind.value);
+    if (cached) {
+      acpModes.value = cached.modes;
+      acpConfigOptions.value = cached.configOptions;
+    }
+  }
   // Only read the transcript back from SQLite when the session has none. A
   // non-empty session is the LIVE copy — it kept receiving while this view was
   // unmounted, so it is ahead of the DB, and assigning over it would throw the

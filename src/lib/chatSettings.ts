@@ -9,7 +9,7 @@
 import { getConfig, setConfig } from "@/lib/config";
 
 /** Records shaped `{ [chatKey]: value }`. */
-export const FLAT_CHAT_KEYS = ["chatModelByChat", "chatEffortByChat", "chatAcpSettings"] as const;
+export const FLAT_CHAT_KEYS = ["chatModelByChat", "chatEffortByChat", "chatAcpSettings", "chatAcpCapabilities"] as const;
 
 /** `chatPermissionMode` nests its per-chat maps one level down. */
 const PERM_KEY = "chatPermissionMode";

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"burrow/internal/agentphase"
 )
 
 // ACP / Codex app-server bridge. Ports acp_start/codex_start/acp_send/
@@ -390,6 +392,7 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		// input request) is no longer pending. Forward it so the UI does not
 		// optimistically clear the prompt before the app-server accepted it.
 		emit(map[string]any{"method": method, "params": params})
+		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookRunning})
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
 		// Blocking approval requests. `parseAcpPermRequest` understands exactly
 		// these three method names, so they belong on the request channel — the
@@ -399,6 +402,7 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		if line, err := json.Marshal(msg); err == nil {
 			a.emitChatLine(chatID, "acp-req", string(line))
 		}
+		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookPermission, Detail: method})
 	case "item/tool/requestUserInput":
 		// Unlike an approval this request has a structured answers response.  Keep
 		// it on the request channel so the dedicated Codex input panel can respond.
@@ -406,6 +410,7 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		if err == nil {
 			a.emitChatLine(chatID, "acp-req", string(line))
 		}
+		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookWaiting, Detail: method})
 	default:
 		if _, hasID := msg["id"]; hasID {
 			// A JSON-RPC server request is blocking.  Previously we forwarded every
@@ -522,8 +527,20 @@ func (a *App) finishCodexTurn(chatID string, sess *acpSession, emit func(any), f
 				"messageId":     "codex-runtime-error",
 				"content":       map[string]any{"text": "Codex error: " + failure},
 			}}})
+		// The error bubble above is a text delta, which is normally evidence of
+		// a running turn. Apply the terminal failure after it so the server phase
+		// cannot be regressed back to running by its own diagnostic message.
+		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookError, Detail: failure})
+	} else {
+		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookDone})
 	}
 	emit(map[string]any{"id": rpc, "result": map[string]any{}})
+}
+
+func (a *App) applyChatPhase(chatID string, event agentphase.Event) {
+	if a.phases != nil {
+		a.phases.Apply("chat:"+chatID, event)
+	}
 }
 
 // resetCodexTurnWatchdog settles only a truly silent live app-server. Normal
@@ -969,9 +986,16 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		}
 		err := sess.write(map[string]any{"jsonrpc": "2.0", "id": rpc, "method": "turn/start", "params": params})
 		if err != nil {
-			a.finishCodexTurn(id, sess, func(any) {}, "")
+			sess.mu.Lock()
+			sess.pendingTurn = 0
+			if sess.turnWatchdog != nil {
+				sess.turnWatchdog.Stop()
+				sess.turnWatchdog = nil
+			}
+			sess.mu.Unlock()
 			return rpc, fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
 		}
+		a.applyChatPhase(id, agentphase.Event{Kind: agentphase.HookRunning})
 		a.emitChatLine(id, chatUserKind, text)
 		return rpc, nil
 	}
