@@ -186,6 +186,12 @@ var remoteAllowed = map[string]remoteCmd{
 	"save_chats":  {Method: "SaveChats", Args: []string{"chats"}, Scope: scopeOrchOperate},
 	"delete_chat": {Method: "DeleteChat", Args: []string{"id"}, Scope: scopeOrchOperate},
 
+	// Diff review notes (diffcomments.go) — DiffTab.vue's batch review flow.
+	"list_diff_comments":   {Method: "ListDiffComments", Args: []string{"wsId"}, Scope: scopeOrchRead},
+	"add_diff_comment":     {Method: "AddDiffComment", Args: []string{"wsId", "file", "line", "side", "body"}, Scope: scopeOrchOperate},
+	"compose_diff_notes":   {Method: "ComposeDiffNotes", Args: []string{"ids"}, Scope: scopeOrchRead},
+	"mark_diff_notes_sent": {Method: "MarkDiffNotesSent", Args: []string{"ids"}, Scope: scopeOrchOperate},
+
 	// Workspaces / tabs
 	"list_workspaces":     {Method: "ListWorkspaces", Args: nil, Scope: scopeOrchRead},
 	"create_workspace":    {Method: "CreateWorkspace", Args: []string{"name", "path"}, Scope: scopeOrchOperate},
