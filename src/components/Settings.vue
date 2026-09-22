@@ -250,6 +250,17 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Chat usage</span>
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Estimated cost</span>
+                <span class="text-[11px] text-muted-foreground">Recorded chat usage only; terminal transcript scanning is not included.</span>
+              </div>
+              <span class="font-mono text-[13px] text-secondary-foreground">{{ chatUsageLoading ? "…" : formatUsageCost(chatUsageCost) }}</span>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface</span>
             <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
@@ -1545,6 +1556,25 @@ const blurControls = [
 // Deep-link target set by the caller (⌘P → "Keyboard Shortcuts" etc.).
 const active = ref(ui.settingsSection || "general");
 
+// One compact read-model for the Settings number. The backend replays any
+// context.usage rows not folded into its durable projection before returning.
+const chatUsageCost = ref(0);
+const chatUsageLoading = ref(false);
+async function loadChatUsage() {
+  chatUsageLoading.value = true;
+  try {
+    const report = await invoke<{ estimated_cost_usd: number }>("get_chat_usage");
+    chatUsageCost.value = report.estimated_cost_usd ?? 0;
+  } catch (e) {
+    console.error("get_chat_usage failed", e);
+  } finally {
+    chatUsageLoading.value = false;
+  }
+}
+function formatUsageCost(value: number): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
 // ── Burrow agent docs (skill install/update) ────────────────────────────────
 const installingDocs = ref(false);
 const installDocsStatus = ref("");
@@ -1800,10 +1830,12 @@ async function runExtensionCommand(extensionId: string, commandId: string) {
 
 // Lazy-load each panel's data the first time it's opened.
 watch(active, (id) => {
+	if (id === "general") loadChatUsage();
   if (id === "skills" && skills.value.length === 0) loadSkills();
   if (id === "mcp" && mcpServers.value.length === 0) loadMcp();
   if (id === "extensions") loadExtensions();
 });
+if (active.value === "general") loadChatUsage();
 
 // Refresh forge status whenever the Integrations tab is the one showing: on
 // mount too, since `active` can already be "integrations" from persisted

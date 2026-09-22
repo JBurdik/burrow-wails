@@ -15,9 +15,7 @@ const emit = defineEmits<{
 }>();
 
 const comment = shallowRef("");
-const selectionLabel = computed(() =>
-  props.selection ? "Selected diff context will be included." : "Select diff lines to include context.",
-);
+const selectionLabel = computed(() => props.selection);
 
 function submit() {
   const value = comment.value.trim();
@@ -34,7 +32,7 @@ function submit() {
       v-model="comment"
       class="w-full resize-y rounded border border-border bg-base p-1.5 font-mono text-[11px] leading-snug text-foreground focus:border-accent focus:outline focus:outline-1 focus:outline-accent"
       rows="3"
-      placeholder="Describe the change you want…"
+      placeholder="Add a note about this line…"
       :disabled="!targetAvailable || sending"
       @keydown.meta.enter.prevent="submit"
       @keydown.ctrl.enter.prevent="submit"
@@ -43,7 +41,7 @@ function submit() {
       <span class="flex-1 text-[10px] text-muted-foreground" :class="{ 'text-destructive': !targetAvailable }">{{ status }}</span>
       <Button type="button" variant="secondary" size="sm" @click="emit('cancel')">Cancel</Button>
       <Button type="submit" size="sm" :disabled="!comment.trim() || !targetAvailable || sending">
-        {{ sending ? "Sending…" : "Send to agent" }}
+        {{ sending ? "Adding…" : "Add note" }}
       </Button>
     </div>
   </form>

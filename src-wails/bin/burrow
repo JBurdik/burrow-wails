@@ -148,12 +148,40 @@ _call() {
   esac
 }
 
+_skill_get() {
+  name="$1"; shift
+  [ "$name" = "burrow" ] || { echo "burrow skills get: unknown skill '$name'" >&2; exit 1; }
+  query=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --reference)
+        [ -n "$2" ] || { echo "burrow skills get: --reference needs a name" >&2; exit 1; }
+        query="?reference=$2"; shift 2 ;;
+      --references)
+        query="?references"; shift ;;
+      *) echo "burrow skills get: unexpected argument '$1'" >&2; exit 1 ;;
+    esac
+  done
+  port=$(_port); token=$(_token)
+  if [ -z "$port" ] || [ -z "$token" ]; then
+    echo "burrow: Burrow is not running or this shell has no control token" >&2
+    exit 1
+  fi
+  curl -sf "http://127.0.0.1:$port/v1/skills/burrow$query" -H "Authorization: Bearer $token" || exit 1
+}
+
 case "$sub" in
   help|--help|-h)
     echo "burrow <verb> [POSITIONAL] [--arg value ...]"
     echo
     echo "Verbs supported by the running app:"
     _call _verbs
+    ;;
+
+  skills)
+    [ "$1" = "get" ] || { echo "usage: burrow skills get burrow [--reference NAME|--references]" >&2; exit 1; }
+    shift
+    _skill_get "$@"
     ;;
 
   status)

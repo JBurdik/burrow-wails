@@ -181,10 +181,23 @@ var remoteAllowed = map[string]remoteCmd{
 	// reach it the same way — which is the point of moving it out of
 	// config.json, where each client kept its own copy of the truth and
 	// overwrote the other's.
-	"list_chats":  {Method: "ListChats", Args: nil, Scope: scopeOrchRead},
-	"create_chat": {Method: "CreateChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
-	"save_chats":  {Method: "SaveChats", Args: []string{"chats"}, Scope: scopeOrchOperate},
-	"delete_chat": {Method: "DeleteChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"list_chats":     {Method: "ListChats", Args: nil, Scope: scopeOrchRead},
+	"get_chat_usage": {Method: "GetChatUsage", Args: nil, Scope: scopeOrchRead},
+	"create_chat":    {Method: "CreateChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
+	"save_chats":     {Method: "SaveChats", Args: []string{"chats"}, Scope: scopeOrchOperate},
+	"delete_chat":    {Method: "DeleteChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// Chat-side equivalent of kill_pty: terminates the chat's live runtime
+	// (and its children's) without deleting the row. kill_pty is the same action
+	// on the other half of the pair but carries scopeTerminal; a chat is not a
+	// terminal, so this takes the orchestration scope instead. A paired device
+	// holds both, so the choice is about naming, not reach.
+	"stop_chat": {Method: "StopChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+
+	// Diff review notes (diffcomments.go) — DiffTab.vue's batch review flow.
+	"list_diff_comments":   {Method: "ListDiffComments", Args: []string{"wsId"}, Scope: scopeOrchRead},
+	"add_diff_comment":     {Method: "AddDiffComment", Args: []string{"wsId", "file", "line", "side", "body"}, Scope: scopeOrchOperate},
+	"compose_diff_notes":   {Method: "ComposeDiffNotes", Args: []string{"ids"}, Scope: scopeOrchRead},
+	"mark_diff_notes_sent": {Method: "MarkDiffNotesSent", Args: []string{"ids"}, Scope: scopeOrchOperate},
 
 	// Workspaces / tabs
 	"list_workspaces":     {Method: "ListWorkspaces", Args: nil, Scope: scopeOrchRead},
