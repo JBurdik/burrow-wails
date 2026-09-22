@@ -33,10 +33,10 @@ describe("keybindings store", () => {
 
   it("rebinding onto a taken combo releases the previous owner", () => {
     const keys = useKeybindingsStore();
-    keys.set("manager", "⌘P"); // steals the palette's combo
+    keys.set("unread", "⌘P"); // steals the palette's combo
     expect(keys.shortcut("palette")).toBe("");
     expect(keys.matches(ev("p", { meta: true }), "palette")).toBe(false);
-    expect(keys.matches(ev("p", { meta: true }), "manager")).toBe(true);
+    expect(keys.matches(ev("p", { meta: true }), "unread")).toBe(true);
   });
 
   it("clearing unbinds without matching anything", () => {

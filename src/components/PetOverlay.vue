@@ -440,8 +440,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
 
 .pet {
   position: absolute;
-  /* Walk on top of the Manager bar strip (var set by ManagerBar). */
-  bottom: calc(4px + var(--manager-bar-h, 0px));
+  bottom: 4px;
   /* width/height set inline from SPRITE_W/H */
   pointer-events: auto;
   cursor: pointer;

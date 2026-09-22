@@ -314,15 +314,6 @@
       <DiffView v-else :diff="scopedDiff" :diff-key="diffScopeKey" />
     </div>
 
-    <ManagerPanel
-      v-else-if="activeTab === 'manager' && props.workspaceId"
-      :cwd="props.cwd"
-      :ws-id="props.workspaceId"
-    />
-    <div v-else-if="activeTab === 'manager'" class="flex flex-1 items-center justify-center p-6 text-center text-[11px] leading-relaxed text-muted-foreground">
-      Open a project to start a Manager thread.
-    </div>
-
     <!-- Sub-agents tab: this thread's chat sub-agents + its Task-tool invocations -->
     <div v-else-if="activeTab === 'agents'" class="flex min-h-0 flex-1 flex-col">
       <!-- Detail: the open child's chat. It is NOT mounted here — SubAgentHost.vue
@@ -369,7 +360,12 @@
             class="group flex cursor-pointer items-center gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
             @click="openChild(child.id)"
           >
-            <PhRobot :size="12" class="shrink-0 text-muted-foreground" />
+            <component
+              :is="agentIconComp(childProvider(child)?.icon)"
+              :size="12"
+              class="shrink-0 text-muted-foreground"
+              :style="childProvider(child)?.color ? { color: childProvider(child)!.color } : undefined"
+            />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ child.title }}</span>
             <!-- Phase dot reserves the slot's size (invisible, not hidden, so the box stays); the
                  close button overlays it via absolute + opacity, so it never resizes the row and stays
@@ -556,12 +552,14 @@ import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
-  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhSparkle, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
+  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
+import { useProvidersStore } from "@/stores/providers";
+import { agentIconComp } from "@/lib/agentIcons";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { activeChatIdFor, childrenOf } from "@/stores/chatTree";
 import { subAgentViewTarget, nextSubAgentView } from "@/lib/subAgentView";
@@ -576,7 +574,6 @@ import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
 import DevServersSurface from "./DevServersSurface.vue";
-import ManagerPanel from "./ManagerPanel.vue";
 import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
 import CommitPushMenu from "./CommitPushMenu.vue";
@@ -588,11 +585,12 @@ import { initPtyCounter, nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
-const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; managerOpen: [] }>();
+const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: [] }>();
 const git = useGitStore();
 const fileTree = useFileTreeStore();
 const chats = useClaudeChatsStore();
 const subagents = useSubagentsStore();
+const providers = useProvidersStore();
 const terminalTabs = useTerminalTabsStore();
 const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensionSurfaces();
 // RightPanel is one shared instance across all workspaces (App.vue doesn't
@@ -633,15 +631,22 @@ function subagentTime(ts: number): string {
 
 // ── Sub-agents section (chat-tree children of the active thread) ──────────────
 // The thread on screen is whichever TAB is active, not `claudeChats.activeByWs`
-// — that slot is only ever written by ManagerPanel, so opening a chat from the
-// Sidebar or a route left it pointing at nothing and this panel said "open a
-// chat to see its sub-agents" while a chat was open. The tabs mirror already
+// — nothing writes that slot any more, so opening a chat from the Sidebar or a
+// route left it pointing at nothing and this panel said "open a chat to see its
+// sub-agents" while a chat was open. The tabs mirror already
 // carries `chatId` for chat tabs (Terminal.vue is its writer), so it is the
 // same source of truth the user is actually looking at.
 const activeChatId = computed(() =>
   activeChatIdFor(terminalTabs.tabsByWs, terminalTabs.activeByWs, props.workspaceId),
 );
 const childList = computed(() => (activeChatId.value ? childrenOf(chats.sessions, activeChatId.value) : []));
+
+/** The provider instance backing a sub-agent, for its row's logo and colour.
+ *  `resolve` falls back to the first configured chat agent, and `agentIconComp`
+ *  falls back to the generic robot, so an unknown agentKind still renders. */
+function childProvider(child: { agentKind?: string }) {
+  return providers.resolve(child.agentKind);
+}
 
 // Which child the panel is showing, per workspace (so switching
 // projects doesn't carry a detail view over).
@@ -848,7 +853,6 @@ const tabs = computed(() => {
     { id: "explorer", label: "Files", icon: PhFiles, description: "Browse the current workspace." },
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
-    { id: "manager", label: "Manager", icon: PhSparkle, description: "Plan and coordinate agent work for this project." },
     { id: "agents", label: "Sub-agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "dev-servers", label: "Dev servers", icon: PhPlugsConnected, description: "See and kill dev servers running in this workspace." },
@@ -918,7 +922,6 @@ async function openSurface(id: string) {
   if (!openedTabIds.value.includes(id)) openedTabIds.value.push(id);
   activeTab.value = id;
   if (id === "browser") ensureBrowserPane(wsKey.value);
-  if (id === "manager") emit("managerOpen");
 }
 
 function closeSurface(id: string) {
@@ -944,15 +947,11 @@ function showSurfacePicker() {
   activeTab.value = null;
 }
 
-function openManager() {
-  openSurface("manager");
-}
-
 function openGitTab() {
   openSurface("git");
 }
 
-defineExpose({ openManager, openGitTab, openSubagent });
+defineExpose({ openGitTab, openSubagent });
 
 // --- Checkpoints (History tab) ---
 interface Checkpoint {

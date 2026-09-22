@@ -82,8 +82,8 @@
             :diff-file="pane.leaf.diffFile!"
             :diff-staged="pane.leaf.diffStaged ?? false"
             :diff="pane.leaf.diff || ''"
-            :feedback-target-pty-id="pane.leaf.diffOwnerPtyId"
-            :send-feedback="(payload) => sendDiffFeedback(pane.leaf.diffOwnerPtyId, payload)"
+            :workspace-id="workspaceId"
+            :send-batch-notes="(markdown) => sendBatchNotes(markdown, pane.leaf.diffOwnerPtyId)"
           />
           <CodeEditor
             v-else-if="pane.leaf.leafType === 'editor'"
@@ -197,6 +197,7 @@ import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vu
 import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import { spinnerFrame } from "@/lib/spinner";
 import { dropChatSession } from "@/lib/chatSession";
+import { perform } from "@/lib/controlBridge";
 import { router } from "@/router";
 import { configReady } from "@/lib/config";
 import { playSound } from "@/lib/sounds";
@@ -1186,22 +1187,42 @@ function insertContext(absPath: string) {
   xterm?.sendText(ref);
 }
 
-function sendDiffFeedback(
-  ownerPtyId: number | undefined,
-  payload: { comment: string; selectedDiff: string },
-): Promise<boolean> {
-  if (ownerPtyId === undefined) return Promise.resolve(false);
-  const owner = locateLeaf(ownerPtyId)?.leaf;
-  if (!owner?.isAgent) return Promise.resolve(false);
+// Batch review notes (DiffTab.vue "Send N notes") — ChatUI first, see
+// docs/plans/orca-steal-2026-09-22.md's binding rule. The workspace's chat is
+// the default target because a chat answers the review structurally; a
+// terminal is the fallback for a workspace with no chat open yet.
+function resolveNotesTarget(
+  diffOwnerPtyId: number | undefined,
+): { type: "chat"; chatId: number } | { type: "tab"; ptyId: number } | null {
+  const chat = chatsStore.activeSession(props.workspaceId) ?? chatsStore.sessionsForWs(props.workspaceId)[0];
+  if (chat) return { type: "chat", chatId: chat.id };
 
-  const context = payload.selectedDiff
-    ? `\n\nSelected diff context:\n${payload.selectedDiff}`
-    : "";
-  const text = `[Review feedback]\n${payload.comment}${context}\n`;
-  return invoke("write_pty", {
-    id: ownerPtyId,
-    data: Array.from(new TextEncoder().encode(text)),
-  }).then(() => true).catch(() => false);
+  const owner = diffOwnerPtyId !== undefined ? locateLeaf(diffOwnerPtyId)?.leaf : undefined;
+  if (owner?.isAgent) return { type: "tab", ptyId: diffOwnerPtyId! };
+
+  const activeTab = tabs.value.find((t) => t.id === activeTabId.value);
+  const leaf = activeTab
+    ? getAllLeaves(activeTab.root).find((l) => l.leafType !== "diff" && l.leafType !== "editor" && l.leafType !== "chat")
+    : undefined;
+  return leaf ? { type: "tab", ptyId: leaf.id } : null;
+}
+
+async function sendBatchNotes(markdown: string, diffOwnerPtyId: number | undefined): Promise<boolean> {
+  const target = resolveNotesTarget(diffOwnerPtyId);
+  if (!target) return false;
+  try {
+    if (target.type === "chat") {
+      await perform("chat_send", { chatId: target.chatId, text: markdown });
+    } else {
+      await invoke("write_pty", {
+        id: target.ptyId,
+        data: Array.from(new TextEncoder().encode(markdown + "\n")),
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function openDiffInTab(file: string, staged: boolean, diff: string, ownerPtyId?: number) {
@@ -1529,6 +1550,10 @@ function tabSettled(t: Tab): boolean {
 }
 
 function syncStore() {
+  // Same hazard as persist(): a sync that runs before the restore has added the
+  // chat tabs pushes a list missing them, and setTabs prunes the activity stamps
+  // of every key it doesn't see — so yesterday's threads came back stamped "now".
+  if (!restored) return;
   tabsStore.setTabs(
     props.workspaceId,
     tabs.value.map((t) => ({
@@ -1767,8 +1792,8 @@ onMounted(async () => {
   // "which tabs were open" list to fall out of sync (a stale empty one used to
   // hide every thread on restart).
   //
-  // The only skip is the Manager, which is hidden by design (control: true).
-  // There used to be a second one — `!s.claudeSessionId && !s.messageCount`,
+  // Nothing is skipped here any more. There used to be a skip —
+  // `!s.claudeSessionId && !s.messageCount`,
   // meant for "never-used blanks left by older builds" — and it was asking a
   // question those two fields cannot answer: a brand-new chat looks exactly
   // like an abandoned one. It hid every chat the user created and did not
@@ -1778,7 +1803,6 @@ onMounted(async () => {
   // clutter is what `isSettled` is for, and an untouched one settles on its
   // own after AUTO_SETTLE_AFTER_DAYS.
   for (const s of chatsStore.sessionsForWs(props.workspaceId)) {
-    if (s.control) continue;
     openClaudeChat(s.id);
   }
 

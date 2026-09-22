@@ -243,7 +243,7 @@ func TestMigrationPreservesChatIds(t *testing.T) {
 		"chatIdCounter": float64(87),
 		"chatSessions": []any{
 			map[string]any{"id": float64(19), "workspaceId": float64(2), "title": "Chat 1", "transport": "claude-cli"},
-			map[string]any{"id": float64(86), "workspaceId": float64(2), "title": "Chat 56", "agentKind": "claude", "control": true},
+			map[string]any{"id": float64(86), "workspaceId": float64(2), "title": "Chat 56", "agentKind": "claude"},
 		},
 	})
 
@@ -263,7 +263,7 @@ func TestMigrationPreservesChatIds(t *testing.T) {
 	if byID[19].Title != "Chat 1" || byID[19].Transport != "claude-cli" {
 		t.Fatalf("row 19 wrong: %+v", byID[19])
 	}
-	if byID[86].Title != "Chat 56" || byID[86].AgentKind != "claude" || !byID[86].Control {
+	if byID[86].Title != "Chat 56" || byID[86].AgentKind != "claude" {
 		t.Fatalf("row 86 wrong: %+v", byID[86])
 	}
 }

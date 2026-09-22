@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"burrow/internal/forge"
@@ -33,7 +35,7 @@ func forgeRun(bin, cwd string, args []string) (string, string, int) {
 }
 
 // providerOverride reads the per-repo choice, climbing parent_id so a worktree
-// inherits the root repo's provider — the same climb the Manager uses to keep
+// inherits the root repo's provider — the same climb the chat tree uses to keep
 // one thread per root repo. Returns "" when no ancestor has one.
 func (a *App) providerOverride(cwd string) string {
 	var id int64
@@ -162,4 +164,39 @@ func (a *App) SetForgeProvider(wsID int64, provider string) error {
 	}
 	emitWorkspacesChanged()
 	return nil
+}
+
+// ForgeInstallCLI installs a provider's CLI in the background instead of typing
+// the command into a new terminal tab: that tab was created behind the Settings
+// overlay, so from the user's side the button opened a terminal and nothing
+// happened. Homebrew is non-interactive here (NONINTERACTIVE=1), so there is
+// nothing to see — only the outcome matters. Logging in still needs a tab.
+func (a *App) ForgeInstallCLI(provider string) (string, error) {
+	f, err := forge.New(forge.Provider(provider), forgeRun)
+	if err != nil {
+		return "", err
+	}
+	cmd := f.CLI().InstallCmd
+	if cmd == "" {
+		return "", fmt.Errorf("no install command for %s", provider)
+	}
+	// sh -c, not a bare exec: the install lines are shell (`&&`, flags). PATH is
+	// widened the same way spawned binaries get it — a GUI app's PATH has no brew.
+	c := exec.Command("/bin/sh", "-c", cmd)
+	c.Env = append(os.Environ(), "PATH="+augmentedPath(""), "NONINTERACTIVE=1", "HOMEBREW_NO_AUTO_UPDATE=1")
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("%s failed: %v\n%s", cmd, err, tailLines(string(out), 12))
+	}
+	return string(out), nil
+}
+
+// tailLines keeps an error message readable: brew's failure reason is at the
+// bottom of a few hundred lines of progress output.
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }

@@ -24,9 +24,6 @@ export interface ClaudeSession {
   // Mirrors the terminal-tab status model so chats show the same dots/bell in the
   // Sidebar. "permission" = blocked on an allow/deny decision (amber + bell).
   status?: TermStatus;
-  // The hidden per-repo Manager (Mission Control) session — kept out of the
-  // Sidebar chat list so it isn't a duplicate of the floating Manager card.
-  control?: boolean;
   // Set when the user manually renames the tab — prevents auto-title from overwriting.
   pinnedTitle?: boolean;
   // Which agent backs this chat — a chatAgents store id (default 'claude').
@@ -158,7 +155,6 @@ interface ChatRow {
   pinned_title: boolean;
   claude_session_id: string;
   message_count: number;
-  control: boolean;
   agent_kind: string;
   transport: string;
   model: string;
@@ -180,7 +176,6 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     pinnedTitle: r.pinned_title || undefined,
     claudeSessionId: r.claude_session_id,
     messageCount: r.message_count,
-    control: r.control || undefined,
     agentKind: r.agent_kind || undefined,
     transport: (r.transport || undefined) as ChatTransport | undefined,
     model: r.model || undefined,
@@ -201,7 +196,6 @@ function rowFromSession(s: ClaudeSession): ChatRow {
     pinned_title: !!s.pinnedTitle,
     claude_session_id: s.claudeSessionId ?? "",
     message_count: s.messageCount ?? 0,
-    control: !!s.control,
     agent_kind: s.agentKind ?? "",
     transport: s.transport ?? "",
     model: s.model ?? "",
@@ -227,7 +221,20 @@ const WINDOW_MS = 5 * 60 * 60 * 1000; // 5 hours
 
 type SessionActor = ReturnType<typeof createActor<typeof agentStatusMachine>>;
 
-export const useClaudeChatsStore = defineStore("claudeChats", () => {
+/**
+ * Whether a sync() patch is real thread activity — a turn starting or a new
+ * message — as opposed to the bookkeeping (session id, title, agent kind,
+ * status settling) that a restore replays for every chat it restores.
+ */
+export function isActivitySync(
+  prev: Pick<ClaudeSession, "status" | "messageCount">,
+  patch: Pick<Partial<ClaudeSession>, "status" | "messageCount">,
+): boolean {
+  if (patch.status === "running" && prev.status !== "running") return true;
+  return patch.messageCount !== undefined && patch.messageCount > (prev.messageCount ?? 0);
+}
+
+  export const useClaudeChatsStore = defineStore("claudeChats", () => {
   const sessions = ref<ClaudeSession[]>([]);
   const activeByWs = ref<Record<number, number>>({});
   const turns = ref<TurnEvent[]>([]);
@@ -623,17 +630,22 @@ export const useClaudeChatsStore = defineStore("claudeChats", () => {
     return wt.length ? wt[0].ts : null;
   });
 
-  // Called by ClaudeChat.vue to sync live state back.
-  function sync(id: number, patch: Partial<Pick<ClaudeSession, "busy" | "messageCount" | "claudeSessionId" | "title" | "status" | "control" | "agentKind" | "transport">>) {
+// Called by ClaudeChat.vue to sync live state back.
+  function sync(id: number, patch: Partial<Pick<ClaudeSession, "busy" | "messageCount" | "claudeSessionId" | "title" | "status" | "agentKind" | "transport">>) {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
     // A fresh turn starting is real reactivation — drop any settle/unsettle pin
     // so the next done/review transition auto-settles again instead of being
     // stuck (mirrors t3code clearing settledOverride on a system-triggered unsettle).
     if (patch.status === "running" && s.settledOverride) s.settledOverride = null;
-    s.lastActivityAt = Date.now();
+    // Only a real turn is activity. Bumping on EVERY sync meant a restart —
+    // which syncs each chat's session id / title / status as it restores —
+    // restamped every thread to now, so yesterday's threads all read "Last
+    // activity now". Same rule setModel already states for itself.
+    const isActivity = isActivitySync(s, patch);
+    if (isActivity) s.lastActivityAt = Date.now();
     Object.assign(s, patch);
-    if (patch.claudeSessionId !== undefined || patch.title !== undefined || patch.messageCount !== undefined || patch.control !== undefined || patch.agentKind !== undefined || patch.transport !== undefined) {
+    if (isActivity || patch.claudeSessionId !== undefined || patch.title !== undefined || patch.messageCount !== undefined || patch.agentKind !== undefined || patch.transport !== undefined) {
       persist();
     }
   }

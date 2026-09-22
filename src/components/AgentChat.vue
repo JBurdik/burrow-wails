@@ -355,7 +355,7 @@
     </div>
 
     <!-- New-style input bar -->
-    <div v-if="!hideComposer" class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
+    <div class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
       <div class="mx-auto w-full max-w-[760px]">
       <!-- Branch-changed banner: session.branch (created-on snapshot) vs. current workspace branch -->
       <div v-if="branchChanged && !branchBannerDismissed" class="mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -458,7 +458,6 @@
           <div class="composer-toolbar px-2 pb-2 pt-1.5">
           <!-- Left: share selection, model dropdown, perm mode -->
           <div class="composer-pillbar">
-            <img v-if="avatarSrc" :src="avatarSrc" class="toolbar-avatar mr-0.5 h-[22px] w-[22px] flex-shrink-0 rounded-full border border-border object-cover [object-position:center_18%]" alt="Manager" />
             <button
               v-if="editorCtx.selection"
               class="composer-pill"
@@ -752,18 +751,11 @@ const props = defineProps<{
   // Compact mode (float chat): hide the heavy chrome (changes panel + diff
   // sidebar), keep the message stream + input + inline permission gates.
   compact?: boolean;
-  // Mission-control primer passed to claude_start as --append-system-prompt.
+  // Extra system prompt passed to claude_start as --append-system-prompt.
   appendSystemPrompt?: string;
-  // Hide the built-in text composer — the host (e.g. the Manager bar) drives
-  // sends from its own external input via the exposed sendMessage(). Permission
-  // / plan / question gates stay visible.
-  hideComposer?: boolean;
-  // Optional avatar shown at the start of the composer's bottom toolbar row
-  // (used by the Manager bar to give the agent a face).
-  avatarSrc?: string;
   // Use a dedicated localStorage key for the model selection instead of the
-  // shared global one, so this chat's model is independent of every other chat
-  // (the Manager keeps its own model). Falls back to the global key.
+  // shared global one, so this chat's model is independent of every other
+  // chat. Falls back to the global key.
   modelKey?: string;
   // Initial model when nothing is stored under modelKey yet.
   defaultModel?: string;
@@ -773,8 +765,8 @@ const props = defineProps<{
   agentKind?: string;
   // Whether this chat's tab is actually the one on screen (its workspace active,
   // terminal mode, this tab selected) — passed by Terminal.vue via its isWatching()
-  // helper. Callers that don't track tab-level visibility (float chat, Manager bar)
-  // omit it and fall back to plain window focus.
+  // helper. Callers that don't track tab-level visibility (float chat) omit it
+  // and fall back to plain window focus.
   isWatching?: boolean;
   // First message to send automatically once this chat's runtime is up (used by
   // the welcome-screen composer, which creates the chat and its prompt at once).
@@ -3304,7 +3296,7 @@ onBeforeUnmount(() => {
   // NOTE: deliberately do NOT stop the adapter/CLI here. The backend process
   // lifetime is tied to the SESSION, not this component's mount — a background
   // chat gets unmounted whenever its host tears down (FloatChat when ws.active
-  // flips, ManagerBar when the repo set changes, a workspace leaving `opened`),
+  // flips, a workspace leaving `opened`),
   // and killing the proc there halted live agents mid-turn ("blik"). Teardown
   // now happens on explicit close (Terminal.closeTab / closePane → stopChatSession)
   // and on `remove()` in the claudeChats store.
@@ -3317,8 +3309,8 @@ watch(() => chats.activeByWs[props.workspaceId], (activeId) => {
   if (activeId === props.chatId) nextTick(() => scrollToBottom(true));
 });
 
-// Exposed for host shells (e.g. the Manager bar) that drive this chat from an
-// external compact input: send a message and focus the textarea.
+// Exposed for host shells that drive this chat from an external compact
+// input: send a message and focus the textarea.
 function focusInput() {
   nextTick(() => inputEl.value?.focus());
 }

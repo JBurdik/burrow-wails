@@ -151,7 +151,7 @@ registry of *verbs* (`spawn`, `agent_status`, `focus_tab`, `create_worktree`,
 capabilities as interfaces (`Deps`: DB, a git runner, a `Forge` client, exec
 runner, PTY writer, worktrees, `UIBridge`). `Forge` replaced a raw `gh`
 runner (see "Pull requests go through each forge's own CLI" below) — the
-verbs below are the same surface the Manager, the `burrow` CLI and MCP all
+verbs below are the same surface every agent, the `burrow` CLI and MCP all
 reach, so "Burrow can open a pull request" has to be true off GitHub too.
 Transports sit on top:
 
@@ -164,8 +164,8 @@ Transports sit on top:
 `Scope` is a field on the verb, and a verb is **local-only unless it opts in** —
 a new verb that never thought about the network stays off it. The registry is
 also the single source of truth for the MCP tool schemas (`/v1/_verbs`), the
-CLI's `burrow help`, and the Manager's primer, so none of them can drift from
-what the app supports.
+CLI's `burrow help` and the installed agent skill, so none of them can drift
+from what the app supports.
 
 **UI-performed verbs.** Opening a tab, focusing a workspace and reading a
 terminal's scrollback can only be done by the frontend, so those verbs call
@@ -225,8 +225,7 @@ of sync with what a CLI actually returns.
 `Detect()` maps a remote host to a provider; a self-hosted GitLab at, say,
 `git.firma.cz` is invisible from its hostname, so `workspaces.forge_provider`
 lets the user say so once, and a worktree inherits that override by climbing
-`parent_id` — the same climb the Manager uses to find its root repo's thread
-(see "Manager" above).
+`parent_id`.
 
 **`Create` looks the new PR up by the number parsed out of the URL the CLI
 prints**, not by re-reading "the PR for the current branch": `gh`/`glab` print
@@ -530,21 +529,40 @@ appear in Settings; kill the socket mid-turn and check the dots catch up rather 
 freeze; revoke the device and confirm the phone drops to the pairing screen; heavy terminal
 output under backpressure; and pressing ESC mid-turn.
 
-### Manager (`src/components/ManagerPanel.vue`)
+### Orchestration is the main thread's job (the Manager is gone)
 
-A per-repository orchestrator chat living in the right panel. One thread per
-**root repo** (climbs `parent_id`, so it survives hopping between a repo and its
-worktrees), session flagged `control: true` so it stays out of the Sidebar's chat
-list, kept mounted per engaged repo and toggled with `v-show` so a busy Manager
-keeps streaming while the user looks elsewhere. Message stream, composer,
-permission gates and model picker all come from `AgentChat` — the panel only owns
-the thread lifecycle and the primer.
+There is no Manager panel. It was a per-repository orchestrator chat in the right
+panel, one thread per root repo, flagged `control: true` so it stayed out of the
+Sidebar, with a primer generated from the verb registry plus a worktree-isolation
+toggle and the project's `.burrow/manager.md`. All of it is deleted:
+`ManagerPanel.vue`, `managerPrimer.ts`, the RP surface and its ⌘⇧J binding, the
+Project Config prompt tab, and the `control` flag on a session.
 
-Its primer (`src/utils/managerPrimer.ts`) is **generated from the verb registry**
-(`control_verbs`) plus the worktree-isolation toggle and the project's
-`.burrow/manager.md`. It tells the Manager to orchestrate and never implement,
-and describes both doors (MCP tools if it has them, `burrow <verb>` otherwise) —
-any configured agent can be the Manager, so the shell is the common denominator.
+Sub-agents replaced it. An ordinary thread orchestrates by spawning children
+(`parent_chat_id`), which the Right Panel's Sub-agents surface lists and hosts —
+so the orchestrator is whichever chat the user is already talking to, instead of a
+second hidden thread with its own model, its own prompt and its own inbox. Each
+sub-agent row now carries its provider's own logo (`agentIconComp` over the
+provider instance backing that chat) rather than a generic robot, because a thread
+can spawn children on different providers.
+
+Two consequences worth knowing:
+
+- `spawn` with a `parent_chat_id` **always** forces `target: "chat"`. The old
+  exemption (`parent_is_control`, `chatIsControl`) existed only because a
+  Manager-spawned chat sub-agent would land in no list — the Manager was never the
+  active session. With no Manager, every parent is a listed thread.
+- The `control` column stays on the `chats` table, unread and unwritten. Dropping
+  it would need a migration on every existing database to remove a column that
+  costs nothing. The ROWS still carrying it do need handling, though:
+  `archiveLegacyManagerChats()` runs once at startup and archives them (clearing
+  the flag in the same statement, which is what makes it one-shot). Without it an
+  upgrade resurrects one Manager thread per project the user ever opened it in —
+  auto-opened as a tab on restart, in the Sidebar, in `agent_status`, on the phone.
+
+Worktree isolation is no longer a UI toggle. It only ever fed one paragraph of the
+primer; the orchestrating thread decides per task by calling `create_worktree` and
+passing the path as `cwd`.
 
 **Agent docs install** (`agentdocs.go`, at startup): teaches every agent the CLI.
 Claude/Copilot get the `burrow` skill (`agentdocs/skills/burrow/SKILL.md`) plus an

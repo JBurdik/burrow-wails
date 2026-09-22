@@ -11,7 +11,7 @@
  * ages onto the settled shelf.
  */
 import { describe, it, expect } from "vitest";
-import { AUTO_SETTLE_AFTER_DAYS, settledFor } from "./claudeChats";
+import { AUTO_SETTLE_AFTER_DAYS, settledFor, isActivitySync } from "./claudeChats";
 import type { ClaudeSession } from "./claudeChats";
 import { childrenOf, topLevel, allChildrenOf } from "./chatTree";
 
@@ -120,5 +120,18 @@ describe("chat tree", () => {
       { id: 3, workspaceId: 1, parentChatId: 1, archivedAt: 12345 },
     ] as any[];
     expect(allChildrenOf(withArchived, 1).map((s) => s.id)).toEqual([2, 3]);
+  });
+});
+
+describe("isActivitySync", () => {
+  it("counts a turn starting and a new message, not restore bookkeeping", () => {
+    const prev = { status: "idle", messageCount: 3 } as const;
+    expect(isActivitySync(prev, { status: "running" })).toBe(true);
+    expect(isActivitySync(prev, { messageCount: 4 })).toBe(true);
+    // What a restart replays for every chat — must not restamp the thread.
+    expect(isActivitySync(prev, { claudeSessionId: "abc" } as never)).toBe(false);
+    expect(isActivitySync(prev, { title: "Renamed" } as never)).toBe(false);
+    expect(isActivitySync(prev, { status: "idle", messageCount: 3 })).toBe(false);
+    expect(isActivitySync({ status: "running", messageCount: 3 }, { status: "running" })).toBe(false);
   });
 });

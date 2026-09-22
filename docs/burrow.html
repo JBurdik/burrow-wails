@@ -59,7 +59,7 @@
   </p>
   <p>
     That is the whole point: <strong>one implementation, three doors</strong>. An MCP tool cannot behave differently from
-    the same verb typed in a shell, and <code>burrow help</code>, the MCP tool schemas and the Manager's system prompt are
+    the same verb typed in a shell, and <code>burrow help</code> and the MCP tool schemas are
     all generated from the registry, so none of them can advertise something the app can't do.
   </p>
   <div class="note">
@@ -166,7 +166,7 @@
   → verb returns {"pty_id":37,"token":"res1712…","target":"tab"}</code></pre>
   <ul>
     <li>One app-wide listener, not one per Terminal: actions are addressed by workspace/pty id, so "is that workspace mounted?" stops being the agent's problem.</li>
-    <li>Requests are keyed by id and tracked in a map, so a Manager spawning three agents at once gets three answers back — the Sidebar's single-slot request ref would have clobbered them.</li>
+    <li>Requests are keyed by id and tracked in a map, so a thread spawning three agents at once gets three answers back — the Sidebar's single-slot request ref would have clobbered them.</li>
     <li>A UI that never answers (window closed, JS exception) surfaces as an error after 15 s instead of hanging the agent.</li>
   </ul>
   <div class="note">
@@ -240,7 +240,7 @@
   </table>
   <p>
     Chat sessions (Claude and ACP alike) get the <code>burrow</code> bin on PATH and the same <code>BURROW_*</code> values
-    minus <code>BURROW_PTY_ID</code> — without that an ACP agent such as Codex or Gemini could not act as a Manager at all.
+    minus <code>BURROW_PTY_ID</code> — without that an ACP agent such as Codex or Gemini could not orchestrate at all.
   </p>
 
   <h2>Examples</h2>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -105,8 +106,56 @@ func TestControlAPIServesTheRegistry(t *testing.T) {
 	t.Error("spawn missing from the registry")
 }
 
+// The installed SKILL.md is intentionally only a stable stub. This endpoint is
+// the live replacement, so this exhaustiveness test makes a new registry verb
+// impossible to add without appearing in `burrow skills get burrow`.
+func TestSkillsGetBurrowNamesEveryControlVerb(t *testing.T) {
+	app := &App{controlToken: "t", control: control.New(control.Deps{})}
+	srv := httptest.NewServer(controlMux(app))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/skills/burrow", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide := string(body)
+	for _, verb := range app.control.Verbs() {
+		command := "`burrow " + strings.ReplaceAll(verb.Name, "_", "-") + "`"
+		if !strings.Contains(guide, command) {
+			t.Errorf("live guide omits %s", command)
+		}
+	}
+
+	for _, path := range []string{"/v1/skills/burrow?references", "/v1/skills/burrow?reference=worktrees"} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer t")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: got %d, want 200", path, resp.StatusCode)
+		}
+		if len(body) == 0 {
+			t.Errorf("%s: empty response", path)
+		}
+	}
+}
+
 // The UI bridge is request/response: emit, block, deliver the frontend's ack to
-// the right waiter. Several actions can be outstanding at once (a Manager
+// the right waiter. Several actions can be outstanding at once (a thread
 // spawning three agents), so ids must not cross.
 func TestUIBridgeDeliversAcksToTheRightCaller(t *testing.T) {
 	app := &App{}

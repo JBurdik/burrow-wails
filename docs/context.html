@@ -187,11 +187,11 @@
       </ul>
     </div>
     <div class="card">
-      <h3>Manager — per-repo orchestrator</h3>
+      <h3>Orchestration — the thread you are already in</h3>
       <ul>
-        <li><code>ManagerPanel.vue</code> in the right panel: a persistent chat that orchestrates and never implements. Message stream, composer, permission gates and model picker come from <code>AgentChat</code>; the panel owns only the thread and the primer</li>
-        <li>Keyed by the <strong>root repo id</strong> (climbs <code>parent_id</code>), so one Manager survives hopping between a repo and its worktrees. Threads stay mounted per engaged repo and toggle with <code>v-show</code>, so a busy Manager keeps streaming while you look elsewhere. Its session is flagged <code>control:true</code> and excluded from the Sidebar chat list</li>
-        <li>Its primer is <strong>generated from the verb registry</strong> (<code>control_verbs</code>) plus the worktree-isolation toggle and the project's <code>.burrow/manager.md</code> — it can't advertise a tool that doesn't exist. Any configured agent can be the Manager: MCP tools when it has them, <code>burrow &lt;verb&gt;</code> otherwise</li>
+        <li>There is <strong>no Manager panel</strong>. <code>ManagerPanel.vue</code>, its generated primer, the <code>.burrow/manager.md</code> project prompt, the ⌘⇧J binding and the <code>control:true</code> session flag were all removed — an ordinary chat orchestrates by spawning sub-agents</li>
+        <li>Sub-agents (<code>parent_chat_id</code>, one level deep) are listed and hosted by the right panel's <strong>Sub-agents</strong> surface. Each row shows its provider's own logo, so a thread's children can run on different providers</li>
+        <li><code>spawn</code> with a <code>parent_chat_id</code> always forces <code>target: "chat"</code>; worktree isolation is per task (<code>create_worktree</code> → pass the path as <code>cwd</code>), not a global toggle</li>
         <li>Destructive verbs (<code>worktree_remove</code>, <code>pr_merge</code>, <code>tab_close</code>) require user confirmation first</li>
       </ul>
     </div>
@@ -291,7 +291,7 @@
       <tr><td>list_terminal_tabs(workspaceId)</td><td>Load persisted tab list for workspace</td></tr>
       <tr><td>save_terminal_tabs(workspaceId, tabs)</td><td>Persist tab list</td></tr>
       <tr><td>get_pty_foreground(id)</td><td>Foreground process name (poll → tab title; never fabricates agent busy)</td></tr>
-      <tr><td>control_verbs()</td><td>The control verb registry (name, summary, args) — drives the Manager's primer and the MCP tool schemas</td></tr>
+      <tr><td>control_verbs()</td><td>The control verb registry (name, summary, args) — drives <code>burrow help</code> and the MCP tool schemas</td></tr>
       <tr><td>ack_control_action(id, resultJson, errMsg)</td><td>Frontend's reply to a <code>control:action</code> event; unblocks the waiting verb</td></tr>
       <tr><td>get_hook_server_port()</td><td>Port of the local status-hook HTTP server</td></tr>
       <tr><td>set_max_agents(n)</td><td>Publish the soft sub-agent cap (Settings → Agents) to <code>&lt;app-data&gt;/max_agents</code> for the <code>burrow</code> CLI / <code>/burrow</code> skill</td></tr>
@@ -484,7 +484,6 @@
       <tr><td><span class="kbd">⌘⇧D</span></td><td>Split pane vertically</td></tr>
       <tr><td><span class="kbd">⌘1–9</span></td><td>Switch project/workspace</td></tr>
       <tr><td><span class="kbd">⌘B</span></td><td>Toggle sidebar</td></tr>
-      <tr><td><span class="kbd">⌘J</span></td><td>Toggle Manager</td></tr>
       <tr><td><span class="kbd">⌘/</span></td><td>Shortcut cheatsheet</td></tr>
       <tr><td><span class="kbd">⌘⇧N</span></td><td>New project (in-app folder browse; ⌘↵ creates the folder)</td></tr>
       <tr><td><span class="kbd">⌘⇧O</span></td><td>Pick project → Welcome composer</td></tr>

@@ -490,13 +490,25 @@ onMounted(async () => {
     }),
   ]);
 
-  // Create PTY
-  await invoke("create_pty", {
+  // Create PTY. A failure must NOT abort onMounted: everything below it —
+  // the initial command, the foreground poll, registerTerm — would silently
+  // never run and the tab would sit blank forever with no way back. One retry,
+  // because the daemon client redials on its next call after a dropped socket.
+  const createPty = () => invoke("create_pty", {
     id: props.ptyId,
     cwd: props.cwd,
     cols: term.cols,
     rows: term.rows,
   });
+  try {
+    await createPty();
+  } catch {
+    try {
+      await createPty();
+    } catch (e) {
+      term.writeln(`\r\n\x1b[31mburrow: could not start this terminal — ${e}\x1b[0m`);
+    }
+  }
 
   // Send initial command once the shell is actually ready (inject --settings for
   // claude). A fixed timeout raced slow startups (a login shell sourcing
@@ -686,13 +698,14 @@ onMounted(async () => {
   dbgTimer = setInterval(refreshDbg, 500);
 
   // Let the control API read this tab's output (`burrow tab-output`), which is
-  // how a Manager checks on an agent mid-task instead of waiting for its result.
+  // how an orchestrating thread checks on an agent mid-task instead of waiting
+  // for its result.
   registerTerm(props.ptyId, { readOutput });
 });
 
 /**
  * The tail of the buffer as plain text. Trailing blank rows are dropped (an
- * agent's TUI pads the screen, and a Manager reading 80 lines of padding learns
+ * agent's TUI pads the screen, and a reader taking 80 lines of padding learns
  * nothing), and each row is right-trimmed.
  */
 function readOutput(lines: number): string {

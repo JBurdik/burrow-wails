@@ -331,7 +331,6 @@ function agentStatus(args: Record<string, unknown> = {}) {
   }
 
   for (const s of chats.sessions) {
-    if (s.control) continue; // the Manager's own session
     const isChild = s.parentChatId === parentChatId && parentChatId > 0;
     if (onlyChildren && !isChild) continue; // skip non-children when filtering
 

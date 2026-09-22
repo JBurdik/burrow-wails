@@ -235,32 +235,6 @@ func TestSpawnFromChatForcesChatTargetAndCarriesParent(t *testing.T) {
 	}
 }
 
-// IMPORTANT 6: a spawn made from the Manager (a `control` chat) is exempt
-// from the parent-forces-chat rule above. The Manager is control:true and
-// never the active session, and the Right Panel's Sub-agents list is scoped
-// to the active session, so a Manager-spawned CHAT sub-agent would land in no
-// list anywhere. `parent_is_control` is set server-side the same way
-// caller_is_subagent is (controlapi.go derives both from the DB, never trusts
-// the request) — this test exercises the verb with it already set, which is
-// the contract the verb owns; controlapi.go's derivation is that param's
-// wiring, not the verb's behaviour.
-func TestSpawnFromControlChatKeepsTabTarget(t *testing.T) {
-	ui := &fakeUI{result: SpawnResult{PtyID: 3, Target: "tab"}}
-	c := newTestCore(t, Deps{UI: ui})
-
-	if _, err := c.Call(context.Background(), ScopeLocal, "spawn", Params{
-		"task":              "investigate the cache bug",
-		"target":            "tab",
-		"parent_chat_id":    float64(7),
-		"parent_is_control": true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if ui.args["target"] != "tab" {
-		t.Errorf("target = %v, want tab — a Manager spawn must not be forced to chat", ui.args["target"])
-	}
-}
-
 // Depth is capped at one level: recursive agent trees run away in cost and the
 // panel that shows them is a flat list.
 func TestSubAgentCannotSpawn(t *testing.T) {

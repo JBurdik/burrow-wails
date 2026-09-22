@@ -51,7 +51,7 @@ func StartHookServer(ctx context.Context, phases *PhaseStore, routes ...func(*ht
 	mux.HandleFunc("/hook", h.handleStatus)
 	mux.HandleFunc("/status", h.handleStatus)
 	// Posted by `burrow capture` once a sub-agent's result file is written, so a
-	// Manager can collect immediately instead of polling.
+	// the spawning thread can collect immediately instead of polling.
 	mux.HandleFunc("/agent-done", h.handleAgentDone)
 	for _, register := range routes {
 		register(mux)

@@ -250,6 +250,17 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Chat usage</span>
+            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Estimated cost</span>
+                <span class="text-[11px] text-muted-foreground">Recorded chat usage only; terminal transcript scanning is not included.</span>
+              </div>
+              <span class="font-mono text-[13px] text-secondary-foreground">{{ chatUsageLoading ? "…" : formatUsageCost(chatUsageCost) }}</span>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2.5">
             <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface</span>
             <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
@@ -470,12 +481,14 @@
                   <template v-else>Status unknown for this repo</template>
                 </span>
               </div>
+              <span v-if="forgeError[f.provider]" class="max-w-[280px] truncate text-[11px] text-destructive" :title="forgeError[f.provider]">{{ forgeError[f.provider] }}</span>
               <button
                 v-if="isMac && forgeState(f.provider) !== 'authed'"
-                class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs text-foreground hover:border-accent"
-                @click="runInTab(forgeState(f.provider) === 'installed' ? f.auth : f.install)"
+                class="h-8 rounded-[var(--radius-chip)] border border-border px-3 text-xs text-foreground hover:border-accent disabled:opacity-50"
+                :disabled="forgeInstalling === f.provider"
+                @click="forgeState(f.provider) === 'installed' ? logInToForge(f.auth) : installForge(f.provider)"
               >
-                {{ forgeState(f.provider) === 'installed' ? "Log in" : "Install" }}
+                {{ forgeState(f.provider) === 'installed' ? "Log in" : forgeInstalling === f.provider ? "Installing…" : "Install" }}
               </button>
               <a
                 v-else-if="!isMac"
@@ -1177,7 +1190,7 @@ import {
   type RemoteCredentials,
 } from "@/runtime/remoteEndpoint";
 
-defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: [] }>();
 
 // Deep-link into one provider instance (chat header → "configure this agent").
 const focusId = computed(() => ui.settingsFocusId);
@@ -1401,11 +1414,34 @@ async function refreshForgeStatus() {
   if (info?.provider) forgeStatus.value[info.provider] = { installed: info.installed, authed: info.authed };
 }
 
-// Runs the command in a terminal tab rather than silently in the background:
-// Homebrew can prompt, the output is worth seeing, and the user can kill it.
-async function runInTab(cmd: string) {
+const forgeInstalling = ref("");
+const forgeError = ref<Record<string, string>>({});
+
+// Installing runs in the background in Go. It used to open a terminal tab, but
+// the tab was born behind this overlay: the user saw nothing happen, and with
+// Settings closed afterwards, an untouched terminal. brew needs no input here.
+async function installForge(provider: string) {
+  forgeInstalling.value = provider;
+  forgeError.value = { ...forgeError.value, [provider]: "" };
+  try {
+    await invoke("forge_install_cli", { provider });
+    await refreshForgeStatus();
+    // forge_info only answers for the active repo's provider, so a successful
+    // install of any other CLI would still read "unknown" — record it directly.
+    if (!forgeStatus.value[provider]) forgeStatus.value[provider] = { installed: true, authed: false };
+  } catch (e) {
+    forgeError.value = { ...forgeError.value, [provider]: e instanceof Error ? e.message : String(e) };
+  } finally {
+    forgeInstalling.value = "";
+  }
+}
+
+// Logging in is interactive, so it stays a terminal tab — and Settings closes,
+// otherwise the tab is invisible behind this overlay.
+async function logInToForge(cmd: string) {
   const wsId = wsStore.active?.id;
   if (!wsId) return;
+  emit("close");
   await perform("new_tab", { workspaceId: wsId, cmd });
 }
 
@@ -1519,6 +1555,25 @@ const blurControls = [
 
 // Deep-link target set by the caller (⌘P → "Keyboard Shortcuts" etc.).
 const active = ref(ui.settingsSection || "general");
+
+// One compact read-model for the Settings number. The backend replays any
+// context.usage rows not folded into its durable projection before returning.
+const chatUsageCost = ref(0);
+const chatUsageLoading = ref(false);
+async function loadChatUsage() {
+  chatUsageLoading.value = true;
+  try {
+    const report = await invoke<{ estimated_cost_usd: number }>("get_chat_usage");
+    chatUsageCost.value = report.estimated_cost_usd ?? 0;
+  } catch (e) {
+    console.error("get_chat_usage failed", e);
+  } finally {
+    chatUsageLoading.value = false;
+  }
+}
+function formatUsageCost(value: number): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
 
 // ── Burrow agent docs (skill install/update) ────────────────────────────────
 const installingDocs = ref(false);
@@ -1775,10 +1830,12 @@ async function runExtensionCommand(extensionId: string, commandId: string) {
 
 // Lazy-load each panel's data the first time it's opened.
 watch(active, (id) => {
+	if (id === "general") loadChatUsage();
   if (id === "skills" && skills.value.length === 0) loadSkills();
   if (id === "mcp" && mcpServers.value.length === 0) loadMcp();
   if (id === "extensions") loadExtensions();
 });
+if (active.value === "general") loadChatUsage();
 
 // Refresh forge status whenever the Integrations tab is the one showing: on
 // mount too, since `active` can already be "integrations" from persisted

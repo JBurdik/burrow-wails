@@ -30,6 +30,11 @@ type DaemonClient struct {
 	conn    net.Conn
 	enc     *json.Encoder
 	pending map[string]chan *daemonproto.Response
+
+	// dialMu serializes reconnects so two calls racing on a dropped socket
+	// cannot end up with two live connections — both readLoops would broadcast
+	// the same pty-data frame and every terminal would render doubled output.
+	dialMu sync.Mutex
 }
 
 func NewDaemonClient(ctx context.Context, sockPath string) *DaemonClient {
@@ -164,8 +169,52 @@ func (d *DaemonClient) spawn() error {
 	return cmd.Start()
 }
 
+// ensureConn reconnects if the daemon dropped us. The daemon closes a client
+// whose write blocked for 2 s (daemonserver's clientWriteTimeout — a PTY output
+// flood is enough), and before this the client never noticed: readLoop returned,
+// the encoder stayed non-nil, and every later call wrote into a dead socket and
+// timed out. Symptom: every terminal goes silent and a new tab opens and never
+// comes up, until the app is restarted.
+func (d *DaemonClient) ensureConn() error {
+	if d.connected() {
+		return nil
+	}
+	d.dialMu.Lock()
+	defer d.dialMu.Unlock()
+	if d.connected() { // another caller won the race
+		return nil
+	}
+	return d.connect()
+}
+
+func (d *DaemonClient) connected() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.enc != nil
+}
+
+// dropConn invalidates the connection this readLoop was serving and fails the
+// calls waiting on it, rather than leaving them to the 10 s timeout each. Only
+// the live connection is cleared: a reconnect may already have replaced it.
+func (d *DaemonClient) dropConn(conn net.Conn) {
+	d.mu.Lock()
+	var orphaned map[string]chan *daemonproto.Response
+	if d.conn == conn {
+		d.conn = nil
+		d.enc = nil
+		orphaned = d.pending
+		d.pending = make(map[string]chan *daemonproto.Response)
+	}
+	d.mu.Unlock()
+	_ = conn.Close()
+	for id, ch := range orphaned {
+		ch <- &daemonproto.Response{ReqID: id, Error: "daemon connection lost"}
+	}
+}
+
 func (d *DaemonClient) readLoop(conn net.Conn) {
 	dec := json.NewDecoder(conn)
+	defer d.dropConn(conn)
 	for {
 		var env daemonproto.Envelope
 		if err := dec.Decode(&env); err != nil {
@@ -197,6 +246,10 @@ func (d *DaemonClient) readLoop(conn net.Conn) {
 func (d *DaemonClient) call(req daemonproto.Request) (*daemonproto.Response, error) {
 	req.ReqID = uuid.NewString()
 	ch := make(chan *daemonproto.Response, 1)
+
+	if err := d.ensureConn(); err != nil {
+		return nil, fmt.Errorf("daemon not connected: %w", err)
+	}
 
 	d.mu.Lock()
 	if d.enc == nil {
