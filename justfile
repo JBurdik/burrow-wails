@@ -3,6 +3,11 @@
 
 set shell := ["bash", "-uc"]
 
+# `wails` lives in GOBIN, which a non-login shell (an agent's Bash tool, a hook)
+# does not have on PATH — `just build` then dies with "wails: command not found"
+# halfway through a release, after the version bump has already happened.
+export PATH := env_var('HOME') + "/go/bin:" + env_var('PATH')
+
 # Apple notarization identity (NOT secret — the app-specific password lives in
 # the login Keychain item BURROW_NOTARY_PWD, never here).
 export APPLE_ID      := "bc.jakubgal@email.cz"

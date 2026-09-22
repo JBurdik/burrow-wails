@@ -14,8 +14,12 @@ Run these in parallel:
 git status
 git log --oneline $(git describe --tags --abbrev=0)..HEAD
 git diff HEAD  # see uncommitted changes
-node -p "require('./src-tauri/tauri.conf.json').version"
+node -p "require('./src-wails/wails.json').info.productVersion"
 ```
+
+`just release` aborts on a dirty tree, so anything uncommitted — regenerated
+Wails bindings under `src-wails/frontend/wailsjs/` are the usual case — has to be
+committed alongside the changelog in Step 5.
 
 Also check `git diff` on any modified source files to understand what the uncommitted changes actually do. The goal is to describe all changes (committed since last tag + uncommitted) in the changelog.
 
@@ -28,7 +32,7 @@ If the user didn't specify `patch` / `minor` / `major`, ask. Default is `patch`.
 
 ## Step 3 — Compute new version
 
-Current version is in `src-tauri/tauri.conf.json`. Compute the bumped version yourself (don't run `just bump` yet — that happens inside `just release`). You need it to write the changelog header.
+Current version is `info.productVersion` in `src-wails/wails.json` — the single source of truth. Compute the bumped version yourself (don't run `just bump` yet — that happens inside `just release`). You need it to write the changelog header.
 
 ## Step 4 — Update docs/changelog.html
 
@@ -107,8 +111,9 @@ Current date is in your system context — use the correct month.
 Working tree must be clean before `just release` runs (it checks `git diff --quiet`). Commit changelog first:
 
 ```bash
-git add docs/changelog.html
+git add docs/changelog.html src-wails/frontend/wailsjs/   # plus anything else uncommitted
 git commit -m "docs(changelog): add vX.Y.Z — stručný popis"
+git status --short   # must print nothing
 ```
 
 The commit message should briefly summarize the main changes (1–2 key items).
@@ -119,14 +124,17 @@ The commit message should briefly summarize the main changes (1–2 key items).
 just release [level]
 ```
 
-This takes **10–20 minutes** (Tauri build + Apple notarization). Warn the user. The command will:
-1. Bump version in `tauri.conf.json`, `package.json`, `Cargo.toml`
-2. Build signed .app + .dmg
-3. Notarize + staple dmg
-4. Generate `latest.json` updater manifest
-5. Commit version files as `"release vX.Y.Z"`
-6. Tag + push to GitHub
-7. Create GitHub release with dmg, updater artifacts, manifest
+This takes **10–20 minutes** (Wails build + two Apple notarization round trips). Warn the user and run it in the background — a foreground Bash call will hit its timeout. The command will:
+1. Preflight: `gh` present, `BURROW_NOTARY_PWD` in the Keychain, clean tree
+2. `just bump` — version in `src-wails/wails.json`, `package.json`, `src-wails/version.go`
+3. `just build` — frontend → `wails build -s` → daemon binary into the bundle
+4. `just sign` (Developer ID, hardened runtime) → `notarize-app` → `dmg` → `notarize-dmg`
+5. `just pack` — `Burrow.app.tar.gz` + `latest.json` with the sha256
+6. Commit version files as `"release vX.Y.Z"`, tag, push both
+7. `gh release create` with dmg, tarball, `latest.json`
+
+Release notes are generated from commit subjects since the last tag — the changelog
+is the human-facing artifact, the GitHub notes are not.
 
 ## Step 7 — Report
 
@@ -140,6 +148,24 @@ After success, tell the user:
 | Error | Fix |
 |-------|-----|
 | `working tree dirty` | Uncommitted files exist — commit or stash them first, then try again |
-| `dmg not found` | Build failed — check `pnpm tauri:build` output |
-| `updater key missing` | `~/.tauri/burrow_updater.key` not found — user needs to restore it |
-| Notarization failure | Usually network issue — re-run `just release` (idempotent after bump commit) |
+| `dmg not found` | Build failed — check the `just build` output above it |
+| `gh CLI not found` | `brew install gh` |
+| `BURROW_NOTARY_PWD missing` | `just notary-creds '<app-specific-password>'` |
+| `wails: command not found` | GOBIN isn't on PATH. The `justfile` exports `$HOME/go/bin` itself, so this means `wails` isn't installed: `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
+| Notarization failure | Usually network — re-run `just release`, but **check the version first** (below) |
+
+**Any failure after `just bump`** leaves `package.json`, `src-wails/wails.json` and
+`src-wails/version.go` bumped but uncommitted — a re-run would bump *again* and skip
+a version. Revert them before retrying:
+
+```bash
+git checkout package.json src-wails/wails.json src-wails/version.go
+```
+
+Nothing is pushed or tagged until the build, signing and both notarization steps
+have all succeeded, so a mid-flight failure is always safe to retry.
+
+## Verifying afterwards
+
+`just verify` runs the full codesign / Gatekeeper / staple audit on the built
+`.app` and `.dmg`. Worth it when the signing or notarization steps were touched.
