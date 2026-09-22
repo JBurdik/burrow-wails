@@ -65,6 +65,8 @@ func (p Params) Str(name string) string {
 		return strings.TrimSpace(v)
 	case float64:
 		return fmt.Sprintf("%d", int64(v))
+	case int64:
+		return fmt.Sprintf("%d", v)
 	case bool:
 		return fmt.Sprintf("%t", v)
 	default:
@@ -76,6 +78,8 @@ func (p Params) Int(name string) int64 {
 	switch v := p[name].(type) {
 	case float64:
 		return int64(v)
+	case int64:
+		return v
 	case string:
 		var n int64
 		_, err := fmt.Sscanf(strings.TrimSpace(v), "%d", &n)
@@ -129,6 +133,16 @@ type Exec interface {
 // reaches an already-running agent.
 type PTYWriter interface {
 	WritePty(ptyID string, text string) error
+}
+
+// PTYLister reports which PTY ids the daemon currently knows about — positive
+// proof for the "PTY gone from the daemon" half of dispatch liveness, distinct
+// from the phase's own absence-based `stale` inference (phasepoll.go's
+// watchdog already collapses a dead PTY into `stale`, which is exactly the
+// kind of absence orca's safety floor says must never authorize a conclusion
+// on its own).
+type PTYLister interface {
+	ListPtySessions() ([]string, error)
 }
 
 // UIBridge performs an action only the frontend can perform (open a tab, focus
@@ -188,6 +202,10 @@ type Deps struct {
 	// been collected — the chat equivalent of the <token>.result/.done files.
 	Chats       ChatReader
 	ChatStopper ChatStopper
+	// PTYs reports live PTY ids for orchestration dispatch liveness. Optional:
+	// nil means "no proof either way", so absence of the capability itself
+	// must never be read as absence of the process.
+	PTYs PTYLister
 }
 
 // Core is the verb registry plus the dependencies verbs run against.
@@ -201,6 +219,7 @@ func New(deps Deps) *Core {
 	c.register(delegationVerbs(c)...)
 	c.register(navigationVerbs(c)...)
 	c.register(vcsVerbs(c)...)
+	c.register(orchVerbs(c)...)
 	return c
 }
 

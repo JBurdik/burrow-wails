@@ -129,6 +129,7 @@ func migrate(db *sql.DB) error {
 	stmts = append(stmts, chatsSchema()...)
 	stmts = append(stmts, usageSchema()...)
 	stmts = append(stmts, diffCommentsSchema()...)
+	stmts = append(stmts, orchSchema()...)
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return err
