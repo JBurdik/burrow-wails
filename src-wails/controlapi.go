@@ -200,6 +200,7 @@ func (a *App) initControl(dataDir string) {
 		Phases:       phasesAdapter{s: a.phases},
 		Chats:        a,
 		ChatStopper:  a,
+		PTYs:         a,
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")
 }
