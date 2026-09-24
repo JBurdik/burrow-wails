@@ -90,7 +90,26 @@
           <!-- Status ↔ Settle swap via visibility in one grid cell — display
                swapping resized the row and made it jump on hover. -->
           <span class="grid shrink-0 justify-items-end">
-            <span class="[grid-area:1/1] text-[10px] tabular-nums group-hover:invisible" :class="statusClass(row.tab.status)">{{ statusText(row) }}</span>
+            <span
+              class="flex items-center gap-1 [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible"
+              :class="statusClass(row.tab.status)"
+            >
+              <PhWarningCircle
+                v-if="attentionState(row) === 'needs-input'"
+                :size="10"
+                weight="fill"
+                class="shrink-0 text-[var(--yellow)]"
+                aria-hidden="true"
+              />
+              <span
+                v-else-if="attentionState(row) === 'done-unread'"
+                class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--blue)]"
+                title="Unread completion"
+                role="status"
+                aria-label="Unread completion"
+              />
+              <span>{{ statusText(row) }}</span>
+            </span>
             <button
               class="invisible flex items-center gap-[3px] self-center rounded px-1 text-[10px] font-semibold leading-none text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-[var(--green)] group-hover:visible"
               title="Settle"
@@ -114,6 +133,7 @@
           <PhChatCenteredText v-else-if="row.tab.isChat" :size="14" class="shrink-0 text-[var(--yellow)]" />
           <PhRobot v-else-if="row.tab.isAgent" :size="14" class="ws-term-icon-agent shrink-0 text-accent" />
           <PhTerminal v-else :size="14" class="shrink-0 text-muted-foreground" />
+          <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" aria-label="Pinned" />
           <input
             v-if="editingTab?.wsId === row.ws.id && editingTab?.tabId === row.tab.id"
             v-model="editingTabTitle"
@@ -142,6 +162,7 @@
           <PhGitBranch v-if="row.ws.parent_id" :size="9" class="shrink-0 text-accent" />
           <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ branchOf(row.ws) || row.tab.branch }}</span>
           <span class="ml-auto flex shrink-0 items-center gap-1">
+            <SubagentBadge :summary="subagentActivity(row)" />
             <span v-if="row.tab.model" class="rounded bg-hover px-1 font-mono text-[9px] leading-[1.5] text-muted-foreground" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
             <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
             <span
@@ -194,6 +215,7 @@
           >
             <div class="flex items-center gap-1.5">
               <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : PhChatCenteredText" :size="10" class="shrink-0" />
+              <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="10" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" aria-label="Pinned" />
               <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
               <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
               <span class="grid shrink-0 justify-items-end">
@@ -388,6 +410,10 @@
       <template v-if="rowMenu.tab">
         <button class="menu-item" @click="withMenu((ws, tab) => startTabRename(ws.id, tab!))">Rename tab…</button>
         <button v-if="rowMenu.tab.isChat" class="menu-item" @click="withMenu((ws, tab) => regenerateTitle(ws, tab!))">Regenerate title</button>
+        <button v-if="rowMenu.tab.chatId != null" class="menu-item" @click="withMenu((_ws, tab) => toggleChatPin(tab!.chatId!))">
+          <PhPushPin :size="15" class="mr-1.5 shrink-0" :weight="isChatPinned(rowMenu.tab.chatId) ? 'fill' : 'regular'" />
+          {{ isChatPinned(rowMenu.tab.chatId) ? "Unpin thread" : "Pin thread to top" }}
+        </button>
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
           {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
         </button>
@@ -569,8 +595,11 @@ import {
   PhTrash,
   PhCheck,
   PhArchive,
+  PhPushPin,
+  PhWarningCircle,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
+import SubagentBadge from "./SubagentBadge.vue";
 import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
@@ -582,12 +611,15 @@ import { spinnerFrame } from "@/lib/spinner";
 import { agentIconComp } from "@/lib/agentIcons";
 import {
   getAgentAttentionState,
+  summarizeChildActivity,
   type AgentAttentionState,
+  type ChildActivitySummary,
   type TermStatus,
 } from "@/lib/terminalStatus";
 import { useGitStore, type PrInfo } from "@/stores/git";
 import { useNotificationsStore } from "@/stores/notifications";
 import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
+import { isChatPinned, toggleChatPin, unpinChat } from "@/lib/pinnedChats";
 import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
 import { buildActivityRows, type ActivityRow } from "@/lib/sidebarGroups";
 import { toggleTabSettled } from "@/lib/settledTabs";
@@ -666,8 +698,25 @@ const feed = computed(() =>
         ? chats.sessions.find((s) => s.id === tab.chatId)?.lastActivityAt
         : undefined) ?? termTabs.activityAt(wsId, tab),
     filterProjectId: filterProjectId.value,
+    isPinned: (tab) => isChatPinned(tab.chatId),
   }),
 );
+
+const subagentActivityByParent = computed(() => {
+  const statuses = new Map<number, TermStatus[]>();
+  for (const session of chats.sessions) {
+    if (session.parentChatId == null || session.archivedAt) continue;
+    const list = statuses.get(session.parentChatId) ?? [];
+    list.push(session.status ?? "idle");
+    statuses.set(session.parentChatId, list);
+  }
+  const summaries = new Map<number, ChildActivitySummary>();
+  for (const [parentId, childStatuses] of statuses) {
+    const summary = summarizeChildActivity(childStatuses);
+    if (summary) summaries.set(parentId, summary);
+  }
+  return summaries;
+});
 
 // ── search ───────────────────────────────────────────────────────────────────
 // Plain substring match over workspace name + tab title; a row survives the
@@ -705,7 +754,10 @@ function runConfirm() {
 function deletePermanently(chatId: number) {
   confirmDialog.value = {
     message: "Delete this chat permanently? This cannot be undone.",
-    onConfirm: () => chats.remove(chatId),
+    onConfirm: () => {
+      unpinChat(chatId);
+      chats.remove(chatId);
+    },
   };
 }
 // Last step of a thread's life: settled → archived → gone. A chat row is a
@@ -716,7 +768,10 @@ function deleteThread(wsId: number, tab: TabSummary) {
     message: `Delete “${tab.title}” permanently? This cannot be undone.`,
     onConfirm: () => {
       termTabs.close(wsId, tab.id);
-      if (tab.isChat && tab.chatId != null) chats.remove(tab.chatId);
+      if (tab.isChat && tab.chatId != null) {
+        unpinChat(tab.chatId);
+        chats.remove(tab.chatId);
+      }
     },
   };
 }
@@ -860,7 +915,7 @@ function statusClass(status: TermStatus): string {
   switch (status) {
     case "running": return "text-accent";
     case "permission": return "text-[var(--yellow)]";
-    case "waiting": return "text-[var(--blue)]";
+    case "waiting": return "text-[var(--yellow)]";
     case "error": return "text-destructive";
     case "review": return "text-[var(--blue)]";
     default: return "text-muted-foreground";
@@ -869,6 +924,10 @@ function statusClass(status: TermStatus): string {
 
 function attentionState(row: ActivityRow): AgentAttentionState {
   return getAgentAttentionState(row.tab.status, termTabs.isCompletionUnseen(row.ws.id, row.tab.id));
+}
+
+function subagentActivity(row: ActivityRow): ChildActivitySummary | null {
+  return row.tab.chatId == null ? null : subagentActivityByParent.value.get(row.tab.chatId) ?? null;
 }
 
 function attentionLabel(state: AgentAttentionState): string {

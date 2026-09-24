@@ -5,6 +5,7 @@
       :class="{ 'bg-selected': store.selectedId === node.id }"
       :style="{ paddingLeft: `${8 + depth * 12}px` }"
       @click="handleClick"
+      @dblclick.stop="handleDoubleClick"
     >
       <PhSpinner    v-if="node.loading" class="w-2.5 shrink-0 animate-spin text-secondary-foreground" :size="10" />
       <PhCaretRight v-else-if="node.type === 'folder' && !node.expanded" class="w-2.5 shrink-0 text-secondary-foreground" :size="10" weight="bold" />
@@ -109,6 +110,12 @@ function handleClick() {
     store.select(props.node.id);
     activeTerm()?.openFileInTab(props.node.id, props.node.name);
   }
+}
+
+function handleDoubleClick() {
+  if (props.node.type !== "file") return;
+  store.select(props.node.id);
+  activeTerm()?.openFileInTab(props.node.id, props.node.name, undefined, true);
 }
 
 function addToContext() {

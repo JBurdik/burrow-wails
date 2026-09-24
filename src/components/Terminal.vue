@@ -36,6 +36,14 @@
       @dismiss="inspectorOpen = false"
     />
 
+    <FileViewer
+      :workspace-id="workspaceId"
+      :cwd="cwd"
+      @close-file="closeEditorFile"
+      @saved="onFileViewerSaved"
+      @error="onLeafError"
+    />
+
     <div
       v-if="tabs.length > 0"
       class="terminal-body relative flex flex-1 overflow-hidden"
@@ -193,6 +201,7 @@ import AgentChat from "./AgentChat.vue";
 import BrowserPane from "./BrowserPane.vue";
 import BottomTerminalPanel from "./BottomTerminalPanel.vue";
 import GitPanel from "./GitPanel.vue";
+import FileViewer from "./FileViewer.vue";
 import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vue";
 import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import { spinnerFrame } from "@/lib/spinner";
@@ -207,6 +216,7 @@ import {
   aggregateStatus,
   deriveTabTitle,
   isDefaultTitle,
+  threadAttentionSummary,
   type TermStatus,
 } from "@/lib/terminalStatus";
 import { useAgentHistoryStore } from "@/stores/agentHistory";
@@ -218,6 +228,7 @@ import { useKeybindingsStore } from "@/stores/keybindings";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useGitStore } from "@/stores/git";
+import { useFileViewerStore } from "@/stores/fileViewer";
 import { isTabSettled, settledTabKeys } from "@/lib/settledTabs";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
@@ -230,6 +241,7 @@ const tabsStore = useTerminalTabsStore();
 const keys = useKeybindingsStore();
 const notifStore = useNotificationsStore();
 const gitStore = useGitStore();
+const fileViewerStore = useFileViewerStore();
 const historyStore = useAgentHistoryStore();
 
 interface Tab {
@@ -1274,43 +1286,26 @@ function isLeafDirty(leaf: Leaf): boolean {
   return !!leaf.dirty;
 }
 
-// Open a file from the explorer as an editor tab beside the terminal tabs. If the
-// file is already open anywhere, focus it instead of duplicating.
-function openFileInTab(path: string, name: string, line?: number) {
-  for (const tab of tabs.value) {
-    const existing = getAllLeaves(tab.root).find(
-      (l) => l.leafType === "editor" && l.filePath === path,
-    );
-    if (existing) {
-      activeTabId.value = tab.id;
-      markTabSeen(tab);
-      focusedLeafId.value = existing.id;
-      nextTick(() => {
-        if (line) xtermRefs.get(existing.id)?.revealLine?.(line);
-        xtermRefs.get(existing.id)?.focus();
-      });
-      return;
-    }
-  }
-  const id = nextPtyId();
-  const leaf: Leaf = {
-    type: "leaf",
-    id,
-    title: name,
-    defaultTitle: name,
-    isAgent: false,
-    busy: false,
-    status: "idle",
-    leafType: "editor",
-    filePath: path,
-    fileLine: line,
-    dirty: false,
-  };
-  const tab: Tab = { id, root: leaf };
-  tabs.value.push(tab);
-  activeTabId.value = id;
-  focusedLeafId.value = id;
-  nextTick(() => xtermRefs.get(id)?.focus());
+// Files live on a workspace-local editor surface, not in the terminal/chat tab
+// list mirrored to the Sidebar. The method name stays stable for callers.
+function openFileInTab(path: string, name: string, line?: number, pin = false) {
+  fileViewerStore.openFile(props.workspaceId, path, name, line, { pin });
+}
+
+async function closeEditorFile(path: string) {
+  const file = fileViewerStore.workspace(props.workspaceId).files.find((candidate) => candidate.path === path);
+  if (!file) return;
+  if (file.dirty && !(await confirmClose(file.name, "unsaved"))) return;
+  fileViewerStore.closeFile(props.workspaceId, path);
+}
+
+function closeActiveEditor() {
+  const path = fileViewerStore.workspace(props.workspaceId).activePath;
+  if (path) void closeEditorFile(path);
+}
+
+function onFileViewerSaved() {
+  if (gitStore.cwd === props.cwd) gitStore.refresh(true);
 }
 
 async function makeChatLeaf(agentId?: string): Promise<Leaf> {
@@ -1462,7 +1457,9 @@ function onKeydown(e: KeyboardEvent) {
   }
   const actions: Record<string, () => void> = {
     newTab: () => addTab(),
-    closePane: () => closePane(focusedLeafId.value),
+    closePane: () => fileViewerStore.workspace(props.workspaceId).visible
+      ? closeActiveEditor()
+      : closePane(focusedLeafId.value),
     splitH: () => splitFocused("terminal", "h"),
     splitV: () => splitFocused("terminal", "v"),
     bottomPanel: () => toggleBottomPanel(),
@@ -1475,6 +1472,16 @@ function onKeydown(e: KeyboardEvent) {
     }
   }
 }
+
+// A Sidebar selection changes the active terminal/chat id. Files are a
+// temporary overlay, so return to the selected thread without discarding the
+// session-only file tabs or touching the high-impact activateTab() path.
+watch(
+  () => tabsStore.activeByWs[props.workspaceId],
+  (active, previous) => {
+    if (active !== previous) fileViewerStore.hide(props.workspaceId);
+  },
+);
 
 // ── persistence ─────────────────────────────────────────────────────────────
 
@@ -1549,6 +1556,15 @@ function tabSettled(t: Tab): boolean {
     : isTabSettled(props.workspaceId, t.id);
 }
 
+function threadStatus(t: Tab): { status: TermStatus; settled: boolean } {
+  const ownStatus = tabStatus(t);
+  const settled = tabSettled(t);
+  if (!tabIsChat(t)) return { status: ownStatus, settled };
+  const childStatuses = chatsStore.childrenOf((t.root as Leaf).chatId!)
+    .map((child) => child.status ?? "idle");
+  return threadAttentionSummary(ownStatus, childStatuses, settled);
+}
+
 function syncStore() {
   // Same hazard as persist(): a sync that runs before the restore has added the
   // chat tabs pushes a list missing them, and setTabs prunes the activity stamps
@@ -1556,31 +1572,47 @@ function syncStore() {
   if (!restored) return;
   tabsStore.setTabs(
     props.workspaceId,
-    tabs.value.map((t) => ({
-      id: t.id,
-      title: tabTitle(t),
-      isAgent: tabIsAgent(t),
-      isChat: isChat(t),
-      busy: getAllLeaves(t.root).some((l) => l.busy),
-      status: tabStatus(t),
-      leafCount: getAllLeaves(t.root).length,
-      round: Math.max(0, ...getAllLeaves(t.root).map((l) => l.round ?? 0)),
-      sessionId: getAllLeaves(t.root)[0]?.sessionId,
-      chatId: tabIsChat(t) ? (t.root as Leaf).chatId : undefined,
-      settled: tabSettled(t),
-      agentIcon: tabAgentIcon(t),
-      model: chatSessionOf(t)?.model ?? getAllLeaves(t.root)[0]?.model,
-      // Chat threads snapshot their own branch at creation (persisted in
-      // config.json with the session — see claudeChats.create); plain
-      // terminal/agent tabs use the per-tab cache backed by SQLite.
-      branch: chatSessionOf(t)?.branch ?? branchSnapshotFor(t.id),
-      bottomTerms: bottomPanels[t.id]?.ptyIds.length || undefined,
-    })),
+    tabs.value.map((t) => {
+      const { status, settled } = threadStatus(t);
+      return {
+        id: t.id,
+        title: tabTitle(t),
+        isAgent: tabIsAgent(t),
+        isChat: isChat(t),
+        busy: getAllLeaves(t.root).some((l) => l.busy),
+        status,
+        leafCount: getAllLeaves(t.root).length,
+        round: Math.max(0, ...getAllLeaves(t.root).map((l) => l.round ?? 0)),
+        sessionId: getAllLeaves(t.root)[0]?.sessionId,
+        chatId: tabIsChat(t) ? (t.root as Leaf).chatId : undefined,
+        // A manually/automatically settled parent must return to the live list
+        // while one of its children is blocked on the user. Once resolved, the
+        // parent's original settle decision naturally takes over again.
+        settled,
+        agentIcon: tabAgentIcon(t),
+        model: chatSessionOf(t)?.model ?? getAllLeaves(t.root)[0]?.model,
+        // Chat threads snapshot their own branch at creation (persisted in
+        // config.json with the session — see claudeChats.create); plain
+        // terminal/agent tabs use the per-tab cache backed by SQLite.
+        branch: chatSessionOf(t)?.branch ?? branchSnapshotFor(t.id),
+        bottomTerms: bottomPanels[t.id]?.ptyIds.length || undefined,
+      };
+    }),
   );
   tabsStore.setActive(props.workspaceId, activeTabId.value);
 }
 
 watch([tabs, activeTabId, focusedLeafId], syncStore, { deep: true });
+// A sub-agent has no top-level tab/leaf of its own, so its phase cannot trigger
+// the deep `tabs` watcher above. Mirror only the child fields that affect the
+// parent thread's derived attention status.
+watch(
+  () => chatsStore.sessions
+    .filter((session) => session.parentChatId)
+    .map((session) => `${session.id}:${session.parentChatId}:${session.status ?? "idle"}:${session.archivedAt ?? ""}`)
+    .join(","),
+  syncStore,
+);
 // Bottom panels live outside `tabs`, so the sidebar's terminal chip needs its
 // own trigger.
 watch(bottomPanels, syncStore, { deep: true });

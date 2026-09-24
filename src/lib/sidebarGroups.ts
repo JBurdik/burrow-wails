@@ -18,6 +18,9 @@ export interface ActivityInput {
   activityAt: (wsId: number, tab: TabSummary) => number;
   /** repo id to restrict to, or null for all */
   filterProjectId: number | null;
+  /** pinned rows float to the top of their own section; optional so callers
+   *  that don't care about pins (tests, future surfaces) can omit it. */
+  isPinned?: (tab: TabSummary) => boolean;
 }
 
 /**
@@ -46,6 +49,11 @@ export function buildActivityRows(
     }
   }
 
-  const byRecency = (a: ActivityRow, b: ActivityRow) => b.ts - a.ts || b.tab.id - a.tab.id;
-  return { live: live.sort(byRecency), settledChats: settledChats.sort(byRecency) };
+  // Pinned first, then the existing recency order — inside the pinned block
+  // and inside the rest, ordering is untouched, so unpinning restores exactly
+  // the order the row would have had.
+  const pinned = input.isPinned ?? (() => false);
+  const order = (a: ActivityRow, b: ActivityRow) =>
+    Number(pinned(b.tab)) - Number(pinned(a.tab)) || b.ts - a.ts || b.tab.id - a.tab.id;
+  return { live: live.sort(order), settledChats: settledChats.sort(order) };
 }

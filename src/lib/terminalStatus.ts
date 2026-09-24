@@ -70,6 +70,42 @@ export function aggregateStatus<T>(
   return "idle";
 }
 
+export type ChildActivityState = Exclude<AgentAttentionState, "idle">;
+
+export interface ChildActivitySummary {
+  state: ChildActivityState;
+  count: number;
+}
+
+/** Highest-priority separate badge for a thread's active/unread children. */
+export function summarizeChildActivity(childStatuses: TermStatus[]): ChildActivitySummary | null {
+  const states = childStatuses
+    .map((status) => getAgentAttentionState(status))
+    .filter((state): state is ChildActivityState => state !== "idle");
+  if (states.length === 0) return null;
+  const state = ATTENTION_PRIORITY.find(
+    (candidate): candidate is ChildActivityState => candidate !== "idle" && states.includes(candidate),
+  );
+  return state ? { state, count: states.length } : null;
+}
+
+/** Derive parent sidebar status and visibility from child attention state. */
+export function threadAttentionSummary(
+  parentStatus: TermStatus,
+  childStatuses: TermStatus[],
+  settled: boolean,
+): { status: TermStatus; settled: boolean } {
+  const childActivity = summarizeChildActivity(childStatuses);
+  return {
+    // A child's lifecycle is shown by its own badge and never replaces the
+    // parent thread's status.
+    status: parentStatus,
+    // Keep a parent discoverable while a child is working or needs review.
+    // MARK_SEEN clears durable review/error states once that child is opened.
+    settled: childActivity ? false : settled,
+  };
+}
+
 /** Human label for a TermStatus. Same wording Sidebar.vue uses for its rows. */
 export function statusLabel(status: TermStatus): string {
   switch (status) {

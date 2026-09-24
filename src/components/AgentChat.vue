@@ -2693,17 +2693,19 @@ async function resolveClaudePrompt(
   cr: CanUseToolReq,
   response: Record<string, unknown>,
   clearPrompt: () => void,
-) {
+): Promise<boolean> {
   nativeControlResponsePending.value = true;
   try {
     await respondControl(cr.requestId, response);
     clearPrompt();
+    return true;
   } catch (e) {
     messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
     saveMessages(props.chatId, messages.value);
     // respondControl throws before RESUME fires — clear anyway so status doesn't stay stuck on waiting/permission.
     clearPrompt();
     chats.sendStatusEvent(props.chatId, { type: "RESUME" });
+    return false;
   } finally {
     nativeControlResponsePending.value = false;
     syncStore();
@@ -2818,12 +2820,19 @@ async function cancelQuestion() {
 async function respondPlan(approve: boolean) {
   const cr = pendingPlan.value;
   if (!cr || nativeControlResponsePending.value) return;
-  await resolveClaudePrompt(cr, approve
+  const resolved = await resolveClaudePrompt(cr, approve
     ? { behavior: "allow", updatedInput: cr.input }
     : { behavior: "deny", message: planFeedback.value.trim() || "Keep planning — do not exit plan mode yet." }, () => {
       removeFeedMarker(pendingPlanMsgId.value); pendingPlanMsgId.value = null;
       pendingPlan.value = null;
     });
+  // ExitPlanMode changes Claude's live session in place. Mirror that transition
+  // locally without restarting the process, or the picker and next resume keep
+  // claiming/re-applying plan mode after the approved implementation has begun.
+  if (approve && resolved && permMode.value === "plan") {
+    permMode.value = "auto";
+    savePermMode(props.chatId, "auto");
+  }
 }
 
 // Pick a permission mode from the header dropdown (default / acceptEdits / bypassPermissions).

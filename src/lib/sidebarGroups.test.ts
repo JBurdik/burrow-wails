@@ -50,3 +50,44 @@ describe("buildActivityRows", () => {
     expect(settledChats.map((r) => r.tab.id)).toEqual([101]);
   });
 });
+
+describe("buildActivityRows pinning", () => {
+  const tabs = [
+    mkTab(100, "a1", { isChat: true, chatId: 1 }),
+    mkTab(101, "a2", { isChat: true, chatId: 2 }),
+    mkTab(102, "a3", { isChat: true, chatId: 3 }),
+  ];
+  const stamps: Record<number, number> = { 100: 30, 101: 90, 102: 60 };
+  const run = (pins: number[]) =>
+    buildActivityRows({
+      openedWorkspaces: [repoA],
+      tabsByWs: { 1: tabs },
+      activityAt: (_ws, tab) => stamps[tab.id] ?? 0,
+      filterProjectId: null,
+      isPinned: (tab) => tab.chatId != null && pins.includes(tab.chatId),
+    });
+
+  it("floats pinned rows above the recency order", () => {
+    expect(run([1]).live.map((r) => r.tab.id)).toEqual([100, 101, 102]);
+  });
+
+  it("keeps recency order among pinned rows and among the rest", () => {
+    expect(run([1, 3]).live.map((r) => r.tab.id)).toEqual([102, 100, 101]);
+  });
+
+  it("restores the plain recency order once unpinned", () => {
+    expect(run([]).live.map((r) => r.tab.id)).toEqual([101, 102, 100]);
+  });
+
+  it("pins inside the settled bucket, not out of it", () => {
+    const { live, settledChats } = buildActivityRows({
+      openedWorkspaces: [repoA],
+      tabsByWs: { 1: [tabs[0], { ...tabs[1], settled: true }, { ...tabs[2], settled: true }] },
+      activityAt: (_ws, tab) => stamps[tab.id] ?? 0,
+      filterProjectId: null,
+      isPinned: (tab) => tab.chatId === 3,
+    });
+    expect(live.map((r) => r.tab.id)).toEqual([100]);
+    expect(settledChats.map((r) => r.tab.id)).toEqual([102, 101]);
+  });
+});
