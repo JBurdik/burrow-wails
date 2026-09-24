@@ -221,23 +221,92 @@
                 <Button variant="outline" size="sm" @click="browseConfigDir"><PhFolderOpen :size="11" /></Button>
               </div>
             </SettingField>
+
+            <SettingField
+              v-if="inst.kind === 'claude'"
+              label="Auto-compact after"
+              hint="Token budget before the CLI compacts the conversation (CLAUDE_CODE_AUTO_COMPACT_WINDOW). Empty uses Claude's default."
+            >
+              <input
+                v-model="inst.autoCompactWindow"
+                type="number"
+                min="0"
+                placeholder="e.g. 300000"
+                class="w-full rounded-lg border border-border bg-base px-2.5 py-1.5 font-mono text-xs text-foreground focus:border-accent/60 focus:outline-none"
+              />
+            </SettingField>
           </div>
 
           <!-- Models -->
-          <div v-else-if="tab === 'Models'" class="flex flex-col gap-1">
-            <div v-if="!models.length" class="text-[11px] text-muted-foreground/60">
-              No models reported yet — start a chat with this provider once.
+          <div v-else-if="tab === 'Models'" class="flex flex-col gap-2">
+            <p class="text-[11px] text-muted-foreground/60">
+              Favorites, visibility and ordering apply to this device. Custom ids are passed to the CLI as-is.
+            </p>
+
+            <div class="flex items-center gap-2">
+              <input
+                v-model="modelFilter"
+                type="text"
+                placeholder="Filter models"
+                class="min-w-0 flex-1 rounded-lg border border-border bg-base px-2.5 py-1.5 text-xs text-foreground focus:border-accent/60 focus:outline-none"
+              />
+              <span class="whitespace-nowrap text-[11px] text-muted-foreground/60">
+                {{ models.length }} models · {{ favCount }} favorites · {{ hiddenCount }} hidden
+              </span>
+              <Button variant="outline" size="sm" :disabled="models.length < 2" @click="onHideAll">Hide all</Button>
             </div>
-            <button
-              v-for="m in models"
-              :key="m.id"
-              class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-hover"
-              @click="onToggleFavorite(m.id)"
-            >
-              <PhStar :size="13" :weight="isFav(m.id) ? 'fill' : 'regular'" :class="isFav(m.id) ? 'text-accent' : 'text-muted-foreground/50'" />
-              <span class="flex-1 truncate text-xs text-secondary-foreground">{{ m.label }}</span>
-              <code class="font-mono text-[10px] text-muted-foreground/60">{{ m.id }}</code>
-            </button>
+
+            <div v-if="!models.length" class="text-[11px] text-muted-foreground/60">
+              No models reported yet — start a chat with this provider once, or add one below.
+            </div>
+
+            <template v-for="group in [
+              { key: 'fav', label: 'Favorites', rows: favModels },
+              { key: 'all', label: 'All', rows: plainModels },
+              { key: 'hidden', label: 'Hidden from picker', rows: hiddenModels },
+            ]" :key="group.key">
+              <div v-if="group.rows.length" class="flex flex-col gap-0.5">
+                <div class="px-2 pt-1 text-[10px] uppercase tracking-wide text-muted-foreground/50">{{ group.label }}</div>
+                <div
+                  v-for="m in group.rows"
+                  :key="m.id"
+                  class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-hover"
+                  :class="group.key === 'hidden' && 'opacity-50'"
+                >
+                  <button :title="isFav(m.id) ? 'Unfavorite' : 'Favorite'" @click="onToggleFavorite(m.id)">
+                    <PhStar :size="13" :weight="isFav(m.id) ? 'fill' : 'regular'" :class="isFav(m.id) ? 'text-accent' : 'text-muted-foreground/50'" />
+                  </button>
+                  <span class="truncate text-xs text-secondary-foreground">{{ m.label }}</span>
+                  <code class="truncate font-mono text-[10px] text-muted-foreground/60">{{ m.id }}</code>
+                  <span v-if="m.efforts?.length" class="ml-auto whitespace-nowrap text-[10px] text-muted-foreground/50">Reasoning</span>
+                  <div class="flex items-center gap-0.5" :class="!m.efforts?.length && 'ml-auto'">
+                    <button class="rounded p-1 text-muted-foreground/60 hover:bg-hover hover:text-foreground" title="Move up" @click="onMove(m.id, -1)"><PhArrowUp :size="11" /></button>
+                    <button class="rounded p-1 text-muted-foreground/60 hover:bg-hover hover:text-foreground" title="Move down" @click="onMove(m.id, 1)"><PhArrowDown :size="11" /></button>
+                    <button
+                      v-if="isCustom(m.id)"
+                      class="rounded p-1 text-muted-foreground/60 hover:bg-hover hover:text-foreground"
+                      title="Remove custom model"
+                      @click="onRemoveCustom(m.id)"
+                    ><PhTrash :size="11" /></button>
+                    <Switch :model-value="!isHid(m.id)" title="Show in picker" @update:model-value="onToggleHidden(m.id)" />
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <SettingField label="Add custom model" hint="A model id this build's catalog doesn't ship yet — passed to the CLI verbatim.">
+              <div class="flex gap-1.5">
+                <input
+                  v-model="customDraft"
+                  type="text"
+                  placeholder="claude-opus-9"
+                  class="min-w-0 flex-1 rounded-lg border border-border bg-base px-2.5 py-1.5 font-mono text-xs text-foreground focus:border-accent/60 focus:outline-none"
+                  @keydown.enter="onAddCustom"
+                />
+                <Button variant="outline" size="sm" @click="onAddCustom"><PhPlus :size="11" /> Add</Button>
+              </div>
+              <div v-if="customError" class="pt-1 text-[11px] text-red-400">{{ customError }}</div>
+            </SettingField>
           </div>
         </div>
 
@@ -296,7 +365,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
-import { PhPlus, PhX, PhTrash, PhArrowsClockwise, PhArrowCounterClockwise, PhCaretRight, PhStar, PhFolderOpen, PhWarning } from "@phosphor-icons/vue";
+import { PhPlus, PhX, PhTrash, PhArrowsClockwise, PhArrowCounterClockwise, PhCaretRight, PhStar, PhFolderOpen, PhWarning, PhArrowUp, PhArrowDown } from "@phosphor-icons/vue";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
@@ -305,7 +374,10 @@ import ShortcutRecorder from "@/components/ShortcutRecorder.vue";
 import { useProvidersStore, type ProviderInstance } from "@/stores/providers";
 import { providerFor } from "@/lib/providers";
 import { agentIconComp, AGENT_ICON_KEYS } from "@/lib/agentIcons";
-import { modelsFor, isFavorite, toggleFavorite, ensureModels } from "@/lib/chatModels";
+import {
+  modelsFor, isFavorite, toggleFavorite, ensureModels, isHidden, setHidden, hideAllModels,
+  moveModel, addCustomModel, isCustomModel, removeCustomModel,
+} from "@/lib/chatModels";
 import { pickDir } from "@/lib/pickPath";
 import { flushConfig } from "@/lib/config";
 import { invoke } from "@tauri-apps/api/core";
@@ -446,12 +518,46 @@ async function browseConfigDir() {
 }
 
 // --- Models -----------------------------------------------------------------
+// This panel is the one place that sees *every* model, hidden ones included —
+// hence modelsFor and not visibleModelsFor, which is what the pickers read.
 const models = computed(() => (inst.value ? modelsFor(inst.value.id) : []));
+const modelFilter = ref("");
+const filtered = computed(() => {
+  const q = modelFilter.value.trim().toLowerCase();
+  if (!q) return models.value;
+  return models.value.filter((m) => m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
+});
+// Three buckets, each keeping the user's ordering inside it.
+const favModels = computed(() => filtered.value.filter((m) => isFav(m.id) && !isHid(m.id)));
+const plainModels = computed(() => filtered.value.filter((m) => !isFav(m.id) && !isHid(m.id)));
+const hiddenModels = computed(() => filtered.value.filter((m) => isHid(m.id)));
+const hiddenCount = computed(() => models.value.filter((m) => isHid(m.id)).length);
+const favCount = computed(() => models.value.filter((m) => isFav(m.id)).length);
+
 watch([inst, tab], () => {
   if (inst.value && tab.value === "Models") void ensureModels(inst.value.id, inst.value.kind, "");
 });
 function isFav(modelId: string) { return inst.value ? isFavorite(inst.value.id, modelId) : false; }
+function isHid(modelId: string) { return inst.value ? isHidden(inst.value.id, modelId) : false; }
+function isCustom(modelId: string) { return inst.value ? isCustomModel(inst.value.id, modelId) : false; }
 function onToggleFavorite(modelId: string) { if (inst.value) toggleFavorite(inst.value.id, modelId); }
+function onToggleHidden(modelId: string) { if (inst.value) setHidden(inst.value.id, modelId, !isHid(modelId)); }
+function onMove(modelId: string, delta: -1 | 1) { if (inst.value) moveModel(inst.value.id, modelId, delta); }
+function onHideAll() { if (inst.value) hideAllModels(inst.value.id); }
+
+const customDraft = ref("");
+const customError = ref("");
+function onAddCustom() {
+  if (!inst.value) return;
+  const slug = customDraft.value.trim();
+  if (!slug) return;
+  // The id goes straight onto the CLI's --model flag, so a duplicate would
+  // silently shadow a catalog entry rather than add anything.
+  if (!addCustomModel(inst.value.id, slug)) { customError.value = `${slug} is already in the list.`; return; }
+  customDraft.value = "";
+  customError.value = "";
+}
+function onRemoveCustom(modelId: string) { if (inst.value) removeCustomModel(inst.value.id, modelId); }
 
 // --- Actions ----------------------------------------------------------------
 function onAdd(providerId: string) {

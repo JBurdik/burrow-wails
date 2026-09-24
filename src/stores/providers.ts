@@ -52,6 +52,7 @@ function normalize(parsed: unknown): ProviderInstance[] | null {
     return newInstance(String(a.providerId ?? "custom"), {
       ...a,
       id: String(a.id ?? "custom"),
+      autoCompactWindow: String(a.autoCompactWindow ?? ""),
       args: [...(a.args ?? [])],
       transportArgs: [...(a.transportArgs ?? [])],
       env: { ...(a.env ?? {}) },

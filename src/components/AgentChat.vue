@@ -1097,7 +1097,9 @@ function onPickModel(agentId: string, modelId: string) {
 }
 
 // Model switcher — ids come from the shared catalog (src/lib/chatModels.ts).
-const CLAUDE_MODELS = modelsFor("claude");
+// Called, not captured: custom model ids land in config.json after this module
+// is evaluated, and a chat pinned to one must still validate.
+const claudeModels = () => modelsFor("claude");
 type ClaudeModelId = string;
 // Legacy localStorage key (kept only for the one-time migration below).
 const MODEL_KEY = props.modelKey ?? "burrow.claude.model";
@@ -1115,7 +1117,7 @@ const MODEL_BY_CHAT_KEY = "chatModelByChat";
 const chatSettingId = computed(() => chatSettingKey(props.chatId, props.modelKey));
 function storedChatModel(): ClaudeModelId | null {
   const v = getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {})[chatSettingId.value];
-  return CLAUDE_MODELS.some((m) => m.id === v) ? (v as ClaudeModelId) : null;
+  return claudeModels().some((m) => m.id === v) ? (v as ClaudeModelId) : null;
 }
 /** The model this chat starts with: its own pick, else the caller's explicit
  *  default (e.g. what the composer's ModelPicker chose for this new thread),
@@ -1126,12 +1128,12 @@ function storedChatModel(): ClaudeModelId | null {
 function loadModel(): ClaudeModelId {
   const own = storedChatModel();
   if (own) return own;
-  if (props.defaultModel && CLAUDE_MODELS.some((m) => m.id === props.defaultModel)) {
+  if (props.defaultModel && claudeModels().some((m) => m.id === props.defaultModel)) {
     return props.defaultModel as ClaudeModelId;
   }
   const v = getConfig<string | null>(MODEL_CONFIG_KEY, null);
-  if (CLAUDE_MODELS.some((m) => m.id === v)) return v as ClaudeModelId;
-  return CLAUDE_MODELS[0].id;
+  if (claudeModels().some((m) => m.id === v)) return v as ClaudeModelId;
+  return claudeModels()[0].id;
 }
 function saveChatModel(id: ClaudeModelId) {
   const rec = { ...getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {}) };
@@ -2635,11 +2637,11 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   // Claim the echo before the send goes out — a loopback round trip can land
   // user.delta before the next line runs.
   pendingSends.add(text);
-  // Snapshot the worktree before the turn so it is revertable from the History
-  // panel. Best-effort, and a no-op outside a git repo.
-  invoke("create_checkpoint", {
+  // This is the durable start receipt. It captures the recovery checkpoint and
+  // creates one audit row; provider completion freezes its final diff.
+  await invoke("start_turn_audit", {
     cwd: props.cwd,
-    ptyId: `chat-${props.chatId}`,
+    subjectId: `chat:${props.chatId}`,
     label: text.slice(0, 60),
   }).catch(() => {});
   busy.value = true;
@@ -2903,6 +2905,7 @@ async function restartClaude() {
     configDir: selectedProfile.value?.configDir || null,
     profileCommand: selectedProfile.value?.binary || null,
     profileArgs: selectedProfile.value?.args.join(" ") || null,
+    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
   }).catch(() => {});
   runtimeStarted.value = true;
   busy.value = false;
@@ -2951,6 +2954,7 @@ async function clearChat() {
     configDir: selectedProfile.value?.configDir || projSettings.claude_config_dir || null,
     profileCommand: selectedProfile.value?.binary || null,
     profileArgs: selectedProfile.value?.args.join(" ") || null,
+    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
   }).catch(() => {});
   runtimeStarted.value = true;
   // Switched to a stream-json agent at runtime → ensure the claude-data listener
@@ -3145,6 +3149,7 @@ async function ensureRuntime(): Promise<unknown> {
       configDir: selectedProfile.value?.configDir || null,
       profileCommand: selectedProfile.value?.binary || null,
       profileArgs: selectedProfile.value?.args.join(" ") || null,
+    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
     }).catch((e: unknown) => {
       // A swallowed failure here (missing `claude` binary, bad profile) used to
       // look like a chat that simply never answers.

@@ -669,6 +669,7 @@ export const useRemoteStore = defineStore("remote", () => {
           configDir: "",
           profileCommand: "",
           profileArgs: "",
+          autoCompactWindow: "",
         });
         await transport.invoke("claude_send", {
           id: String(chat.id),

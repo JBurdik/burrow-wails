@@ -241,6 +241,8 @@ var remoteAllowed = map[string]remoteCmd{
 	"list_checkpoints":   {Method: "ListCheckpoints", Args: []string{"cwd", "limit"}, Scope: scopeOrchRead},
 	"checkpoint_diff":    {Method: "CheckpointDiff", Args: []string{"cwd", "commit"}, Scope: scopeOrchRead},
 	"restore_checkpoint": {Method: "RestoreCheckpoint", Args: []string{"cwd", "commit"}, Scope: scopeOrchOperate},
+	"start_turn_audit":   {Method: "StartTurnAudit", Args: []string{"cwd", "subjectId", "label"}, Scope: scopeOrchOperate},
+	"settle_turn_audit":  {Method: "SettleTurnAudit", Args: []string{"subjectId", "state"}, Scope: scopeOrchOperate},
 
 	// Branch diff — diff against the repo's default/upstream branch (git.go)
 	"branch_diff_base": {Method: "BranchDiffBase", Args: []string{"cwd"}, Scope: scopeOrchRead},
@@ -357,6 +359,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"claude_start": {Method: "ClaudeStart", Args: []string{
 		"id", "cwd", "resumeSessionId", "permissionMode", "appendSystemPrompt",
 		"model", "effort", "configDir", "profileCommand", "profileArgs",
+		"autoCompactWindow",
 	}, Scope: scopeOrchOperate},
 	"claude_send":  {Method: "ClaudeSend", Args: []string{"id", "text", "sessionId", "images"}, Scope: scopeOrchOperate},
 	"claude_stop":  {Method: "ClaudeStop", Args: []string{"id"}, Scope: scopeOrchOperate},

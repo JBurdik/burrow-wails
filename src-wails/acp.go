@@ -541,6 +541,10 @@ func (a *App) applyChatPhase(chatID string, event agentphase.Event) {
 	if a.phases != nil {
 		a.phases.Apply("chat:"+chatID, event)
 	}
+	if event.Kind == agentphase.HookDone || event.Kind == agentphase.HookError || event.Kind == agentphase.Dead {
+		state := string(event.Kind)
+		go func() { _, _ = a.SettleTurnAudit("chat:"+chatID, state) }()
+	}
 }
 
 // resetCodexTurnWatchdog settles only a truly silent live app-server. Normal
@@ -1066,10 +1070,8 @@ func codexModes() map[string]any {
 	return map[string]any{
 		"currentModeId": "auto",
 		"availableModes": []map[string]any{
-			{"id": "read-only", "name": "Supervised", "description": "Ask before commands and file changes."},
-			{"id": "auto-accept-edits", "name": "Auto-accept edits", "description": "Auto-approve edits, ask before other actions."},
+			{"id": "supervised", "name": "Supervised", "description": "Work in the workspace, asking before commands and file changes."},
 			{"id": "auto", "name": "Auto", "description": "Codex reviews routine actions automatically; risky actions still ask."},
-			{"id": "dontAsk", "name": "Don't ask", "description": "No approval prompts, still confined to the workspace."},
 			{"id": "full-access", "name": "Full access", "description": "Allow commands and edits without prompts."},
 		},
 	}
@@ -1080,7 +1082,15 @@ func codexModes() map[string]any {
 // descriptive Codex names while the legacy Claude dropdown uses its own ids.
 func codexModeSettings(modeID string) (approvalPolicy, sandbox, reviewer string, ok bool) {
 	switch modeID {
-	case "default", "ask", "approval-required", "plan", "read-only":
+	case "default", "ask", "approval-required", "read-only", "supervised":
+		// T3-style Supervised intentionally permits workspace writes, but every
+		// command or file change remains a user decision. The old read-only id
+		// stays accepted for existing chats and configurations.
+		return "on-request", "workspaceWrite", "user", true
+	case "plan":
+		// Plan remains a compatibility mode for older providers: it must not
+		// silently gain write access merely because the primary UI now uses
+		// Supervised for its writable, approval-gated mode.
 		return "untrusted", "readOnly", "user", true
 	case "acceptEdits", "auto-accept-edits":
 		return "on-request", "workspaceWrite", "user", true

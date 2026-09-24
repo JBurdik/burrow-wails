@@ -1180,7 +1180,7 @@ import { soundsForKind, playSound, type SoundKind } from "@/lib/sounds";
 import { eventToShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
-import { effortLabel, effortsFor, ensureModels, modelsFor, parseTextGenerationValue, textGenerationValue } from "@/lib/chatModels";
+import { effortLabel, effortsFor, ensureModels, visibleModelsFor, parseTextGenerationValue, textGenerationValue } from "@/lib/chatModels";
 import {
   clearRemoteCredentials,
   desktopUsesRemote,
@@ -1252,7 +1252,7 @@ const textGenerationAgents = computed(() =>
 );
 const textGenModelOptions = computed(() =>
   textGenerationAgents.value.flatMap((agent) =>
-    modelsFor(agent.id)
+    visibleModelsFor(agent.id)
       .map((model) => ({
         value: textGenerationValue(agent.kind, agent.providerId, model.id),
         label: `${agent.name} · ${model.label}`,

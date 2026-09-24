@@ -110,7 +110,7 @@ func oneOf(v string, allowed ...string) bool {
 // ClaudeStart spawns the Claude Code CLI for chat `id`. Already-running ids are
 // a no-op (matching the Rust behaviour ClaudeChat.vue relies on when it
 // remounts).
-func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystemPrompt, model, effort, configDir, profileCommand, profileArgs string) error {
+func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystemPrompt, model, effort, configDir, profileCommand, profileArgs, autoCompactWindow string) error {
 	if a.claudeMgr().Alive(id) {
 		return nil
 	}
@@ -123,8 +123,18 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 		return fmt.Errorf("%s binary not found (checked ~/.local/bin, homebrew, PATH)", cmdName)
 	}
 
+	// Keep one user-facing safety vocabulary across all providers. Claude's
+	// CLI uses different identifiers, so translate at this boundary and keep
+	// legacy aliases accepted for chats created by earlier Burrow versions.
 	perm := "default"
-	if oneOf(permissionMode, "acceptEdits", "bypassPermissions", "plan", "auto", "dontAsk") {
+	switch permissionMode {
+	case "supervised", "read-only", "default", "ask", "approval-required", "plan", "":
+		perm = "default"
+	case "auto":
+		perm = "auto"
+	case "full-access", "bypassPermissions":
+		perm = "bypassPermissions"
+	case "acceptEdits", "dontAsk":
 		perm = permissionMode
 	}
 	args := []string{
@@ -178,6 +188,11 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 			}
 		}
 		env = append(env, "CLAUDE_CONFIG_DIR="+cd)
+	}
+	// The CLI's own auto-compact threshold. Only forwarded when the instance
+	// pins one — an empty value here would read as "0 tokens", not "default".
+	if w := strings.TrimSpace(autoCompactWindow); w != "" {
+		env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+w)
 	}
 	// NOTE: deliberately no BURROW_PTY_ID — a chat is not a tab, so the global
 	// status hook stays a no-op for it.

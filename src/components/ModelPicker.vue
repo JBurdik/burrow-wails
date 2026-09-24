@@ -71,7 +71,7 @@ import { ref, computed, nextTick, onBeforeUnmount, watch } from "vue";
 import { PhCaretDown, PhStar, PhMagnifyingGlass } from "@phosphor-icons/vue";
 import { useProvidersStore } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
-import { modelsFor, modelLabel, favorites, parseFav, isFavorite, toggleFavorite, ensureModels, type ModelEntry } from "@/lib/chatModels";
+import { visibleModelsFor, modelLabel, favorites, parseFav, isFavorite, toggleFavorite, ensureModels, type ModelEntry } from "@/lib/chatModels";
 
 const props = defineProps<{
   agentId: string;
@@ -100,7 +100,7 @@ const triggerLabel = computed(() => {
 // the rail still come from the catalog.
 function listFor(agentId: string): ModelEntry[] {
   if (props.models?.length && agentId === props.agentId) return props.models;
-  return modelsFor(agentId);
+  return visibleModelsFor(agentId);
 }
 
 const open = ref(false);

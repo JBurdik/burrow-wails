@@ -96,6 +96,8 @@ export interface ProviderInstance {
   env: Record<string, string>;
   /** CLAUDE_CONFIG_DIR-style config dir; empty = the user's default. */
   configDir: string;
+  /** Token budget before the CLI auto-compacts; empty = the CLI's own default. */
+  autoCompactWindow: string;
   /** Org/team accounts can't use the OAuth usage API — scan local JSONL instead. */
   orgAccount: boolean;
 
@@ -128,6 +130,7 @@ export function newInstance(providerId: string, over: Partial<ProviderInstance> 
     args: [],
     env: {},
     configDir: "",
+    autoCompactWindow: "",
     orgAccount: false,
     terminalArgs: "",
     terminalShortcut: "",

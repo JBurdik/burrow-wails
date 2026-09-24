@@ -29,6 +29,14 @@ import (
 func main() {
 	app := NewApp()
 	app.startup(context.Background())
+	// A headless process exists to serve a remote client. Unlike the desktop
+	// app, it has no Settings surface from which a person could enable the
+	// loopback HTTP/WebSocket endpoint, so bring that endpoint up explicitly.
+	// setHttpEnabled keeps the listener loopback-only and retains the Funnel
+	// safety guard; SSH is responsible for making it reachable elsewhere.
+	if err := app.setHttpEnabled(true); err != nil {
+		log.Fatalf("remote server: %v", err)
+	}
 
 	log.Printf("burrow server up (environment %s, hook port %d)", app.environmentID, app.hookPort)
 

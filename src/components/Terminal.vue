@@ -696,20 +696,19 @@ function applyPhase(leafId: number, phase: Phase) {
   // repeated phase event from re-notifying.
   if (status !== prevStatus && isFresh(phase)) {
     if (status === "waiting" || status === "permission") playSound("waiting");
-    if (status === "done") onTurnSettled(leafId);
-    if (status === "review") { playSound("done"); onTurnSettled(leafId); }
+    if (status === "done") { void invoke("settle_turn_audit", { subjectId: `pty:${leafId}`, state: "done" }); onTurnSettled(leafId); }
+    if (status === "review") { void invoke("settle_turn_audit", { subjectId: `pty:${leafId}`, state: "review" }); playSound("done"); onTurnSettled(leafId); }
     if (status === "error") maybeNtfy("error", leaf.title);
     // Agent turns only: a plain `npm test` must not cut a checkpoint or bump
     // the turn counter. The hook that starts an agent turn sets is_agent
     // itself, so this does not have to wait for the 2 s poll tick.
     if (status === "running" && phase.is_agent) {
       leaf.round = (leaf.round ?? 0) + 1;
-      // Snapshot the worktree before the agent touches it, so this turn is
-      // revertable from the History panel. No-op outside a git repo, and
-      // best-effort: never block a turn on the snapshot.
-      invoke("create_checkpoint", {
+      // Start the durable audit before the agent touches files. It owns the
+      // checkpoint and later receives a settled receipt with its frozen diff.
+      invoke("start_turn_audit", {
         cwd: leaf.cwd ?? props.cwd,
-        ptyId: leaf.id,
+        subjectId: `pty:${leaf.id}`,
         label: leaf.title || "Agent turn",
       }).catch(() => {});
     }

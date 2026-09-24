@@ -111,6 +111,12 @@ build-web:
 build-mobile:
     pnpm build:mobile
 
+# Headless remote server for an SSH-accessible development machine. It still
+# binds only to remote loopback; reach it through an SSH tunnel, never a LAN
+# listener or public port.
+build-server:
+    cd src-wails && go build -tags headless -o build/bin/burrow-server .
+
 # Full unsigned build: frontend + app bundle + the sidecar binaries inside it
 # (burrow-daemon holds the PTYs; burrow-mcp serves the control verbs to agent
 # clients that speak MCP).

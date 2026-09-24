@@ -208,6 +208,15 @@ func (a *App) CheckpointDiff(cwd, commit string) (string, error) {
 	if !isGitRepo(cwd) {
 		return "", errors.New("not a git repository")
 	}
+	// Once a turn has settled, its audit owns the canonical diff. Returning
+	// that frozen receipt makes History describe that turn rather than whatever
+	// later agents have since changed in the same working tree.
+	if a.db != nil {
+		var frozen string
+		if err := a.db.QueryRow(`SELECT diff FROM turn_audits WHERE cwd = ? AND checkpoint_sha = ? AND settled_at > 0 ORDER BY id DESC LIMIT 1`, cwd, commit).Scan(&frozen); err == nil {
+			return frozen, nil
+		}
+	}
 	nowTree, err := snapshotTree(cwd)
 	if err != nil {
 		return "", err

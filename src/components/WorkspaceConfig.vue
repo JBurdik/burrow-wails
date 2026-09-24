@@ -164,7 +164,7 @@ import { useScriptsStore, type ProjectSettings } from '@/stores/scripts'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useProvidersStore } from '@/stores/providers'
 import { useUIStore } from '@/stores/ui'
-import { modelsFor } from '@/lib/chatModels'
+import { visibleModelsFor } from '@/lib/chatModels'
 import { getProjectSettings, setProjectSettings } from '@/lib/projectSettings'
 import { isPinned, togglePin } from '@/lib/pinnedWorkspaces'
 import { isArchived, toggleArchived } from '@/lib/archivedWorkspaces'
@@ -191,7 +191,7 @@ const modelDraft = ref(saved.modelId ?? '')
 const worktreesDraft = ref(saved.worktreesDir ?? '')
 const confirmDelete = ref(false)
 
-const modelOptions = computed(() => modelsFor(chatAgents.resolve(agentDraft.value || ui.defaultChatAgent).kind))
+const modelOptions = computed(() => visibleModelsFor(chatAgents.resolve(agentDraft.value || ui.defaultChatAgent).kind))
 const agentOptions = computed(() => [{ value: '', label: `Default (${chatAgents.resolve(ui.defaultChatAgent).name})` }, ...chatAgents.chatAgents.map((agent) => ({ value: agent.id, label: agent.name }))])
 const modelSelectOptions = computed(() => [{ value: '', label: 'Default model' }, ...modelOptions.value.map((model) => ({ value: model.id, label: model.label }))])
 

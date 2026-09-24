@@ -221,7 +221,8 @@ func TestCodexModeSettings(t *testing.T) {
 		sandbox  string
 		reviewer string
 	}{
-		"default":           {"untrusted", "readOnly", "user"},
+		"default":           {"on-request", "workspaceWrite", "user"},
+		"supervised":        {"on-request", "workspaceWrite", "user"},
 		"acceptEdits":       {"on-request", "workspaceWrite", "user"},
 		"auto":              {"on-request", "workspaceWrite", "auto_review"},
 		"plan":              {"untrusted", "readOnly", "user"},

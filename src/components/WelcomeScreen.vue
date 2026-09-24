@@ -134,7 +134,7 @@ import { configReady, getConfig, setConfig } from "@/lib/config";
 import { getLastAcpSetting, setLastAcpSetting } from "@/lib/acpSettings";
 import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { modelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
+import { visibleModelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
 import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
@@ -170,7 +170,7 @@ function cycleProvider() {
   const next = list[(idx + 1 + list.length) % list.length];
   // Empty model = let the new provider pick its own default (ClaudeChat.vue
   // resolves it once the session exists).
-  onModelSelect(next.id, next.kind === "claude" ? getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id) : "");
+  onModelSelect(next.id, next.kind === "claude" ? getConfig<string>("chatLastUsedModel", visibleModelsFor("claude")[0].id) : "");
 }
 
 // @file / $skill completion + skill pills — the same engine the chat composer
@@ -239,7 +239,7 @@ const isClaude = computed(() => selectedAgent.value.kind === "claude");
 // permission mode stay native-Claude only — ACP agents own those themselves.
 // Config keys match ClaudeChat.vue's global defaults, so the chat we create
 // picks the choice straight up.
-const selectedModel = ref(getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id));
+const selectedModel = ref(getConfig<string>("chatLastUsedModel", visibleModelsFor("claude")[0].id));
 function onModelSelect(agentId: string, modelId: string) {
   selectedAgentId.value = agentId;
   selectedModel.value = modelId;
@@ -323,7 +323,7 @@ function saveAcp(field: "mode" | "model" | "effort", value: string) {
 // composer without a model-specific effort control even after the catalog was
 // ready. Resolve that empty/stale selection once real options arrive, preferring
 // the user's last Codex pick and otherwise the CLI-advertised default.
-const selectedAgentModels = computed(() => modelsFor(selectedAgentId.value).filter((model) => model.id));
+const selectedAgentModels = computed(() => visibleModelsFor(selectedAgentId.value).filter((model) => model.id));
 watch([isCodex, selectedAgentModels], () => {
   if (!isCodex.value || !selectedAgentModels.value.length) return;
   const saved = lastAcp("model");
@@ -460,10 +460,8 @@ function pickCodexEffort(id: string) { saveAcp("effort", id); }
 
 // Mirrors codexModes() in src-wails/acp.go — keep the ids in sync.
 const CODEX_PERM_MODES: ComposerPillItem[] = [
-  { id: "read-only", label: "Supervised", description: "Ask before commands and file changes.", icon: PhShieldCheck },
-  { id: "auto-accept-edits", label: "Auto-accept edits", description: "Auto-approve edits, ask before other actions.", icon: PhPencilSimple },
+  { id: "supervised", label: "Supervised", description: "Work in the workspace, asking before commands and file changes.", icon: PhShieldCheck },
   { id: "auto", label: "Auto", description: "Codex reviews routine actions automatically; risky actions still ask.", icon: PhSparkle },
-  { id: "dontAsk", label: "Don't ask", description: "No approval prompts, still confined to the workspace.", icon: PhFastForward },
   { id: "full-access", label: "Full access", description: "Allow commands and edits without prompts.", icon: PhShieldWarning, danger: true },
 ];
 const codexPermMode = computed(() => lastAcp("mode") ?? "auto");
@@ -482,7 +480,7 @@ function pickMode(m: string) { launchMode.value = m as LaunchMode; setConfig("we
 onMounted(async () => {
   await configReady;
   selectedAgentId.value = ui.defaultChatAgent;
-  selectedModel.value = getConfig<string>("chatLastUsedModel", modelsFor("claude")[0].id);
+  selectedModel.value = getConfig<string>("chatLastUsedModel", visibleModelsFor("claude")[0].id);
   selectedEffort.value = getConfig<string>("chatClaudeEffort", "high");
   const lastPerm = getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }).last;
   if ((PERM_MODES as string[]).includes(lastPerm ?? "")) selectedPermMode.value = lastPerm as PermMode;

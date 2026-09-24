@@ -212,7 +212,7 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 				return nil, fmt.Errorf("set codex permission mode: %w", err)
 			}
 		}
-	} else if err := a.ClaudeStart(id, cwd, "", permissionMode, "", model, effort, "", "", ""); err != nil {
+	} else if err := a.ClaudeStart(id, cwd, "", permissionMode, "", model, effort, "", "", "", ""); err != nil {
 		if delErr := a.DeleteChat(chat.ID); delErr != nil {
 			return nil, fmt.Errorf("start claude: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
 		}

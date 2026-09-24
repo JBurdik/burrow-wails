@@ -367,17 +367,33 @@
               :style="childProvider(child)?.color ? { color: childProvider(child)!.color } : undefined"
             />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ child.title }}</span>
-            <!-- Phase dot reserves the slot's size (invisible, not hidden, so the box stays); the
-                 close button overlays it via absolute + opacity, so it never resizes the row and stays
-                 focusable (unlike display:none) for keyboard/AX users. -->
+            <!-- The status slot is separate from the close control so rows do
+                 not resize. Done+read intentionally renders nothing; blue is
+                 reserved for an unread completion. -->
             <span class="relative flex h-[13px] w-[13px] shrink-0 items-center justify-center">
-              <span
-                v-if="childPhase[child.id] && childPhase[child.id] !== 'idle'"
-                class="status-dot group-hover:invisible"
-                :class="`status-${childPhase[child.id]}`"
-                :title="statusLabel(childPhase[child.id])"
+              <PhWarningCircle
+                v-if="childAttentionState(child.id) === 'needs-input' || childAttentionState(child.id) === 'error'"
+                :size="11"
+                weight="fill"
+                class="group-hover:invisible"
+                :class="childAttentionState(child.id) === 'error' ? 'text-destructive' : 'text-[var(--yellow)]'"
+                :title="childAttentionState(child.id) === 'error' ? 'Sub-agent failed' : 'Sub-agent needs attention'"
                 role="status"
-              >{{ childPhase[child.id] === "running" ? spinnerFrame : "" }}</span>
+              />
+              <PhSpinner
+                v-else-if="childAttentionState(child.id) === 'working'"
+                :size="11"
+                class="animate-spin text-accent group-hover:invisible"
+                title="Sub-agent working"
+                role="status"
+              />
+              <span
+                v-else-if="childAttentionState(child.id) === 'done-unread'"
+                class="h-1.5 w-1.5 rounded-full bg-[var(--blue)] group-hover:invisible"
+                title="Unread completion — open to mark read"
+                aria-label="Unread completion"
+                role="status"
+              />
               <button
                 class="absolute inset-0 flex items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground opacity-0 pointer-events-none transition-opacity hover:bg-hover hover:text-destructive group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
                 :title="`Close ${child.title}`"
@@ -547,27 +563,25 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, inject, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
+  PhSpinner, PhWarningCircle,
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
+import { useSubagentAttentionStore } from "@/stores/subagentAttention";
 import { useProvidersStore } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { activeChatIdFor, childrenOf } from "@/stores/chatTree";
 import { subAgentViewTarget, nextSubAgentView } from "@/lib/subAgentView";
 import { perform } from "@/lib/controlBridge";
-import { displayStatus, type Phase } from "@/runtime/displayStatus";
-import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
-import { statusLabel, type TermStatus } from "@/lib/terminalStatus";
-import { spinnerFrame } from "@/lib/spinner";
+import { getAgentAttentionState, type AgentAttentionState } from "@/lib/terminalStatus";
 import FileTreeNode from "./FileTreeNode.vue";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useContainerQuery } from "@/composables/useContainerQuery";
@@ -590,6 +604,7 @@ const git = useGitStore();
 const fileTree = useFileTreeStore();
 const chats = useClaudeChatsStore();
 const subagents = useSubagentsStore();
+const subagentAttention = useSubagentAttentionStore();
 const providers = useProvidersStore();
 const terminalTabs = useTerminalTabsStore();
 const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensionSurfaces();
@@ -659,7 +674,11 @@ const openChildId = computed<number | null>({
 // this panel is rendering it. `flush: "post"` so the host gives the child up
 // only once this panel's own AgentChat has been patched in — handing over in
 // the same tick would unmount the host's instance before the panel's exists.
-watch(openChildId, (v) => { subAgentViewTarget.value = v; }, { flush: "post" });
+watch(openChildId, (current, previous) => {
+  if (previous !== null) subagentAttention.setWatching(previous, false);
+  if (current !== null) subagentAttention.setWatching(current, true);
+  subAgentViewTarget.value = current;
+}, { flush: "post" });
 /** The open child's session — the panel renders its AgentChat itself. */
 const openChildSession = computed(() =>
   openChildId.value === null ? undefined : chats.sessions.find((s) => s.id === openChildId.value),
@@ -673,7 +692,8 @@ function openChild(id: number) {
 // slot — called on the back button, on leaving the agents surface, on the
 // panel closing, and on a workspace switch, below.
 function closeChildDetail() {
-  if (openChildId.value !== null) openChildId.value = null;
+  if (openChildId.value === null) return;
+  openChildId.value = null;
 }
 
 // Closing a sub-agent removes it. `remove()` stops its process, drops its
@@ -692,56 +712,9 @@ async function confirmCloseChild() {
   await chats.remove(id);
 }
 
-// Phase per child, straight off the bus — the same event Terminal.vue's
-// applyPhase listens to for tabs. First frontend consumer of phase-chat:.
-//
-// Unlike AgentChat.vue's own subagentPhase (safe because a transcript's list
-// of spawn rows only ever grows), childList shrinks on every chat and
-// workspace switch — so listeners are torn down when a child leaves the
-// list, not just on RightPanel's own unmount (which never happens; it is
-// mounted once for the app's lifetime).
-const childPhase = reactive<Record<number, TermStatus>>({});
-const phaseUnsubs = new Map<number, () => void>();
-// Ids whose phase has already arrived LIVE. The seed below is a round trip, so
-// it can resolve after the first `phase-chat:` event for the same child and put
-// a stale snapshot back over a newer state; this is what makes the seed lose.
-const phaseFromEvent = new Set<number>();
-watch(childList, (list) => {
-  const liveIds = new Set(list.map((c) => c.id));
-  for (const [id, un] of phaseUnsubs) {
-    if (liveIds.has(id)) continue;
-    un();
-    phaseUnsubs.delete(id);
-    phaseFromEvent.delete(id);
-    delete childPhase[id];
-  }
-  const fresh = list.filter((c) => !phaseUnsubs.has(c.id));
-  if (fresh.length) {
-    // PhaseStore only emits on a CHANGE (phasestore.go), so a child whose
-    // phase already flipped to running/done before this panel subscribed
-    // would otherwise sit on the "idle" placeholder until its next
-    // transition. Seed it from the server's current state instead of guessing.
-    invoke<ShellSnapshotData>("shell_snapshot").then((snap) => {
-      for (const child of fresh) {
-        const phase = snap.phases[`chat:${child.id}`];
-        if (phase && !phaseFromEvent.has(child.id)) childPhase[child.id] = displayStatus(phase, 0, true);
-      }
-    });
-  }
-  for (const child of fresh) {
-    childPhase[child.id] = childPhase[child.id] ?? "idle";
-    listen<Phase>(`phase-chat:${child.id}`, (ev) => {
-      phaseFromEvent.add(child.id);
-      childPhase[child.id] = ev.payload ? displayStatus(ev.payload, 0, true) : "idle";
-    }).then((un) => {
-      // The child may have left the list again while listen() was still
-      // resolving — don't resurrect a subscription for one already torn down.
-      if (!childList.value.some((c) => c.id === child.id)) { un(); return; }
-      phaseUnsubs.set(child.id, un);
-    });
-  }
-}, { immediate: true });
-onBeforeUnmount(() => phaseUnsubs.forEach((un) => un()));
+function childAttentionState(chatId: number): AgentAttentionState {
+  return getAgentAttentionState(subagentAttention.statusFor(chatId));
+}
 
 // The open child must never survive a thread switch, or point at a child
 // that no longer exists in the store (deleted directly, or cascade-deleted

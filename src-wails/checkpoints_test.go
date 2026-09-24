@@ -116,6 +116,47 @@ func TestCheckpointSkipsUnchangedTree(t *testing.T) {
 	}
 }
 
+func TestTurnAuditFreezesDiffOnSettlement(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if out := runGitEnv(repo, nil, args...); !out.Success {
+			t.Fatalf("git %v: %s", args, out.Stderr)
+		}
+	}
+	git("init", "-q")
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "app.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-qm", "init")
+
+	app := &App{db: mustTestDB(t)}
+	audit, err := app.StartTurnAudit(repo, "chat:42", "change app")
+	if err != nil || audit.ID == 0 || audit.Checkpoint == "" {
+		t.Fatalf("start audit = %+v, %v", audit, err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "app.txt"), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settled, err := app.SettleTurnAudit("chat:42", "done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled.State != "done" || settled.SettledAt == 0 || !strings.Contains(settled.Diff, "after") || len(settled.Files) != 1 || settled.Files[0] != "app.txt" {
+		t.Fatalf("settled audit = %+v", settled)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "app.txt"), []byte("later\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := app.CheckpointDiff(repo, audit.Checkpoint)
+	if err != nil || !strings.Contains(frozen, "after") || strings.Contains(frozen, "later") {
+		t.Fatalf("history diff must be frozen at settlement, got %q (%v)", frozen, err)
+	}
+}
+
 // A plain directory is not an error — it just has no history.
 func TestCheckpointNonRepoIsNoop(t *testing.T) {
 	app := &App{db: mustTestDB(t)}

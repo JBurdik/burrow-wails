@@ -15,7 +15,7 @@ import { computed, onMounted, ref, type Component } from "vue";
 import { Bot, Sparkles, Gauge, ShieldCheck, ChevronDown, Paperclip, ArrowUp, Folder, Check } from "lucide-vue-next";
 import { agentIconComp } from "@/lib/agentIcons";
 import { providerFor } from "@/lib/providers";
-import { modelsFor, effortLabel } from "@/lib/chatModels";
+import { visibleModelsFor, effortLabel } from "@/lib/chatModels";
 import { getConfig, setConfig, configReady } from "@/lib/config";
 import { useRemoteStore } from "../store";
 
@@ -65,15 +65,15 @@ function saveLastPermMode(mode: PermMode) {
 // provider+model picker for that reason: picking a model implies which
 // agent creates the chat.
 const agentKind = ref<"claude" | "codex">("claude");
-const modelId = ref(modelsFor("claude")[0]?.id ?? "");
-const effort = ref(modelsFor("claude")[0]?.defaultEffort ?? "");
+const modelId = ref(visibleModelsFor("claude")[0]?.id ?? "");
+const effort = ref(visibleModelsFor("claude")[0]?.defaultEffort ?? "");
 const permMode = ref<PermMode>("default");
 const workspaceId = ref<number | null>(null);
 const prompt = ref("");
 const creating = ref(false);
 const error = ref("");
 
-const currentEfforts = computed(() => modelsFor(agentKind.value).find((m) => m.id === modelId.value)?.efforts ?? []);
+const currentEfforts = computed(() => visibleModelsFor(agentKind.value).find((m) => m.id === modelId.value)?.efforts ?? []);
 
 // Codex has no static model catalog (chatModels.ts's MODELS_BY_AGENT only
 // has a real list for "claude" — every other provider gets a single
@@ -82,7 +82,7 @@ const currentEfforts = computed(() => modelsFor(agentKind.value).find((m) => m.i
 // label carries the provider name for that entry ("Codex — Default");
 // Claude's own model names already say what they are.
 const modelChipLabel = computed(() => {
-  const m = modelsFor(agentKind.value).find((x) => x.id === modelId.value);
+  const m = visibleModelsFor(agentKind.value).find((x) => x.id === modelId.value);
   if (!m) return "Model";
   return m.label === "Default" ? `${providerFor(agentKind.value).label} — Default` : m.label;
 });
@@ -92,7 +92,7 @@ const modelRows = computed<ModelRow[]>(() => {
   const rows: ModelRow[] = [];
   for (const kind of ["claude", "codex"] as const) {
     const provider = providerFor(kind);
-    for (const m of modelsFor(kind)) {
+    for (const m of visibleModelsFor(kind)) {
       rows.push({
         key: `${kind}:${m.id}`,
         agentKind: kind,
@@ -113,7 +113,7 @@ function selectModel(row: ModelRow) {
   // A model swap can invalidate the previously chosen effort (a different
   // model publishes a different effort list, or none at all) — reset to the
   // new model's own default rather than carrying over a stale value.
-  effort.value = modelsFor(row.agentKind).find((m) => m.id === row.modelId)?.defaultEffort ?? "";
+  effort.value = visibleModelsFor(row.agentKind).find((m) => m.id === row.modelId)?.defaultEffort ?? "";
   sheet.value = null;
 }
 
