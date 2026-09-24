@@ -22,6 +22,7 @@
         ref="iframeEl"
         class="block h-full w-full border-0 bg-white"
         :src="committedUrl"
+        sandbox="allow-downloads allow-forms allow-modals allow-same-origin allow-scripts"
         allow="clipboard-read; clipboard-write"
         @load="onLoad"
         @error="onError"
