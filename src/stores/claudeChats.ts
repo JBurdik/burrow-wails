@@ -1,10 +1,7 @@
 import { ref, computed } from "vue";
 import { defineStore } from "pinia";
 import { invoke } from "@tauri-apps/api/core";
-import { createActor } from "xstate";
 import type { TermStatus } from "@/lib/terminalStatus";
-import { agentStatusMachine } from "@/machines/agentStatus";
-import type { AgentStatusEvent } from "@/machines/agentStatus";
 import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
@@ -219,8 +216,6 @@ export interface TurnEvent {
 
 const WINDOW_MS = 5 * 60 * 60 * 1000; // 5 hours
 
-type SessionActor = ReturnType<typeof createActor<typeof agentStatusMachine>>;
-
 /**
  * Whether a sync() patch is real thread activity — a turn starting or a new
  * message — as opposed to the bookkeeping (session id, title, agent kind,
@@ -242,25 +237,14 @@ export function isActivitySync(
   // Matched against the key(s) derived from an incoming can_use_tool request.
   const permissionRules = ref<string[]>([]);
 
-  // XState actors — one per session, keyed by session id. Not persisted.
-  const actors = new Map<number, SessionActor>();
-
-  function spawnActor(session: ClaudeSession): SessionActor {
-    // ponytail: still fed by AgentChat, but no longer the status — chatAttention
-    // writes session.status from the Go phase. Deleted with the reducer move.
-    const actor = createActor(agentStatusMachine, { input: {} }).start();
-    actors.set(session.id, actor);
-    return actor;
-  }
-
   /**
    * Load (or re-load) the shared chat list.
    *
    * MERGES rather than replaces: a re-load triggered by `chats-changed` must
-   * not discard a running actor or an in-flight `busy` for a chat that is
-   * only being re-read. Rows the server no longer has are dropped, with their
-   * actors, because that is what a delete on the other client looks like from
-   * here.
+   * not discard the live `status` (chatAttention's) or an in-flight `busy`
+   * for a chat that is only being re-read. Rows the server no longer has are
+   * dropped, because that is what a delete on the other client looks like
+   * from here.
    */
   async function reload() {
     let rows: ChatRow[];
@@ -269,15 +253,6 @@ export function isActivitySync(
     } catch {
       return; // no backend (browser-only dev) — leave whatever is loaded
     }
-    const incoming = new Map(rows.map((r) => [r.id, r]));
-
-    for (const [id, actor] of actors) {
-      if (!incoming.has(id)) {
-        actor.stop();
-        actors.delete(id);
-      }
-    }
-
     const next: ClaudeSession[] = [];
     for (const row of rows) {
       const existing = sessions.value.find((s) => s.id === row.id);
@@ -293,15 +268,6 @@ export function isActivitySync(
     }
     sessions.value = next;
     pruneActiveByWs();
-    // ONLY for sessions that do not have an actor yet. Spawning
-    // unconditionally re-created every actor on every reload, which reset
-    // every chat's status to idle and orphaned the previous actor without
-    // stopping it — and since a reload now happens on every `chats-changed`,
-    // that meant every chat's dot went blank whenever anything anywhere
-    // touched a chat.
-    for (const s of sessions.value) {
-      if (!actors.has(s.id)) spawnActor(s);
-    }
   }
 
   // Writes this client has in flight. A `chats-changed` while one is
@@ -466,9 +432,6 @@ export function isActivitySync(
       if (opts.initialPrompt) pendingSubagentPrompts.set(session.id, opts.initialPrompt);
     }
     sessions.value.push(session);
-    // Pass the REACTIVE array element (not the raw `session`) so the actor's
-    // status mutations go through Vue's proxy and actually trigger reactivity.
-    spawnActor(sessions.value[sessions.value.length - 1]);
     // A sub-agent is never the workspace's selected THREAD — it lives in the
     // Right Panel. Writing it here would go around setActive's guard (this
     // assignment is direct, not a call), which is exactly how a spawn left
@@ -512,13 +475,11 @@ export function isActivitySync(
     seen.add(id);
     // A thread's sub-agents go with it — ALL of them, archived included
     // (allChildrenOf, not childrenOf: an already-archived child still needs
-    // its row deleted and its listeners dropped, or it's a session/actor/
+    // its row deleted and its listeners dropped, or it's a session/
     // chatSession left dangling with no row behind it until the next
     // reload). Go cascades the ROWS; the processes are ours to stop, because
     // which stop verb applies depends on the transport.
     for (const child of allChildrenOfSessions(sessions.value, id)) await remove(child.id, seen);
-    actors.get(id)?.stop();
-    actors.delete(id);
     // The chat is gone, so its stream session must go with it — otherwise its
     // listeners outlive it (they are deliberately kept across an unmount).
     dropChatSession(id);
@@ -557,11 +518,9 @@ export function isActivitySync(
     // Same reasoning as remove(): an archived thread whose helpers keep
     // running is not archived. allChildrenOf, not childrenOf, for the same
     // reason as remove() — an already-archived child (a no-op archive() call
-    // below) still needs its actor stopped and process killed if somehow
+    // below) still needs its process killed if somehow
     // still alive.
     for (const child of allChildrenOfSessions(sessions.value, id)) await archive(child.id, seen);
-    actors.get(id)?.stop();
-    actors.delete(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
     s.archivedAt = Date.now();
     if (activeByWs.value[s.workspaceId] === id) {
@@ -572,7 +531,7 @@ export function isActivitySync(
     persist();
   }
 
-  // Reverses archive(); does NOT restart the actor/process — the caller (chat
+  // Reverses archive(); does NOT restart the process — the caller (chat
   // reopen) is responsible for that, same as opening any other existing chat.
   function unarchive(id: number) {
     const s = sessions.value.find((x) => x.id === id);
@@ -652,16 +611,6 @@ export function isActivitySync(
     persist();
   }
 
-  function sendStatusEvent(id: number, event: AgentStatusEvent) {
-    actors.get(id)?.send(event);
-  }
-
-  // Called by AgentChat on mount — which now only happens when the chat is
-  // actually displayed (Terminal.isChatVisible), so "seen" means seen.
-  function markSeen(id: number) {
-    actors.get(id)?.send({ type: "MARK_SEEN" });
-  }
-
   // Sessions whose workspace is currently in ws.opened — used by App.vue for keep-alive mounting.
   // The caller filters by opened workspace ids.
   const allSessions = computed(() => sessions.value);
@@ -694,7 +643,5 @@ export function isActivitySync(
     addPermissionRule,
     hasPermissionRule,
     clearPermissionRules,
-    sendStatusEvent,
-    markSeen,
   };
 });

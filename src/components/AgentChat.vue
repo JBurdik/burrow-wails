@@ -1763,7 +1763,6 @@ function dismissCancelledControlRequest(requestId: string) {
   if (dismissed) {
     settleControlRequest(requestId);
     nativeControlResponsePending.value = false;
-    chats.sendStatusEvent(props.chatId, { type: "RESUME" });
     syncStore();
   }
 }
@@ -2071,7 +2070,6 @@ function applyClaudeTitle(raw: unknown) {
 function markAgentActive() {
   if (busy.value) return;
   busy.value = true;
-  chats.sendStatusEvent(props.chatId, { type: "START" });
   syncStore();
 }
 
@@ -2237,7 +2235,6 @@ function finishTurn() {
   if (suppressNextDone.value) {
     suppressNextDone.value = false;
   } else {
-    chats.sendStatusEvent(props.chatId, { type: "STOP", watching: watchingNow() });
     notifyDone();
   }
   // The session outlives this component while a turn is running; now that the
@@ -2310,27 +2307,23 @@ function onLine(line: string) {
       const qMid = S.nextMsgId++;
       pendingQuestionMsgId.value = qMid;
       messages.value.push({ id: qMid, role: "system-info", text: `❓ ${qText}` });
-      chats.sendStatusEvent(props.chatId, { type: "WAIT" });
     } else if (cr.toolName === "ExitPlanMode") {
       planFeedback.value = "";
       pendingPlan.value = cr;
       const pMid = S.nextMsgId++;
       pendingPlanMsgId.value = pMid;
       messages.value.push({ id: pMid, role: "system-info", text: `📋 Plan ready for review` });
-      chats.sendStatusEvent(props.chatId, { type: "WAIT" });
     } else if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(cr.toolName)) {
       pendingDiff.value = cr;
       const filePath = ((cr.input.file_path ?? cr.input.path ?? "") as string);
       const dMid = S.nextMsgId++;
       pendingDiffMsgId.value = dMid;
       messages.value.push({ id: dMid, role: "system-info", text: `✏️ ${cr.toolName}: ${filePath.split("/").slice(-2).join("/")}` });
-      chats.sendStatusEvent(props.chatId, { type: "PERMISSION_REQUEST" });
     } else {
       pendingPermission.value = cr;
       const pmMid = S.nextMsgId++;
       pendingPermissionMsgId.value = pmMid;
       messages.value.push({ id: pmMid, role: "system-info", text: `⚡ ${cr.toolName} wants permission` });
-      chats.sendStatusEvent(props.chatId, { type: "PERMISSION_REQUEST" });
     }
     notifyPermission(cr);
     syncStore(); // surface busy/messageCount in the Sidebar
@@ -2375,7 +2368,6 @@ function onAcpData(raw: string) {
       acpPermReq.value = null;
       acpPermRpcId.value = null;
       permissionResponsePending.value = false;
-      chats.sendStatusEvent(props.chatId, { type: "RESUME" });
       syncStore();
     }
     return;
@@ -2459,7 +2451,6 @@ function onAcpReq(raw: string) {
     if (typeof msg.id !== "number" || questions.length === 0) return;
     codexUserInput.value = { rpcId: msg.id, questions };
     codexUserInputPending.value = false;
-    chats.sendStatusEvent(props.chatId, { type: "WAIT" });
     syncStore();
     return;
   }
@@ -2482,7 +2473,6 @@ function onAcpReq(raw: string) {
   const pmMid = S.nextMsgId++;
   acpPermMsgId.value = pmMid;
   messages.value.push({ id: pmMid, role: "system-info", text: isPlan ? "📋 Plan ready for review" : `⚡ Permission: ${perm.title}` });
-  chats.sendStatusEvent(props.chatId, { type: "PERMISSION_REQUEST" });
   notifyPermission({ requestId: String(perm.rpcId), toolName: perm.title, input: perm.rawInput, suggestions: [] } as CanUseToolReq);
   syncStore();
   scrollToBottom();
@@ -2495,7 +2485,6 @@ async function respondCodexUserInput(answers: Record<string, string[]>) {
   try {
     await invoke("acp_respond_user_input", { id: props.chatId, rpcId: request.rpcId, answers });
     codexUserInput.value = null;
-    chats.sendStatusEvent(props.chatId, { type: "RESUME" });
   } catch (error) {
     messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Unable to submit Codex input: ${error}` });
     codexUserInputPending.value = false;
@@ -2632,7 +2621,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     label: text.slice(0, 60),
   }).catch(() => {});
   busy.value = true;
-  chats.sendStatusEvent(props.chatId, { type: "START" });
 
   // Auto-title from first user message (only if still at default and Claude hasn't set one yet)
   if (!claudeGeneratedTitle.value) {
@@ -2653,7 +2641,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     } catch (e) {
       messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
       busy.value = false;
-      chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
       syncStore();
     }
     return;
@@ -2664,7 +2651,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   } catch (e) {
     messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
     busy.value = false;
-    chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
     syncStore();
   }
 }
@@ -2674,7 +2660,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
 async function respondControl(requestId: string, response: Record<string, unknown>) {
   await invoke("claude_respond_control", { id: props.chatId, requestId, response });
   settleControlRequest(requestId);
-  chats.sendStatusEvent(props.chatId, { type: "RESUME" });
   syncStore();
 }
 
@@ -2691,9 +2676,8 @@ async function resolveClaudePrompt(
   } catch (e) {
     messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
     saveMessages(props.chatId, messages.value);
-    // respondControl throws before RESUME fires — clear anyway so status doesn't stay stuck on waiting/permission.
+    // respondControl threw — clear the prompt anyway so it doesn't stay stuck on screen.
     clearPrompt();
-    chats.sendStatusEvent(props.chatId, { type: "RESUME" });
     return false;
   } finally {
     nativeControlResponsePending.value = false;
@@ -2723,7 +2707,6 @@ async function respondPermission(allow: boolean, opts?: { always?: boolean; upda
       messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
     });
     acpPermRpcId.value = null;
-    chats.sendStatusEvent(props.chatId, { type: "RESUME" });
     syncStore();
     return;
   }
@@ -2874,7 +2857,6 @@ async function restartClaude() {
     busy.value = false;
     const lastAcp = messages.value[messages.value.length - 1];
     if (lastAcp?.partial) lastAcp.partial = false;
-    chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
     syncStore();
     return;
   }
@@ -2903,7 +2885,6 @@ async function restartClaude() {
   pendingPlan.value = null;
   const last = messages.value[messages.value.length - 1];
   if (last?.partial) last.partial = false;
-  chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
   syncStore();
 }
 
@@ -2917,7 +2898,6 @@ async function abortTurn() {
     const ok = await invoke("codex_interrupt", { id: props.chatId }).then(() => true, () => false);
     if (ok) {
       suppressNextDone.value = true; // user stopped it — no "finished" toast
-      chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
       const started = turnStartedAt.value;
       setTimeout(() => {
         if (busy.value && turnStartedAt.value === started) void restartClaude();

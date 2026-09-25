@@ -40,7 +40,7 @@ cd src-wails && go build ./...
 cd src-wails && go test ./...
 ```
 
-Tests: `pnpm test` (vitest, no DOM env). Currently covers only `src/machines/agentStatus.ts` — the status state machine. `just` (Justfile task runner, `brew install just`) drives dev/build/release; see `justfile`.
+Tests: `pnpm test` (vitest, no DOM env). `just` (Justfile task runner, `brew install just`) drives dev/build/release; see `justfile`.
 
 ## Architecture
 
@@ -173,10 +173,16 @@ per leaf in `localStorage` under `burrow.seenAt` (read-modify-write, never whole
 `phase-pty:{leafId}`. `tabStatus()` priority (`terminalStatus.ts`): **error** > permission > waiting >
 running > review > done > idle.
 
-**`src/machines/agentStatus.ts` is chat-only, not dead code** — terminals are off it, but
-`claudeChats.ts` / `AgentChat.vue` drive one instance per chat because chat permission state arrives
-on the control/permission protocol, not as a phase. A permission request fires a toast + (unfocused)
-a native notification via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
+**Chats use the same derivation.** Go derives waiting/permission for every provider from neutral
+`request.opened` / `request.resolved` events (Claude `control_request`, ACP `session/request_permission`,
+Codex approvals/user input); an answer applies `agentphase.Resume`, an abort/stop `Interrupt` (and a
+trailing turn end on an idle chat is dropped), a generic ACP turn settles on its own `session/prompt`
+response. `src/stores/chatAttention.ts` (instantiated in `App.vue`) is the **only writer of
+`session.status`**: `displayStatus(phase-chat, seenAt, watching)`, receipts in `burrow.seenAt` as
+`chat:<id>`, watching = a count held by the mounted `AgentChat` / RP sub-agent detail while the window
+has focus. There is no chat state machine any more. The phone does the same with its own receipt
+(`burrow.chatSeenAt.mobile`). A permission request fires a toast + (unfocused) a native notification
+via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
 list, distinguished only by icon.
 
 ### Control API + `burrow` CLI (`src-wails/internal/control`, `src-wails/bin/burrow`)
