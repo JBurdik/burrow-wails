@@ -45,7 +45,7 @@ export function ClaudeRespondControl(arg1:string,arg2:string,arg3:Record<string,
 
 export function ClaudeSend(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<void>;
 
-export function ClaudeStart(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:string,arg9:string,arg10:string):Promise<void>;
+export function ClaudeStart(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:string,arg9:string,arg10:string,arg11:string):Promise<void>;
 
 export function ClaudeStop(arg1:string):Promise<void>;
 
@@ -307,7 +307,11 @@ export function SetWorkspaceIcon(arg1:number,arg2:string):Promise<void>;
 
 export function SetWorkspaceOrder(arg1:Array<number>):Promise<void>;
 
+export function SettleTurnAudit(arg1:string,arg2:string):Promise<main.TurnAudit>;
+
 export function ShellSnapshot():Promise<main.ShellSnapshot>;
+
+export function StartTurnAudit(arg1:string,arg2:string,arg3:string):Promise<main.TurnAudit>;
 
 export function StopChat(arg1:number):Promise<void>;
 

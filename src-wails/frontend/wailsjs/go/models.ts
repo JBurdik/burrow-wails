@@ -1046,6 +1046,36 @@ export namespace main {
 	        this.branch = source["branch"];
 	    }
 	}
+	export class TurnAudit {
+	    id: number;
+	    subjectId: string;
+	    cwd: string;
+	    label: string;
+	    checkpoint: string;
+	    startedAt: number;
+	    settledAt: number;
+	    state: string;
+	    diff: string;
+	    files: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TurnAudit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.subjectId = source["subjectId"];
+	        this.cwd = source["cwd"];
+	        this.label = source["label"];
+	        this.checkpoint = source["checkpoint"];
+	        this.startedAt = source["startedAt"];
+	        this.settledAt = source["settledAt"];
+	        this.state = source["state"];
+	        this.diff = source["diff"];
+	        this.files = source["files"];
+	    }
+	}
 	export class UpdateInfo {
 	    available: boolean;
 	    version: string;

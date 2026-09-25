@@ -86,8 +86,8 @@ export function ClaudeSend(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ClaudeSend'](arg1, arg2, arg3, arg4);
 }
 
-export function ClaudeStart(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) {
-  return window['go']['main']['App']['ClaudeStart'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
+export function ClaudeStart(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11) {
+  return window['go']['main']['App']['ClaudeStart'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11);
 }
 
 export function ClaudeStop(arg1) {
@@ -610,8 +610,16 @@ export function SetWorkspaceOrder(arg1) {
   return window['go']['main']['App']['SetWorkspaceOrder'](arg1);
 }
 
+export function SettleTurnAudit(arg1, arg2) {
+  return window['go']['main']['App']['SettleTurnAudit'](arg1, arg2);
+}
+
 export function ShellSnapshot() {
   return window['go']['main']['App']['ShellSnapshot']();
+}
+
+export function StartTurnAudit(arg1, arg2, arg3) {
+  return window['go']['main']['App']['StartTurnAudit'](arg1, arg2, arg3);
 }
 
 export function StopChat(arg1) {
