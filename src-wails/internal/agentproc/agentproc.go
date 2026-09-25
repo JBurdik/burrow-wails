@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +27,14 @@ type Session struct {
 	stdin  io.WriteCloser
 	onLine func(line string)
 	onExit func()
+
+	// stopped is set by an explicit Stop. The killed process keeps streaming
+	// (and exits) asynchronously — often after the caller has already started
+	// its replacement under the same id and sent it a prompt. Its late lines and
+	// exit would then land on the new process's channel: a stray `result` or
+	// `exit` ends the NEW turn in the UI. The caller that stopped it already
+	// owns the teardown, so from then on the old process is silenced.
+	stopped atomic.Bool
 
 	// lastSeen is the last time this session did anything: a prompt written to
 	// stdin, or a line streamed back. Both matter — a long turn writes no stdin
@@ -73,11 +82,15 @@ func (m *Manager) Start(id, command string, args []string, cwd string, env []str
 		scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 		for scanner.Scan() {
 			m.touch(sess)
-			onLine(scanner.Text())
+			if !sess.stopped.Load() {
+				onLine(scanner.Text())
+			}
 		}
 		c.Wait()
 		m.removeIfCurrent(id, sess)
-		onExit()
+		if !sess.stopped.Load() {
+			onExit()
+		}
 	}()
 
 	return nil
@@ -157,6 +170,7 @@ func (m *Manager) Stop(id string) error {
 	// the replacement rather than treating the terminating process as alive.
 	delete(m.sessions, id)
 	m.mu.Unlock()
+	sess.stopped.Store(true)
 	sess.stdin.Close()
 	return killProcessTree(sess.cmd)
 }

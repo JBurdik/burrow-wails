@@ -278,17 +278,6 @@
           </div>
         </template>
 
-        <!-- Queued message placeholder -->
-        <template v-else-if="msg.role === 'queued'">
-          <div class="flex items-end justify-end gap-2 px-4 py-[3px]">
-            <div class="inline-flex max-w-[min(460px,85%)] items-center gap-1.5 rounded-[14px] border border-dashed border-border bg-hover px-3 py-2 text-right text-[13px] text-muted-foreground opacity-70">
-              <PhClock :size="11" class="flex-shrink-0" />
-              <span v-html="renderUserMd(msg.text)" />
-            </div>
-            <div class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-border bg-hover text-[11px] font-bold text-secondary-foreground opacity-35">U</div>
-          </div>
-        </template>
-
         <!-- Permission log -->
         <template v-else-if="msg.role === 'permission'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
@@ -339,6 +328,17 @@
         <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
         <span class="ml-1 text-[11px] italic text-muted-foreground tabular-nums">Working for {{ workingElapsed }}</span>
       </div>
+
+      <!-- Queued follow-ups, pinned below the live turn (Claude desktop-style) -->
+      <div v-for="q in messageQueue" :key="q.id" class="flex flex-col items-end gap-0.5 px-4 py-[3px]">
+        <div class="inline-flex max-w-[min(460px,85%)] items-center gap-1.5 rounded-[14px] border border-dashed border-border bg-hover px-3 py-2 text-[13px] text-muted-foreground">
+          <span v-html="renderUserMd(q.text)" />
+        </div>
+        <div class="flex gap-2 text-[11px] text-muted-foreground">
+          <button class="border-none bg-transparent p-0 hover:text-foreground" @click="removeQueued(q.id)">Remove</button>
+          <button class="border-none bg-transparent p-0 hover:text-foreground" @click="sendQueuedNow(q.id)" title="Interrupt the current turn and send this now">Send now</button>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -371,22 +371,6 @@
            pushed the whole toolbar down as the user typed. -->
       <ComposerSuggestions :items="suggestions" :active-index="activeIndex" @pick="completion.apply" />
       <div class="chat-input-box overflow-hidden rounded-[var(--radius-composer)] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, var(--accent)) 4%, var(--chat-surface));">
-        <!-- Queued messages panel (Zed-style) -->
-        <div v-if="messageQueue.length > 0" class="border-b border-border bg-[color-mix(in_srgb,var(--chat-accent)_5%,transparent)]">
-          <div class="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 hover:bg-hover" @click="queueExpanded = !queueExpanded">
-            <PhCaretDown :size="10" class="text-muted-foreground transition-transform" :class="{ '-rotate-90': !queueExpanded }" />
-            <span class="flex-1 text-[11px] text-muted-foreground">{{ messageQueue.length }} Queued {{ messageQueue.length === 1 ? 'Message' : 'Messages' }}</span>
-            <button class="border-none bg-transparent px-1 py-px text-[10px] text-muted-foreground hover:text-foreground" @click.stop="clearQueue" title="Clear All">Clear All</button>
-          </div>
-          <div v-if="queueExpanded" class="flex flex-col gap-[3px] px-2.5 pb-1.5">
-            <div v-for="msg in messageQueue" :key="msg.id" class="flex items-center gap-1.5 py-[3px]">
-              <span class="flex-shrink-0 text-xs text-[var(--chat-accent)]">•</span>
-              <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-secondary-foreground">{{ msg.text }}</span>
-              <button class="queue-item-btn" @click="removeQueued(msg.id)" title="Remove"><PhX :size="10" /></button>
-              <button class="queue-item-btn !text-[var(--chat-accent)] !border-[color-mix(in_srgb,var(--chat-accent)_35%,transparent)] hover:!border-[color-mix(in_srgb,var(--chat-accent)_65%,transparent)]" @click="sendQueuedNext(msg.id)" title="Run after the active turn">Send Next</button>
-            </div>
-          </div>
-        </div>
         <!-- Working indicator — sits above the textarea, only for tool activity.
              Thinking has its own bubble in the chat body, so it's not duplicated here. -->
         <div v-if="currentActivity" class="flex items-center gap-1.5 border-b border-border px-3 pb-1 pt-1.5">
@@ -593,14 +577,6 @@
               @click="abortTurn"
             >
               <PhStop :size="14" weight="bold" />
-            </button>
-            <button
-              v-else-if="messageQueue.length > 0"
-              class="composer-send"
-              disabled
-              :title="`${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`"
-            >
-              {{ messageQueue.length }}
             </button>
             <button v-else class="composer-send" :disabled="!inputText.trim()" @click="sendMessage()">
               <PhArrowUp :size="14" weight="bold" />
@@ -1386,7 +1362,9 @@ const grouping = computed(() => {
   const display: (ChatMessage | ToolGroupHeader)[] = [];
   const groupIdByMsgId = new Map<number, string>();
   const groupsById = new Map<string, ToolGroupHeader>();
-  const msgs = messages.value;
+  // Queued follow-ups render pinned below the live turn (like Claude desktop),
+  // not at their array position — streamed output lands after them.
+  const msgs = messages.value.filter((m) => m.role !== "queued");
   let i = 0;
   while (i < msgs.length) {
     const m = msgs[i];
@@ -1784,21 +1762,18 @@ function removeFeedMarker(id: number | null) {
   if (idx !== -1) messages.value.splice(idx, 1);
 }
 
-// Queue panel
-const queueExpanded = ref(true);
-function clearQueue() {
-  clearQueuedMessages();
-  saveMessages(props.chatId, messages.value);
-}
+// Queued follow-ups
 function removeQueued(id: number) {
   removeQueuedMessage(id);
   saveMessages(props.chatId, messages.value);
 }
-function sendQueuedNext(id: number) {
-  // This deliberately reorders instead of steering. A follow-up has to remain
-  // its own turn for every provider, including Codex and generic ACP adapters.
+function sendQueuedNow(id: number) {
+  // Interrupt, don't steer: a follow-up has to remain its own turn for every
+  // provider (Codex, generic ACP). The abort clears `busy`, and the session's
+  // drain then sends the queue head — which this message just became.
   moveQueuedMessageNext(id);
   saveMessages(props.chatId, messages.value);
+  void abortTurn();
 }
 
 // Context meter. The window is whatever the CLI says the model had on the last
@@ -2921,6 +2896,23 @@ async function restartClaude() {
 }
 
 async function abortTurn() {
+  // Codex can stop a turn in place: the thread stays loaded, so nothing has to
+  // be resumed (a failed thread/resume after a kill silently started a fresh
+  // thread). The turn then ends through its own turn/completed, which clears
+  // `busy` and lets the queue drain. A stalled chat, a refused interrupt (no
+  // addressable turn yet) or one Codex never answers still gets the restart.
+  if (effectiveTransport.value === "codex-app-server" && !stalled.value) {
+    const ok = await invoke("codex_interrupt", { id: props.chatId }).then(() => true, () => false);
+    if (ok) {
+      suppressNextDone.value = true; // user stopped it — no "finished" toast
+      chats.sendStatusEvent(props.chatId, { type: "INTERRUPT" });
+      const started = turnStartedAt.value;
+      setTimeout(() => {
+        if (busy.value && turnStartedAt.value === started) void restartClaude();
+      }, 5_000);
+      return;
+    }
+  }
   await restartClaude();
 }
 
@@ -3651,22 +3643,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
   scrollbar-width: thin;
 }
 
-/* Queue item action buttons */
-.queue-item-btn {
-  font-size: 10px;
-  color: var(--chat-muted);
-  background: none;
-  border: 1px solid var(--chat-border);
-  border-radius: 4px;
-  padding: 1px 5px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-  transition: color .12s ease-out, border-color .12s ease-out;
-}
-.queue-item-btn:hover { color: var(--chat-text); border-color: color-mix(in srgb, var(--chat-text) 25%, transparent); }
 
 /* Context usage bar fill colors */
 /* Context ring — the meter is the button that empties it */

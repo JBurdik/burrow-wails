@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"burrow/internal/agentphase"
@@ -40,9 +41,18 @@ type acpSession struct {
 	proto     acpProtocol
 	sessionID string // ACP sessionId / Codex threadId
 
+	// stopped is set by AcpStop. The killed child keeps streaming and exits
+	// asynchronously — often after a replacement was started under the same
+	// chat id (abort / "Send now"). Its trailing lines and `_burrow:exit` would
+	// land on the replacement's channel and end the NEW turn in the UI, so from
+	// the stop on the old pump is silent. Same fix as agentproc.Session.stopped.
+	stopped atomic.Bool
+
 	mu           sync.Mutex
 	nextID       int64
-	pendingTurn  int64 // Codex: rpc id of the turn awaiting turn/completed (0 = none)
+	pendingTurn  int64  // Codex: rpc id of the turn awaiting turn/completed (0 = none)
+	turnID       string // Codex: id of the running turn, what turn/interrupt addresses
+	interrupting bool   // Codex: we asked for this turn to stop, so its abort is not an error
 	turnWatchdog *time.Timer
 	model        string // Codex: model override applied on the next turn/start
 	effort       string
@@ -270,7 +280,7 @@ func spawnStdio(bin string, args []string, cwd string, env map[string]string) (*
 func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 	for r.sc.Scan() {
 		raw := strings.TrimSpace(r.sc.Text())
-		if raw == "" {
+		if raw == "" || sess.stopped.Load() {
 			continue
 		}
 		var msg map[string]any
@@ -296,7 +306,9 @@ func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 	// so a dead session left in the registry made the next send write into a
 	// closed stdin (`write |1: broken pipe`) instead of spawning a replacement.
 	a.acpReg().dropIf(chatID, sess)
-	a.emitChatLine(chatID, "acp-data", `{"_burrow":"exit"}`)
+	if !sess.stopped.Load() {
+		a.emitChatLine(chatID, "acp-data", `{"_burrow":"exit"}`)
+	}
 }
 
 // pumpCodexLine translates Codex app-server notifications into the ACP
@@ -322,6 +334,14 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 	// successful response merely means the turn is now running and its terminal
 	// notification remains authoritative.
 	if method == "" {
+		// The turn/start ack is the first place the running turn's id appears.
+		if tid, _ := mapOf(mapOf(msg["result"])["turn"])["id"].(string); tid != "" {
+			sess.mu.Lock()
+			if rid, ok := msg["id"].(float64); ok && int64(rid) == sess.pendingTurn {
+				sess.turnID = tid
+			}
+			sess.mu.Unlock()
+		}
 		if failure := codexRPCErrorMessage(msg); failure != "" {
 			a.finishCodexTurn(chatID, sess, emit, failure)
 		}
@@ -372,13 +392,28 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 				"sessionUpdate": "agent_thought_chunk",
 				"content":       map[string]any{"text": delta},
 			}}})
+	case "turn/started":
+		if tid, _ := mapOf(params["turn"])["id"].(string); tid != "" {
+			sess.mu.Lock()
+			if sess.pendingTurn != 0 {
+				sess.turnID = tid
+			}
+			sess.mu.Unlock()
+		}
 	case "turn/completed":
 		a.finishCodexTurn(chatID, sess, emit, codexTurnTerminalFailure(params))
 	case "turn/aborted":
 		// Newer app-server versions may report an aborted turn separately instead
 		// of (or before) turn/completed.  Leaving pendingTurn set in that case is
 		// precisely what made the composer spin forever.
-		a.finishCodexTurn(chatID, sess, emit, "Codex aborted the turn.")
+		sess.mu.Lock()
+		asked := sess.interrupting
+		sess.mu.Unlock()
+		failure := "Codex aborted the turn."
+		if asked {
+			failure = ""
+		}
+		a.finishCodexTurn(chatID, sess, emit, failure)
 	case "error":
 		// `error` is terminal unless Codex says it will retry.  T3code treats the
 		// same notification as an error state; settle our synthetic prompt reply
@@ -512,6 +547,8 @@ func (a *App) finishCodexTurn(chatID string, sess *acpSession, emit func(any), f
 	sess.mu.Lock()
 	rpc := sess.pendingTurn
 	sess.pendingTurn = 0
+	sess.turnID = ""
+	sess.interrupting = false
 	if sess.turnWatchdog != nil {
 		sess.turnWatchdog.Stop()
 		sess.turnWatchdog = nil
@@ -1153,6 +1190,7 @@ func (a *App) AcpStop(id string) error {
 	if sess == nil {
 		return nil
 	}
+	sess.stopped.Store(true)
 	sess.mu.Lock()
 	if sess.turnWatchdog != nil {
 		sess.turnWatchdog.Stop()
@@ -1161,6 +1199,34 @@ func (a *App) AcpStop(id string) error {
 	sess.mu.Unlock()
 	_ = sess.stdin.Close()
 	return killAgentProcessTree(sess.cmd)
+}
+
+// CodexInterrupt stops the running turn in place (`turn/interrupt`) instead of
+// killing the app-server: the thread stays loaded, so nothing has to be
+// resumed — a failed thread/resume after a kill used to fall back to a fresh
+// thread and silently lose the conversation. The turn still ends through its
+// own turn/completed (status "interrupted"), which settles the UI as usual.
+// An error means there is no addressable turn yet (the turn/start ack has not
+// arrived); the caller then falls back to a restart.
+func (a *App) CodexInterrupt(id string) error {
+	sess, ok := a.acpReg().get(id)
+	if !ok || sess.proto != protoCodexAppServer {
+		return fmt.Errorf("codex app-server not running")
+	}
+	sess.mu.Lock()
+	turnID := sess.turnID
+	if turnID != "" {
+		sess.interrupting = true
+	}
+	sess.mu.Unlock()
+	if turnID == "" {
+		return fmt.Errorf("no running codex turn to interrupt")
+	}
+	rpc := sess.rpcID()
+	return sess.write(map[string]any{
+		"jsonrpc": "2.0", "id": rpc, "method": "turn/interrupt",
+		"params": map[string]any{"threadId": sess.sessionID, "turnId": turnID},
+	})
 }
 
 func (a *App) CodexStop(id string) error {

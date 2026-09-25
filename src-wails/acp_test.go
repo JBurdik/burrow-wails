@@ -332,3 +332,49 @@ func TestAcpSendRecordsOnASuccessfulWrite(t *testing.T) {
 		t.Fatalf("want the user line recorded on a successful write, got %v", msgs)
 	}
 }
+
+// Send now / Esc on Codex: the turn id comes from the turn/start ack, the
+// interrupt addresses it, and the resulting abort settles the turn without an
+// error bubble (the user asked for it).
+func TestCodexInterruptAddressesRunningTurn(t *testing.T) {
+	a := newTestApp(t)
+	var stdin bytes.Buffer
+	sess := &acpSession{stdin: nopWriteCloser{Writer: &stdin}, proto: protoCodexAppServer, sessionID: "thread-1"}
+	a.acpReg().put("93", sess)
+
+	if err := a.CodexInterrupt("93"); err == nil {
+		t.Fatal("interrupt with no running turn should fail so the UI falls back to a restart")
+	}
+	rpc, err := a.CodexSend("93", "fix it", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.pumpCodexLine("93", map[string]any{"id": float64(rpc), "result": map[string]any{"turn": map[string]any{"id": "turn-9"}}}, sess)
+
+	stdin.Reset()
+	if err := a.CodexInterrupt("93"); err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(stdin.Bytes()), &req); err != nil {
+		t.Fatal(err)
+	}
+	params := mapOf(req["params"])
+	if req["method"] != "turn/interrupt" || params["threadId"] != "thread-1" || params["turnId"] != "turn-9" {
+		t.Fatalf("interrupt request = %v", req)
+	}
+
+	a.pumpCodexLine("93", map[string]any{"method": "turn/aborted", "params": map[string]any{}}, sess)
+	lines, err := a.LoadChatStreamSince("93", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if strings.Contains(l.Line, "codex-runtime-error") {
+			t.Fatalf("requested interrupt rendered as an error: %s", l.Line)
+		}
+	}
+	if sess.pendingTurn != 0 || sess.turnID != "" || sess.interrupting {
+		t.Fatalf("turn not settled: %+v", sess)
+	}
+}

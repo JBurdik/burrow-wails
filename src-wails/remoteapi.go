@@ -394,6 +394,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"acp_list_sessions": {Method: "AcpListSessions", Args: []string{"id", "cwd"}, Scope: scopeOrchOperate},
 	"acp_stop":          {Method: "AcpStop", Args: []string{"id"}, Scope: scopeOrchOperate},
 	"codex_stop":        {Method: "CodexStop", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"codex_interrupt":   {Method: "CodexInterrupt", Args: []string{"id"}, Scope: scopeOrchOperate},
 	// CodexListModels spawns `codex app-server` to probe the model catalog
 	// (acp.go) — a host process spawn, so operate scope, not read, matching
 	// the generate_* calls above for the same reason.
