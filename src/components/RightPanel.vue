@@ -574,7 +574,7 @@ import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
-import { useSubagentAttentionStore } from "@/stores/subagentAttention";
+import { useChatAttentionStore } from "@/stores/chatAttention";
 import { useProvidersStore } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -604,7 +604,7 @@ const git = useGitStore();
 const fileTree = useFileTreeStore();
 const chats = useClaudeChatsStore();
 const subagents = useSubagentsStore();
-const subagentAttention = useSubagentAttentionStore();
+const chatAttention = useChatAttentionStore();
 const providers = useProvidersStore();
 const terminalTabs = useTerminalTabsStore();
 const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensionSurfaces();
@@ -675,8 +675,8 @@ const openChildId = computed<number | null>({
 // only once this panel's own AgentChat has been patched in — handing over in
 // the same tick would unmount the host's instance before the panel's exists.
 watch(openChildId, (current, previous) => {
-  if (previous !== null) subagentAttention.setWatching(previous, false);
-  if (current !== null) subagentAttention.setWatching(current, true);
+  if (previous !== null) chatAttention.setWatching(previous, false);
+  if (current !== null) chatAttention.setWatching(current, true);
   subAgentViewTarget.value = current;
 }, { flush: "post" });
 /** The open child's session — the panel renders its AgentChat itself. */
@@ -713,7 +713,7 @@ async function confirmCloseChild() {
 }
 
 function childAttentionState(chatId: number): AgentAttentionState {
-  return getAgentAttentionState(subagentAttention.statusFor(chatId));
+  return getAgentAttentionState(chatAttention.statusFor(chatId));
 }
 
 // The open child must never survive a thread switch, or point at a child

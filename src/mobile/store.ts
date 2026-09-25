@@ -11,6 +11,7 @@ import {
 } from "@/runtime/remoteEndpoint";
 import type { TermStatus } from "@/lib/terminalStatus";
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
+import { displayStatus, type Phase } from "@/runtime/displayStatus";
 import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 
 // The phone runs on the SAME transport, the same command table and the same
@@ -77,10 +78,6 @@ export interface RemoteChat {
   workspaceName?: string;
   workspacePath?: string;
   messages: RemoteMessage[];
-  // Set when a turn finished while this chat was not the open one — cleared
-  // by markChatSeen(). Mirrors desktop's "review" persisting until the tab
-  // is seen (Terminal.vue's settleDone()).
-  unseen?: "review" | "error";
   // Set when the agent is blocked on an allow/deny decision — mirrors
   // desktop's "permission" status. Cleared by respondChatPermission().
   pendingPermission?: PendingPermission | null;
@@ -96,6 +93,9 @@ export type View = "connect" | "chats" | "chat" | "welcome";
 const AUTO_SETTLE_AFTER_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LAST_ACTIVITY_KEY = "burrow.chatActivity.mobile";
+// This device's read receipts: whether a finished turn still needs looking at
+// is per-device, so the phone keeps its own (the desktop's live in burrow.seenAt).
+const CHAT_SEEN_AT_KEY = "burrow.chatSeenAt.mobile";
 const SETTLED_OVERRIDE_KEY = "burrow.chatSettledOverride.mobile";
 
 function loadJsonRecord<T>(key: string): Record<string, T> {
@@ -122,6 +122,9 @@ export const useRemoteStore = defineStore("remote", () => {
   const activeChat = ref<RemoteChat | null>(null);
   const chatActivity = reactive<Record<string, number>>(loadJsonRecord(LAST_ACTIVITY_KEY));
   const chatSettledOverride = reactive<Record<string, "settled" | "active">>(loadJsonRecord(SETTLED_OVERRIDE_KEY));
+  // Go's phase per chat (`phase-chat:<id>`), the same source the desktop's dots read.
+  const chatPhases = reactive<Record<string, Phase>>({});
+  const chatSeenAt = reactive<Record<string, number>>(loadJsonRecord(CHAT_SEEN_AT_KEY));
 
   let transport: Transport | null = null;
   // Every listen() this store installed, so a disconnect() really stops
@@ -153,11 +156,20 @@ export const useRemoteStore = defineStore("remote", () => {
     }, WORKSPACES_CHANGED_DEBOUNCE_MS);
   }
 
+  function watchingChat(chatId: number): boolean {
+    return view.value === "chat" && activeChat.value?.id === chatId;
+  }
+
   function chatStatus(chat: RemoteChat): TabStatus {
-    if (chat.pendingPermission) return "permission";
-    if (chat.busy) return "running";
-    if (chat.unseen) return chat.unseen;
-    return "idle";
+    return displayStatus(chatPhases[String(chat.id)], chatSeenAt[String(chat.id)] ?? 0, watchingChat(chat.id));
+  }
+
+  function applyChatPhase(chatId: number, phase: Phase) {
+    const prev = chatPhases[String(chatId)];
+    if (prev && prev.updated_at > phase.updated_at) return; // a snapshot older than a live event
+    chatPhases[String(chatId)] = phase;
+    // A turn that ends while its chat is open is read on arrival.
+    if (watchingChat(chatId)) markChatSeen(chatId);
   }
 
   function touchChatActivity(chatId: number) {
@@ -326,6 +338,9 @@ export const useRemoteStore = defineStore("remote", () => {
 
       workspaces.value = (snap.workspaces ?? []).map((ws) => ({ id: ws.id, name: ws.name, path: ws.path }));
       applyChats((snap.chats ?? []) as unknown as RemoteChat[]);
+      for (const [key, phase] of Object.entries(snap.phases ?? {})) {
+        if (key.startsWith("chat:")) applyChatPhase(Number(key.slice(5)), phase as Phase);
+      }
     } catch (e: any) {
       listError.value = e?.message ?? "Failed to load";
     } finally {
@@ -452,8 +467,6 @@ export const useRemoteStore = defineStore("remote", () => {
         chat.messages.forEach((message) => {
           message.partial = false;
         });
-        const watching = view.value === "chat" && activeChat.value?.id === chat.id;
-        if (!watching) chat.unseen = event.type === "turn.failed" ? "error" : "review";
         return;
       }
       case "session.id":
@@ -490,6 +503,12 @@ export const useRemoteStore = defineStore("remote", () => {
     const id = chat.id;
     if (watchedChats.has(id)) return;
     watchedChats.add(id);
+
+    track(
+      transport!.listen<Phase>(`phase-chat:${id}`, (payload) => {
+        if (payload && typeof payload === "object") applyChatPhase(id, payload);
+      }),
+    );
 
     track(
       transport!.listen<{ events?: Array<Record<string, any>> }>(`chat-event-${id}`, (payload) => {
@@ -579,8 +598,12 @@ export const useRemoteStore = defineStore("remote", () => {
   }
 
   function markChatSeen(chatId: number) {
-    const chat = chatFor(chatId);
-    if (chat) chat.unseen = undefined;
+    const ended = chatPhases[String(chatId)]?.turn_ended_at ?? 0;
+    if (ended <= (chatSeenAt[String(chatId)] ?? 0)) return;
+    chatSeenAt[String(chatId)] = Math.max(ended, Date.now());
+    try {
+      localStorage.setItem(CHAT_SEEN_AT_KEY, JSON.stringify(chatSeenAt));
+    } catch { /* private mode / quota — the receipt just doesn't survive a reload */ }
   }
 
   function closeChat() {

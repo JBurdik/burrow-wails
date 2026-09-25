@@ -621,6 +621,7 @@ import {
   type ChatEventBatch, type ChatProjectionState,
 } from "@/lib/chatProjection";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { useChatAttentionStore } from "@/stores/chatAttention";
 import { useSubagentsStore } from "@/stores/subagents";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useEditorContextStore } from "@/stores/editorContext";
@@ -754,6 +755,15 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "prompt-sent"): void }>();
 
 const chats = useClaudeChatsStore();
+const chatAttention = useChatAttentionStore();
+// Whether this instance holds one of chatAttention's watch counts. Tracked so
+// mount/unmount and isWatching flips stay balanced.
+let attentionHeld = false;
+function holdAttention(value: boolean) {
+  if (value === attentionHeld) return;
+  attentionHeld = value;
+  chatAttention.setWatching(props.chatId, value);
+}
 const subagents = useSubagentsStore();
 const workspaces = useWorkspaceStore();
 const git = useGitStore();
@@ -1255,7 +1265,9 @@ watch(
   },
   { immediate: true, deep: true },
 );
+watch(() => props.isWatching, (value) => holdAttention(value ?? true));
 onBeforeUnmount(() => {
+  holdAttention(false);
   subagentPhaseUnmounted = true;
   subagentPhaseUnsubs.forEach((un) => un());
 });
@@ -3188,7 +3200,7 @@ let unmounted = false;
 // refCount plus a LIVE document.hasFocus(), which is what finishTurn already
 // trusts to tell done from review.
 function onWindowFocus() {
-  if (watchingNow()) chats.markSeen(props.chatId);
+  if (watchingNow()) chatAttention.markSeen(props.chatId);
 }
 
 onMounted(async () => {
@@ -3258,7 +3270,7 @@ onMounted(async () => {
   // Mounted normally means visible (Terminal.isChatVisible), but a chat spawned
   // with a prompt can mount unwatched — marking that one seen would clear a dot
   // nobody looked at.
-  if (props.isWatching ?? true) chats.markSeen(props.chatId);
+  holdAttention(props.isWatching ?? true);
   window.addEventListener("focus", onWindowFocus);
   window.addEventListener("keydown", onWindowKeydown);
   // Float (compact) control chat: pre-allow `burrow` Bash commands so routine

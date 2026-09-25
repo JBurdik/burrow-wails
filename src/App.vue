@@ -134,6 +134,7 @@ import { useUpdateStore } from "@/stores/update";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { matchesShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";
+import { useChatAttentionStore } from "@/stores/chatAttention";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
 import PathPicker from "@/components/PathPicker.vue";
 import { pickDir } from "@/lib/pickPath";
@@ -161,6 +162,9 @@ const providers = useProvidersStore();
 const keys = useKeybindingsStore();
 const update = useUpdateStore();
 const tabsStore = useTerminalTabsStore();
+// App-wide on purpose: every chat dot (Sidebar, tabs, Dashboard) reads
+// session.status, which this store derives from the Go phase.
+useChatAttentionStore();
 const onboardingOpen = ref(false);
 const docsOpen = ref(false);
 const ONBOARDING_CONFIG_KEY = "onboardingComplete";

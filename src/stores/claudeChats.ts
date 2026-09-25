@@ -246,16 +246,9 @@ export function isActivitySync(
   const actors = new Map<number, SessionActor>();
 
   function spawnActor(session: ClaudeSession): SessionActor {
+    // ponytail: still fed by AgentChat, but no longer the status — chatAttention
+    // writes session.status from the Go phase. Deleted with the reducer move.
     const actor = createActor(agentStatusMachine, { input: {} }).start();
-    // The actor's own state is authoritative from here on. Adopt it
-    // immediately: `status` is persisted with the session, so an app closed
-    // mid-turn comes back claiming `running` with no process behind it, and
-    // subscribe() only fires on later transitions — leaving that stale dot
-    // spinning forever.
-    session.status = actor.getSnapshot().value as TermStatus;
-    actor.subscribe((snapshot) => {
-      session.status = snapshot.value as TermStatus;
-    });
     actors.set(session.id, actor);
     return actor;
   }
