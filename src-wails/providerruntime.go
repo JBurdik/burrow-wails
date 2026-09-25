@@ -70,6 +70,12 @@ type ProviderRuntimeEvent struct {
 	Role   string   `json:"role,omitempty"`   // message.note: the ChatMessage role to render
 	Images []string `json:"images,omitempty"` // message.note / message.patch_user
 	TurnMs int      `json:"turnMs,omitempty"` // message.patch_user
+
+	// request.opened / request.resolved. The request's own payload stays on the
+	// raw channel (the UI answers it there); these two only say THAT the turn
+	// is blocked and on what, which is all the phase needs.
+	RequestID   string `json:"requestId,omitempty"`
+	RequestKind string `json:"requestKind,omitempty"` // RequestApproval | RequestInput
 }
 
 // Event type constants — the whole vocabulary, in one place.
@@ -96,6 +102,17 @@ const (
 	// carry no phase meaning (see chatPhaseEvent's fallthrough).
 	EvtMessageNote      = "message.note"
 	EvtMessagePatchUser = "message.patch_user"
+	// The turn is blocked on the user (a permission, a question, a plan) /
+	// no longer is (answered, or withdrawn by the agent). Name carries the
+	// tool or method that asked.
+	EvtRequestOpened   = "request.opened"
+	EvtRequestResolved = "request.resolved"
+)
+
+// RequestKind values: what a blocked turn is waiting for.
+const (
+	RequestApproval = "approval"
+	RequestInput    = "input"
 )
 
 // toolOutputLimit matches the frontend's slice(0, 2000): a tool result is shown
@@ -166,9 +183,67 @@ func normalizeClaudeEvent(event map[string]any) []ProviderRuntimeEvent {
 			}
 		}
 		return nil
+	case "control_request":
+		return claudeControlRequest(event)
+	case "control_cancel_request":
+		// The CLI withdrew a request it had parked (e.g. the turn moved on).
+		return []ProviderRuntimeEvent{{Type: EvtRequestResolved, RequestID: strField(event["request_id"])}}
 	default:
 		return nil
 	}
+}
+
+// claudeControlRequest reports a can_use_tool request as a blocked turn.
+// AskUserQuestion and ExitPlanMode are the CLI asking the person something,
+// not asking to run something, so they wait for input, not approval — the
+// same split the desktop has always drawn (WAIT vs PERMISSION_REQUEST).
+func claudeControlRequest(event map[string]any) []ProviderRuntimeEvent {
+	req := mapField(event["request"])
+	if strField(req["subtype"]) != "can_use_tool" {
+		return nil
+	}
+	tool := strField(req["tool_name"])
+	kind := RequestApproval
+	if tool == "AskUserQuestion" || tool == "ExitPlanMode" {
+		kind = RequestInput
+	}
+	return []ProviderRuntimeEvent{{
+		Type: EvtRequestOpened, RequestID: strField(event["request_id"]), RequestKind: kind, Name: tool,
+	}}
+}
+
+// normalizeAcpRequest reads a server→client JSON-RPC request off the acp-req
+// channel: ACP's session/request_permission and Codex's approval / user-input
+// requests (pumpCodexLine forwards exactly those here).
+func normalizeAcpRequest(line string) []ProviderRuntimeEvent {
+	var msg map[string]any
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		return nil
+	}
+	method := strField(msg["method"])
+	kind := RequestApproval
+	switch method {
+	case "session/request_permission",
+		"item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
+	case "item/tool/requestUserInput":
+		kind = RequestInput
+	default:
+		return nil
+	}
+	return []ProviderRuntimeEvent{{
+		Type: EvtRequestOpened, RequestID: rpcIDString(msg["id"]), RequestKind: kind, Name: method,
+	}}
+}
+
+// rpcIDString renders a JSON-RPC id (a number or a string on the wire).
+func rpcIDString(v any) string {
+	switch id := v.(type) {
+	case string:
+		return id
+	case float64:
+		return fmt.Sprintf("%d", int64(id))
+	}
+	return ""
 }
 
 func claudeAssistant(event map[string]any) []ProviderRuntimeEvent {
@@ -354,6 +429,10 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 		return []ProviderRuntimeEvent{{Type: EvtSessionExited}}
 	}
 
+	if strField(msg["method"]) == "serverRequest/resolved" {
+		// Codex's authoritative "that request is no longer pending".
+		return []ProviderRuntimeEvent{{Type: EvtRequestResolved, RequestID: rpcIDString(mapField(msg["params"])["requestId"])}}
+	}
 	if strField(msg["method"]) != "session/update" {
 		// A JSON-RPC response also settles a turn — but only the one answering
 		// the session/prompt that opened it, and that correlation lives with
@@ -458,6 +537,13 @@ func chatPhaseEvent(ev ProviderRuntimeEvent) (agentphase.Event, bool) {
 		return agentphase.Event{Kind: agentphase.HookError, Detail: ev.Message}, true
 	case EvtSessionTitle:
 		return agentphase.Event{Kind: agentphase.HookSession, Title: ev.Title}, true
+	case EvtRequestOpened:
+		if ev.RequestKind == RequestInput {
+			return agentphase.Event{Kind: agentphase.HookWaiting, Detail: ev.Name}, true
+		}
+		return agentphase.Event{Kind: agentphase.HookPermission, Detail: ev.Name}, true
+	case EvtRequestResolved:
+		return agentphase.Event{Kind: agentphase.Resume}, true
 	}
 	return agentphase.Event{}, false
 }
@@ -479,9 +565,11 @@ func NormalizeChatLine(kind, line string, ord int64) []ProviderRuntimeEvent {
 		return normalizeUserPrompt(line, ord)
 	case chatNoteKind:
 		return normalizeChatNote(line, ord)
+	case "acp-req":
+		// The request itself is a UI decision and keeps its raw channel; this
+		// only reports that the turn is now blocked on it.
+		return normalizeAcpRequest(line)
 	default:
-		// acp-req is a blocking permission request — a UI decision, not
-		// transcript. It keeps its own channel.
 		return nil
 	}
 }

@@ -60,8 +60,13 @@ const (
 	PollNeedsInput Kind = "poll_needs_input"
 	PollGotInput   Kind = "poll_got_input"
 
-	Interrupt Kind = "interrupt" // Ctrl+C or ESC written to the PTY
+	Interrupt Kind = "interrupt" // Ctrl+C or ESC written to the PTY; a chat's abort
 	Dead      Kind = "dead"      // watchdog confirmed the PTY is gone
+
+	// Resume: the user answered (or the agent withdrew) the request a turn was
+	// blocked on. Unlike HookRunning it only moves a WAITING turn — a late
+	// answer or a cancel that lands after the turn ended must not reopen it.
+	Resume Kind = "resume"
 )
 
 type Event struct {
@@ -157,6 +162,11 @@ func Next(cur Phase, ev Event, now int64) Phase {
 			next.State = Idle
 			next.Detail = ""
 			next.TurnEndedAt = 0
+		}
+	case Resume:
+		if cur.State == WaitingInput || cur.State == WaitingApproval {
+			next.State = Running
+			next.Detail = ""
 		}
 	case Dead:
 		if cur.InFlight() {

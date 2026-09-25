@@ -51,6 +51,7 @@ type acpSession struct {
 	mu           sync.Mutex
 	nextID       int64
 	pendingTurn  int64  // Codex: rpc id of the turn awaiting turn/completed (0 = none)
+	promptRPC    int64  // ACP: rpc id of the session/prompt whose response ends the turn (0 = none)
 	turnID       string // Codex: id of the running turn, what turn/interrupt addresses
 	interrupting bool   // Codex: we asked for this turn to stop, so its abort is not an error
 	turnWatchdog *time.Timer
@@ -300,6 +301,9 @@ func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 			kind = "acp-req"
 		}
 		a.emitChatLine(chatID, kind, raw)
+		if hasID && !hasMethod {
+			a.settleAcpPrompt(chatID, sess, msg)
+		}
 	}
 	// The child is gone: forget it BEFORE announcing the exit. AcpStart and
 	// CodexStart both short-circuit on "a session for this id is already live",
@@ -426,8 +430,8 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		// This is Codex's authoritative acknowledgement that an approval (or
 		// input request) is no longer pending. Forward it so the UI does not
 		// optimistically clear the prompt before the app-server accepted it.
+		// NormalizeAcpLine reads it as request.resolved, which resumes the phase.
 		emit(map[string]any{"method": method, "params": params})
-		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookRunning})
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
 		// Blocking approval requests. `parseAcpPermRequest` understands exactly
 		// these three method names, so they belong on the request channel — the
@@ -435,17 +439,15 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 		// which is why a Supervised turn died with "the environment rejected the
 		// command approval request".
 		if line, err := json.Marshal(msg); err == nil {
-			a.emitChatLine(chatID, "acp-req", string(line))
+			a.emitChatLine(chatID, "acp-req", string(line)) // → request.opened → waiting_approval
 		}
-		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookPermission, Detail: method})
 	case "item/tool/requestUserInput":
 		// Unlike an approval this request has a structured answers response.  Keep
 		// it on the request channel so the dedicated Codex input panel can respond.
 		line, err := json.Marshal(msg)
 		if err == nil {
-			a.emitChatLine(chatID, "acp-req", string(line))
+			a.emitChatLine(chatID, "acp-req", string(line)) // → request.opened → waiting_input
 		}
-		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookWaiting, Detail: method})
 	default:
 		if _, hasID := msg["id"]; hasID {
 			// A JSON-RPC server request is blocking.  Previously we forwarded every
@@ -574,9 +576,52 @@ func (a *App) finishCodexTurn(chatID string, sess *acpSession, emit func(any), f
 	emit(map[string]any{"id": rpc, "result": map[string]any{}})
 }
 
+// settleAcpPrompt ends the turn when the response to its own session/prompt
+// arrives. NormalizeAcpLine cannot do this — it is stateless, and any other
+// response (a mode switch, a session list) must not end the turn — but the
+// session knows which rpc id it sent.
+func (a *App) settleAcpPrompt(chatID string, sess *acpSession, msg map[string]any) {
+	id, _ := msg["id"].(float64)
+	sess.mu.Lock()
+	match := sess.promptRPC != 0 && int64(id) == sess.promptRPC
+	if match {
+		sess.promptRPC = 0
+	}
+	sess.mu.Unlock()
+	if !match {
+		return
+	}
+	a.applyChatPhase(chatID, acpPromptOutcome(msg))
+}
+
+// acpPromptOutcome maps a session/prompt response onto the phase event that
+// settles its turn: a JSON-RPC error fails it, stopReason "cancelled" is the
+// user's interrupt, anything else completed.
+func acpPromptOutcome(msg map[string]any) agentphase.Event {
+	if e := mapField(msg["error"]); e != nil {
+		return agentphase.Event{Kind: agentphase.HookError, Detail: strField(e["message"])}
+	}
+	if strField(mapField(msg["result"])["stopReason"]) == "cancelled" {
+		return agentphase.Event{Kind: agentphase.Interrupt}
+	}
+	return agentphase.Event{Kind: agentphase.HookDone}
+}
+
 func (a *App) applyChatPhase(chatID string, event agentphase.Event) {
 	if a.phases != nil {
-		a.phases.Apply("chat:"+chatID, event)
+		key := "chat:" + chatID
+		// Every chat turn opens through Running (the user prompt is published
+		// as user.delta), so a turn end that finds the chat idle belongs to a
+		// turn the user interrupted: the CLI's trailing result (Claude after
+		// SIGINT, Codex's turn/aborted) would otherwise paint a cancelled turn
+		// as done — and give it a review dot.
+		if (event.Kind == agentphase.HookDone || event.Kind == agentphase.HookError) && a.phases.Get(key).State == agentphase.Idle {
+			return
+		}
+		a.phases.Apply(key, event)
+	}
+	if event.Kind == agentphase.Interrupt {
+		go func() { _, _ = a.SettleTurnAudit("chat:"+chatID, string(event.Kind)) }()
 	}
 	if event.Kind == agentphase.HookDone || event.Kind == agentphase.HookError || event.Kind == agentphase.Dead {
 		state := string(event.Kind)
@@ -1054,10 +1099,16 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		}
 		prompt = append(prompt, map[string]any{"type": "image", "mimeType": mime, "data": data})
 	}
+	sess.mu.Lock()
+	sess.promptRPC = rpc
+	sess.mu.Unlock()
 	if err := sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpc, "method": "session/prompt",
 		"params": map[string]any{"sessionId": sess.sessionID, "prompt": prompt},
 	}); err != nil {
+		sess.mu.Lock()
+		sess.promptRPC = 0
+		sess.mu.Unlock()
 		return rpc, fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
 	}
 	a.emitChatLine(id, chatUserKind, text)
@@ -1190,6 +1241,9 @@ func (a *App) AcpStop(id string) error {
 	if sess == nil {
 		return nil
 	}
+	// The stopped pump is silent from here on, so nothing else would settle
+	// a turn this kill cut short.
+	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.Interrupt})
 	sess.stopped.Store(true)
 	sess.mu.Lock()
 	if sess.turnWatchdog != nil {
@@ -1223,10 +1277,14 @@ func (a *App) CodexInterrupt(id string) error {
 		return fmt.Errorf("no running codex turn to interrupt")
 	}
 	rpc := sess.rpcID()
-	return sess.write(map[string]any{
+	if err := sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpc, "method": "turn/interrupt",
 		"params": map[string]any{"threadId": sess.sessionID, "turnId": turnID},
-	})
+	}); err != nil {
+		return err
+	}
+	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.Interrupt})
+	return nil
 }
 
 func (a *App) CodexStop(id string) error {

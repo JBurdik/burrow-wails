@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+
+	"burrow/internal/agentphase"
 )
 
 // Permission/control-request responses. Both Claude Code and ACP agents
@@ -27,7 +29,11 @@ func (a *App) ClaudeRespondControl(id, requestID string, response map[string]any
 	if err != nil {
 		return err
 	}
-	return a.claudeWrite(id, string(payload))
+	if err := a.claudeWrite(id, string(payload)); err != nil {
+		return err
+	}
+	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.Resume})
+	return nil
 }
 
 // AcpRespondPermission answers a session/request_permission (ACP) or an
@@ -53,9 +59,9 @@ func (a *App) AcpRespondPermission(id string, rpcID int64, optionID string) erro
 	if optionID != "" {
 		outcome = map[string]any{"outcome": "selected", "optionId": optionID}
 	}
-	return sess.write(map[string]any{
+	return a.resumeAfter(id, sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"outcome": outcome},
-	})
+	}))
 }
 
 // AcpRespondUserInput answers a tool's request for structured user input.
@@ -80,7 +86,17 @@ func (a *App) AcpRespondUserInput(id string, rpcID int64, answers map[string][]s
 			break
 		}
 	}
-	return sess.write(map[string]any{
+	return a.resumeAfter(id, sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"content": text},
-	})
+	}))
+}
+
+// resumeAfter resumes a blocked ACP turn once its answer is written. Codex
+// never gets here: its serverRequest/resolved is the authoritative resume, and
+// resuming on our own write would clear a prompt the app-server rejected.
+func (a *App) resumeAfter(chatID string, writeErr error) error {
+	if writeErr == nil {
+		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.Resume})
+	}
+	return writeErr
 }
