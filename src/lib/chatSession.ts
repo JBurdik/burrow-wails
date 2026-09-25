@@ -2,7 +2,7 @@ import { computed, effectScope, ref, watch, type ComputedRef, type EffectScope, 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AcpConfigOption, AcpModes, AcpPermReq, CanUseToolReq, ChatMessage, QueuedChatMessage, TurnStats,
+  AcpConfigOption, AcpModes, AcpPermReq, CanUseToolReq, ChatMessage, CodexUserInputReq, QueuedChatMessage, TurnStats,
 } from "@/lib/chatTypes";
 import type { ChatEventBatch } from "@/lib/chatProjection";
 
@@ -109,6 +109,11 @@ export interface ChatSession {
   acpPermRpcId: Ref<number | null>;
   acpPermMsgId: Ref<number | null>;
   acpPromptRpcId: Ref<number | null>;
+  /** An answer to acpPermReq is in flight (Codex clears it on serverRequest/resolved). */
+  permissionResponsePending: Ref<boolean>;
+  /** Codex `item/tool/requestUserInput`: blocking, so it must outlive the view. */
+  codexUserInput: Ref<CodexUserInputReq | null>;
+  codexUserInputPending: Ref<boolean>;
   acpControlIds: Set<number>;
   acpModes: Ref<AcpModes | null>;
   acpConfigOptions: Ref<AcpConfigOption[]>;
@@ -233,7 +238,8 @@ function isIdle(s: InternalSession): boolean {
     && s.pendingQuestion.value === null
     && s.pendingPlan.value === null
     && s.pendingDiff.value === null
-    && s.acpPermReq.value === null;
+    && s.acpPermReq.value === null
+    && s.codexUserInput.value === null;
 }
 
 function create(chatId: number): InternalSession {
@@ -269,6 +275,9 @@ function create(chatId: number): InternalSession {
     acpPermRpcId: ref<number | null>(null),
     acpPermMsgId: ref<number | null>(null),
     acpPromptRpcId: ref<number | null>(null),
+    permissionResponsePending: ref(false),
+    codexUserInput: ref<CodexUserInputReq | null>(null),
+    codexUserInputPending: ref(false),
     acpControlIds: new Set<number>(),
     acpModes: ref<AcpModes | null>(null),
     acpConfigOptions: ref<AcpConfigOption[]>([]),

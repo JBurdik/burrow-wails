@@ -642,7 +642,7 @@ import ComposerImages from "@/components/composer/ComposerImages.vue";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
-import CodexUserInputPanel, { type CodexUserInputQuestion } from "@/components/CodexUserInputPanel.vue";
+import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
 import { chatSession, replayChatStream } from "@/lib/chatSession";
 import type { AcpConfigOption, AcpModes, CanUseToolReq, ChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
@@ -844,11 +844,9 @@ const {
   pendingPermissionMsgId, pendingQuestionMsgId, pendingPlanMsgId, pendingDiffMsgId,
   settledControlRequestIds,
   acpPermReq, acpPermRpcId, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
+  permissionResponsePending, codexUserInput, codexUserInputPending,
   enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext, takeNextQueuedMessage,
 } = S;
-const permissionResponsePending = ref(false);
-const codexUserInput = ref<{ rpcId: number; questions: CodexUserInputQuestion[] } | null>(null);
-const codexUserInputPending = ref(false);
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
   const p = acpPermReq.value?.rawInput?.plan;

@@ -49,6 +49,22 @@ describe("chat session eviction", () => {
     expect(liveChatSessionIds()).not.toContain(3);
   });
 
+  // A Codex user-input prompt that arrives while the chat is unmounted used to
+  // land in the dead view's own ref: the remount showed nothing, and the
+  // session could be evicted while the agent sat blocked on an answer.
+  it("keeps a chat blocked on a Codex user-input prompt, and the prompt survives a remount", () => {
+    const s = chatSession(4);
+    s.retain();
+    s.release(); // the view is gone before the request arrives
+    const again = chatSession(4);
+    again.codexUserInput.value = { rpcId: 9, questions: [{ id: "q", header: "Q", question: "Which?", options: [] }] };
+    again.retain();
+    again.release();
+    expect(liveChatSessionIds()).toContain(4);
+    expect(chatSession(4).codexUserInput.value?.rpcId).toBe(9);
+    dropChatSession(4);
+  });
+
   it("release is not driven negative by extra unmounts", () => {
     const s = chatSession(4);
     s.retain();

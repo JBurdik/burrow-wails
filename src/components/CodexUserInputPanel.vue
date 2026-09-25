@@ -1,14 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive } from "vue";
 
-export interface CodexUserInputQuestion {
-  id: string;
-  header: string;
-  question: string;
-  isOther?: boolean;
-  isSecret?: boolean;
-  options: Array<{ label: string; description?: string }>;
-}
+import type { CodexUserInputQuestion } from "@/lib/chatTypes";
 
 const props = defineProps<{
   questions: CodexUserInputQuestion[];
