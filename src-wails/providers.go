@@ -186,7 +186,10 @@ func (a *App) UpdateProvider(binary string, pkg string, homebrewFormula string, 
 			if r, err := filepath.EvalSymlinks(resolved); err == nil {
 				real = r
 			}
-			if isHomebrewInstallPath(resolved) || isHomebrewInstallPath(real) {
+			// Only the resolved target counts: an npm global under the Homebrew
+			// prefix is a /opt/homebrew/bin/ symlink into lib/node_modules, and
+			// matching the shim sent it to `brew upgrade` for a cask it never had.
+			if isHomebrewInstallPath(real) {
 				if brewPath := resolveAgentBin("brew", cwd); brewPath != "" {
 					// A third-party formula ("user/repo/name") 404s from brew
 					// until its tap is added — the binary being installed
