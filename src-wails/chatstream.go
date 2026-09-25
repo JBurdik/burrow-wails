@@ -316,7 +316,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 		if a.phases != nil {
 			for _, e := range events {
 				if pev, ok := chatPhaseEvent(e); ok {
-					a.phases.Apply("chat:"+chatID, pev)
+					a.applyChatPhase(chatID, pev) // also settles the turn audit
 				}
 			}
 			if a.phases.Get("chat:"+chatID).State == agentphase.Running {
