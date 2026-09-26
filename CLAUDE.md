@@ -119,9 +119,13 @@ Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatT
 
 A chat's stream is owned by a **session registry keyed by chat id**, not by `AgentChat.vue`: the
 session holds transcript, turn state, blocking requests and the `claude-data-{id}` / `acp-data-{id}` /
-`acp-req-{id}` listeners; components `setHandlers` on mount, `release()` on unmount, and a session is
-only torn down when **idle** (a running turn or pending permission keeps streaming behind an unmounted
-view). That's what lets chat leaves render with `v-if`.
+`acp-req-{id}` listeners, **and reduces the stream itself** (`onEvents`/`onLine`/`onAcpData`/`onAcpReq`,
+turn end, queue drain, notifications via `ChatHost` in `src/lib/chatHost.ts`). A component
+`attachView(ChatViewHooks)`s on mount — scroll, question/plan draft resets, ACP selector restore, `send`
+for the drain — and `release()`s on unmount; the last view's hooks stay installed. A session is only torn
+down when **idle** (`pendingRequests` empty and not busy — a running turn or pending permission keeps
+streaming behind an unmounted view). That's what lets chat leaves render with `v-if`. Deps (`invoke`,
+`listen`, host) are injectable: `chatSession.test.ts` drives the reducers through fake listeners.
 
 Every agent line is appended to SQLite `chat_stream(chat_id, ord, kind, line)` *before* it is emitted;
 `chat_stream_state.folded_ord` records how far the frontend folded it into `chat_messages`, so a trim

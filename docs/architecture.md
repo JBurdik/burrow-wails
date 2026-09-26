@@ -80,8 +80,16 @@ impossible to find.
 A chat's stream is owned by a **session registry keyed by chat id**, not by
 `AgentChat.vue`. The session holds the transcript, turn state, blocking requests
 and the `claude-data-{id}` / `acp-data-{id}` / `acp-req-{id}` listeners; the
-component installs its reducers with `setHandlers` on mount and `release()`s on
-unmount. A session is only torn down when it is **idle** — a running turn or a
+session also **reduces** the stream — every piece of state a line can change
+lives there, including the Codex user-input prompt and the context meter, and
+notifications go out through `ChatHost` (`src/lib/chatHost.ts`) with or without
+a view. The reducers used to be `AgentChat.vue` closures installed with
+`setHandlers`; they outlived the component, and state they touched but the
+session did not own was written into the dead instance (a Codex
+`requestUserInput` arriving while unmounted was invisible on remount and did not
+block eviction). The component now `attachView`s a small `ChatViewHooks` (scroll,
+question/plan draft resets, ACP selector restore, `send` for the queue drain) on
+mount and `release()`s on unmount. A session is only torn down when it is **idle** — a running turn or a
 pending permission keeps streaming behind an unmounted view (ported from
 t3code's `shouldEvictThreadDetailSubscription`). That is what lets chat leaves
 render with `v-if` (`Terminal.isChatVisible`), so "is the user looking at this"
