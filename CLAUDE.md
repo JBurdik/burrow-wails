@@ -40,7 +40,7 @@ cd src-wails && go build ./...
 cd src-wails && go test ./...
 ```
 
-Tests: `pnpm test` (vitest, no DOM env). Currently covers only `src/machines/agentStatus.ts` — the status state machine. `just` (Justfile task runner, `brew install just`) drives dev/build/release; see `justfile`.
+Tests: `pnpm test` (vitest, no DOM env). `just` (Justfile task runner, `brew install just`) drives dev/build/release; see `justfile`.
 
 ## Architecture
 
@@ -119,9 +119,15 @@ Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatT
 
 A chat's stream is owned by a **session registry keyed by chat id**, not by `AgentChat.vue`: the
 session holds transcript, turn state, blocking requests and the `claude-data-{id}` / `acp-data-{id}` /
-`acp-req-{id}` listeners; components `setHandlers` on mount, `release()` on unmount, and a session is
-only torn down when **idle** (a running turn or pending permission keeps streaming behind an unmounted
-view). That's what lets chat leaves render with `v-if`.
+`acp-req-{id}` listeners, **and reduces the stream itself** (`onEvents`/`onLine`/`onAcpData`/`onAcpReq`,
+turn end, queue drain, notifications via `ChatHost` in `src/lib/chatHost.ts`). A component
+`attachView(ChatViewHooks)`s on mount — scroll, question/plan draft resets, ACP selector restore, `send`
+for the drain — and `release()`s on unmount; the last view's hooks stay installed. A session is only torn
+down when **idle** (`pendingRequests` — a typed `PendingRequest` union — empty and not busy; every answer
+goes through the one `respond(PendingAnswer)` door, which also closes a generic ACP prompt on write since
+only Codex sends `serverRequest/resolved` — a running turn or pending permission keeps
+streaming behind an unmounted view). That's what lets chat leaves render with `v-if`. Deps (`invoke`,
+`listen`, host) are injectable: `chatSession.test.ts` drives the reducers through fake listeners.
 
 Every agent line is appended to SQLite `chat_stream(chat_id, ord, kind, line)` *before* it is emitted;
 `chat_stream_state.folded_ord` records how far the frontend folded it into `chat_messages`, so a trim
@@ -173,10 +179,16 @@ per leaf in `localStorage` under `burrow.seenAt` (read-modify-write, never whole
 `phase-pty:{leafId}`. `tabStatus()` priority (`terminalStatus.ts`): **error** > permission > waiting >
 running > review > done > idle.
 
-**`src/machines/agentStatus.ts` is chat-only, not dead code** — terminals are off it, but
-`claudeChats.ts` / `AgentChat.vue` drive one instance per chat because chat permission state arrives
-on the control/permission protocol, not as a phase. A permission request fires a toast + (unfocused)
-a native notification via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
+**Chats use the same derivation.** Go derives waiting/permission for every provider from neutral
+`request.opened` / `request.resolved` events (Claude `control_request`, ACP `session/request_permission`,
+Codex approvals/user input); an answer applies `agentphase.Resume`, an abort/stop `Interrupt` (and a
+trailing turn end on an idle chat is dropped), a generic ACP turn settles on its own `session/prompt`
+response. `src/stores/chatAttention.ts` (instantiated in `App.vue`) is the **only writer of
+`session.status`**: `displayStatus(phase-chat, seenAt, watching)`, receipts in `burrow.seenAt` as
+`chat:<id>`, watching = a count held by the mounted `AgentChat` / RP sub-agent detail while the window
+has focus. There is no chat state machine any more. The phone does the same with its own receipt
+(`burrow.chatSeenAt.mobile`). A permission request fires a toast + (unfocused) a native notification
+via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
 list, distinguished only by icon.
 
 ### Control API + `burrow` CLI (`src-wails/internal/control`, `src-wails/bin/burrow`)
@@ -491,3 +503,17 @@ This project is indexed by GitNexus as **burrow-wails** (6314 symbols, 11895 rel
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`JBurdik/burrow-wails`, via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `CONTEXT.md` + `docs/adr/`, created lazily. See `docs/agents/domain.md`.

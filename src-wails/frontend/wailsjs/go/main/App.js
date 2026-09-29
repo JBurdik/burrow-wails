@@ -102,6 +102,10 @@ export function CleanDaemon() {
   return window['go']['main']['App']['CleanDaemon']();
 }
 
+export function CodexInterrupt(arg1) {
+  return window['go']['main']['App']['CodexInterrupt'](arg1);
+}
+
 export function CodexListModels(arg1) {
   return window['go']['main']['App']['CodexListModels'](arg1);
 }

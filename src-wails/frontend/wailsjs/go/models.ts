@@ -276,6 +276,8 @@ export namespace main {
 	    role?: string;
 	    images?: string[];
 	    turnMs?: number;
+	    requestId?: string;
+	    requestKind?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProviderRuntimeEvent(source);
@@ -304,6 +306,8 @@ export namespace main {
 	        this.role = source["role"];
 	        this.images = source["images"];
 	        this.turnMs = source["turnMs"];
+	        this.requestId = source["requestId"];
+	        this.requestKind = source["requestKind"];
 	    }
 	}
 	export class ChatEventBatch {

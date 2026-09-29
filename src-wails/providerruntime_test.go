@@ -117,9 +117,29 @@ func TestNormalizeClaudeStreamLine(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "a permission request keeps its own channel, not this one",
-			line: `{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool"}}`,
+			name: "a tool permission request blocks the turn on approval",
+			line: `{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash"}}`,
+			want: []ProviderRuntimeEvent{{Type: EvtRequestOpened, RequestID: "r1", RequestKind: RequestApproval, Name: "Bash"}},
+		},
+		{
+			name: "AskUserQuestion blocks the turn on input, not approval",
+			line: `{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion"}}`,
+			want: []ProviderRuntimeEvent{{Type: EvtRequestOpened, RequestID: "r2", RequestKind: RequestInput, Name: "AskUserQuestion"}},
+		},
+		{
+			name: "ExitPlanMode blocks the turn on input",
+			line: `{"type":"control_request","request_id":"r3","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode"}}`,
+			want: []ProviderRuntimeEvent{{Type: EvtRequestOpened, RequestID: "r3", RequestKind: RequestInput, Name: "ExitPlanMode"}},
+		},
+		{
+			name: "other control requests are not the user's business",
+			line: `{"type":"control_request","request_id":"r4","request":{"subtype":"hook_callback"}}`,
 			want: nil,
+		},
+		{
+			name: "a withdrawn request resolves it",
+			line: `{"type":"control_cancel_request","request_id":"r1"}`,
+			want: []ProviderRuntimeEvent{{Type: EvtRequestResolved, RequestID: "r1"}},
 		},
 		{
 			name: "garbage is dropped, not an error — the CLI owns its own format",
@@ -426,6 +446,60 @@ func TestChatNoteEventsDoNotMoveThePhase(t *testing.T) {
 	for _, evType := range []string{EvtMessageNote, EvtMessagePatchUser} {
 		if _, ok := chatPhaseEvent(ProviderRuntimeEvent{Type: evType}); ok {
 			t.Fatalf("%q should not map to a phase event", evType)
+		}
+	}
+}
+
+func TestNormalizeAcpRequestLines(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want []ProviderRuntimeEvent
+	}{
+		{"ACP permission", `{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{}}`,
+			[]ProviderRuntimeEvent{{Type: EvtRequestOpened, RequestID: "7", RequestKind: RequestApproval, Name: "session/request_permission"}}},
+		{"Codex command approval", `{"id":3,"method":"item/commandExecution/requestApproval","params":{}}`,
+			[]ProviderRuntimeEvent{{Type: EvtRequestOpened, RequestID: "3", RequestKind: RequestApproval, Name: "item/commandExecution/requestApproval"}}},
+		{"Codex user input", `{"id":"q1","method":"item/tool/requestUserInput","params":{}}`,
+			[]ProviderRuntimeEvent{{Type: EvtRequestOpened, RequestID: "q1", RequestKind: RequestInput, Name: "item/tool/requestUserInput"}}},
+		{"unknown request", `{"id":1,"method":"item/tool/call"}`, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NormalizeChatLine("acp-req", tc.line, 1); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	resolved := NormalizeAcpLine(`{"method":"serverRequest/resolved","params":{"requestId":3}}`)
+	if want := []ProviderRuntimeEvent{{Type: EvtRequestResolved, RequestID: "3"}}; !reflect.DeepEqual(resolved, want) {
+		t.Fatalf("serverRequest/resolved: got %+v", resolved)
+	}
+}
+
+func TestRequestEventsDriveTheChatPhase(t *testing.T) {
+	p := agentphase.Phase{}
+	steps := []struct {
+		ev   ProviderRuntimeEvent
+		want agentphase.State
+	}{
+		{ProviderRuntimeEvent{Type: EvtUserDelta}, agentphase.Running},
+		{ProviderRuntimeEvent{Type: EvtRequestOpened, RequestKind: RequestApproval, Name: "Bash"}, agentphase.WaitingApproval},
+		{ProviderRuntimeEvent{Type: EvtRequestResolved}, agentphase.Running},
+		{ProviderRuntimeEvent{Type: EvtRequestOpened, RequestKind: RequestInput}, agentphase.WaitingInput},
+		{ProviderRuntimeEvent{Type: EvtRequestResolved}, agentphase.Running},
+		{ProviderRuntimeEvent{Type: EvtTurnCompleted}, agentphase.Done},
+		// A withdrawal that arrives after the result must not reopen the turn.
+		{ProviderRuntimeEvent{Type: EvtRequestResolved}, agentphase.Done},
+	}
+	for i, st := range steps {
+		ev, ok := chatPhaseEvent(st.ev)
+		if !ok {
+			t.Fatalf("step %d: %s has no phase meaning", i, st.ev.Type)
+		}
+		p = agentphase.Next(p, ev, int64(i+1))
+		if p.State != st.want {
+			t.Fatalf("step %d (%s): want %s, got %s", i, st.ev.Type, st.want, p.State)
 		}
 	}
 }

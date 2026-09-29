@@ -53,6 +53,8 @@ export function ClaudeUsage5h(arg1:string):Promise<main.ClaudeUsage>;
 
 export function CleanDaemon():Promise<number>;
 
+export function CodexInterrupt(arg1:string):Promise<void>;
+
 export function CodexListModels(arg1:string):Promise<Array<main.AgentModel>>;
 
 export function CodexSend(arg1:string,arg2:string,arg3:Array<string>):Promise<number>;

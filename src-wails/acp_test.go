@@ -378,3 +378,89 @@ func TestCodexInterruptAddressesRunningTurn(t *testing.T) {
 		t.Fatalf("turn not settled: %+v", sess)
 	}
 }
+
+func newPhasedTestApp(t *testing.T) (*App, *PhaseStore) {
+	t.Helper()
+	a := newTestApp(t)
+	store, err := NewPhaseStore(a.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.phases = store
+	return a, store
+}
+
+func TestCodexInterruptSettlesIdleAndIgnoresTheTrailingTurnEnd(t *testing.T) {
+	a, store := newPhasedTestApp(t)
+	var stdin bytes.Buffer
+	sess := &acpSession{stdin: nopWriteCloser{Writer: &stdin}, proto: protoCodexAppServer, sessionID: "thread-1", turnID: "turn-1"}
+	a.acpReg().put("92", sess)
+	if _, err := a.CodexSend("92", "go", nil); err != nil {
+		t.Fatal(err)
+	}
+	sess.turnID = "turn-1" // CodexSend does not ack; the turn/start response would set it
+	if err := a.CodexInterrupt("92"); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get("chat:92").State; got != "idle" {
+		t.Fatalf("after interrupt phase = %q, want idle", got)
+	}
+	a.pumpCodexLine("92", map[string]any{
+		"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "interrupted"}},
+	}, sess)
+	if got := store.Get("chat:92").State; got != "idle" {
+		t.Fatalf("trailing turn end relabelled an interrupted turn: %q", got)
+	}
+}
+
+func TestAcpTurnSettlesOnItsOwnPromptResponse(t *testing.T) {
+	a, store := newPhasedTestApp(t)
+	var stdin bytes.Buffer
+	sess := &acpSession{stdin: nopWriteCloser{Writer: &stdin}, proto: protoACP, sessionID: "s1"}
+	a.acpReg().put("93", sess)
+	rpc, err := a.AcpSend("93", "hi", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get("chat:93").State; got != "running" {
+		t.Fatalf("after send phase = %q, want running", got)
+	}
+
+	// A permission request blocks it; answering resumes it.
+	a.emitChatLine("93", "acp-req", `{"jsonrpc":"2.0","id":50,"method":"session/request_permission","params":{}}`)
+	if got := store.Get("chat:93").State; got != "waiting_approval" {
+		t.Fatalf("during permission phase = %q, want waiting_approval", got)
+	}
+	if err := a.AcpRespondPermission("93", 50, "allow"); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get("chat:93").State; got != "running" {
+		t.Fatalf("after answer phase = %q, want running", got)
+	}
+
+	// Some other response must not end the turn.
+	a.settleAcpPrompt("93", sess, map[string]any{"id": float64(rpc + 100), "result": map[string]any{}})
+	if got := store.Get("chat:93").State; got != "running" {
+		t.Fatalf("unrelated response settled the turn: %q", got)
+	}
+	a.settleAcpPrompt("93", sess, map[string]any{"id": float64(rpc), "result": map[string]any{"stopReason": "end_turn"}})
+	if got := store.Get("chat:93").State; got != "done" {
+		t.Fatalf("prompt response phase = %q, want done", got)
+	}
+}
+
+func TestAcpPromptOutcome(t *testing.T) {
+	cases := []struct {
+		msg  map[string]any
+		want agentphase.Kind
+	}{
+		{map[string]any{"result": map[string]any{"stopReason": "end_turn"}}, agentphase.HookDone},
+		{map[string]any{"result": map[string]any{"stopReason": "cancelled"}}, agentphase.Interrupt},
+		{map[string]any{"error": map[string]any{"message": "boom"}}, agentphase.HookError},
+	}
+	for _, tc := range cases {
+		if got := acpPromptOutcome(tc.msg); got.Kind != tc.want {
+			t.Fatalf("%v: got %s, want %s", tc.msg, got.Kind, tc.want)
+		}
+	}
+}

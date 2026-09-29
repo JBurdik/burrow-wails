@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"burrow/internal/agentphase"
 )
 
 // Claude Code chat runtime. Ports claude_start/claude_send/claude_stop/
@@ -265,12 +267,16 @@ func (a *App) claudeWrite(id, line string) error {
 }
 
 func (a *App) ClaudeStop(id string) error {
+	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.Interrupt})
 	return a.claudeMgr().Stop(id)
 }
 
 // ClaudeAbort interrupts the current turn with SIGINT so the CLI finalizes
 // gracefully (it emits a result event); SIGKILL would just drop the pipe.
 func (a *App) ClaudeAbort(id string) error {
+	// Settled here, not by the CLI's trailing result: applyChatPhase drops a
+	// turn end that finds the chat idle, so the result cannot relabel it done.
+	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.Interrupt})
 	if err := a.claudeMgr().Signal(id, os.Interrupt); err != nil {
 		// No live process (or signal refused) — fall back to a hard stop so the
 		// UI's abort button is never a no-op.

@@ -251,3 +251,20 @@ func TestInterruptSettlesOnlyAnInFlightTurn(t *testing.T) {
 		t.Fatalf("interrupt on a failed phase changed it: %+v vs %+v", got, failed)
 	}
 }
+
+func TestResumeOnlyMovesAWaitingTurn(t *testing.T) {
+	for _, blocked := range []Kind{HookWaiting, HookPermission} {
+		p := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: blocked, Detail: "Bash"}, Event{Kind: Resume})
+		if p.State != Running || p.Detail != "" {
+			t.Fatalf("%s → resume: want running with no detail, got %q %q", blocked, p.State, p.Detail)
+		}
+	}
+	// An answer that lands after the turn ended must not reopen it.
+	done := apply(Phase{}, Event{Kind: HookRunning}, Event{Kind: HookDone})
+	if got := Next(done, Event{Kind: Resume}, now+1); got != done {
+		t.Fatalf("resume after done changed the phase: %+v", got)
+	}
+	if got := Next(Phase{State: Idle}, Event{Kind: Resume}, now); got.State != Idle {
+		t.Fatalf("resume from idle: want idle, got %q", got.State)
+	}
+}

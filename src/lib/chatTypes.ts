@@ -52,6 +52,22 @@ export interface CanUseToolReq {
   toolUseId?: string;
 }
 
+/** One question of a Codex `item/tool/requestUserInput` request. */
+export interface CodexUserInputQuestion {
+  id: string;
+  header: string;
+  question: string;
+  isOther?: boolean;
+  isSecret?: boolean;
+  options: Array<{ label: string; description?: string }>;
+}
+
+/** A pending Codex user-input request: its JSON-RPC id and the questions. */
+export interface CodexUserInputReq {
+  rpcId: number;
+  questions: CodexUserInputQuestion[];
+}
+
 export interface AcpPermReq {
   rpcId: number;
   toolCallId: string;
