@@ -635,8 +635,8 @@ import ComposerPill, { type ComposerPillItem } from "@/components/composer/Compo
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
-import { chatSession, replayChatStream, ruleKeys } from "@/lib/chatSession";
-import type { CanUseToolReq, ChatMessage } from "@/lib/chatTypes";
+import { chatSession, replayChatStream } from "@/lib/chatSession";
+import type { ChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { chatSettingKey } from "@/lib/chatSettings";
 import { splitMentions } from "@/lib/mentionTokens";
@@ -828,14 +828,13 @@ const {
   messages, busy, lastActivityAt, turnStartedAt, messageQueue, suppressNextDone,
   sessionId, turnStats, sessionCost, runtimeStarted,
   pendingPermission, pendingQuestion, pendingPlan, pendingDiff,
-  pendingPermissionMsgId, pendingQuestionMsgId, pendingPlanMsgId, pendingDiffMsgId,
   acpPermReq, acpPermRpcId, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
   permissionResponsePending, codexUserInput, codexUserInputPending,
   nativeControlResponsePending, acpRestorePushIds,
   contextTokens, contextWindow, contextSplit, contextReport, contextReportPending, awaitingContextReport,
   claudeGeneratedTitle,
   enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext,
-  removeFeedMarker, respondControl,
+  removeFeedMarker,
 } = S;
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
@@ -1908,18 +1907,7 @@ function syncStore() {
 
 
 async function respondCodexUserInput(answers: Record<string, string[]>) {
-  const request = codexUserInput.value;
-  if (!request || codexUserInputPending.value) return;
-  codexUserInputPending.value = true;
-  try {
-    await invoke("acp_respond_user_input", { id: props.chatId, rpcId: request.rpcId, answers });
-    codexUserInput.value = null;
-  } catch (error) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Unable to submit Codex input: ${error}` });
-    codexUserInputPending.value = false;
-  } finally {
-    syncStore();
-  }
+  await S.respond({ kind: "codexInput", answers });
 }
 
 function cancelCodexUserInput() {
@@ -1931,20 +1919,7 @@ function cancelCodexUserInput() {
 
 // Reply to a rich ACP permission request with the chosen adapter optionId.
 async function acpRespond(optionId: string, optName: string, kind: string) {
-  const r = acpPermReq.value;
-  if (!r || permissionResponsePending.value) return;
-  permissionResponsePending.value = true;
-  const reject = kind.startsWith("reject");
-  try {
-    await invoke("acp_respond_permission", { id: props.chatId, rpcId: r.rpcId, optionId });
-    messages.value.push({ id: S.nextMsgId++, role: "permission", text: `${reject ? "✗" : "✓"} ${optName}: ${r.title}` });
-    S.save();
-    // serverRequest/resolved closes the prompt and updates the Sidebar state.
-  } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
-    S.save();
-    permissionResponsePending.value = false;
-  }
+  await S.respond({ kind: "acpOption", optionId, label: optName, reject: kind.startsWith("reject") });
 }
 
 async function copyMessage(msg: ChatMessage) {
@@ -2085,79 +2060,10 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
 }
 
 
-async function resolveClaudePrompt(
-  cr: CanUseToolReq,
-  response: Record<string, unknown>,
-  clearPrompt: () => void,
-): Promise<boolean> {
-  nativeControlResponsePending.value = true;
-  try {
-    await respondControl(cr.requestId, response);
-    clearPrompt();
-    return true;
-  } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
-    S.save();
-    // respondControl threw — clear the prompt anyway so it doesn't stay stuck on screen.
-    clearPrompt();
-    return false;
-  } finally {
-    nativeControlResponsePending.value = false;
-    syncStore();
-  }
-}
 
 // Generic tool permission + diff Accept/Reject (both pull from pendingPermission|pendingDiff).
 async function respondPermission(allow: boolean, opts?: { always?: boolean; updatedInput?: Record<string, unknown>; message?: string }) {
-  const cr = pendingPermission.value ?? pendingDiff.value;
-  if (!cr) return;
-  // ACP transport: reply to the agent's blocking request_permission.
-  if (usesRpcRuntime.value && acpPermRpcId.value !== null) {
-    // ACP optionIds are agent-defined — pick the matching one by kind from the
-    // request's options (NOT a hardcoded string), else fall back to the first.
-    const optsList = ((cr as unknown as { suggestions?: Array<{ optionId: string; kind: string }> }).suggestions ?? []);
-    const pick = (...kinds: string[]) => {
-      for (const k of kinds) { const o = optsList.find((x) => x.kind === k); if (o) return o.optionId; }
-      return optsList[0]?.optionId ?? "";
-    };
-    const optionId = allow
-      ? (opts?.always ? pick("allow_always", "allow_once") : pick("allow_once", "allow_always"))
-      : pick("reject_once", "reject_always");
-    messages.value.push({ id: S.nextMsgId++, role: "permission", text: `${allow ? "✓ Allowed" : "✗ Denied"}: ${cr.toolName}` });
-    S.save();
-    invoke("acp_respond_permission", { id: props.chatId, rpcId: acpPermRpcId.value, optionId }).catch((e) => {
-      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Permission response failed: ${e}` });
-    });
-    acpPermRpcId.value = null;
-    syncStore();
-    return;
-  }
-  if (nativeControlResponsePending.value) return;
-  nativeControlResponsePending.value = true;
-  const detail = (cr.input.command ?? cr.input.file_path ?? cr.input.path ?? cr.description ?? "") as string;
-  const detailStr = detail ? ` — ${detail.length > 80 ? detail.slice(0, 80) + "…" : detail}` : "";
-  try {
-    await respondControl(cr.requestId, allow
-      ? { behavior: "allow", updatedInput: opts?.updatedInput ?? cr.input }
-      : { behavior: "deny", message: opts?.message || "User denied this action." });
-    removeFeedMarker(pendingPermissionMsgId.value); pendingPermissionMsgId.value = null;
-    removeFeedMarker(pendingDiffMsgId.value); pendingDiffMsgId.value = null;
-    pendingPermission.value = null;
-    pendingDiff.value = null;
-    if (allow && opts?.always) {
-      const keys = ruleKeys(cr.toolName, cr.input);
-      chats.addPermissionRule(keys[keys.length - 1]);
-    }
-    const label = allow ? (opts?.always ? "✓ Always allowed" : "✓ Allowed") : "✗ Denied";
-    messages.value.push({ id: S.nextMsgId++, role: "permission", text: `${label}: ${cr.toolName}${detailStr}` });
-    S.save();
-  } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
-    S.save();
-  } finally {
-    nativeControlResponsePending.value = false;
-    syncStore();
-  }
+  await S.respond({ kind: "permission", allow, ...opts });
 }
 
 function toggleOption(question: string, label: string, multi: boolean) {
@@ -2180,12 +2086,10 @@ function setCustomAnswer(question: string, text: string) {
 }
 
 async function submitQuestion() {
-  const cr = pendingQuestion.value;
-  if (!cr || !canSubmitQuestion.value || nativeControlResponsePending.value) return;
-  // The tool reads input.answers keyed by question text. A multi-select answer
-  // must stay an array (the CLI expects the same shape it gave options in) —
-  // joining it into a comma string here is what made multi-select questions
-  // look permanently stuck after Submit.
+  if (!pendingQuestion.value || !canSubmitQuestion.value) return;
+  // A multi-select answer must stay an array (the CLI expects the same shape it
+  // gave options in) — joining it into a comma string here is what made
+  // multi-select questions look permanently stuck after Submit.
   const answers: Record<string, string | string[]> = {};
   for (const q of questionSpecs.value) {
     const custom = (questionCustomAnswers.value[q.question] ?? "").trim();
@@ -2194,32 +2098,14 @@ async function submitQuestion() {
     if (!labels.length) continue;
     answers[q.question] = q.multiSelect ? labels : labels[0];
   }
-  await resolveClaudePrompt(cr, { behavior: "allow", updatedInput: { ...cr.input, answers } }, () => {
-    if (pendingQuestion.value?.requestId !== cr.requestId) return; // superseded by a newer request
-    removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
-    pendingQuestion.value = null;
-  });
+  await S.respond({ kind: "question", answers });
 }
 async function cancelQuestion() {
-  const cr = pendingQuestion.value;
-  if (!cr || nativeControlResponsePending.value) return;
-  // allow with empty answers → tool reports "did not answer" (clean dismiss, no error).
-  await resolveClaudePrompt(cr, { behavior: "allow", updatedInput: { ...cr.input, answers: {} } }, () => {
-    if (pendingQuestion.value?.requestId !== cr.requestId) return; // superseded by a newer request
-    removeFeedMarker(pendingQuestionMsgId.value); pendingQuestionMsgId.value = null;
-    pendingQuestion.value = null;
-  });
+  await S.respond({ kind: "question", answers: {} });
 }
 
 async function respondPlan(approve: boolean) {
-  const cr = pendingPlan.value;
-  if (!cr || nativeControlResponsePending.value) return;
-  const resolved = await resolveClaudePrompt(cr, approve
-    ? { behavior: "allow", updatedInput: cr.input }
-    : { behavior: "deny", message: planFeedback.value.trim() || "Keep planning — do not exit plan mode yet." }, () => {
-      removeFeedMarker(pendingPlanMsgId.value); pendingPlanMsgId.value = null;
-      pendingPlan.value = null;
-    });
+  const resolved = await S.respond({ kind: "plan", approve, feedback: planFeedback.value });
   // ExitPlanMode changes Claude's live session in place. Mirror that transition
   // locally without restarting the process, or the picker and next resume keep
   // claiming/re-applying plan mode after the approved implementation has begun.

@@ -123,7 +123,9 @@ session holds transcript, turn state, blocking requests and the `claude-data-{id
 turn end, queue drain, notifications via `ChatHost` in `src/lib/chatHost.ts`). A component
 `attachView(ChatViewHooks)`s on mount — scroll, question/plan draft resets, ACP selector restore, `send`
 for the drain — and `release()`s on unmount; the last view's hooks stay installed. A session is only torn
-down when **idle** (`pendingRequests` empty and not busy — a running turn or pending permission keeps
+down when **idle** (`pendingRequests` — a typed `PendingRequest` union — empty and not busy; every answer
+goes through the one `respond(PendingAnswer)` door, which also closes a generic ACP prompt on write since
+only Codex sends `serverRequest/resolved` — a running turn or pending permission keeps
 streaming behind an unmounted view). That's what lets chat leaves render with `v-if`. Deps (`invoke`,
 `listen`, host) are injectable: `chatSession.test.ts` drives the reducers through fake listeners.
 

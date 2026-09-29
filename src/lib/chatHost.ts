@@ -22,6 +22,7 @@ export interface ChatHost {
   syncChat(chatId: number, patch: Parameters<ReturnType<typeof useClaudeChatsStore>["sync"]>[1]): void;
   recordTurn(inputTokens: number, outputTokens: number): void;
   hasPermissionRule(keys: string[]): boolean;
+  addPermissionRule(key: string): void;
   subagentStarted(chatId: number, toolCallId: string, input: Record<string, unknown> | undefined): void;
   subagentCompleted(toolCallId: string, failed: boolean): void;
   /** A turn finished. `watching`: the user saw it finish (no chime). */
@@ -55,6 +56,7 @@ export const appChatHost: ChatHost = {
   syncChat: (chatId, patch) => useClaudeChatsStore().sync(chatId, patch),
   recordTurn: (inp, out) => useClaudeChatsStore().recordTurn(inp, out),
   hasPermissionRule: (keys) => useClaudeChatsStore().hasPermissionRule(keys),
+  addPermissionRule: (key) => useClaudeChatsStore().addPermissionRule(key),
   subagentStarted: (chatId, id, input) => useSubagentsStore().started(chatId, id, input),
   subagentCompleted: (id, failed) => useSubagentsStore().completed(id, failed),
   notifyDone(chatId, watching) {

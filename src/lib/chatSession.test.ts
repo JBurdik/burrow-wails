@@ -16,6 +16,7 @@ function fakeDeps() {
     syncChat: vi.fn(),
     recordTurn: vi.fn(),
     hasPermissionRule: vi.fn(() => false),
+    addPermissionRule: vi.fn(),
     subagentStarted: vi.fn(),
     subagentCompleted: vi.fn(),
     notifyDone: vi.fn(),
@@ -424,5 +425,91 @@ describe("stream reducers", () => {
     expect(s.runtimeStarted.value).toBe(false);
     expect(s.messages.value[0].toolFailed).toBe(true);
     dropChatSession(67);
+  });
+});
+
+// One door for every answer. The prompt-clearing rules differ per protocol and
+// used to be spread over six functions in the view.
+describe("answering a pending request", () => {
+  const nativeRequest = (toolName: string, input: Record<string, unknown> = {}) =>
+    ({ requestId: `r-${toolName}`, toolName, input, suggestions: [] });
+
+  it("allows a native permission, remembers an always-rule, and leaves a receipt", async () => {
+    const { deps, host, invoke: fake } = fakeDeps();
+    const s = chatSession(70, deps);
+    s.pendingPermission.value = nativeRequest("Bash", { command: "git push" });
+    expect(s.pendingRequests.value.map((r) => r.kind)).toEqual(["permission"]);
+    expect(await s.respond({ kind: "permission", allow: true, always: true })).toBe(true);
+    expect(fake).toHaveBeenCalledWith("claude_respond_control", { id: 70, requestId: "r-Bash", response: { behavior: "allow", updatedInput: { command: "git push" } } });
+    expect(host.addPermissionRule).toHaveBeenCalledWith("Bash:git");
+    expect(s.pendingRequests.value).toEqual([]);
+    expect(s.messages.value[s.messages.value.length - 1]?.text).toBe("✓ Always allowed: Bash — git push");
+    dropChatSession(70);
+  });
+
+  it("drops a native prompt whose answer could not be written, and says so", async () => {
+    const { deps, invoke: fake } = fakeDeps();
+    fake.mockRejectedValue(new Error("pipe closed"));
+    const s = chatSession(71, deps);
+    s.pendingPlan.value = nativeRequest("ExitPlanMode");
+    expect(await s.respond({ kind: "plan", approve: false, feedback: "more detail" })).toBe(false);
+    expect(s.pendingPlan.value).toBeNull();
+    expect(s.messages.value[0].text).toContain("pipe closed");
+    expect(s.nativeControlResponsePending.value).toBe(false);
+    dropChatSession(71);
+  });
+
+  it("sends question answers in the tool's own input, {} to dismiss", async () => {
+    const { deps, invoke: fake } = fakeDeps();
+    const s = chatSession(72, deps);
+    s.pendingQuestion.value = nativeRequest("AskUserQuestion", { questions: [] });
+    await s.respond({ kind: "question", answers: { "Which?": ["A", "B"] } });
+    expect(fake).toHaveBeenCalledWith("claude_respond_control", expect.objectContaining({
+      response: { behavior: "allow", updatedInput: { questions: [], answers: { "Which?": ["A", "B"] } } },
+    }));
+    expect(s.pendingQuestion.value).toBeNull();
+    dropChatSession(72);
+  });
+
+  it("closes a generic ACP permission on the write, but waits for Codex to resolve its own", async () => {
+    const acp = fakeDeps();
+    acp.host.chat.mockReturnValue({ transport: "acp" } as never);
+    const s = chatSession(73, acp.deps);
+    s.acpPermReq.value = { rpcId: 4, toolCallId: "t", title: "Edit", kind: "edit", options: [], rawInput: {} };
+    s.acpPermRpcId.value = 4;
+    expect(await s.respond({ kind: "acpOption", optionId: "allow_once", label: "Allow", reject: false })).toBe(true);
+    expect(acp.invoke).toHaveBeenCalledWith("acp_respond_permission", { id: 73, rpcId: 4, optionId: "allow_once" });
+    expect(s.acpPermReq.value).toBeNull();
+    dropChatSession(73);
+
+    const codex = fakeDeps();
+    codex.host.chat.mockReturnValue({ transport: "codex-app-server" } as never);
+    const c = chatSession(74, codex.deps);
+    c.acpPermReq.value = { rpcId: 5, toolCallId: "t", title: "Run", kind: "execute", options: [], rawInput: {} };
+    await c.respond({ kind: "acpOption", optionId: "codex:accept", label: "Accept", reject: false });
+    expect(c.acpPermReq.value).not.toBeNull(); // serverRequest/resolved clears it
+    expect(c.permissionResponsePending.value).toBe(true);
+    dropChatSession(74);
+  });
+
+  it("keeps an ACP prompt retryable when its answer fails", async () => {
+    const { deps, invoke: fake } = fakeDeps();
+    fake.mockRejectedValue(new Error("adapter gone"));
+    const s = chatSession(75, deps);
+    s.acpPermReq.value = { rpcId: 6, toolCallId: "t", title: "Edit", kind: "edit", options: [], rawInput: {} };
+    expect(await s.respond({ kind: "acpOption", optionId: "x", label: "Allow", reject: false })).toBe(false);
+    expect(s.acpPermReq.value).not.toBeNull();
+    expect(s.permissionResponsePending.value).toBe(false);
+    dropChatSession(75);
+  });
+
+  it("answers a Codex user-input request by question id", async () => {
+    const { deps, invoke: fake } = fakeDeps();
+    const s = chatSession(76, deps);
+    s.codexUserInput.value = { rpcId: 8, questions: [{ id: "q", header: "Q", question: "Which?", options: [] }] };
+    expect(await s.respond({ kind: "codexInput", answers: { q: ["A"] } })).toBe(true);
+    expect(fake).toHaveBeenCalledWith("acp_respond_user_input", { id: 76, rpcId: 8, answers: { q: ["A"] } });
+    expect(s.codexUserInput.value).toBeNull();
+    dropChatSession(76);
   });
 });

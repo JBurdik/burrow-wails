@@ -76,6 +76,28 @@ export function ruleKeys(toolName: string, input: Record<string, unknown>): stri
 
 export type CtxSplit = { cached: number; fresh: number; output: number };
 
+/** One thing the agent is blocked on, whatever the transport. */
+export type PendingRequest =
+  | { kind: "permission"; request: CanUseToolReq }
+  | { kind: "diff"; request: CanUseToolReq }
+  | { kind: "question"; request: CanUseToolReq }
+  | { kind: "plan"; request: CanUseToolReq }
+  | { kind: "acpPermission"; request: AcpPermReq }
+  | { kind: "codexInput"; request: CodexUserInputReq };
+
+/** The user's answer to the matching pending request. */
+export type PendingAnswer =
+  /** A native tool permission or file diff (Allow / Always / Deny). */
+  | { kind: "permission"; allow: boolean; always?: boolean; updatedInput?: Record<string, unknown>; message?: string }
+  /** AskUserQuestion — answers keyed by question text; {} dismisses it. */
+  | { kind: "question"; answers: Record<string, string | string[]> }
+  /** ExitPlanMode — approve, or keep planning with feedback. */
+  | { kind: "plan"; approve: boolean; feedback?: string }
+  /** An ACP / Codex permission — one of the adapter's own options. */
+  | { kind: "acpOption"; optionId: string; label: string; reject: boolean }
+  /** Codex requestUserInput — answers keyed by question id; all-empty dismisses it. */
+  | { kind: "codexInput"; answers: Record<string, string[]> };
+
 // Remembered per chat, because replayChatStream only replays from folded_ord —
 // the usage that filled the context ring is usually behind that mark, so
 // nothing would re-emit it and the ring would vanish until the next turn.
@@ -177,7 +199,14 @@ export interface ChatSession {
   acpConfigOptions: Ref<AcpConfigOption[]>;
 
   /** Every request the agent is blocked on, whatever the transport. */
-  pendingRequests: ComputedRef<unknown[]>;
+  pendingRequests: ComputedRef<PendingRequest[]>;
+  /**
+   * Answer the matching pending request — the one door for every transport.
+   * Resolves true when the agent accepted the answer. A failed write leaves an
+   * error row in the transcript; whether the prompt stays depends on the
+   * protocol (a native prompt is dropped, an ACP one stays retryable).
+   */
+  respond(answer: PendingAnswer): Promise<boolean>;
 
   /** Point the session's hooks at this view. Replaces any previous view's. */
   attachView(view: ChatViewHooks): void;
@@ -365,10 +394,17 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     acpModes: ref<AcpModes | null>(null),
     acpConfigOptions: ref<AcpConfigOption[]>([]),
 
-    pendingRequests: computed(() => [
-      s.pendingPermission.value, s.pendingQuestion.value, s.pendingPlan.value, s.pendingDiff.value,
-      s.acpPermReq.value, s.codexUserInput.value,
-    ].filter((request) => request !== null)),
+    pendingRequests: computed(() => {
+      const out: PendingRequest[] = [];
+      if (s.pendingPermission.value) out.push({ kind: "permission", request: s.pendingPermission.value });
+      if (s.pendingDiff.value) out.push({ kind: "diff", request: s.pendingDiff.value });
+      if (s.pendingQuestion.value) out.push({ kind: "question", request: s.pendingQuestion.value });
+      if (s.pendingPlan.value) out.push({ kind: "plan", request: s.pendingPlan.value });
+      if (s.acpPermReq.value) out.push({ kind: "acpPermission", request: s.acpPermReq.value });
+      if (s.codexUserInput.value) out.push({ kind: "codexInput", request: s.codexUserInput.value });
+      return out;
+    }),
+    respond: (answer) => respond(s, answer),
 
     enqueueMessage(text, images) {
       const entry: QueuedChatMessage = { id: s.nextMsgId++, text, ...(images?.length ? { images } : {}) };
@@ -934,4 +970,127 @@ function onAcpReq(s: InternalSession, raw: string) {
   s.deps.host.notifyPermission(s.chatId, { requestId: String(perm.rpcId), toolName: perm.title, input: perm.rawInput, suggestions: [] } as CanUseToolReq);
   s.sync();
   s.view?.scrollToBottom();
+}
+
+// ── answering ─────────────────────────────────────────────────────────────
+
+function pushRow(s: InternalSession, role: ChatMessage["role"], text: string) {
+  s.messages.value.push({ id: s.nextMsgId++, role, text });
+  s.save();
+}
+
+/**
+ * Write a native control response and drop the prompt it answered. The prompt
+ * goes either way: a failed write is reported in the transcript rather than
+ * left on screen as a prompt nothing is listening to.
+ */
+async function resolveNative(
+  s: InternalSession,
+  requestId: string,
+  response: Record<string, unknown>,
+  clear: () => void,
+): Promise<boolean> {
+  if (s.nativeControlResponsePending.value) return false;
+  s.nativeControlResponsePending.value = true;
+  try {
+    await s.respondControl(requestId, response);
+    clear();
+    return true;
+  } catch (e) {
+    pushRow(s, "assistant", `Control response failed: ${e}`);
+    clear();
+    return false;
+  } finally {
+    s.nativeControlResponsePending.value = false;
+    s.sync();
+  }
+}
+
+function clearSlot(s: InternalSession, request: Ref<CanUseToolReq | null>, markerId: Ref<number | null>, requestId: string) {
+  if (request.value?.requestId !== requestId) return; // superseded by a newer request
+  s.removeFeedMarker(markerId.value);
+  markerId.value = null;
+  request.value = null;
+}
+
+async function respond(s: InternalSession, answer: PendingAnswer): Promise<boolean> {
+  const { chatId } = s;
+  switch (answer.kind) {
+    case "permission": {
+      const cr = s.pendingPermission.value ?? s.pendingDiff.value;
+      if (!cr) return false;
+      const detail = (cr.input.command ?? cr.input.file_path ?? cr.input.path ?? cr.description ?? "") as string;
+      const detailStr = detail ? ` — ${detail.length > 80 ? detail.slice(0, 80) + "…" : detail}` : "";
+      const ok = await resolveNative(s, cr.requestId, answer.allow
+        ? { behavior: "allow", updatedInput: answer.updatedInput ?? cr.input }
+        : { behavior: "deny", message: answer.message || "User denied this action." }, () => {
+        clearSlot(s, s.pendingPermission, s.pendingPermissionMsgId, cr.requestId);
+        clearSlot(s, s.pendingDiff, s.pendingDiffMsgId, cr.requestId);
+      });
+      if (!ok) return false;
+      if (answer.allow && answer.always) {
+        const keys = ruleKeys(cr.toolName, cr.input);
+        s.deps.host.addPermissionRule(keys[keys.length - 1]);
+      }
+      const label = answer.allow ? (answer.always ? "✓ Always allowed" : "✓ Allowed") : "✗ Denied";
+      pushRow(s, "permission", `${label}: ${cr.toolName}${detailStr}`);
+      return true;
+    }
+    case "question": {
+      const cr = s.pendingQuestion.value;
+      if (!cr) return false;
+      // The tool reads input.answers keyed by question text; {} is the clean
+      // "did not answer" dismiss (no error on the agent's side).
+      return resolveNative(s, cr.requestId, { behavior: "allow", updatedInput: { ...cr.input, answers: answer.answers } },
+        () => clearSlot(s, s.pendingQuestion, s.pendingQuestionMsgId, cr.requestId));
+    }
+    case "plan": {
+      const cr = s.pendingPlan.value;
+      if (!cr) return false;
+      return resolveNative(s, cr.requestId, answer.approve
+        ? { behavior: "allow", updatedInput: cr.input }
+        : { behavior: "deny", message: answer.feedback?.trim() || "Keep planning — do not exit plan mode yet." },
+        () => clearSlot(s, s.pendingPlan, s.pendingPlanMsgId, cr.requestId));
+    }
+    case "acpOption": {
+      const r = s.acpPermReq.value;
+      if (!r || s.permissionResponsePending.value) return false;
+      s.permissionResponsePending.value = true;
+      try {
+        await s.deps.invoke("acp_respond_permission", { id: chatId, rpcId: r.rpcId, optionId: answer.optionId });
+      } catch (e) {
+        pushRow(s, "assistant", `Permission response failed: ${e}`);
+        s.permissionResponsePending.value = false; // stays on screen, retryable
+        return false;
+      }
+      pushRow(s, "permission", `${answer.reject ? "✗" : "✓"} ${answer.label}: ${r.title}`);
+      // Codex acknowledges with serverRequest/resolved (onAcpData clears the
+      // prompt then). A generic ACP adapter sends nothing of the sort — its
+      // prompt used to sit on screen, and block eviction, forever.
+      if (s.deps.host.chat(chatId)?.transport !== "codex-app-server" && s.acpPermReq.value === r) {
+        s.removeFeedMarker(s.acpPermMsgId.value); s.acpPermMsgId.value = null;
+        s.acpPermReq.value = null;
+        s.acpPermRpcId.value = null;
+        s.permissionResponsePending.value = false;
+      }
+      s.sync();
+      return true;
+    }
+    case "codexInput": {
+      const request = s.codexUserInput.value;
+      if (!request || s.codexUserInputPending.value) return false;
+      s.codexUserInputPending.value = true;
+      try {
+        await s.deps.invoke("acp_respond_user_input", { id: chatId, rpcId: request.rpcId, answers: answer.answers });
+        s.codexUserInput.value = null;
+        return true;
+      } catch (e) {
+        s.messages.value.push({ id: s.nextMsgId++, role: "assistant", text: `Unable to submit Codex input: ${e}` });
+        s.codexUserInputPending.value = false;
+        return false;
+      } finally {
+        s.sync();
+      }
+    }
+  }
 }
