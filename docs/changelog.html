@@ -79,12 +79,60 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.7 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.7</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">září 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Modely</div>
+      <ul>
+        <li><strong>Claude Sonnet 5.5, Opus 5.5 a Fable 5.1</strong> — nové modely v katalogu Claude. Opus 5.5 má výchozí effort Medium, stejně jako picker v CLI.</li>
+        <li><strong>Katalog modelů pro každou instanci zvlášť</strong> — v panelu Providers jde přidat vlastní ID modelu, skrýt model a změnit pořadí (převzato z t3code). Až vyjde další model, nemusí se čekat na novou verzi Burrow.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Vlákna a soubory</div>
+      <ul>
+        <li><strong>Prohlížeč souborů</strong> — nový overlay <code>FileViewer</code> pro otevření a úpravu souboru; dvojklik v průzkumníku otevře soubor v editoru.</li>
+        <li><strong>Připnutí vláken</strong> — připnutý chat se drží nahoře, uloží se do configu.</li>
+        <li><strong>Aktivita podagentů</strong> — odznak u rodiče ukazuje stav dětí; když dítě blokuje nebo doběhne, rodič se znovu označí jako nepřečtený.</li>
+        <li><strong>Zprávy ve frontě pod běžícím tahem + „Send now“</strong> — zpráva ve frontě se dřív zobrazila dvakrát a streamovaný výstup ji zahrabal doprostřed konverzace. Teď visí pod indikátorem práce s tlačítky Remove / Send now; Send now tah přeruší a zprávu pošle hned po něm.</li>
+        <li><strong>Toasty v Sidebaru</strong> — nová výchozí pozice notifikací: nad spodní lištou Sidebaru. Když je Sidebar skrytý, zobrazí se vlevo dole.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Stav chatu se odvozuje v Go</div>
+      <ul>
+        <li><strong>Tečky chatů z Go fáze na desktopu i v telefonu</strong> — chat používá stejnou cestu jako terminálové taby: <code>displayStatus(phase, seenAt, watching)</code>. XState automat chatu je smazaný; jediný zapisovatel <code>session.status</code> je <code>chatAttention</code>.</li>
+        <li><strong>Čekání, obnovení, konec tahu a přerušení řeší Go</strong> — Claude control requesty, ACP i Codex žádosti jdou přes neutrální <code>request.opened</code> / <code>request.resolved</code>. Výsledek, který dorazí až po přerušení, už chat nepřeznačí na done.</li>
+        <li><strong>Chat session redukuje svůj stream sama</strong> — přepis, stav tahu a čekající žádosti drží session, ne komponenta. Všechny odpovědi jdou jedněmi dveřmi (<code>respond()</code>), takže tah na pozadí dál streamuje, i když je chat odmontovaný.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Dotaz Codexu se už neztratí</strong> — <code>requestUserInput</code>, který dorazil, když chat nebyl otevřený, se zapsal do už zaniklé komponenty. Po znovuotevření se dotaz neukázal a session mohla být uklizena, zatímco Codex čekal na odpověď.</li>
+        <li><strong>Stop počká na ukončený proces</strong> — poslední řádky zabitého procesu přistávaly v kanálu nového tahu a v UI ho ukončily. Explicitně zastavené session se teď umlčí.</li>
+        <li><strong>npm instalace se nepovažuje za Homebrew</strong> — globální npm balíček pod prefixem Homebrew je jen symlink do <code>lib/node_modules</code> a aktualizoval se přes <code>brew upgrade</code>. Rozhoduje se teď jen podle cesty, kam symlink vede.</li>
+        <li><strong>Navigace v prohlížeči zůstane v panelu</strong> — kliknutí na odkaz už neotevře stránku mimo panel.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.6 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.6</span>
-      <span class="tag tag-latest">nejnovější</span>
-      <span class="date">září 2026</span>
+            <span class="date">září 2026</span>
     </div>
 
     <div class="section feat">

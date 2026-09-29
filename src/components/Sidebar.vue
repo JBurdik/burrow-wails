@@ -286,6 +286,23 @@
 
     </div>
 
+    <!-- Toasts docked above the bottom bar (toastPosition "sidebar"), t3code-style. -->
+    <TransitionGroup v-if="ui.toastPosition === 'sidebar'" tag="div" name="sb-toast" class="flex shrink-0 flex-col gap-1 px-1.5 empty:hidden [&:not(:empty)]:pb-1">
+      <button
+        v-for="t in notif.toasts"
+        :key="t.id"
+        class="flex w-full items-center gap-2 rounded-md bg-hover/60 px-2 py-1.5 text-left transition-colors hover:bg-hover"
+        :title="t.body ? `${t.title} — ${t.body}` : t.title"
+        @click="notif.dismiss(t.id)"
+      >
+        <PhCircleNotch v-if="t.type === 'pending'" :size="12" class="shrink-0 animate-spin text-muted-foreground" />
+        <PhWarningCircle v-else-if="t.type === 'error'" :size="12" class="shrink-0 text-destructive" />
+        <PhCheckCircle v-else-if="t.type === 'done'" :size="12" class="shrink-0 text-lime-500" />
+        <PhInfo v-else :size="12" class="shrink-0 text-blue-500" />
+        <span class="min-w-0 flex-1 truncate text-[11px] text-secondary-foreground">{{ t.title }}<span v-if="t.body" class="text-muted-foreground"> · {{ t.body }}</span></span>
+      </button>
+    </TransitionGroup>
+
     <!-- Bottom bar: what the vertical ActivityBar used to hold -->
     <div class="flex shrink-0 items-center gap-0.5 border-t border-border px-1.5 py-1">
       <button class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground active:scale-90" title="Settings (⌘,)" @click="ui.openSettings()"><PhGear :size="14" /></button>
@@ -590,6 +607,9 @@ import {
   PhGitBranch,
   PhChatCenteredText,
   PhGear,
+  PhCircleNotch,
+  PhCheckCircle,
+  PhInfo,
   PhSquaresFour,
   PhPlayCircle,
   PhTrash,
@@ -1325,6 +1345,8 @@ async function confirmCreate() {
 </script>
 
 <style scoped>
+.sb-toast-enter-active, .sb-toast-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.sb-toast-enter-from, .sb-toast-leave-to { opacity: 0; transform: translateY(6px); }
 .section-header {
   display: flex;
   width: calc(100% - 8px);

@@ -1,6 +1,7 @@
 <template>
   <Teleport to="body">
-    <div class="toast-stack fixed z-[9999] flex flex-col gap-2 pointer-events-none" :class="`toast-stack--${ui.toastPosition}`">
+    <!-- "sidebar" is rendered by Sidebar.vue itself; fall back to a corner while the sidebar is hidden. -->
+    <div v-if="!inSidebar" class="toast-stack fixed z-[9999] flex flex-col gap-2 pointer-events-none" :class="`toast-stack--${ui.toastPosition === 'sidebar' ? 'bottom-left' : ui.toastPosition}`">
       <TransitionGroup name="toast">
         <div
           v-for="toast in store.toasts"
@@ -28,10 +29,12 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useUIStore } from "@/stores/ui";
 const store = useNotificationsStore();
 const ui = useUIStore();
+const inSidebar = computed(() => ui.toastPosition === "sidebar" && ui.sidebarVisible);
 </script>
 
 <style scoped>

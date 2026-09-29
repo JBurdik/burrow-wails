@@ -46,6 +46,7 @@ export const MODELS_BY_AGENT: Record<string, ModelEntry[]> = {
     { id: "claude-opus-5-5", label: "Claude Opus 5.5", efforts: [...OPUS_EFFORTS], defaultEffort: "medium" },
     { id: "claude-fable-5-1", label: "Claude Fable 5.1", efforts: [...OPUS_EFFORTS], defaultEffort: "high" },
     { id: "claude-opus-5", label: "Claude Opus 5", efforts: [...OPUS_EFFORTS], defaultEffort: "high" },
+    { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", efforts: [...SONNET_EFFORTS], defaultEffort: "high" },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5", efforts: [...SONNET_EFFORTS], defaultEffort: "high" },
     { id: "claude-fable-5", label: "Claude Fable 5", efforts: [...OPUS_EFFORTS], defaultEffort: "high" },
     { id: "claude-opus-4-8", label: "Claude Opus 4.8", efforts: [...OPUS_EFFORTS], defaultEffort: "high" },

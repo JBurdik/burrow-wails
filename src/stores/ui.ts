@@ -129,8 +129,9 @@ export const TEXT_GENERATION_POLICIES: { id: TextGenerationPolicy; label: string
 // Screen anchor for the toast stack (ToastStack.vue).
 export type ToastPosition =
   | "top-left" | "top-center" | "top-right"
-  | "bottom-left" | "bottom-center" | "bottom-right";
+  | "bottom-left" | "bottom-center" | "bottom-right" | "sidebar";
 export const TOAST_POSITIONS: { id: ToastPosition; label: string }[] = [
+  { id: "sidebar", label: "Sidebar (bottom)" },
   { id: "top-left", label: "Top left" },
   { id: "top-center", label: "Top center" },
   { id: "top-right", label: "Top right" },
@@ -206,7 +207,7 @@ const DEFAULT_PREFS: Prefs = {
   sidebarVisible: false,
   sidebarWidth: 220,
   rightPanelWidth: 300,
-  toastPosition: "bottom-left",
+  toastPosition: "sidebar",
   defaultChatAgent: "claude",
   spawnMode: "terminal",
   textGenerationModel: DEFAULT_TEXT_GENERATION_MODEL,
@@ -316,7 +317,7 @@ export const useUIStore = defineStore("ui", () => {
   const sidebarVisible = ref(loaded.sidebarVisible ?? false);
   const sidebarWidth = ref(loaded.sidebarWidth ?? 220);
   const rightPanelWidth = ref(loaded.rightPanelWidth ?? 300);
-  const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "bottom-left");
+  const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "sidebar");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
   const textGenerationModel = ref<string>(loaded.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL);
@@ -378,7 +379,7 @@ export const useUIStore = defineStore("ui", () => {
     sidebarVisible.value = p.sidebarVisible ?? false;
     sidebarWidth.value = p.sidebarWidth ?? 220;
     rightPanelWidth.value = p.rightPanelWidth ?? 300;
-    toastPosition.value = p.toastPosition ?? "bottom-left";
+    toastPosition.value = p.toastPosition ?? "sidebar";
     defaultChatAgent.value = p.defaultChatAgent ?? "claude";
     spawnMode.value = p.spawnMode ?? "terminal";
     textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
