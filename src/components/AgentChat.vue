@@ -151,6 +151,7 @@
       <div
         v-for="(msg, msgIdx) in displayItems"
         :key="msg.id"
+        :data-message-id="msg.id"
         class="chat-message"
         :class="[`role-${msg.role}`, { partial: msg.partial }]"
       >
@@ -310,8 +311,19 @@
             </div>
             <div v-else class="mt-0.5 w-[26px] flex-shrink-0" />
             <div class="min-w-0 flex-1 pt-1 text-[13px] leading-[1.65] text-foreground">
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <div class="md-body" v-html="renderMd(msg.text)" />
+              <TranscriptComments
+                :message-id="msg.id"
+                :text="msg.text"
+                :partial="msg.partial"
+                :notes="transcriptFeedback.notes.value.filter((note) => note.messageId === msg.id)"
+                @add="(quote, body) => transcriptFeedback.add(msg.id, msg.text, quote, body)"
+                @remove="transcriptFeedback.remove"
+                @resolve="transcriptFeedback.setResolved"
+                @follow-up="jumpToFeedback"
+              >
+                <!-- eslint-disable-next-line vue/no-v-html -->
+                <div class="md-body" v-html="renderMd(msg.text)" />
+              </TranscriptComments>
             </div>
             <button class="message-copy-btn mt-0.5" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
               <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
@@ -365,6 +377,13 @@
         <button class="flex-shrink-0 font-medium text-foreground hover:underline disabled:opacity-50" :disabled="restoringBranch" @click="restoreBranch">{{ restoringBranch ? 'Restoring…' : 'Restore branch' }}</button>
         <button class="flex-shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss" @click="branchBannerDismissed = true"><PhX :size="11" weight="bold" /></button>
       </div>
+      <TranscriptFeedbackBar
+        :count="transcriptFeedback.pending.value.length"
+        :sending="sendingFeedback"
+        :busy="busy"
+        :error="feedbackSendError || transcriptFeedback.error.value"
+        @send="sendTranscriptNotes"
+      />
       <div class="relative">
       <!-- @file / $skill / /command picker. Floats above the frame rather than
            inside it: .chat-input-box is overflow-hidden, and an inline list
@@ -650,6 +669,10 @@ import {
   setAcpCapabilities, setAcpChatSetting, type AcpChatSettings,
 } from "@/lib/acpSettings";
 import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
+import { restoreSubagentCodexSettings } from "@/lib/subagentProfiles";
+import TranscriptComments from "./review/TranscriptComments.vue";
+import TranscriptFeedbackBar from "./review/TranscriptFeedbackBar.vue";
+import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
 
 function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string);
@@ -740,6 +763,32 @@ const props = defineProps<{
   // Images paired with the first prompt from the welcome-screen composer.
   initialImages?: string[];
 }>();
+const transcriptFeedback = useTranscriptFeedback(() => props.chatId);
+const sendingFeedback = ref(false);
+const feedbackSendError = ref("");
+
+function jumpToFeedback(deliveryId: string) {
+  const delivery = transcriptFeedback.deliveries.value[deliveryId];
+  const message = delivery && messages.value.find((msg) => (msg.role === "user" || msg.role === "queued") && msg.text === delivery.text);
+  const target = message && scrollEl.value?.querySelector<HTMLElement>(`[data-message-id="${message.id}"]`);
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+  else feedbackSendError.value = "This follow-up is no longer in the visible transcript.";
+}
+
+async function sendTranscriptNotes() {
+  if (sendingFeedback.value || busy.value || !transcriptFeedback.pending.value.length) return;
+  sendingFeedback.value = true;
+  feedbackSendError.value = "";
+  try {
+    const result = await sendMessage();
+    if (!result) feedbackSendError.value = "Comments were not sent. They are still pending; check the agent connection and retry.";
+  } catch (error) {
+    feedbackSendError.value = `Comments were not sent: ${error}`;
+  } finally {
+    sendingFeedback.value = false;
+  }
+}
+
 
 const emit = defineEmits<{ (e: "prompt-sent"): void }>();
 
@@ -989,12 +1038,14 @@ async function startRpcRuntime(emitHistory = false) {
   await ensureAcpListeners();
   if (effectiveTransport.value === "codex-app-server") {
     const agent = currentAgent.value;
-    return invoke("codex_start", {
+    const result = await invoke("codex_start", {
       id: props.chatId,
       cwd: props.cwd,
       env: agent?.env ?? {},
       resumeSessionId: sessionId.value || null,
     });
+    await restoreSubagentCodexSettings(props.chatId, invoke);
+    return result;
   }
   return invoke("acp_start", acpStartPayload(emitHistory));
 }
@@ -1967,7 +2018,9 @@ async function sendInitialPrompt(prompt: string, images?: string[]) {
   await sendMessage(prompt, images);
 }
 
-async function sendMessage(forcedText?: string, extraImages?: string[]) {
+async function sendMessage(forcedText?: string, extraImages?: string[]): Promise<{ id: number; text: string } | null> {
+  const feedbackBatch = forcedText === undefined && !busy.value ? [...transcriptFeedback.pending.value] : [];
+  const sendingChatId = props.chatId;
   const raw = forcedText ?? inputText.value;
   // The stripped copy is what goes on the wire and what an echoed user.delta
   // is matched against (`pendingSends`); `raw` still carries any `wrapPaste`
@@ -1975,28 +2028,10 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
   // message something to collapse into a chip — never sent anywhere.
   const strippedBaseline = stripPasteMarkers(raw).trim();
   let text = strippedBaseline;
-  if (!text) return;
+  if (!text && !feedbackBatch.length) return null;
   branchBannerDismissed.value = true;
   // A cold chat (never opened this launch) has no process yet — start it now.
-  if (await ensureRuntime()) return;
-  const images = [...pendingImages.value, ...(extraImages ?? [])];
-  // A follow-up is always a separate turn.  In particular, do not rely on an
-  // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
-  // as steering, and generic adapters have no negotiated queue capability.
-  if (busy.value) {
-    enqueueMessage(text, images);
-    pendingImages.value = [];
-    inputText.value = "";
-    S.save();
-    await nextTick();
-    scrollToBottom(true);
-    return;
-  }
-  if (!forcedText) {
-    inputText.value = "";
-    await nextTick();
-  }
-
+  if (await ensureRuntime()) return null;
   // /pr: build a PR description prompt from git diff
   if (text.match(/^\/pr\b/)) {
     try {
@@ -2005,15 +2040,40 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
       text = `Write a PR description for these changes:\n\n${stat.stdout}\n\`\`\`diff\n${diff.stdout.slice(0, 8000)}\n\`\`\``;
     } catch (e) {
       messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error reading git diff: ${e}` });
-      return;
+      return null;
     }
+  }
+
+  text = transcriptFeedback.compose(feedbackBatch, text);
+  const acceptFeedback = () => {
+    if (feedbackBatch.length && props.chatId === sendingChatId) transcriptFeedback.markSent(feedbackBatch, text);
+    feedbackSendError.value = "";
+  };
+  const images = [...pendingImages.value, ...(extraImages ?? [])];
+  // A follow-up is always a separate turn.  In particular, do not rely on an
+  // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
+  // as steering, and generic adapters have no negotiated queue capability.
+  if (busy.value) {
+    const queued = enqueueMessage(text, images);
+    acceptFeedback();
+    pendingImages.value = [];
+    inputText.value = "";
+    S.save();
+    await nextTick();
+    scrollToBottom(true);
+    return { id: queued.id, text };
+  }
+  if (!forcedText) {
+    inputText.value = "";
+    await nextTick();
   }
 
   const msgImages = images.length > 0 ? images : undefined;
   // Only set when the /pr rewrite above didn't replace `text` with a generated
   // prompt — that one has no paste chip of its own to show.
   const displayText = text === strippedBaseline && hasPasteMarkers(raw) ? raw.trim() : undefined;
-  messages.value.push({ id: S.nextMsgId++, role: "user", text, images: msgImages, ...(displayText ? { displayText } : {}) });
+  const sentId = S.nextMsgId++;
+  messages.value.push({ id: sentId, role: "user", text, images: msgImages, ...(displayText ? { displayText } : {}) });
   // Claim the echo before the send goes out — a loopback round trip can land
   // user.delta before the next line runs.
   S.expectEcho(text);
@@ -2042,20 +2102,25 @@ async function sendMessage(forcedText?: string, extraImages?: string[]) {
     try {
       pendingImages.value = [];
       acpPromptRpcId.value = await sendRpcRuntime(text, msgImages);
+      acceptFeedback();
+      return { id: sentId, text };
     } catch (e) {
       messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
       busy.value = false;
       syncStore();
     }
-    return;
+    return null;
   }
   try {
     pendingImages.value = [];
     await invoke("claude_send", { id: props.chatId, text, sessionId: sessionId.value || null, images: msgImages });
+    acceptFeedback();
+    return { id: sentId, text };
   } catch (e) {
     messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
     busy.value = false;
     syncStore();
+    return null;
   }
 }
 
@@ -2502,7 +2567,7 @@ onMounted(async () => {
     onAcpSession: () => learnModels(agentKind.value, liveModels.value),
     restoreAcpSelections,
     usesRpcRuntime: () => usesRpcRuntime.value,
-    send: (text, images) => sendMessage(text, images),
+    send: async (text, images) => { await sendMessage(text, images); },
   });
   // The transcript arrives on this channel for BOTH transports, so it is
   // attached unconditionally — unlike the raw ones, which are per-runtime.

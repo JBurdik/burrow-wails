@@ -1,19 +1,22 @@
 <template>
   <div class="flex h-full w-full flex-col overflow-hidden bg-base">
-    <div class="flex shrink-0 items-center gap-1.5 border-b border-border bg-hover px-3 py-1.5 text-[11px]">
-      <span class="flex-1 truncate font-mono text-foreground">{{ title }}</span>
-      <span class="shrink-0 text-muted-foreground">{{ diffStaged ? "staged" : "unstaged" }}</span>
-      <button v-if="instances.length > 1" class="shrink-0 rounded border border-border bg-transparent px-1.5 py-0.5 text-[10px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="toggleAll">
+    <div class="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-hover px-3 py-1.5 text-[11px]">
+      <span v-if="!compact" class="min-w-0 flex-1 truncate font-mono text-foreground">{{ title }}</span>
+      <span v-if="!compact" class="shrink-0 text-muted-foreground">{{ diffStaged ? "staged" : "unstaged" }}</span>
+      <span v-if="review.fileCount.value" class="mr-auto shrink-0 tabular-nums text-muted-foreground" aria-live="polite">{{ review.seenCount.value }}/{{ review.fileCount.value }} seen</span>
+      <button v-if="review.fileCount.value > 1" class="shrink-0 rounded border border-border bg-transparent px-1.5 py-0.5 text-[10px] text-secondary-foreground hover:bg-hover hover:text-foreground" @click="toggleAll">
         {{ allCollapsed ? "Expand all" : "Collapse all" }}
       </button>
       <button
         class="shrink-0 rounded border border-border bg-transparent px-1.5 py-0.5 text-[10px] text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-40"
-        :disabled="pendingNotes.length === 0 || sendingBatch"
+        :disabled="pendingNotes.length === 0 || sendingBatch || !sendBatchNotes"
         @click="sendNotes"
       >
         {{ sendingBatch ? "Sending…" : `Send ${pendingNotes.length} note${pendingNotes.length === 1 ? "" : "s"}` }}
       </button>
     </div>
+    <div v-if="batchStatus || review.storageError.value" role="status" class="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">{{ batchStatus || review.storageError.value }}</div>
+    <DiffReviewComments :notes="notes" :busy="resolvingNote" @resolve="resolveNote" />
     <DiffFeedbackComposer
       v-if="showComposer"
       :selection="pendingLabel"
@@ -30,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import {
   DIFFS_TAG_NAME,
   FileDiff,
@@ -41,7 +44,10 @@ import {
 } from "@pierre/diffs";
 import { invoke } from "@tauri-apps/api/core";
 import { useUIStore } from "@/stores/ui";
+import DiffReviewComments from "./review/DiffReviewComments.vue";
 import DiffFeedbackComposer from "./DiffFeedbackComposer.vue";
+import { useDiffCommentRefresh } from "@/composables/useDiffCommentRefresh";
+import { useDiffReview } from "@/composables/useDiffReview";
 
 interface DiffComment {
   id: number;
@@ -52,6 +58,7 @@ interface DiffComment {
   body: string;
   created_at: number;
   sent_at: number;
+  resolved_at?: number;
 }
 
 const ui = useUIStore();
@@ -61,16 +68,32 @@ const props = defineProps<{
   diffStaged: boolean;
   diff: string;
   workspaceId?: number;
+  reviewKey?: string;
+  compact?: boolean;
   sendBatchNotes?: (markdown: string) => Promise<boolean>;
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
+const review = useDiffReview(() => props.reviewKey ?? `workspace:${props.workspaceId ?? "none"}:${props.diffFile}`);
 const parseError = ref(false);
 const title = ref(props.diffFile);
 const allCollapsed = ref(false);
 
 const notes = ref<DiffComment[]>([]);
-const pendingNotes = computed(() => notes.value.filter((n) => !n.sent_at));
+const resolvingNote = ref(false);
+async function resolveNote(id: number, resolved: boolean) {
+  if (resolvingNote.value || !props.workspaceId) return;
+  const wsId = props.workspaceId;
+  resolvingNote.value = true;
+  try {
+    await invoke("set_diff_comment_resolved", { wsId, id, resolved });
+    if (props.workspaceId !== wsId) return;
+    notes.value = notes.value.map((note) => note.id === id ? { ...note, resolved_at: resolved ? Date.now() : 0 } : note);
+    applyAnnotations();
+  } catch { batchStatus.value = "Could not change the comment status. Try again."; }
+  finally { resolvingNote.value = false; }
+}
+const pendingNotes = computed(() => notes.value.filter((n) => !n.sent_at && !n.resolved_at));
 const sendingBatch = ref(false);
 const batchStatus = ref("");
 
@@ -85,7 +108,7 @@ const pendingLabel = computed(() => {
 });
 const composerStatus = computed(() => batchStatus.value);
 
-const instances = ref<FileDiff<DiffComment>[]>([]);
+const instances = shallowRef<FileDiff<DiffComment>[]>([]);
 
 function toggleAll() {
   const next = !allCollapsed.value;
@@ -102,12 +125,18 @@ function cleanUp() {
   if (containerRef.value) containerRef.value.textContent = "";
 }
 
+let notesWorkspace: number | undefined;
+let notesRequest = 0;
 async function loadNotes() {
+  const request = ++notesRequest;
+  const wsId = props.workspaceId;
+  if (notesWorkspace !== wsId) notes.value = [];
+  notesWorkspace = wsId;
   if (!props.workspaceId) {
-    notes.value = [];
     return;
   }
-  const rows = await invoke<DiffComment[] | null>("list_diff_comments", { wsId: props.workspaceId }).catch(() => []);
+  const rows = await invoke<DiffComment[] | null>("list_diff_comments", { wsId }).catch(() => []);
+  if (props.workspaceId !== wsId || request !== notesRequest) return;
   notes.value = rows ?? [];
   applyAnnotations();
 }
@@ -123,8 +152,9 @@ function renderNoteAnnotation(annotation: DiffLineAnnotation<DiffComment>): HTML
   const marker = document.createElement("button");
   marker.type = "button";
   marker.className = "diff-note-marker";
-  marker.textContent = note.sent_at ? "✓" : "●";
-  marker.title = note.sent_at ? "Sent" : "Pending note — click to view";
+  marker.textContent = note.resolved_at ? "✓" : note.sent_at ? "↗" : "●";
+  marker.title = note.resolved_at ? "Resolved comment" : note.sent_at ? "Sent comment" : "Pending comment";
+  marker.setAttribute("aria-label", `${marker.title}, ${note.file}:${note.line}`);
 
   const body = document.createElement("div");
   body.className = "diff-note-body";
@@ -137,6 +167,15 @@ function renderNoteAnnotation(annotation: DiffLineAnnotation<DiffComment>): HTML
   });
 
   wrap.appendChild(marker);
+  const resolve = document.createElement("button");
+  resolve.type = "button";
+  resolve.textContent = note.resolved_at ? "Reopen" : "Resolve";
+  resolve.style.cssText = "display:block;margin-top:6px;font-size:11px;cursor:pointer;color:var(--secondary-foreground)";
+  resolve.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void resolveNote(note.id, !note.resolved_at);
+  });
+  body.appendChild(resolve);
   wrap.appendChild(body);
   return wrap;
 }
@@ -225,7 +264,8 @@ async function sendNotes() {
 function render() {
   parseError.value = false;
   cleanUp();
-  if (!containerRef.value || !props.diff) return;
+  if (!props.diff) { review.syncFiles([]); return; }
+  if (!containerRef.value) return;
 
   let patches;
   try {
@@ -236,6 +276,8 @@ function render() {
   }
 
   const fileCount = patches.reduce((n, p) => n + p.files.length, 0);
+  review.syncFiles(patches.flatMap((patch) => patch.files));
+  allCollapsed.value = review.fileCount.value > 0 && review.seenCount.value === review.fileCount.value;
   title.value = fileCount === 1
     ? (patches[0]?.files[0]?.name ?? props.diffFile)
     : props.diffFile;
@@ -251,6 +293,7 @@ function render() {
         diffStyle: "unified",
         expansionLineCount: 5,
         enableLineSelection: true,
+        collapsed: review.isSeen(fileDiff.name),
         renderAnnotation: renderNoteAnnotation,
         onLineSelected: (range) => {
           if (!range) return;
@@ -258,15 +301,35 @@ function render() {
           showComposer.value = true;
         },
         renderHeaderMetadata() {
+          const controls = document.createElement("div");
+          controls.style.cssText = "display:flex;align-items:center;gap:8px;font:11px var(--font-sans,system-ui);color:var(--muted-foreground)";
+          const label = document.createElement("label");
+          label.style.cssText = "display:flex;align-items:center;gap:4px;cursor:pointer";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = review.isSeen(fileDiff.name);
+          checkbox.setAttribute("aria-label", `Mark ${fileDiff.name} as seen`);
+          checkbox.style.accentColor = "var(--accent)";
+          checkbox.addEventListener("change", () => {
+            review.setSeen(fileDiff.name, checkbox.checked);
+            instance.setOptions({ ...instance.options, collapsed: checkbox.checked });
+            allCollapsed.value = instances.value.every((inst) => inst.options.collapsed);
+            void instance.rerender();
+          });
+          label.append(checkbox, document.createTextNode("Seen"));
           const btn = document.createElement("button");
+          btn.type = "button";
           btn.className = "collapse-btn";
+          btn.setAttribute("aria-label", `${instance?.options.collapsed ? "Expand" : "Collapse"} ${fileDiff.name}`);
           btn.textContent = instance?.options.collapsed ? "▶" : "▼";
           btn.addEventListener("click", () => {
             const next = !instance.options.collapsed;
             instance.setOptions({ ...instance.options, collapsed: next });
+            allCollapsed.value = instances.value.every((inst) => inst.options.collapsed);
             void instance.rerender();
           });
-          return btn;
+          controls.append(label, btn);
+          return controls;
         },
       });
       instance.render({ fileDiff, fileContainer });
@@ -277,11 +340,16 @@ function render() {
   applyAnnotations();
 }
 
+useDiffCommentRefresh(() => props.workspaceId, loadNotes);
+
 onMounted(() => {
   render();
   loadNotes();
 });
-watch(() => props.diff, () => render());
+watch([() => props.diff, () => props.reviewKey, () => props.diffFile], () => {
+  cancelComposer();
+  render();
+}, { flush: "post" });
 watch(() => props.workspaceId, () => loadNotes());
 // Re-render with the new syntax theme when the app theme changes.
 watch(() => ui.activeTheme.shiki, () => render());

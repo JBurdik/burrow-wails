@@ -1,3 +1,6 @@
+import { configReady } from "@/lib/config";
+import { useSubagentProfilesStore } from "@/stores/subagentProfiles";
+import { profileTask, assertProfileProvider, profileTerminalCommand } from "@/lib/subagentProfiles";
 /**
  * Frontend half of the control API.
  *
@@ -66,6 +69,9 @@ export async function perform(action: string, args: Record<string, unknown>): Pr
       return spawn(args);
     case "chat_send":
       return chatSendFollowUp(num(args.chatId), str(args.text));
+    case "list_subagent_profiles":
+      await useSubagentProfilesStore().whenReady();
+      return useSubagentProfilesStore().profiles;
     case "list_agents":
       return listAgents();
     case "agent_status":
@@ -162,13 +168,20 @@ async function createWorkspace(path: string, name: string) {
  * launched like Claude, or invent flags.
  */
 async function spawn(args: Record<string, unknown>) {
-  const task = str(args.task);
-  if (!task) throw new Error("spawn needs a task");
+  await configReady;
+  await useSubagentProfilesStore().whenReady();
+  const profileId = str(args.profile).toLowerCase();
+  const profile = profileId ? useSubagentProfilesStore().find(profileId) : undefined;
+  if (profileId && !profile) throw new Error(`Unknown sub-agent profile "${profileId}". Use scout, worker, or reviewer.`);
+  const task = profile ? profileTask(profile, str(args.task)) : str(args.task);
+  if (!str(args.task).trim()) throw new Error("spawn needs a task");
   const providers = useProvidersStore();
   const ui = useUIStore();
   const wsStore = useWorkspaceStore();
+  // Stores first created by a control call load their saved config in a microtask.
+  await Promise.resolve();
 
-  const wanted = str(args.agent);
+  const wanted = str(args.agent) || profile?.agentId || "";
   const instance =
     (wanted && (providers.byId(wanted) ?? providers.instances.find((i) => i.name.toLowerCase() === wanted.toLowerCase()))) ||
     providers.byId(ui.defaultChatAgent) ||
@@ -178,6 +191,8 @@ async function spawn(args: Record<string, unknown>) {
     throw new Error(`no agent named "${wanted}" — call list_agents to see the configured ones`);
   }
 
+  const launchSettings = profile ? { agentId: instance.id, model: str(args.model) || profile.model, permissionMode: profile.permissionMode } : undefined;
+  if (profile) assertProfileProvider(instance);
   const cwd = str(args.cwd);
   // A spawn into a worktree belongs to THAT workspace, so its tab nests under
   // the worktree in the sidebar rather than under the parent repo.
@@ -199,6 +214,7 @@ async function spawn(args: Record<string, unknown>) {
   const openAs = str(args.target) || (ui.spawnMode === "chat" ? "chat" : "tab");
   const parentChatId = num(args.parent_chat_id);
   if (openAs === "chat") {
+    if (instance.transport === "none") throw new Error("This provider does not offer an embedded chat.");
     const chats = useClaudeChatsStore();
     // A sub-agent belongs to its thread, not the Sidebar, so it does NOT go
     // through openChat() — that is what puts a chat there. Its CLI starts
@@ -213,6 +229,7 @@ async function spawn(args: Record<string, unknown>) {
       agentKind: instance.id,
       parentChatId: parentChatId || undefined,
       initialPrompt: parentChatId ? task : undefined,
+      launchSettings,
     });
     if (parentChatId) {
       // The parent's transcript gets a row recording the delegation.
@@ -223,7 +240,7 @@ async function spawn(args: Record<string, unknown>) {
     return { chat_id: session.id, workspace_id: target.id };
   }
 
-  const cmd = buildTerminalCommand(
+  const cmd = launchSettings ? profileTerminalCommand(instance, launchSettings, task) : buildTerminalCommand(
     { kind: instance.kind, command: providers.binaryFor(instance), model: str(args.model) || undefined },
     task,
   );

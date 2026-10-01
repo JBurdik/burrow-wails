@@ -143,4 +143,22 @@ describe("sub-agent prompt handoff is race-free", () => {
     await chats.remove(session.id);
     expect(isLocallyCreatedSubagent(session.id)).toBe(false);
   });
+  it("publishes profile settings before the child can start its initial prompt", async () => {
+    const { useClaudeChatsStore } = await import("./claudeChats");
+    const { getConfig, configReady } = await import("@/lib/config");
+    await configReady;
+    const chats = useClaudeChatsStore();
+    let settingsAtPush: unknown;
+    const stop = chats.$subscribe((_mutation, state) => {
+      const child = state.sessions.find((session) => session.parentChatId === 42);
+      if (child) settingsAtPush = getConfig<Record<string, unknown>>("chatAcpSettings", {})[String(child.id)];
+    }, { flush: "sync" });
+    await chats.create(1, {
+      agentKind: "codex", parentChatId: 42, initialPrompt: "Inspect only",
+      launchSettings: { agentId: "codex", model: "chosen-model", permissionMode: "plan" },
+    });
+    stop();
+    expect(settingsAtPush).toEqual({ model: "chosen-model", mode: "plan" });
+  });
+
 });

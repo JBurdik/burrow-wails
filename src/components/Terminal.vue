@@ -1895,7 +1895,25 @@ function splitPane(direction: "h" | "v" = "h") {
   splitFocused("terminal", direction);
 }
 
-defineExpose({ addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
+const reviewSubject = computed(() => {
+  const leaf = locateLeaf(focusedLeafId.value)?.leaf;
+  if (!leaf || leaf.leafType === "editor" || leaf.leafType === "diff" || leaf.leafType === "browser") return "";
+  if (leaf.leafType !== "chat" && !leaf.isAgent) return "";
+  return leaf.leafType === "chat" && leaf.chatId ? `chat:${leaf.chatId}` : `pty:${leaf.id}`;
+});
+
+async function sendReviewNotes(markdown: string): Promise<boolean> {
+  const subject = reviewSubject.value;
+  if (!subject) return false;
+  try {
+    const id = Number(subject.split(":")[1]);
+    if (subject.startsWith("chat:")) await perform("chat_send", { chatId: id, text: markdown });
+    else await invoke("write_pty", { id, data: Array.from(new TextEncoder().encode(markdown + "\n")) });
+    return true;
+  } catch { return false; }
+}
+
+defineExpose({ reviewSubject, sendReviewNotes, addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
 </script>
 
 <style scoped>

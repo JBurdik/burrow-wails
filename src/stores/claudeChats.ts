@@ -1,3 +1,4 @@
+import { seedSubagentSettings, type SubagentLaunchSettings } from "@/lib/subagentProfiles";
 import { ref, computed } from "vue";
 import { defineStore } from "pinia";
 import { invoke } from "@tauri-apps/api/core";
@@ -390,7 +391,7 @@ export function isActivitySync(
    */
   async function create(
     workspaceId: number,
-    opts?: { agentKind?: string; parentChatId?: number; initialPrompt?: string },
+    opts?: { agentKind?: string; parentChatId?: number; initialPrompt?: string; launchSettings?: SubagentLaunchSettings },
   ): Promise<ClaudeSession> {
     const agentKind = opts?.agentKind ?? 'claude';
     const transport: ChatTransport =
@@ -424,6 +425,7 @@ export function isActivitySync(
     });
 
     const session = sessionFromRow(row);
+    if (opts?.launchSettings) seedSubagentSettings(session.id, opts.launchSettings);
     // Register the prompt handoff (and this id's local-create provenance)
     // BEFORE the push below — see pendingSubagentPrompts' comment for why
     // the order matters.

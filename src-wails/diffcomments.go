@@ -19,14 +19,15 @@ import (
 
 // DiffComment is one reviewer note anchored to a diff line.
 type DiffComment struct {
-	ID        int64  `json:"id"`
-	WsID      int64  `json:"ws_id"`
-	File      string `json:"file"`
-	Line      int64  `json:"line"`
-	Side      string `json:"side"` // "additions" | "deletions", @pierre/diffs' AnnotationSide
-	Body      string `json:"body"`
-	CreatedAt int64  `json:"created_at"`
-	SentAt    int64  `json:"sent_at"` // 0 means unsent
+	ID         int64  `json:"id"`
+	WsID       int64  `json:"ws_id"`
+	File       string `json:"file"`
+	Line       int64  `json:"line"`
+	Side       string `json:"side"` // "additions" | "deletions", @pierre/diffs' AnnotationSide
+	Body       string `json:"body"`
+	CreatedAt  int64  `json:"created_at"`
+	SentAt     int64  `json:"sent_at"`     // 0 means unsent
+	ResolvedAt int64  `json:"resolved_at"` // 0 means open
 }
 
 func diffCommentsSchema() []string {
@@ -39,7 +40,8 @@ func diffCommentsSchema() []string {
 			side       TEXT    NOT NULL DEFAULT '',
 			body       TEXT    NOT NULL,
 			created_at INTEGER NOT NULL,
-			sent_at    INTEGER NOT NULL DEFAULT 0
+			sent_at    INTEGER NOT NULL DEFAULT 0,
+			resolved_at INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS diff_comments_ws ON diff_comments(ws_id)`,
 	}
@@ -53,7 +55,7 @@ func (a *App) ListDiffComments(wsID int64) ([]DiffComment, error) {
 		return out, nil
 	}
 	rows, err := a.db.Query(
-		`SELECT id, ws_id, file, line, side, body, created_at, sent_at
+		`SELECT id, ws_id, file, line, side, body, created_at, sent_at, resolved_at
 		 FROM diff_comments WHERE ws_id = ? ORDER BY created_at`, wsID)
 	if err != nil {
 		return out, err
@@ -61,7 +63,7 @@ func (a *App) ListDiffComments(wsID int64) ([]DiffComment, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var c DiffComment
-		if err := rows.Scan(&c.ID, &c.WsID, &c.File, &c.Line, &c.Side, &c.Body, &c.CreatedAt, &c.SentAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.WsID, &c.File, &c.Line, &c.Side, &c.Body, &c.CreatedAt, &c.SentAt, &c.ResolvedAt); err != nil {
 			return out, err
 		}
 		out = append(out, c)
@@ -112,7 +114,7 @@ func (a *App) diffCommentsByIDs(ids []int64) ([]DiffComment, error) {
 		args[i] = id
 	}
 	rows, err := a.db.Query(
-		`SELECT id, ws_id, file, line, side, body, created_at, sent_at
+		`SELECT id, ws_id, file, line, side, body, created_at, sent_at, resolved_at
 		 FROM diff_comments WHERE id IN (`+placeholders+`)`, args...)
 	if err != nil {
 		return nil, err
@@ -121,7 +123,7 @@ func (a *App) diffCommentsByIDs(ids []int64) ([]DiffComment, error) {
 	byID := map[int64]DiffComment{}
 	for rows.Next() {
 		var c DiffComment
-		if err := rows.Scan(&c.ID, &c.WsID, &c.File, &c.Line, &c.Side, &c.Body, &c.CreatedAt, &c.SentAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.WsID, &c.File, &c.Line, &c.Side, &c.Body, &c.CreatedAt, &c.SentAt, &c.ResolvedAt); err != nil {
 			return nil, err
 		}
 		byID[c.ID] = c
@@ -144,7 +146,13 @@ func (a *App) ComposeDiffNotes(ids []int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return composeDiffNotesMarkdown(notes), nil
+	open := make([]DiffComment, 0, len(notes))
+	for _, note := range notes {
+		if note.ResolvedAt == 0 {
+			open = append(open, note)
+		}
+	}
+	return composeDiffNotesMarkdown(open), nil
 }
 
 // composeDiffNotesMarkdown is the pure formatting step, split out so it is
@@ -196,4 +204,28 @@ func (a *App) MarkDiffNotesSent(ids []int64) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// SetDiffCommentResolved changes review state without erasing its send receipt.
+func (a *App) SetDiffCommentResolved(wsID, id int64, resolved bool) error {
+	if a.db == nil {
+		return fmt.Errorf("no database")
+	}
+	at := int64(0)
+	if resolved {
+		at = time.Now().UnixMilli()
+	}
+	result, err := a.db.Exec(`UPDATE diff_comments SET resolved_at = ? WHERE id = ? AND ws_id = ?`, at, id, wsID)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("review comment not found in this workspace")
+	}
+	busEmit("diff-comments-changed", wsID)
+	return nil
 }

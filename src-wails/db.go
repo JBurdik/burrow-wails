@@ -139,6 +139,7 @@ func migrate(db *sql.DB) error {
 
 	// Idempotent additive migrations, matching the Rust backend's columns.
 	alters := []string{
+		`ALTER TABLE diff_comments ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE workspaces ADD COLUMN parent_id INTEGER`,
 		`ALTER TABLE workspaces ADD COLUMN worktree_branch TEXT`,
 		`ALTER TABLE workspaces ADD COLUMN is_git INTEGER DEFAULT 0`,

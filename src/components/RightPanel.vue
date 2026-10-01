@@ -288,11 +288,13 @@
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <PhGitCommit :size="13" class="shrink-0 text-secondary-foreground" />
         <select
+          aria-label="Diff comparison"
           class="min-w-0 flex-1 rounded-[var(--radius-nav)] border border-border bg-panel py-1 pl-1.5 pr-1 text-[11px] text-secondary-foreground outline-none hover:border-muted-foreground"
           :value="diffScopeKey"
           @change="onDiffScopeChange(($event.target as HTMLSelectElement).value)"
         >
-          <option value="workspace">Working tree</option>
+          <option value="last-turn">Last turn</option>
+          <option value="workspace">Uncommitted</option>
           <option value="branch">Branch changes</option>
           <optgroup v-if="numberedCheckpoints.length" label="Turns">
             <option v-for="nc in numberedCheckpoints" :key="nc.cp.id" :value="`turn:${nc.cp.id}`">
@@ -300,9 +302,10 @@
             </option>
           </optgroup>
         </select>
-        <button class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="scopedDiffLoading" @click="loadScopedDiff"><PhArrowClockwise :size="12" :class="scopedDiffLoading && 'animate-spin'" /></button>
+        <button class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="scopedDiffLoading" @click="loadScopedDiff(true)"><PhArrowClockwise :size="12" :class="scopedDiffLoading && 'animate-spin'" /></button>
       </div>
-      <div v-if="scopedDiffLoading" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
+      <div v-if="scopedDiffError" role="alert" class="p-3 text-[11px] text-destructive">{{ scopedDiffError }}</div>
+      <div v-if="scopedDiffLoading && !scopedDiff" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
       <div v-else-if="diffScope.kind === 'branch' && !branchBase" class="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center text-[11px] text-muted-foreground">
         <span>Couldn't find a default branch to diff against.</span>
         <select class="rounded-[var(--radius-nav)] border border-border bg-panel px-1.5 py-1 text-[11px] text-secondary-foreground" @change="pickBranchBase(($event.target as HTMLSelectElement).value)">
@@ -310,8 +313,20 @@
           <option v-for="b in git.branches.filter((b) => b !== git.branch)" :key="b" :value="b">{{ b }}</option>
         </select>
       </div>
-      <div v-else-if="!scopedDiff" class="p-4 text-center text-[11px] leading-relaxed text-muted-foreground">No changes.</div>
-      <DiffView v-else :diff="scopedDiff" :diff-key="diffScopeKey" />
+      <div v-else-if="diffScope.kind === 'last-turn' && !lastTurn" class="p-4 text-center text-[11px] leading-relaxed text-muted-foreground">{{ reviewSubject ? "No completed turn in this thread yet." : "Open an agent thread to review its last turn." }}</div>
+      <template v-else>
+        <div v-if="diffScope.kind === 'last-turn' && lastTurn" class="shrink-0 truncate border-b border-border px-3 py-1.5 text-[10px] text-muted-foreground" :title="lastTurn.label">{{ lastTurn.label || 'Last completed turn' }}</div>
+        <div v-else-if="diffScope.kind === 'branch' && branchBase" class="shrink-0 truncate border-b border-border px-3 py-1.5 text-[10px] text-muted-foreground" :title="branchBase">Committed changes since {{ branchBase }}</div>
+        <DiffTab
+          :diff="scopedDiff"
+          :diff-file="diffScopeKey"
+          :diff-staged="false"
+          :workspace-id="props.workspaceId"
+          :review-key="`${props.cwd}:${reviewSubject}:${diffScopeKey}:${diffScope.kind === 'last-turn' ? lastTurn?.id : diffScope.kind === 'branch' ? branchBase : ''}`"
+          :send-batch-notes="sendPanelNotes"
+          compact
+        />
+      </template>
     </div>
 
     <!-- Sub-agents tab: this thread's chat sub-agents + its Task-tool invocations -->
@@ -438,6 +453,7 @@
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="spawnDialogOpen" @click.self="spawnDialogOpen = false">
       <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
         <h3 class="text-sm font-semibold text-foreground">Spawn a sub-agent</h3>
+        <SubagentProfilePicker v-model="spawnProfile" @configure="configureSpawnProfiles" />
         <textarea
           v-model="spawnTask"
           class="h-24 w-full resize-none rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
@@ -446,9 +462,10 @@
           @keydown.esc="spawnDialogOpen = false"
           @keydown.enter.meta.prevent="confirmSpawnDialog"
         />
+        <p v-if="spawnError" role="alert" class="m-0 text-xs text-destructive">{{ spawnError }}</p>
         <div class="flex justify-end gap-2">
           <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="spawnDialogOpen = false">Cancel</button>
-          <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmSpawnDialog" :disabled="!spawnTask.trim()">Spawn</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmSpawnDialog" :disabled="!spawnTask.trim() || spawning">{{ spawning ? 'Spawning…' : 'Spawn' }}</button>
         </div>
       </div>
     </div>
@@ -590,6 +607,11 @@ import PullRequestsPanel from "./PullRequestsPanel.vue";
 import DevServersSurface from "./DevServersSurface.vue";
 import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
+import { useUIStore } from "@/stores/ui";
+import SubagentProfilePicker from "@/components/agents/SubagentProfilePicker.vue";
+import DiffTab from "./DiffTab.vue";
+import { fetchReviewDiff, type ReviewDiffScope, type TurnReview } from "@/lib/reviewDiff";
+import { useTurnReviewRefresh } from "@/composables/useTurnReviewRefresh";
 import CommitPushMenu from "./CommitPushMenu.vue";
 import BrowserPane from "./BrowserPane.vue";
 import XTerm from "./XTerm.vue";
@@ -613,7 +635,7 @@ const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensio
 // must be tracked per workspace, not as one global ref — otherwise switching
 // projects shows the other project's open tabs.
 const NO_WS = -1;
-type DiffScope = { kind: "workspace" } | { kind: "branch" } | { kind: "turn"; checkpointId: number };
+type DiffScope = ReviewDiffScope;
 interface WsUiState { openedTabIds: string[]; activeTab: string | null; diffScope: DiffScope; openChildId: number | null }
 const wsUiStates = reactive<Record<number, WsUiState>>({});
 const wsKey = computed(() => props.workspaceId ?? NO_WS);
@@ -733,17 +755,26 @@ watch([activeChatId, childList], ([cur, list]) => {
 // own small rename-dialog pattern instead of introducing a browser dialog.
 const spawnDialogOpen = ref(false);
 const spawnTask = ref("");
+const spawnProfile = ref("worker");
+const spawning = ref(false);
+const spawnError = ref("");
+function configureSpawnProfiles() { spawnDialogOpen.value = false; useUIStore().openSettings("subagent-profiles"); }
 function openSpawnDialog() {
   if (!activeChatId.value || !props.workspaceId) return;
   spawnTask.value = "";
+  spawnError.value = "";
   spawnDialogOpen.value = true;
 }
 async function confirmSpawnDialog() {
   const task = spawnTask.value.trim();
-  if (!task || !activeChatId.value || !props.workspaceId) return;
-  spawnDialogOpen.value = false;
-  // Same door as the agent's own spawn verb: one implementation, two callers.
-  await perform("spawn", { task, target: "chat", parent_chat_id: activeChatId.value, cwd: props.cwd });
+  if (!task || !activeChatId.value || !props.workspaceId || spawning.value) return;
+  spawning.value = true;
+  spawnError.value = "";
+  try {
+    await perform("spawn", { task, profile: spawnProfile.value, target: "chat", parent_chat_id: activeChatId.value, cwd: props.cwd });
+    spawnDialogOpen.value = false;
+  } catch (error) { spawnError.value = String(error); }
+  finally { spawning.value = false; }
 }
 
 /** Open a sub-agent chat's detail view from outside the panel (a transcript
@@ -789,6 +820,9 @@ const diffScopeKey = computed(() => {
 });
 const scopedDiff = ref("");
 const scopedDiffLoading = ref(false);
+const scopedDiffError = ref("");
+const lastTurn = ref<TurnReview | null>(null);
+let diffRequest = 0;
 // Branch base is auto-detected per workspace (git.ts has no default-branch
 // concept), so it lives here rather than in a store; a manual pick overrides
 // detection until the workspace changes.
@@ -796,6 +830,10 @@ const branchBase = ref("");
 const manualBranchBase = ref("");
 const showHistory = ref(false);
 const activeTerm = inject<() => any>('activeTerm', () => undefined);
+const reviewSubject = computed<string>(() => activeTerm()?.reviewSubject ?? (activeChatId.value ? `chat:${activeChatId.value}` : ""));
+async function sendPanelNotes(markdown: string): Promise<boolean> {
+  return await activeTerm()?.sendReviewNotes(markdown) ?? false;
+}
 
 const panelEl = ref<HTMLElement | null>(null);
 // sm=220: show tab labels; md=320: show inline diff; lg=440: not used yet
@@ -943,8 +981,10 @@ const restoreError = ref("");
 const restoreBusy = ref(false);
 
 async function loadCheckpoints() {
-  if (!props.cwd) return (checkpoints.value = []);
-  checkpoints.value = await invoke<Checkpoint[]>("list_checkpoints", { cwd: props.cwd, limit: 50 });
+  const cwd = props.cwd;
+  if (!cwd) return (checkpoints.value = []);
+  const rows = await invoke<Checkpoint[]>("list_checkpoints", { cwd, limit: 50 });
+  if (props.cwd === cwd) checkpoints.value = rows;
 }
 
 function cpTime(ms: number): string {
@@ -982,11 +1022,12 @@ async function confirmRestore() {
 }
 
 watch([activeTab, () => props.cwd], () => { if (activeTab.value === "history") loadCheckpoints(); });
-watch([activeTab, () => props.cwd], () => {
+watch([activeTab, () => props.cwd, diffScopeKey, reviewSubject], () => {
+  // Invalidate in-flight requests even when the diff surface is closed.
+  diffRequest++;
   if (activeTab.value !== "diff") return;
-  loadCheckpoints(); // needed for the Turn N options, not just the Checkpoints tab
-  loadScopedDiff();
-});
+  void loadScopedDiff();
+}, { immediate: true });
 
 // checkpoints are listed newest-first; turn numbers count up from the oldest,
 // so "Turn 1" is stable as new turns land instead of shifting every time.
@@ -994,11 +1035,13 @@ const numberedCheckpoints = computed(() =>
   checkpoints.value.map((cp, i) => ({ cp, turn: checkpoints.value.length - i })));
 
 function onDiffScopeChange(v: string) {
-  diffScope.value = v.startsWith("turn:")
-    ? { kind: "turn", checkpointId: Number(v.slice(5)) }
-    : { kind: v as "workspace" | "branch" };
-  if (diffScope.value.kind === "branch") manualBranchBase.value = "";
-  loadScopedDiff();
+  if (v.startsWith("turn:")) {
+    const id = Number(v.slice(5));
+    if (!Number.isInteger(id) || !checkpoints.value.some((cp) => cp.id === id)) return;
+    diffScope.value = { kind: "turn", checkpointId: id };
+  } else if (v === "workspace" || v === "branch" || v === "last-turn") {
+    diffScope.value = { kind: v };
+  }
 }
 
 function pickBranchBase(b: string) {
@@ -1007,35 +1050,39 @@ function pickBranchBase(b: string) {
   loadScopedDiff();
 }
 
-async function loadScopedDiff() {
-  if (!props.cwd) { scopedDiff.value = ""; return; }
+async function loadScopedDiff(preserveCurrent = false) {
+  const request = ++diffRequest;
+  const cwd = props.cwd;
   const scope = diffScope.value;
+  const subjectId = reviewSubject.value;
+  const manualBase = manualBranchBase.value;
+  const isCurrent = () => request === diffRequest && cwd === props.cwd;
+  if (!preserveCurrent) {
+    scopedDiff.value = "";
+    branchBase.value = "";
+    lastTurn.value = null;
+  }
+  scopedDiffError.value = "";
   scopedDiffLoading.value = true;
   try {
-    if (scope.kind === "workspace") {
-      const [unstaged, staged] = await Promise.all([git.fetchAllDiff(false), git.fetchAllDiff(true)]);
-      scopedDiff.value = [
-        unstaged && "# Unstaged changes\n" + unstaged,
-        staged && "# Staged changes\n" + staged,
-      ].filter(Boolean).join("\n\n");
-    } else if (scope.kind === "branch") {
-      if (manualBranchBase.value) {
-        const out = await invoke<{ stdout: string; code: number }>("run_git", { cwd: props.cwd, args: ["diff", `${manualBranchBase.value}...HEAD`] });
-        branchBase.value = manualBranchBase.value;
-        scopedDiff.value = out.code === 0 ? out.stdout : "";
-      } else {
-        branchBase.value = await invoke<string>("branch_diff_base", { cwd: props.cwd });
-        if (!branchBase.value) { scopedDiff.value = ""; await git.fetchBranches(); }
-        else scopedDiff.value = await invoke<string>("branch_diff", { cwd: props.cwd });
-      }
-    } else {
-      const cp = checkpoints.value.find((c) => c.id === scope.checkpointId);
-      scopedDiff.value = cp ? await invoke<string>("checkpoint_diff", { cwd: props.cwd, commit: cp.commit }) : "";
-    }
+    const rows = cwd ? await invoke<Checkpoint[]>("list_checkpoints", { cwd, limit: 50 }) : [];
+    if (!isCurrent()) return;
+    checkpoints.value = rows ?? [];
+    const checkpointCommit = scope.kind === "turn" ? checkpoints.value.find((c) => c.id === scope.checkpointId)?.commit : undefined;
+    const result = await fetchReviewDiff({ cwd, scope, subjectId, checkpointCommit, manualBase }, invoke);
+    if (!isCurrent()) return;
+    scopedDiff.value = result.diff;
+    branchBase.value = result.base;
+    lastTurn.value = result.turn;
+    if (scope.kind === "branch" && !result.base) await git.fetchBranches();
+  } catch (error) {
+    if (isCurrent()) scopedDiffError.value = `Could not load changes: ${error}`;
   } finally {
-    scopedDiffLoading.value = false;
+    if (isCurrent()) scopedDiffLoading.value = false;
   }
 }
+
+watch(() => props.cwd, () => { manualBranchBase.value = ""; checkpoints.value = []; }, { flush: "sync" });
 
 watch(() => props.cwd, (p) => {
   if (p) {
@@ -1054,11 +1101,15 @@ watch(() => props.cwd, (p) => {
 function autoRefresh() {
   if (props.cwd && !document.hidden) {
     git.refresh(true);
+    if (activeTab.value === "diff" && !scopedDiffLoading.value) void loadScopedDiff(true);
   }
 }
 
 const ar = useAutoRefresh(autoRefresh, "burrow-git-refresh-interval");
 
+useTurnReviewRefresh(reviewSubject, () => {
+  if (activeTab.value === "diff" && diffScope.value.kind === "last-turn") void loadScopedDiff(true);
+});
 function onFocus() { autoRefresh(); }
 function onVisible() { if (!document.hidden) autoRefresh(); }
 

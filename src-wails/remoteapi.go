@@ -194,10 +194,11 @@ var remoteAllowed = map[string]remoteCmd{
 	"stop_chat": {Method: "StopChat", Args: []string{"id"}, Scope: scopeOrchOperate},
 
 	// Diff review notes (diffcomments.go) — DiffTab.vue's batch review flow.
-	"list_diff_comments":   {Method: "ListDiffComments", Args: []string{"wsId"}, Scope: scopeOrchRead},
-	"add_diff_comment":     {Method: "AddDiffComment", Args: []string{"wsId", "file", "line", "side", "body"}, Scope: scopeOrchOperate},
-	"compose_diff_notes":   {Method: "ComposeDiffNotes", Args: []string{"ids"}, Scope: scopeOrchRead},
-	"mark_diff_notes_sent": {Method: "MarkDiffNotesSent", Args: []string{"ids"}, Scope: scopeOrchOperate},
+	"list_diff_comments":        {Method: "ListDiffComments", Args: []string{"wsId"}, Scope: scopeOrchRead},
+	"add_diff_comment":          {Method: "AddDiffComment", Args: []string{"wsId", "file", "line", "side", "body"}, Scope: scopeOrchOperate},
+	"compose_diff_notes":        {Method: "ComposeDiffNotes", Args: []string{"ids"}, Scope: scopeOrchRead},
+	"set_diff_comment_resolved": {Method: "SetDiffCommentResolved", Args: []string{"wsId", "id", "resolved"}, Scope: scopeOrchOperate},
+	"mark_diff_notes_sent":      {Method: "MarkDiffNotesSent", Args: []string{"ids"}, Scope: scopeOrchOperate},
 
 	// Workspaces / tabs
 	"list_workspaces":     {Method: "ListWorkspaces", Args: nil, Scope: scopeOrchRead},
@@ -243,6 +244,8 @@ var remoteAllowed = map[string]remoteCmd{
 	"restore_checkpoint": {Method: "RestoreCheckpoint", Args: []string{"cwd", "commit"}, Scope: scopeOrchOperate},
 	"start_turn_audit":   {Method: "StartTurnAudit", Args: []string{"cwd", "subjectId", "label"}, Scope: scopeOrchOperate},
 	"settle_turn_audit":  {Method: "SettleTurnAudit", Args: []string{"subjectId", "state"}, Scope: scopeOrchOperate},
+	"last_turn_audit":    {Method: "LastTurnAudit", Args: []string{"cwd", "subjectId"}, Scope: scopeOrchRead},
+	"working_tree_diff":  {Method: "WorkingTreeDiff", Args: []string{"cwd"}, Scope: scopeOrchRead},
 
 	// Branch diff — diff against the repo's default/upstream branch (git.go)
 	"branch_diff_base": {Method: "BranchDiffBase", Args: []string{"cwd"}, Scope: scopeOrchRead},

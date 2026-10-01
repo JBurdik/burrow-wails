@@ -295,6 +295,8 @@
         </section>
 
         <!-- Notifications -->
+        <section v-else-if="active === 'subagent-profiles'" class="flex flex-col gap-3.5"><SubagentProfilesPanel /></section>
+
         <section v-else-if="active === 'notifications'" class="flex flex-col gap-3.5">
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
@@ -1172,6 +1174,7 @@ import { perform } from "@/lib/controlBridge";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEXT_GENERATION_POLICIES, type NtfyEvent } from "@/stores/ui";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
+import SubagentProfilesPanel from "@/components/agents/SubagentProfilesPanel.vue";
 import ProvidersPanel from "@/components/ProvidersPanel.vue";
 import { testNtfy } from "@/lib/ntfy";
 import { useUpdateStore } from "@/stores/update";
@@ -1887,6 +1890,7 @@ const navItems: NavItem[] = [
   { id: "general", label: "General", icon: PhSlidersHorizontal },
   { id: "workspaces", label: "Workspaces", icon: PhFolderOpen },
   { id: "providers", label: "Providers", icon: PhRobot },
+  { id: "subagent-profiles", label: "Sub-agent profiles", icon: PhRobot },
   { id: "scripts", label: "Scripts", icon: PhPlayCircle },
   { id: "skills", label: "Skills", icon: PhSparkle },
   { id: "mcp", label: "MCP Servers", icon: PhPlugsConnected },

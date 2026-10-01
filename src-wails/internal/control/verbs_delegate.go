@@ -41,6 +41,7 @@ func delegationVerbs(c *Core) []Verb {
 		Summary: "Delegate a task to a sub-agent in a new tab (or chat), visible to the user",
 		Args: []Arg{
 			{Name: "task", Type: "string", Desc: "The full task prompt for the sub-agent: what to do, what not to touch, what to report", Required: true},
+			{Name: "profile", Type: "string", Desc: "Saved sub-agent role: scout, worker, or reviewer (Settings > Sub-agent profiles)"},
 			{Name: "agent", Type: "string", Desc: "Agent instance to run (name or id from list_agents); defaults to the user's default"},
 			{Name: "model", Type: "string", Desc: "Model override for this task, e.g. claude-haiku-4-5-20251001 for mechanical work"},
 			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work; defaults to the caller's"},
@@ -51,6 +52,14 @@ func delegationVerbs(c *Core) []Verb {
 		},
 		Scope: ScopeLocal,
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.spawn(ctx, p) },
+	}, {
+		Name:    "list_subagent_profiles",
+		Summary: "Saved sub-agent roles with instructions, model, provider, and permission mode",
+		Scope:   ScopeLocal,
+		Fn: func(ctx context.Context, p Params) (any, error) {
+			var out any
+			return out, c.ui(ctx, "list_subagent_profiles", nil, &out)
+		},
 	}, {
 		Name:    "list_agents",
 		Summary: "Agent instances configured in Settings > Providers, spawnable by name",
@@ -181,6 +190,7 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 
 	args := map[string]any{
 		"task":           p.Str("task"),
+		"profile":        p.Str("profile"),
 		"agent":          p.Str("agent"),
 		"model":          p.Str("model"),
 		"cwd":            p.Str("cwd"),

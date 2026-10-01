@@ -1158,6 +1158,7 @@ func codexModes() map[string]any {
 	return map[string]any{
 		"currentModeId": "auto",
 		"availableModes": []map[string]any{
+			{"id": "plan", "name": "Plan", "description": "Investigate and plan without workspace writes."},
 			{"id": "supervised", "name": "Supervised", "description": "Work in the workspace, asking before commands and file changes."},
 			{"id": "auto", "name": "Auto", "description": "Codex reviews routine actions automatically; risky actions still ask."},
 			{"id": "full-access", "name": "Full access", "description": "Allow commands and edits without prompts."},
