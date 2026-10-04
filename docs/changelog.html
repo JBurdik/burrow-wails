@@ -80,11 +80,39 @@
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
   <!-- v0.4.7 -->
+  <!-- v0.4.8 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.8</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Review komentářů</div>
+      <ul>
+        <li><strong>Resolve / Reopen</strong> — komentáře k odpovědím agenta i k řádkům diffu mají vlastní stav „vyřešeno“. Původní citace i potvrzení odeslání zůstávají; znovuotevření už odeslaný komentář nepošle podruhé a nevyřešené neodeslané komentáře z dávky vypadnou.</li>
+        <li><strong>Seznam „Review comments“ v diffu</strong> — ukazuje i poznámky, jejichž řádek nebo soubor už v patchi není, a jde jim tam změnit stav. Stav review diffu se ukládá do SQLite (<code>diff_comments.resolved_at</code>).</li>
+        <li><strong>Diff pracovního stromu</strong> — <code>WorkingTreeDiff</code> porovnává HEAD s jediným snapshotem včetně nesledovaných souborů, takže staged + unstaged změny téhož souboru nedají dva patche a funguje to i před prvním commitem.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Profily podagentů</div>
+      <ul>
+        <li><strong>Uložené role Scout, Worker, Reviewer</strong> — v <em>Settings → Sub-agent profiles</em> má každá role instrukce, providera, volitelný model a režim oprávnění (Scout a Reviewer výchozí Plan, Worker Supervised). Změna platí pro další delegace, ne pro běžící agenty.</li>
+        <li><strong><code>burrow spawn --profile</code></strong> — role jde vybrat ve formuláři i z CLI; <code>burrow list-subagent-profiles</code> je zpřístupní agentovi. Explicitní <code>--agent</code> / <code>--model</code> mají přednost.</li>
+        <li><strong>Žádná tichá změna oprávnění</strong> — profily zatím podporují Claude CLI a Codex app-server. Nepodporovaný provider nebo vlastní CLI argumenty v terminálu skončí viditelnou chybou, místo aby se dítě spustilo s jiným režimem oprávnění.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.7</span>
-      <span class="tag tag-latest">nejnovější</span>
-      <span class="date">září 2026</span>
+            <span class="date">září 2026</span>
     </div>
 
     <div class="section feat">
