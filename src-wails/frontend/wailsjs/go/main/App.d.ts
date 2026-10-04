@@ -151,6 +151,8 @@ export function KillPty(arg1:string):Promise<void>;
 
 export function LastAssistantMessage(arg1:number):Promise<string>;
 
+export function LastTurnAudit(arg1:string,arg2:string):Promise<main.TurnAudit>;
+
 export function LatestNpmVersion(arg1:string):Promise<main.ProviderLatest>;
 
 export function ListChats():Promise<Array<main.Chat>>;
@@ -291,6 +293,8 @@ export function SendFloatSnapshot(arg1:string,arg2:string,arg3:number,arg4:numbe
 
 export function SetBurrowMcpMaxDepth(arg1:number):Promise<void>;
 
+export function SetDiffCommentResolved(arg1:number,arg2:number,arg3:boolean):Promise<void>;
+
 export function SetExtensionEnabled(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetForgeProvider(arg1:number,arg2:string):Promise<void>;
@@ -328,6 +332,8 @@ export function TouchWorkspace(arg1:number):Promise<void>;
 export function UncollectedChildren(arg1:number):Promise<Array<number>>;
 
 export function UpdateProvider(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.ProviderUpdateResult>;
+
+export function WorkingTreeDiff(arg1:string):Promise<string>;
 
 export function WriteConfig(arg1:string):Promise<void>;
 

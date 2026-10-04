@@ -560,6 +560,7 @@ export namespace main {
 	    body: string;
 	    created_at: number;
 	    sent_at: number;
+	    resolved_at: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DiffComment(source);
@@ -575,6 +576,7 @@ export namespace main {
 	        this.body = source["body"];
 	        this.created_at = source["created_at"];
 	        this.sent_at = source["sent_at"];
+	        this.resolved_at = source["resolved_at"];
 	    }
 	}
 	export class DirEntry {

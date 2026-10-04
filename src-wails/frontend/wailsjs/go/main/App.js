@@ -298,6 +298,10 @@ export function LastAssistantMessage(arg1) {
   return window['go']['main']['App']['LastAssistantMessage'](arg1);
 }
 
+export function LastTurnAudit(arg1, arg2) {
+  return window['go']['main']['App']['LastTurnAudit'](arg1, arg2);
+}
+
 export function LatestNpmVersion(arg1) {
   return window['go']['main']['App']['LatestNpmVersion'](arg1);
 }
@@ -578,6 +582,10 @@ export function SetBurrowMcpMaxDepth(arg1) {
   return window['go']['main']['App']['SetBurrowMcpMaxDepth'](arg1);
 }
 
+export function SetDiffCommentResolved(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetDiffCommentResolved'](arg1, arg2, arg3);
+}
+
 export function SetExtensionEnabled(arg1, arg2) {
   return window['go']['main']['App']['SetExtensionEnabled'](arg1, arg2);
 }
@@ -652,6 +660,10 @@ export function UncollectedChildren(arg1) {
 
 export function UpdateProvider(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['UpdateProvider'](arg1, arg2, arg3, arg4);
+}
+
+export function WorkingTreeDiff(arg1) {
+  return window['go']['main']['App']['WorkingTreeDiff'](arg1);
 }
 
 export function WriteConfig(arg1) {
