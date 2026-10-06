@@ -161,8 +161,11 @@ a hard requirement of remote access. `XTerm.vue` has no status emits left; it on
   after `s.mu` is released) so the loser can't emit last. `CreatePty` `Forget`s a phase the daemon
   doesn't list — **PTY ids are reused**, so without that a fresh tab wore the old one's review dot.
   `PhaseStore.Apply` is the **only** writer of `terminal_tabs.status`.
-- **Three inputs:** (1) global persistent hooks — `installStatusHooks` merges a hook into each agent's
-  own global config non-destructively; `burrow hook` maps `hook_event_name` → state and POSTs to the
+- **Three inputs:** (1) persistent hooks — Claude's live in the burrow plugin's `hooks/hooks.json`
+  (`hooks` key, PTY-scoped via `CLAUDE_CODE_PLUGIN_DIRS`, so chats and non-Burrow sessions never run
+  them); `installStatusHooks` still merges a hook into Codex's global config non-destructively and
+  writes Copilot's file, and for Claude only strips the entries older versions merged into
+  `settings.json` (migration, keep ≥ 1 release); `burrow hook` maps `hook_event_name` → state and POSTs to the
   loopback hook server (port from `<BURROW_HOME_DIR>/hook.port`); `hookEvent()` applies the phase. The
   legacy `pty-hook-{id}` event is gone. (2) foreground poll (`phasepoll.go`, 2 s, server-side) — an
   agent being foreground is **never** busy; only the shell branch may clear `is_agent`; three empty
@@ -367,7 +370,9 @@ via the **burrow Claude Code mod**.
 `PreToolUse`/`PostToolUse` (no sh+curl per tool call); `prompt.submit` attaches the rule as `context`
 once per session. **Load-bearing:** on a Team/Enterprise login the built-in `cc-plugin-sec-default`
 guard bypasses user-tier mods on `classic.*` and `prompt.compose/context/section` — so no turn-end,
-permission or system-prompt hooks in the mod; those stay with the settings hooks. Tests:
+permission or system-prompt hooks in the mod's `modules`; those are classic `hooks` entries in the
+same `hooks/hooks.json` (the `cc-plugin-sec-default` guard governs mods, not settings hooks), each
+running `burrow hook`. A second `PermissionRequest` group can be appended to its array. Tests:
 `claude plugin test src-wails/agentdocs/mod/burrow`.
 
 ### Backend (`src-wails/*.go`, bound as `App` methods)

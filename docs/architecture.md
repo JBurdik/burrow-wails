@@ -584,7 +584,16 @@ for chats, the burrow mod's `prompt.submit` context for PTY tabs. The mod lives 
 makes `burrow hook` skip PreToolUse/PostToolUse). It uses only events the built-in
 `cc-plugin-sec-default` guard lets a user-tier mod see on a Team/Enterprise login:
 `classic.*` and `prompt.compose` are bypassed there, which is why turn end,
-permission and session metadata stay in the settings hooks.
+permission and session metadata are classic `hooks` entries in the mod's own
+`hooks/hooks.json` (the eight `claudeHookEvents`, each running `burrow hook`) rather
+than in `~/.claude/settings.json`: the plugin is loaded only in Burrow PTYs via
+`CLAUDE_CODE_PLUGIN_DIRS`, so chats and plain `claude` runs no longer spawn a no-op
+hook, and the guard governs mods, not plugin settings hooks. Startup still strips the
+entries older versions merged into global Claude `settings.json` (non-destructive;
+keep for at least one release — a tab started before the upgrade keeps its old env).
+Codex/Copilot have no plugin equivalent and keep the global install. Hook entries
+are arrays per event, so a second group (e.g. an approval `PermissionRequest` hook)
+can be appended later.
 ### Backend (`src-wails/*.go`, bound as `App` methods)
 
 Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem:

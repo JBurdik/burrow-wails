@@ -79,3 +79,49 @@ func readJSON(t *testing.T, path string) map[string]any {
 	}
 	return v
 }
+
+// The plugin's hooks.json is the Claude status source now: every event in
+// claudeHookEvents must run `burrow hook`, and the mod's modules must survive.
+func TestClaudeModHooksMatchEvents(t *testing.T) {
+	var f struct {
+		Modules []string `json:"modules"`
+		Hooks   map[string][]struct {
+			Hooks []struct{ Type, Command string } `json:"hooks"`
+		} `json:"hooks"`
+	}
+	b, err := os.ReadFile("agentdocs/mod/burrow/hooks/hooks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Modules) == 0 {
+		t.Error("modules key lost")
+	}
+	if len(f.Hooks) != len(claudeHookEvents) {
+		t.Errorf("hooks has %d events, want %d", len(f.Hooks), len(claudeHookEvents))
+	}
+	for _, ev := range claudeHookEvents {
+		g := f.Hooks[ev]
+		if len(g) == 0 || len(g[0].Hooks) == 0 || g[0].Hooks[0].Command != "burrow hook" {
+			t.Errorf("%s: want a `burrow hook` command, got %+v", ev, g)
+		}
+	}
+}
+
+// Startup migration: our legacy global entries go, the user's stay, and Claude
+// is never written to again.
+func TestRemoveLegacyClaudeHooksKeepsUserHooks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	in := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"other-tool report"}]},{"hooks":[{"type":"command","command":"[ -n \"$BURROW_PTY_ID\" ] && '/x/burrow' hook || true"}]}]}}`
+	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removeLegacyClaudeHooks([]string{dir})
+	stop := readJSON(t, path)["hooks"].(map[string]any)["Stop"].([]any)
+	if len(stop) != 1 || isBurrowHook(stop[0]) {
+		t.Errorf("want only the user hook left, got %v", stop)
+	}
+}
