@@ -138,7 +138,7 @@ func (s *Server) handle(req daemonproto.Request) *daemonproto.Response {
 	case "list":
 		resp.IDs = s.mgr.List()
 	case "foreground":
-		resp.Name, err = s.mgr.Foreground(req.ID)
+		resp.Name, resp.Pid, err = s.mgr.ForegroundInfo(req.ID)
 	case "version":
 		resp.ExePath, _ = os.Executable()
 		resp.Pid = os.Getpid()

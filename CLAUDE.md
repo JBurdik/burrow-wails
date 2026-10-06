@@ -171,7 +171,14 @@ a hard requirement of remote access. `XTerm.vue` has no status emits left; it on
   agent being foreground is **never** busy; only the shell branch may clear `is_agent`; three empty
   reads + daemon not listing the PTY ⇒ `stale`. (3) the interrupt keystroke — `App.WritePty` applies
   `agentphase.Interrupt` on a payload that is exactly one byte of `0x03`/`0x1b` (length is what
-  separates a cancel from an arrow key); guarded on `cur.InFlight()`.
+  separates a cancel from an arrow key); guarded on `cur.InFlight()`. **Plus a fourth, claude-only
+  source inside the poll** (`claudestatus.go`): when the foreground is `claude`, the poll reads Claude's
+  own `<CLAUDE_CONFIG_DIR|~/.claude>/sessions/<pid>.json` (pid = foreground pgid, from the daemon's
+  `foreground` reply `Pid`; `kind:"interactive"`, `pid` must match) and applies `busy`→`HookRunning`,
+  `waiting`(+`waitingFor:"permission prompt"`)→`HookPermission`/else `HookWaiting`, `idle`/`shell`→
+  `StatusIdle` (settles an *in-flight* turn to `done`, no-op otherwise). **On change only** (a per-pty
+  baseline), so an unchanged file never overwrites a fresher hook. Absent/foreign/unknown file, pid 0
+  (old daemon) or an old CLI ⇒ exactly the previous behaviour.
 - **Chats feed the same store** via `chatPhaseEvent()` in `providerruntime.go`, applied in
   `emitChatLine`.
 

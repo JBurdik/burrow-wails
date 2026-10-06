@@ -282,7 +282,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	if a.phases != nil {
-		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground)
+		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground, a.daemon.ForegroundPid)
 	}
 }
 

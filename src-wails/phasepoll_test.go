@@ -1,6 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 
 	"burrow/internal/agentphase"
@@ -187,5 +191,113 @@ func TestWatchdogIgnoresASingleEmptyRead(t *testing.T) {
 
 	if s.Get("pty:7").State != agentphase.Running {
 		t.Fatalf("one empty read is a daemon race, not a death: %+v", s.Get("pty:7"))
+	}
+}
+
+func writeClaudeFile(t *testing.T, dir string, pid int, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(pid)+".json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func claudeFileBody(pid int, status, waitingFor string) string {
+	b := fmt.Sprintf(`{"pid":%d,"kind":"interactive","entrypoint":"cli","status":%q`, pid, status)
+	if waitingFor != "" {
+		b += fmt.Sprintf(`,"waitingFor":%q`, waitingFor)
+	}
+	return b + "}"
+}
+
+// TestPollReadsClaudeStatusFile walks the lifecycle observed on Claude 2.1.291:
+// idle → busy → waiting(permission prompt) → busy → idle, keyed by the
+// foreground pid.
+func TestPollReadsClaudeStatusFile(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	s, _ := newTestStore(t)
+	dir := t.TempDir()
+	f := &fakePty{sessions: []string{"7"}, fg: map[string]string{"7": "claude"}}
+	p := newPhasePoller(s, f.list, f.foreground)
+	p.fgPid, p.sessionsDir = func(string) int { return 4242 }, dir
+
+	step := func(status, waitingFor string, want agentphase.State) {
+		t.Helper()
+		writeClaudeFile(t, dir, 4242, claudeFileBody(4242, status, waitingFor))
+		p.tick()
+		if got := s.Get("pty:7"); got.State != want {
+			t.Fatalf("%s/%s: want %s, got %+v", status, waitingFor, want, got)
+		}
+	}
+	step("idle", "", agentphase.Idle) // an idle start must not mint a done turn
+	step("busy", "", agentphase.Running)
+	step("waiting", "permission prompt", agentphase.WaitingApproval)
+	step("busy", "", agentphase.Running)
+	step("waiting", "input needed", agentphase.WaitingInput)
+	step("busy", "", agentphase.Running)
+	step("idle", "", agentphase.Done)
+	if s.Get("pty:7").TurnEndedAt == 0 {
+		t.Fatal("file idle settled the turn without TurnEndedAt")
+	}
+}
+
+// TestClaudeStatusFileAppliesOnChangeOnly: a hook-driven waiting_approval must
+// survive the ticks until the file itself catches up.
+func TestClaudeStatusFileAppliesOnChangeOnly(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	s, _ := newTestStore(t)
+	dir := t.TempDir()
+	f := &fakePty{sessions: []string{"7"}, fg: map[string]string{"7": "claude"}}
+	p := newPhasePoller(s, f.list, f.foreground)
+	p.fgPid, p.sessionsDir = func(string) int { return 4242 }, dir
+
+	writeClaudeFile(t, dir, 4242, claudeFileBody(4242, "busy", ""))
+	p.tick()
+	s.Apply("pty:7", agentphase.Event{Kind: agentphase.HookPermission})
+	p.tick() // file still says busy — unchanged, so it must not overwrite
+	if s.Get("pty:7").State != agentphase.WaitingApproval {
+		t.Fatalf("unchanged file overwrote a hook: %+v", s.Get("pty:7"))
+	}
+}
+
+// TestClaudeStatusFileFallsBack: no file / foreign file / unknown literal /
+// unknown pid → exactly the old behaviour (agent flagged, never fabricated).
+func TestClaudeStatusFileFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]func(){
+		"missing":  func() {},
+		"foreign":  func() { writeClaudeFile(t, dir, 4242, claudeFileBody(1, "busy", "")) },
+		"unknown":  func() { writeClaudeFile(t, dir, 4242, claudeFileBody(4242, "dancing", "")) },
+		"garbage":  func() { writeClaudeFile(t, dir, 4242, "{") },
+		"print-ns": func() { writeClaudeFile(t, dir, 4242, `{"pid":4242,"kind":"bg","status":"busy"}`) },
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(busReset)
+			busReset()
+			s, _ := newTestStore(t)
+			setup()
+			f := &fakePty{sessions: []string{"7"}, fg: map[string]string{"7": "claude"}}
+			p := newPhasePoller(s, f.list, f.foreground)
+			p.fgPid, p.sessionsDir = func(string) int { return 4242 }, dir
+			p.tick()
+			got := s.Get("pty:7")
+			if !got.IsAgent || got.State != agentphase.Idle {
+				t.Fatalf("fallback changed behaviour: %+v", got)
+			}
+		})
+	}
+	// An old daemon reports pid 0.
+	t.Cleanup(busReset)
+	busReset()
+	s, _ := newTestStore(t)
+	writeClaudeFile(t, dir, 4242, claudeFileBody(4242, "busy", ""))
+	f := &fakePty{sessions: []string{"7"}, fg: map[string]string{"7": "claude"}}
+	p := newPhasePoller(s, f.list, f.foreground)
+	p.fgPid, p.sessionsDir = func(string) int { return 0 }, dir
+	p.tick()
+	if s.Get("pty:7").State != agentphase.Idle {
+		t.Fatal("pid 0 must disable the file")
 	}
 }
