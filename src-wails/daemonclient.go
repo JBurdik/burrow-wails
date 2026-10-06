@@ -306,6 +306,16 @@ func (d *DaemonClient) Foreground(id string) (string, error) {
 	return resp.Name, nil
 }
 
+// ForegroundPid is the foreground process group id of a PTY, 0 when unknown
+// (no foreground group, daemon error, or an older daemon that does not send it).
+func (d *DaemonClient) ForegroundPid(id string) int {
+	resp, err := d.call(daemonproto.Request{Kind: "foreground", ID: id})
+	if err != nil {
+		return 0
+	}
+	return resp.Pid
+}
+
 func (d *DaemonClient) List() ([]string, error) {
 	resp, err := d.call(daemonproto.Request{Kind: "list"})
 	if err != nil {

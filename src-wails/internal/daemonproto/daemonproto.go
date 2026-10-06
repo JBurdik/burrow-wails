@@ -25,6 +25,8 @@ type Response struct {
 	Error string   `json:"error,omitempty"`
 	IDs   []string `json:"ids,omitempty"` // for "list"
 	Name  string   `json:"name,omitempty"` // for "foreground"
+	// For "foreground", Pid is the foreground process group id (0 from a daemon
+	// that predates the field — callers treat that as "unknown").
 	// ExePath/Pid answer "version": the daemon's own binary path and pid, so a
 	// client reconnecting to an ALREADY-RUNNING daemon.sock (the whole point of
 	// the daemon surviving app restarts) can tell "still my binary" apart from

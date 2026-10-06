@@ -60,6 +60,11 @@ const (
 	PollNeedsInput Kind = "poll_needs_input"
 	PollGotInput   Kind = "poll_got_input"
 
+	// StatusIdle: Claude's own status file says idle. Settles an in-flight turn
+	// to Done (a lost Stop hook), and is a no-op on anything that already ended —
+	// unlike HookDone it must not mint a TurnEndedAt for a turn that never ran.
+	StatusIdle Kind = "status_idle"
+
 	Interrupt Kind = "interrupt" // Ctrl+C or ESC written to the PTY; a chat's abort
 	Dead      Kind = "dead"      // watchdog confirmed the PTY is gone
 
@@ -95,7 +100,7 @@ func Next(cur Phase, ev Event, now int64) Phase {
 	// (PollAgent{false}), which is how a leaf goes back to poll-driven once its
 	// agent exits.
 	switch ev.Kind {
-	case HookRunning, HookWaiting, HookPermission, HookDone, HookError, HookSession:
+	case HookRunning, HookWaiting, HookPermission, HookDone, HookError, HookSession, StatusIdle:
 		next.IsAgent = true
 	}
 
@@ -127,6 +132,11 @@ func Next(cur Phase, ev Event, now int64) Phase {
 		}
 		if ev.Title != "" {
 			next.Title = ev.Title
+		}
+	case StatusIdle:
+		if cur.InFlight() {
+			next.State = Done
+			next.TurnEndedAt = now
 		}
 	case PollAgent:
 		next.IsAgent = ev.Bool
