@@ -113,7 +113,7 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "submit", Type: "boolean", Desc: "Press Enter after typing (default true)"},
 		},
 		Scope: ScopeLocal,
-		Fn:    func(ctx context.Context, p Params) (any, error) { return c.sendToTab(p) },
+		Fn:    func(ctx context.Context, p Params) (any, error) { return c.sendToTab(ctx, p) },
 	}, {
 		Name:    "chat_send",
 		Summary: "Send a follow-up message to a chat sub-agent and submit it",
@@ -206,16 +206,89 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	return res, nil
 }
 
-func (c *Core) sendToTab(p Params) (any, error) {
+const (
+	pasteStart = "\x1b[200~"
+	pasteEnd   = "\x1b[201~"
+	readyPoll  = 100 * time.Millisecond
+	readyWait  = 10 * time.Second
+)
+
+// waitForTabTail requires three identical, non-empty terminal captures. A
+// phase alone cannot prove that a newly spawned TUI has mounted its composer.
+func (c *Core) waitForTabTail(ctx context.Context, id int64, changedFrom string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, readyWait)
+	defer cancel()
+	previous, stable := "", 0
+	for {
+		blocked := false
+		if c.deps.Phases != nil {
+			state, _ := c.deps.Phases.Phase(fmt.Sprintf("pty:%d", id))
+			if state == "running" || state == "waiting_approval" || state == "waiting_input" || state == "stale" || state == "failed" {
+				previous, stable = "", 0
+				blocked = true
+			}
+		}
+		if !blocked {
+			var tail struct {
+				Text string `json:"text"`
+			}
+			if err := c.ui(ctx, "tab_output", map[string]any{"ptyId": id, "lines": 12}, &tail); err != nil {
+				return "", fmt.Errorf("send_to_tab: read terminal: %w", err)
+			}
+			if strings.TrimSpace(tail.Text) != "" && tail.Text != changedFrom {
+				if tail.Text == previous {
+					stable++
+				} else {
+					previous, stable = tail.Text, 1
+				}
+				if stable >= 3 {
+					return tail.Text, nil
+				}
+			} else {
+				previous, stable = "", 0
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("send_to_tab: prompt/draft not ready: %w", ctx.Err())
+		case <-time.After(readyPoll):
+		}
+	}
+}
+
+func (c *Core) sendToTab(ctx context.Context, p Params) (any, error) {
 	if c.deps.PTY == nil {
 		return nil, fmt.Errorf("send_to_tab: no terminal backend")
 	}
+	id := p.Int("pty_id")
 	text := p.Str("text")
-	if p["submit"] == nil || p.Bool("submit") {
-		text += "\r"
+	if id <= 0 || strings.TrimSpace(text) == "" {
+		return nil, fmt.Errorf("send_to_tab: pty_id and non-empty text required")
 	}
-	if err := c.deps.PTY.WritePty(p.Str("pty_id"), text); err != nil {
+	if strings.ContainsAny(text, "\x1b\x00") {
+		return nil, fmt.Errorf("send_to_tab: text contains a terminal control byte")
+	}
+	before, err := c.waitForTabTail(ctx, id, "")
+	if err != nil {
+		return nil, err
+	}
+	// Newlines inside the paste are data to both Claude Code and Codex. Keep
+	// Enter outside the paste so it submits exactly once.
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	if strings.HasSuffix(text, "\\") {
+		// A trailing backslash can escape the separate submit Enter in Claude.
+		text += "\n"
+	}
+	if err := c.deps.PTY.WritePty(fmt.Sprint(id), pasteStart+text+pasteEnd); err != nil {
 		return nil, fmt.Errorf("send_to_tab: %w", err)
+	}
+	if p["submit"] == nil || p.Bool("submit") {
+		if _, err := c.waitForTabTail(ctx, id, before); err != nil {
+			return nil, err
+		}
+		if err := c.deps.PTY.WritePty(fmt.Sprint(id), "\r"); err != nil {
+			return nil, fmt.Errorf("send_to_tab: submit: %w", err)
+		}
 	}
 	return map[string]any{"sent": true}, nil
 }

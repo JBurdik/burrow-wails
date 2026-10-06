@@ -82,3 +82,32 @@ func read(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// Upgrade path: the old CLAUDE.md rule block goes, the user's content stays.
+func TestRemoveDocBlockKeepsUserContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	mergeDocBlock(path, "rule")
+	if err := os.WriteFile(path, []byte("# Mine\n\n"+read(t, path)+"\n# After\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removeDocBlock(path)
+	if got := read(t, path); got != "# Mine\n\n# After\n" {
+		t.Errorf("unexpected content: %q", got)
+	}
+}
+
+// The manifest is in a dot-dir; without `all:` on the embed the mod would be
+// written without it and Claude Code would not load it.
+func TestInstallClaudeModWritesManifestNotTests(t *testing.T) {
+	dir := t.TempDir()
+	installClaudeMod(dir)
+	mod := claudeModDir(dir)
+	for _, f := range []string{".claude-plugin/plugin.json", "hooks/hooks.json", "hooks/register.ts"} {
+		if _, err := os.Stat(filepath.Join(mod, f)); err != nil {
+			t.Errorf("missing %s: %v", f, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(mod, "tests")); !os.IsNotExist(err) {
+		t.Errorf("tests dir should not be installed")
+	}
+}
