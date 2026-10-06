@@ -147,3 +147,20 @@ func TestCollectSkillsMissingRoot(t *testing.T) {
 		t.Errorf("want nil, got %+v", got)
 	}
 }
+
+func TestCollectPluginSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	inst := filepath.Join(home, "p", "superpowers")
+	os.MkdirAll(filepath.Join(inst, "skills", "brainstorming"), 0o755)
+	os.MkdirAll(filepath.Join(inst, "commands"), 0o755)
+	os.WriteFile(filepath.Join(inst, "skills", "brainstorming", "SKILL.md"), []byte("---\nname: brainstorming\ndescription: think first\n---\n"), 0o644)
+	os.WriteFile(filepath.Join(inst, "commands", "commit.md"), []byte("---\ndescription: make commit\n---\n"), 0o644)
+	os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755)
+	reg := `{"plugins":{"superpowers@m":[{"installPath":"` + inst + `"},{"installPath":"` + inst + `"}]}}`
+	os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), []byte(reg), 0o644)
+	got := collectPluginSkills()
+	if len(got) != 2 || got[0].Name != "superpowers:brainstorming" || got[1].Name != "superpowers:commit" || got[1].Description != "make commit" {
+		t.Fatalf("got %+v", got)
+	}
+}
