@@ -283,6 +283,13 @@ case "$sub" in
     # via `burrow status`. No-op outside Burrow (BURROW_PTY_ID unset). Best-effort
     # string parse, no jq/node needed.
     [ -n "$BURROW_PTY_ID" ] || exit 0
+    json=$(cat)
+    ev=$(printf '%s' "$json" | sed -n 's/.*"hook_event_name"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
+    # The burrow Claude Code mod (agentdocs/mod/burrow) sets BURROW_MOD and
+    # reports tool phases in-process — skip the per-tool-call ps/curl here.
+    case "$BURROW_MOD:$ev" in
+      1:PreToolUse|1:PostToolUse) exit 0 ;;
+    esac
     # Durable agent pid for the liveness sweep. Claude/Codex run the hook as
     # `sh -c '<burrow hook>'`, so OUR $PPID is that throwaway wrapper shell (it exits
     # the instant the hook returns — using it would falsely clear a LIVE agent). The
@@ -292,8 +299,6 @@ case "$sub" in
     case "$agent_pid" in
       ''|*[!0-9]*) agent_pid="$PPID" ;;
     esac
-    json=$(cat)
-    ev=$(printf '%s' "$json" | sed -n 's/.*"hook_event_name"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
     tool=$(printf '%s' "$json" | sed -n 's/.*"tool_name"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
     case "$ev" in
       UserPromptSubmit)

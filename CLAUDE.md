@@ -356,8 +356,19 @@ Manager thread per project as an ordinary chat. Consequence in `spawn`: a call w
 **always** forces `target: "chat"` — the exemption for a control chat is gone with it.
 
 **Agent docs install** (`agentdocs.go`, at startup): Claude/Copilot get the `burrow` skill
-(`agentdocs/skills/burrow/SKILL.md`) plus an always-in-context rule in `~/.claude/CLAUDE.md`; Codex gets
-the same content as a managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md`.
+(`agentdocs/skills/burrow/SKILL.md`); Codex gets the same content as a managed `<!-- BURROW:BEGIN/END -->`
+block in `~/.codex/AGENTS.md`. The Claude delegation rule (`agentdocs/claude-rule.md`) is **no longer** in
+`~/.claude/CLAUDE.md` (startup removes the old block): chats get it via `--append-system-prompt`, PTY tabs
+via the **burrow Claude Code mod**.
+
+**The burrow mod** (`agentdocs/mod/burrow`, written to `<app-data>/claude-mod/burrow`, loaded through
+`CLAUDE_CODE_PLUGIN_DIRS` in every PTY; needs Claude Code ≥ 2.1.287). Only in a PTY (`BURROW_PTY_ID`):
+`tool.call` reports running/waiting in-process and sets `BURROW_MOD=1`, so `burrow hook` skips
+`PreToolUse`/`PostToolUse` (no sh+curl per tool call); `prompt.submit` attaches the rule as `context`
+once per session. **Load-bearing:** on a Team/Enterprise login the built-in `cc-plugin-sec-default`
+guard bypasses user-tier mods on `classic.*` and `prompt.compose/context/section` — so no turn-end,
+permission or system-prompt hooks in the mod; those stay with the settings hooks. Tests:
+`claude plugin test src-wails/agentdocs/mod/burrow`.
 
 ### Backend (`src-wails/*.go`, bound as `App` methods)
 
