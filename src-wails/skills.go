@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -135,13 +136,70 @@ func collectSkills(root, source string) []SkillInfo {
 	return out
 }
 
+// collectPluginSkills lists what installed Claude Code plugins ship — both
+// `skills/*/SKILL.md` and `commands/*.md` — named the way the agent invokes
+// them (`superpowers:brainstorming`). Read-only: they are not ours to toggle.
+// ponytail: ignores enabledPlugins in settings.json, so a plugin that is
+// installed but switched off still shows. Upgrade path: filter on it.
+func collectPluginSkills() []SkillInfo {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	b, err := os.ReadFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"))
+	if err != nil {
+		return nil
+	}
+	var reg struct {
+		Plugins map[string][]struct {
+			InstallPath string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	if json.Unmarshal(b, &reg) != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(reg.Plugins))
+	for k := range reg.Plugins {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := []SkillInfo{}
+	seen := map[string]bool{}
+	add := func(s SkillInfo) {
+		if !seen[s.Name] {
+			seen[s.Name] = true
+			out = append(out, s)
+		}
+	}
+	for _, key := range keys {
+		plugin, _, _ := strings.Cut(key, "@")
+		for _, inst := range reg.Plugins[key] {
+			for _, s := range collectSkills(filepath.Join(inst.InstallPath, "skills"), "plugin") {
+				s.Name = plugin + ":" + s.Name
+				add(s)
+			}
+			cmds, _ := os.ReadDir(filepath.Join(inst.InstallPath, "commands"))
+			for _, c := range cmds {
+				base, ok := strings.CutSuffix(c.Name(), ".md")
+				if !ok {
+					continue
+				}
+				_, desc := skillFrontmatter(filepath.Join(inst.InstallPath, "commands", c.Name()))
+				add(SkillInfo{Dir: "", Name: plugin + ":" + base, Description: desc, Source: "plugin", Enabled: true})
+			}
+		}
+	}
+	return out
+}
+
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
 
 // ListSkills reports the user's own skills plus, when `cwd` names a repo, that
-// repo's checked-in ones. Settings passes "" — it manages personal skills only,
+// repo's checked-in ones, plus installed plugins' (only with a cwd, so the
+// composer sees them and Settings — which can toggle/delete — does not). Settings passes "" — it manages personal skills only,
 // which is what keeps SetSkillEnabled/DeleteSkill's `dir` unambiguous (they
 // resolve it against ~/.claude/skills and must never be handed a project row).
 func (a *App) ListSkills(cwd string) ([]SkillInfo, error) {
@@ -151,6 +209,7 @@ func (a *App) ListSkills(cwd string) ([]SkillInfo, error) {
 	}
 	out := collectSkills(dir, "personal")
 	if cwd != "" {
+		out = append(out, collectPluginSkills()...)
 		out = append(out, collectSkills(filepath.Join(cwd, ".claude", "skills"), "project")...)
 	}
 	return out, nil

@@ -573,10 +573,27 @@ primer; the orchestrating thread decides per task by calling `create_worktree` a
 passing the path as `cwd`.
 
 **Agent docs install** (`agentdocs.go`, at startup): teaches every agent the CLI.
-Claude/Copilot get the `burrow` skill (`agentdocs/skills/burrow/SKILL.md`) plus an
-always-in-context rule in `~/.claude/CLAUDE.md` (so Claude reaches for
-`burrow spawn` before its own `Agent` tool); Codex gets the same content as a
-managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md`.
+Claude/Copilot get the `burrow` skill (`agentdocs/skills/burrow/SKILL.md`); Codex
+gets the same content as a managed `<!-- BURROW:BEGIN/END -->` block in
+`~/.codex/AGENTS.md`. The Claude rule (reach for `burrow spawn` before the built-in
+`Agent` tool) used to be a block in `~/.claude/CLAUDE.md`, which put it in every
+Claude session on the machine, Burrow or not; startup now removes that block and
+Burrow injects the rule only where it launches Claude — `--append-system-prompt`
+for chats, the burrow mod's `prompt.submit` context for PTY tabs. The mod lives in
+`agentdocs/mod/burrow` and also reports tool-call phases in-process (`BURROW_MOD=1`
+makes `burrow hook` skip PreToolUse/PostToolUse). It uses only events the built-in
+`cc-plugin-sec-default` guard lets a user-tier mod see on a Team/Enterprise login:
+`classic.*` and `prompt.compose` are bypassed there, which is why turn end,
+permission and session metadata are classic `hooks` entries in the mod's own
+`hooks/hooks.json` (the eight `claudeHookEvents`, each running `burrow hook`) rather
+than in `~/.claude/settings.json`: the plugin is loaded only in Burrow PTYs via
+`CLAUDE_CODE_PLUGIN_DIRS`, so chats and plain `claude` runs no longer spawn a no-op
+hook, and the guard governs mods, not plugin settings hooks. Startup still strips the
+entries older versions merged into global Claude `settings.json` (non-destructive;
+keep for at least one release — a tab started before the upgrade keeps its old env).
+Codex/Copilot have no plugin equivalent and keep the global install. Hook entries
+are arrays per event, so a second group (e.g. an approval `PermissionRequest` hook)
+can be appended later.
 ### Backend (`src-wails/*.go`, bound as `App` methods)
 
 Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem:
