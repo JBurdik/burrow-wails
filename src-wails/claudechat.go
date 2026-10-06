@@ -154,9 +154,12 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}
+	// The Burrow rule rides every chat; it is no longer in the global CLAUDE.md.
+	sys := docAsset("agentdocs/claude-rule.md")
 	if s := strings.TrimSpace(appendSystemPrompt); s != "" {
-		args = append(args, "--append-system-prompt", s)
+		sys += "\n\n" + s
 	}
+	args = append(args, "--append-system-prompt", sys)
 	// Allowlisted so the model id can't smuggle extra argv.
 	if strings.HasPrefix(model, "claude-") {
 		args = append(args, "--model", model)

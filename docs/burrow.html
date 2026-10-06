@@ -223,7 +223,7 @@
   <h2>How agents discover the CLI</h2>
   <p><code>installAgentDocs</code> (<code>src-wails/agentdocs.go</code>, at startup) writes into every known config dir:</p>
   <ul>
-    <li><strong>Claude</strong> — the <code>burrow</code> skill at <code>&lt;dir&gt;/skills/burrow/SKILL.md</code>, plus a short always-in-context rule in <code>&lt;dir&gt;/CLAUDE.md</code> inside a managed <code>&lt;!-- BURROW:BEGIN/END --&gt;</code> block, so Claude reaches for <code>burrow spawn</code> before its own in-process <code>Agent</code> tool.</li>
+    <li><strong>Claude</strong> — the <code>burrow</code> skill at <code>&lt;dir&gt;/skills/burrow/SKILL.md</code>, plus a short rule so Claude reaches for <code>burrow spawn</code> before its own in-process <code>Agent</code> tool — injected only into Claude sessions Burrow launches (<code>--append-system-prompt</code> for chats, the burrow Claude Code mod for PTY tabs), no longer a block in <code>&lt;dir&gt;/CLAUDE.md</code>.</li>
     <li><strong>Codex</strong> — the same content as a managed block in <code>&lt;dir&gt;/AGENTS.md</code> (no skill mechanism).</li>
     <li><strong>Copilot</strong> — the skill, plus its <code>skills</code> dir registered in <code>settings.json</code>'s <code>skillDirectories</code> (Copilot has no implicit lookup).</li>
   </ul>

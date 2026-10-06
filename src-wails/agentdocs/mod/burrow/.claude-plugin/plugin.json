@@ -1,0 +1,1 @@
+{ "name": "burrow", "version": "0.1.0", "description": "Report agent phase to Burrow and add Burrow context, only inside a Burrow session" }

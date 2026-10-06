@@ -38,6 +38,7 @@ type App struct {
 	controlToken  string
 	burrowBinDir  string
 	sessionDir    string
+	claudeModDir  string
 	environmentID string
 
 	endpointProviders []EndpointProvider
@@ -236,6 +237,8 @@ func (a *App) startup(ctx context.Context) {
 	// a config the user or another tool edited.
 	installStatusHooks(dataDir)
 	installAgentDocs()
+	installClaudeMod(dataDir)
+	a.claudeModDir = claudeModDir(dataDir)
 
 	// Warm the font list so the Settings pickers don't pay the ~1 s scan.
 	go ListFonts()
@@ -279,7 +282,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	if a.phases != nil {
-		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground)
+		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground, a.daemon.ForegroundPid)
 	}
 }
 
@@ -344,6 +347,15 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	}
 	if a.hookSrv != nil {
 		env = append(env, fmt.Sprintf("BURROW_HOOK_PORT=%d", a.hookSrv.port))
+	}
+	// Loads the burrow mod into any Claude Code started in this tab, on top of
+	// whatever plugin dirs the user already names.
+	if a.claudeModDir != "" {
+		dirs := a.claudeModDir
+		if own := os.Getenv("CLAUDE_CODE_PLUGIN_DIRS"); own != "" {
+			dirs = own + string(os.PathListSeparator) + dirs
+		}
+		env = append(env, "CLAUDE_CODE_PLUGIN_DIRS="+dirs)
 	}
 	if err := a.daemon.CreatePty(id, cwd, cols, rows, env); err != nil {
 		return err
