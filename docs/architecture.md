@@ -592,8 +592,39 @@ hook, and the guard governs mods, not plugin settings hooks. Startup still strip
 entries older versions merged into global Claude `settings.json` (non-destructive;
 keep for at least one release — a tab started before the upgrade keeps its old env).
 Codex/Copilot have no plugin equivalent and keep the global install. Hook entries
-are arrays per event, so a second group (e.g. an approval `PermissionRequest` hook)
-can be appended later.
+are arrays per event, so a second group can be appended — and is: see the next section.
+
+### Answerable PTY permission prompts (`src-wails/ptypermissions.go`, `bin/burrow approve`)
+
+**What:** a Claude tab's permission prompt can be answered from the desktop (toast + a banner above the tab's
+xterm, oldest request with `+N`) without taking the TUI prompt away. Phone is deferred.
+
+**How:** a second `PermissionRequest` entry (`burrow approve`, `timeout: 86400`) next to the status hook in the
+plugin's `hooks.json` (plugin settings-hooks survive the Team/Enterprise guard; the mod's `modules` do not).
+`burrow approve` reads stdin, exits 0/empty at once when `BURROW_PTY_ID` is unset or the tool is
+`AskUserQuestion`/`ExitPlanMode`, otherwise `curl`s `POST /v1/permission_request?pty_id=…` with the control token and
+prints the reply verbatim. The server parks it in `permRegistry`, keyed `pty_id` + hash(`tool_name`,`tool_input`)
+because the payload carries no `tool_use_id`; two byte-identical in-flight requests share one card and each hook
+gets the answer. The pty's whole pending list goes out as `pty-permissions` (state, so a replay can't leave the UI
+wrong); `list_pty_permissions` is the first paint and `answer_pty_permission` the answer door (both in
+`remoteAllowed`).
+
+**Why it fails open to the TUI, never to allow:** Claude reads "no decision" as "ask the user" — empty stdout +
+exit 0. A timeout, invalid JSON or non-zero exit also lands on the TUI prompt. So the CLI, the handler and the
+registry return nothing on every non-answer path, and an unknown answer is an error, not an allow. Claude owns the
+rules: `chatPermissionRules` are not applied to PTY tabs. `always` = `updatedPermissions` `addRules`,
+`destination: "session"` — Claude's first `addRules` suggestion re-pointed at the session when it offered one,
+else the exact Bash command (or the whole tool). Persisted destinations stay the TUI's.
+
+**Spike — what happens when the user answers in the TUI (claude 2.1.291):** Claude does **not** kill the losing
+hook. A `sh` hook with a `sleep` child was still running 30 s+ after the TUI answer and the tool had already run;
+it got SIGTERM only when Claude exited. The docs are silent on this, and it makes the request context
+(`r.Context().Done()`) useless for the "answered in the terminal" case — it only fires when Claude exits or the
+hook is killed. The real signal is the tab's **phase** leaving `waiting_approval` (`PostToolUse`/mod `tool.call`
+→ running, `Stop` → done), wired as `PhaseStore.onChange` → `permRegistry.phaseChanged`. The status hook and the
+approve hook run in parallel, so a request can be parked just before the phase reads `waiting_approval`: it only
+closes on "left waiting_approval" once the approval phase was observed, and before that only a turn end
+(done/idle/failed/stale) closes it.
 ### Backend (`src-wails/*.go`, bound as `App` methods)
 
 Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem:

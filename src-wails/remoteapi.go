@@ -441,6 +441,8 @@ var remoteAllowed = map[string]remoteCmd{
 
 	// Control/permission responses
 	"claude_respond_control": {Method: "ClaudeRespondControl", Args: []string{"id", "requestId", "response"}, Scope: scopeOrchOperate},
+	"list_pty_permissions":   {Method: "ListPtyPermissions", Args: []string{}, Scope: scopeOrchRead},
+	"answer_pty_permission":  {Method: "AnswerPtyPermission", Args: []string{"id", "behavior", "message"}, Scope: scopeOrchOperate},
 	"acp_respond_permission": {Method: "AcpRespondPermission", Args: []string{"id", "rpcId", "optionId"}, Scope: scopeOrchOperate},
 	"acp_respond_user_input": {Method: "AcpRespondUserInput", Args: []string{"id", "rpcId", "answers"}, Scope: scopeOrchOperate},
 

@@ -39,6 +39,10 @@ type PhaseStore struct {
 	// It is deliberately NOT s.mu: sinks must never run under the state lock,
 	// or a sink that reads the store back deadlocks.
 	emitMu sync.Mutex
+
+	// onChange runs after every published change, under emitMu: it must not
+	// call back into Apply/Forget. Set once at startup, before any producer.
+	onChange func(id string, p agentphase.Phase)
 }
 
 func NewPhaseStore(db *sql.DB) (*PhaseStore, error) {
@@ -97,6 +101,9 @@ func (s *PhaseStore) Apply(id string, ev agentphase.Event) {
 
 	s.persist(id, next, n)
 	busEmit("phase-"+id, next)
+	if s.onChange != nil {
+		s.onChange(id, next)
+	}
 
 	// Mirror for `burrow list-tabs` / MCP list_tabs, which read the DB with no
 	// frontend round-trip. The frontend used to make this call itself.
