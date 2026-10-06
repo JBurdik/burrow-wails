@@ -73,6 +73,7 @@
     />
     <PathPicker />
     <ToastStack />
+    <PtyPermissionToasts />
     <UpdateBanner />
     <ProviderUpdateBanner />
     <DiagramModal v-if="diagramContent !== null" />
@@ -119,6 +120,7 @@ import Dashboard from "@/components/Dashboard.vue";
 import Settings from "@/components/Settings.vue";
 import Spotlight from "@/components/Spotlight.vue";
 import ToastStack from "@/components/ToastStack.vue";
+import PtyPermissionToasts from "@/components/PtyPermissionToasts.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
 import ProviderUpdateBanner from "@/components/ProviderUpdateBanner.vue";
 import PetOverlay from "@/components/PetOverlay.vue";

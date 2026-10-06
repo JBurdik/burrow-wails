@@ -51,6 +51,15 @@
             "command": "burrow hook"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "burrow approve",
+            "timeout": 86400
+          }
+        ]
       }
     ],
     "SessionStart": [

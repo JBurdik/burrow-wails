@@ -255,6 +255,8 @@ func (a *App) ControlVerbs() []ControlVerb {
 // frontend's replies don't come back this way — it acks over its Wails binding
 // (AckControlAction), which needs no token and no port.
 func (a *App) registerControlRoutes(mux *http.ServeMux) {
+	// The `burrow approve` long-poll; own pattern (longest match beats /v1/).
+	mux.HandleFunc("/v1/permission_request", a.handlePermissionRequest)
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		if !a.controlAuthorized(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

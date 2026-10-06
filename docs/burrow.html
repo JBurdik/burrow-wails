@@ -197,6 +197,7 @@
     <tr><th>Subcommand</th><th>Role</th></tr>
     <tr><td>burrow status</td><td>Report this tab's agent state to <code>/hook</code>: <code>running</code>, <code>waiting</code>, <code>permission</code>, <code>done</code>, <code>error --detail</code>, <code>session --model/--source/--title</code>, plus <code>--pid</code> for the liveness sweep. Port resolution is file-first (<code>hook.port</code> is rewritten every launch; the baked <code>BURROW_HOOK_PORT</code> goes stale after a restart). Sticky states retry 3×; <code>running</code> takes one fast attempt.</td></tr>
     <tr><td>burrow hook</td><td>Invoked by the globally-installed Claude/Codex hooks; maps <code>hook_event_name</code> → state with <code>sed</code>, no node/jq.</td></tr>
+    <tr><td>burrow approve</td><td>Second <code>PermissionRequest</code> hook in the burrow plugin (<code>timeout: 86400</code>): long-polls <code>POST /v1/permission_request?pty_id=</code> so the desktop can answer a Claude permission prompt, and prints the reply verbatim. Empty stdout + exit 0 (the TUI decides) when outside Burrow, for <code>AskUserQuestion</code>/<code>ExitPlanMode</code>, and on any error — it never prints an allow of its own. Claude does not kill it when the prompt is answered in the TUI; the app closes the request when the tab's phase leaves <code>waiting_approval</code>.</td></tr>
     <tr><td>burrow notify</td><td>Legacy Codex notify-program path, kept as a fallback.</td></tr>
     <tr><td>burrow capture</td><td>Result capture, above.</td></tr>
   </table>

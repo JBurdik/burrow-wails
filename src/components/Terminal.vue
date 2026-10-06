@@ -85,6 +85,7 @@
               <PhX :size="9" weight="bold" />
             </button>
           </div>
+          <PtyPermissionBanner v-if="!pane.leaf.leafType || pane.leaf.leafType === 'terminal'" :pty-id="pane.leaf.id" />
           <DiffTab
             v-if="pane.leaf.leafType === 'diff'"
             :diff-file="pane.leaf.diffFile!"
@@ -195,6 +196,7 @@ import { providerIdForCommand } from "@/lib/providers";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import XTerm from "./XTerm.vue";
+import PtyPermissionBanner from "./PtyPermissionBanner.vue";
 import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
