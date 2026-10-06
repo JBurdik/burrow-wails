@@ -23,6 +23,7 @@ type App struct {
 	db     *sql.DB
 	daemon *DaemonClient
 	phases *PhaseStore
+	perms  *permRegistry
 	poller *phasePoller
 
 	streamOnce sync.Once
@@ -206,6 +207,8 @@ func (a *App) startup(ctx context.Context) {
 		log.Printf("phase store: %v", err)
 	} else {
 		a.phases = ps
+		a.perms = newPermRegistry(ps)
+		ps.onChange = a.perms.phaseChanged
 	}
 
 	// Chat transcripts used to live in config.json; move them into SQLite before

@@ -218,7 +218,7 @@ request-dir transport.
 normalised, `cwd` always riding along as `$BURROW_CWD`. Only `curl` + `sed`, so it works from Claude's
 Bash tool and from hooks. Non-verb subcommands (status plumbing, deliberately independent of the
 control API): `burrow status <state>` (**POSTs to `/hook`** — serving only `/status` silently killed
-every status dot), `burrow hook`, `burrow notify`, `burrow capture <token>` (writes
+every status dot), `burrow hook`, `burrow approve`, `burrow notify`, `burrow capture <token>` (writes
 `<session>/<token>.result` + `.done`, so results survive a restart).
 
 **`burrow-mcp`** (`cmd/burrow-mcp`) is the same verbs as MCP tools — `/v1/_verbs` → JSON schemas,
@@ -372,8 +372,27 @@ once per session. **Load-bearing:** on a Team/Enterprise login the built-in `cc-
 guard bypasses user-tier mods on `classic.*` and `prompt.compose/context/section` — so no turn-end,
 permission or system-prompt hooks in the mod's `modules`; those are classic `hooks` entries in the
 same `hooks/hooks.json` (the `cc-plugin-sec-default` guard governs mods, not settings hooks), each
-running `burrow hook`. A second `PermissionRequest` group can be appended to its array. Tests:
+running `burrow hook`. A second `PermissionRequest` group in that array runs `burrow approve` (below). Tests:
 `claude plugin test src-wails/agentdocs/mod/burrow`.
+
+### Answerable PTY permission prompts (`src-wails/ptypermissions.go`, `bin/burrow approve`)
+
+A Claude tab's tool-permission prompt can be answered from Burrow (toast with Allow / Always / Deny **plus**
+a banner above that tab's xterm showing the oldest request and a `+N` counter) while the TUI prompt stays
+up. The second `PermissionRequest` hook (`burrow approve`, `timeout: 86400`) long-polls loopback
+`POST /v1/permission_request?pty_id=` (control.token auth); `permRegistry` parks it, keyed by
+`pty_id` + hash(`tool_name`,`tool_input`) (the payload has no `tool_use_id`), and publishes the pty's whole
+pending list as `pty-permissions` (state, not delta). **Never falls back to allow:** every path that is not an
+explicit answer — app down, any error, hook disconnect, phase leaving `waiting_approval`, `AskUserQuestion` /
+`ExitPlanMode` (out of v1, TUI decides) — is empty stdout + exit 0 = TUI decides. Answers: `allow`, `deny`
+(+message), `always` = `updatedPermissions` `addRules` with `destination: "session"` (Claude's first `addRules`
+suggestion re-pointed at the session, else the exact Bash command / the tool). `chatPermissionRules` do **not**
+apply to PTY tabs. Commands: `list_pty_permissions` (read), `answer_pty_permission` (operate) in `remoteAllowed`.
+**Load-bearing (spiked, claude 2.1.291): Claude does NOT kill the hook when the user answers in the TUI** — it
+lingers until Claude exits (then SIGTERM). So a request answered in the terminal is cleared by the **phase**
+leaving `waiting_approval` (`PhaseStore.onChange` → `permRegistry.phaseChanged`; before `waiting_approval` was
+ever observed only a turn end closes it, because the status hook races the approve hook), not by the
+disconnect.
 
 ### Backend (`src-wails/*.go`, bound as `App` methods)
 
