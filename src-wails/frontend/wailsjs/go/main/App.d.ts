@@ -25,6 +25,8 @@ export function AddDiffComment(arg1:number,arg2:string,arg3:number,arg4:string,a
 
 export function AddMcpServer(arg1:string,arg2:Record<string, any>):Promise<void>;
 
+export function AnswerPtyPermission(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function BranchDiff(arg1:string):Promise<string>;
 
 export function BranchDiffBase(arg1:string):Promise<string>;
@@ -172,6 +174,8 @@ export function ListFonts():Promise<Array<string>>;
 export function ListMcpServers():Promise<Record<string, any>>;
 
 export function ListOpenTargets():Promise<Array<main.OpenTarget>>;
+
+export function ListPtyPermissions():Promise<Array<main.permRequest>>;
 
 export function ListPtySessions():Promise<Array<string>>;
 

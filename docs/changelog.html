@@ -79,12 +79,56 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
-  <!-- v0.4.7 -->
+  <!-- v0.4.9 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.9</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Přetahování souborů do chatu</div>
+      <ul>
+        <li><strong>Drag &amp; drop z Finderu</strong> — soubor pustíš kamkoli do okna chatu nebo na uvítací obrazovku. Obrázky (png, jpg, gif, webp) se přidají jako příloha stejně jako při <code>⌘V</code>, ostatní soubory se vloží jako <code>@/cesta/k/souboru</code>, aby si je agent přečetl sám z disku. Cesty s mezerou se vloží jako <code>@"…"</code>.</li>
+        <li><strong>Fullscreen nápověda</strong> — při tahu souboru nad okno se zobrazí backdrop s textem „Drop files to attach“. Pustit jde jen tam, kde je chat nebo composer; drop reaguje jen chat pod kurzorem.</li>
+        <li><strong>Jak to funguje</strong> — Wails <code>DragAndDrop.EnableFileDrop</code> dává skutečné cesty (HTML5 <code>File</code> je nemá), proto je vypnutý vlastní drop webview. Událost <code>file-drop</code> jde přes bus a není v replay ringu, aby se po reconnectu nevložila podruhé.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Odpovědi na povolení v terminálových tabech</div>
+      <ul>
+        <li><strong>Allow / Always / Deny z Burrow</strong> — dotaz Claude na oprávnění k nástroji jde zodpovědět toastem i bannerem nad xtermem, zatímco prompt v TUI zůstává. Nikdy se nespadne na „povolit“: aplikace nedostupná, chyba, odpojení hooku, <code>AskUserQuestion</code> i <code>ExitPlanMode</code> nechají rozhodnout TUI.</li>
+        <li><strong>Odpověď v terminálu uklidí banner</strong> — Claude hook po odpovědi v TUI neukončí, proto požadavek zavírá změna fáze mimo <code>waiting_approval</code>, ne odpojení.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Stav a hooky Claude tabů</div>
+      <ul>
+        <li><strong>Burrow Claude Code mod</strong> — v PTY tabu hlásí běh nástrojů přímo z procesu Claude (<code>BURROW_MOD=1</code>), takže <code>burrow hook</code> nespouští <code>sh</code> + <code>curl</code> při každém volání nástroje, a přikládá delegační pravidlo jednou za session.</li>
+        <li><strong>Hooky vázané na plugin</strong> — stavové hooky Claude jsou v <code>hooks/hooks.json</code> pluginu a platí jen v PTY tabech Burrow; chaty a cizí session je nespouští. Staré záznamy v <code>settings.json</code> se při startu odstraní.</li>
+        <li><strong>Fáze z <code>sessions/&lt;pid&gt;.json</code></strong> — foreground poll čte i vlastní stavový soubor Claude (<code>busy</code>, <code>waiting</code>, <code>idle</code>), takže fáze sedí i tam, kde hook nedorazí. Bere se jen při změně, nepřepíše čerstvější hook.</li>
+        <li><strong>Skills a příkazy z pluginů</strong> — seznam skillů a slash příkazů v composeru zahrnuje i ty, které dodávají nainstalované pluginy Claude.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong><code>send_to_tab</code> vloží vstup jako bracketed paste</strong> — dřív se víceřádkový text mohl rozpadnout na jednotlivé odeslané řádky. Teď dorazí jako jeden hotový paste.</li>
+        <li><strong>Vitest mimo testy pluginu a vnořené worktrees</strong> — testy v adresáři pluginu a ve vnořených worktrees se už nesbírají do <code>pnpm test</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.8 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.8</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">říjen 2026</span>
     </div>
 

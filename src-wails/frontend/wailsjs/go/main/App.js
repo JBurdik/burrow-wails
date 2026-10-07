@@ -46,6 +46,10 @@ export function AddMcpServer(arg1, arg2) {
   return window['go']['main']['App']['AddMcpServer'](arg1, arg2);
 }
 
+export function AnswerPtyPermission(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AnswerPtyPermission'](arg1, arg2, arg3);
+}
+
 export function BranchDiff(arg1) {
   return window['go']['main']['App']['BranchDiff'](arg1);
 }
@@ -340,6 +344,10 @@ export function ListMcpServers() {
 
 export function ListOpenTargets() {
   return window['go']['main']['App']['ListOpenTargets']();
+}
+
+export function ListPtyPermissions() {
+  return window['go']['main']['App']['ListPtyPermissions']();
 }
 
 export function ListPtySessions() {

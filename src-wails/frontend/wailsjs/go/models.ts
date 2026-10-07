@@ -1104,6 +1104,27 @@ export namespace main {
 	        this.sha256 = source["sha256"];
 	    }
 	}
+	
+	export class permRequest {
+	    id: string;
+	    pty_id: string;
+	    tool_name: string;
+	    tool_input: number[];
+	    at: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new permRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.pty_id = source["pty_id"];
+	        this.tool_name = source["tool_name"];
+	        this.tool_input = source["tool_input"];
+	        this.at = source["at"];
+	    }
+	}
 
 }
 
