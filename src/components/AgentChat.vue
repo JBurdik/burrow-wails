@@ -1,5 +1,5 @@
 <template>
-  <div class="claude-chat flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
+  <div class="claude-chat drop-zone flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
     <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
 
     <!-- Chat title bar -->
@@ -632,6 +632,7 @@
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch, inject } from "vue";
 import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
@@ -1297,6 +1298,10 @@ watch(
   { immediate: true, deep: true },
 );
 watch(() => props.isWatching, (value) => holdAttention(value ?? true));
+useFileDrop(() => inputEl.value?.element?.closest(".claude-chat"), {
+  image: (uri) => pendingImages.value.push(uri),
+  ref: (r) => { inputText.value = appendRef(inputText.value, r); nextTick(() => inputEl.value?.focus()); },
+});
 onBeforeUnmount(() => {
   holdAttention(false);
   subagentPhaseUnmounted = true;

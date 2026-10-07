@@ -420,3 +420,7 @@ textarea {
   transition: color .1s ease-out, background .1s ease-out;
 }
 .composer-image-remove:hover { color: var(--red, #f87171); background: color-mix(in srgb, var(--red, #f87171) 18%, transparent); }
+
+/* File drop target (useFileDrop.ts). Wails reads the custom property and adds
+   .wails-drop-target-active to the zone while a file is dragged over it. */
+.drop-zone { --wails-drop-target: drop; }

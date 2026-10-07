@@ -1,5 +1,5 @@
 <template>
-  <div class="welcome">
+  <div class="welcome drop-zone">
     <template v-if="target">
       <h1 class="welcome-title">
         What should we build in
@@ -137,6 +137,7 @@ import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMen
 import { visibleModelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
 import ModelPicker from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
+import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { stripPasteMarkers } from "@/lib/composerDom";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
@@ -192,6 +193,10 @@ function onComposerKeydown(e: KeyboardEvent) {
 }
 
 const pendingImages = ref<string[]>([]);
+useFileDrop(() => inputEl.value?.element?.closest(".welcome"), {
+  image: (uri) => pendingImages.value.push(uri),
+  ref: (r) => { text.value = appendRef(text.value, r); nextTick(() => inputEl.value?.focus()); },
+});
 
 function attachImages(files: Iterable<File>) {
   for (const file of files) {

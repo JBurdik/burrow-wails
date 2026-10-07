@@ -122,6 +122,9 @@ var notRingable = []string{
 	// durably logged with an ord — a reconnecting client re-reads the
 	// transcript (or replays from folded_ord) rather than resuming these.
 	chatMessagesChangedPrefix,
+	// A one-shot UI gesture: replaying a stale drop on resume would insert the
+	// files into the composer a second time.
+	"file-drop",
 }
 
 // isRingable reports whether an event belongs in the replay ring.

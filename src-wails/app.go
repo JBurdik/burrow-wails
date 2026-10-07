@@ -14,6 +14,8 @@ import (
 	"burrow/internal/agentphase"
 	"burrow/internal/agentproc"
 	"burrow/internal/control"
+
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App is the Wails-bound struct exposing methods to the frontend, replacing
@@ -169,6 +171,9 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	wailsruntime.OnFileDrop(ctx, func(x, y int, paths []string) {
+		busEmit("file-drop", map[string]any{"x": x, "y": y, "paths": paths})
+	})
 	// The bus has exactly ONE sink now: remotews.handle's per-connection
 	// subscription. It is still the single door for every event a client may
 	// care about — what went away is the second delivery path, not the door.

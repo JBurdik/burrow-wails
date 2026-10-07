@@ -61,6 +61,7 @@
       :workspace-id="ws.active.parent_id ?? ws.active.id"
       @close="showProjectConfig = false"
     />
+    <FileDropOverlay />
     <Spotlight
       ref="spotlightRef"
       @launch="(cmd) => activeTerm()?.spawnAgent(cmd)"
@@ -119,6 +120,7 @@ import SubAgentHost from "@/components/SubAgentHost.vue";
 import Dashboard from "@/components/Dashboard.vue";
 import Settings from "@/components/Settings.vue";
 import Spotlight from "@/components/Spotlight.vue";
+import FileDropOverlay from "@/components/FileDropOverlay.vue";
 import ToastStack from "@/components/ToastStack.vue";
 import PtyPermissionToasts from "@/components/PtyPermissionToasts.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";

@@ -48,6 +48,10 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
+		// Real paths for files dragged in from Finder; the webview's own drop
+		// is disabled so it can't navigate to the dropped file. The frontend
+		// hit-tests x/y against the chat composer (AgentChat.vue).
+		DragAndDrop:      &options.DragAndDrop{EnableFileDrop: true, DisableWebViewDrop: true},
 		OnStartup:        app.startup,
 		OnDomReady:       app.restoreWindowState,
 		OnBeforeClose: func(ctx context.Context) bool {
