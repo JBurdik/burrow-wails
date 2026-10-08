@@ -79,11 +79,35 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.10 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.10</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Modely</div>
+      <ul>
+        <li><strong>Claude Haiku 5.5</strong> — nový model v pickeru chatu (<code>claude-haiku-5-5</code>) s úrovněmi effort <code>low</code> až <code>max</code>, výchozí <code>medium</code> jako v samotném CLI. Odhad ceny chatu počítá s jeho sazbou ($0.10 / $0.50 za MTok).</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Odkazy se otevírají v systémovém prohlížeči</strong> — Wails WKWebView nemá delegáta navigace ani nových oken, takže klik na odkaz (v markdownu chatu, v nastavení…) přepnul celé okno aplikace na cizí stránku bez možnosti zpět nebo zavřít. Teď každý externí <code>http(s)</code> odkaz — klik, prostřední tlačítko i <code>window.open</code> — jde přes <code>BrowserOpenURL</code> ven.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.9 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.9</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">říjen 2026</span>
     </div>
 
