@@ -67,9 +67,11 @@ var claudeModelPricing = map[string]modelPricing{
 	"claude-sonnet-4":   {3, 15, 0.3, 3.75},
 	"claude-sonnet-3-7": {3, 15, 0.3, 3.75},
 	"claude-sonnet-3-5": {3, 15, 0.3, 3.75},
-	"claude-haiku-4-5":  {1, 5, 0.1, 1.25},
-	"claude-haiku-3-5":  {0.8, 4, 0.08, 1},
-	"claude-haiku-3":    {0.25, 1.25, 0.03, 0.3},
+	// ponytail: ≤100K-prompt rate; prompts above that bill $0.50/$2.50 and are under-counted here.
+	"claude-haiku-5-5": {0.1, 0.5, 0.01, 0.125},
+	"claude-haiku-4-5": {1, 5, 0.1, 1.25},
+	"claude-haiku-3-5": {0.8, 4, 0.08, 1},
+	"claude-haiku-3":   {0.25, 1.25, 0.03, 0.3},
 }
 
 var legacyBaseOpus4 = regexp.MustCompile(`opus-4(?:$|-thinking$|-20\d{6}(?:-thinking)?$|@20\d{6}$)`)
@@ -119,6 +121,9 @@ func normalizeModelForPricing(model string) string {
 	}
 	if strings.Contains(lower, "sonnet-3-5") || strings.Contains(lower, "sonnet-3.5") || strings.Contains(lower, "3-5-sonnet") || strings.Contains(lower, "3.5-sonnet") {
 		return "claude-sonnet-3-5"
+	}
+	if boundary("haiku-5-5") {
+		return "claude-haiku-5-5"
 	}
 	if strings.Contains(lower, "haiku-4-5") {
 		return "claude-haiku-4-5"

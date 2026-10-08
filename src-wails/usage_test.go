@@ -21,6 +21,8 @@ func TestEstimateCostUSDPreservesModelVersionBoundaries(t *testing.T) {
 		{"claude-sonnet-5-thinking", 2, true},
 		{"claude-sonnet-5-opus-5", 5, true},
 		{"claude-3.5-sonnet-20241022", 3, true},
+		{"claude-haiku-5-5", 0.1, true},
+		{"claude-haiku-5.5", 0.1, true},
 	}
 	for _, tt := range tests {
 		got, priced := estimateCostUSD(tt.model, 1_000_000, 0, 0, 0)

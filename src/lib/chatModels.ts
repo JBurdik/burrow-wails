@@ -48,10 +48,11 @@ export const MODELS_BY_AGENT: Record<string, ModelEntry[]> = {
     { id: "claude-opus-5", label: "Claude Opus 5", efforts: [...OPUS_EFFORTS], defaultEffort: "high" },
     { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", efforts: [...SONNET_EFFORTS], defaultEffort: "high" },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5", efforts: [...SONNET_EFFORTS], defaultEffort: "high" },
+    { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", efforts: [...OPUS_EFFORTS], defaultEffort: "medium" },
     { id: "claude-fable-5", label: "Claude Fable 5", efforts: [...OPUS_EFFORTS], defaultEffort: "high" },
     { id: "claude-opus-4-8", label: "Claude Opus 4.8", efforts: [...OPUS_EFFORTS], defaultEffort: "high" },
     { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", efforts: [...SONNET_EFFORTS], defaultEffort: "high" },
-    // Haiku publishes no reasoning efforts — same as t3code's catalog.
+    // Haiku 4.5 publishes no reasoning efforts — same as t3code's catalog.
     { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
   ],
 };
