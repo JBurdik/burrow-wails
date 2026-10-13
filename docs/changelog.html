@@ -79,11 +79,44 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.4.11 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.11</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Terminál</div>
+      <ul>
+        <li><strong>Spodní terminálový panel na welcome screenu</strong> — <code>⌘J</code> fungoval jen uvnitř threadu, takže na welcome screenu nešel otevřít (panel se otevřel ve skrytém workspace). Welcome screen má teď vlastní panel; shell startuje v projektu vybraném v composeru, přežije odchod z welcome screenu a při ukončení aplikace se zabije, aby v daemonu nezůstal osiřelý proces.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Modely</div>
+      <ul>
+        <li><strong>Haiku 5.5 jako výchozí model pro generování textu</strong> — commit zprávy, PR, názvy větví a chatů. Instalace s původním výchozím Haiku 4.5 se převedou; starší CLI, které id <code>claude-haiku-5-5</code> nezná, automaticky spadne zpět na Haiku 4.5.</li>
+        <li><strong>Cena Claude Opus 5.5</strong> — odhad ceny chatu počítá s jeho sazbou ($4 / $20 za MTok) místo sazby Opus 5.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Terminál v pravém panelu blokoval ostatní surfaces</strong> — <code>XTerm.vue</code> má fragment root (dva root elementy), na kterém Vue tiše ignoruje <code>v-show</code>. Terminál proto zůstal vidět pořád, picker po <code>+</code> se zmáčkl nad něj a jiný tab (Checkpoints, Sub-agents…) přes něj nešel zobrazit. XTerm je teď obalený divem, který <code>v-show</code> nese.</li>
+        <li><strong>Víc terminálů ve spodním panelu bylo vidět najednou</strong> — stejná příčina v <code>BottomTerminalPanel.vue</code>: přepínání mezi terminály neschovávalo neaktivní. Stejná oprava.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.10 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.10</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">říjen 2026</span>
     </div>
 
