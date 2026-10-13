@@ -26,6 +26,21 @@ func TestParseTextGenerationSelection(t *testing.T) {
 	}
 }
 
+func TestTextGenFallback(t *testing.T) {
+	cases := map[string]string{
+		"claude::claude::claude-haiku-5-5":          "claude::claude::claude-haiku-4-5-20251001",
+		"claude::claude::claude-haiku-5-5::high":    "claude::claude::claude-haiku-4-5-20251001",
+		"claude::claude::claude-haiku-4-5-20251001": "",
+		"claude::claude::claude-opus-5-5":           "",
+		"codex::codex::claude-haiku-5-5":            "",
+	}
+	for in, want := range cases {
+		if got := textGenFallback(in); got != want {
+			t.Errorf("textGenFallback(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestClaudeCliEffort(t *testing.T) {
 	cases := map[string]string{
 		"low":        "low",

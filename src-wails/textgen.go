@@ -148,7 +148,25 @@ func generateTextJSON(cwd, selection, prompt, schema string) ([]byte, error) {
 	return generateTextJSONContext(ctx, cwd, selection, prompt, schema)
 }
 
+// textGenFallback is what a failed Claude generation retries on: Haiku 5.5 →
+// Haiku 4.5, because a CLI older than the 5.5 release rejects its id. Effort is
+// dropped (Haiku 4.5 takes no --effort). "" = no retry.
+func textGenFallback(selection string) string {
+	if sel := parseTextGenerationSelection(selection); sel.provider == "claude" && sel.model == "claude-haiku-5-5" {
+		return "claude::claude::claude-haiku-4-5-20251001"
+	}
+	return ""
+}
+
 func generateTextJSONContext(ctx context.Context, cwd, selection, prompt, schema string) ([]byte, error) {
+	out, err := generateTextJSONOnce(ctx, cwd, selection, prompt, schema)
+	if fallback := textGenFallback(selection); err != nil && fallback != "" && ctx.Err() == nil {
+		return generateTextJSONOnce(ctx, cwd, fallback, prompt, schema)
+	}
+	return out, err
+}
+
+func generateTextJSONOnce(ctx context.Context, cwd, selection, prompt, schema string) ([]byte, error) {
 	sel := parseTextGenerationSelection(selection)
 	switch sel.provider {
 	case "claude":

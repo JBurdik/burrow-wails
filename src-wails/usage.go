@@ -54,6 +54,7 @@ type modelPricing struct {
 // their own rate.
 var claudeModelPricing = map[string]modelPricing{
 	"claude-fable-5":    {10, 50, 1, 12.5},
+	"claude-opus-5-5":   {4, 20, 0.2, 5},
 	"claude-opus-5":     {5, 25, 0.5, 6.25},
 	"claude-sonnet-5":   {2, 10, 0.2, 2.5},
 	"claude-opus-4-8":   {5, 25, 0.5, 6.25},
@@ -92,7 +93,7 @@ func normalizeModelForPricing(model string) string {
 
 	// Check the most specific / highest-price families first. This preserves the
 	// reference behaviour for names such as "claude-sonnet-5-opus-5".
-	for _, name := range []string{"claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-opus-4-1"} {
+	for _, name := range []string{"claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-opus-4-1"} {
 		if boundary(strings.TrimPrefix(name, "claude-")) {
 			return name
 		}

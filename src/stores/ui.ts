@@ -155,9 +155,10 @@ export const NTFY_EVENTS: { id: NtfyEvent; label: string }[] = [
 const BASE_FONT_SIZE = 13;
 
 // Haiku is the cheap default t3code picks too (their
-// DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER), and it publishes no reasoning
-// efforts, so the selection stays three-part.
-export const DEFAULT_TEXT_GENERATION_MODEL = "claude::claude::claude-haiku-4-5-20251001";
+// DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER). Three-part = the CLI's own
+// effort default; textgen.go retries a failed Haiku 5.5 call on Haiku 4.5.
+export const DEFAULT_TEXT_GENERATION_MODEL = "claude::claude::claude-haiku-5-5";
+const PREVIOUS_TEXT_GENERATION_MODEL = "claude::claude::claude-haiku-4-5-20251001";
 
 const DEFAULT_PREFS: Prefs = {
   uiFont: UI_FONTS[0].value,
@@ -232,6 +233,12 @@ function normalize(parsed: unknown): Prefs {
       // Short-lived first provider-aware format: kind::model.
       const [kind, model] = stored.textGenerationModel.split("::");
       stored.textGenerationModel = `${kind}::${kind}::${model}`;
+    }
+    // Every save persists the model, so installs still on the old default carry
+    // it explicitly. ponytail: indistinguishable from a deliberate Haiku 4.5
+    // pick, which gets bumped too; add a migration marker if anyone wants 4.5 back.
+    if (stored.textGenerationModel === PREVIOUS_TEXT_GENERATION_MODEL) {
+      stored.textGenerationModel = DEFAULT_TEXT_GENERATION_MODEL;
     }
     // Migrate installs saved below the current default up to it.
     if (stored.uiFontSize < DEFAULT_PREFS.uiFontSize) stored.uiFontSize = DEFAULT_PREFS.uiFontSize;
