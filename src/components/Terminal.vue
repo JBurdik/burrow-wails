@@ -1463,7 +1463,8 @@ function onKeydown(e: KeyboardEvent) {
       : closePane(focusedLeafId.value),
     splitH: () => splitFocused("terminal", "h"),
     splitV: () => splitFocused("terminal", "v"),
-    bottomPanel: () => toggleBottomPanel(),
+    // On the welcome screen this workspace is hidden; App.vue owns that panel.
+    bottomPanel: () => { if (!uiStore.welcomeVisible) toggleBottomPanel(); },
   };
   for (const cmd of keys.inScope("terminal")) {
     if (actions[cmd.id] && keys.matches(e, cmd.id)) {

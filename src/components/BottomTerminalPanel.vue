@@ -21,14 +21,15 @@
         <PhPlus :size="13" />
       </button>
     </div>
-    <XTerm
+    <!-- Wrapper is load-bearing: XTerm has a fragment root, so v-show on it is ignored. -->
+    <div
       v-for="id in state.ptyIds"
       :key="id"
       v-show="state.activeId === id"
-      :pty-id="id"
-      :cwd="cwd"
-      class="min-h-0 flex-1"
-    />
+      class="relative flex min-h-0 flex-1 flex-col"
+    >
+      <XTerm :pty-id="id" :cwd="cwd" />
+    </div>
   </div>
 </template>
 

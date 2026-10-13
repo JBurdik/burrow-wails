@@ -538,15 +538,17 @@
     />
 
     <!-- Terminal: same kept-mounted treatment, one per workspace, so an app running
-         in it keeps running when you switch projects and back. -->
-    <XTerm
+         in it keeps running when you switch projects and back. The wrapper is
+         load-bearing: XTerm has a fragment root, so v-show on it is ignored and
+         the shell stayed painted over every other surface (incl. the picker). -->
+    <div
       v-for="id in terminalWsIds"
       :key="id"
       v-show="id === wsKey && activeTab === 'terminal'"
-      :pty-id="terminalPtyByWs[id]"
-      :cwd="terminalCwdByWs[id]"
-      class="min-h-0 flex-1"
-    />
+      class="relative flex min-h-0 flex-1 flex-col"
+    >
+      <XTerm :pty-id="terminalPtyByWs[id]" :cwd="terminalCwdByWs[id]" />
+    </div>
     <div v-if="activeTab === 'terminal' && !terminalWsIds.includes(wsKey)" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
 
 
