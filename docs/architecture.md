@@ -56,6 +56,19 @@ request body, because a client-supplied `caller_is_subagent: false` would otherw
 sub-agent's own transcript talk it into spawning a grandchild the app has no plan for
 tracking, displaying, or tearing down.
 
+**Finished sub-agents archive themselves after 30 minutes — on the desktop, not in Go.**
+`chatAttention`'s one-minute sweep calls the same `archive()` the Sidebar uses (one
+`archived_at` column, process stopped) when `subagentArchivable` (`chatTree.ts`, pure, tested)
+holds: phase `done`/`failed`/`idle` (Go turns an open request into `waiting_*`, so that covers
+pending permissions too), not busy, not on screen, `collected_at` set (the parent took the result
+via `wait_result`/`collect_results`), and this device's `seenAt` covers the last turn — with the
+delay counted from the later of the receipt and the last phase change. Go has the phase and
+`collected_at` but not the receipt, which is per-device `localStorage`; a server sweep would have
+to drop "seen" or invent a shared receipt. `collected_at` is therefore on `Chat` read-only
+(`SaveChats` never writes it) and its changes emit `chats-changed`. There is no Archived shelf for
+sub-agents (the Sidebar's shelf lists threads only), so an archived child simply leaves the panel;
+its row and transcript stay, and an uncollected one is never archived.
+
 **What is still per-device, and why.** `chatActiveByWs` stays in `config.json`, next to
 `burrow.seenAt`: which chat is selected is this device's business, and the desktop being on
 chat 78 says nothing about what the phone should show. Same reasoning as `review` being a

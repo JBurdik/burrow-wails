@@ -111,6 +111,9 @@ status **is** the phase (`pty_phase`, key `chat:<id>`).
 `parent_chat_id` makes a sub-agent belong to a thread: Sidebar filters on `!parentChatId`, RP's
 Sub-agents surface uses `childrenOf(sessions, activeChatId)`, `DeleteChat` cascades to children.
 Depth capped at **one level**, derived server-side (`chatIsSubagent`), never trusted from the request.
+A settled, seen, **collected** (`collected_at`, read-only on `Chat`) sub-agent is auto-archived after
+30 min by `chatAttention`'s desktop sweep (`subagentArchivable` in `chatTree.ts`) — client-side because
+`seenAt` is per-device. No Archived shelf for sub-agents: it just leaves the RP list.
 
 Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatTurns`,
 `chatPermissionRules`. Phone-created chats are titled `Chat N (phone)`.

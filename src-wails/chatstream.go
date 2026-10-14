@@ -379,8 +379,13 @@ func (a *App) clearCollectedOnRunning(chatID string) {
 	if err != nil {
 		return
 	}
-	if _, err := a.db.Exec(`UPDATE chats SET collected_at = 0 WHERE id = ? AND collected_at != 0`, id); err != nil {
+	res, err := a.db.Exec(`UPDATE chats SET collected_at = 0 WHERE id = ? AND collected_at != 0`, id)
+	if err != nil {
 		log.Printf("clear collected_at for chat %d: %v", id, err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		busEmit("chats-changed", nil)
 	}
 }
 

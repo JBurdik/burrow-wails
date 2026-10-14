@@ -65,6 +65,10 @@ type Chat struct {
 	// DeleteChat cascades on it. A column rather than a title tag, because all
 	// three of those would otherwise rest on a string.
 	ParentChatID int64 `json:"parent_chat_id"`
+	// Read-only on the wire: set by wait_result/collect_results (MarkCollected),
+	// cleared by a new turn. SaveChats never writes it. The desktop's sub-agent
+	// auto-archive sweep reads it so a result nobody has taken stays listed.
+	CollectedAt int64 `json:"collected_at"`
 }
 
 func chatsSchema() []string {
@@ -111,13 +115,13 @@ func chatsPostAlterSchema() []string {
 // existing database.
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, agent_kind, transport, model, branch,
-	settled_override, archived_at, last_activity_at, parent_chat_id`
+	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
 		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
-		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID)
+		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt)
 	return c, err
 }
 
@@ -599,6 +603,9 @@ func (a *App) MarkCollected(chatID int64) error {
 	if a.db == nil {
 		return fmt.Errorf("no database")
 	}
-	_, err := a.db.Exec(`UPDATE chats SET collected_at = ? WHERE id = ?`, time.Now().UnixMilli(), chatID)
-	return err
+	if _, err := a.db.Exec(`UPDATE chats SET collected_at = ? WHERE id = ?`, time.Now().UnixMilli(), chatID); err != nil {
+		return err
+	}
+	busEmit("chats-changed", nil)
+	return nil
 }
