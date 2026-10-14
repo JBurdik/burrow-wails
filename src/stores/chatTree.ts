@@ -1,4 +1,31 @@
 import type { ClaudeSession } from "./claudeChats";
+import type { Phase } from "@/runtime/displayStatus";
+
+/** How long a finished, seen, collected sub-agent stays in the Right Panel. */
+export const SUBAGENT_AUTOARCHIVE_MS = 30 * 60 * 1000;
+
+/** True when chatAttention's sweep may archive this sub-agent.
+ *
+ *  All of: a sub-agent, not archived, not busy and not on screen; its phase
+ *  is settled (done/failed/idle — so no running turn and no open request,
+ *  which Go turns into waiting_*); its result was taken by the parent
+ *  (collected_at, set by wait_result/collect_results); this device has SEEN
+ *  the last turn; and `delayMs` has passed since the later of that receipt
+ *  and the last phase change. No phase = unknown = keep it. */
+export function subagentArchivable(
+  session: ClaudeSession,
+  phase: Phase | undefined,
+  seenAt: number,
+  watching: boolean,
+  now: number,
+  delayMs = SUBAGENT_AUTOARCHIVE_MS,
+): boolean {
+  if (!session.parentChatId || session.archivedAt || session.busy || watching) return false;
+  if (!session.collectedAt) return false;
+  if (!phase || !["done", "failed", "idle"].includes(phase.state)) return false;
+  if (!seenAt || seenAt < phase.turn_ended_at) return false;
+  return now - Math.max(seenAt, phase.updated_at) >= delayMs;
+}
 
 /** Sub-agents of one thread, oldest first, for DISPLAY (SubAgentHost.vue's
  *  mount list, the Right Panel's Sub-agents list). Pure so the panel filter

@@ -46,6 +46,9 @@ export interface ClaudeSession {
   // The thread that spawned this sub-agent. Undefined for a normal thread; a
   // sub-agent lives in the Right Panel and is filtered out of the Sidebar.
   parentChatId?: number;
+  // When the parent took this sub-agent's result (wait_result/collect_results);
+  // 0/undefined = not yet. Server-owned, never written back by this store.
+  collectedAt?: number;
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -161,6 +164,8 @@ interface ChatRow {
   archived_at: number;
   last_activity_at: number;
   parent_chat_id: number;
+  // Read-only: Go sets it (wait_result/collect_results) and SaveChats ignores it.
+  collected_at?: number;
 }
 
 // The one place the column names and the client's field names meet. `busy`
@@ -182,6 +187,7 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     archivedAt: r.archived_at || null,
     lastActivityAt: r.last_activity_at || undefined,
     parentChatId: r.parent_chat_id || undefined,
+    collectedAt: r.collected_at || undefined,
     busy: false,
   };
 }

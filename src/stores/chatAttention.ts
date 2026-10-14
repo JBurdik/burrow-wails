@@ -6,6 +6,7 @@ import { DONE_AUTOCLEAR_MS, displayStatus, shouldMarkSeen, type Phase } from "@/
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { subagentArchivable } from "@/stores/chatTree";
 
 // Shared with Terminal.vue's PTY receipts: one key, one receipt per subject.
 // PTY leaves use their bare numeric id, chats `chat:<id>` — Terminal.vue's
@@ -173,6 +174,21 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     },
     { immediate: true },
   );
+
+  // Sub-agent auto-archive. Lives here, not in Go, because "seen" is this
+  // device's receipt (localStorage) — Go has the phase and collected_at but
+  // no idea whether anyone looked. Only the desktop instantiates this store,
+  // so the phone never archives. Same archive() as the Sidebar's button: one
+  // archived_at column, process stopped.
+  // ponytail: 1-minute poll; a per-chat timer only matters if 30 min ± 1 does.
+  setInterval(() => {
+    const now = Date.now();
+    for (const session of chats.sessions) {
+      if (subagentArchivable(session, phases.get(session.id), seenAt.get(session.id) ?? 0, (watchers.get(session.id) ?? 0) > 0, now)) {
+        void chats.archive(session.id);
+      }
+    }
+  }, 60_000);
 
   return { statusFor, phaseFor, markSeen, setWatching };
 });
