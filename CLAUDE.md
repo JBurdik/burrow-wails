@@ -271,7 +271,9 @@ that reshape args.
 
 ### The shell stream: `seq`, the ring, resume (`src-wails/shellstream.go` + `shellsnapshot.go`)
 
-`busEmit` **numbers** every event and keeps the last **512** in a ring (`shellRingSize`). `welcome`
+`busEmit` **numbers** every event and keeps the last **512** in a ring (`shellRingSize`); numbering and
+fan-out share one lock (`busOrderMu`) — two emitters otherwise deliver seq N+1 before N and the client's
+high-water dedup drops N for good. `welcome`
 carries `currentSeq()`; a client sends `{t:"resume", since}` and gets deltas or a `resync`. A process
 restart always means `resync` (`since > shellSeq`). **No per-client state on the server** — the ring is
 shared and `resumeSince` is a pure function over it.

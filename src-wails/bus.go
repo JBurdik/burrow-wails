@@ -22,6 +22,9 @@ var (
 	busMu     sync.RWMutex
 	busSinks  []busEntry
 	busNextID uint64
+
+	// busOrderMu serializes a numbered event's record + fan-out (busEmit).
+	busOrderMu sync.Mutex
 )
 
 // busSubscribe registers a sink and returns a function that removes it.
@@ -70,6 +73,13 @@ func busEmit(name string, payload any) {
 	// ring's order is the order clients receive.
 	ev := shellEvent{Name: name, Payload: payload}
 	if isRingable(name) {
+		// Numbering and fan-out happen under one lock, or two emitters can
+		// deliver seq 6 before seq 5 — and the client, which drops anything
+		// at or behind its high-water mark, would lose seq 5 for good.
+		// Holding it across the sinks is cheap: the only sink never blocks
+		// (remotews drops a full queue instead).
+		busOrderMu.Lock()
+		defer busOrderMu.Unlock()
 		ev = recordShellEvent(name, payload)
 	}
 
