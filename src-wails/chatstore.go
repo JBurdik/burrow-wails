@@ -20,8 +20,8 @@ import (
 // typed columns. ChatMessage is a frontend type that grows a field per agent
 // feature; mirroring it in SQL would mean a migration each time, and nothing
 // server-side queries inside a message. Columns exist only for what we filter
-// or order by. If message-level search ever lands, add an FTS index over
-// payload_json's text — the rows are already there.
+// or order by. Message-level search reads `$.text` out of payload_json by
+// trigger into an FTS5 index (chatsearch.go).
 
 func chatMessagesSchema() []string {
 	return []string{

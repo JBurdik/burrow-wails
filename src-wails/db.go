@@ -26,8 +26,14 @@ func openDB(appDataDir string) (*sql.DB, error) {
 	// immediate SQLITE_BUSY instead of a short wait. Both pragmas go in the
 	// DSN so every pooled connection gets them; the path is URL-escaped
 	// because the macOS app data dir contains a space.
+	//
+	// _txlock=immediate: every db.Begin() here is a writer, and a DEFERRED
+	// transaction that touches chat_fts (via the chat_messages triggers) reads
+	// FTS5's shadow tables before it asks for the write lock. SQLite never runs
+	// the busy handler for that upgrade, so busy_timeout was skipped and the
+	// write failed instantly with SQLITE_BUSY. Taking the lock at BEGIN waits.
 	dsn := "file:" + (&url.URL{Path: dbPath}).String() +
-		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -190,6 +196,9 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	if err := migrateChatSearch(db); err != nil {
+		return err
+	}
 	return migratePtyPhaseColumns(db)
 }
 
