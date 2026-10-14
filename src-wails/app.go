@@ -415,6 +415,12 @@ func (a *App) WritePty(id string, data []int) error {
 	return a.daemon.Write(id, data)
 }
 
+// PtySince returns what PTY `id` wrote from byte `since` on: how a terminal view
+// fills the hole a dropped /v2/ws left (pty-data-* is not in the shell ring).
+func (a *App) PtySince(id string, since uint64) (ptyChunk, error) {
+	return a.daemon.Since(id, since)
+}
+
 func (a *App) ResizePty(id string, cols, rows uint16) error {
 	return a.daemon.Resize(id, cols, rows)
 }

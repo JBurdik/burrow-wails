@@ -370,11 +370,9 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 			// Dropping is now recoverable for everything numbered — the
 			// client reconnects, resumes from the seq it last saw, and the
 			// ring hands back the gap (or a resync, if the gap outran 512
-			// events). What is still lost is pty-data, which is not in the
-			// ring on purpose: that is a hole in a terminal's scrollback
-			// with no reattach to replay it, since pty-data-<id> is
-			// emit-once and the daemon's own ring is only replayed on a
-			// fresh attach. Phase dots, workspace and chat events survive.
+			// events). pty-data is not in the ring on purpose; each chunk
+			// carries its byte offset and the terminal view refills the hole
+			// from the daemon's per-pty ring with pty_since (ptyStream.ts).
 			shutdown()
 		}
 	})

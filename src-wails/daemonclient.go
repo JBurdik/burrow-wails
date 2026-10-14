@@ -235,7 +235,7 @@ func (d *DaemonClient) readLoop(conn net.Conn) {
 			f := env.Frame
 			switch f.Event {
 			case "pty-data":
-				busEmit("pty-data-"+f.ID, f.Data)
+				busEmit("pty-data-"+f.ID, ptyChunk{Off: f.Off, Data: f.Data})
 			case "pty-exit":
 				busEmit("pty-exit-"+f.ID, nil)
 			}
@@ -314,6 +314,27 @@ func (d *DaemonClient) ForegroundPid(id string) int {
 		return 0
 	}
 	return resp.Pid
+}
+
+// ptyChunk is the pty-data-<id> payload: Data starts at byte Off of the PTY's
+// whole output. Off is null from a daemon that predates it.
+type ptyChunk struct {
+	Off  *uint64 `json:"off"`
+	Data []int   `json:"data"`
+}
+
+// Since is the PTY's output from offset `from` on, from the daemon's ring. The
+// returned chunk starts later than `from` when the ring no longer holds it all.
+func (d *DaemonClient) Since(id string, from uint64) (ptyChunk, error) {
+	resp, err := d.call(daemonproto.Request{Kind: "since", ID: id, Since: from})
+	if err != nil {
+		return ptyChunk{}, err
+	}
+	data := resp.Data
+	if data == nil {
+		data = []int{}
+	}
+	return ptyChunk{Off: &resp.Off, Data: data}, nil
 }
 
 func (d *DaemonClient) List() ([]string, error) {

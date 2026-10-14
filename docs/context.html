@@ -280,6 +280,7 @@
     </thead>
     <tbody>
       <tr><td>create_pty(id, cwd, cols, rows)</td><td>Spawn PTY, start reader thread emitting <code>pty-data-{id}</code> events</td></tr>
+      <tr><td>pty_since(id, since)</td><td>PTY output from byte offset <code>since</code> out of the daemon's 1 MiB ring — a view's catch-up after a dropped socket</td></tr>
       <tr><td>write_pty(id, data)</td><td>Write bytes to PTY stdin</td></tr>
       <tr><td>resize_pty(id, cols, rows)</td><td>Resize PTY window</td></tr>
       <tr><td>kill_pty(id)</td><td>Close PTY and clean up</td></tr>
