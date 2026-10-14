@@ -20,6 +20,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useUIStore } from "@/stores/ui";
+import { appTransport } from "@/lib/wailsCompat/core";
+import { createPtyStream, type PtyChunk } from "@/runtime/ptyStream";
 import "@xterm/xterm/css/xterm.css";
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -131,6 +133,8 @@ let fitAddon: FitAddon;
 let serializeAddon: SerializeAddon;
 let renderAddon: ITerminalAddon | null = null;
 let unlisten: UnlistenFn | null = null;
+let unlistenExit: UnlistenFn | null = null;
+let unlistenState: (() => void) | null = null;
 let unlistenSnapReq: UnlistenFn | null = null;
 let unlistenWrite: UnlistenFn | null = null;
 let resizeObserver: ResizeObserver;
@@ -432,38 +436,56 @@ onMounted(async () => {
   // matching "response" envelope for the spawn call) — registering pty-data-*
   // only after `await invoke("create_pty", ...)` resolved dropped that replay
   // silently, showing a blank terminal until the next live byte arrived.
-  [unlisten, unlistenWrite, unlistenSnapReq] = await Promise.all([
+  // Every PTY byte reaches xterm through here, once, in order (ptyStream).
+  const renderBytes = (data: number[]) => {
+    const bytes = new Uint8Array(data);
+    // Capture stick BEFORE the write grows the buffer; re-pin in the parse
+    // callback so a fast agent flood can't leave the viewport stranded.
+    const stick = isAtBottom();
+    term.write(bytes, () => { if (stick) term.scrollToBottom(); });
+    bytesRx += bytes.length;
+    writes++;
+    const text = new TextDecoder().decode(bytes);
+
+    // `burrow spawn` requests: decode base64 fields → open a new tab.
+    // Loop, since one chunk may carry several.
+    SPAWN_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = SPAWN_RE.exec(text)) !== null) {
+      try {
+        const cmd = b64decode(m[1]).trim();
+        if (cmd) emit("spawn", { cmd, token: b64decode(m[2]).trim(), cwd: b64decode(m[3]).trim() });
+      } catch { /* ignore malformed payload */ }
+    }
+
+    // OSC 7: shell CWD hint. Passive — no-op if the user's shell doesn't emit it.
+    OSC7_RE.lastIndex = 0;
+    while ((m = OSC7_RE.exec(text)) !== null) {
+      const p = decodeURIComponent(m[1]);
+      if (p) emit("cwd", p);
+    }
+
+    lastDataAt = performance.now();
+  };
+  const ptyStream = createPtyStream({
+    write: renderBytes,
+    fetchSince: (since) => invoke<PtyChunk>("pty_since", { id: props.ptyId, since }),
+    onLost: (n) => console.warn(`[xterm ${props.ptyId}] ${n} bytes of output fell out of the daemon ring during a disconnect`),
+  });
+  // The socket came back: fetch what was streamed while it was down.
+  try {
+    let wasUp = true;
+    unlistenState = appTransport().onState((up) => {
+      if (up && !wasUp) void ptyStream.catchUp();
+      wasUp = up;
+    });
+  } catch { /* no endpoint (browser-only dev) — nothing to reconnect */ }
+
+  [unlisten, unlistenExit, unlistenWrite, unlistenSnapReq] = await Promise.all([
     // Stream output from Rust → xterm
-    listen<number[]>(`pty-data-${props.ptyId}`, (event) => {
-      const bytes = new Uint8Array(event.payload);
-      // Capture stick BEFORE the write grows the buffer; re-pin in the parse
-      // callback so a fast agent flood can't leave the viewport stranded.
-      const stick = isAtBottom();
-      term.write(bytes, () => { if (stick) term.scrollToBottom(); });
-      bytesRx += bytes.length;
-      writes++;
-      const text = new TextDecoder().decode(bytes);
-
-      // `burrow spawn` requests: decode base64 fields → open a new tab.
-      // Loop, since one chunk may carry several.
-      SPAWN_RE.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = SPAWN_RE.exec(text)) !== null) {
-        try {
-          const cmd = b64decode(m[1]).trim();
-          if (cmd) emit("spawn", { cmd, token: b64decode(m[2]).trim(), cwd: b64decode(m[3]).trim() });
-        } catch { /* ignore malformed payload */ }
-      }
-
-      // OSC 7: shell CWD hint. Passive — no-op if the user's shell doesn't emit it.
-      OSC7_RE.lastIndex = 0;
-      while ((m = OSC7_RE.exec(text)) !== null) {
-        const p = decodeURIComponent(m[1]);
-        if (p) emit("cwd", p);
-      }
-
-      lastDataAt = performance.now();
-    }),
+    listen<PtyChunk>(`pty-data-${props.ptyId}`, (event) => ptyStream.push(event.payload)),
+    // A new PTY under this id numbers its output from 0 again.
+    listen(`pty-exit-${props.ptyId}`, () => ptyStream.reset()),
     // tmux send-keys path: the shim POSTs /write → hook server emits this event →
     // we forward to the daemon as regular PTY input.
     listen<string>(`pty-write-${props.ptyId}`, (event) => {
@@ -726,6 +748,8 @@ onBeforeUnmount(async () => {
   resizeObserver?.disconnect();
   if (resizeTimer) clearTimeout(resizeTimer);
   unlisten?.();
+  unlistenExit?.();
+  unlistenState?.();
   unlistenSnapReq?.();
   unlistenWrite?.();
   unlistenDrop?.();

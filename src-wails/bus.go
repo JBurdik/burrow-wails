@@ -88,7 +88,8 @@ func busEmit(name string, payload any) {
 // hold. Every one of them is BOTH high-volume and already replayable from a
 // durable log of its own, which is the whole test for belonging on this list:
 //
-//	pty-data-*    the daemon keeps its own ring and replays it on reattach
+//	pty-data-*    numbered per pty by the daemon (payload {off,data}) and kept
+//	              in its own 1 MiB ring; a view catches up with pty_since
 //	claude-data-* ┐
 //	acp-data-*    ├ persisted to chat_stream with an ord before they are ever
 //	acp-req-*     │ emitted; replayChatStream/LoadChatEventsSince catch a

@@ -18,7 +18,9 @@ import (
 // process re-emits these as Wails events; the daemon re-emits them as
 // socket data frames to attached clients).
 type Events interface {
-	OnData(id string, data []byte)
+	// off is the offset of data's first byte in everything this PTY has
+	// written, so a client that lost some can ask Since for exactly that.
+	OnData(id string, off uint64, data []byte)
 	OnExit(id string)
 }
 
@@ -32,6 +34,7 @@ type session struct {
 	id   string
 	cmd  *exec.Cmd
 	file *os.File
+	ring *byteRing
 }
 
 func NewManager(events Events) *Manager {
@@ -83,7 +86,7 @@ func (m *Manager) Create(id, cwd string, cols, rows uint16, env []string) error 
 		return err
 	}
 
-	sess := &session{id: id, cmd: c, file: f}
+	sess := &session{id: id, cmd: c, file: f, ring: newByteRing(ringSize)}
 	m.mu.Lock()
 	m.sessions[id] = sess
 	m.mu.Unlock()
@@ -98,7 +101,8 @@ func (m *Manager) pump(sess *session) {
 	for {
 		n, err := sess.file.Read(buf)
 		if n > 0 {
-			m.events.OnData(sess.id, append([]byte(nil), buf[:n]...))
+			data := append([]byte(nil), buf[:n]...)
+			m.events.OnData(sess.id, sess.ring.write(data), data)
 		}
 		if err != nil {
 			break
@@ -136,6 +140,17 @@ func (m *Manager) Kill(id string) error {
 		_ = sess.cmd.Process.Kill()
 	}
 	return sess.file.Close()
+}
+
+// Since returns this PTY's output from offset `from` on, and the offset it
+// actually starts at — later than `from` when the ring no longer holds it all.
+func (m *Manager) Since(id string, from uint64) (uint64, []byte, error) {
+	sess, ok := m.get(id)
+	if !ok {
+		return 0, nil, errUnknown(id)
+	}
+	off, data := sess.ring.since(from)
+	return off, data, nil
 }
 
 func (m *Manager) List() []string {

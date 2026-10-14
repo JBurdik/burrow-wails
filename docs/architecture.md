@@ -366,7 +366,7 @@ resumes exactly as well as one it just dropped.
 
 **What the ring does not hold** (`notRingable` in `bus.go`) is everything that is both
 high-volume **and** already replayable from a durable log of its own: `pty-data-*` (the
-daemon keeps its own ring and replays it on reattach) and the chat channels
+daemon numbers and rings it per PTY, below) and the chat channels
 `claude-data-*`, `acp-data-*`, `acp-req-*`, `chat-event-*` (persisted to `chat_stream`
 with an `ord` before they are ever emitted; `replayChatStream`/`LoadChatEventsSince` catch
 a client up from `chat_stream_state.folded_ord`). This is not only about the cost of
@@ -374,10 +374,19 @@ ringing them — it is what makes resume work at all. One streaming agent emits 
 chat lines per turn, so ringing them would churn all 512 slots in seconds and every
 reconnect would come back a `resync`, making the ring dead weight. What is left is shell
 state — phases, workspaces, pty exits, control results — which changes a handful of times
-a minute, so 512 slots is hours of history. The consequence to keep in mind: a dropped
-connection still loses **PTY bytes** with no reattach to replay them (`pty-data-<id>` is
-emit-once), which is a hole in a terminal's scrollback; phase dots, workspace and chat
-state all survive.
+a minute, so 512 slots is hours of history.
+
+**PTY bytes resume by offset, not by `seq`.** `ptycore` numbers every byte a PTY writes
+and keeps the last **1 MiB** per PTY (`ring.go`); `pty-data-<id>` carries `{off, data}`
+(`off` = offset of the first byte, `null` from a daemon that predates it — an updated app
+keeps talking to the old daemon until it is replaced). `src/runtime/ptyStream.ts` holds the
+next offset a view needs, trims overlap and drops duplicates, and on a reconnect
+(`transport.onState` false→true) or a hole in the offsets calls `pty_since(id, since)`,
+holding live chunks behind that call so order is kept. Never a full replay — that is what
+corrupts a re-fitted xterm. If the gap outran the ring, the rest is rendered and the lost
+byte count is logged; if `pty_since` fails (old daemon), the hole is accepted as before.
+`pty-exit-<id>` resets the position (a reused id numbers from 0 again). The phone renders
+no PTY output, so this is desktop-only.
 
 **`shell_snapshot`** (`scopeOrchRead`) is the first paint in one round trip: workspaces,
 tabs for **every** workspace (a phone opens on one the desktop never mounted), all phases,

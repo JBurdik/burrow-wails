@@ -278,8 +278,10 @@ shared and `resumeSince` is a pure function over it.
 
 **Not ringed** (`notRingable` in `bus.go`): `pty-data-*` and the chat channels — both high-volume *and*
 replayable from their own durable logs. One streaming turn would churn all 512 slots and make every
-reconnect a `resync`. Consequence: a dropped connection still loses **PTY bytes** (a hole in
-scrollback); phases, workspace and chat state survive.
+reconnect a `resync`. PTY bytes resume by **byte offset** instead: the daemon numbers each PTY's
+output and keeps the last 1 MiB (`internal/ptycore/ring.go`); `pty-data-<id>` is `{off, data}`;
+`src/runtime/ptyStream.ts` dedupes by offset and, on reconnect or a hole, fetches exactly the gap via
+`pty_since` (never a full replay). Gap past the ring / old daemon ⇒ the hole stays, as before.
 
 **`shell_snapshot`** (`scopeOrchRead`) is the first paint in one round trip: workspaces, tabs for
 *every* workspace, all phases, chats, and the `seq` it's current as of — **`seq` read first, before any
