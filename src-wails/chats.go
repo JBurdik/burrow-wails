@@ -231,6 +231,11 @@ func (a *App) DeleteChat(id int64) error {
 	if id <= 0 {
 		return sql.ErrNoRows
 	}
+	// The transcript goes with the row (children's too): its chat_fts entries
+	// are dropped by trigger, so a deleted chat stops turning up in search.
+	if _, err := a.db.Exec(`DELETE FROM chat_messages WHERE chat_id = ? OR chat_id IN (SELECT id FROM chats WHERE parent_chat_id = ?)`, id, id); err != nil {
+		return err
+	}
 	if _, err := a.db.Exec(`DELETE FROM chats WHERE parent_chat_id = ?`, id); err != nil {
 		return err
 	}

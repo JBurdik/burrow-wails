@@ -75,6 +75,29 @@ remotely-created one used to be indistinguishable from the fifty above it in the
 which is how the chat in the original bug report managed to be on screen and still
 impossible to find.
 
+### Transcript search (`src-wails/chatsearch.go`)
+
+Spotlight's "IN CHATS" section is `SearchChats(query, limit)` over an FTS5 table `chat_fts`.
+It indexes `chat_messages` (the readable, folded transcript), **not** `chat_stream` (raw protocol
+lines, trimmed). Only `user` and `assistant` rows' `$.text` are indexed — tool rows are names and
+JSON noise.
+
+**Kept in sync by SQLite triggers on `chat_messages`, not by the Go writers.** There are several
+writers (the fold's upsert, `SaveChatMessages`' replace-all, the fold's prune, `DeleteChatMessages`,
+and `DeleteChat`, which now drops the chat's and its children's transcript) and the next one would
+forget. The FTS rowid *is* the `chat_messages` rowid, so an update/delete is a rowid lookup, not a
+scan. Backfill runs once, only when `chat_fts` did not exist yet.
+
+**Why `_txlock=immediate` in the DSN:** with the triggers in place, a DEFERRED transaction's first
+write reads FTS5's shadow tables before asking for the write lock, and SQLite does not run the busy
+handler for a read→write upgrade — concurrent fold persists failed instantly with `SQLITE_BUSY`
+despite `busy_timeout(5000)`. Every `db.Begin()` in the backend is a writer, so taking the lock at
+BEGIN costs nothing.
+
+Query: every word must match, the last as a prefix; words are quoted so FTS syntax is literal;
+`unicode61 remove_diacritics 2` so `prepis` finds `Přepiš`. One hit per chat (best bm25), archived
+chats and orphan transcripts excluded.
+
 ### Chat stream ownership (`src/lib/chatSession.ts` + `src-wails/chatstream.go`)
 
 A chat's stream is owned by a **session registry keyed by chat id**, not by

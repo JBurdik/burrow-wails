@@ -73,7 +73,7 @@ import { ref, computed, watch, nextTick } from "vue";
 import {
   PhTerminal, PhSparkle, PhCode, PhGitBranch, PhRobot,
   PhFolderOpen, PhGear, PhPlus, PhColumns, PhPalette, PhKeyboard, PhGlobe, PhPlayCircle,
-  PhFileText, PhMagnifyingGlass, PhArrowsClockwise, PhMoonStars,
+  PhFileText, PhMagnifyingGlass, PhArrowsClockwise, PhMoonStars, PhChatCircleText,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useProvidersStore } from "@/stores/providers";
@@ -82,6 +82,8 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useKeybindingsStore } from "@/stores/keybindings";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
+import router from "@/router";
 import { pickDir } from "@/lib/pickPath";
 import type { Component } from "vue";
 
@@ -101,6 +103,7 @@ const wsStore = useWorkspaceStore();
 const keys = useKeybindingsStore();
 const ui = useUIStore();
 const notifStore = useNotificationsStore();
+const termTabs = useTerminalTabsStore();
 
 const isOpen = ref(false);
 const query = ref("");
@@ -117,6 +120,10 @@ const projectOnly = ref(false);
 // honest, and results die with the palette anyway.
 interface SearchHit { path: string; line: number; text: string }
 const hits = ref<SearchHit[]>([]);
+// Transcript hits: SQLite FTS over every chat (chatsearch.go), not just the
+// active project.
+interface ChatHit { chat_id: number; workspace_id: number; title: string; snippet: string; ts: number }
+const chatHits = ref<ChatHit[]>([]);
 let searchTimer: number | undefined;
 let searchSeq = 0;
 
@@ -124,12 +131,22 @@ watch(query, (q) => {
   clearTimeout(searchTimer);
   const term = q.trim();
   const cwd = wsStore.active?.path;
-  if (term.length < 2 || !cwd || projectOnly.value) return (hits.value = []);
+  if (term.length < 2 || projectOnly.value) {
+    hits.value = [];
+    chatHits.value = [];
+    return;
+  }
   const seq = ++searchSeq;
   searchTimer = window.setTimeout(async () => {
-    const found = await invoke<SearchHit[]>("search_files", { cwd, query: term, limit: 24 }).catch(() => []);
+    const [found, chats] = await Promise.all([
+      cwd ? invoke<SearchHit[]>("search_files", { cwd, query: term, limit: 24 }).catch(() => []) : [],
+      invoke<ChatHit[]>("search_chats", { query: term, limit: 8 }).catch(() => []),
+    ]);
     // Drop a slow reply whose query the user has already typed past.
-    if (seq === searchSeq) hits.value = found;
+    if (seq === searchSeq) {
+      hits.value = found;
+      chatHits.value = chats;
+    }
   }, 140);
 });
 
@@ -260,6 +277,28 @@ const fileItems = computed<SpotlightItem[]>(() =>
   })),
 );
 
+const chatItems = computed<SpotlightItem[]>(() =>
+  chatHits.value.map((h) => ({
+    id: `chat-${h.chat_id}`,
+    title: h.title || `Chat ${h.chat_id}`,
+    desc: h.snippet.replace(/\s+/g, " "),
+    icon: PhChatCircleText as Component,
+    color: "#f472b6",
+    badge: wsStore.workspaces.find((w) => w.id === h.workspace_id)?.name,
+    action: () => { close(); void openChatHit(h); },
+  })),
+);
+
+// Same as a Sidebar click (termTabs.openChat), after making the chat's project
+// the routed one — a hit can live in any project, not just the active one.
+async function openChatHit(h: ChatHit) {
+  const ws = wsStore.workspaces.find((w) => w.id === h.workspace_id);
+  if (!ws) return;
+  wsStore.open(ws);
+  await router.push(`/ws/${ws.id}`);
+  termTabs.openChat(ws.id, h.chat_id);
+}
+
 // Empty query = context + commands (your projects, then everything runnable).
 // Agents, scripts and file hits only appear once you type — running a raw
 // agent isn't a default action, and search results are meaningless empty.
@@ -274,6 +313,7 @@ const sections = computed(() => {
         { key: "projects", label: "PROJECTS", items: projectItems.value },
         { key: "scripts", label: "SCRIPTS", items: scriptItems.value },
         { key: "commands", label: "COMMANDS", items: commandItems.value },
+        { key: "chats", label: "IN CHATS", items: chatItems.value },
         { key: "files", label: "IN FILES", items: fileItems.value },
       ]
     : [
@@ -353,6 +393,7 @@ function show(opts?: { projectOnly?: boolean }) {
   projectOnly.value = !!opts?.projectOnly;
   query.value = "";
   hits.value = [];
+  chatHits.value = [];
   nextTick(() => {
     inputRef.value?.focus();
     selectFirst();
