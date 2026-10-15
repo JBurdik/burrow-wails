@@ -174,6 +174,20 @@ function cycleProvider() {
   onModelSelect(next.id, next.kind === "claude" ? getConfig<string>("chatLastUsedModel", visibleModelsFor("claude")[0].id) : "");
 }
 
+// Active workspace, else the most recently opened one, unless the user picked
+// a different one from the dropdown. Declared before useComposerCompletion:
+// that prefetches skills/files at setup, so its `cwd` getter reads `target`
+// immediately (a later `const` threw a TDZ ReferenceError on every load).
+const override = ref<Workspace | null>(null);
+const target = computed<Workspace | null>(
+  () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
+);
+function pick(repo: Workspace) { override.value = repo; }
+// Someone else switching the active project (⌘⇧O's picker, the Sidebar) wins
+// over a stale local pick — otherwise the composer kept showing whatever was
+// last chosen here.
+watch(() => store.active?.id, () => { override.value = null; });
+
 // @file / $skill completion + skill pills — the same engine the chat composer
 // uses (lib/composerCompletion.ts), so the two cannot drift.
 const completion = useComposerCompletion({
@@ -339,18 +353,6 @@ watch([isCodex, selectedAgentModels], () => {
   if (selectedModel.value !== next) selectedModel.value = next;
   if (saved !== next) saveAcp("model", next);
 }, { immediate: true });
-
-// Active workspace, else the most recently opened one, unless the user picked
-// a different one from the dropdown.
-const override = ref<Workspace | null>(null);
-const target = computed<Workspace | null>(
-  () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
-);
-function pick(repo: Workspace) { override.value = repo; }
-// Someone else switching the active project (⌘⇧O's picker, the Sidebar) wins
-// over a stale local pick — otherwise the composer kept showing whatever was
-// last chosen here.
-watch(() => store.active?.id, () => { override.value = null; });
 
 // Exposed so App.vue can point the titlebar/right-panel git surfaces at
 // whatever project this screen is targeting — picking a project here doesn't
