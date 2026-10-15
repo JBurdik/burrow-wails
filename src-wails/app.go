@@ -226,6 +226,8 @@ func (a *App) startup(ctx context.Context) {
 	// Upgrade path: the Manager is gone, so its `control = 1` rows would
 	// otherwise come back as ordinary chats.
 	a.archiveLegacyManagerChats()
+	// Per-chat launch settings move from config.json onto the rows, once.
+	a.backfillChatLaunchSettings()
 
 	a.daemon = NewDaemonClient(ctx, filepath.Join(dataDir, "daemon.sock"))
 	if err := a.daemon.Ensure(); err != nil {

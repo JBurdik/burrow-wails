@@ -180,6 +180,12 @@ func migrate(db *sql.DB) error {
 		// sub-agent auto-archive sweep needs it) but never in SaveChats' column
 		// lists, so it can't ride that last-writer-wins path.
 		`ALTER TABLE chats ADD COLUMN collected_at INTEGER NOT NULL DEFAULT 0`,
+		// Launch settings (docs/plans/006-chat-runtime.md). Read through
+		// Chat/chatColumns, kept out of SaveChats like collected_at.
+		`ALTER TABLE chats ADD COLUMN effort TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN permission_mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN append_system_prompt TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
