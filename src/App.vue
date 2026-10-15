@@ -152,6 +152,7 @@ import { useChatAttentionStore } from "@/stores/chatAttention";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
 import PathPicker from "@/components/PathPicker.vue";
 import { pickDir } from "@/lib/pickPath";
+import { looksLikeMdPath, resolveLocalLink } from "@/lib/localLink";
 import { installControlBridge } from "@/lib/controlBridge";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -458,6 +459,26 @@ function openRightPanelSubagent(chatId: number, workspaceId: number) {
 
 provide('openRightPanelSubagent', openRightPanelSubagent);
 
+// A file link in rendered markdown (chat, an open document): markdown opens
+// rendered in the panel, anything else in the editor. Without this a relative
+// href navigates the whole WKWebView away. External URLs are main.ts's job.
+function onLocalLinkClick(e: MouseEvent) {
+  const target = e.target as Element | null;
+  const scope = target?.closest?.(".md-body, [data-link-base]");
+  const root = ws.active?.path;
+  if (!scope || !root) return;
+  const base = scope.closest("[data-link-base]")?.getAttribute("data-link-base") || root;
+  const a = target!.closest("a[href]");
+  const code = !a && target!.closest("code");
+  const raw = a ? a.getAttribute("href") : code && !code.closest("pre") && looksLikeMdPath(code.textContent ?? "") ? code.textContent : null;
+  const link = resolveLocalLink(raw, base);
+  if (!link) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (link.markdown) rightPanelRef.value?.openDoc(link.path);
+  else activeTerm()?.openFileInTab(link.path, link.path.split("/").pop() ?? link.path, link.line);
+}
+
 
 async function openNewWorkspace() {
   const dir = await pickDir({ title: "Add project", start: ui.defaultProjectDir || "~/" });
@@ -519,6 +540,7 @@ onMounted(async () => {
   if (route.path === "/" && ui.startupMode === "dashboard") void router.replace("/dashboard");
   playStartupChime();
   window.addEventListener("keydown", onKeydown);
+  document.addEventListener("click", onLocalLinkClick, true);
   window.addEventListener('mousemove', onResizeMove);
   window.addEventListener('mouseup', onResizeUp);
   setTimeout(() => update.check({ silent: true }), 3000);
@@ -545,6 +567,7 @@ onBeforeUnmount(() => {
   // reattach — leaving them alive orphans a process in the daemon for good.
   welcomeBottom.ptyIds.forEach((id) => void invoke("kill_pty", { id }).catch(() => {}));
   window.removeEventListener("keydown", onKeydown);
+  document.removeEventListener("click", onLocalLinkClick, true);
   window.removeEventListener('mousemove', onResizeMove);
   window.removeEventListener('mouseup', onResizeUp);
   if (updateTimer) clearInterval(updateTimer);

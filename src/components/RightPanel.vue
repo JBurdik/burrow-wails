@@ -312,6 +312,8 @@
 
     <DevServersSurface v-else-if="act(pi) === 'dev-servers'" :cwd="props.cwd" />
 
+    <MarkdownDocSurface v-else-if="act(pi) === 'doc' && docPath" :path="docPath" :cwd="props.cwd" />
+
     <div v-else-if="act(pi) === 'diff'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <PhGitCommit :size="13" class="shrink-0 text-secondary-foreground" />
@@ -642,7 +644,7 @@ import {
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
-  PhSpinner, PhWarningCircle, PhRows, PhArrowsInSimple, PhPlay,
+  PhSpinner, PhWarningCircle, PhRows, PhArrowsInSimple, PhPlay, PhFileText,
 } from "@phosphor-icons/vue";
 import {
   closeBottom, closeSurface as closeLayoutSurface, emptyLayout, isShown, loadLayouts, moveTo, openBottom, openIn,
@@ -666,6 +668,7 @@ import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
 import DevServersSurface from "./DevServersSurface.vue";
+import MarkdownDocSurface from "./MarkdownDocSurface.vue";
 import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
 import { useUIStore } from "@/stores/ui";
@@ -698,9 +701,15 @@ const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensio
 // projects shows the other project's open tabs.
 const NO_WS = -1;
 type DiffScope = ReviewDiffScope;
-interface WsUiState { diffScope: DiffScope; openChildId: number | null }
+interface WsUiState { diffScope: DiffScope; openChildId: number | null; docPath: string }
 const wsUiStates = reactive<Record<number, WsUiState>>({});
 const wsKey = computed(() => props.workspaceId ?? NO_WS);
+// The open document survives a restart, like the layout that shows it.
+const DOC_KEY = "burrow.rpDoc";
+function storedDoc(id: number): string {
+  try { return JSON.parse(localStorage.getItem(DOC_KEY) ?? "{}")[id] ?? ""; } catch { return ""; }
+}
+const docPath = computed(() => wsUi(wsKey.value).docPath);
 
 // Task-tool invocations, narrowed to the thread that's actually open (was:
 // every chat in the workspace) — both this and the Sub-agents list below
@@ -843,7 +852,7 @@ function openSubagent(chatId: number, workspaceId: number) {
   state.openChildId = chatId;
 }
 function wsUi(id: number): WsUiState {
-  return (wsUiStates[id] ??= { diffScope: { kind: "workspace" }, openChildId: null });
+  return (wsUiStates[id] ??= { diffScope: { kind: "workspace" }, openChildId: null, docPath: storedDoc(id) });
 }
 // ── Layout: two stacked panes per workspace, persisted per device ─────────────
 const PANES = [0, 1] as const;
@@ -990,6 +999,8 @@ const tabs = computed(() => {
     { id: "dev-servers", label: "Dev servers", icon: PhPlugsConnected, description: "See and kill dev servers running in this workspace." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
+  // Only exists once something opened a document (chat link, ⌘-click…).
+  if (docPath.value) all.push({ id: "doc", label: docPath.value.split("/").pop()!, icon: PhFileText, description: "Rendered markdown document." });
   return [...all, ...extensionSurfaces.value];
 });
 
@@ -1133,7 +1144,17 @@ function openGitTab() {
   openSurface("git");
 }
 
-defineExpose({ openGitTab, openSubagent });
+/** Render a markdown file (plan, spec, README) in the panel. */
+function openDoc(path: string) {
+  wsUi(wsKey.value).docPath = path;
+  try {
+    const all = JSON.parse(localStorage.getItem(DOC_KEY) ?? "{}");
+    localStorage.setItem(DOC_KEY, JSON.stringify({ ...all, [wsKey.value]: path }));
+  } catch { /* per-device convenience only */ }
+  void openSurface("doc");
+}
+
+defineExpose({ openGitTab, openSubagent, openDoc });
 
 // --- Checkpoints (History tab) ---
 interface Checkpoint {
