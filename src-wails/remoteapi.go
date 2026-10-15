@@ -469,6 +469,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"search_chats":           {Method: "SearchChats", Args: []string{"query", "limit"}, Scope: scopeOrchRead},
 	"delete_chat_messages":   {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"publish_chat_note":      {Method: "PublishChatNote", Args: []string{"chatId", "note"}, Scope: scopeOrchOperate},
+	"publish_subagent_row":   {Method: "PublishSubagentRow", Args: []string{"parentChatId", "chatId", "task", "agentName"}, Scope: scopeOrchOperate},
 
 	// App config file
 	"read_config":  {Method: "ReadConfig", Args: nil, Scope: scopeOrchRead},

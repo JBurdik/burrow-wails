@@ -25,9 +25,7 @@ import { useDiagram } from "@/composables/useDiagram";
 import { buildTerminalCommand } from "@/lib/agentCommand";
 import { readTermOutput } from "@/lib/termRegistry";
 import { panelTerminals } from "@/lib/rpTerminals";
-import { subagentMessage, type ChatMessage } from "@/lib/chatTypes";
 import { childrenOf } from "@/stores/chatTree";
-import { chatSession, liveChatSessionIds } from "@/lib/chatSession";
 import { sendToChat } from "@/lib/chatRuntime";
 
 type ControlAction = { id: string; action: string; args: Record<string, unknown> };
@@ -73,11 +71,6 @@ export async function perform(action: string, args: Record<string, unknown>): Pr
       return spawn(args);
     case "chat_send":
       return chatSendFollowUp(num(args.chatId), str(args.text));
-    case "subagent_row":
-      // A sub-agent Go spawned (control verb spawn): only its row in the
-      // parent's transcript is still drawn here.
-      await appendSubagentMessage(num(args.parentChatId), num(args.chatId), str(args.task), str(args.agentName));
-      return { ok: true };
     case "list_subagent_profiles":
       await useSubagentProfilesStore().whenReady();
       return useSubagentProfilesStore().profiles;
@@ -203,7 +196,7 @@ async function spawn(args: Record<string, unknown>) {
       { parentChatId: parent, task: str(args.task), profile: str(args.profile), agent: str(args.agent), model: str(args.model), cwd: str(args.cwd) },
     );
     if (got.handled) {
-      await appendSubagentMessage(parent, got.chat_id, got.task, got.agent_name);
+      // Go already recorded the spawn in the parent's transcript.
       return { chat_id: got.chat_id, workspace_id: got.workspace_id, parent_chat_id: parent };
     }
   }
@@ -267,8 +260,9 @@ async function spawn(args: Record<string, unknown>) {
       launchSettings,
     });
     if (parentChatId) {
-      // The parent's transcript gets a row recording the delegation.
-      await appendSubagentMessage(parentChatId, session.id, task, instance.name);
+      // The parent's transcript gets a row recording the delegation — written
+      // by Go into the parent's chat_stream, like a Go-spawned child's.
+      await invoke("publish_subagent_row", { parentChatId, chatId: session.id, task, agentName: instance.name });
       return { chat_id: session.id, workspace_id: target.id, parent_chat_id: parentChatId };
     }
     useTerminalTabsStore().openChat(target.id, session.id, instance.id, task);
@@ -286,40 +280,6 @@ async function spawn(args: Record<string, unknown>) {
   });
   if (ptyId === undefined) throw new Error("the workspace did not open a tab (is it still loading?)");
   return { pty_id: ptyId, workspace_id: target.id, agent: instance.name };
-}
-
-/**
- * Record a spawn in the parent's transcript.
- *
- * Hazard: `AgentChat.vue` destructures `messages` straight off its
- * `chatSession(chatId)` (`const { messages, ... } = S`), so that Ref — not a
- * component-local copy — is the transcript, and it outlives an unmounted view
- * (see chatSession.ts). A blind load→push→save here would race the parent's
- * OWN next `saveMessages()` call, which serializes whatever is in that Ref at
- * the time and would silently drop our row if it lands between our load and
- * our save. `spawn` only ever runs mid-turn for the chat that called it, so
- * the parent's session already exists (`chatSession()` was created at mount);
- * pushing straight into that shared Ref, then saving from it, makes our
- * append indistinguishable from one the parent made itself — nothing to race.
- * Only a parent with no live session (spawned via the control API with no
- * view ever mounted for it) falls back to a direct read-modify-write.
- */
-async function appendSubagentMessage(parentChatId: number, childChatId: number, task: string, agentName: string) {
-  const msg = subagentMessage(childChatId, task, agentName);
-  if (liveChatSessionIds().includes(parentChatId)) {
-    const S = chatSession(parentChatId);
-    S.messages.value.push(msg);
-    // Mirrors AgentChat.vue's own saveMessages(): drop partials, cap history,
-    // and hand foldedOrd = lastOrd + 1 so the chat_stream trim stays safe.
-    const toSave = S.messages.value.filter((m) => !m.partial).slice(-2000);
-    const foldedOrd = S.lastOrd >= 0 ? S.lastOrd + 1 : -1;
-    await invoke("save_chat_messages", { chatId: parentChatId, messages: JSON.stringify(toSave), foldedOrd });
-    return;
-  }
-  const raw = await invoke<string>("load_chat_messages", { chatId: parentChatId }).catch(() => "[]");
-  const messages: ChatMessage[] = JSON.parse(raw || "[]");
-  messages.push(msg);
-  await invoke("save_chat_messages", { chatId: parentChatId, messages: JSON.stringify(messages), foldedOrd: -1 });
 }
 
 /** A follow-up into a child's session — the same door the composer uses, so a

@@ -197,8 +197,8 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	}
 
 	// A thread's sub-agent runs in the host's chat runtime: no view has to be
-	// mounted, so spawn works with the desktop closed. The parent's transcript
-	// row is the UI's to draw, best-effort — the child runs either way.
+	// mounted, so spawn works with the desktop closed. The host also records
+	// the spawn in the parent's transcript (its chat_stream).
 	if parent > 0 && c.deps.ChatRuntime != nil {
 		got, handled, err := c.deps.ChatRuntime.SpawnSubagent(SpawnRequest{
 			Task: p.Str("task"), Profile: p.Str("profile"), Agent: p.Str("agent"),
@@ -208,13 +208,6 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 			return nil, err
 		}
 		if handled {
-			if c.deps.UI != nil {
-				go func() {
-					_ = c.ui(context.Background(), "subagent_row", map[string]any{
-						"parentChatId": parent, "chatId": got.ChatID, "task": got.Task, "agentName": got.AgentName,
-					}, nil)
-				}()
-			}
 			return SpawnResult{ChatID: got.ChatID, Target: "chat"}, nil
 		}
 	}

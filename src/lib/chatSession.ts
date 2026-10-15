@@ -113,43 +113,20 @@ function hasFocus(): boolean {
   return typeof document !== "undefined" && document.hasFocus();
 }
 
-export interface ChatSession {
-  readonly chatId: number;
-
+/**
+ * The session's state. Writable here, inside the module, where the reducers
+ * and the intent methods below keep its invariants; everything outside reads
+ * it through ChatSession, which hands the same refs back read-only.
+ */
+interface SessionState {
   // ── transcript ──
   messages: Ref<ChatMessage[]>;
-  /** Monotonic id generator for messages; plain field, never rendered. */
-  nextMsgId: number;
-  /**
-   * Highest chat_stream ord this session has actually put through a reducer.
-   * `foldedOrd` handed to save_chat_messages is this + 1 — "everything up to
-   * and including lastOrd is now in chat_messages", which is what lets the
-   * backend trim safely (chatstream.go).
-   */
-  lastOrd: number;
-  /** True once a restart replay has run (or been ruled out) for this session. */
-  replayed: boolean;
 
   // ── turn state ──
   busy: Ref<boolean>;
   lastActivityAt: Ref<number>;
+  /** Set while busy; stamped onto the turn's user message as turnMs when it settles. */
   turnStartedAt: Ref<number>;
-  /**
-   * FIFO of follow-ups, DERIVED from the transcript's own `queued` entries.
-   * There is deliberately no second array: the queue and its placeholder
-   * bubbles used to be two structures synchronised by hand in five methods,
-   * and `moveQueuedMessageNext` only ever updated one of them — "Send Next"
-   * reordered what was sent while the transcript kept showing the old order.
-   * Deriving it also makes the queue survive a relaunch for free, since the
-   * placeholders are persisted with the transcript.
-   */
-  messageQueue: ComputedRef<QueuedChatMessage[]>;
-  enqueueMessage(text: string, images?: string[]): QueuedChatMessage;
-  removeQueuedMessage(id: number): void;
-  clearQueuedMessages(): void;
-  moveQueuedMessageNext(id: number): void;
-  takeNextQueuedMessage(): QueuedChatMessage | undefined;
-  suppressNextDone: Ref<boolean>;
   sessionId: Ref<string>;
   turnStats: Ref<TurnStats | null>;
   sessionCost: Ref<number>;
@@ -161,8 +138,6 @@ export interface ChatSession {
   contextSplit: Ref<CtxSplit | null>;
   contextReport: Ref<CtxReportRow[] | null>;
   contextReportPending: Ref<boolean>;
-  /** A `/context` was sent out of band; its report is lifted out of the stream. */
-  awaitingContextReport: Ref<boolean>;
   /** Claude named the thread — later heuristics must not overwrite it. */
   claudeGeneratedTitle: Ref<boolean>;
 
@@ -175,7 +150,6 @@ export interface ChatSession {
   pendingQuestionMsgId: Ref<number | null>;
   pendingPlanMsgId: Ref<number | null>;
   pendingDiffMsgId: Ref<number | null>;
-  settledControlRequestIds: Set<string>;
   /** A native control response is being written; the prompt stays until it lands. */
   nativeControlResponsePending: Ref<boolean>;
 
@@ -192,11 +166,45 @@ export interface ChatSession {
   /** Codex `item/tool/requestUserInput`: blocking, so it must outlive the view. */
   codexUserInput: Ref<CodexUserInputReq | null>;
   codexUserInputPending: Ref<boolean>;
-  acpControlIds: Set<number>;
-  /** Ids of OUR OWN selector restore pushes — their replies must not restore again. */
-  acpRestorePushIds: Set<number>;
   acpModes: Ref<AcpModes | null>;
   acpConfigOptions: Ref<AcpConfigOption[]>;
+}
+
+type ReadonlyRefs<T> = { readonly [K in keyof T]: T[K] extends Ref<infer V> ? Readonly<Ref<V>> : T[K] };
+
+/** A user turn as the composer hands it over. */
+export interface UserPrompt {
+  text: string;
+  images?: string[];
+  /** What the bubble shows when it differs from what was sent (paste chips). */
+  displayText?: string;
+}
+
+/**
+ * A chat's live session, as everything outside this module sees it: read-only
+ * state plus intents. Nothing outside writes a ref — that is what keeps the
+ * idle invariant (no pending request, not busy → evictable) true, since the
+ * only code that can break it is in this file.
+ */
+export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">> {
+  readonly chatId: number;
+  /** Read-only: rows are added by the reducers and the intents below. */
+  readonly messages: Readonly<Ref<readonly ChatMessage[]>>;
+
+  /**
+   * FIFO of follow-ups, DERIVED from the transcript's own `queued` entries.
+   * There is deliberately no second array: the queue and its placeholder
+   * bubbles used to be two structures synchronised by hand in five methods,
+   * and `moveQueuedMessageNext` only ever updated one of them — "Send Next"
+   * reordered what was sent while the transcript kept showing the old order.
+   * Deriving it also makes the queue survive a relaunch for free, since the
+   * placeholders are persisted with the transcript.
+   */
+  messageQueue: ComputedRef<QueuedChatMessage[]>;
+  enqueueMessage(text: string, images?: string[]): QueuedChatMessage;
+  removeQueuedMessage(id: number): void;
+  clearQueuedMessages(): void;
+  moveQueuedMessageNext(id: number): void;
 
   /** Every request the agent is blocked on, whatever the transport. */
   pendingRequests: ComputedRef<PendingRequest[]>;
@@ -208,22 +216,48 @@ export interface ChatSession {
    */
   respond(answer: PendingAnswer): Promise<boolean>;
 
+  // ── intents ──
+  /** An app-authored assistant row (a failed action, an error) — saved with the transcript. */
+  notice(text: string): void;
+  /** Show the user's prompt and claim its echo. Returns the bubble's id. Does not start the turn. */
+  postUserMessage(prompt: UserPrompt): number;
+  /** The prompt is on its way: the chat is busy until a turn boundary. */
+  startTurn(): void;
+  /** The send failed: report it and leave the turn. */
+  failTurn(error: unknown): void;
+  /** The JSON-RPC id of our own `session/prompt` — its response ends an ACP turn. */
+  trackAcpPrompt(rpcId: number): void;
+  /** A selector push we sent; `restore` marks our own restore push, whose reply must not restore again. */
+  trackAcpControl(rpcId: number, restore?: boolean): void;
+  /** Optimistically show an ACP selector pick ("mode", or a config option id) before the adapter confirms. */
+  showAcpSelection(id: string, value: string): void;
+  /** Learned or cached ACP capabilities, for a session that has none yet. */
+  seedAcpCapabilities(modes: AcpModes | null, configOptions: AcpConfigOption[]): void;
+  /**
+   * The process went away under a transport the Go chat runtime does not run
+   * yet (Codex / ACP restart or clear): the same settlement a `session.reset`
+   * event applies — every pending request dropped, partial closed, not busy;
+   * `cleared` also empties the transcript and the turn accounting.
+   */
+  runtimeReset(opts?: { cleared?: boolean }): void;
+  /** The view started a Codex / ACP process (claude-cli is started by Go). */
+  markRuntimeStarted(): void;
+  /** The coming turn end is ours (restart, interrupt) — no "finished" toast. */
+  suppressDoneToast(): void;
+  /** Ask the CLI for `/context` out of band; its report is lifted out of the stream. */
+  requestContextReport(): Promise<void>;
+  /** First paint from storage, for a session that has no transcript yet. */
+  hydrate(state: { messages?: ChatMessage[]; sessionId?: string }): void;
+  /** Take the last user message back out to edit it (↑ in an empty composer). */
+  recallLastUserMessage(): string | null;
+
+  // ── lifecycle ──
   /** Point the session's hooks at this view. Replaces any previous view's. */
   attachView(view: ChatViewHooks): void;
-  /** A prompt this client is about to send — drop its echo when Go publishes it. */
-  expectEcho(text: string): void;
   /** Persist the transcript (fire-and-forget), with the folded stream mark. */
   save(): void;
   /** Mirror busy / message count into the chat list and the remote mirror. */
   sync(): void;
-  /** Settle partial rows and stuck tool spinners (a turn ended somehow). */
-  settleTranscript(failedTools?: boolean): void;
-  /** Remove a system-info marker row by id. */
-  removeFeedMarker(id: number | null): void;
-  /** Record a native control request as answered (a replay must not reopen it). */
-  settleControlRequest(requestId: string): void;
-  /** Answer a native can_use_tool request. Throws if the write failed. */
-  respondControl(requestId: string, response: Record<string, unknown>): Promise<void>;
   /** Send the next queued follow-up if the chat is idle. */
   drain(): void;
   /** Attach the domain-event listener (idempotent). Both transports use it. */
@@ -258,7 +292,36 @@ export interface ChatSession {
   isWatched(): boolean;
 }
 
-interface InternalSession extends ChatSession {
+interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionState> {
+  /** Monotonic id generator for messages; plain field, never rendered. */
+  nextMsgId: number;
+  /**
+   * Highest chat_stream ord this session has actually put through a reducer.
+   * `foldedOrd` handed to save_chat_messages is this + 1 — "everything up to
+   * and including lastOrd is now in chat_messages", which is what lets the
+   * backend trim safely (chatstream.go).
+   */
+  lastOrd: number;
+  /** True once a restart replay has run (or been ruled out) for this session. */
+  replayed: boolean;
+  suppressNextDone: Ref<boolean>;
+  /** A `/context` was sent out of band; its report is lifted out of the stream. */
+  awaitingContextReport: Ref<boolean>;
+  settledControlRequestIds: Set<string>;
+  acpControlIds: Set<number>;
+  /** Ids of OUR OWN selector restore pushes — their replies must not restore again. */
+  acpRestorePushIds: Set<number>;
+  takeNextQueuedMessage(): QueuedChatMessage | undefined;
+  /** A prompt this client is about to send — drop its echo when Go publishes it. */
+  expectEcho(text: string): void;
+  /** Settle partial rows and stuck tool spinners (a turn ended somehow). */
+  settleTranscript(failedTools?: boolean): void;
+  /** Remove a system-info marker row by id. */
+  removeFeedMarker(id: number | null): void;
+  /** Record a native control request as answered (a replay must not reopen it). */
+  settleControlRequest(requestId: string): void;
+  /** Answer a native can_use_tool request. Throws if the write failed. */
+  respondControl(requestId: string, response: Record<string, unknown>): Promise<void>;
   deps: ChatSessionDeps;
   view: ChatViewHooks | null;
   /** Prompts this client sent and has not yet seen echoed back (see expectEcho). */
@@ -405,6 +468,81 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       return out;
     }),
     respond: (answer) => respond(s, answer),
+
+    notice(text) {
+      pushRow(s, "assistant", text);
+    },
+    postUserMessage({ text, images, displayText }) {
+      const id = s.nextMsgId++;
+      s.messages.value.push({ id, role: "user", text, ...(images?.length ? { images } : {}), ...(displayText ? { displayText } : {}) });
+      // Claim the echo before the send goes out — a loopback round trip can
+      // land user.delta before the caller's next line runs.
+      s.expectEcho(text);
+      return id;
+    },
+    startTurn() {
+      s.busy.value = true;
+    },
+    failTurn(error) {
+      pushRow(s, "assistant", `Error: ${error}`);
+      s.busy.value = false;
+      s.sync();
+    },
+    trackAcpPrompt(rpcId) {
+      s.acpPromptRpcId.value = rpcId;
+    },
+    trackAcpControl(rpcId, restore = false) {
+      s.acpControlIds.add(rpcId);
+      if (restore) s.acpRestorePushIds.add(rpcId);
+    },
+    showAcpSelection(id, value) {
+      if (id === "mode") {
+        if (s.acpModes.value) s.acpModes.value.currentModeId = value;
+        return;
+      }
+      const option = s.acpConfigOptions.value.find((o) => o.id === id);
+      if (option) option.currentValue = value;
+    },
+    seedAcpCapabilities(modes, configOptions) {
+      if (s.acpModes.value || s.acpConfigOptions.value.length) return;
+      s.acpModes.value = modes;
+      s.acpConfigOptions.value = configOptions;
+    },
+    runtimeReset(opts) {
+      resetRuntime(s, opts?.cleared === true);
+    },
+    markRuntimeStarted() {
+      s.runtimeStarted.value = true;
+    },
+    suppressDoneToast() {
+      s.suppressNextDone.value = true;
+    },
+    async requestContextReport() {
+      if (s.busy.value || s.contextReportPending.value) return;
+      s.contextReportPending.value = true;
+      s.awaitingContextReport.value = true;
+      try {
+        await s.deps.invoke("chat_send", { chatId, text: "/context", images: [] });
+      } catch {
+        s.contextReportPending.value = false;
+        s.awaitingContextReport.value = false;
+      }
+    },
+    hydrate({ messages, sessionId }) {
+      if (messages && s.messages.value.length === 0) {
+        s.messages.value = messages;
+        // Ids must continue past the loaded history, or new messages collide
+        // with old ones on the same `:key`.
+        s.nextMsgId = messages.reduce((max, m) => Math.max(max, m.id + 1), s.nextMsgId);
+      }
+      if (sessionId) s.sessionId.value = sessionId;
+    },
+    recallLastUserMessage() {
+      const lastUser = [...s.messages.value].reverse().find((m) => m.role === "user");
+      if (!lastUser) return null;
+      s.messages.value = s.messages.value.filter((m) => m !== lastUser);
+      return lastUser.text;
+    },
 
     enqueueMessage(text, images) {
       const entry: QueuedChatMessage = { id: s.nextMsgId++, text, ...(images?.length ? { images } : {}) };
@@ -589,6 +727,20 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
   // the user looks at another tab, and a component watcher died with it — the
   // queue then sat parked behind a send button the queue itself disables.
   scope.run(() => watch(s.busy, (running) => { if (!running) s.drain(); }));
+  // Turn clock: stamped onto the user message that opened the turn when it
+  // settles, so it persists with the history and the fold row can say
+  // "Worked for 26s" after a reload.
+  scope.run(() => watch(s.busy, (running) => {
+    if (running) {
+      s.lastActivityAt.value = Date.now();
+      s.turnStartedAt.value = Date.now();
+      return;
+    }
+    if (!s.turnStartedAt.value) return;
+    const lastUser = [...s.messages.value].reverse().find((m) => m.role === "user");
+    if (lastUser) lastUser.turnMs = Date.now() - s.turnStartedAt.value;
+    s.turnStartedAt.value = 0;
+  }, { flush: "sync" }));
   return s;
 }
 
@@ -750,30 +902,41 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
         // it on purpose (reset: restart, interrupt, clear, a launch-settings
         // change). Either way the next send spawns a replacement, nothing the
         // old process asked is answerable any more, and no turn is running.
-        s.runtimeStarted.value = false;
-        dropPendingRequests(s);
-        if (event.type === "session.reset" && event.cleared) {
-          s.messages.value = [];
-          s.sessionId.value = "";
-          s.turnStats.value = null;
-          s.sessionCost.value = 0;
-          s.claudeGeneratedTitle.value = false;
+        {
+          const cleared = event.type === "session.reset" && event.cleared === true;
+          resetRuntime(s, cleared);
           // Go restarted the stream's numbering with it.
-          s.lastOrd = batch.ord;
+          if (cleared) s.lastOrd = batch.ord;
         }
-        if (s.busy.value) {
-          // Died mid-turn with no boundary of its own — settle it here or the
-          // spinner runs forever.
-          s.busy.value = false;
-          s.settleTranscript(true);
-        } else {
-          s.settleTranscript();
-        }
-        s.sync();
-        s.maybeEvict();
         break;
     }
   }
+}
+
+/**
+ * The process is gone — nothing it asked is answerable any more and no turn is
+ * running. `cleared` also empties the transcript and the turn accounting.
+ */
+function resetRuntime(s: InternalSession, cleared: boolean) {
+  s.runtimeStarted.value = false;
+  dropPendingRequests(s);
+  if (cleared) {
+    s.messages.value = [];
+    s.sessionId.value = "";
+    s.turnStats.value = null;
+    s.sessionCost.value = 0;
+    s.claudeGeneratedTitle.value = false;
+  }
+  if (s.busy.value) {
+    // Died mid-turn with no boundary of its own — settle it here or the
+    // spinner runs forever.
+    s.busy.value = false;
+    s.settleTranscript(true);
+  } else {
+    s.settleTranscript();
+  }
+  s.sync();
+  s.maybeEvict();
 }
 
 /** Every pending request belongs to a process; when it goes, they all go. */

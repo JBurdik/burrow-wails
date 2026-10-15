@@ -38,6 +38,11 @@ export interface ChatEvent {
   sessionId?: string;
   /** session.reset: the transcript was wiped too (chat_clear). */
   cleared?: boolean;
+  /** message.note: a row Burrow authored (e.g. "spawned a sub-agent"). */
+  role?: ChatMessage["role"];
+  images?: string[];
+  subagentChatId?: number;
+  subagentAgent?: string;
 }
 
 export interface ChatEventBatch {
@@ -46,7 +51,7 @@ export interface ChatEventBatch {
 }
 
 /** Types this module renders. Everything else is for the view to act on. */
-const PROJECTED = new Set(["text.delta", "thinking.delta", "user.delta", "tool.started", "tool.completed"]);
+const PROJECTED = new Set(["text.delta", "thinking.delta", "user.delta", "tool.started", "tool.completed", "message.note"]);
 
 export function isProjectedEvent(type: string): boolean {
   return PROJECTED.has(type);
@@ -96,6 +101,20 @@ export function applyChatEvent(state: ChatProjectionState, event: ChatEvent): bo
       if (!tool) return false;
       tool.toolOutput = event.output ?? "";
       tool.toolFailed = event.failed === true;
+      return true;
+    }
+
+    case "message.note": {
+      // A whole row Burrow authored — Go only lets system-info / permission
+      // through (chatNoteRoles), and it never streams in pieces.
+      if (!event.role || !event.text) return false;
+      state.messages.push({
+        id: state.nextMsgId++,
+        role: event.role,
+        text: event.text,
+        ...(event.images?.length ? { images: event.images } : {}),
+        ...(event.subagentChatId ? { subagentChatId: event.subagentChatId, subagentAgent: event.subagentAgent } : {}),
+      });
       return true;
     }
 
