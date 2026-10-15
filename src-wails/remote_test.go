@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -64,16 +63,10 @@ func TestRemoteCreateChatRejectsUnsupportedAgentKind(t *testing.T) {
 
 // The rejection test above only proves an UNRELATED kind ("gemini") is
 // rejected — it would not notice "codex" being typo'd, or dropped from the
-// allowlist entirely, since a rejection is still an error either way. This
-// proves "codex" specifically clears the agentKind guard.
-//
-// Whether a real "codex" binary is on PATH varies by machine — a CI runner
-// likely has none (CodexStart fails, the chat row must be rolled back, same
-// guarantee a failed ClaudeStart already has), but a dev box with the CLI
-// installed can genuinely succeed. Both outcomes are asserted; a real
-// success is torn down (process killed, chat deleted) so the test has no
-// environment-dependent side effects.
-func TestRemoteCreateChatAcceptsCodexPastTheAgentKindGuard(t *testing.T) {
+// allowlist entirely. This proves "codex" clears the guard and comes back as a
+// row carrying its launch settings, with no process started (that is
+// chat_send's job now).
+func TestRemoteCreateChatCreatesCodexRowOnly(t *testing.T) {
 	a, dir := newChatApp(t)
 	t.Cleanup(busReset)
 	busReset()
@@ -82,39 +75,24 @@ func TestRemoteCreateChatAcceptsCodexPastTheAgentKindGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := a.ListChats()
+	result, err := a.RemoteCreateChat(ws.ID, "codex", "gpt-x", "high", "plan")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	result, createErr := a.RemoteCreateChat(ws.ID, "codex", "", "", "")
-	if createErr != nil {
-		if strings.Contains(createErr.Error(), "only supports") {
-			t.Fatalf("codex was rejected by the agentKind guard, not by CodexStart: %v", createErr)
-		}
-		after, err := a.ListChats()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(after) != len(before) {
-			t.Fatalf("a failed codex start left a ghost chat row: before=%d after=%d", len(before), len(after))
-		}
-		return
-	}
-
-	// codex really is installed here and CodexStart genuinely succeeded —
-	// assert the row is shaped right, then tear the live process down.
-	if result["transport"] != "codex-app-server" {
-		t.Fatalf("transport = %#v, want codex-app-server", result["transport"])
-	}
-	if result["agentKind"] != "codex" {
-		t.Fatalf("agentKind = %#v, want codex", result["agentKind"])
+	if result["transport"] != "codex-app-server" || result["agentKind"] != "codex" {
+		t.Fatalf("shape = %#v", result)
 	}
 	chatID, _ := result["id"].(int64)
-	if sess := a.acpReg().drop(fmt.Sprint(chatID)); sess != nil && sess.cmd != nil && sess.cmd.Process != nil {
-		_ = sess.cmd.Process.Kill()
+	row, err := a.chatByID(chatID)
+	if err != nil || row.Model != "gpt-x" || row.Effort != "high" || row.PermissionMode != "plan" {
+		t.Fatalf("row = %+v, err = %v", row, err)
 	}
-	_ = a.DeleteChat(chatID)
+	if _, live := a.acpReg().get(fmt.Sprint(chatID)); live {
+		t.Fatal("creating a chat must not start its process")
+	}
+	if _, err := a.RemoteCreateChat(ws.ID, "codex", "", "", "bogus"); err == nil {
+		t.Fatal("an unsupported Codex mode must not produce a chat")
+	}
 }
 
 func TestResolveWorkspaceCwdRejectsUnknownWorkspace(t *testing.T) {

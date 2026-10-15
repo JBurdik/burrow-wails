@@ -130,7 +130,6 @@ interface SessionState {
   sessionId: Ref<string>;
   turnStats: Ref<TurnStats | null>;
   sessionCost: Ref<number>;
-  runtimeStarted: Ref<boolean>;
 
   // ── context meter + /context report ──
   contextTokens: Ref<number>;
@@ -160,7 +159,6 @@ interface SessionState {
    *  remount, and a fresh view's local id would never match it. */
   acpPermRpcId: Ref<number | null>;
   acpPermMsgId: Ref<number | null>;
-  acpPromptRpcId: Ref<number | null>;
   /** An answer to acpPermReq is in flight (Codex clears it on serverRequest/resolved). */
   permissionResponsePending: Ref<boolean>;
   /** Codex `item/tool/requestUserInput`: blocking, so it must outlive the view. */
@@ -225,23 +223,25 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   startTurn(): void;
   /** The send failed: report it and leave the turn. */
   failTurn(error: unknown): void;
-  /** The JSON-RPC id of our own `session/prompt` — its response ends an ACP turn. */
-  trackAcpPrompt(rpcId: number): void;
+  /**
+   * Send a prompt as its own turn — the one door for every transport: show
+   * the bubble, mark busy, `chat_send` (the Go chat runtime starts the process
+   * if there is none). Resolves the bubble's id, or null when the send failed
+   * (already reported in the transcript).
+   */
+  send(prompt: UserPrompt): Promise<number | null>;
+  /** Stop the process; Go publishes session.reset and the next send starts a fresh one. */
+  restart(): Promise<void>;
+  /** End the running turn (no "finished" toast); Go restarts if the provider can't stop in place. */
+  interrupt(): Promise<void>;
+  /** Wipe the transcript and the agent session; Go publishes session.reset{cleared}. */
+  clear(): Promise<void>;
   /** A selector push we sent; `restore` marks our own restore push, whose reply must not restore again. */
   trackAcpControl(rpcId: number, restore?: boolean): void;
   /** Optimistically show an ACP selector pick ("mode", or a config option id) before the adapter confirms. */
   showAcpSelection(id: string, value: string): void;
   /** Learned or cached ACP capabilities, for a session that has none yet. */
   seedAcpCapabilities(modes: AcpModes | null, configOptions: AcpConfigOption[]): void;
-  /**
-   * The process went away under a transport the Go chat runtime does not run
-   * yet (Codex / ACP restart or clear): the same settlement a `session.reset`
-   * event applies — every pending request dropped, partial closed, not busy;
-   * `cleared` also empties the transcript and the turn accounting.
-   */
-  runtimeReset(opts?: { cleared?: boolean }): void;
-  /** The view started a Codex / ACP process (claude-cli is started by Go). */
-  markRuntimeStarted(): void;
   /** The coming turn end is ours (restart, interrupt) — no "finished" toast. */
   suppressDoneToast(): void;
   /** Ask the CLI for `/context` out of band; its report is lifted out of the stream. */
@@ -424,7 +424,6 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     sessionId: ref(""),
     turnStats: ref<TurnStats | null>(null),
     sessionCost: ref(0),
-    runtimeStarted: ref(false),
 
     contextTokens: ref(ctx?.tokens ?? 0),
     contextWindow: ref(ctx?.window ?? 0),
@@ -448,7 +447,6 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     acpPermReq: ref<AcpPermReq | null>(null),
     acpPermRpcId: ref<number | null>(null),
     acpPermMsgId: ref<number | null>(null),
-    acpPromptRpcId: ref<number | null>(null),
     permissionResponsePending: ref(false),
     codexUserInput: ref<CodexUserInputReq | null>(null),
     codexUserInputPending: ref(false),
@@ -488,8 +486,32 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.busy.value = false;
       s.sync();
     },
-    trackAcpPrompt(rpcId) {
-      s.acpPromptRpcId.value = rpcId;
+    async send(prompt) {
+      const id = s.postUserMessage(prompt);
+      s.startTurn();
+      s.save();
+      s.sync();
+      s.view?.scrollToBottom(true);
+      try {
+        await s.deps.invoke("chat_send", { chatId, text: prompt.text, images: prompt.images ?? [] });
+        return id;
+      } catch (e) {
+        s.failTurn(e);
+        return null;
+      }
+    },
+    async restart() {
+      await s.deps.invoke("chat_restart", { chatId }).catch(() => {});
+    },
+    async interrupt() {
+      // The trailing turn end of a stopped turn is not a "finished" one.
+      s.suppressNextDone.value = true;
+      await s.deps.invoke("chat_interrupt", { chatId }).catch(() => {});
+    },
+    async clear() {
+      // The reset that empties the transcript arrives on the events channel.
+      await s.listenEvents();
+      await s.deps.invoke("chat_clear", { chatId }).catch((e: unknown) => s.notice(`Could not clear the chat: ${e}`));
     },
     trackAcpControl(rpcId, restore = false) {
       s.acpControlIds.add(rpcId);
@@ -507,12 +529,6 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       if (s.acpModes.value || s.acpConfigOptions.value.length) return;
       s.acpModes.value = modes;
       s.acpConfigOptions.value = configOptions;
-    },
-    runtimeReset(opts) {
-      resetRuntime(s, opts?.cleared === true);
-    },
-    markRuntimeStarted() {
-      s.runtimeStarted.value = true;
     },
     suppressDoneToast() {
       s.suppressNextDone.value = true;
@@ -808,9 +824,9 @@ function markActive(s: InternalSession) {
   s.sync();
 }
 
-/** Everything a finished turn does beyond the transcript. Shared by the native
- *  boundary (turn.completed) and the ACP one (the response to our own
- *  session/prompt, which only the sender can correlate). */
+/** Everything a finished turn does beyond the transcript. Every transport ends
+ *  its turn with turn.completed / turn.failed — for Codex / ACP the Go runtime
+ *  emits it after the response to its own prompt. */
 function finishTurn(s: InternalSession) {
   s.busy.value = false;
   s.settleTranscript();
@@ -918,7 +934,6 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
  * running. `cleared` also empties the transcript and the turn accounting.
  */
 function resetRuntime(s: InternalSession, cleared: boolean) {
-  s.runtimeStarted.value = false;
   dropPendingRequests(s);
   if (cleared) {
     s.messages.value = [];
@@ -955,7 +970,6 @@ function dropPendingRequests(s: InternalSession) {
   }
   s.nativeControlResponsePending.value = false;
   s.acpPermRpcId.value = null;
-  s.acpPromptRpcId.value = null;
   s.permissionResponsePending.value = false;
   s.codexUserInput.value = null;
   s.codexUserInputPending.value = false;
@@ -1063,8 +1077,8 @@ function onLine(s: InternalSession, line: string) {
   // assistant / user (tool results) / result / exit arrive as domain events.
 }
 
-/** Lines from acp-data-{chatId}: the session handshake, selector replies, the
- *  session/prompt response that ends a turn, Codex's serverRequest/resolved. */
+/** Lines from acp-data-{chatId}: the session handshake, selector replies,
+ *  Codex's serverRequest/resolved. The turn end is a domain event. */
 function onAcpData(s: InternalSession, raw: string) {
   let msg: Record<string, unknown>;
   try { msg = JSON.parse(raw); } catch { console.warn(`[chat-diag] unparseable acp-data line, dropped (len=${raw.length})`); return; }
@@ -1085,7 +1099,7 @@ function onAcpData(s: InternalSession, raw: string) {
     return;
   }
 
-  // Emitted by acp_start after the handshake: sessionId (for resume) plus the
+  // Emitted by the Go runtime after an ACP / Codex handshake: sessionId (for resume) plus the
   // modes/configOptions that populate the selectors.
   if (msg._burrow === "session") {
     const sid = msg.sessionId as string;
@@ -1106,25 +1120,21 @@ function onAcpData(s: InternalSession, raw: string) {
 
   if ("id" in msg && !("method" in msg)) {
     const rid = msg.id as number;
-    if (s.acpControlIds.has(rid)) {
-      s.acpControlIds.delete(rid);
-      // Reply to a restore push we sent ourselves: apply it, but do NOT
-      // restore from it — that is the ping-pong the guard exists for.
-      const wasRestorePush = s.acpRestorePushIds.delete(rid);
-      const result = msg.result as { configOptions?: AcpConfigOption[]; modes?: AcpModes } | undefined;
-      if (result?.configOptions) s.acpConfigOptions.value = result.configOptions;
-      if (result?.modes) s.acpModes.value = result.modes;
-      // A model / mode / effort switch comes back with the adapter's whole
-      // selector set reset to its defaults — put the user's picks back.
-      if (!wasRestorePush && (result?.configOptions || result?.modes)) s.view?.restoreAcpSelections();
-      return;
-    }
-    // The turn is settled by the response to OUR session/prompt.
-    if (s.acpPromptRpcId.value === null || rid !== s.acpPromptRpcId.value) return;
-    s.acpPromptRpcId.value = null;
-    finishTurn(s);
+    // A selector reply carries the adapter's whole selector set — apply it
+    // whoever asked (the Go runtime pushes the row's settings after a start).
+    const result = msg.result as { configOptions?: AcpConfigOption[]; modes?: AcpModes } | undefined;
+    if (result?.configOptions) s.acpConfigOptions.value = result.configOptions;
+    if (result?.modes) s.acpModes.value = result.modes;
+    if (!s.acpControlIds.delete(rid)) return;
+    // Reply to a restore push we sent ourselves: apply it, but do NOT
+    // restore from it — that is the ping-pong the guard exists for.
+    const wasRestorePush = s.acpRestorePushIds.delete(rid);
+    // A model / mode / effort switch comes back with the adapter's whole
+    // selector set reset to its defaults — put the user's picks back.
+    if (!wasRestorePush && (result?.configOptions || result?.modes)) s.view?.restoreAcpSelections();
   }
-  // session/update and the {_burrow:"exit"} EOF arrive as domain events.
+  // session/update, the turn boundary and the {_burrow:"exit"} EOF arrive as
+  // domain events.
 }
 
 /** Lines from acp-req-{chatId}: blocking permission and user-input requests. */

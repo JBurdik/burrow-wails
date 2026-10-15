@@ -542,9 +542,9 @@ func codexRPCErrorMessage(msg map[string]any) string {
 	return "The Codex app-server rejected the request without an error message."
 }
 
-// finishCodexTurn turns a terminal Codex notification into the prompt response
-// consumed by AgentChat.  Codex completes turns by notification, unlike ACP's
-// request/response session/prompt API.
+// finishCodexTurn turns a terminal Codex notification into the turn boundary.
+// Codex completes turns by notification, unlike ACP's request/response
+// session/prompt API.
 func (a *App) finishCodexTurn(chatID string, sess *acpSession, emit func(any), failure string) {
 	sess.mu.Lock()
 	rpc := sess.pendingTurn
@@ -566,20 +566,31 @@ func (a *App) finishCodexTurn(chatID string, sess *acpSession, emit func(any), f
 				"messageId":     "codex-runtime-error",
 				"content":       map[string]any{"text": "Codex error: " + failure},
 			}}})
-		// The error bubble above is a text delta, which is normally evidence of
-		// a running turn. Apply the terminal failure after it so the server phase
-		// cannot be regressed back to running by its own diagnostic message.
-		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookError, Detail: failure})
-	} else {
-		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookDone})
 	}
-	emit(map[string]any{"id": rpc, "result": map[string]any{}})
+	// The turn boundary, after the error bubble: that bubble is a text delta —
+	// evidence of a running turn — so the failure has to land after it or the
+	// phase would be regressed back to running by its own diagnostic.
+	emit(acpTurnEnd(failure))
+}
+
+// acpTurnEnd is Burrow's own turn-boundary marker on the ACP channel, read as
+// turn.completed / turn.failed (NormalizeAcpLine), which settles the phase
+// and every client's spinner. Go emits it because only Go knows which
+// response or notification ended the turn: the rpc id of a session/prompt or
+// Codex turn/start now never leaves the runtime.
+func acpTurnEnd(failure string) map[string]any {
+	m := map[string]any{"_burrow": "turn"}
+	if failure != "" {
+		m["error"] = failure
+	}
+	return m
 }
 
 // settleAcpPrompt ends the turn when the response to its own session/prompt
-// arrives. NormalizeAcpLine cannot do this — it is stateless, and any other
-// response (a mode switch, a session list) must not end the turn — but the
-// session knows which rpc id it sent.
+// arrives, by emitting the turn-boundary marker after it. NormalizeAcpLine
+// cannot do this — it is stateless, and any other response (a mode switch, a
+// session list) must not end the turn — but the session knows which rpc id it
+// sent.
 func (a *App) settleAcpPrompt(chatID string, sess *acpSession, msg map[string]any) {
 	id, _ := msg["id"].(float64)
 	sess.mu.Lock()
@@ -591,20 +602,17 @@ func (a *App) settleAcpPrompt(chatID string, sess *acpSession, msg map[string]an
 	if !match {
 		return
 	}
-	a.applyChatPhase(chatID, acpPromptOutcome(msg))
-}
-
-// acpPromptOutcome maps a session/prompt response onto the phase event that
-// settles its turn: a JSON-RPC error fails it, stopReason "cancelled" is the
-// user's interrupt, anything else completed.
-func acpPromptOutcome(msg map[string]any) agentphase.Event {
+	failure := ""
 	if e := mapField(msg["error"]); e != nil {
-		return agentphase.Event{Kind: agentphase.HookError, Detail: strField(e["message"])}
+		failure = firstNonEmpty(strField(e["message"]), "the agent rejected the prompt")
+	} else if strField(mapField(msg["result"])["stopReason"]) == "cancelled" {
+		// The user's interrupt: idle first, so the boundary below reads as a
+		// cancelled turn (applyChatPhase drops a turn end on an idle chat).
+		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.Interrupt})
 	}
-	if strField(mapField(msg["result"])["stopReason"]) == "cancelled" {
-		return agentphase.Event{Kind: agentphase.Interrupt}
+	if line, err := json.Marshal(acpTurnEnd(failure)); err == nil {
+		a.emitChatLine(chatID, "acp-data", string(line))
 	}
-	return agentphase.Event{Kind: agentphase.HookDone}
 }
 
 func (a *App) applyChatPhase(chatID string, event agentphase.Event) {
@@ -669,8 +677,11 @@ func codexErrorMessage(params map[string]any) string {
 	return "The Codex app-server ended the turn without an error message."
 }
 
-// emitSession hands the frontend the one line its selectors populate from.
+// emitSession hands the frontend the one line its selectors populate from,
+// and records the session / thread id on the chat row: the next start resumes
+// it with no client involved (the Claude twin is observeClaudeLine).
 func (a *App) emitSession(chatID, sessionID string, modes any, configOptions any) {
+	a.recordChatSessionID(chatID, sessionID)
 	if configOptions == nil {
 		configOptions = []any{}
 	}

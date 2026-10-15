@@ -375,35 +375,14 @@ var remoteAllowed = map[string]remoteCmd{
 	"claude_abort": {Method: "ClaudeAbort", Args: []string{"id"}, Scope: scopeOrchOperate},
 
 	// ACP / Codex — the Go bridge owns the JSON-RPC handshake and emits
-	// acp-data-<id> / acp-req-<id> under the frontend's chat id.
-	//
-	// AcpStart takes a single Go struct argument (AcpStartOpts), unlike every
-	// other entry here which is scalar positional args — core.ts assembles
-	// that struct client-side from a flat args object. There is no way to
-	// spread a struct's fields across multiple table entries for one Go
-	// parameter (the arity test requires exactly one Args name for one Go
-	// param), so the wire carries the whole options object under a single
-	// key. This is the one call in this table I could not port as a literal
-	// 1:1 transcription of core.ts's argument list.
-	//
-	// NOTE for Task 3's client: callApp's number->string coercion only looks
-	// at TOP-LEVEL args named in Args — here that's "opts" itself, not the
-	// fields nested inside it. AcpStartOpts.ID is a string, and core.ts:160
-	// does String(args.id) before nesting it into the object it passes to
-	// App.AcpStart. A caller that sends {"opts":{"id":3,...}} (a bare numeric
-	// id, unstringified) will fail to unmarshal, because the coercion never
-	// reaches inside the object. Whoever builds the opts payload must
-	// stringify id itself, same as core.ts already does.
-	"acp_start":         {Method: "AcpStart", Args: []string{"opts"}, Scope: scopeOrchOperate},
-	"codex_start":       {Method: "CodexStart", Args: []string{"id", "cwd", "env", "resumeSessionId"}, Scope: scopeOrchOperate},
-	"acp_send":          {Method: "AcpSend", Args: []string{"id", "text", "images"}, Scope: scopeOrchOperate},
-	"codex_send":        {Method: "CodexSend", Args: []string{"id", "text", "images"}, Scope: scopeOrchOperate},
+	// acp-data-<id> / acp-req-<id> under the frontend's chat id. Starting and
+	// prompting are chat_send's (the chat runtime); what stays is the view's
+	// own selector pushes, history picker and explicit stop.
 	"acp_set_mode":      {Method: "AcpSetMode", Args: []string{"id", "modeId"}, Scope: scopeOrchOperate},
 	"acp_set_config":    {Method: "AcpSetConfig", Args: []string{"id", "configId", "value"}, Scope: scopeOrchOperate},
 	"acp_list_sessions": {Method: "AcpListSessions", Args: []string{"id", "cwd"}, Scope: scopeOrchOperate},
 	"acp_stop":          {Method: "AcpStop", Args: []string{"id"}, Scope: scopeOrchOperate},
 	"codex_stop":        {Method: "CodexStop", Args: []string{"id"}, Scope: scopeOrchOperate},
-	"codex_interrupt":   {Method: "CodexInterrupt", Args: []string{"id"}, Scope: scopeOrchOperate},
 	// CodexListModels spawns `codex app-server` to probe the model catalog
 	// (acp.go) — a host process spawn, so operate scope, not read, matching
 	// the generate_* calls above for the same reason.
@@ -469,7 +448,6 @@ var remoteAllowed = map[string]remoteCmd{
 	"search_chats":           {Method: "SearchChats", Args: []string{"query", "limit"}, Scope: scopeOrchRead},
 	"delete_chat_messages":   {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"publish_chat_note":      {Method: "PublishChatNote", Args: []string{"chatId", "note"}, Scope: scopeOrchOperate},
-	"publish_subagent_row":   {Method: "PublishSubagentRow", Args: []string{"parentChatId", "chatId", "task", "agentName"}, Scope: scopeOrchOperate},
 
 	// App config file
 	"read_config":  {Method: "ReadConfig", Args: nil, Scope: scopeOrchRead},
@@ -550,8 +528,13 @@ var remoteAllowed = map[string]remoteCmd{
 var remoteDenied = map[string]string{
 	// Superseded by chat_send: a client building its own start payload is how
 	// three copies of it drifted apart (docs/plans/006-chat-runtime.md).
-	"ClaudeStart": "a chat's process is the chat runtime's to start, from the row's launch settings — use chat_send",
-	"ClaudeSend":  "sending to a process the caller did not start fails after a reap — use chat_send, which ensures the process",
+	"ClaudeStart":    "a chat's process is the chat runtime's to start, from the row's launch settings — use chat_send",
+	"ClaudeSend":     "sending to a process the caller did not start fails after a reap — use chat_send, which ensures the process",
+	"AcpStart":       "a chat's process is the chat runtime's to start, from the row's provider and launch settings — use chat_send",
+	"CodexStart":     "a chat's process is the chat runtime's to start, from the row's provider and launch settings — use chat_send",
+	"AcpSend":        "the turn boundary is the runtime's to emit, and a send must ensure the process — use chat_send",
+	"CodexSend":      "the turn boundary is the runtime's to emit, and a send must ensure the process — use chat_send",
+	"CodexInterrupt": "falls back to a restart only through the runtime — use chat_interrupt",
 
 	// LocalEndpoint issues the single-use ticket that authorizes a /v2/ws
 	// connection in the first place. Being in-process (a Wails binding) IS

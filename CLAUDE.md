@@ -123,28 +123,37 @@ resolves them + profile (`providers`) + project `claude_config_dir` into Claude 
 
 ### Chat runtime (`src-wails/chatruntime.go`, `chatspawn.go`, `src/lib/chatRuntime.ts`)
 
-A **claude-cli** chat's process is Go's, keyed by chat id — no mounted view needed (`spawn`, the phone,
-`chat_send` all work with the desktop closed). `chat_send` **ensures the process itself** (start from the row
-+ resume `claude_session_id`, which Go now captures from `system/init`; covers a send after `ReapIdle`), then
-sends; a per-chat lock makes concurrent ensures one start. `chat_restart` / `chat_interrupt` (Claude
-`interrupt` control request, restart fallback) / `chat_clear` (wipe `chat_messages` + `chat_stream` +
+Every chat's process is Go's, keyed by chat id — **all three transports** (claude-cli, Codex app-server,
+generic ACP); no mounted view needed (`spawn`, the phone, `chat_send` all work with the desktop closed).
+`chat_send` **ensures the process itself** (start from the row + resume `claude_session_id` — Go captures it
+from Claude `system/init` and from the ACP/Codex handshake; covers a send after `ReapIdle`), then sends; a
+per-chat lock makes concurrent ensures one start. Codex/ACP resolve the row's `agent_kind` as a provider
+instance (`resolveRPCLaunch`: binary, `transportArgs`, env, project `env_file` / `claude_config_dir`) and
+then push the row's model / effort / permission mode into the fresh session — the **mode fails closed**
+(Codex starts every thread in Auto). `chat_restart` / `chat_interrupt` (Claude
+`interrupt` control request; Codex `turn/interrupt` + a 5 s still-running check; ACP and every refusal →
+restart) / `chat_clear` (wipe `chat_messages` + `chat_stream` +
 session id) all publish **`session.reset`** (stream kind `chat-runtime`, `{cleared}` for clear); the
 `chatSession` reducer — same branch as `session.exited` — drops every pending request, closes the partial,
-clears busy. `chat_set_launch_settings(id, patch)` writes the row and applies live via confirmed
-`set_model` / `set_permission_mode` control requests, else restarts (`row_only` = record only). Process
-starter is the `chatProcs` interface (`agentproc.Manager` / test fake). `claude_start`/`claude_send` are in
-`remoteDenied`; `remote_create_chat` (Claude) only creates the row. **Codex / generic ACP are not on the
-runtime yet** (PR4): `src/lib/chatRuntime.ts` `sendToChat` is the one frontend door that dispatches on
-transport, and their processes still start from AgentChat, which is why `SubAgentHost.vue` and the
-`pendingSubagentPrompts` handover are still there.
+clears busy. `chat_set_launch_settings(id, patch)` writes the row and applies live — Claude via confirmed
+`set_model` / `set_permission_mode` control requests, Codex/ACP via `AcpSetConfig` / `AcpSetMode` — else
+restarts (`row_only` = record only). Process starters: `chatProcs` (`agentproc.Manager` / test fake) and
+`App.rpcStarter` (nil = real `CodexStart`/`AcpStart`; tests register a session over a buffer).
+`claude_start`/`claude_send`/`acp_start`/`codex_start`/`acp_send`/`codex_send`/`codex_interrupt` are in
+`remoteDenied`; `remote_create_chat` only creates the row (Claude and Codex). **An ACP/Codex turn ends on a
+Go-emitted `{"_burrow":"turn"[,"error"]}` marker** (→ `turn.completed` / `turn.failed`), written after the
+response to the runtime's own `session/prompt` or Codex's terminal turn notification — the rpc id never
+leaves Go, so there is no client-side prompt correlation any more.
 
 **`spawn` of a thread's sub-agent runs in Go** (`spawnSubagent`, `control.Deps.ChatRuntime`): profile
 (defaults duplicated from `subagentProfiles.ts`, test-guarded) → agent (arg / profile / parent's / default
-chat agent / first enabled) → row with launch settings (arg / profile / parent's) → `ChatSend(task)`. A
-non-claude agent returns *unhandled* and the UI path does it. The parent's transcript row is Go's: a
-`chat-note` row (`subagentChatId`/`subagentAgent`) in the **parent's** `chat_stream` (`publishSubagentRow`;
-the UI path calls `publish_subagent_row`), projected as `message.note`. The Right Panel's button reaches the same code via
-`spawn_subagent_chat`. Top-level chat and tab spawns stay UI.
+chat agent / first enabled) → row with launch settings (arg / profile / the parent's **when it runs on the
+same transport**) → `ChatSend(task)`, every transport. The parent's transcript row is Go's: a `chat-note`
+row (`subagentChatId`/`subagentAgent`) in the **parent's** `chat_stream` (`publishSubagentRow`), projected as
+`message.note`. The Right Panel's button reaches the same code via `spawn_subagent_chat`. Top-level chat and
+tab spawns stay UI. There is no hidden host mounting sub-agents any more: a child's view mounts only when
+the Right Panel shows it, and a permission request from a chat with **no session in the registry** is
+toasted by `chatAttention` off its `waiting_*` phase.
 
 Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatTurns`,
 `chatPermissionRules`. Phone-created chats are titled `Chat N (phone)`.
@@ -162,9 +171,9 @@ goes through the one `respond(PendingAnswer)` door, which also closes a generic 
 only Codex sends `serverRequest/resolved` — a running turn or pending permission keeps
 streaming behind an unmounted view). That's what lets chat leaves render with `v-if`. **The interface is
 closed**: `ChatSession` hands every ref back `Readonly` (writable `SessionState` is module-private) plus
-intents — `notice`, `postUserMessage`/`startTurn`/`failTurn`, `runtimeReset` (the same settlement as a
-`session.reset` event, for Codex/ACP restarts the view still drives until PR4), `suppressDoneToast`,
-`requestContextReport`, `hydrate`, … — so nothing outside can break the idle invariant. The turn clock
+intents — **`send` / `restart` / `interrupt` / `clear`** (forward to `chat_*`; the one door for AgentChat,
+the queue drain via `ChatViewHooks.send`), `notice`, `suppressDoneToast`, `requestContextReport`,
+`hydrate`, … — so nothing outside can break the idle invariant. The turn clock
 (`turnStartedAt` → `turnMs`) is the session's too. Deps (`invoke`, `listen`, host) are injectable:
 `chatSession.test.ts` drives it **only** through that interface and fake listeners.
 
@@ -181,7 +190,7 @@ Claude stream-json and ACP JSON-RPC are parsed in **one** place (Go) and re-emit
 `AgentChat.onEvents` for scroll/notify/accounting); `LoadChatEventsSince` replays the log as events.
 
 **Deliberately still on the raw channel** (UI decisions, not transcript): the control/permission
-protocol, Claude `system/init`, the ACP handshake, `serverRequest/resolved`, `acpPromptRpcId`.
+protocol, Claude `system/init`, the ACP handshake, selector replies, `serverRequest/resolved`.
 `chat_messages` is still written by the frontend.
 
 ### PTY / Agent phase (`src-wails/internal/agentphase`, `phasestore.go`, `phasepoll.go`)

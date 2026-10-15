@@ -179,12 +179,10 @@ type ChatStopper interface {
 }
 
 // ChatRuntime starts and drives chat sub-agents in the host, with no client
-// attached (docs/plans/006-chat-runtime.md, decision 10). handled=false means
-// the resolved agent is not on the runtime yet (Codex/ACP until PR4) and the UI
-// still has to do it.
+// attached (docs/plans/006-chat-runtime.md, decision 10) — every transport.
 type ChatRuntime interface {
-	SpawnSubagent(req SpawnRequest) (res SpawnedChat, handled bool, err error)
-	SendToChat(chatID int64, text string) (handled bool, err error)
+	SpawnSubagent(req SpawnRequest) (SpawnedChat, error)
+	SendToChat(chatID int64, text string) error
 }
 
 // SpawnRequest is spawn's chat half, as the caller gave it.

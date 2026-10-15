@@ -64,10 +64,6 @@
         @close-panel="ui.rightPanelVisible = false"
         @open-project-config="showProjectConfig = true"
       />
-      <!-- Keeps every sub-agent's CLI alive for its whole life, independent of
-           whether the Right Panel is currently showing it — see the component
-           for why mounting is what starts a child. -->
-      <SubAgentHost />
     </div>
     <WorkspaceConfig
       v-if="showProjectConfig && ws.active"
@@ -129,7 +125,6 @@ import TitleBar from "@/components/TitleBar.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import Terminal from "@/components/Terminal.vue";
 import RightPanel from "@/components/RightPanel.vue";
-import SubAgentHost from "@/components/SubAgentHost.vue";
 import Dashboard from "@/components/Dashboard.vue";
 import Settings from "@/components/Settings.vue";
 import Spotlight from "@/components/Spotlight.vue";

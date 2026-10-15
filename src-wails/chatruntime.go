@@ -23,8 +23,8 @@ import (
 // every start reads the chat ROW (launch settings, claude_session_id) and
 // resolves it the same way (claudeLaunchFor), whoever asked.
 //
-// claude-cli only for now. Codex and generic ACP still start from the view
-// until PR4; ChatSend refuses them rather than guessing a start payload.
+// All three transports: claude-cli (agentproc), Codex app-server and generic
+// ACP (acp.go). Each starts from the row the same way whoever asked.
 
 type chatRuntime struct {
 	locks sync.Map // chat id string → *sync.Mutex
@@ -76,6 +76,18 @@ func chatIsClaude(c Chat) bool {
 	return c.Transport == "claude-cli" || (c.Transport == "" && (c.AgentKind == "" || c.AgentKind == "claude"))
 }
 
+// chatTransport is the runtime a row runs on: claude-cli, codex-app-server or
+// acp (an unknown non-Claude transport is driven as generic ACP).
+func chatTransport(c Chat) string {
+	switch {
+	case chatIsClaude(c):
+		return "claude-cli"
+	case c.Transport == "codex-app-server":
+		return c.Transport
+	}
+	return "acp"
+}
+
 func (a *App) ensureClaude(c Chat) error {
 	id := strconv.FormatInt(c.ID, 10)
 	if a.claudeMgr().Alive(id) {
@@ -85,31 +97,94 @@ func (a *App) ensureClaude(c Chat) error {
 	return a.startClaude(id, cwd, c.ClaudeSessionID, a.claudeLaunchFor(c, cwd))
 }
 
-// ChatSend is the one door for a prompt: it starts the process if there is
-// none (resuming the row's claude_session_id — also what makes a send after
-// agentproc.ReapIdle work) and then sends.
+// startRPC starts a Codex app-server or ACP adapter session and registers it
+// (acp.go). A field so tests can register a fake session instead of spawning.
+func (a *App) startRPC(opts AcpStartOpts, transport string) error {
+	if a.rpcStarter != nil {
+		return a.rpcStarter(opts, transport)
+	}
+	if transport == "codex-app-server" {
+		return a.CodexStart(opts.ID, opts.Cwd, opts.Env, opts.ResumeSessionID)
+	}
+	return a.AcpStart(opts)
+}
+
+// ensureRPC is ensureClaude for Codex / generic ACP: start from the row (its
+// provider instance, resumed thread/session), then push the row's model,
+// effort and permission mode into the fresh session — a start's defaults are
+// the adapter's, not the chat's. The view used to do this after its own start
+// (restoreAcpSelections, restoreSubagentCodexSettings); here it also happens
+// for a spawned sub-agent or a phone chat nobody is looking at.
+//
+// The permission mode is the one that fails closed: Codex starts every thread
+// in Auto, so a mode that does not apply would run the chat MORE permissively
+// than its row says. Model and effort are best-effort.
+func (a *App) ensureRPC(c Chat, transport string) error {
+	id := strconv.FormatInt(c.ID, 10)
+	if _, live := a.acpReg().get(id); live {
+		return nil
+	}
+	opts, err := a.rpcLaunchFor(c, transport, a.chatCwd(c))
+	if err != nil {
+		return err
+	}
+	if err := a.startRPC(opts, transport); err != nil {
+		return err
+	}
+	if c.Model != "" {
+		_, _ = a.AcpSetConfig(id, "model", c.Model)
+	}
+	if c.Effort != "" {
+		_, _ = a.AcpSetConfig(id, "effort", c.Effort)
+	}
+	if c.PermissionMode != "" {
+		if _, err := a.AcpSetMode(id, c.PermissionMode); err != nil {
+			_ = a.AcpStop(id)
+			return fmt.Errorf("set permission mode %q: %w", c.PermissionMode, err)
+		}
+	}
+	return nil
+}
+
+// ChatSend is the one door for a prompt, whatever the transport: it starts the
+// process if there is none (resuming the row's session — also what makes a
+// send after agentproc.ReapIdle work) and then sends.
 func (a *App) ChatSend(chatID int64, text string, images []string) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
 		return err
 	}
-	if !chatIsClaude(c) {
-		return fmt.Errorf("chat %d runs on %q, which the chat runtime does not start yet", chatID, c.Transport)
-	}
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
+	if t := chatTransport(c); t != "claude-cli" {
+		if err := a.ensureRPC(c, t); err != nil {
+			return fmt.Errorf("start %s: %w", t, err)
+		}
+		_, err := a.AcpSend(id, text, images)
+		return err
+	}
 	if err := a.ensureClaude(c); err != nil {
 		return fmt.Errorf("start claude: %w", err)
 	}
 	return a.ClaudeSend(id, text, c.ClaudeSessionID, images)
 }
 
-// stopAndReset stops the process (if any) and publishes the reset, so every
-// client drops its pending requests and spinner. Called with the chat lock.
-func (a *App) stopAndReset(id, marker string) {
+// stopProcess stops whichever runtime holds the chat id. By id, not by the
+// row's transport: an agent switch rewrites the row while the old process may
+// still be up.
+func (a *App) stopProcess(id string) {
 	if a.claudeMgr().Alive(id) {
 		_ = a.ClaudeStop(id) // also settles the phase (Interrupt)
 	}
+	if _, live := a.acpReg().get(id); live {
+		_ = a.AcpStop(id) // ditto
+	}
+}
+
+// stopAndReset stops the process (if any) and publishes the reset, so every
+// client drops its pending requests and spinner. Called with the chat lock.
+func (a *App) stopAndReset(id, marker string) {
+	a.stopProcess(id)
 	a.emitChatLine(id, chatRuntimeKind, marker)
 }
 
@@ -126,12 +201,23 @@ func (a *App) ChatRestart(chatID int64) error {
 	return nil
 }
 
-// ChatInterrupt ends the running turn but keeps the process: a Claude
-// `interrupt` control request. If the CLI does not confirm, it falls back to a
-// restart so the stop button is never a no-op. Either way the reset follows,
-// which drops whatever request the dead turn was blocked on.
+// codexInterruptGrace is how long an accepted Codex turn/interrupt may take to
+// end the turn before the runtime restarts the app-server instead.
+var codexInterruptGrace = 5 * time.Second
+
+// ChatInterrupt ends the running turn, keeping the process where the provider
+// can stop a turn in place:
+//   - Claude: an `interrupt` control request; unconfirmed → restart.
+//   - Codex: `turn/interrupt`; the turn then ends through its own
+//     turn/completed. Refused (no addressable turn yet) → restart; accepted but
+//     still running after codexInterruptGrace → restart.
+//   - generic ACP: restart.
+//
+// A restart always publishes the reset, which drops whatever request the dead
+// turn was blocked on. So does a Claude interrupt.
 func (a *App) ChatInterrupt(chatID int64) error {
-	if _, err := a.chatByID(chatID); err != nil {
+	c, err := a.chatByID(chatID)
+	if err != nil {
 		return err
 	}
 	id := strconv.FormatInt(chatID, 10)
@@ -141,13 +227,36 @@ func (a *App) ChatInterrupt(chatID int64) error {
 		if err := a.claudeControl(id, map[string]any{"subtype": "interrupt"}); err != nil {
 			_ = a.ClaudeStop(id)
 		}
+		a.emitChatLine(id, chatRuntimeKind, "reset")
+		return nil
 	}
-	a.emitChatLine(id, chatRuntimeKind, "reset")
+	if sess, live := a.acpReg().get(id); live && chatTransport(c) == "codex-app-server" {
+		if a.CodexInterrupt(id) == nil {
+			go a.restartIfStillRunning(chatID, sess)
+			return nil
+		}
+	}
+	a.stopAndReset(id, "reset")
 	return nil
 }
 
+// restartIfStillRunning is the interrupt's fallback: a Codex that accepted
+// turn/interrupt but never finished the turn gets restarted. Only the same
+// session counts — a restart in between already settled it.
+func (a *App) restartIfStillRunning(chatID int64, sess *acpSession) {
+	time.Sleep(codexInterruptGrace)
+	id := strconv.FormatInt(chatID, 10)
+	defer a.chatRT.lock(id)()
+	sess.mu.Lock()
+	running := sess.pendingTurn != 0
+	sess.mu.Unlock()
+	if cur, live := a.acpReg().get(id); live && cur == sess && running {
+		a.stopAndReset(id, "reset")
+	}
+}
+
 // ChatClear wipes the transcript (chat_messages + chat_stream), forgets the
-// Claude session so the next start is fresh, stops the process and tells every
+// agent session so the next start is fresh, stops the process and tells every
 // client. The client keeps only its own draft/images to drop.
 func (a *App) ChatClear(chatID int64) error {
 	if _, err := a.chatByID(chatID); err != nil {
@@ -155,9 +264,7 @@ func (a *App) ChatClear(chatID int64) error {
 	}
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
-	if a.claudeMgr().Alive(id) {
-		_ = a.ClaudeStop(id)
-	}
+	a.stopProcess(id)
 	if err := a.DeleteChatMessages(int(chatID)); err != nil {
 		return err
 	}
@@ -183,10 +290,11 @@ type LaunchSettingsPatch struct {
 }
 
 // ChatSetLaunchSettings writes the row, then applies the change to a live
-// process where Claude can take it in place (set_model, set_permission_mode —
-// confirmed by the CLI, not assumed); anything else, or a refusal, restarts so
-// the next send starts with the new settings. A cold chat just has its row
-// updated: every start reads it.
+// process where the provider can take it in place — Claude set_model /
+// set_permission_mode (confirmed by the CLI, not assumed), Codex / ACP through
+// applyRPCSettings; anything else, or a refusal, restarts so the next send
+// starts with the new settings. A cold chat just has its row updated: every
+// start reads it.
 func (a *App) ChatSetLaunchSettings(chatID int64, patch LaunchSettingsPatch) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
@@ -205,8 +313,8 @@ func (a *App) ChatSetLaunchSettings(chatID int64, patch LaunchSettingsPatch) err
 	}
 	model := set("model", patch.Model, c.Model)
 	perm := set("permission_mode", patch.PermissionMode, c.PermissionMode)
-	other := set("effort", patch.Effort, c.Effort)
-	other = set("profile_id", patch.ProfileID, c.ProfileID) || other
+	effort := set("effort", patch.Effort, c.Effort)
+	other := set("profile_id", patch.ProfileID, c.ProfileID)
 	other = set("append_system_prompt", patch.AppendSystemPrompt, c.AppendSystemPrompt) || other
 	if len(sets) == 0 {
 		return nil
@@ -217,10 +325,17 @@ func (a *App) ChatSetLaunchSettings(chatID int64, patch LaunchSettingsPatch) err
 	}
 	busEmit("chats-changed", nil)
 
-	if patch.RowOnly || !chatIsClaude(c) || !a.claudeMgr().Alive(id) {
+	if patch.RowOnly {
 		return nil
 	}
-	live := !other
+	if !chatIsClaude(c) {
+		a.applyRPCSettings(id, patch, other)
+		return nil
+	}
+	if !a.claudeMgr().Alive(id) {
+		return nil
+	}
+	live := !other && !effort // Claude has no live effort control
 	if live && model {
 		m := *patch.Model
 		if m == "" || !strings.HasPrefix(m, "claude-") {
@@ -238,6 +353,45 @@ func (a *App) ChatSetLaunchSettings(chatID int64, patch LaunchSettingsPatch) err
 		a.stopAndReset(id, "reset")
 	}
 	return nil
+}
+
+// applyRPCSettings is ChatSetLaunchSettings' live half for Codex / ACP: model
+// and effort through AcpSetConfig (Codex stashes them for the next turn/start,
+// an ACP adapter switches in place), the mode through AcpSetMode. A profile or
+// system-prompt change, or a mode the session refuses, restarts — the next
+// start applies the row (ensureRPC). A cold chat has nothing to apply.
+func (a *App) applyRPCSettings(id string, patch LaunchSettingsPatch, restart bool) {
+	if _, live := a.acpReg().get(id); !live {
+		return
+	}
+	if !restart && patch.Model != nil && *patch.Model != "" {
+		_, _ = a.AcpSetConfig(id, "model", *patch.Model)
+	}
+	if !restart && patch.Effort != nil && *patch.Effort != "" {
+		_, _ = a.AcpSetConfig(id, "effort", *patch.Effort)
+	}
+	if !restart && patch.PermissionMode != nil && *patch.PermissionMode != "" {
+		_, err := a.AcpSetMode(id, *patch.PermissionMode)
+		restart = err != nil
+	}
+	if restart {
+		a.stopAndReset(id, "reset")
+	}
+}
+
+// recordChatSessionID puts the agent's session / thread id on the row, where
+// every start reads its resume target.
+func (a *App) recordChatSessionID(id, sessionID string) {
+	chatID := chatIDOf(id)
+	if chatID <= 0 || sessionID == "" || a.db == nil {
+		return
+	}
+	res, err := a.db.Exec(`UPDATE chats SET claude_session_id = ? WHERE id = ? AND claude_session_id != ?`, sessionID, chatID, sessionID)
+	if err == nil {
+		if n, _ := res.RowsAffected(); n > 0 {
+			busEmit("chats-changed", nil)
+		}
+	}
 }
 
 // claudeControlTimeout bounds a control request. A CLI that never answers is
@@ -304,16 +458,7 @@ func (a *App) observeClaudeLine(id, line string) {
 	}
 	switch {
 	case ev.Type == "system" && ev.Subtype == "init" && ev.SessionID != "":
-		chatID := chatIDOf(id)
-		if chatID <= 0 || a.db == nil {
-			return
-		}
-		res, err := a.db.Exec(`UPDATE chats SET claude_session_id = ? WHERE id = ? AND claude_session_id != ?`, ev.SessionID, chatID, ev.SessionID)
-		if err == nil {
-			if n, _ := res.RowsAffected(); n > 0 {
-				busEmit("chats-changed", nil)
-			}
-		}
+		a.recordChatSessionID(id, ev.SessionID)
 	case ev.Type == "control_response":
 		r := &a.chatRT
 		r.ctrlMu.Lock()

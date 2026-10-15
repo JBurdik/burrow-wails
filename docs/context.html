@@ -157,7 +157,7 @@
       <h3>Right Panel — Sub-agents</h3>
       <ul>
         <li>A thread's child chats (spawned via <code>spawn --target chat</code>, one level deep) plus its Task-tool calls, scoped to whichever chat is active</li>
-        <li>Mounting is <strong>not</strong> owned by the panel: <code>src/components/SubAgentHost.vue</code>, mounted once in <code>App.vue</code>, keeps one always-on hidden <code>AgentChat</code> per child of every open workspace, so closing the panel never restarts a child's CLI process</li>
+        <li>A child's process is the Go chat runtime's (<code>src-wails/chatruntime.go</code>), every transport: the panel mounts a child's <code>AgentChat</code> only to show it, and closing the panel never stops a child. A permission request from a child nobody has open is toasted by <code>chatAttention</code> off its phase</li>
         <li>The panel renders an empty <code>#subagent-slot</code> and <code>&lt;Teleport&gt;</code>s the selected child's already-running instance into it — opening the panel is a view change, not a process start</li>
         <li>A clickable row in the parent transcript (a "Spawned sub-agent…" marker) opens the panel straight to that child; each child row carries a live phase dot from <code>phase-chat:{id}</code> — the first frontend consumer of the chat phase</li>
         <li>A manual "spawn a sub-agent" dialog in the panel goes through the same <code>spawn</code> verb an agent's own CLI call would</li>

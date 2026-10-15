@@ -59,7 +59,9 @@ three times over (`restartClaude`, `clearChat`, `ensureRuntime`), each with its 
 resume id; one swallowed errors), plus copies in the phone store and `RemoteCreateChat`. A
 spawn therefore needed a desktop: `SubAgentHost.vue` mounted hidden chats just to start
 processes, and `claudeChats.ts` carried a prompt handover for the race in between. Now every
-start reads the row through `claudeLaunchFor`, whoever asked.
+start reads the row — `claudeLaunchFor` for Claude, `rpcLaunchFor` for Codex and generic ACP
+(the row's `agent_kind` resolved as a provider instance, as `acpStartPayload` used to in the
+view) — whoever asked.
 
 - **`ChatSend` ensures, then sends.** No separate "start" for callers to forget: a cold chat,
   or one `agentproc.ReapIdle` took back, starts with `--resume <claude_session_id>`. Go
@@ -74,16 +76,32 @@ start reads the row through `claudeLaunchFor`, whoever asked.
   `interrupt` are control requests whose `control_response` Go waits for (5 s); a refusal
   or silence restarts instead. Assuming success would leave a chat in a *more* permissive
   mode than the picker shows if the CLI refused a stricter one.
+- **Codex / ACP start from the row, then take the row's settings.** A fresh app-server or
+  adapter session runs on its own defaults, so `ensureRPC` pushes the row's model, effort
+  and permission mode (`AcpSetConfig` / `AcpSetMode`) before the first prompt. The mode
+  **fails closed** — Codex starts every thread in Auto, so a mode that does not apply would
+  run the chat more permissively than its row says; model and effort are best-effort.
+- **The ACP / Codex turn boundary is Go's.** Only the sender knows which JSON-RPC response
+  ends a turn (the one to its own `session/prompt`; Codex ends a turn by notification). The
+  view used to hold that rpc id (`acpPromptRpcId`); with the runtime sending, it never
+  leaves Go, so Go writes `{"_burrow":"turn"[,"error"]}` after it and the normalizer reads it
+  as `turn.completed` / `turn.failed` — which also settles the phone, the phase and the Go
+  fold the same way the Claude `result` does.
+- **Interrupt in place where the provider can.** Claude: `interrupt` control request.
+  Codex: `turn/interrupt`, and if the same session is still mid-turn after 5 s, a restart.
+  Generic ACP and every refusal: a restart.
 - **Test seam:** `chatProcs` (agents.go) — `*agentproc.Manager` or the fake in
-  `chatruntime_test.go`.
-- **Not yet:** Codex and generic ACP (plan PR4). `src/lib/chatRuntime.ts` is already the
-  one frontend door (`sendToChat` dispatches on transport), so moving them is a Go change.
+  `chatruntime_test.go` — and `App.rpcStarter`, which the tests point at a session over a
+  buffer so they can read what the runtime wrote.
 
 `spawn` with a parent thread runs in Go (`chatspawn.go`): profile → agent → row with launch
 settings (else the parent's) → `ChatSend`. The parent's transcript row is written by Go
 into the **parent's** `chat_stream` as a `chat-note` row carrying `subagentChatId` /
-`subagentAgent` (`publishSubagentRow`; a UI-spawned Codex/ACP child goes through
-`publish_subagent_row`), so it needs no client and replays after a restart. The old path —
+`subagentAgent` (`publishSubagentRow`), so it needs no client and replays after a restart.
+Every transport spawns here, so `SubAgentHost.vue` (hidden views kept mounted only to start
+processes) and the prompt handover are gone; the one thing it still gave — a permission
+toast for a child nobody has open — comes from `chatAttention`, off the child's
+`waiting_*` phase, when no session in the registry would raise it. The old path —
 the UI read-modify-writing the parent's `chat_messages` — raced the parent's own save.
 
 **`parent_chat_id` is what makes a sub-agent belong to a thread rather than sit beside
@@ -214,8 +232,9 @@ what `replayChatStream()` uses.
 
 **Still on the raw channel, deliberately** — these are UI decisions, not
 transcript: the control/permission protocol, Claude `system/init`, the ACP
-handshake (`modes`/`configOptions`), `serverRequest/resolved`, and the
-`acpPromptRpcId` correlation that settles an ACP turn. `chat_messages` is also
+handshake (`modes`/`configOptions`) and selector replies, and `serverRequest/resolved`.
+(The ACP turn end used to be here too — the view correlated `acpPromptRpcId`; it is a Go
+marker now, see the chat runtime.) `chat_messages` is also
 still written by the frontend; making Go its sole writer is fáze 7 in the plan
 and has a real prerequisite (the transcript mixes stream-derived messages with
 client-authored ones).
@@ -365,7 +384,6 @@ the PTY keeps running server-side for the next reattach) and `send_float_snapsho
 over `runtime.EventsEmit`, which only the native window ever receives, or serve the
 removed float-window feature outright) — plus a few cases that reshape args before
 forwarding (`list_pty_sessions` normalizes daemon ids into session records,
-`acp_start` nests flat call-site args into the one Go struct parameter the table names,
 `save_chat_messages` restores the `foldedOrd ?? -1` sentinel the old switch supplied).
 
 **`remoteapi.go`'s `remoteAllowed`** is the security boundary: wire command name → `App`

@@ -98,9 +98,9 @@ func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, err
 	return cwd, nil
 }
 
-// RemoteCreateChat creates a chat. A Claude chat is only a row with its launch
-// settings — the process starts on the first chat_send (chatruntime.go); a
-// Codex chat still starts here until it moves into the chat runtime too.
+// RemoteCreateChat creates a chat: a row with its launch settings and nothing
+// else. Its process starts on the first chat_send (chatruntime.go), from the
+// row, for Claude and Codex alike.
 //
 // The long warning that used to sit here is obsolete: the id comes from the
 // database, so it cannot be reissued to somebody else, and no other client's
@@ -109,21 +109,11 @@ func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, err
 // database now owns, and its own comment admitted it never closed the real
 // one.
 //
-// Claude and Codex only: a plain-ACP session (gemini, opencode, a custom
-// adapter) needs command/args/configDir resolved from provider config that
-// today only exists in AgentChat.vue's acpStartPayload(). Codex is exempt —
-// CodexStart (acp.go) resolves its own binary and needs nothing beyond
-// cwd, exactly like ClaudeStart.
+// Claude and Codex only — the two providers the phone's composer offers.
 //
-// model/effort/permissionMode come straight from WelcomeView's composer. For
-// Claude they are the row's launch settings, read by every start. Codex takes
-// no model/effort/mode at start (a fresh thread is always in its own Auto
-// default), so they are applied as a follow-up via AcpSetConfig/AcpSetMode
-// once the thread exists. model/effort are best-effort there; permissionMode
-// is not, because Auto is more permissive than most of the composer's other
-// modes and swallowing a failed mode change would fail OPEN. codexModeSettings
-// (acp.go) aliases Claude's own permissionMode ids, so the SAME composer value
-// works for both agents.
+// model/effort/permissionMode come straight from WelcomeView's composer.
+// codexModeSettings (acp.go) aliases Claude's own permissionMode ids, so the
+// SAME composer value works for both agents.
 func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, permissionMode string) (map[string]any, error) {
 	if agentKind != "claude" && agentKind != "codex" {
 		return nil, fmt.Errorf("remote chat creation only supports claude and codex (got %q)", agentKind)
@@ -132,8 +122,7 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 	// Resolve and validate the workspace BEFORE creating anything, so an
 	// invalid request never leaves a row behind.
 	names, paths := a.workspaceLabels()
-	cwd, err := resolveWorkspaceCwd(paths, workspaceID)
-	if err != nil {
+	if _, err := resolveWorkspaceCwd(paths, workspaceID); err != nil {
 		return nil, err
 	}
 
@@ -151,8 +140,16 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 	transport := "claude-cli"
 	if agentKind == "codex" {
 		transport = "codex-app-server"
+		// Checked here rather than at the first send: Codex starts every thread
+		// in Auto, so a mode it cannot take must not even produce a chat
+		// (ensureRPC fails closed on it too).
+		if _, _, _, ok := codexModeSettings(permissionMode); permissionMode != "" && !ok {
+			return nil, fmt.Errorf("unsupported Codex permission mode %q", permissionMode)
+		}
 	}
 
+	// Launch settings live on the row for every transport; the process starts
+	// on the first chat_send (the chat runtime), not here.
 	chat, err := a.CreateChat(Chat{
 		WorkspaceID: workspaceID,
 		// The " (phone)" is not decoration. The desktop names chats
@@ -164,63 +161,14 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 		AgentKind:      agentKind,
 		Transport:      transport,
 		Model:          model,
+		Effort:         effort,
+		PermissionMode: permissionMode,
 		LastActivityAt: time.Now().UnixMilli(),
-		// Claude's launch settings live on the row; its process starts on the
-		// first chat_send. Codex still takes them as a follow-up below (PR4).
-		Effort:         claudeOnly(agentKind, effort),
-		PermissionMode: claudeOnly(agentKind, permissionMode),
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	id := fmt.Sprint(chat.ID)
-	if agentKind == "codex" {
-		if err := a.CodexStart(id, cwd, nil, ""); err != nil {
-			// Roll the row back. A chat whose CLI never started is a ghost in
-			// both sidebars that can only be removed by hand — and under
-			// config.json that is exactly what a failed start used to leave.
-			if delErr := a.DeleteChat(chat.ID); delErr != nil {
-				return nil, fmt.Errorf("start codex: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
-			}
-			return nil, fmt.Errorf("start codex: %w", err)
-		}
-		// model/effort are genuinely best-effort: AcpSetConfig only ever
-		// stashes them as local session state (sess.model/sess.effort) for
-		// Codex, so the only way it can fail post-CodexStart is "adapter not
-		// running" — which cannot happen right after a successful start,
-		// since the session is registered before CodexStart returns.
-		if model != "" {
-			_, _ = a.AcpSetConfig(id, "model", model)
-		}
-		if effort != "" {
-			_, _ = a.AcpSetConfig(id, "effort", effort)
-		}
-		// permissionMode is NOT best-effort: CodexStart's own startParams
-		// always launch the thread in Auto (workspace-write, auto-reviewed),
-		// which is more permissive than most of the composer's other modes
-		// (Supervised/Plan are read-only). Swallowing a failure here would
-		// silently hand back a chat running MORE permissively than what the
-		// user explicitly asked for — a fail-open, not a narrowing — so a
-		// failed mode change is treated exactly like a failed CodexStart.
-		if permissionMode != "" {
-			if _, err := a.AcpSetMode(id, permissionMode); err != nil {
-				if delErr := a.DeleteChat(chat.ID); delErr != nil {
-					return nil, fmt.Errorf("set codex permission mode: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
-				}
-				return nil, fmt.Errorf("set codex permission mode: %w", err)
-			}
-		}
-	}
-
 	return remoteChatShape(chat, names, paths), nil
-}
-
-func claudeOnly(agentKind, v string) string {
-	if agentKind == "claude" {
-		return v
-	}
-	return ""
 }
 
 // RemoteSetChatTitle upgrades a chat's title from the phone — first the cheap

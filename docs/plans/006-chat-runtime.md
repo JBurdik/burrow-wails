@@ -64,3 +64,15 @@ copies. Because the process starts from a mounted view, `spawn` (chat target goe
 | PR4 | Codex + generic ACP into the runtime; `RemoteCreateChat` without its own `CodexStart` | yes |
 
 Each PR targets `beta`, mergeable on its own. Keep `CLAUDE.md` / `docs/architecture.md` in sync.
+
+## Status
+
+- PR1 #24, PR2 #25, PR3 #26: done (stacked). PR2 kept `SubAgentHost` and the prompt handover
+  for Codex/ACP; PR3 left the session-level `send`/`restart`/`clear`/`interrupt` for PR4.
+- PR4: Codex + generic ACP run in `chatruntime.go` (`ensureRPC` / `resolveRPCLaunch`, row
+  settings pushed after start, mode fails closed); the ACP/Codex turn boundary is a Go-emitted
+  `_burrow:"turn"` marker instead of the view's `acpPromptRpcId`; `ChatSession` has
+  `send`/`restart`/`interrupt`/`clear`; `spawn` handles every transport, so `SubAgentHost.vue`,
+  the prompt handover, `publish_subagent_row` and `sendToChat` are deleted;
+  `RemoteCreateChat` only creates the row; `acp_start`/`codex_start`/`acp_send`/`codex_send`/
+  `codex_interrupt` are in `remoteDenied`.

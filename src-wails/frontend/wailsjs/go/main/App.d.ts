@@ -231,8 +231,6 @@ export function PtySince(arg1:string,arg2:number):Promise<main.ptyChunk>;
 
 export function PublishChatNote(arg1:string,arg2:string):Promise<void>;
 
-export function PublishSubagentRow(arg1:number,arg2:number,arg3:string,arg4:string):Promise<void>;
-
 export function ReadClaudeActivity(arg1:string,arg2:string):Promise<string>;
 
 export function ReadClaudeTranscript(arg1:string,arg2:string):Promise<Array<string>>;

@@ -432,6 +432,13 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 			return []ProviderRuntimeEvent{{Type: EvtSessionID, SessionID: id}}
 		}
 		return nil
+	case "turn":
+		// The runtime's turn boundary (acpTurnEnd): the response to our own
+		// session/prompt, or Codex's terminal turn notification.
+		if e := strField(msg["error"]); e != "" {
+			return []ProviderRuntimeEvent{{Type: EvtTurnFailed, Message: e}}
+		}
+		return []ProviderRuntimeEvent{{Type: EvtTurnCompleted}}
 	case "exit":
 		// Deliberately NOT a turn boundary, unlike the native transport: an ACP
 		// turn is settled by the response to its own session/prompt, and the
@@ -445,10 +452,10 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 		return []ProviderRuntimeEvent{{Type: EvtRequestResolved, RequestID: rpcIDString(mapField(msg["params"])["requestId"])}}
 	}
 	if strField(msg["method"]) != "session/update" {
-		// A JSON-RPC response also settles a turn — but only the one answering
-		// the session/prompt that opened it, and that correlation lives with
-		// whoever sent it (acpPromptRpcId). Guessing "any response ends the
-		// turn" here would settle a turn on an unrelated reply.
+		// A JSON-RPC response settles a turn only when it answers the
+		// session/prompt that opened it; the runtime knows which one and emits
+		// `_burrow:"turn"` after it (settleAcpPrompt). Guessing "any response
+		// ends the turn" here would settle a turn on an unrelated reply.
 		return nil
 	}
 	update := mapField(mapField(msg["params"])["update"])

@@ -7,6 +7,8 @@ import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { subagentArchivable } from "@/stores/chatTree";
+import { liveChatSessionIds } from "@/lib/chatSession";
+import { appChatHost } from "@/lib/chatHost";
 
 // Shared with Terminal.vue's PTY receipts: one key, one receipt per subject.
 // PTY leaves use their bare numeric id, chats `chat:<id>` — Terminal.vue's
@@ -110,9 +112,21 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     refresh(chatId);
   }
 
-  function applyPhase(chatId: number, phase: Phase): void {
+  function applyPhase(chatId: number, phase: Phase, live = false): void {
+    const before = phases.get(chatId)?.state;
     phases.set(chatId, phase);
     refresh(chatId);
+    if (live && phase.state !== before) notifyBlocked(chatId, phase);
+  }
+
+  // A chat with a session in the registry raises its own permission toast,
+  // with the request's detail (chatSession.ts). One with none — a sub-agent
+  // the Go runtime started that nobody has opened, a thread whose view is
+  // gone — would block silently, so the phase raises it here instead.
+  function notifyBlocked(chatId: number, phase: Phase): void {
+    if (phase.state !== "waiting_approval" && phase.state !== "waiting_input") return;
+    if (liveChatSessionIds().includes(chatId)) return;
+    appChatHost.notifyPermission(chatId, { requestId: "", toolName: phase.detail || "Agent", input: {}, suggestions: [] });
   }
 
   function setWatching(chatId: number, value: boolean): void {
@@ -159,7 +173,7 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
         void listen<Phase>(`phase-chat:${id}`, (event) => {
           if (!event.payload) return;
           phaseFromEvent.add(id);
-          applyPhase(id, event.payload);
+          applyPhase(id, event.payload, true);
         }).then((unlisten) => {
           pendingListeners.delete(id);
           if (!isLive(id)) {
