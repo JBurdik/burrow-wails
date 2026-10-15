@@ -148,20 +148,6 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
         .map((pty_id) => ({ pty_id, cwd: "", title: "", alive: true })) as T;
     }
 
-    // AcpStart takes ONE Go struct (AcpStartOpts), so the wire carries the
-    // whole options object under a single key — remoteapi.go's `acp_start`
-    // names exactly one argument, `opts`, because one Go parameter cannot be
-    // spread across several table entries. Call sites pass the fields flat
-    // (AgentChat.acpStartPayload), which is the shape the old switch
-    // assembled the struct from, so that assembly lives here now.
-    //
-    // `id` must be stringified on this side: callApp's number->string
-    // coercion only looks at the TOP-LEVEL args the table names — here that
-    // is `opts` itself — and never reaches inside the object, so a bare
-    // numeric id would fail to unmarshal into AcpStartOpts.ID.
-    case "acp_start":
-      return t.invoke<T>("acp_start", { opts: { ...args, id: String(args.id) } });
-
     // foldedOrd -1 is the "don't know" sentinel, which leaves the existing
     // fold mark alone (chatstore.go writes it only when >= 0). An absent
     // argument is the zero value 0 on the Go side — a real ordinal — and one

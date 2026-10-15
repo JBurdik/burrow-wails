@@ -62,65 +62,6 @@ export interface ClaudeSession {
 export const AUTO_SETTLE_AFTER_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// One-shot handoff from `create()` to `SubAgentHost.vue`: a sub-agent's CLI
-// is started by mounting its AgentChat (see that component for why), and the
-// mount is what needs the first prompt — not this store, which has no view to
-// send it from. A plain module-level Map, consumed once, does the job without
-// a Pinia store outliving the handoff and leaking entries for chats nobody
-// ever mounts.
-//
-// Registered HERE, inside `create()`, before `sessions.value.push(session)` —
-// not by the caller after `create()` resolves. `push` triggers Vue's reactive
-// effects (SubAgentHost's `watch(children, …)`) synchronously as a queued
-// microtask job, which used to run and read this map BEFORE the caller's own
-// `await chats.create(...)` continuation got a turn to fill it in: the host
-// read `undefined`, cached that as "no prompt", and the sub-agent's CLI never
-// started. Filling the map before the push closes that window entirely.
-const pendingSubagentPrompts = new Map<number, string>();
-
-// Every child chat id `create()` has ever produced locally, independent of
-// whether it got a prompt. `SubAgentHost.vue` uses this to tell "this id came
-// through create() in THIS process, so pendingSubagentPrompts is already
-// final for it" from "this id showed up from ListChats/a shell snapshot
-// (another client, or this one after a restart), so no local handoff was
-// EVER going to be queued for it" — the latter is legitimately absent, not a
-// race, and is safe to cache as `undefined` on first read.
-const locallyCreatedSubagentIds = new Set<number>();
-
-/** Read (and clear) the task text queued for a just-created sub-agent chat.
- *  Called once by SubAgentHost when it notices the chat, never again — a
- *  second read after the host has already mounted the chat must not replay
- *  the prompt.
- *
- *  Also prunes `locallyCreatedSubagentIds`: this is the "consumed" half of
- *  that id's life — SubAgentHost calls `isLocallyCreatedSubagent` then this,
- *  together, exactly once per id (see its watcher) — so once the prompt is
- *  taken there is nothing left for the id to still be tracked for. The other
- *  half, `forgetLocallyCreatedSubagent`, covers an id that never gets this
- *  far (removed before the host ever noticed it). Without either, the set
- *  grows for the life of the process. */
-export function takePendingSubagentPrompt(chatId: number): string | undefined {
-  const task = pendingSubagentPrompts.get(chatId);
-  pendingSubagentPrompts.delete(chatId);
-  locallyCreatedSubagentIds.delete(chatId);
-  return task;
-}
-
-/** Whether `chatId` is a sub-agent this process's own `create()` produced —
- *  see `locallyCreatedSubagentIds` above for why that matters to the caller. */
-export function isLocallyCreatedSubagent(chatId: number): boolean {
-  return locallyCreatedSubagentIds.has(chatId);
-}
-
-/** Drops `chatId` from `locallyCreatedSubagentIds` (and any still-queued
- *  prompt) without reading it — the removal-time half of pruning that set,
- *  for a sub-agent removed before SubAgentHost ever consumed it via
- *  `takePendingSubagentPrompt` above. Called from `remove()`. */
-export function forgetLocallyCreatedSubagent(chatId: number): void {
-  pendingSubagentPrompts.delete(chatId);
-  locallyCreatedSubagentIds.delete(chatId);
-}
-
 /**
  * Whether a chat needs no more attention right now. Ported from t3code's
  * settle decision: pending work always wins (not settled), then a manual pin,
@@ -412,7 +353,7 @@ export function isActivitySync(
    */
   async function create(
     workspaceId: number,
-    opts?: { agentKind?: string; parentChatId?: number; initialPrompt?: string; launchSettings?: SubagentLaunchSettings },
+    opts?: { agentKind?: string; parentChatId?: number; launchSettings?: SubagentLaunchSettings },
   ): Promise<ClaudeSession> {
     const agentKind = opts?.agentKind ?? 'claude';
     const transport: ChatTransport =
@@ -447,13 +388,6 @@ export function isActivitySync(
 
     const session = sessionFromRow(row);
     if (opts?.launchSettings) seedSubagentSettings(session.id, opts.launchSettings);
-    // Register the prompt handoff (and this id's local-create provenance)
-    // BEFORE the push below — see pendingSubagentPrompts' comment for why
-    // the order matters.
-    if (opts?.parentChatId) {
-      locallyCreatedSubagentIds.add(session.id);
-      if (opts.initialPrompt) pendingSubagentPrompts.set(session.id, opts.initialPrompt);
-    }
     sessions.value.push(session);
     // A sub-agent is never the workspace's selected THREAD — it lives in the
     // Right Panel. Writing it here would go around setActive's guard (this
@@ -506,11 +440,6 @@ export function isActivitySync(
     // The chat is gone, so its stream session must go with it — otherwise its
     // listeners outlive it (they are deliberately kept across an unmount).
     dropChatSession(id);
-    // Prunes locallyCreatedSubagentIds (and any still-queued prompt) for a
-    // sub-agent removed before SubAgentHost ever consumed it via
-    // takePendingSubagentPrompt — otherwise that id sits in the set for the
-    // rest of the process's life. A no-op for a non-subagent id.
-    forgetLocallyCreatedSubagent(id);
     await invoke(s.transport === "claude-cli" ? "claude_stop" : s.transport === "codex-app-server" ? "codex_stop" : "acp_stop", { id }).catch(() => {});
     // Explicit delete: save_chats never removes, so a row only goes when
     // somebody says so — which is what stops a stale client from deleting a

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -449,18 +450,38 @@ func TestAcpTurnSettlesOnItsOwnPromptResponse(t *testing.T) {
 	}
 }
 
-func TestAcpPromptOutcome(t *testing.T) {
+func TestAcpPromptResponseEmitsTurnBoundary(t *testing.T) {
 	cases := []struct {
-		msg  map[string]any
-		want agentphase.Kind
+		result map[string]any
+		event  string
+		phase  string
 	}{
-		{map[string]any{"result": map[string]any{"stopReason": "end_turn"}}, agentphase.HookDone},
-		{map[string]any{"result": map[string]any{"stopReason": "cancelled"}}, agentphase.Interrupt},
-		{map[string]any{"error": map[string]any{"message": "boom"}}, agentphase.HookError},
+		{map[string]any{"result": map[string]any{"stopReason": "end_turn"}}, EvtTurnCompleted, "done"},
+		{map[string]any{"result": map[string]any{"stopReason": "cancelled"}}, EvtTurnCompleted, "idle"},
+		{map[string]any{"error": map[string]any{"message": "boom"}}, EvtTurnFailed, "failed"},
 	}
-	for _, tc := range cases {
-		if got := acpPromptOutcome(tc.msg); got.Kind != tc.want {
-			t.Fatalf("%v: got %s, want %s", tc.msg, got.Kind, tc.want)
+	for i, tc := range cases {
+		a, store := newPhasedTestApp(t)
+		chat := strconv.Itoa(200 + i)
+		events := chatEvents(t, chat)
+		sess := &acpSession{stdin: nopWriteCloser{Writer: &bytes.Buffer{}}, proto: protoACP, sessionID: "s1"}
+		a.acpReg().put(chat, sess)
+		rpc, err := a.AcpSend(chat, "hi", nil)
+		if err != nil {
+			t.Fatal(err)
 		}
+		msg := map[string]any{"id": float64(rpc)}
+		for k, v := range tc.result {
+			msg[k] = v
+		}
+		a.settleAcpPrompt(chat, sess, msg)
+		got := events()
+		if last := got[len(got)-1]; last.Type != tc.event {
+			t.Fatalf("%d: last event %+v, want %s", i, last, tc.event)
+		}
+		if st := store.Get("chat:" + chat).State; string(st) != tc.phase {
+			t.Fatalf("%d: phase %q, want %q", i, st, tc.phase)
+		}
+		drainChatStream(t, a, chat)
 	}
 }

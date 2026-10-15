@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,9 +21,9 @@ func TestSpawnSubagentRunsInGo(t *testing.T) {
 		Model: "claude-opus-x", Effort: "max", PermissionMode: "acceptEdits"})
 
 	// No profile: the parent's launch settings.
-	got, handled, err := a.spawnSubagent(control.SpawnRequest{Task: "look around\nmore", ParentChatID: parent.ID})
-	if err != nil || !handled {
-		t.Fatalf("spawn: handled=%v err=%v", handled, err)
+	got, err := a.spawnSubagent(control.SpawnRequest{Task: "look around\nmore", ParentChatID: parent.ID})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
 	}
 	child, _ := a.chatByID(got.ChatID)
 	if child.ParentChatID != parent.ID || child.Model != "claude-opus-x" || child.Effort != "max" ||
@@ -33,7 +35,7 @@ func TestSpawnSubagentRunsInGo(t *testing.T) {
 	}
 
 	// Profile: its permission and saved model win, the task is wrapped.
-	got, _, err = a.spawnSubagent(control.SpawnRequest{Task: "find it", Profile: "Scout", ParentChatID: parent.ID})
+	got, err = a.spawnSubagent(control.SpawnRequest{Task: "find it", Profile: "Scout", ParentChatID: parent.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,15 +44,20 @@ func TestSpawnSubagentRunsInGo(t *testing.T) {
 		t.Fatalf("profile not applied: %+v task=%q", child, got.Task)
 	}
 
-	// Codex is not on the runtime yet: left to the UI, nothing created.
-	before, _ := a.ListChats()
-	if _, handled, err := a.spawnSubagent(control.SpawnRequest{Task: "x", Agent: "codex", ParentChatID: parent.ID}); handled || err != nil {
-		t.Fatalf("codex spawn: handled=%v err=%v", handled, err)
+	// A Codex child runs in the runtime too, and does not inherit a Claude
+	// parent's model / effort / mode — they mean nothing to Codex.
+	got, err = a.spawnSubagent(control.SpawnRequest{Task: "x", Agent: "codex", ParentChatID: parent.ID})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if after, _ := a.ListChats(); len(after) != len(before) {
-		t.Fatal("an unhandled spawn must not create a row")
+	child, _ = a.chatByID(got.ChatID)
+	if child.Transport != "codex-app-server" || child.Model != "" || child.Effort != "" || child.PermissionMode != "" {
+		t.Fatalf("codex child row: %+v", child)
 	}
-	if _, _, err := a.spawnSubagent(control.SpawnRequest{Task: "x", Agent: "nope", ParentChatID: parent.ID}); err == nil {
+	if len(fake.rpc.starts) != 1 || !slices.Contains(fake.rpc.methods(strconv.FormatInt(got.ChatID, 10)), "turn/start") {
+		t.Fatalf("codex child not started with its task: %v", fake.rpc.starts)
+	}
+	if _, err := a.spawnSubagent(control.SpawnRequest{Task: "x", Agent: "nope", ParentChatID: parent.ID}); err == nil {
 		t.Fatal("unknown agent must be an error")
 	}
 }

@@ -22,7 +22,7 @@ function fakeDeps() {
     notifyDone: vi.fn(),
     notifyPermission: vi.fn(),
   } satisfies ChatHost;
-  const fakeInvoke = vi.fn(async () => undefined as unknown);
+  const fakeInvoke = vi.fn(async (_cmd: string, _args?: unknown) => undefined as unknown);
   const deps = {
     invoke: fakeInvoke,
     listen: (async (name: string, cb: (e: { payload: unknown }) => void) => {
@@ -429,18 +429,29 @@ describe("stream reducers", () => {
     dropChatSession(64);
   });
 
-  it("settles an ACP turn on the response to its own session/prompt, not another", async () => {
+  it("leaves an ACP turn to Go's boundary and applies any selector reply", async () => {
+    const view = fakeView({ usesRpcRuntime: () => true });
     const { deps, emit } = fakeDeps();
     const s = chatSession(65, deps);
-    s.attachView(fakeView({ usesRpcRuntime: () => true }));
+    s.attachView(view);
     await s.listenAcp();
+    await s.listenEvents();
     s.startTurn();
-    s.trackAcpPrompt(7);
-    emit("acp-data-65", line({ id: 3, result: {} }));
-    expect(s.busy.value).toBe(true);
+    // A bare JSON-RPC response is not a turn end — whoever's prompt it answers.
     emit("acp-data-65", line({ id: 7, result: { stopReason: "end_turn" } }));
+    expect(s.busy.value).toBe(true);
+    // A selector reply to a push Go made (the row's settings after a start)
+    // still updates the pickers, without a restore round.
+    const configOptions = [{ id: "model", name: "Model", currentValue: "m2", options: [] }];
+    emit("acp-data-65", line({ id: 8, result: { configOptions } }));
+    expect(s.acpConfigOptions.value).toEqual(configOptions);
+    expect(view.restoreAcpSelections).not.toHaveBeenCalled();
+    // Our own pick's reply does restore the rest.
+    s.trackAcpControl(9);
+    emit("acp-data-65", line({ id: 9, result: { configOptions } }));
+    expect(view.restoreAcpSelections).toHaveBeenCalledOnce();
+    emit("chat-event-65", { ord: 2, events: [{ type: "turn.completed" }] });
     expect(s.busy.value).toBe(false);
-    expect(s.acpPromptRpcId.value).toBeNull();
     dropChatSession(65);
   });
 
@@ -464,10 +475,8 @@ describe("stream reducers", () => {
     const s = chatSession(67, deps);
     await s.listenEvents();
     s.startTurn();
-    s.markRuntimeStarted();
     emit("chat-event-67", { ord: 1, events: [{ type: "tool.started", toolCallId: "t", name: "Bash" }, { type: "session.exited" }] });
     expect(s.busy.value).toBe(false);
-    expect(s.runtimeStarted.value).toBe(false);
     expect(s.messages.value[0].toolFailed).toBe(true);
     dropChatSession(67);
   });
@@ -478,7 +487,6 @@ describe("stream reducers", () => {
     const s = chatSession(68, deps);
     await s.listenEvents();
     s.startTurn();
-    s.markRuntimeStarted();
     emit("chat-event-68", { ord: 1, events: [{ type: "text.delta", messageId: "m", text: "half" }] });
     await nativeRequest(s, f, "Bash", { command: "ls" });
     await acpRequest(s, f, codexApproval(4));
@@ -488,7 +496,6 @@ describe("stream reducers", () => {
     emit("chat-event-68", { ord: 3, events: [{ type: "session.reset" }] });
     expect(s.pendingRequests.value).toEqual([]);
     expect(s.busy.value).toBe(false);
-    expect(s.runtimeStarted.value).toBe(false);
     expect(s.messages.value.some((m) => m.partial)).toBe(false);
     expect(s.messages.value.some((m) => m.text === "half")).toBe(true);
     dropChatSession(68);
@@ -509,41 +516,46 @@ describe("stream reducers", () => {
   });
 });
 
-describe("runtime reset for a transport Go does not run yet", () => {
-  it("is the same settlement as a session.reset event", async () => {
-    // A Codex / ACP restart happens in the view until those transports move
-    // into the Go chat runtime; it must not hand-clear refs any more.
+// The process intents forward to the Go chat runtime, whatever the transport.
+describe("process intents", () => {
+  it("sends through chat_send: bubble, busy, the wire call", async () => {
     const f = fakeDeps();
     const s = chatSession(80, f.deps);
-    s.startTurn();
-    s.markRuntimeStarted();
-    await acpRequest(s, f, codexApproval(3));
-    await acpRequest(s, f, codexInput(4));
-    expect(s.pendingRequests.value.map((r) => r.kind)).toEqual(["acpPermission", "codexInput"]);
-
-    s.runtimeReset();
-    expect(s.pendingRequests.value).toEqual([]);
-    expect(s.busy.value).toBe(false);
-    expect(s.runtimeStarted.value).toBe(false);
-
-    s.notice("kept");
-    s.runtimeReset({ cleared: true });
-    expect(s.messages.value).toEqual([]);
+    const id = await s.send({ text: "go", images: ["data:x"] });
+    expect(id).not.toBeNull();
+    expect(s.busy.value).toBe(true);
+    expect(s.messages.value.map((m) => [m.role, m.text])).toEqual([["user", "go"]]);
+    expect(f.invoke).toHaveBeenCalledWith("chat_send", { chatId: 80, text: "go", images: ["data:x"] });
     dropChatSession(80);
   });
 
-  it("a failed send reports itself and leaves the turn", () => {
+  it("a failed send reports itself and leaves the turn", async () => {
     const f = fakeDeps();
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_send") throw "pipe closed";
+      return undefined;
+    });
     const s = chatSession(81, f.deps);
-    s.postUserMessage({ text: "go", displayText: "go!" });
-    s.startTurn();
-    s.failTurn("pipe closed");
+    expect(await s.send({ text: "go", displayText: "go!" })).toBeNull();
     expect(s.busy.value).toBe(false);
     expect(s.messages.value.map((m) => [m.role, m.text])).toEqual([["user", "go"], ["assistant", "Error: pipe closed"]]);
     expect(s.messages.value[0].displayText).toBe("go!");
     expect(s.recallLastUserMessage()).toBe("go");
     expect(s.messages.value.map((m) => m.role)).toEqual(["assistant"]);
     dropChatSession(81);
+  });
+
+  it("restart / interrupt / clear forward to Go; an interrupt's turn end does not toast", async () => {
+    const f = fakeDeps();
+    const s = chatSession(82, f.deps);
+    await s.restart();
+    await s.clear();
+    s.startTurn();
+    await s.interrupt();
+    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).toEqual(["chat_restart", "chat_clear", "chat_interrupt"]);
+    f.emit("chat-event-82", { ord: 1, events: [{ type: "turn.completed" }] });
+    expect(f.host.notifyDone).not.toHaveBeenCalled();
+    dropChatSession(82);
   });
 });
 

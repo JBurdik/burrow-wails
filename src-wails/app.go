@@ -34,6 +34,8 @@ type App struct {
 	claudeAgents *agentproc.Manager
 	// claudeProcs overrides claudeAgents in tests (agents.go chatProcs).
 	claudeProcs chatProcs
+	// rpcStarter overrides the Codex / ACP start in tests (chatruntime.go startRPC).
+	rpcStarter  func(opts AcpStartOpts, transport string) error
 	chatRT      chatRuntime
 	acpSessions *acpRegistry
 	lspMgr      *lspManager

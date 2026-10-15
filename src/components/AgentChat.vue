@@ -639,10 +639,9 @@ import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useImageLightbox } from "@/composables/useImageLightbox";
-import { useScriptsStore } from "@/stores/scripts";
 import { useGitStore } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useProvidersStore, chatTransportFor, binaryFor, type ChatTransport } from "@/stores/providers";
+import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } from "reka-ui";
 import ModelPicker from "@/components/ModelPicker.vue";
@@ -671,7 +670,6 @@ import {
   setAcpCapabilities, setAcpChatSetting, type AcpChatSettings,
 } from "@/lib/acpSettings";
 import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
-import { restoreSubagentCodexSettings } from "@/lib/subagentProfiles";
 import TranscriptComments from "./review/TranscriptComments.vue";
 import TranscriptFeedbackBar from "./review/TranscriptFeedbackBar.vue";
 import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
@@ -805,7 +803,6 @@ function holdAttention(value: boolean) {
 const workspaces = useWorkspaceStore();
 const git = useGitStore();
 const uiStore = useUIStore();
-const scriptsStore = useScriptsStore();
 const chatAgents = useProvidersStore();
 const editorCtx = useEditorContextStore();
 const { showImage } = useImageLightbox();
@@ -858,9 +855,6 @@ const usesRpcRuntime = computed(() => effectiveTransport.value !== 'claude-cli')
 // Codex's app-server bridge reports the same modes/configOptions shape, so
 // everything ACP-flavoured (effort, mode, history) applies to it too.
 const isAcpRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
-const runtimeLabel = computed(() =>
-  effectiveTransport.value === 'codex-app-server' ? 'Codex app-server' : effectiveTransport.value === 'acp' ? 'ACP adapter' : 'Claude CLI'
-);
 // Per-agent accent color.
 const agentAccentColor = computed(() =>
   agentKind.value === 'claude' ? 'var(--chat-accent)' : (currentAgent.value?.color ?? 'var(--chat-accent)'),
@@ -875,7 +869,7 @@ const agentAccentColor = computed(() =>
 const S = chatSession(props.chatId);
 const {
   messages, busy, lastActivityAt, turnStartedAt, messageQueue,
-  sessionId, turnStats, sessionCost, runtimeStarted,
+  turnStats, sessionCost,
   pendingPermission, pendingQuestion, pendingPlan, pendingDiff,
   acpPermReq, acpModes, acpConfigOptions,
   permissionResponsePending, codexUserInput, codexUserInputPending,
@@ -947,9 +941,12 @@ watch([acpModes, acpConfigOptions], ([modes, configOptions]) => {
 // replies breaks the loop, while every OTHER reset (session start, or the
 // reply to a user's mode/effort/model pick) still gets repaired.
 
+// A pick is also recorded on the row (row_only — this push applies it live):
+// the row is what the chat runtime re-applies after its next start.
 async function acpSelectMode(modeId: string, userPick = true) {
   S.showAcpSelection("mode", modeId);
   setAcpChatSetting(props.chatId, agentKind.value, "mode", modeId);
+  if (userPick) void persistLaunch({ permission_mode: modeId, row_only: true });
   try {
     const rid = await invoke<number>("acp_set_mode", { id: props.chatId, modeId });
     S.trackAcpControl(rid, !userPick);
@@ -960,6 +957,7 @@ async function acpSelectMode(modeId: string, userPick = true) {
 async function acpSelectModel(value: string, userPick = true) {
   S.showAcpSelection("model", value);
   setAcpChatSetting(props.chatId, agentKind.value, "model", value);
+  if (userPick) void persistLaunch({ model: value, row_only: true });
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "model", value });
     S.trackAcpControl(rid, !userPick);
@@ -970,6 +968,7 @@ async function acpSelectModel(value: string, userPick = true) {
 async function acpSelectEffort(value: string, userPick = true) {
   S.showAcpSelection("effort", value);
   setAcpChatSetting(props.chatId, agentKind.value, "effort", value);
+  if (userPick) void persistLaunch({ effort: value, row_only: true });
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "effort", value });
     S.trackAcpControl(rid, !userPick);
@@ -1004,54 +1003,10 @@ function restoreAcpSelections() {
 // Agent switcher dropdown.
 async function selectAgent(id: string) {
   if (id === agentKind.value) return;
-  // Stop OLD process before agentKind changes (effectiveTransport depends on it).
-  await (usesRpcRuntime.value ? stopRpcRuntime() : invoke('claude_stop', { id: props.chatId })).catch(() => {});
+  // chat_clear (below) stops whichever process the chat has, by id.
   agentKind.value = id;
   chats.sync(props.chatId, { agentKind: id, transport: currentAgent.value ? chatTransportFor(currentAgent.value) : 'claude-cli' });
   await clearChat();
-}
-
-// Build the acp_start invoke payload from the current agent + per-project settings.
-function acpStartPayload(emitHistory = false) {
-  const a = currentAgent.value;
-  const proj = scriptsStore.settingsFor(props.cwd);
-  return {
-    emitHistory,
-    id: props.chatId,
-    cwd: props.cwd,
-    command: a ? binaryFor(a) || "npx" : "npx",
-    args: a?.transportArgs ?? [],
-    env: a?.env ?? {},
-    kind: a?.kind ?? "custom",
-    configDir: proj.claude_config_dir || a?.env?.CLAUDE_CONFIG_DIR || null,
-    envFile: proj.env_file || null,
-    // Resume the chat's prior ACP session (server-side history) when we have its id.
-    resumeSessionId: sessionId.value || null,
-  };
-}
-
-async function startRpcRuntime(emitHistory = false) {
-  await ensureAcpListeners();
-  if (effectiveTransport.value === "codex-app-server") {
-    const agent = currentAgent.value;
-    const result = await invoke("codex_start", {
-      id: props.chatId,
-      cwd: props.cwd,
-      env: agent?.env ?? {},
-      resumeSessionId: sessionId.value || null,
-    });
-    await restoreSubagentCodexSettings(props.chatId, invoke);
-    return result;
-  }
-  return invoke("acp_start", acpStartPayload(emitHistory));
-}
-
-function stopRpcRuntime() {
-  return invoke(effectiveTransport.value === "codex-app-server" ? "codex_stop" : "acp_stop", { id: props.chatId });
-}
-
-function sendRpcRuntime(text: string, images?: string[]) {
-  return invoke<number>(effectiveTransport.value === "codex-app-server" ? "codex_send" : "acp_send", { id: props.chatId, text, images });
 }
 
 // Relative-to-cwd path for a shared selection's @-reference.
@@ -1548,9 +1503,6 @@ async function loadMessages(chatId: number): Promise<ChatMessage[]> {
 }
 
 
-function clearMessageHistory(chatId: number) {
-  void invoke("delete_chat_messages", { chatId }).catch(() => {});
-}
 
 const DRAFT_KEY = computed(() => `burrow.draft.chat.${props.chatId}`);
 const inputText = ref(localStorage.getItem(DRAFT_KEY.value) ?? "");
@@ -1601,12 +1553,6 @@ const completion = useComposerCompletion({
   commands: allCommands,
 });
 const { suggestions, activeIndex } = completion;
-
-// Attach the acp-data/acp-req listeners if not already. onMounted only attaches
-// them when the chat STARTS as an ACP agent; switching to an ACP agent at runtime
-// (selectAgent → clearChat → acp_start) must attach them too, or every adapter
-// event (model/config + the whole turn) is dropped → no model, stuck "thinking".
-const ensureAcpListeners = () => S.listenAcp();
 
 // Permission mode (per-chat, persisted). Mirrors `claude --permission-mode`:
 // default | auto | acceptEdits | plan | dontAsk | bypassPermissions.
@@ -1994,19 +1940,10 @@ async function copyMessage(msg: ChatMessage) {
   }
 }
 
-// The welcome-screen composer creates a chat and its first prompt together. The
-// send has to wait for the runtime: chat_send starts a Claude process itself,
-// but an ACP adapter only has a session after its handshake lands on acp-data.
-// ponytail: 20 s cap, no retry — if the adapter is that slow the prompt stays in
-// the feed as a plain user message and the user can resend.
+// The welcome-screen composer creates a chat and its first prompt together.
+// chat_send starts the process itself, whatever the transport.
 async function sendInitialPrompt(prompt: string, images?: string[]) {
   emit("prompt-sent");
-  if (usesRpcRuntime.value && !sessionId.value) {
-    await new Promise<void>((resolve) => {
-      const stop = watch(sessionId, (v) => { if (v) { stop(); resolve(); } });
-      setTimeout(() => { stop(); resolve(); }, 20_000);
-    });
-  }
   await sendMessage(prompt, images);
 }
 
@@ -2022,8 +1959,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   let text = strippedBaseline;
   if (!text && !feedbackBatch.length) return null;
   branchBannerDismissed.value = true;
-  // A cold chat (never opened this launch) has no process yet — start it now.
-  if (await ensureRuntime()) return null;
   // /pr: build a PR description prompt from git diff
   if (text.match(/^\/pr\b/)) {
     try {
@@ -2064,7 +1999,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   // Only set when the /pr rewrite above didn't replace `text` with a generated
   // prompt — that one has no paste chip of its own to show.
   const displayText = text === strippedBaseline && hasPasteMarkers(raw) ? raw.trim() : undefined;
-  const sentId = S.postUserMessage({ text, images: msgImages, displayText });
   // This is the durable start receipt. It captures the recovery checkpoint and
   // creates one audit row; provider completion freezes its final diff.
   await invoke("start_turn_audit", {
@@ -2072,7 +2006,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     subjectId: `chat:${props.chatId}`,
     label: text.slice(0, 60),
   }).catch(() => {});
-  S.startTurn();
 
   // Auto-title from first user message (only if still at default and Claude hasn't set one yet)
   if (!claudeGeneratedTitle.value) {
@@ -2083,29 +2016,12 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     }
   }
 
-  S.save();
+  pendingImages.value = [];
   syncStore();
-  scrollToBottom(true);
-  if (usesRpcRuntime.value) {
-    try {
-      pendingImages.value = [];
-      S.trackAcpPrompt(await sendRpcRuntime(text, msgImages));
-      acceptFeedback();
-      return { id: sentId, text };
-    } catch (e) {
-      S.failTurn(e);
-    }
-    return null;
-  }
-  try {
-    pendingImages.value = [];
-    await invoke("chat_send", { chatId: props.chatId, text, images: msgImages ?? [] });
-    acceptFeedback();
-    return { id: sentId, text };
-  } catch (e) {
-    S.failTurn(e);
-    return null;
-  }
+  const sentId = await S.send({ text, images: msgImages, displayText });
+  if (sentId === null) return null;
+  acceptFeedback();
+  return { id: sentId, text };
 }
 
 
@@ -2182,6 +2098,7 @@ async function selectPermMode(mode: PermMode) {
         modeId: mode,
       });
       S.trackAcpControl(requestId);
+      void persistLaunch({ permission_mode: mode, row_only: true });
     } catch (err) {
       // Do not leave the picker claiming a policy that the server rejected.
       permMode.value = previousMode;
@@ -2195,72 +2112,24 @@ async function selectPermMode(mode: PermMode) {
   await persistLaunch({ permission_mode: mode });
 }
 
-// Restart the chat's process (with --resume so the session continues) and
-// settle all turn state. For the RPC runtimes that is done here; for
-// claude-cli it is the Go chat runtime's (chat_restart → session.reset).
-async function restartClaude() {
-  if (usesRpcRuntime.value) {
-    S.suppressDoneToast(); // restart — don't toast on the teardown `exit`
-    await stopRpcRuntime().catch(() => {});
-    await startRpcRuntime().catch(() => {});
-    // The rpc ids behind any pending prompt are dead after a restart.
-    S.runtimeReset();
-    return;
-  }
-  // The chat runtime stops the process and publishes session.reset, whose
-  // reducer (lib/chatSession.ts) drops the dead prompts, closes the partial
-  // and clears busy — for every client, not just this view. The next send
-  // starts a fresh process with --resume.
-  await invoke("chat_restart", { chatId: props.chatId }).catch(() => {});
-}
-
+// Restart / abort / clear are the chat runtime's (lib/chatSession.ts intents →
+// chat_restart / chat_interrupt / chat_clear): Go stops the process and
+// publishes session.reset, whose reducer drops the dead prompts, closes the
+// partial and clears busy — for every client, not just this view. The next
+// send starts a fresh process, resuming the session unless it was cleared.
 async function abortTurn() {
-  // Codex can stop a turn in place: the thread stays loaded, so nothing has to
-  // be resumed (a failed thread/resume after a kill silently started a fresh
-  // thread). The turn then ends through its own turn/completed, which clears
-  // `busy` and lets the queue drain. A stalled chat, a refused interrupt (no
-  // addressable turn yet) or one Codex never answers still gets the restart.
-  if (effectiveTransport.value === "codex-app-server" && !stalled.value) {
-    const ok = await invoke("codex_interrupt", { id: props.chatId }).then(() => true, () => false);
-    if (ok) {
-      S.suppressDoneToast(); // user stopped it — no "finished" toast
-      const started = turnStartedAt.value;
-      setTimeout(() => {
-        if (busy.value && turnStartedAt.value === started) void restartClaude();
-      }, 5_000);
-      return;
-    }
-  }
-  if (!usesRpcRuntime.value) {
-    // Claude ends the turn in place (an `interrupt` control request); its
-    // trailing result is not a "finished" toast. Go falls back to a restart.
-    S.suppressDoneToast();
-    await invoke("chat_interrupt", { chatId: props.chatId }).catch(() => {});
-    return;
-  }
-  await restartClaude();
+  // A stalled turn gets the restart its button promises; otherwise the
+  // provider stops the turn in place where it can (Claude, Codex), and Go
+  // falls back to a restart where it cannot or does not answer.
+  await (stalled.value ? S.restart() : S.interrupt());
 }
 
 async function clearChat() {
-  const rpc = usesRpcRuntime.value;
   // The draft side is this view's own; the transcript side is Go's.
   clearQueuedMessages();
   pendingImages.value = [];
   chats.sync(props.chatId, { claudeSessionId: "", busy: false, messageCount: 0, title: `Chat` });
-  if (!rpc) {
-    // Go stops the process, wipes chat_messages + chat_stream + the session id
-    // and publishes session.reset{cleared}; the reducer empties the transcript.
-    await S.listenEvents();
-    await invoke("chat_clear", { chatId: props.chatId }).catch((e: unknown) => {
-      S.notice(`Could not clear the chat: ${e}`);
-    });
-    return;
-  }
-  await stopRpcRuntime().catch(() => {});
-  S.runtimeReset({ cleared: true });
-  clearMessageHistory(props.chatId);
-  const startErr = await startRpcRuntime().catch((e: unknown) => e);
-  if (startErr) S.notice(`Failed to start ${runtimeLabel.value}: ${startErr}`);
+  await S.clear();
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -2406,48 +2275,6 @@ function migrateLegacyChatConfig() {
   }
 }
 
-// --- Lazy runtime start -----------------------------------------------------
-// A chat's CLI is expensive (each idle `claude` holds ~150 MB), and Terminal.vue
-// keeps EVERY chat of every opened workspace mounted. Starting a process per
-// mount meant 40 persisted chats = 40 live CLIs = multi-GB at launch for chats
-// the user never opened. So the process is started on demand instead: on send,
-// or up front only for a chat spawned with a prompt to deliver. agentproc's
-// sweeper takes it back once the chat goes quiet.
-let runtimeStarting: Promise<unknown> | null = null;
-
-// Only a chat spawned with a prompt still to deliver warms itself up. Merely
-// looking at a chat does not need a process — the transcript is on disk.
-function shouldAutoStart(): boolean {
-  return props.initialPrompt !== undefined;
-}
-
-// Starts the backing process once. Returns a truthy error if the start failed
-// (the message is already surfaced in the feed), falsy on success.
-async function ensureRuntime(): Promise<unknown> {
-  if (runtimeStarted.value) return null;
-  if (runtimeStarting) return runtimeStarting;
-  runtimeStarting = (async (): Promise<unknown> => {
-    if (usesRpcRuntime.value) {
-      await scriptsStore.loadForPath(props.cwd);
-      const startErr = await startRpcRuntime().catch((e: unknown) => e);
-      if (startErr) {
-        S.notice(`Failed to start ${runtimeLabel.value}: ${startErr}`);
-        return startErr;
-      }
-      S.markRuntimeStarted();
-      return null;
-    }
-    // claude-cli: nothing to start here — chat_send starts the process in Go.
-    await S.listenClaude();
-    return null;
-  })();
-  try {
-    return await runtimeStarting;
-  } finally {
-    runtimeStarting = null;
-  }
-}
-
 // Set on unmount so the long async onMounted() below can stop writing into
 // this instance's (possibly by-then-evicted) session once nothing is
 // watching — see the guards after each `await` inside onMounted.
@@ -2553,18 +2380,14 @@ onMounted(async () => {
   const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
   if (stored) S.hydrate({ sessionId: stored });
   S.sync();
-  // The stream-json listener is JS-only and free — attach it even when the
-  // runtime is still cold, so a later ensureRuntime() streams immediately.
-  if (!usesRpcRuntime.value) {
-    await S.listenClaude();
-  }
-  if (shouldAutoStart()) {
-    const startErr = await ensureRuntime();
-    if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
-    // No drain here: it already ran above, unconditionally. Two drains in one
-    // mount each take their own message and send both turns at once.
-    if (usesRpcRuntime.value) return;
-  }
+  // The raw listeners are JS-only and free — attach both, so a cold chat
+  // (its process is started by chat_send, in Go) and an agent switch stream
+  // immediately.
+  await S.listenClaude();
+  await S.listenAcp();
+  // No drain here: it already ran above, unconditionally. Two drains in one
+  // mount each take their own message and send both turns at once.
+  if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
 
   // Load account info (plan, 5h window) — non-blocking.
   invoke<AccountInfo>("claude_get_account", { cwd: props.cwd })

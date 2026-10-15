@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -21,6 +22,55 @@ type fakeProcs struct {
 	sent      []string
 	onLine    map[string]func(string)
 	ctrlReply string
+	rpc       *fakeRPC // the Codex / ACP half (App.rpcStarter)
+}
+
+// fakeRPC registers an acpSession over a buffer instead of spawning an
+// app-server / adapter, so what the runtime writes to it can be read back.
+type fakeRPC struct {
+	mu         sync.Mutex
+	starts     []AcpStartOpts
+	transports []string
+	writers    map[string]*bytes.Buffer
+}
+
+func (f *fakeRPC) starter(a *App) func(AcpStartOpts, string) error {
+	return func(o AcpStartOpts, transport string) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		buf := &bytes.Buffer{}
+		f.writers[o.ID] = buf
+		f.starts = append(f.starts, o)
+		f.transports = append(f.transports, transport)
+		proto := protoACP
+		if transport == "codex-app-server" {
+			proto = protoCodexAppServer
+		}
+		a.acpReg().put(o.ID, &acpSession{stdin: nopWriteCloser{Writer: buf}, proto: proto, sessionID: "thread-1", nextID: 100})
+		return nil
+	}
+}
+
+// methods lists the JSON-RPC methods written to chat id's session, in order.
+func (f *fakeRPC) methods(id string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(f.writers[id].String()), "\n") {
+		var m struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal([]byte(line), &m) == nil {
+			out = append(out, m.Method)
+		}
+	}
+	return out
+}
+
+func (f *fakeRPC) written(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.writers[id].String()
 }
 
 type fakeStart struct {
@@ -101,6 +151,8 @@ func runtimeApp(t *testing.T) (*App, *fakeProcs, int64, string) {
 	t.Cleanup(func() { drainChatStream(t, a, "1") })
 	fake := newFakeProcs()
 	a.claudeProcs = fake
+	fake.rpc = &fakeRPC{writers: map[string]*bytes.Buffer{}}
+	a.rpcStarter = fake.rpc.starter(a)
 	ws := t.TempDir()
 	res, err := a.db.Exec(`INSERT INTO workspaces (name, path, created_at) VALUES ('w', ?, 0)`, ws)
 	if err != nil {
@@ -205,11 +257,153 @@ func TestChatSendStartsAgainAfterReap(t *testing.T) {
 	}
 }
 
-func TestChatSendRefusesOtherTransports(t *testing.T) {
+func TestChatSendStartsCodexFromRow(t *testing.T) {
+	a, fake, wsID, ws := runtimeApp(t)
+	writeConfig(t, map[string]any{"providers": []any{map[string]any{
+		"id": "codex-work", "name": "Codex", "providerId": "codex", "kind": "codex", "transport": "codex-app-server",
+		"enabled": true, "env": map[string]string{"CODEX_HOME": "/cx"}, "transportArgs": []string{"app-server"},
+	}}})
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "codex-app-server", AgentKind: "codex-work",
+		ClaudeSessionID: "thr-0", Model: "gpt-x", Effort: "high", PermissionMode: "plan"})
+	if err := a.ChatSend(c.ID, "hello", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ChatSend(c.ID, "again", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.rpc.starts) != 1 || fake.rpc.transports[0] != "codex-app-server" {
+		t.Fatalf("want one codex start, got %v", fake.rpc.transports)
+	}
+	o := fake.rpc.starts[0]
+	if o.ResumeSessionID != "thr-0" || o.Cwd != ws || o.Env["CODEX_HOME"] != "/cx" {
+		t.Fatalf("start did not use the row + provider: %+v", o)
+	}
+	got := fake.rpc.methods("1")
+	if !slices.Equal(got, []string{"thread/settings/update", "turn/start", "turn/start"}) {
+		t.Fatalf("writes: %v", got)
+	}
+	if w := fake.rpc.written("1"); !strings.Contains(w, `"model":"gpt-x"`) || !strings.Contains(w, `"effort":"high"`) || !strings.Contains(w, `"readOnly"`) {
+		t.Fatalf("row settings not applied: %s", w)
+	}
+}
+
+func TestChatSendStartsAcpFromRow(t *testing.T) {
+	a, fake, wsID, ws := runtimeApp(t)
+	writeConfig(t, map[string]any{"providers": []any{map[string]any{
+		"id": "gem", "name": "Gemini", "providerId": "gemini", "kind": "gemini", "transport": "acp",
+		"enabled": true, "transportArgs": []string{"--acp"},
+	}}})
+	if err := os.MkdirAll(filepath.Join(ws, ".burrow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(ws, ".burrow", "config.toml"), []byte("[settings]\nenv_file = \".env.local\"\nclaude_config_dir = \"/cfg\"\n"), 0o644)
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "acp", AgentKind: "gem", Model: "m1"})
+	if err := a.ChatSend(c.ID, "hi", nil); err != nil {
+		t.Fatal(err)
+	}
+	o := fake.rpc.starts[0]
+	if o.Command != "gemini" || !slices.Equal(o.Args, []string{"--acp"}) || o.Kind != "gemini" || o.EnvFile != ".env.local" || o.ConfigDir != "/cfg" {
+		t.Fatalf("acp start payload: %+v", o)
+	}
+	if got := fake.rpc.methods("1"); !slices.Equal(got, []string{"session/set_config_option", "session/prompt"}) {
+		t.Fatalf("writes: %v", got)
+	}
+}
+
+func TestChatSendRefusesUnknownAcpProvider(t *testing.T) {
 	a, fake, wsID, _ := runtimeApp(t)
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "acp", AgentKind: "nope"})
+	if err := a.ChatSend(c.ID, "hi", nil); err == nil || len(fake.rpc.starts) != 0 {
+		t.Fatalf("want an error and no start, err=%v starts=%d", err, len(fake.rpc.starts))
+	}
+}
+
+func TestCodexPermissionModeFailsClosed(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "codex-app-server", AgentKind: "codex", PermissionMode: "bogus"})
+	if err := a.ChatSend(c.ID, "hi", nil); err == nil {
+		t.Fatal("an unappliable mode must refuse the send")
+	}
+	if _, live := a.acpReg().get("1"); live {
+		t.Fatal("the session that could not take the mode must be stopped")
+	}
+}
+
+func TestRPCRestartClearAndInterrupt(t *testing.T) {
+	a, fake, wsID, _ := runtimeApp(t)
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "codex-app-server", AgentKind: "codex", ClaudeSessionID: "thr-0"})
+	events := chatEvents(t, "1")
+	live := func() bool { _, ok := a.acpReg().get("1"); return ok }
+
+	_ = a.ChatSend(c.ID, "hi", nil)
+	if err := a.ChatRestart(c.ID); err != nil || live() {
+		t.Fatalf("restart must stop the session: err=%v live=%v", err, live())
+	}
+	if got := events(); got[len(got)-1].Type != EvtSessionReset {
+		t.Fatalf("want a reset, got %+v", got)
+	}
+
+	// No addressable turn: the interrupt falls back to a restart.
+	_ = a.ChatSend(c.ID, "hi", nil)
+	sess, _ := a.acpReg().get("1")
+	sess.mu.Lock()
+	sess.turnID = ""
+	sess.mu.Unlock()
+	if _ = a.ChatInterrupt(c.ID); live() {
+		t.Fatal("an unaddressable interrupt must restart")
+	}
+
+	// Accepted, but the turn never ends: restarted after the grace.
+	old := codexInterruptGrace
+	codexInterruptGrace = 10 * time.Millisecond
+	t.Cleanup(func() { codexInterruptGrace = old })
+	_ = a.ChatSend(c.ID, "hi", nil)
+	sess, _ = a.acpReg().get("1")
+	sess.mu.Lock()
+	sess.turnID = "turn-1"
+	sess.mu.Unlock()
+	_ = a.ChatInterrupt(c.ID)
+	if !live() || !strings.Contains(fake.rpc.written("1"), `"turn/interrupt"`) {
+		t.Fatal("an accepted interrupt keeps the session")
+	}
+	for i := 0; i < 200 && live(); i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if live() {
+		t.Fatal("a turn still running after the grace must be restarted")
+	}
+
+	// Clear forgets the thread: the next start does not resume it.
+	_ = a.ChatSend(c.ID, "hi", nil)
+	if err := a.ChatClear(c.ID); err != nil || live() {
+		t.Fatalf("clear: err=%v live=%v", err, live())
+	}
+	_ = a.ChatSend(c.ID, "fresh", nil)
+	if o := fake.rpc.starts[len(fake.rpc.starts)-1]; o.ResumeSessionID != "" {
+		t.Fatalf("cleared chat resumed %q", o.ResumeSessionID)
+	}
+}
+
+func TestRPCLaunchSettingsApplyLive(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "codex-app-server", AgentKind: "codex"})
-	if err := a.ChatSend(c.ID, "hi", nil); err == nil || fake.startCount() != 0 {
-		t.Fatalf("codex chat must be refused, err=%v starts=%d", err, fake.startCount())
+	str := func(s string) *string { return &s }
+	_ = a.ChatSend(c.ID, "hi", nil)
+	if err := a.ChatSetLaunchSettings(c.ID, LaunchSettingsPatch{Model: str("gpt-y"), Effort: str("low"), PermissionMode: str("auto")}); err != nil {
+		t.Fatal(err)
+	}
+	sess, live := a.acpReg().get("1")
+	if !live || sess.model != "gpt-y" || sess.effort != "low" {
+		t.Fatalf("live apply: live=%v %+v", live, sess)
+	}
+	if row, _ := a.chatByID(c.ID); row.Model != "gpt-y" || row.PermissionMode != "auto" {
+		t.Fatalf("row not written: %+v", row)
+	}
+	if err := a.ChatSetLaunchSettings(c.ID, LaunchSettingsPatch{ProfileID: str("other")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, live := a.acpReg().get("1"); live {
+		t.Fatal("a profile change must restart")
 	}
 }
 
@@ -349,5 +543,14 @@ func TestChatInterruptKeepsProcessWhenClaudeConfirms(t *testing.T) {
 	_ = a.ChatInterrupt(c.ID)
 	if fake.Alive("1") {
 		t.Fatal("an unanswered interrupt must fall back to a stop")
+	}
+}
+
+func TestRPCSessionIDLandsOnRow(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "acp", AgentKind: "gem"})
+	a.emitSession("1", "sess-acp", nil, nil)
+	if row, _ := a.chatByID(c.ID); row.ClaudeSessionID != "sess-acp" {
+		t.Fatalf("session id not recorded: %+v", row)
 	}
 }

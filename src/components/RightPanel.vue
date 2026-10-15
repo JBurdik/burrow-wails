@@ -359,19 +359,13 @@
 
     <!-- Sub-agents tab: this thread's chat sub-agents + its Task-tool invocations -->
     <div v-else-if="act(pi) === 'agents'" class="flex min-h-0 flex-1 flex-col">
-      <!-- Detail: the open child's chat. It is NOT mounted here — SubAgentHost.vue
-           keeps one AgentChat alive per child for its whole life (a CLI process
-           starts on mount, and it must run whether or not this panel is open),
-           and teleports the open one into this slot. -->
+      <!-- Detail: the open child's chat. Only a view: the child's process is
+           the Go chat runtime's and runs whether or not this panel is open. -->
       <template v-if="openChildId">
         <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
           <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" aria-label="Back to sub-agents" @click="closeChildDetail"><PhCaretLeft :size="12" /></button>
           <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold text-foreground">{{ chatTitle(openChildId) }}</span>
         </div>
-        <!-- The panel owns the open child's view; SubAgentHost keeps every
-             OTHER child alive so their CLIs keep running with the panel shut.
-             Exactly one of the two renders a given chat id, so their reducers
-             cannot overwrite each other in the chat-session registry. -->
         <AgentChat
           v-if="openChildSession"
           :key="openChildSession.id"
@@ -663,7 +657,7 @@ import { useProvidersStore } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { activeChatIdFor, childrenOf } from "@/stores/chatTree";
-import { subAgentViewTarget, nextSubAgentView } from "@/lib/subAgentView";
+import { nextSubAgentView } from "@/lib/subAgentView";
 import { perform } from "@/lib/controlBridge";
 import { getAgentAttentionState, type AgentAttentionState } from "@/lib/terminalStatus";
 import FileTreeNode from "./FileTreeNode.vue";
@@ -719,8 +713,7 @@ function chatTitle(chatId: number): string {
   return chats.sessions.find((s) => s.id === chatId)?.title ?? `Chat ${chatId}`;
 }
 // A Task-tool row names a chat this thread spawned through Claude's own Task
-// tool. Those are real chats but not chat-tree children, so they have no
-// SubAgentHost instance to teleport — opening one as a tab is still right.
+// tool. Those are real chats but not chat-tree children, so they open as a tab.
 function openSubagentChat(chatId: number) {
   if (!props.workspaceId) return;
   // A chat-tree child belongs to the panel; only a Task-tool chat becomes a tab.
@@ -760,14 +753,9 @@ const openChildId = computed<number | null>({
   set: (v) => { wsUi(wsKey.value).openChildId = v; },
 });
 
-// subAgentViewTarget tells SubAgentHost which child NOT to render, because
-// this panel is rendering it. `flush: "post"` so the host gives the child up
-// only once this panel's own AgentChat has been patched in — handing over in
-// the same tick would unmount the host's instance before the panel's exists.
 watch(openChildId, (current, previous) => {
   if (previous !== null) chatAttention.setWatching(previous, false);
   if (current !== null) chatAttention.setWatching(current, true);
-  subAgentViewTarget.value = current;
 }, { flush: "post" });
 /** The open child's session — the panel renders its AgentChat itself. */
 const openChildSession = computed(() =>
@@ -852,10 +840,6 @@ async function confirmSpawnDialog() {
 function openSubagent(chatId: number, workspaceId: number) {
   const state = wsUi(workspaceId);
   openIn(layoutFor(workspaceId), "agents");
-  // No subAgentViewTarget here: the watcher above carries it across once the
-  // surface and the slot have actually rendered. Setting it now would be the
-  // same too-early Teleport the watcher exists to avoid — and this path is
-  // the worse one, because it may also be switching the surface to "agents".
   state.openChildId = chatId;
 }
 function wsUi(id: number): WsUiState {
@@ -945,7 +929,6 @@ watch(() => shown("agents"), (on) => { if (!on) closeChildDetail(); });
 watch(() => props.open, (open) => { if (!open) closeChildDetail(); });
 watch(wsKey, (_cur, old) => {
   if (old !== undefined && old !== NO_WS && wsUiStates[old]?.openChildId != null) wsUiStates[old].openChildId = null;
-  subAgentViewTarget.value = null;
 });
 
 const diffScope = computed<DiffScope>({

@@ -27,8 +27,8 @@ export function subagentArchivable(
   return now - Math.max(seenAt, phase.updated_at) >= delayMs;
 }
 
-/** Sub-agents of one thread, oldest first, for DISPLAY (SubAgentHost.vue's
- *  mount list, the Right Panel's Sub-agents list). Pure so the panel filter
+/** Sub-agents of one thread, oldest first, for DISPLAY (the Right Panel's
+ *  Sub-agents list). Pure so the panel filter
  *  is testable without a store, a transport or a mounted component.
  *
  *  Excludes archived children: archive(parent) stops each child's actor and

@@ -130,12 +130,10 @@ func delegationVerbs(c *Core) []Verb {
 				return nil, fmt.Errorf("chat_send needs text")
 			}
 			if rt := c.deps.ChatRuntime; rt != nil {
-				if handled, err := rt.SendToChat(p.Int("chat_id"), p.Str("text")); handled || err != nil {
-					if err != nil {
-						return nil, err
-					}
-					return map[string]any{"chat_id": p.Int("chat_id"), "sent": true}, nil
+				if err := rt.SendToChat(p.Int("chat_id"), p.Str("text")); err != nil {
+					return nil, err
 				}
+				return map[string]any{"chat_id": p.Int("chat_id"), "sent": true}, nil
 			}
 			var out any
 			return out, c.ui(ctx, "chat_send", map[string]any{"chatId": p.Int("chat_id"), "text": p.Str("text")}, &out)
@@ -200,16 +198,14 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	// mounted, so spawn works with the desktop closed. The host also records
 	// the spawn in the parent's transcript (its chat_stream).
 	if parent > 0 && c.deps.ChatRuntime != nil {
-		got, handled, err := c.deps.ChatRuntime.SpawnSubagent(SpawnRequest{
+		got, err := c.deps.ChatRuntime.SpawnSubagent(SpawnRequest{
 			Task: p.Str("task"), Profile: p.Str("profile"), Agent: p.Str("agent"),
 			Model: p.Str("model"), Cwd: p.Str("cwd"), ParentChatID: parent,
 		})
 		if err != nil {
 			return nil, err
 		}
-		if handled {
-			return SpawnResult{ChatID: got.ChatID, Target: "chat"}, nil
-		}
+		return SpawnResult{ChatID: got.ChatID, Target: "chat"}, nil
 	}
 
 	args := map[string]any{

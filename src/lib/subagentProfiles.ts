@@ -62,12 +62,6 @@ export function seedSubagentSettings(chatId: number, settings: SubagentLaunchSet
     ...(settings.model ? { model: settings.model } : {}),
   } });
 }
-/** Native Codex must finish restoring the profile before its first prompt. */
-export async function restoreSubagentCodexSettings(chatId: number, invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>): Promise<void> {
-  const saved = getConfig<Record<string, { mode?: string; model?: string }>>("chatAcpSettings", {})[String(chatId)];
-  if (saved?.mode) await invoke("acp_set_mode", { id: chatId, modeId: saved.mode });
-  if (saved?.model) await invoke("acp_set_config", { id: chatId, configId: "model", value: saved.model });
-}
 export function profileTerminalCommand(agent: ProviderInstance, settings: SubagentLaunchSettings, task: string): string {
   assertProfileProvider(agent);
   if (agent.args.length || agent.terminalArgs.trim()) {

@@ -503,3 +503,12 @@ func TestRequestEventsDriveTheChatPhase(t *testing.T) {
 		}
 	}
 }
+
+func TestAcpTurnMarker(t *testing.T) {
+	if got := NormalizeAcpLine(`{"_burrow":"turn"}`); len(got) != 1 || got[0].Type != EvtTurnCompleted {
+		t.Fatalf("turn: %+v", got)
+	}
+	if got := NormalizeAcpLine(`{"_burrow":"turn","error":"boom"}`); len(got) != 1 || got[0].Type != EvtTurnFailed || got[0].Message != "boom" {
+		t.Fatalf("failed turn: %+v", got)
+	}
+}

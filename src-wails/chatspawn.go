@@ -14,7 +14,8 @@ import (
 // create the sub-agent's row with its launch settings and send it the task
 // through the chat runtime. It used to be a UI action — the row was created by
 // the frontend and the process started when SubAgentHost.vue mounted a hidden
-// AgentChat for it, so a spawn needed a live desktop. Ported from
+// AgentChat for it, so a spawn needed a live desktop. Every transport runs
+// here now (Claude, Codex, generic ACP). Ported from
 // controlBridge.ts's spawn(); the resolution order is the same, plus decision
 // 10's "else the parent's" for the launch settings.
 
@@ -110,22 +111,22 @@ type spawnConfig struct {
 // methods, so they don't become Wails bindings / remote commands.
 type chatRuntimeAdapter struct{ a *App }
 
-func (r chatRuntimeAdapter) SpawnSubagent(req control.SpawnRequest) (control.SpawnedChat, bool, error) {
+func (r chatRuntimeAdapter) SpawnSubagent(req control.SpawnRequest) (control.SpawnedChat, error) {
 	return r.a.spawnSubagent(req)
 }
 
-func (r chatRuntimeAdapter) SendToChat(chatID int64, text string) (bool, error) {
-	return r.a.sendToChat(chatID, text)
+func (r chatRuntimeAdapter) SendToChat(chatID int64, text string) error {
+	return r.a.ChatSend(chatID, text, nil)
 }
 
-func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, bool, error) {
+func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, error) {
 	var none control.SpawnedChat
 	if strings.TrimSpace(req.Task) == "" {
-		return none, false, fmt.Errorf("spawn needs a task")
+		return none, fmt.Errorf("spawn needs a task")
 	}
 	parent, err := a.chatByID(req.ParentChatID)
 	if err != nil {
-		return none, false, err
+		return none, err
 	}
 	var cfg spawnConfig
 	if raw, err := a.ReadConfig(); err == nil {
@@ -137,7 +138,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, bool
 	if id := strings.ToLower(req.Profile); id != "" {
 		p, ok := findSubagentProfile(id, cfg.Profiles)
 		if !ok {
-			return none, false, fmt.Errorf("Unknown sub-agent profile %q. Use scout, worker, or reviewer.", id)
+			return none, fmt.Errorf("Unknown sub-agent profile %q. Use scout, worker, or reviewer.", id)
 		}
 		profile, task = &p, profileTask(p, req.Task)
 	}
@@ -151,7 +152,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, bool
 	var inst *providerInstance
 	if wanted != "" {
 		if inst = providerByIDOrName(wanted, cfg.Providers, cfg.Aliases); inst == nil {
-			return none, false, fmt.Errorf("no agent named %q — call list_agents to see the configured ones", wanted)
+			return none, fmt.Errorf("no agent named %q — call list_agents to see the configured ones", wanted)
 		}
 	}
 	if inst == nil && parent.AgentKind != "" {
@@ -173,14 +174,20 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, bool
 		}
 	}
 	if inst == nil {
-		return none, false, fmt.Errorf("no agent is configured in Settings > Providers")
+		return none, fmt.Errorf("no agent is configured in Settings > Providers")
+	}
+	if inst.Transport == "none" && inst.Kind != "claude" {
+		return none, fmt.Errorf("This provider does not offer an embedded chat.")
 	}
 	transport := chatTransportOf(*inst)
 	if profile != nil && (!inst.Enabled || !oneOf(transport, "claude-cli", "codex-app-server")) {
-		return none, false, fmt.Errorf("Sub-agent profiles require an enabled Claude CLI or Codex app-server provider. Choose one in Settings > Sub-agent profiles.")
+		return none, fmt.Errorf("Sub-agent profiles require an enabled Claude CLI or Codex app-server provider. Choose one in Settings > Sub-agent profiles.")
 	}
-	if transport != "claude-cli" {
-		return none, false, nil // Codex / ACP: still the UI's (PR4)
+	// The parent's launch settings only mean something to the same runtime: a
+	// Claude model id is no Codex model, a Codex mode no Claude one.
+	var inherit Chat
+	if chatTransport(parent) == transport {
+		inherit = parent
 	}
 
 	// Workspace: the one the caller's cwd names (a worktree spawn nests under
@@ -199,54 +206,40 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, bool
 		Title:          subagentTitle(req.Task),
 		AgentKind:      inst.ID,
 		Transport:      transport,
-		Model:          firstNonEmpty(req.Model, profileField(profile, func(p *subagentProfile) string { return p.Model }), parent.Model),
-		Effort:         parent.Effort,
-		PermissionMode: firstNonEmpty(profileField(profile, func(p *subagentProfile) string { return p.PermissionMode }), parent.PermissionMode),
+		Model:          firstNonEmpty(req.Model, profileField(profile, func(p *subagentProfile) string { return p.Model }), inherit.Model),
+		Effort:         inherit.Effort,
+		PermissionMode: firstNonEmpty(profileField(profile, func(p *subagentProfile) string { return p.PermissionMode }), inherit.PermissionMode),
 		ProfileID:      inst.ID,
 		LastActivityAt: time.Now().UnixMilli(),
 	}
 	c, err := a.CreateChat(row)
 	if err != nil {
-		return none, false, err
+		return none, err
 	}
 	if err := a.ChatSend(c.ID, task, nil); err != nil {
 		// A row whose process never started is a sub-agent nobody can reach.
 		_ = a.DeleteChat(c.ID)
-		return none, false, err
+		return none, err
 	}
 	name := inst.Name
 	if name == "" {
 		name = inst.ID
 	}
 	a.publishSubagentRow(parent.ID, c.ID, task, name)
-	return control.SpawnedChat{ChatID: c.ID, WorkspaceID: wsID, Task: task, AgentName: name}, true, nil
+	return control.SpawnedChat{ChatID: c.ID, WorkspaceID: wsID, Task: task, AgentName: name}, nil
 }
 
 // SpawnSubagentChat is the same spawn for an in-app caller (the Right Panel's
-// spawn button goes through controlBridge's spawn(), which asks here first).
-// handled=false: the agent is not on the chat runtime yet, the UI does it.
+// spawn button goes through controlBridge's spawn()).
 func (a *App) SpawnSubagentChat(parentChatID int64, task, profile, agent, model, cwd string) (map[string]any, error) {
-	got, handled, err := a.spawnSubagent(control.SpawnRequest{
+	got, err := a.spawnSubagent(control.SpawnRequest{
 		Task: task, Profile: profile, Agent: agent, Model: model, Cwd: cwd, ParentChatID: parentChatID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"handled": handled, "chat_id": got.ChatID, "workspace_id": got.WorkspaceID,
+	return map[string]any{"chat_id": got.ChatID, "workspace_id": got.WorkspaceID,
 		"task": got.Task, "agent_name": got.AgentName}, nil
-}
-
-// sendToChat: claude-cli chats go through ChatSend; anything else is still
-// the UI's.
-func (a *App) sendToChat(chatID int64, text string) (bool, error) {
-	c, err := a.chatByID(chatID)
-	if err != nil {
-		return false, err
-	}
-	if !chatIsClaude(c) {
-		return false, nil
-	}
-	return true, a.ChatSend(chatID, text, nil)
 }
 
 func profileField(p *subagentProfile, f func(*subagentProfile) string) string {
@@ -294,14 +287,4 @@ func subagentNote(childChatID int64, task, agentName string) string {
 		SubagentChatID: childChatID, SubagentAgent: agentName,
 	})
 	return string(note)
-}
-
-// PublishSubagentRow is publishSubagentRow for a sub-agent the UI started
-// (Codex / ACP children, until they move into the chat runtime).
-func (a *App) PublishSubagentRow(parentChatID, childChatID int64, task, agentName string) error {
-	if parentChatID <= 0 || childChatID <= 0 {
-		return fmt.Errorf("publish_subagent_row: parent and child chat ids are required")
-	}
-	a.publishSubagentRow(parentChatID, childChatID, task, agentName)
-	return nil
 }

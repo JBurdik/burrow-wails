@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -44,6 +45,57 @@ type providerInstance struct {
 	Args              []string `json:"args"`
 	ConfigDir         string   `json:"configDir"`
 	AutoCompactWindow string   `json:"autoCompactWindow"`
+	// Codex / ACP starts only.
+	Env           map[string]string `json:"env"`
+	TransportArgs []string          `json:"transportArgs"`
+}
+
+// catalogBinary is PROVIDER_CATALOG's default binary (src/lib/providers.ts
+// binaryFor): an instance with no binary of its own runs its provider's.
+var catalogBinary = map[string]string{
+	"claude": "claude", "codex": "codex", "gemini": "gemini", "opencode": "opencode",
+	"copilot": "copilot", "aider": "aider", "cursor": "cursor-agent",
+}
+
+// resolveRPCLaunch is the Codex / generic ACP start a chat row resolves to —
+// AgentChat.vue's acpStartPayload, moved here so a start needs no view. The
+// row's agent_kind names the provider instance (aliases included); the
+// project's .burrow/config.toml supplies env_file and claude_config_dir.
+// An unknown instance still starts Codex on its defaults (the phone creates
+// rows as plain "codex"); a generic ACP adapter has nothing to guess from.
+func resolveRPCLaunch(c Chat, transport string, providers []providerInstance, aliases map[string]string, cwd, projectConfigDir, envFile string) (AcpStartOpts, error) {
+	opts := AcpStartOpts{
+		ID: strconv.FormatInt(c.ID, 10), Cwd: cwd, ResumeSessionID: c.ClaudeSessionID,
+		Env: map[string]string{}, EnvFile: envFile,
+	}
+	p := providerByIDOrName(c.AgentKind, providers, aliases)
+	if p == nil {
+		if transport != "codex-app-server" {
+			return opts, fmt.Errorf("chat %d: no provider %q is configured for its ACP adapter", c.ID, c.AgentKind)
+		}
+		opts.Command, opts.Kind, opts.Args = "codex", "codex", []string{"app-server"}
+		return opts, nil
+	}
+	for k, v := range p.Env {
+		opts.Env[k] = v
+	}
+	opts.Command = firstNonEmpty(strings.TrimSpace(p.Binary), catalogBinary[p.ProviderID], "npx")
+	opts.Args = p.TransportArgs
+	opts.Kind = firstNonEmpty(p.Kind, "custom")
+	opts.ConfigDir = firstNonEmpty(projectConfigDir, p.Env["CLAUDE_CONFIG_DIR"])
+	return opts, nil
+}
+
+// rpcLaunchFor reads resolveRPCLaunch's inputs fresh, like claudeLaunchFor.
+func (a *App) rpcLaunchFor(c Chat, transport, cwd string) (AcpStartOpts, error) {
+	var cfg struct {
+		Providers []providerInstance `json:"providers"`
+		Aliases   map[string]string  `json:"providerAliases"`
+	}
+	if raw, err := a.ReadConfig(); err == nil {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	return resolveRPCLaunch(c, transport, cfg.Providers, cfg.Aliases, cwd, projectClaudeConfigDir(cwd), projectSetting(cwd, "env_file"))
 }
 
 // resolveClaudeLaunch is pure: the row's launch settings, its profile looked up
@@ -121,6 +173,10 @@ func (a *App) claudeLaunchFor(c Chat, cwd string) ClaudeLaunch {
 // parses for settingsFor(cwd). A line-level parse, like the frontend's: the
 // file is written by serializeSettingsToml as `key = "value"`.
 func projectClaudeConfigDir(cwd string) string {
+	return projectSetting(cwd, "claude_config_dir")
+}
+
+func projectSetting(cwd, key string) string {
 	if cwd == "" {
 		return ""
 	}
@@ -128,7 +184,7 @@ func projectClaudeConfigDir(cwd string) string {
 	if err != nil {
 		return ""
 	}
-	return parseSettingsValue(string(b), "claude_config_dir")
+	return parseSettingsValue(string(b), key)
 }
 
 func parseSettingsValue(content, key string) string {

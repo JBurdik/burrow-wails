@@ -408,7 +408,7 @@ export const useRemoteStore = defineStore("remote", () => {
    * and the sender does not learn it — ClaudeSend returns no ord today.
    * Ceiling: sending the identical text twice inside one round trip collapses
    * to one bubble until the next reload. Thread the ord back through
-   * chat_send/acp_send if that ever matters.
+   * chat_send if that ever matters.
    */
   const pendingSends = new Set<string>();
 
@@ -662,31 +662,10 @@ export const useRemoteStore = defineStore("remote", () => {
     pendingSends.add(prompt);
     chat.busy = true;
     try {
-      if (chat.transport === "claude-cli") {
-        // The Go chat runtime starts the process from the row's launch
-        // settings if there is none (a new chat, or one ReapIdle took back),
-        // resuming its Claude session — the phone needs no start of its own.
-        await transport.invoke("chat_send", { chatId: chat.id, text: prompt, images: [] });
-      } else {
-        // Reproduced against a live backend: an old codex-app-server chat with no process registered
-        // failed acp_send with "acp adapter not running". CodexStart resolves
-        // its own binary (resolveAgentBin("codex", cwd)) and is a no-op if
-        // already alive, so — unlike generic "acp" below — it needs nothing
-        // mobile doesn't already have.
-        // ponytail: plain "acp" transport (custom adapters) is NOT covered —
-        // AcpStart needs the adapter's command/args/kind, which only lives in
-        // the desktop's per-project agent config. Thread that through if a
-        // custom-adapter chat needs mobile resume too.
-        if (chat.transport === "codex-app-server") {
-          await transport.invoke("codex_start", {
-            id: String(chat.id),
-            cwd: workspaces.value.find((w) => w.id === chat.workspaceId)?.path ?? "",
-            env: {},
-            resumeSessionId: chat.claudeSessionId || "",
-          });
-        }
-        await transport.invoke("acp_send", { id: String(chat.id), text: text.trim() });
-      }
+      // The Go chat runtime starts the process from the row (its provider and
+      // launch settings) if there is none — a new chat, or one ReapIdle took
+      // back — resuming its session. Every transport; the phone starts nothing.
+      await transport.invoke("chat_send", { chatId: chat.id, text: prompt, images: [] });
     } catch (e: any) {
       chat.busy = false;
       // Release the claim: the send failed, so no echo is coming. Leaving it
@@ -697,17 +676,13 @@ export const useRemoteStore = defineStore("remote", () => {
     }
   }
 
-  // agentKind is "claude" | "codex" — RemoteCreateChat (remote.go) rejects
-  // every other provider today (a plain-ACP session needs command/args/
-  // configDir that only exist in the desktop's per-project agent config;
-  // Codex is exempt because CodexStart resolves its own binary and needs
-  // nothing beyond cwd, same as ClaudeStart).
+  // agentKind is "claude" | "codex" — the two providers RemoteCreateChat
+  // (remote.go) accepts.
   //
   // model/effort/permissionMode are WelcomeView's composer choices, passed
-  // straight through to remote_create_chat: for Claude they become the row's
-  // launch settings, which every start reads (the first chat_send starts it);
-  // for Codex they're applied as a follow-up (AcpSetConfig/AcpSetMode) once
-  // the thread exists.
+  // straight through to remote_create_chat: they become the row's launch
+  // settings, which the first chat_send's start applies (Claude and Codex
+  // alike).
   async function createChat(
     workspaceId: number,
     agentKind: "claude" | "codex",

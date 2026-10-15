@@ -26,7 +26,7 @@ import { buildTerminalCommand } from "@/lib/agentCommand";
 import { readTermOutput } from "@/lib/termRegistry";
 import { panelTerminals } from "@/lib/rpTerminals";
 import { childrenOf } from "@/stores/chatTree";
-import { sendToChat } from "@/lib/chatRuntime";
+import { setLaunchSettings } from "@/lib/chatRuntime";
 
 type ControlAction = { id: string; action: string; args: Record<string, unknown> };
 
@@ -187,18 +187,16 @@ async function createWorkspace(path: string, name: string) {
 async function spawn(args: Record<string, unknown>) {
   await configReady;
   const parent = num(args.parent_chat_id);
-  // A thread's sub-agent runs in the Go chat runtime when its agent is on it
-  // (claude-cli): no hidden view has to mount to start it. Same resolution as
-  // the control verb, so the Right Panel's button and `burrow spawn` agree.
-  if (parent && str(args.task).trim()) {
-    const got = await invoke<{ handled: boolean; chat_id: number; workspace_id: number; task: string; agent_name: string }>(
+  // A thread's sub-agent runs in the Go chat runtime, every transport: no
+  // view has to mount to start it. Same resolution as the control verb, so
+  // the Right Panel's button and `burrow spawn` agree. Go also records the
+  // spawn in the parent's transcript.
+  if (parent) {
+    const got = await invoke<{ chat_id: number; workspace_id: number }>(
       "spawn_subagent_chat",
       { parentChatId: parent, task: str(args.task), profile: str(args.profile), agent: str(args.agent), model: str(args.model), cwd: str(args.cwd) },
     );
-    if (got.handled) {
-      // Go already recorded the spawn in the parent's transcript.
-      return { chat_id: got.chat_id, workspace_id: got.workspace_id, parent_chat_id: parent };
-    }
+    return { chat_id: got.chat_id, workspace_id: got.workspace_id, parent_chat_id: parent };
   }
   await useSubagentProfilesStore().whenReady();
   const profileId = str(args.profile).toLowerCase();
@@ -243,28 +241,15 @@ async function spawn(args: Record<string, unknown>) {
   // No explicit target → the user's Settings preference ("Spawn sub-agents as",
   // where "terminal" is this API's "tab").
   const openAs = str(args.target) || (ui.spawnMode === "chat" ? "chat" : "tab");
-  const parentChatId = num(args.parent_chat_id);
   if (openAs === "chat") {
     if (instance.transport === "none") throw new Error("This provider does not offer an embedded chat.");
     const chats = useClaudeChatsStore();
-    // A sub-agent belongs to its thread, not the Sidebar, so it does NOT go
-    // through openChat() — that is what puts a chat there. Only a Codex/ACP
-    // child gets here (claude-cli ones were spawned in Go above): its process
-    // still starts when SubAgentHost.vue mounts an AgentChat for it, so the
-    // task rides through `create()`'s `initialPrompt` for that mount — queued
-    // before the session is pushed, see pendingSubagentPrompts in claudeChats.ts.
-    const session = await chats.create(target.id, {
-      agentKind: instance.id,
-      parentChatId: parentChatId || undefined,
-      initialPrompt: parentChatId ? task : undefined,
-      launchSettings,
-    });
-    if (parentChatId) {
-      // The parent's transcript gets a row recording the delegation — written
-      // by Go into the parent's chat_stream, like a Go-spawned child's.
-      await invoke("publish_subagent_row", { parentChatId, chatId: session.id, task, agentName: instance.name });
-      return { chat_id: session.id, workspace_id: target.id, parent_chat_id: parentChatId };
+    const session = await chats.create(target.id, { agentKind: instance.id, launchSettings });
+    // The row is what the chat runtime starts the process from.
+    if (launchSettings) {
+      await setLaunchSettings(session.id, { model: launchSettings.model, permission_mode: launchSettings.permissionMode, row_only: true });
     }
+    // The tab's own view sends the task as its first prompt.
     useTerminalTabsStore().openChat(target.id, session.id, instance.id, task);
     return { chat_id: session.id, workspace_id: target.id };
   }
@@ -283,15 +268,15 @@ async function spawn(args: Record<string, unknown>) {
 }
 
 /** A follow-up into a child's session — the same door the composer uses, so a
- *  steered child is indistinguishable from one the user typed into. A
- *  claude-cli child is normally sent to by the control verb in Go and never
- *  reaches this; Codex/ACP still do (their process is the view's). */
+ *  steered child is indistinguishable from one the user typed into. The
+ *  control verb normally sends in Go and never reaches this; it is the
+ *  fallback for a host with no chat runtime. */
 async function chatSendFollowUp(chatId: number, text: string) {
   if (!chatId) throw new Error("chat_send needs a chat_id");
   if (!text.trim()) throw new Error("chat_send needs text");
   const session = useClaudeChatsStore().sessions.find((s) => s.id === chatId);
   if (!session) throw new Error(`no chat with id ${chatId}`);
-  await sendToChat(session.transport, chatId, text);
+  await invoke("chat_send", { chatId, text, images: [] });
   return { chat_id: chatId, sent: true };
 }
 
