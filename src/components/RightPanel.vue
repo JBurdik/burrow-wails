@@ -541,8 +541,35 @@
       <!-- The wrapper is load-bearing: XTerm has a fragment root, so v-show on
            it is ignored and the shell stayed painted over every other surface. -->
       <Teleport v-for="id in terminalWsIds" :key="'t' + id" :to="hostSlot(id, 'terminal')" :disabled="!hostSlot(id, 'terminal')">
-        <div v-show="id === wsKey && isShown(layout, 'terminal')" class="relative flex min-h-0 flex-1 flex-col">
-          <XTerm :pty-id="terminalPtyByWs[id]" :cwd="terminalCwdByWs[id]" />
+        <div v-show="id === wsKey && isShown(layout, 'terminal')" class="flex min-h-0 flex-1 flex-col bg-[var(--terminal-bg)]">
+          <!-- One sub-tab per shell: scratch shells and agent-started servers (serve). -->
+          <div class="flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-1.5 hide-scrollbar">
+            <button
+              v-for="t in termsByWs[id].terms"
+              :key="t.id"
+              class="group flex h-6 max-w-[180px] shrink-0 items-center gap-1.5 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
+              :class="termsByWs[id].active === t.id && 'bg-accent/15 text-foreground'"
+              :title="t.cmd ? `${t.cmd} — started by an agent` : t.cwd"
+              @click="termsByWs[id].active = t.id"
+            >
+              <component :is="t.cmd ? PhPlay : PhTerminal" :size="12" class="shrink-0" />
+              <span class="truncate">{{ t.label }}</span>
+              <span
+                class="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-black/10 hover:text-foreground group-hover:opacity-100"
+                role="button"
+                :aria-label="`Close ${t.label}`"
+                @click.stop="closeTerminal(id, t.id)"
+              ><PhX :size="10" /></span>
+            </button>
+            <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-hover hover:text-foreground" title="New terminal" aria-label="New terminal" @click="addTerminal(id, { cwd: termsByWs[id].terms[0]?.cwd ?? props.cwd, label: 'Terminal' })">
+              <PhPlus :size="13" />
+            </button>
+          </div>
+          <!-- The wrapper is load-bearing: XTerm has a fragment root, so v-show
+               on it is ignored and the shell stayed painted over everything. -->
+          <div v-for="t in termsByWs[id].terms" :key="t.id" v-show="termsByWs[id].active === t.id" class="relative flex min-h-0 flex-1 flex-col">
+            <XTerm :pty-id="t.id" :cwd="t.cwd" :initial-cmd="t.cmd" />
+          </div>
         </div>
       </Teleport>
     </div>
@@ -621,7 +648,7 @@ import {
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
-  PhSpinner, PhWarningCircle, PhRows, PhArrowsInSimple,
+  PhSpinner, PhWarningCircle, PhRows, PhArrowsInSimple, PhPlay,
 } from "@phosphor-icons/vue";
 import {
   closeBottom, closeSurface as closeLayoutSurface, emptyLayout, isShown, loadLayouts, moveTo, openBottom, openIn,
@@ -659,6 +686,7 @@ import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
 import ExtensionNativeSurface from "./ExtensionNativeSurface.vue";
 import { initPtyCounter, nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
+import { addTerm, findServed, installPanelTerminals, onlyShell, removeTerm, type RpTerm, type RpTerms, type ServeRequest, type ServeResult } from "@/lib/rpTerminals";
 
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: [] }>();
@@ -981,43 +1009,86 @@ function extSurface(pi: PaneIndex) {
   return id ? extensionSurfaces.value.find((surface) => surface.tabId === id) : undefined;
 }
 
-// One scratch terminal (and its cwd) per workspace, kept mounted forever once
-// opened — like the main Terminal.vue leaves — so an app running in it keeps
-// running when you switch to another project and back.
-const terminalPtyByWs = reactive<Record<number, number>>({});
-const terminalCwdByWs = reactive<Record<number, string>>({});
-const terminalWsIds = computed(() => Object.keys(terminalPtyByWs).map(Number));
-const terminalPtyStarts = new Map<number, Promise<void>>();
+// Terminals per workspace — scratch shells plus the processes agents start via
+// `serve` — kept mounted forever once opened, like the main Terminal.vue
+// leaves, so an app running in one keeps running across project switches.
+const termsByWs = reactive<Record<number, RpTerms>>({});
+const terminalWsIds = computed(() => Object.keys(termsByWs).map(Number).filter((id) => termsByWs[id].terms.length));
+const scratchStarts = new Map<number, Promise<void>>();
 
 // The main terminal restores its saved/daemon sessions asynchronously. The RP
 // can be opened before that restore has advanced the shared id counter, which
 // used to let it reuse a live id. The daemon treats that as an attach, so the
 // fresh RP xterm had no shell output and looked like a permanently blank pane.
-async function ensureTerminalPty(id: number) {
-  if (id in terminalPtyByWs) return;
-  const running = terminalPtyStarts.get(id);
-  if (running) return running;
-
-  const start = (async () => {
-    const sessions = await invoke<Array<{ pty_id: number }>>("list_pty_sessions").catch(() => []);
-    // Keep the retired Mission Control id range from pushing ordinary tabs up.
-    const maxLiveId = sessions.reduce(
-      (max, session) => session.pty_id < 1_000_000 ? Math.max(max, session.pty_id) : max,
-      0,
-    );
-    initPtyCounter(maxLiveId);
-    // Another open may have completed while the daemon request was in flight.
-    if (id in terminalPtyByWs) return;
-    terminalPtyByWs[id] = nextPtyId();
-    terminalCwdByWs[id] = props.cwd;
-  })();
-  terminalPtyStarts.set(id, start);
-  try {
-    await start;
-  } finally {
-    terminalPtyStarts.delete(id);
-  }
+// An XTerm only mounts once its id is in termsByWs, i.e. after this check.
+async function addTerminal(ws: number, t: Omit<RpTerm, "id">): Promise<number> {
+  const sessions = await invoke<Array<{ pty_id: number }>>("list_pty_sessions").catch(() => []);
+  // Keep the retired Mission Control id range from pushing ordinary tabs up.
+  initPtyCounter(sessions.reduce((max, s) => (s.pty_id < 1_000_000 ? Math.max(max, s.pty_id) : max), 0));
+  const id = nextPtyId();
+  addTerm((termsByWs[ws] ??= { terms: [], active: null }), { id, ...t });
+  return id;
 }
+
+/** A shown Terminal surface with nothing in it gets one scratch shell. */
+async function ensureScratch(ws: number) {
+  if (termsByWs[ws]?.terms.length) return;
+  const running = scratchStarts.get(ws);
+  if (running) return running;
+  const start = addTerminal(ws, { cwd: props.cwd, label: "Terminal" }).then(() => {});
+  scratchStarts.set(ws, start);
+  try { await start; } finally { scratchStarts.delete(ws); }
+}
+
+function killPty(ptyId: number) {
+  void invoke("kill_pty", { id: ptyId }).catch((error) => console.warn("[right-panel] could not close terminal", error));
+}
+
+// Closing a terminal means close it, not merely hide a live shell forever.
+// Remove it from the render list first so its XTerm listener is disposed; the
+// daemon kill then makes the PTY unrecoverably gone.
+function closeTerminal(ws: number, ptyId: number) {
+  const s = termsByWs[ws];
+  if (!s) return;
+  removeTerm(s, ptyId);
+  killPty(ptyId);
+  if (!s.terms.length) closeLayoutSurface(layoutFor(ws), "terminal");
+}
+
+async function serve(req: ServeRequest): Promise<ServeResult> {
+  const ws = req.workspaceId;
+  // Bottom pane unless the user already put the Terminal surface elsewhere.
+  const reveal = () => {
+    openIn(layoutFor(ws), "terminal", 1);
+    if (ws === wsKey.value && !props.open) emit("openPanel");
+  };
+  const hit = findServed(termsByWs[ws], req.cmd, req.cwd);
+  if (hit) {
+    termsByWs[ws].active = hit.id;
+    reveal();
+    // Same server asked for again: if it was stopped (only the shell is left
+    // in the foreground), start it again in the same terminal.
+    const fg = await invoke<string>("get_pty_foreground", { id: hit.id }).catch(() => "?");
+    const restart = onlyShell(fg);
+    if (restart) await invoke("write_pty", { id: hit.id, data: Array.from(new TextEncoder().encode(req.cmd + "\n")) });
+    return { pty_id: hit.id, workspace_id: ws, reused: true, restarted: restart };
+  }
+  const id = await addTerminal(ws, { cwd: req.cwd, label: req.name || req.cmd, cmd: req.cmd });
+  reveal();
+  return { pty_id: id, workspace_id: ws, reused: false };
+}
+
+function closePanelTerminal(ptyId: number): boolean {
+  for (const [ws, s] of Object.entries(termsByWs)) {
+    if (s.terms.some((t) => t.id === ptyId)) {
+      closeTerminal(Number(ws), ptyId);
+      return true;
+    }
+  }
+  return false;
+}
+onMounted(() => installPanelTerminals({ serve, close: closePanelTerminal }));
+onBeforeUnmount(() => installPanelTerminals(null));
 
 // Same idea for the browser preview: one BrowserPane per workspace, kept
 // mounted so its URL/history survives switching projects.
@@ -1034,32 +1105,20 @@ function paneTabs(pi: PaneIndex) {
 
 async function openSurface(id: string, pane: PaneIndex = 0) {
   if (!props.open) emit("openPanel");
-  // Allocate the PTY before activating the surface. Otherwise Vue can mount
-  // XTerm with an id that has not been checked against the daemon yet.
-  if (id === "terminal") await ensureTerminalPty(wsKey.value);
+  if (id === "terminal") await ensureScratch(wsKey.value);
   openIn(layout.value, id, pane);
   if (id === "browser") ensureBrowserPane(wsKey.value);
 }
 // A layout restored from storage (or a tab clicked after a restart) can show
 // Browser/Terminal before anything allocated them — allocate on first show.
-// The XTerm only mounts once the PTY id is in terminalPtyByWs, i.e. checked.
-watch([wsKey, () => shown("terminal")], ([ws, on]) => { if (on) void ensureTerminalPty(ws); }, { immediate: true });
+watch([wsKey, () => shown("terminal")], ([ws, on]) => { if (on) void ensureScratch(ws); }, { immediate: true });
 watch([wsKey, () => shown("browser")], ([ws, on]) => { if (on) ensureBrowserPane(ws); }, { immediate: true });
 
 function closeSurface(id: string) {
   if (id === "terminal") {
-    const workspaceId = wsKey.value;
-    const ptyId = terminalPtyByWs[workspaceId];
-    // Closing the RP Terminal means close it, not merely hide a live scratch
-    // shell forever. Remove it from the render list first so its XTerm listener
-    // is disposed; the daemon kill then makes the PTY unrecoverably gone.
-    if (ptyId !== undefined) {
-      delete terminalPtyByWs[workspaceId];
-      delete terminalCwdByWs[workspaceId];
-      void invoke("kill_pty", { id: ptyId }).catch((error) =>
-        console.warn("[right-panel] could not close terminal", error),
-      );
-    }
+    const s = termsByWs[wsKey.value];
+    s?.terms.forEach((t) => killPty(t.id));
+    delete termsByWs[wsKey.value];
   }
   closeLayoutSurface(layout.value, id);
 }

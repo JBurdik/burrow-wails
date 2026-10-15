@@ -126,6 +126,7 @@
     <tr><td>focus_workspace</td><td>Switch the user's view to a workspace, opening it if needed.</td></tr>
     <tr><td>focus_tab</td><td>Activate a tab by pty id, switching workspace first.</td></tr>
     <tr><td>new_tab</td><td>Open a plain terminal tab.</td></tr>
+    <tr><td>serve</td><td>Run a long-lived process (dev server, watcher) in an interactive terminal in the Right Panel's bottom pane; returns its <code>pty_id</code>. Same command again reuses that terminal (restarting it if stopped). Agents are told to use it instead of background Bash.</td></tr>
     <tr><td>tab_rename / tab_close</td><td>Retitle a tab; close it and kill its PTY.</td></tr>
     <tr><td>workspace_create</td><td>Add a directory as a workspace and open it.</td></tr>
     <tr><td>diagram</td><td>Render Mermaid source in a panel for the user.</td></tr>

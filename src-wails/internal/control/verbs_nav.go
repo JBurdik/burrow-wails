@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // Navigation verbs: what the app currently shows, and moving the user's view
@@ -78,6 +79,35 @@ func navigationVerbs(c *Core) []Verb {
 			})
 		},
 	}, {
+		// A dev server/watcher started from an agent's own Bash tool lives in
+		// that CLI's process tree — no terminal, nothing the user can type into.
+		// This runs it in a Burrow PTY instead, shown in the Right Panel's
+		// bottom pane, and the agent reads it back with tab_output.
+		Name:    "serve",
+		Summary: "Run a long-lived process (dev server, watcher) in an interactive terminal in the Right Panel. Use instead of background Bash/&; read its output with tab_output",
+		Args: []Arg{
+			{Name: "cmd", Type: "string", Desc: "Command to run, e.g. \"pnpm dev\"", Required: true},
+			{Name: "name", Type: "string", Desc: "Terminal label; defaults to the command"},
+			{Name: "workspace_id", Type: "integer", Desc: "Workspace whose panel shows it; defaults to the one containing cwd"},
+		},
+		Scope: ScopeLocal,
+		Fn: func(ctx context.Context, p Params) (any, error) {
+			cmd := strings.TrimSpace(p.Str("cmd"))
+			if cmd == "" {
+				return nil, fmt.Errorf("serve: cmd is required")
+			}
+			wsID, err := c.workspaceFor(p.Int("workspace_id"), p.Str("cwd"))
+			if err != nil {
+				return nil, fmt.Errorf("serve: %w", err)
+			}
+			return c.uiAction(ctx, "serve", map[string]any{
+				"workspaceId": wsID,
+				"cmd":         cmd,
+				"cwd":         p.Str("cwd"),
+				"name":        p.Str("name"),
+			})
+		},
+	}, {
 		Name:    "tab_rename",
 		Summary: "Retitle a tab",
 		Args: []Arg{
@@ -133,6 +163,33 @@ func (c *Core) uiAction(ctx context.Context, action string, args map[string]any)
 		out = map[string]any{"ok": true}
 	}
 	return out, nil
+}
+
+// workspaceFor picks the workspace a call is about: the explicit id, else the
+// one whose path is the longest prefix of cwd — an agent may have cd'd into a
+// subdirectory, and a worktree nested under its repo must win over the repo.
+func (c *Core) workspaceFor(id int64, cwd string) (int64, error) {
+	if id != 0 {
+		return id, nil
+	}
+	if cwd == "" {
+		return 0, fmt.Errorf("pass workspace_id (or call from a workspace dir)")
+	}
+	ws, err := c.listWorkspaces(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	best, bestLen := int64(0), -1
+	for _, w := range ws {
+		p := strings.TrimRight(w.Path, "/")
+		if (cwd == p || strings.HasPrefix(cwd, p+"/")) && len(p) > bestLen {
+			best, bestLen = w.ID, len(p)
+		}
+	}
+	if bestLen < 0 {
+		return 0, fmt.Errorf("%s is not inside any workspace", cwd)
+	}
+	return best, nil
 }
 
 func (c *Core) listWorkspaces(_ context.Context) ([]Workspace, error) {

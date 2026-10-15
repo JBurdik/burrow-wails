@@ -48,6 +48,10 @@ You only get that choice from a terminal tab. A spawn made FROM a chat thread is
 - wait_result: waits on a tab result token or on a chat_id, depending on the target the spawn actually produced.
 - collect_results: takes completed tab results and, when called from a chat parent, its completed chat-child results.
 
+## Long-running processes
+
+Start a dev server, watcher or any process that does not exit with serve, never with background Bash, & or nohup. serve runs it in an interactive terminal in the user's Right Panel, so they can watch it and type into it, and returns its pty_id. Read the output with tab_output. Calling serve again with the same command reuses that terminal and restarts the process if it was stopped. tab_close stops it.
+
 ## Optional references (load only when needed)
 
 `)
