@@ -360,12 +360,17 @@ var remoteAllowed = map[string]remoteCmd{
 
 	// Claude Code — id is the frontend's chat id; the Go side emits
 	// claude-data-<id> under exactly that name, so it must round-trip.
-	"claude_start": {Method: "ClaudeStart", Args: []string{
-		"id", "cwd", "resumeSessionId", "permissionMode", "appendSystemPrompt",
-		"model", "effort", "configDir", "profileCommand", "profileArgs",
-		"autoCompactWindow",
+	// The chat runtime (chatruntime.go): every client starts, sends to,
+	// restarts and reconfigures a chat through these, by chat id. The process
+	// is Go's to start — claude_start/claude_send are in remoteDenied.
+	"chat_send":                {Method: "ChatSend", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_restart":             {Method: "ChatRestart", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_clear":               {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_interrupt":           {Method: "ChatInterrupt", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_set_launch_settings": {Method: "ChatSetLaunchSettings", Args: []string{"chatId", "patch"}, Scope: scopeOrchOperate},
+	"spawn_subagent_chat": {Method: "SpawnSubagentChat", Args: []string{
+		"parentChatId", "task", "profile", "agent", "model", "cwd",
 	}, Scope: scopeOrchOperate},
-	"claude_send":  {Method: "ClaudeSend", Args: []string{"id", "text", "sessionId", "images"}, Scope: scopeOrchOperate},
 	"claude_stop":  {Method: "ClaudeStop", Args: []string{"id"}, Scope: scopeOrchOperate},
 	"claude_abort": {Method: "ClaudeAbort", Args: []string{"id"}, Scope: scopeOrchOperate},
 
@@ -542,6 +547,11 @@ var remoteAllowed = map[string]remoteCmd{
 // remoteDenied names the App methods that are deliberately NOT reachable over
 // the wire, each with the reason. An entry here is a decision, not a TODO.
 var remoteDenied = map[string]string{
+	// Superseded by chat_send: a client building its own start payload is how
+	// three copies of it drifted apart (docs/plans/006-chat-runtime.md).
+	"ClaudeStart": "a chat's process is the chat runtime's to start, from the row's launch settings — use chat_send",
+	"ClaudeSend":  "sending to a process the caller did not start fails after a reap — use chat_send, which ensures the process",
+
 	// LocalEndpoint issues the single-use ticket that authorizes a /v2/ws
 	// connection in the first place. Being in-process (a Wails binding) IS
 	// the desktop's authorization for calling it; an already-authenticated

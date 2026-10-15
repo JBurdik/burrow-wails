@@ -28,6 +28,7 @@ import { panelTerminals } from "@/lib/rpTerminals";
 import { subagentMessage, type ChatMessage } from "@/lib/chatTypes";
 import { childrenOf } from "@/stores/chatTree";
 import { chatSession, liveChatSessionIds } from "@/lib/chatSession";
+import { sendToChat } from "@/lib/chatRuntime";
 
 type ControlAction = { id: string; action: string; args: Record<string, unknown> };
 
@@ -72,6 +73,11 @@ export async function perform(action: string, args: Record<string, unknown>): Pr
       return spawn(args);
     case "chat_send":
       return chatSendFollowUp(num(args.chatId), str(args.text));
+    case "subagent_row":
+      // A sub-agent Go spawned (control verb spawn): only its row in the
+      // parent's transcript is still drawn here.
+      await appendSubagentMessage(num(args.parentChatId), num(args.chatId), str(args.task), str(args.agentName));
+      return { ok: true };
     case "list_subagent_profiles":
       await useSubagentProfilesStore().whenReady();
       return useSubagentProfilesStore().profiles;
@@ -187,6 +193,20 @@ async function createWorkspace(path: string, name: string) {
  */
 async function spawn(args: Record<string, unknown>) {
   await configReady;
+  const parent = num(args.parent_chat_id);
+  // A thread's sub-agent runs in the Go chat runtime when its agent is on it
+  // (claude-cli): no hidden view has to mount to start it. Same resolution as
+  // the control verb, so the Right Panel's button and `burrow spawn` agree.
+  if (parent && str(args.task).trim()) {
+    const got = await invoke<{ handled: boolean; chat_id: number; workspace_id: number; task: string; agent_name: string }>(
+      "spawn_subagent_chat",
+      { parentChatId: parent, task: str(args.task), profile: str(args.profile), agent: str(args.agent), model: str(args.model), cwd: str(args.cwd) },
+    );
+    if (got.handled) {
+      await appendSubagentMessage(parent, got.chat_id, got.task, got.agent_name);
+      return { chat_id: got.chat_id, workspace_id: got.workspace_id, parent_chat_id: parent };
+    }
+  }
   await useSubagentProfilesStore().whenReady();
   const profileId = str(args.profile).toLowerCase();
   const profile = profileId ? useSubagentProfilesStore().find(profileId) : undefined;
@@ -235,14 +255,11 @@ async function spawn(args: Record<string, unknown>) {
     if (instance.transport === "none") throw new Error("This provider does not offer an embedded chat.");
     const chats = useClaudeChatsStore();
     // A sub-agent belongs to its thread, not the Sidebar, so it does NOT go
-    // through openChat() — that is what puts a chat there. Its CLI starts
-    // when SubAgentHost.vue mounts an AgentChat for it (a chat's process is
-    // started on mount, not here — see AgentChat.vue's "Lazy runtime start"),
-    // so the task text rides through `create()`'s `initialPrompt` for that
-    // mount to pick up and send — queued THERE, before the new session is
-    // pushed into `sessions.value`, so SubAgentHost's watcher can never
-    // observe the session before its prompt is ready. See
-    // pendingSubagentPrompts' comment in claudeChats.ts.
+    // through openChat() — that is what puts a chat there. Only a Codex/ACP
+    // child gets here (claude-cli ones were spawned in Go above): its process
+    // still starts when SubAgentHost.vue mounts an AgentChat for it, so the
+    // task rides through `create()`'s `initialPrompt` for that mount — queued
+    // before the session is pushed, see pendingSubagentPrompts in claudeChats.ts.
     const session = await chats.create(target.id, {
       agentKind: instance.id,
       parentChatId: parentChatId || undefined,
@@ -305,24 +322,16 @@ async function appendSubagentMessage(parentChatId: number, childChatId: number, 
   await invoke("save_chat_messages", { chatId: parentChatId, messages: JSON.stringify(messages), foldedOrd: -1 });
 }
 
-/** A follow-up into a child's session — the same call the composer makes, so a
- *  steered child is indistinguishable from one the user typed into. Goes
- *  straight to the provider bindings, matching AgentChat.vue's own send call
- *  for each transport, rather than through chatSession (which owns the
- *  transcript stream, not sending) — deliberately, since the whole point is
- *  reaching a sub-agent whose AgentChat view is NOT mounted. */
+/** A follow-up into a child's session — the same door the composer uses, so a
+ *  steered child is indistinguishable from one the user typed into. A
+ *  claude-cli child is normally sent to by the control verb in Go and never
+ *  reaches this; Codex/ACP still do (their process is the view's). */
 async function chatSendFollowUp(chatId: number, text: string) {
   if (!chatId) throw new Error("chat_send needs a chat_id");
   if (!text.trim()) throw new Error("chat_send needs text");
   const session = useClaudeChatsStore().sessions.find((s) => s.id === chatId);
   if (!session) throw new Error(`no chat with id ${chatId}`);
-  if (session.transport === "claude-cli") {
-    await invoke("claude_send", { id: chatId, text, sessionId: session.claudeSessionId || null, images: [] });
-  } else if (session.transport === "codex-app-server") {
-    await invoke("codex_send", { id: chatId, text, images: [] });
-  } else {
-    await invoke("acp_send", { id: chatId, text, images: [] });
-  }
+  await sendToChat(session.transport, chatId, text);
   return { chat_id: chatId, sent: true };
 }
 

@@ -110,14 +110,38 @@ func oneOf(v string, allowed ...string) bool {
 }
 
 // ClaudeStart spawns the Claude Code CLI for chat `id`. Already-running ids are
-// a no-op (matching the Rust behaviour ClaudeChat.vue relies on when it
-// remounts).
+// a no-op. Kept as a binding for the legacy surface only: nothing in src/ calls
+// it any more — a chat starts through the chat runtime (chatruntime.go), which
+// resolves the same parameters from the chat row.
 func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystemPrompt, model, effort, configDir, profileCommand, profileArgs, autoCompactWindow string) error {
+	return a.startClaude(id, cwd, resumeSessionID, ClaudeLaunch{
+		Model: model, Effort: effort, PermissionMode: permissionMode,
+		AppendSystemPrompt: appendSystemPrompt, ConfigDir: configDir,
+		ProfileCommand: profileCommand, ProfileArgs: profileArgs, AutoCompactWindow: autoCompactWindow,
+	})
+}
+
+// claudePermMode keeps one user-facing safety vocabulary across all providers.
+// Claude's CLI uses different identifiers, so translate at this boundary and
+// keep legacy aliases accepted for chats created by earlier Burrow versions.
+func claudePermMode(permissionMode string) string {
+	switch permissionMode {
+	case "auto":
+		return "auto"
+	case "full-access", "bypassPermissions":
+		return "bypassPermissions"
+	case "acceptEdits", "dontAsk":
+		return permissionMode
+	}
+	return "default"
+}
+
+func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error {
 	if a.claudeMgr().Alive(id) {
 		return nil
 	}
 	cmdName := "claude"
-	if s := strings.TrimSpace(profileCommand); s != "" {
+	if s := strings.TrimSpace(l.ProfileCommand); s != "" {
 		cmdName = s
 	}
 	bin := resolveAgentBin(cmdName, cwd)
@@ -125,26 +149,12 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 		return fmt.Errorf("%s binary not found (checked ~/.local/bin, homebrew, PATH)", cmdName)
 	}
 
-	// Keep one user-facing safety vocabulary across all providers. Claude's
-	// CLI uses different identifiers, so translate at this boundary and keep
-	// legacy aliases accepted for chats created by earlier Burrow versions.
-	perm := "default"
-	switch permissionMode {
-	case "supervised", "read-only", "default", "ask", "approval-required", "plan", "":
-		perm = "default"
-	case "auto":
-		perm = "auto"
-	case "full-access", "bypassPermissions":
-		perm = "bypassPermissions"
-	case "acceptEdits", "dontAsk":
-		perm = permissionMode
-	}
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
 		"--input-format", "stream-json",
 		"--include-partial-messages",
-		"--permission-mode", perm,
+		"--permission-mode", claudePermMode(l.PermissionMode),
 		// Hidden flag: routes every permission / blocking-tool decision to us as a
 		// can_use_tool control_request on stdin instead of the CLI deciding itself.
 		// Without it Edit/Write/Bash/ExitPlanMode/AskUserQuestion never reach the UI.
@@ -156,20 +166,18 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 	}
 	// The Burrow rule rides every chat; it is no longer in the global CLAUDE.md.
 	sys := docAsset("agentdocs/claude-rule.md")
-	if s := strings.TrimSpace(appendSystemPrompt); s != "" {
+	if s := strings.TrimSpace(l.AppendSystemPrompt); s != "" {
 		sys += "\n\n" + s
 	}
 	args = append(args, "--append-system-prompt", sys)
 	// Allowlisted so the model id can't smuggle extra argv.
-	if strings.HasPrefix(model, "claude-") {
-		args = append(args, "--model", model)
+	if strings.HasPrefix(l.Model, "claude-") {
+		args = append(args, "--model", l.Model)
 	}
-	if oneOf(effort, "low", "medium", "high", "xhigh", "max") {
-		args = append(args, "--effort", effort)
+	if oneOf(l.Effort, "low", "medium", "high", "xhigh", "max") {
+		args = append(args, "--effort", l.Effort)
 	}
-	for _, flag := range strings.Fields(profileArgs) {
-		args = append(args, flag)
-	}
+	args = append(args, strings.Fields(l.ProfileArgs)...)
 
 	// Env overrides (os/exec keeps the LAST duplicate, so these win over the
 	// inherited environment). Empty ANTHROPIC_API_KEY keeps the session on the
@@ -186,7 +194,7 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 	if dir, err := appDataDir(); err == nil {
 		env = append(env, "BURROW_HOME_DIR="+dir)
 	}
-	if cd := strings.TrimSpace(configDir); cd != "" {
+	if cd := strings.TrimSpace(l.ConfigDir); cd != "" {
 		if strings.HasPrefix(cd, "~/") {
 			if home, err := os.UserHomeDir(); err == nil {
 				cd = filepath.Join(home, cd[2:])
@@ -196,7 +204,7 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 	}
 	// The CLI's own auto-compact threshold. Only forwarded when the instance
 	// pins one — an empty value here would read as "0 tokens", not "default".
-	if w := strings.TrimSpace(autoCompactWindow); w != "" {
+	if w := strings.TrimSpace(l.AutoCompactWindow); w != "" {
 		env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+w)
 	}
 	// NOTE: deliberately no BURROW_PTY_ID — a chat is not a tab, so the global
@@ -209,7 +217,10 @@ func (a *App) ClaudeStart(id, cwd, resumeSessionID, permissionMode, appendSystem
 	}
 
 	return a.claudeMgr().Start(id, bin, args, cwd, env,
-		func(line string) { a.emitChatLine(id, "claude-data", line) },
+		func(line string) {
+			a.observeClaudeLine(id, line)
+			a.emitChatLine(id, "claude-data", line)
+		},
 		func() { a.emitChatLine(id, "claude-data", `{"type":"exit"}`) },
 	)
 }

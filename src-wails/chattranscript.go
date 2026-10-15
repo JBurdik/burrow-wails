@@ -177,7 +177,7 @@ func (t *chatTail) combined() []ChatMessage { return t.slice(0) }
 // transcript is the fold, not a subset of it).
 func isTurnBoundary(evType string) bool {
 	switch evType {
-	case EvtTurnCompleted, EvtTurnFailed, EvtSessionExited:
+	case EvtTurnCompleted, EvtTurnFailed, EvtSessionExited, EvtSessionReset:
 		return true
 	}
 	return false

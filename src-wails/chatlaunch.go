@@ -35,7 +35,10 @@ type ClaudeLaunch struct {
 // Claude start needs, as stored in config.json under "providers".
 type providerInstance struct {
 	ID                string   `json:"id"`
+	Name              string   `json:"name"`
 	ProviderID        string   `json:"providerId"`
+	Kind              string   `json:"kind"`
+	Transport         string   `json:"transport"`
 	Enabled           bool     `json:"enabled"`
 	Binary            string   `json:"binary"`
 	Args              []string `json:"args"`

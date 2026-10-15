@@ -426,6 +426,41 @@ describe("stream reducers", () => {
     expect(s.messages.value[0].toolFailed).toBe(true);
     dropChatSession(67);
   });
+
+  it("a runtime reset drops every pending request, closes the partial and goes idle", async () => {
+    const { deps, emit } = fakeDeps();
+    const s = chatSession(68, deps);
+    await s.listenEvents();
+    await s.listenClaude();
+    s.busy.value = true;
+    s.runtimeStarted.value = true;
+    emit("chat-event-68", { ord: 1, events: [{ type: "text.delta", messageId: "m", text: "half" }] });
+    emit("claude-data-68", { ord: 2, kind: "claude-data", line: JSON.stringify({ type: "control_request", request_id: "r9", request: { subtype: "can_use_tool", tool_name: "Bash", input: { command: "ls" } } }) });
+    s.acpPermReq.value = { rpcId: 4 } as never;
+    expect(s.pendingRequests.value.length).toBe(2);
+    expect(s.messages.value.some((m) => m.partial)).toBe(true);
+
+    emit("chat-event-68", { ord: 3, events: [{ type: "session.reset" }] });
+    expect(s.pendingRequests.value).toEqual([]);
+    expect(s.busy.value).toBe(false);
+    expect(s.runtimeStarted.value).toBe(false);
+    expect(s.messages.value.some((m) => m.partial)).toBe(false);
+    expect(s.messages.value.some((m) => m.text === "half")).toBe(true);
+    dropChatSession(68);
+  });
+
+  it("a cleared reset also empties the transcript and restarts the ord", async () => {
+    const { deps, emit } = fakeDeps();
+    const s = chatSession(69, deps);
+    await s.listenEvents();
+    emit("chat-event-69", { ord: 40, events: [{ type: "text.delta", messageId: "m", text: "old" }, { type: "turn.completed" }] });
+    s.sessionId.value = "sess";
+    emit("chat-event-69", { ord: 0, events: [{ type: "session.reset", cleared: true }] });
+    expect(s.messages.value).toEqual([]);
+    expect(s.sessionId.value).toBe("");
+    expect(s.lastOrd).toBe(0);
+    dropChatSession(69);
+  });
 });
 
 // One door for every answer. The prompt-clearing rules differ per protocol and

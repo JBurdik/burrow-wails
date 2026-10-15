@@ -231,6 +231,11 @@ export namespace main {
 	    archived_at: number;
 	    last_activity_at: number;
 	    parent_chat_id: number;
+	    collected_at: number;
+	    effort: string;
+	    permission_mode: string;
+	    profile_id: string;
+	    append_system_prompt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chat(source);
@@ -252,6 +257,11 @@ export namespace main {
 	        this.archived_at = source["archived_at"];
 	        this.last_activity_at = source["last_activity_at"];
 	        this.parent_chat_id = source["parent_chat_id"];
+	        this.collected_at = source["collected_at"];
+	        this.effort = source["effort"];
+	        this.permission_mode = source["permission_mode"];
+	        this.profile_id = source["profile_id"];
+	        this.append_system_prompt = source["append_system_prompt"];
 	    }
 	}
 	export class ProviderRuntimeEvent {
@@ -278,6 +288,7 @@ export namespace main {
 	    turnMs?: number;
 	    requestId?: string;
 	    requestKind?: string;
+	    cleared?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProviderRuntimeEvent(source);
@@ -308,6 +319,7 @@ export namespace main {
 	        this.turnMs = source["turnMs"];
 	        this.requestId = source["requestId"];
 	        this.requestKind = source["requestKind"];
+	        this.cleared = source["cleared"];
 	    }
 	}
 	export class ChatEventBatch {
@@ -341,6 +353,26 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class ChatSearchHit {
+	    chat_id: number;
+	    workspace_id: number;
+	    title: string;
+	    snippet: string;
+	    ts: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatSearchHit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.chat_id = source["chat_id"];
+	        this.workspace_id = source["workspace_id"];
+	        this.title = source["title"];
+	        this.snippet = source["snippet"];
+	        this.ts = source["ts"];
+	    }
 	}
 	export class ChatStreamLine {
 	    ord: number;
@@ -761,6 +793,28 @@ export namespace main {
 	        this.port = source["port"];
 	    }
 	}
+	export class LaunchSettingsPatch {
+	    model?: string;
+	    effort?: string;
+	    permission_mode?: string;
+	    profile_id?: string;
+	    append_system_prompt?: string;
+	    row_only?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LaunchSettingsPatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.model = source["model"];
+	        this.effort = source["effort"];
+	        this.permission_mode = source["permission_mode"];
+	        this.profile_id = source["profile_id"];
+	        this.append_system_prompt = source["append_system_prompt"];
+	        this.row_only = source["row_only"];
+	    }
+	}
 	export class LocalEndpointInfo {
 	    ws_url: string;
 	    ticket: string;
@@ -1123,6 +1177,20 @@ export namespace main {
 	        this.tool_name = source["tool_name"];
 	        this.tool_input = source["tool_input"];
 	        this.at = source["at"];
+	    }
+	}
+	export class ptyChunk {
+	    off?: number;
+	    data: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ptyChunk(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.off = source["off"];
+	        this.data = source["data"];
 	    }
 	}
 

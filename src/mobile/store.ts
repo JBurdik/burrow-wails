@@ -408,7 +408,7 @@ export const useRemoteStore = defineStore("remote", () => {
    * and the sender does not learn it — ClaudeSend returns no ord today.
    * Ceiling: sending the identical text twice inside one round trip collapses
    * to one bubble until the next reload. Thread the ord back through
-   * claude_send/acp_send if that ever matters.
+   * chat_send/acp_send if that ever matters.
    */
   const pendingSends = new Set<string>();
 
@@ -455,7 +455,11 @@ export const useRemoteStore = defineStore("remote", () => {
         return;
       }
       case "turn.completed":
-      case "turn.failed": {
+      case "turn.failed":
+      case "session.exited":
+      case "session.reset": {
+        // session.reset{cleared}: the desktop (or this phone) cleared the chat.
+        if (event.type === "session.reset" && event.cleared) chat.messages = [];
         // A turn ending is the one event guaranteed to mean "whatever was
         // pending is no longer pending" — regardless of whether mobile,
         // desktop, or nobody resolved it. Without this, a permission the
@@ -659,49 +663,12 @@ export const useRemoteStore = defineStore("remote", () => {
     chat.busy = true;
     try {
       if (chat.transport === "claude-cli") {
-        // AgentChat.vue's onMounted does this before ever sending; the phone
-        // never mounts that component, so an older chat whose Go-side process
-        // already exited (ReapIdle, or simply never spawned by this backend)
-        // sent straight into agentproc.Manager.Send with nothing registered —
-        // "unknown agent session" while the prompt still broadcast fine,
-        // because ClaudeSend publishes it before writing to stdin. ClaudeStart
-        // is a no-op if the session is already alive, so this is safe on
-        // every send, not just the first. It does NOT apply the model/
-        // effort/permissionMode picked in WelcomeView's composer — those
-        // only take effect once, inside RemoteCreateChat's own ClaudeStart
-        // call (remote.go), which is what actually spawns a brand-new
-        // chat's CLI. This later call is purely a resume path: chat.model
-        // is the one piece of that original config the server persists and
-        // echoes back (remoteChatShape's "model" key), so it's the
-        // best-effort value to resume with if this backend never started
-        // the process at all.
-        // ponytail: permissionMode/effort/appendSystemPrompt/configDir/
-        // profileCommand/profileArgs aren't threaded on resume — mobile has
-        // no per-chat persistence for them (only `model` is a real column).
-        // Fine for a resume of an already-alive session (no-op regardless);
-        // would under-configure a resume of a session this backend never
-        // started. Thread real chat config through if that matters.
-        await transport.invoke("claude_start", {
-          id: String(chat.id),
-          cwd: workspaces.value.find((w) => w.id === chat.workspaceId)?.path ?? "",
-          resumeSessionId: chat.claudeSessionId || "",
-          permissionMode: "",
-          appendSystemPrompt: "",
-          model: chat.model ?? "",
-          effort: "",
-          configDir: "",
-          profileCommand: "",
-          profileArgs: "",
-          autoCompactWindow: "",
-        });
-        await transport.invoke("claude_send", {
-          id: String(chat.id),
-          text: text.trim(),
-          sessionId: chat.claudeSessionId || null,
-        });
+        // The Go chat runtime starts the process from the row's launch
+        // settings if there is none (a new chat, or one ReapIdle took back),
+        // resuming its Claude session — the phone needs no start of its own.
+        await transport.invoke("chat_send", { chatId: chat.id, text: prompt, images: [] });
       } else {
-        // Same class of bug as claude-cli above, reproduced against a live
-        // backend: an old codex-app-server chat with no process registered
+        // Reproduced against a live backend: an old codex-app-server chat with no process registered
         // failed acp_send with "acp adapter not running". CodexStart resolves
         // its own binary (resolveAgentBin("codex", cwd)) and is a no-op if
         // already alive, so — unlike generic "acp" below — it needs nothing
@@ -737,12 +704,10 @@ export const useRemoteStore = defineStore("remote", () => {
   // nothing beyond cwd, same as ClaudeStart).
   //
   // model/effort/permissionMode are WelcomeView's composer choices, passed
-  // straight through to remote_create_chat so they reach the SAME
-  // ClaudeStart/CodexStart call that spawns the CLI (see remote.go) — for
-  // Claude that's the only place they can take effect (every later
-  // claude_start, in sendChat below, is a no-op once the session is alive);
-  // for Codex they're applied as a best-effort follow-up (AcpSetConfig/
-  // AcpSetMode) once the thread exists.
+  // straight through to remote_create_chat: for Claude they become the row's
+  // launch settings, which every start reads (the first chat_send starts it);
+  // for Codex they're applied as a follow-up (AcpSetConfig/AcpSetMode) once
+  // the thread exists.
   async function createChat(
     workspaceId: number,
     agentKind: "claude" | "codex",

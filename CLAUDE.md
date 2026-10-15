@@ -118,8 +118,32 @@ A settled, seen, **collected** (`collected_at`, read-only on `Chat`) sub-agent i
 **Launch settings** (`effort`, `permission_mode`, `profile_id`, `append_system_prompt`, + `model`) are
 columns too, **read-only on the wire** (SaveChats never writes them, like `collected_at`); backfilled once
 from the per-device `config.json` keys (`chat_migrations` marker). `resolveClaudeLaunch` (`chatlaunch.go`)
-resolves them + profile (`providers`) + project `claude_config_dir` into Claude start params — not wired yet
+resolves them + profile (`providers`) + project `claude_config_dir` into Claude start params at every start
 (plan: `docs/plans/006-chat-runtime.md`).
+
+### Chat runtime (`src-wails/chatruntime.go`, `chatspawn.go`, `src/lib/chatRuntime.ts`)
+
+A **claude-cli** chat's process is Go's, keyed by chat id — no mounted view needed (`spawn`, the phone,
+`chat_send` all work with the desktop closed). `chat_send` **ensures the process itself** (start from the row
++ resume `claude_session_id`, which Go now captures from `system/init`; covers a send after `ReapIdle`), then
+sends; a per-chat lock makes concurrent ensures one start. `chat_restart` / `chat_interrupt` (Claude
+`interrupt` control request, restart fallback) / `chat_clear` (wipe `chat_messages` + `chat_stream` +
+session id) all publish **`session.reset`** (stream kind `chat-runtime`, `{cleared}` for clear); the
+`chatSession` reducer — same branch as `session.exited` — drops every pending request, closes the partial,
+clears busy. `chat_set_launch_settings(id, patch)` writes the row and applies live via confirmed
+`set_model` / `set_permission_mode` control requests, else restarts (`row_only` = record only). Process
+starter is the `chatProcs` interface (`agentproc.Manager` / test fake). `claude_start`/`claude_send` are in
+`remoteDenied`; `remote_create_chat` (Claude) only creates the row. **Codex / generic ACP are not on the
+runtime yet** (PR4): `src/lib/chatRuntime.ts` `sendToChat` is the one frontend door that dispatches on
+transport, and their processes still start from AgentChat, which is why `SubAgentHost.vue` and the
+`pendingSubagentPrompts` handover are still there.
+
+**`spawn` of a thread's sub-agent runs in Go** (`spawnSubagent`, `control.Deps.ChatRuntime`): profile
+(defaults duplicated from `subagentProfiles.ts`, test-guarded) → agent (arg / profile / parent's / default
+chat agent / first enabled) → row with launch settings (arg / profile / parent's) → `ChatSend(task)`. A
+non-claude agent returns *unhandled* and the UI path does it. The parent's transcript row is still the UI's
+(`subagent_row` action, best-effort). The Right Panel's button reaches the same code via
+`spawn_subagent_chat`. Top-level chat and tab spawns stay UI.
 
 Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatTurns`,
 `chatPermissionRules`. Phone-created chats are titled `Chat N (phone)`.

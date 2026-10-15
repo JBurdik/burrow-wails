@@ -98,7 +98,9 @@ func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, err
 	return cwd, nil
 }
 
-// RemoteCreateChat creates a chat and starts its CLI.
+// RemoteCreateChat creates a chat. A Claude chat is only a row with its launch
+// settings — the process starts on the first chat_send (chatruntime.go); a
+// Codex chat still starts here until it moves into the chat runtime too.
 //
 // The long warning that used to sit here is obsolete: the id comes from the
 // database, so it cannot be reissued to somebody else, and no other client's
@@ -113,22 +115,15 @@ func resolveWorkspaceCwd(paths map[int64]string, workspaceID int64) (string, err
 // CodexStart (acp.go) resolves its own binary and needs nothing beyond
 // cwd, exactly like ClaudeStart.
 //
-// model/effort/permissionMode come straight from WelcomeView's composer.
-// This is the ONLY place they can take effect for Claude: ClaudeStart
-// (below) is what actually spawns the CLI, and it is a no-op on every later
-// call once the session is alive — a value threaded in afterwards, on the
-// first sendChat, is threaded in too late to matter. ClaudeStart itself
-// validates/defaults each of the three (an empty or unrecognized value is
-// simply dropped), so this passes them through unchecked. Codex is
-// different: CodexStart takes no model/effort/mode params at all (a fresh
-// thread always starts in its own Auto default), so those three are applied
-// as a follow-up via AcpSetConfig/AcpSetMode once the thread exists — see
-// below. model/effort are best-effort there; permissionMode is not, because
-// Auto is more permissive than most of the composer's other modes and
-// swallowing a failed mode change would fail OPEN, not narrow anything.
-// codexModeSettings (acp.go) deliberately aliases Claude's own permissionMode
-// ids ("default", "acceptEdits", …), so the
-// SAME composer value works for both agents without a second mode list.
+// model/effort/permissionMode come straight from WelcomeView's composer. For
+// Claude they are the row's launch settings, read by every start. Codex takes
+// no model/effort/mode at start (a fresh thread is always in its own Auto
+// default), so they are applied as a follow-up via AcpSetConfig/AcpSetMode
+// once the thread exists. model/effort are best-effort there; permissionMode
+// is not, because Auto is more permissive than most of the composer's other
+// modes and swallowing a failed mode change would fail OPEN. codexModeSettings
+// (acp.go) aliases Claude's own permissionMode ids, so the SAME composer value
+// works for both agents.
 func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, permissionMode string) (map[string]any, error) {
 	if agentKind != "claude" && agentKind != "codex" {
 		return nil, fmt.Errorf("remote chat creation only supports claude and codex (got %q)", agentKind)
@@ -170,6 +165,10 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 		Transport:      transport,
 		Model:          model,
 		LastActivityAt: time.Now().UnixMilli(),
+		// Claude's launch settings live on the row; its process starts on the
+		// first chat_send. Codex still takes them as a follow-up below (PR4).
+		Effort:         claudeOnly(agentKind, effort),
+		PermissionMode: claudeOnly(agentKind, permissionMode),
 	})
 	if err != nil {
 		return nil, err
@@ -212,14 +211,16 @@ func (a *App) RemoteCreateChat(workspaceID int64, agentKind, model, effort, perm
 				return nil, fmt.Errorf("set codex permission mode: %w", err)
 			}
 		}
-	} else if err := a.ClaudeStart(id, cwd, "", permissionMode, "", model, effort, "", "", "", ""); err != nil {
-		if delErr := a.DeleteChat(chat.ID); delErr != nil {
-			return nil, fmt.Errorf("start claude: %w (and rolling back chat %d failed: %v)", err, chat.ID, delErr)
-		}
-		return nil, fmt.Errorf("start claude: %w", err)
 	}
 
 	return remoteChatShape(chat, names, paths), nil
+}
+
+func claudeOnly(agentKind, v string) string {
+	if agentKind == "claude" {
+		return v
+	}
+	return ""
 }
 
 // RemoteSetChatTitle upgrades a chat's title from the phone — first the cheap

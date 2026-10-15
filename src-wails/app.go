@@ -32,8 +32,11 @@ type App struct {
 	streamW    *chatStreamWriter
 
 	claudeAgents *agentproc.Manager
-	acpSessions  *acpRegistry
-	lspMgr       *lspManager
+	// claudeProcs overrides claudeAgents in tests (agents.go chatProcs).
+	claudeProcs chatProcs
+	chatRT      chatRuntime
+	acpSessions *acpRegistry
+	lspMgr      *lspManager
 
 	hookSrv       *HookServer
 	control       *control.Core

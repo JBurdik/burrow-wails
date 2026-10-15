@@ -745,19 +745,57 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
         }
         break;
       case "session.exited":
-        // The process is gone, so the next send must spawn a replacement.
+      case "session.reset":
+        // The process is gone — it died (exited) or the chat runtime stopped
+        // it on purpose (reset: restart, interrupt, clear, a launch-settings
+        // change). Either way the next send spawns a replacement, nothing the
+        // old process asked is answerable any more, and no turn is running.
         s.runtimeStarted.value = false;
+        dropPendingRequests(s);
+        if (event.type === "session.reset" && event.cleared) {
+          s.messages.value = [];
+          s.sessionId.value = "";
+          s.turnStats.value = null;
+          s.sessionCost.value = 0;
+          s.claudeGeneratedTitle.value = false;
+          // Go restarted the stream's numbering with it.
+          s.lastOrd = batch.ord;
+        }
         if (s.busy.value) {
           // Died mid-turn with no boundary of its own — settle it here or the
           // spinner runs forever.
           s.busy.value = false;
           s.settleTranscript(true);
-          s.sync();
+        } else {
+          s.settleTranscript();
         }
+        s.sync();
         s.maybeEvict();
         break;
     }
   }
+}
+
+/** Every pending request belongs to a process; when it goes, they all go. */
+function dropPendingRequests(s: InternalSession) {
+  const slots = [
+    [s.pendingPermission, s.pendingPermissionMsgId],
+    [s.pendingDiff, s.pendingDiffMsgId],
+    [s.pendingQuestion, s.pendingQuestionMsgId],
+    [s.pendingPlan, s.pendingPlanMsgId],
+    [s.acpPermReq, s.acpPermMsgId],
+  ] as const;
+  for (const [request, markerId] of slots) {
+    if (request.value) s.removeFeedMarker(markerId.value);
+    markerId.value = null;
+    request.value = null;
+  }
+  s.nativeControlResponsePending.value = false;
+  s.acpPermRpcId.value = null;
+  s.acpPromptRpcId.value = null;
+  s.permissionResponsePending.value = false;
+  s.codexUserInput.value = null;
+  s.codexUserInputPending.value = false;
 }
 
 function hasActiveControlRequest(s: InternalSession, requestId: string) {
