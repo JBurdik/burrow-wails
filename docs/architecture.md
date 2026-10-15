@@ -49,7 +49,39 @@ per-device keys (`chatModelByChat`, `chatEffortByChat`, `chatPermissionMode.byCh
 (`chatlaunch.go`, pure) turns a row into a Claude start: `profile_id` resolved against
 `config.json` `providers` (by id, then `providerAliases`, else the first enabled Claude
 instance), config dir = profile's, else the project's `.burrow/config.toml`
-`claude_config_dir`. Nothing calls it yet.
+`claude_config_dir`. Every chat-runtime start calls it.
+
+### Chat runtime (`chatruntime.go`)
+
+**Why Go owns the process.** A chat's CLI used to be started by a mounted `AgentChat.vue` —
+three times over (`restartClaude`, `clearChat`, `ensureRuntime`), each with its own drifted
+`claude_start` payload (only one fell back to the project's config dir; one dropped the
+resume id; one swallowed errors), plus copies in the phone store and `RemoteCreateChat`. A
+spawn therefore needed a desktop: `SubAgentHost.vue` mounted hidden chats just to start
+processes, and `claudeChats.ts` carried a prompt handover for the race in between. Now every
+start reads the row through `claudeLaunchFor`, whoever asked.
+
+- **`ChatSend` ensures, then sends.** No separate "start" for callers to forget: a cold chat,
+  or one `agentproc.ReapIdle` took back, starts with `--resume <claude_session_id>`. Go
+  records the session id itself (`observeClaudeLine`, on `system/init`) so a chat nobody
+  ever viewed still resumes. A per-chat mutex serialises ensure/send/restart/clear — two
+  concurrent sends to a cold chat start one process.
+- **`session.reset`** is Burrow's, not the CLI's: `agentproc` silences a stopped process, so
+  without it a restart left the old pending prompts on screen. It is written to
+  `chat_stream` under its own kind (`chat-runtime`) like any line, so a replay drops the
+  same requests the live client did, and the Go fold treats it as a turn boundary.
+- **Live settings are confirmed, not assumed.** `set_model` / `set_permission_mode` /
+  `interrupt` are control requests whose `control_response` Go waits for (5 s); a refusal
+  or silence restarts instead. Assuming success would leave a chat in a *more* permissive
+  mode than the picker shows if the CLI refused a stricter one.
+- **Test seam:** `chatProcs` (agents.go) — `*agentproc.Manager` or the fake in
+  `chatruntime_test.go`.
+- **Not yet:** Codex and generic ACP (plan PR4). `src/lib/chatRuntime.ts` is already the
+  one frontend door (`sendToChat` dispatches on transport), so moving them is a Go change.
+
+`spawn` with a parent thread runs in Go (`chatspawn.go`): profile → agent → row with launch
+settings (else the parent's) → `ChatSend`. The parent's transcript row is still drawn by
+the UI (`subagent_row`), best-effort; plan PR3 moves it into the parent's `chat_stream`.
 
 **`parent_chat_id` is what makes a sub-agent belong to a thread rather than sit beside
 it.** A `spawn` made from inside a chat (carrying `parent_chat_id`, injected from

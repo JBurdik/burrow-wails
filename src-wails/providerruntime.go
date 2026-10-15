@@ -76,6 +76,9 @@ type ProviderRuntimeEvent struct {
 	// is blocked and on what, which is all the phase needs.
 	RequestID   string `json:"requestId,omitempty"`
 	RequestKind string `json:"requestKind,omitempty"` // RequestApproval | RequestInput
+
+	// session.reset: the transcript was wiped too (ChatClear), not only the process.
+	Cleared bool `json:"cleared,omitempty"`
 }
 
 // Event type constants — the whole vocabulary, in one place.
@@ -97,6 +100,11 @@ const (
 	// rather than write to a dead pipe. Distinct from turn.completed, which is
 	// only a turn boundary and leaves the process up.
 	EvtSessionExited = "session.exited"
+	// The chat runtime stopped the process on purpose (restart, interrupt,
+	// clear, a launch-settings change). Unlike session.exited it comes from
+	// Burrow, not the CLI: every pending request the old process held is dead,
+	// the turn is over, and with Cleared the transcript is gone too.
+	EvtSessionReset = "session.reset"
 	// message.note and message.patch_user are CLIENT-authored transcript rows
 	// that no provider produces — see normalizeChatNote / chatNoteKind. They
 	// carry no phase meaning (see chatPhaseEvent's fallthrough).
@@ -565,6 +573,8 @@ func NormalizeChatLine(kind, line string, ord int64) []ProviderRuntimeEvent {
 		return normalizeUserPrompt(line, ord)
 	case chatNoteKind:
 		return normalizeChatNote(line, ord)
+	case chatRuntimeKind:
+		return []ProviderRuntimeEvent{{Type: EvtSessionReset, Cleared: line == "clear"}}
 	case "acp-req":
 		// The request itself is a UI decision and keeps its raw channel; this
 		// only reports that the turn is now blocked on it.

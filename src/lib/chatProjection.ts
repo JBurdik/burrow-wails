@@ -36,6 +36,8 @@ export interface ChatEvent {
   message?: string;
   title?: string;
   sessionId?: string;
+  /** session.reset: the transcript was wiped too (chat_clear). */
+  cleared?: boolean;
 }
 
 export interface ChatEventBatch {

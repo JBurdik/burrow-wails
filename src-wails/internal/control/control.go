@@ -178,6 +178,28 @@ type ChatStopper interface {
 	StopChat(id int64) error
 }
 
+// ChatRuntime starts and drives chat sub-agents in the host, with no client
+// attached (docs/plans/006-chat-runtime.md, decision 10). handled=false means
+// the resolved agent is not on the runtime yet (Codex/ACP until PR4) and the UI
+// still has to do it.
+type ChatRuntime interface {
+	SpawnSubagent(req SpawnRequest) (res SpawnedChat, handled bool, err error)
+	SendToChat(chatID int64, text string) (handled bool, err error)
+}
+
+// SpawnRequest is spawn's chat half, as the caller gave it.
+type SpawnRequest struct {
+	Task, Profile, Agent, Model, Cwd string
+	ParentChatID                     int64
+}
+
+// SpawnedChat is what SpawnSubagent created. Task is the prompt actually sent
+// (a profile wraps the caller's task); AgentName labels the parent's row.
+type SpawnedChat struct {
+	ChatID, WorkspaceID int64
+	Task, AgentName     string
+}
+
 // Deps is everything the verbs need from the host app.
 type Deps struct {
 	DB         *sql.DB
@@ -202,6 +224,8 @@ type Deps struct {
 	// been collected — the chat equivalent of the <token>.result/.done files.
 	Chats       ChatReader
 	ChatStopper ChatStopper
+	// ChatRuntime is optional: nil sends every chat spawn/send to the UI.
+	ChatRuntime ChatRuntime
 	// PTYs reports live PTY ids for orchestration dispatch liveness. Optional:
 	// nil means "no proof either way", so absence of the capability itself
 	// must never be read as absence of the process.

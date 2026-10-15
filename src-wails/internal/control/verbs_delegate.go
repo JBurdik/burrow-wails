@@ -129,6 +129,14 @@ func delegationVerbs(c *Core) []Verb {
 			if strings.TrimSpace(p.Str("text")) == "" {
 				return nil, fmt.Errorf("chat_send needs text")
 			}
+			if rt := c.deps.ChatRuntime; rt != nil {
+				if handled, err := rt.SendToChat(p.Int("chat_id"), p.Str("text")); handled || err != nil {
+					if err != nil {
+						return nil, err
+					}
+					return map[string]any{"chat_id": p.Int("chat_id"), "sent": true}, nil
+				}
+			}
 			var out any
 			return out, c.ui(ctx, "chat_send", map[string]any{"chatId": p.Int("chat_id"), "text": p.Str("text")}, &out)
 		},
@@ -186,6 +194,29 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	token := ""
 	if capture {
 		token = fmt.Sprintf("res%d", time.Now().UnixNano())
+	}
+
+	// A thread's sub-agent runs in the host's chat runtime: no view has to be
+	// mounted, so spawn works with the desktop closed. The parent's transcript
+	// row is the UI's to draw, best-effort — the child runs either way.
+	if parent > 0 && c.deps.ChatRuntime != nil {
+		got, handled, err := c.deps.ChatRuntime.SpawnSubagent(SpawnRequest{
+			Task: p.Str("task"), Profile: p.Str("profile"), Agent: p.Str("agent"),
+			Model: p.Str("model"), Cwd: p.Str("cwd"), ParentChatID: parent,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if handled {
+			if c.deps.UI != nil {
+				go func() {
+					_ = c.ui(context.Background(), "subagent_row", map[string]any{
+						"parentChatId": parent, "chatId": got.ChatID, "task": got.Task, "agentName": got.AgentName,
+					}, nil)
+				}()
+			}
+			return SpawnResult{ChatID: got.ChatID, Target: "chat"}, nil
+		}
 	}
 
 	args := map[string]any{

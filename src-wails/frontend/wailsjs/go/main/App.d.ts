@@ -31,7 +31,17 @@ export function BranchDiff(arg1:string):Promise<string>;
 
 export function BranchDiffBase(arg1:string):Promise<string>;
 
+export function ChatClear(arg1:number):Promise<void>;
+
 export function ChatFoldedOrd(arg1:string):Promise<number>;
+
+export function ChatInterrupt(arg1:number):Promise<void>;
+
+export function ChatRestart(arg1:number):Promise<void>;
+
+export function ChatSend(arg1:number,arg2:string,arg3:Array<string>):Promise<void>;
+
+export function ChatSetLaunchSettings(arg1:number,arg2:main.LaunchSettingsPatch):Promise<void>;
 
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
@@ -217,6 +227,8 @@ export function PickFiles(arg1:string,arg2:Array<string>):Promise<Array<string>>
 
 export function ProbeProvider(arg1:string,arg2:string):Promise<main.ProviderProbe>;
 
+export function PtySince(arg1:string,arg2:number):Promise<main.ptyChunk>;
+
 export function PublishChatNote(arg1:string,arg2:string):Promise<void>;
 
 export function ReadClaudeActivity(arg1:string,arg2:string):Promise<string>;
@@ -291,6 +303,8 @@ export function SaveTempImage(arg1:string,arg2:string):Promise<string>;
 
 export function SaveTerminalTabs(arg1:number,arg2:Array<main.TerminalTab>):Promise<void>;
 
+export function SearchChats(arg1:string,arg2:number):Promise<Array<main.ChatSearchHit>>;
+
 export function SearchFiles(arg1:string,arg2:string,arg3:number):Promise<Array<main.SearchHit>>;
 
 export function SendFloatSnapshot(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
@@ -320,6 +334,8 @@ export function SetWorkspaceOrder(arg1:Array<number>):Promise<void>;
 export function SettleTurnAudit(arg1:string,arg2:string):Promise<main.TurnAudit>;
 
 export function ShellSnapshot():Promise<main.ShellSnapshot>;
+
+export function SpawnSubagentChat(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<Record<string, any>>;
 
 export function StartTurnAudit(arg1:string,arg2:string,arg3:string):Promise<main.TurnAudit>;
 

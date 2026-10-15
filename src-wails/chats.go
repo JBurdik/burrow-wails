@@ -306,7 +306,7 @@ func (a *App) StopChat(id int64) error {
 		var stopErr error
 		if transport == "codex-app-server" || agentKind == "codex" {
 			stopErr = a.AcpStop(sessionID)
-		} else if a.claudeAgents != nil && a.claudeAgents.Alive(sessionID) {
+		} else if a.claudeMgr().Alive(sessionID) {
 			stopErr = a.ClaudeStop(sessionID)
 		}
 		if stopErr != nil && !errors.Is(stopErr, os.ErrProcessDone) {

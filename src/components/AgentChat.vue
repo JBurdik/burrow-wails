@@ -656,6 +656,7 @@ import { useComposerCompletion } from "@/lib/composerCompletion";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
 import { chatSession, replayChatStream } from "@/lib/chatSession";
+import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
 import type { ChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { chatSettingKey } from "@/lib/chatSettings";
@@ -741,8 +742,6 @@ const props = defineProps<{
   // Compact mode (float chat): hide the heavy chrome (changes panel + diff
   // sidebar), keep the message stream + input + inline permission gates.
   compact?: boolean;
-  // Extra system prompt passed to claude_start as --append-system-prompt.
-  appendSystemPrompt?: string;
   // Use a dedicated localStorage key for the model selection instead of the
   // shared global one, so this chat's model is independent of every other
   // chat. Falls back to the global key.
@@ -1075,18 +1074,37 @@ function shareSelection() {
   nextTick(() => inputEl.value?.focus());
 }
 
+// Launch settings live on the chat row (docs/plans/006-chat-runtime.md): the
+// Go chat runtime starts the process from it. The legacy per-chat config.json
+// keys are still read as a fallback (the PR1 backfill copied them over).
+function chatRow() {
+  return chats.sessions.find((s) => s.id === props.chatId);
+}
+async function persistLaunch(patch: LaunchSettingsPatch) {
+  await setLaunchSettings(props.chatId, patch).catch((e: unknown) => {
+    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Couldn't save the chat settings: ${e}` });
+  });
+}
+function seedLaunchRow() {
+  const row = chatRow();
+  if (!row) return;
+  const patch: LaunchSettingsPatch = { row_only: true };
+  if (!row.model) patch.model = selectedModel.value;
+  if (!row.effort) patch.effort = selectedEffort.value;
+  if (!row.permissionMode) patch.permission_mode = permMode.value;
+  if (!row.profileId && selectedProfileId.value) patch.profile_id = selectedProfileId.value;
+  if (Object.keys(patch).length > 1) void persistLaunch(patch);
+}
+
 // Profile switcher — the Claude provider instances (each one is a config dir).
 const claudeProfiles = computed(() => chatAgents.active.filter((a) => a.providerId === "claude"));
 const defaultProfileId = computed(() => claudeProfiles.value[0]?.id ?? "claude");
 // Legacy per-chat localStorage key prefix (kept only for the one-time migration below).
 function loadProfileId(id: number): string {
+  const row = chatRow()?.profileId;
+  if (row) return row;
   const rec = getConfig<Record<string, string>>("chatProfileSelection", {});
   return rec[String(id)] ?? defaultProfileId.value;
-}
-function saveProfileId(id: number, profileId: string) {
-  const rec = { ...getConfig<Record<string, string>>("chatProfileSelection", {}) };
-  rec[String(id)] = profileId;
-  setConfig("chatProfileSelection", rec);
 }
 const selectedProfileId = ref<string>(loadProfileId(props.chatId));
 const selectedProfile = computed(() => chatAgents.byId(selectedProfileId.value) ?? claudeProfiles.value[0]);
@@ -1096,8 +1114,8 @@ const profileItems = computed<ComposerPillItem[]>(() =>
 async function selectProfile(id: string) {
   if (id === selectedProfileId.value) return;
   selectedProfileId.value = id;
-  saveProfileId(props.chatId, id);
-  await restartClaude();
+  // Go restarts a live process with the new profile; a cold one starts with it.
+  await persistLaunch({ profile_id: id });
 }
 
 // One popover drives both provider and model. Switching provider restarts the
@@ -1138,7 +1156,7 @@ const MODEL_CONFIG_KEY = props.modelKey ? `chatLastUsedModel:${props.modelKey}` 
 const MODEL_BY_CHAT_KEY = "chatModelByChat";
 const chatSettingId = computed(() => chatSettingKey(props.chatId, props.modelKey));
 function storedChatModel(): ClaudeModelId | null {
-  const v = getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {})[chatSettingId.value];
+  const v = chatRow()?.model || getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {})[chatSettingId.value];
   return claudeModels().some((m) => m.id === v) ? (v as ClaudeModelId) : null;
 }
 /** The model this chat starts with: its own pick, else the caller's explicit
@@ -1157,18 +1175,13 @@ function loadModel(): ClaudeModelId {
   if (claudeModels().some((m) => m.id === v)) return v as ClaudeModelId;
   return claudeModels()[0].id;
 }
-function saveChatModel(id: ClaudeModelId) {
-  const rec = { ...getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {}) };
-  rec[chatSettingId.value] = id;
-  setConfig(MODEL_BY_CHAT_KEY, rec);
-}
 const selectedModel = ref<ClaudeModelId>(loadModel());
 async function selectModel(id: ClaudeModelId) {
   if (id === selectedModel.value) return;
   selectedModel.value = id;
-  saveChatModel(id);
   setConfig(MODEL_CONFIG_KEY, id); // seed for the NEXT new chat only
-  await restartClaude();
+  // Go applies it in place (set_model) when Claude takes it, else restarts.
+  await persistLaunch({ model: id });
 }
 
 // Mirror the live model into the session so the Sidebar can badge the thread
@@ -1203,7 +1216,7 @@ function isEffort(v: unknown): v is ClaudeEffort {
   return CLAUDE_EFFORTS.some((option) => option.id === v);
 }
 function storedChatEffort(): ClaudeEffort | null {
-  const v = getConfig<Record<string, string>>(EFFORT_BY_CHAT_KEY, {})[chatSettingId.value];
+  const v = chatRow()?.effort || getConfig<Record<string, string>>(EFFORT_BY_CHAT_KEY, {})[chatSettingId.value];
   return isEffort(v) ? v : null;
 }
 function loadEffort(): ClaudeEffort {
@@ -1212,19 +1225,13 @@ function loadEffort(): ClaudeEffort {
   const saved = getConfig<string | null>(EFFORT_CONFIG_KEY, null);
   return isEffort(saved) ? saved : "high";
 }
-function saveChatEffort(effort: ClaudeEffort) {
-  const rec = { ...getConfig<Record<string, string>>(EFFORT_BY_CHAT_KEY, {}) };
-  rec[chatSettingId.value] = effort;
-  setConfig(EFFORT_BY_CHAT_KEY, rec);
-}
 const selectedEffort = ref<ClaudeEffort>(loadEffort());
 const selectedEffortLabel = computed(() => CLAUDE_EFFORTS.find((option) => option.id === selectedEffort.value)?.label ?? "High effort");
 async function selectEffort(effort: ClaudeEffort) {
   if (effort === selectedEffort.value) return;
   selectedEffort.value = effort;
-  saveChatEffort(effort);
   setConfig(EFFORT_CONFIG_KEY, effort); // seed for the NEXT new chat only
-  await restartClaude();
+  await persistLaunch({ effort });
 }
 
 
@@ -1632,7 +1639,7 @@ interface ChatPermissionModeConfig {
 }
 function loadPermMode(id: number): PermMode {
   const cfg = getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} });
-  const v = cfg.byChat[String(id)];
+  const v = chatRow()?.permissionMode || cfg.byChat[String(id)];
   if (isPermMode(v)) return v;
   // Migrate the old boolean "dangerous mode" flag → bypassPermissions.
   if (cfg.dangerousByChat[String(id)]) return "bypassPermissions";
@@ -1640,9 +1647,12 @@ function loadPermMode(id: number): PermMode {
   if (isPermMode(cfg.last)) return cfg.last;
   return "default";
 }
+/** `last` is this device's default for the next new chat; the chat's own mode
+ *  is its row's for claude-cli (persistLaunch), still config.json for the RPC
+ *  runtimes until they move into the Go chat runtime. */
 function savePermMode(id: number, mode: PermMode) {
   const cfg = { ...getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }) };
-  cfg.byChat = { ...cfg.byChat, [String(id)]: mode };
+  if (usesRpcRuntime.value) cfg.byChat = { ...cfg.byChat, [String(id)]: mode };
   cfg.last = mode;
   setConfig("chatPermissionMode", cfg);
 }
@@ -1749,7 +1759,7 @@ async function loadContextReport() {
   contextReportPending.value = true;
   awaitingContextReport.value = true;
   try {
-    await invoke("claude_send", { id: props.chatId, text: "/context", sessionId: sessionId.value || null, images: [] });
+    await invoke("chat_send", { chatId: props.chatId, text: "/context", images: [] });
   } catch {
     contextReportPending.value = false;
     awaitingContextReport.value = false;
@@ -2008,8 +2018,8 @@ async function copyMessage(msg: ChatMessage) {
 }
 
 // The welcome-screen composer creates a chat and its first prompt together. The
-// send has to wait for the runtime: claude_start is awaited, but an ACP adapter
-// only has a session after its handshake lands on acp-data.
+// send has to wait for the runtime: chat_send starts a Claude process itself,
+// but an ACP adapter only has a session after its handshake lands on acp-data.
 // ponytail: 20 s cap, no retry — if the adapter is that slow the prompt stays in
 // the feed as a plain user message and the user can resend.
 async function sendInitialPrompt(prompt: string, images?: string[]) {
@@ -2118,7 +2128,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   }
   try {
     pendingImages.value = [];
-    await invoke("claude_send", { id: props.chatId, text, sessionId: sessionId.value || null, images: msgImages });
+    await invoke("chat_send", { chatId: props.chatId, text, images: msgImages ?? [] });
     acceptFeedback();
     return { id: sentId, text };
   } catch (e) {
@@ -2182,6 +2192,7 @@ async function respondPlan(approve: boolean) {
   if (approve && resolved && permMode.value === "plan") {
     permMode.value = "auto";
     savePermMode(props.chatId, "auto");
+    if (!usesRpcRuntime.value) void persistLaunch({ permission_mode: "auto", row_only: true });
   }
 }
 
@@ -2216,17 +2227,15 @@ async function selectPermMode(mode: PermMode) {
     return;
   }
 
-  await restartClaude();
+  await persistLaunch({ permission_mode: mode });
 }
 
-// Stop + restart the claude proc (with --resume so the session continues) and
-// settle all turn state. Used by abort AND every setting switch (mode/model/
-// profile) — the teardown `exit` is suppressed so it emits no STOP, so the
-// status machine MUST be settled here via INTERRUPT or the dot sticks at
-// running/permission forever.
+// Restart the chat's process (with --resume so the session continues) and
+// settle all turn state. For the RPC runtimes that is done here; for
+// claude-cli it is the Go chat runtime's (chat_restart → session.reset).
 async function restartClaude() {
-  suppressNextDone.value = true; // restart — don't toast on the teardown `exit`
   if (usesRpcRuntime.value) {
+    suppressNextDone.value = true; // restart — don't toast on the teardown `exit`
     await stopRpcRuntime().catch(() => {});
     await startRpcRuntime().catch(() => {});
     // Drop any in-flight permission gate — the rpc id is dead after restart.
@@ -2238,32 +2247,11 @@ async function restartClaude() {
     syncStore();
     return;
   }
-  // claude_stop removes the proc from the map so the subsequent claude_start actually spawns.
-  // claude_abort (SIGINT) leaves a dead entry in the map → claude_start is a no-op.
-  await invoke("claude_stop", { id: props.chatId }).catch(() => {});
-  await invoke("claude_start", {
-    id: props.chatId,
-    cwd: props.cwd,
-    resumeSessionId: sessionId.value || null,
-    permissionMode: permMode.value,
-    appendSystemPrompt: props.appendSystemPrompt || null,
-    model: selectedModel.value,
-    effort: selectedEffort.value,
-    configDir: selectedProfile.value?.configDir || null,
-    profileCommand: selectedProfile.value?.binary || null,
-    profileArgs: selectedProfile.value?.args.join(" ") || null,
-    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
-  }).catch(() => {});
-  runtimeStarted.value = true;
-  busy.value = false;
-  // Drop any in-flight permission/question/plan prompts — the proc backing them is gone.
-  pendingPermission.value = null;
-  pendingDiff.value = null;
-  pendingQuestion.value = null;
-  pendingPlan.value = null;
-  const last = messages.value[messages.value.length - 1];
-  if (last?.partial) last.partial = false;
-  syncStore();
+  // The chat runtime stops the process and publishes session.reset, whose
+  // reducer (lib/chatSession.ts) drops the dead prompts, closes the partial
+  // and clears busy — for every client, not just this view. The next send
+  // starts a fresh process with --resume.
+  await invoke("chat_restart", { chatId: props.chatId }).catch(() => {});
 }
 
 async function abortTurn() {
@@ -2283,45 +2271,42 @@ async function abortTurn() {
       return;
     }
   }
+  if (!usesRpcRuntime.value) {
+    // Claude ends the turn in place (an `interrupt` control request); its
+    // trailing result is not a "finished" toast. Go falls back to a restart.
+    suppressNextDone.value = true;
+    await invoke("chat_interrupt", { chatId: props.chatId }).catch(() => {});
+    return;
+  }
   await restartClaude();
 }
 
 async function clearChat() {
   const rpc = usesRpcRuntime.value;
-  await (rpc ? stopRpcRuntime() : invoke("claude_stop", { id: props.chatId })).catch(() => {});
+  // The draft side is this view's own; the transcript side is Go's.
+  clearQueuedMessages();
+  pendingImages.value = [];
+  chats.sync(props.chatId, { claudeSessionId: "", busy: false, messageCount: 0, title: `Chat` });
+  if (!rpc) {
+    // Go stops the process, wipes chat_messages + chat_stream + the session id
+    // and publishes session.reset{cleared}; the reducer empties the transcript.
+    await S.listenEvents();
+    await invoke("chat_clear", { chatId: props.chatId }).catch((e: unknown) => {
+      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Could not clear the chat: ${e}` });
+    });
+    return;
+  }
+  await stopRpcRuntime().catch(() => {});
   messages.value = [];
   sessionId.value = "";
   busy.value = false;
-  clearQueuedMessages();
-  pendingImages.value = [];
   turnStats.value = null;
   sessionCost.value = 0;
   claudeGeneratedTitle.value = false;
   acpPermRpcId.value = null;
   clearMessageHistory(props.chatId);
-  chats.sync(props.chatId, { claudeSessionId: "", busy: false, messageCount: 0, title: `Chat` });
-  const projSettings = scriptsStore.settingsFor(props.cwd);
-  if (rpc) {
-    const startErr = await startRpcRuntime().catch((e: unknown) => e);
-    if (startErr) messages.value.push({ id: S.nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
-    return;
-  }
-  await invoke("claude_start", {
-    id: props.chatId,
-    cwd: props.cwd,
-    permissionMode: permMode.value,
-    appendSystemPrompt: props.appendSystemPrompt || null,
-    model: selectedModel.value,
-    effort: selectedEffort.value,
-    configDir: selectedProfile.value?.configDir || projSettings.claude_config_dir || null,
-    profileCommand: selectedProfile.value?.binary || null,
-    profileArgs: selectedProfile.value?.args.join(" ") || null,
-    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
-  }).catch(() => {});
-  runtimeStarted.value = true;
-  // Switched to a stream-json agent at runtime → ensure the claude-data listener
-  // exists (onMounted only attaches it when the chat starts as stream-json).
-  await S.listenClaude();
+  const startErr = await startRpcRuntime().catch((e: unknown) => e);
+  if (startErr) messages.value.push({ id: S.nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -2489,7 +2474,6 @@ async function ensureRuntime(): Promise<unknown> {
   if (runtimeStarted.value) return null;
   if (runtimeStarting) return runtimeStarting;
   runtimeStarting = (async (): Promise<unknown> => {
-    const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? sessionId.value ?? "";
     if (usesRpcRuntime.value) {
       await scriptsStore.loadForPath(props.cwd);
       const startErr = await startRpcRuntime().catch((e: unknown) => e);
@@ -2500,27 +2484,9 @@ async function ensureRuntime(): Promise<unknown> {
       runtimeStarted.value = true;
       return null;
     }
-    const startErr = await invoke("claude_start", {
-      id: props.chatId,
-      cwd: props.cwd,
-      resumeSessionId: stored || null,
-      permissionMode: permMode.value,
-      appendSystemPrompt: props.appendSystemPrompt || null,
-      model: selectedModel.value,
-      effort: selectedEffort.value,
-      configDir: selectedProfile.value?.configDir || null,
-      profileCommand: selectedProfile.value?.binary || null,
-      profileArgs: selectedProfile.value?.args.join(" ") || null,
-    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
-    }).catch((e: unknown) => {
-      // A swallowed failure here (missing `claude` binary, bad profile) used to
-      // look like a chat that simply never answers.
-      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to start Claude CLI: ${e}` });
-      return e;
-    });
+    // claude-cli: nothing to start here — chat_send starts the process in Go.
     await S.listenClaude();
-    if (!startErr) runtimeStarted.value = true;
-    return startErr ?? null;
+    return null;
   })();
   try {
     return await runtimeStarting;
@@ -2620,12 +2586,12 @@ onMounted(async () => {
   S.drain();
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
-  // Pin the resolved model to this chat on first mount, so it survives a
-  // remount even if the shared last-used key moves on in the meantime.
-  if (!storedChatModel()) saveChatModel(selectedModel.value);
   selectedEffort.value = loadEffort();
-  if (!storedChatEffort()) saveChatEffort(selectedEffort.value);
   permMode.value = loadPermMode(props.chatId);
+  // Pin what this device resolved (its "last used" defaults) onto the row on
+  // first mount: the row is what Go starts the process with, and it must not
+  // start a different model than the picker shows.
+  if (!usesRpcRuntime.value) seedLaunchRow();
 
   // Mounted normally means visible (Terminal.isChatVisible), but a chat spawned
   // with a prompt can mount unwatched — marking that one seen would clear a dot

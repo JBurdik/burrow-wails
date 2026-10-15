@@ -32,10 +32,13 @@
 <script setup lang="ts">
 // Mounted once, always-on, beside RightPanel in App.vue.
 //
-// A sub-agent's CLI process starts when its AgentChat mounts (claude_start /
-// listenClaude / the ACP branch all live in that component's onMounted — see
-// AgentChat.vue:2860-3015), so a child chat that nobody mounts never starts
-// working. This host is what mounts it: for every child chat belonging to a
+// A Codex/ACP sub-agent's process starts when its AgentChat mounts (the ACP
+// branch lives in that component's onMounted), so such a child that nobody
+// mounts never starts working. A claude-cli child does not need this any more
+// — `spawn` starts it in the Go chat runtime — but it is still hosted, because
+// its chat session (and with it the permission toast) lives in the mounted
+// view. Both go when Codex/ACP join the runtime (docs/plans/006-chat-runtime.md
+// PR4). This host is what mounts it: for every child chat belonging to a
 // workspace the user has open, it keeps one AgentChat alive for the chat's
 // entire life, whether or not the Right Panel (task 9) is currently showing
 // it. Closing/reopening the panel therefore never restarts a child — the

@@ -58,8 +58,28 @@ export function BranchDiffBase(arg1) {
   return window['go']['main']['App']['BranchDiffBase'](arg1);
 }
 
+export function ChatClear(arg1) {
+  return window['go']['main']['App']['ChatClear'](arg1);
+}
+
 export function ChatFoldedOrd(arg1) {
   return window['go']['main']['App']['ChatFoldedOrd'](arg1);
+}
+
+export function ChatInterrupt(arg1) {
+  return window['go']['main']['App']['ChatInterrupt'](arg1);
+}
+
+export function ChatRestart(arg1) {
+  return window['go']['main']['App']['ChatRestart'](arg1);
+}
+
+export function ChatSend(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatSend'](arg1, arg2, arg3);
+}
+
+export function ChatSetLaunchSettings(arg1, arg2) {
+  return window['go']['main']['App']['ChatSetLaunchSettings'](arg1, arg2);
 }
 
 export function CheckUpdate() {
@@ -430,6 +450,10 @@ export function ProbeProvider(arg1, arg2) {
   return window['go']['main']['App']['ProbeProvider'](arg1, arg2);
 }
 
+export function PtySince(arg1, arg2) {
+  return window['go']['main']['App']['PtySince'](arg1, arg2);
+}
+
 export function PublishChatNote(arg1, arg2) {
   return window['go']['main']['App']['PublishChatNote'](arg1, arg2);
 }
@@ -578,6 +602,10 @@ export function SaveTerminalTabs(arg1, arg2) {
   return window['go']['main']['App']['SaveTerminalTabs'](arg1, arg2);
 }
 
+export function SearchChats(arg1, arg2) {
+  return window['go']['main']['App']['SearchChats'](arg1, arg2);
+}
+
 export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3);
 }
@@ -636,6 +664,10 @@ export function SettleTurnAudit(arg1, arg2) {
 
 export function ShellSnapshot() {
   return window['go']['main']['App']['ShellSnapshot']();
+}
+
+export function SpawnSubagentChat(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['SpawnSubagentChat'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function StartTurnAudit(arg1, arg2, arg3) {
