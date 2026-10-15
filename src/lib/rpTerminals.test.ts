@@ -26,7 +26,8 @@ describe("rpTerminals", () => {
   });
 
   it("tells a stopped server (bare shell) from a running one", () => {
-    expect(["zsh", "-zsh", "bash", ""].every(onlyShell)).toBe(true);
-    expect(["node", "python3", "zshy"].some(onlyShell)).toBe(false);
+    expect(["zsh", "-zsh", "bash"].every(onlyShell)).toBe(true);
+    // "" = the PTY is gone (shell exited): not restartable in place.
+    expect(["node", "python3", "zshy", ""].some(onlyShell)).toBe(false);
   });
 });

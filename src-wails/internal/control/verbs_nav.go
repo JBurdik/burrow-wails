@@ -87,6 +87,7 @@ func navigationVerbs(c *Core) []Verb {
 		Summary: "Run a long-lived process (dev server, watcher) in an interactive terminal in the Right Panel. Use instead of background Bash/&; read its output with tab_output",
 		Args: []Arg{
 			{Name: "cmd", Type: "string", Desc: "Command to run, e.g. \"pnpm dev\"", Required: true},
+			{Name: "cwd", Type: "string", Desc: "Directory to run it in (e.g. a monorepo package); defaults to the caller's"},
 			{Name: "name", Type: "string", Desc: "Terminal label; defaults to the command"},
 			{Name: "workspace_id", Type: "integer", Desc: "Workspace whose panel shows it; defaults to the one containing cwd"},
 		},

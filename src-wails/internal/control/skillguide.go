@@ -50,7 +50,7 @@ You only get that choice from a terminal tab. A spawn made FROM a chat thread is
 
 ## Long-running processes
 
-Start a dev server, watcher or any process that does not exit with serve, never with background Bash, & or nohup. serve runs it in an interactive terminal in the user's Right Panel, so they can watch it and type into it, and returns its pty_id. Read the output with tab_output. Calling serve again with the same command reuses that terminal and restarts the process if it was stopped. tab_close stops it.
+Start a dev server, watcher or any process that does not exit with serve, never with background Bash, & or nohup. serve runs it in an interactive terminal in the user's Right Panel, so they can watch it and type into it, and returns its pty_id. Read the output with tab_output. Pass cwd to run it in a subdirectory. Calling serve again with the same command and cwd reuses that terminal and restarts the process if it was stopped. tab_close stops it; closing a terminal you started with serve needs no confirmation.
 
 ## Optional references (load only when needed)
 

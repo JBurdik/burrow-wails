@@ -123,11 +123,11 @@ export function loadLayouts(storage: Pick<Storage, "getItem"> | undefined = glob
   }
 }
 
-export function saveLayout(wsId: number, l: RpLayout, storage: Pick<Storage, "getItem" | "setItem"> | undefined = globalThis.localStorage): void {
+export function saveLayouts(changed: Record<number, RpLayout>, storage: Pick<Storage, "getItem" | "setItem"> | undefined = globalThis.localStorage): void {
   let all: Record<string, unknown> = {};
   try { all = JSON.parse(storage?.getItem(RP_LAYOUT_KEY) ?? "{}") ?? {}; } catch { /* corrupt → start over */ }
   try {
-    all[wsId] = l;
+    Object.assign(all, changed);
     storage?.setItem(RP_LAYOUT_KEY, JSON.stringify(all));
   } catch {
     // Storage full/blocked: the layout just doesn't survive a restart.

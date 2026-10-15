@@ -561,7 +561,7 @@
                 @click.stop="closeTerminal(id, t.id)"
               ><PhX :size="10" /></span>
             </button>
-            <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-hover hover:text-foreground" title="New terminal" aria-label="New terminal" @click="addTerminal(id, { cwd: termsByWs[id].terms[0]?.cwd ?? props.cwd, label: 'Terminal' })">
+            <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-hover hover:text-foreground" title="New terminal" aria-label="New terminal" @click="addTerminal(id, { cwd: props.cwd, label: 'Terminal' })">
               <PhPlus :size="13" />
             </button>
           </div>
@@ -652,7 +652,7 @@ import {
 } from "@phosphor-icons/vue";
 import {
   closeBottom, closeSurface as closeLayoutSurface, emptyLayout, isShown, loadLayouts, moveTo, openBottom, openIn,
-  paneOf, saveLayout, toggleMaximize, clampSplit, type PaneIndex, type RpLayout,
+  paneOf, saveLayouts, toggleMaximize, clampSplit, type PaneIndex, type RpLayout,
 } from "@/lib/rpLayout";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
@@ -868,8 +868,14 @@ function layoutFor(id: number): RpLayout {
   return (layouts[id] ??= emptyLayout());
 }
 const layout = computed(() => layoutFor(wsKey.value));
-watch(layouts, (all) => {
-  for (const [id, l] of Object.entries(all)) if (Number(id) !== NO_WS) saveLayout(Number(id), l);
+// Debounced: a split drag mutates `split` on every pointermove.
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+watch(layouts, () => {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const { [NO_WS]: _welcome, ...persisted } = layouts;
+    saveLayouts(persisted);
+  }, 300);
 }, { deep: true });
 /** Is `id` on screen in some pane of the current workspace? */
 const shown = (id: string) => isShown(layout.value, id);
@@ -1055,7 +1061,20 @@ function closeTerminal(ws: number, ptyId: number) {
   if (!s.terms.length) closeLayoutSurface(layoutFor(ws), "terminal");
 }
 
-async function serve(req: ServeRequest): Promise<ServeResult> {
+// Two serve calls for the same thing in flight (parallel tool calls, MCP and
+// CLI at once) must share one terminal: dedup alone runs before the await.
+const serving = new Map<string, Promise<ServeResult>>();
+function serve(req: ServeRequest): Promise<ServeResult> {
+  const key = `${req.workspaceId}\0${req.cwd}\0${req.cmd.trim().replace(/\s+/g, " ")}`;
+  let p = serving.get(key);
+  if (!p) {
+    p = serveOnce(req).finally(() => serving.delete(key));
+    serving.set(key, p);
+  }
+  return p;
+}
+
+async function serveOnce(req: ServeRequest): Promise<ServeResult> {
   const ws = req.workspaceId;
   // Bottom pane unless the user already put the Terminal surface elsewhere.
   const reveal = () => {
@@ -1063,14 +1082,18 @@ async function serve(req: ServeRequest): Promise<ServeResult> {
     if (ws === wsKey.value && !props.open) emit("openPanel");
   };
   const hit = findServed(termsByWs[ws], req.cmd, req.cwd);
-  if (hit) {
+  const fg = hit ? await invoke<string>("get_pty_foreground", { id: hit.id }).catch(() => "?") : "";
+  // "" = the daemon no longer has that PTY (its shell exited): drop the dead
+  // tab and start fresh rather than typing into nothing.
+  if (hit && fg === "") removeTerm(termsByWs[ws], hit.id);
+  else if (hit) {
     termsByWs[ws].active = hit.id;
     reveal();
     // Same server asked for again: if it was stopped (only the shell is left
-    // in the foreground), start it again in the same terminal.
-    const fg = await invoke<string>("get_pty_foreground", { id: hit.id }).catch(() => "?");
+    // in the foreground), start it again in the same terminal. Ctrl+U first
+    // clears whatever the user left half-typed on the prompt.
     const restart = onlyShell(fg);
-    if (restart) await invoke("write_pty", { id: hit.id, data: Array.from(new TextEncoder().encode(req.cmd + "\n")) });
+    if (restart) await invoke("write_pty", { id: hit.id, data: Array.from(new TextEncoder().encode("\x15" + req.cmd + "\n")) });
     return { pty_id: hit.id, workspace_id: ws, reused: true, restarted: restart };
   }
   const id = await addTerminal(ws, { cwd: req.cwd, label: req.name || req.cmd, cmd: req.cmd });

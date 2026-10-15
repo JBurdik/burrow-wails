@@ -1,3 +1,5 @@
+import { SHELL_RE } from "@/lib/termRegistry";
+
 // The Right Panel's Terminal surface holds several shells per workspace: the
 // user's scratch shells and the long-lived processes agents start through the
 // `serve` control verb. Pure helpers over a plain object (RightPanel keeps it
@@ -32,9 +34,10 @@ export function findServed(s: RpTerms | undefined, cmd: string, cwd: string): Rp
 }
 
 /** True when a PTY's foreground (get_pty_foreground) is just its shell — the
- *  served process was stopped. "" covers a daemon that reports no foreground. */
+ *  served process was stopped. "" is NOT that: the daemon has no such PTY
+ *  (its shell exited), so there is nothing to type into. */
 export function onlyShell(foreground: string): boolean {
-  return foreground === "" || /^-?(zsh|bash|sh|fish|csh|tcsh|dash)$/.test(foreground);
+  return SHELL_RE.test(foreground);
 }
 
 export interface ServeRequest { workspaceId: number; cmd: string; cwd: string; name: string }

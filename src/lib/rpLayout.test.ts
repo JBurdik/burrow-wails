@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   closeBottom, closeSurface, emptyLayout, isShown, loadLayouts, moveTo, normalizeLayout, openBottom, openIn, paneOf,
-  RP_LAYOUT_KEY, saveLayout, toggleMaximize,
+  RP_LAYOUT_KEY, saveLayouts, toggleMaximize,
 } from "./rpLayout";
 
 function memStorage(init: Record<string, string> = {}) {
@@ -68,8 +68,8 @@ describe("rpLayout", () => {
     const s = memStorage({ [RP_LAYOUT_KEY]: "{not json" });
     const a = emptyLayout();
     openIn(a, "git");
-    saveLayout(1, a, s);
-    saveLayout(2, emptyLayout(), s);
+    saveLayouts({ 1: a }, s);
+    saveLayouts({ 2: emptyLayout() }, s);
     const back = loadLayouts(s);
     expect(back[1].panes[0].tabs).toEqual(["git"]);
     expect(Object.keys(back)).toEqual(["1", "2"]);
