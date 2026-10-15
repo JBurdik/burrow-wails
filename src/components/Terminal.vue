@@ -187,6 +187,7 @@
 </template>
 
 <script setup lang="ts">
+import { SHELL_RE } from "@/lib/termRegistry";
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { displayStatus, shouldMarkSeen, DONE_AUTOCLEAR_MS, type Phase } from "@/runtime/displayStatus";
 import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe } from "@phosphor-icons/vue";
@@ -307,7 +308,6 @@ function addBottomTerminal(tabId: number) {
 // group. Ask first when something other than the shell is in the foreground —
 // the same read XTerm's auto-title poll uses. ponytail: one shell-out per pty
 // at close time, no watching.
-const SHELL_RE = /^(zsh|bash|sh|fish|csh|tcsh|dash)$/;
 async function runningIn(ptyIds: number[]): Promise<string> {
   for (const id of ptyIds) {
     const proc = await invoke<string>("get_pty_foreground", { id }).catch(() => "");

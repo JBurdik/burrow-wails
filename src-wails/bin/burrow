@@ -68,7 +68,7 @@ _primary() {
   case "$1" in
     spawn)                       echo "task" ;;
     wait|wait_result)            echo "token" ;;
-    run)                         echo "cmd" ;;
+    run|serve)                   echo "cmd" ;;
     tab_output)                  echo "pty_id" ;;
     send_to_tab)                 echo "pty_id text" ;;
     tab_rename)                  echo "pty_id title" ;;

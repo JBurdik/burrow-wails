@@ -24,6 +24,7 @@ import { router } from "@/router";
 import { useDiagram } from "@/composables/useDiagram";
 import { buildTerminalCommand } from "@/lib/agentCommand";
 import { readTermOutput } from "@/lib/termRegistry";
+import { panelTerminals } from "@/lib/rpTerminals";
 import { subagentMessage, type ChatMessage } from "@/lib/chatTypes";
 import { childrenOf } from "@/stores/chatTree";
 import { chatSession, liveChatSessionIds } from "@/lib/chatSession";
@@ -56,6 +57,8 @@ export async function perform(action: string, args: Record<string, unknown>): Pr
       return focusTab(num(args.ptyId));
     case "new_tab":
       return newTab(num(args.workspaceId), str(args.cmd));
+    case "serve":
+      return serve(args);
     case "tab_rename":
       return renameTab(num(args.ptyId), str(args.title));
     case "tab_close":
@@ -148,9 +151,24 @@ function renameTab(ptyId: number, title: string) {
 
 function closeTab(ptyId: number) {
   const owner = ownerOf(ptyId);
+  // Not a main tab: may be a Right Panel terminal (e.g. one `serve` started).
+  if (owner === undefined && panelTerminals()?.close(ptyId)) return { pty_id: ptyId, closed: true };
   if (owner === undefined) throw new Error(`no open tab with pty id ${ptyId}`);
   useTerminalTabsStore().close(owner, ptyId);
   return { pty_id: ptyId, closed: true };
+}
+
+/** Run a long-lived process in a Right Panel terminal (the `serve` verb). The
+ *  workspace is mounted, not focused (ensureOpen, not open): the agent's
+ *  server shows up in that project's panel without yanking the user away. */
+async function serve(args: Record<string, unknown>) {
+  const panel = panelTerminals();
+  if (!panel) throw new Error("the right panel isn't mounted");
+  const workspaceId = num(args.workspaceId);
+  const target = await workspaceById(workspaceId);
+  if (!target) throw new Error(`no workspace with id ${workspaceId}`);
+  useWorkspaceStore().ensureOpen(target);
+  return panel.serve({ workspaceId, cmd: str(args.cmd), cwd: str(args.cwd) || target.path, name: str(args.name) });
 }
 
 async function createWorkspace(path: string, name: string) {

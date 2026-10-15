@@ -8,7 +8,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
-import { registerTerm, unregisterTerm } from "@/lib/termRegistry";
+import { registerTerm, unregisterTerm, SHELL_RE } from "@/lib/termRegistry";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -148,7 +148,6 @@ const CLAUDE_RE = /^claude$/i;
 const CLAUDE_IDLE_TITLE_RE = /^✳?\s*Claude\s+Code$/i;
 const CODEX_RE = /^codex$/i;
 const COPILOT_RE = /^copilot$/i;
-const SHELL_RE = /^(zsh|bash|sh|fish|csh|tcsh|dash)$/;
 // OSC 9999 from the `burrow` CLI: \x1b]9999;spawn;<b64cmd>;<b64token>;<b64cwd>\x07
 const SPAWN_RE = /\x1b\]9999;spawn;([A-Za-z0-9+/=]*);([A-Za-z0-9+/=]*);([A-Za-z0-9+/=]*)\x07/g;
 // OSC 7: shell CWD hint — \e]7;file://hostname/path\a. Emitted by zsh/fish/bash

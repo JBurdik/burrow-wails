@@ -650,3 +650,30 @@ func TestChatSendReachesTheUI(t *testing.T) {
 		t.Fatalf("args = %v", ui.args)
 	}
 }
+
+// serve resolves the workspace from the caller's cwd by longest prefix, so an
+// agent in a nested worktree (or a subdirectory) lands in its own panel.
+func TestServeResolvesWorkspaceFromCwd(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.Exec(`INSERT INTO workspaces VALUES (3,'nested','/tmp/repo/.worktrees/x',1,'x',2)`); err != nil {
+		t.Fatal(err)
+	}
+	ui := &fakeUI{result: map[string]any{"pty_id": 42}}
+	c := newTestCore(t, Deps{UI: ui, DB: db})
+
+	cases := map[string]int64{"/tmp/repo/src": 1, "/tmp/repo/.worktrees/x/web": 3, "/tmp/repo": 1}
+	for cwd, want := range cases {
+		if _, err := c.Call(context.Background(), ScopeLocal, "serve", Params{"cmd": " pnpm dev ", "cwd": cwd}); err != nil {
+			t.Fatalf("%s: %v", cwd, err)
+		}
+		if ui.action != "serve" || ui.args["workspaceId"] != want || ui.args["cmd"] != "pnpm dev" {
+			t.Errorf("%s: action=%s args=%v, want workspace %d", cwd, ui.action, ui.args, want)
+		}
+	}
+	if _, err := c.Call(context.Background(), ScopeLocal, "serve", Params{"cmd": "pnpm dev", "cwd": "/tmp/repository"}); err == nil {
+		t.Error("a sibling path that merely shares a prefix must not match")
+	}
+	if _, err := c.Call(context.Background(), ScopeLocal, "serve", Params{"cwd": "/tmp/repo"}); err == nil {
+		t.Error("serve without cmd must fail")
+	}
+}
