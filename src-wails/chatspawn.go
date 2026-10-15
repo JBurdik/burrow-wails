@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -217,6 +218,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, bool
 	if name == "" {
 		name = inst.ID
 	}
+	a.publishSubagentRow(parent.ID, c.ID, task, name)
 	return control.SpawnedChat{ChatID: c.ID, WorkspaceID: wsID, Task: task, AgentName: name}, true, nil
 }
 
@@ -270,4 +272,36 @@ func subagentTitle(task string) string {
 		line = string(r[:60])
 	}
 	return line
+}
+
+// publishSubagentRow records "spawned a sub-agent" in the PARENT's transcript
+// through the parent's own chat_stream (a chat-note row), so every client sees
+// it live, a restart replays it, and no client has to read-modify-write the
+// parent's chat_messages — or even be running.
+func (a *App) publishSubagentRow(parentChatID, childChatID int64, task, agentName string) {
+	a.emitChatLine(strconv.FormatInt(parentChatID, 10), chatNoteKind, subagentNote(childChatID, task, agentName))
+}
+
+// subagentNote is the chat-note line for that row: the task's first line as
+// the label, and the child it opens.
+func subagentNote(childChatID int64, task, agentName string) string {
+	text := "Spawned Sub-agent"
+	if label := strings.TrimSpace(strings.SplitN(task, "\n", 2)[0]); label != "" {
+		text = "Spawned sub-agent: " + label
+	}
+	note, _ := json.Marshal(chatNoteEnvelope{
+		Form: "row", Role: "system-info", Text: text,
+		SubagentChatID: childChatID, SubagentAgent: agentName,
+	})
+	return string(note)
+}
+
+// PublishSubagentRow is publishSubagentRow for a sub-agent the UI started
+// (Codex / ACP children, until they move into the chat runtime).
+func (a *App) PublishSubagentRow(parentChatID, childChatID int64, task, agentName string) error {
+	if parentChatID <= 0 || childChatID <= 0 {
+		return fmt.Errorf("publish_subagent_row: parent and child chat ids are required")
+	}
+	a.publishSubagentRow(parentChatID, childChatID, task, agentName)
+	return nil
 }

@@ -48,6 +48,9 @@ type ChatMessage struct {
 	// Unexported would drop it from JSON entirely; chatTypes.ts's `_acpMsgId`
 	// is part of the persisted shape, so it has to round-trip too.
 	AcpMsgID string `json:"_acpMsgId,omitempty"`
+
+	SubagentChatID int64  `json:"subagentChatId,omitempty"`
+	SubagentAgent  string `json:"subagentAgent,omitempty"`
 }
 
 // foldState is the mutable accumulator threaded through folding one event
@@ -93,10 +96,12 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 		// Pushed verbatim, never partial — unlike a provider delta it arrives
 		// whole, with nothing more to append.
 		st.messages = append(st.messages, ChatMessage{
-			ID:     len(st.messages),
-			Role:   ev.Role,
-			Text:   ev.Text,
-			Images: ev.Images,
+			ID:             len(st.messages),
+			Role:           ev.Role,
+			Text:           ev.Text,
+			Images:         ev.Images,
+			SubagentChatID: ev.SubagentChatID,
+			SubagentAgent:  ev.SubagentAgent,
 		})
 		return true
 

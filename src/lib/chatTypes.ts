@@ -88,16 +88,3 @@ export interface AcpConfigOption {
   options: AcpConfigChoice[];
 }
 
-let subagentMsgSeq = 0;
-
-/** The transcript row a thread gets when it spawns a sub-agent. */
-export function subagentMessage(chatId: number, title: string, agentName: string): ChatMessage {
-  const label = title.split("\n")[0].trim();
-  return {
-    id: Date.now() * 1000 + (subagentMsgSeq++ % 1000),
-    role: "system-info",
-    text: label ? `Spawned sub-agent: ${label}` : "Spawned Sub-agent",
-    subagentChatId: chatId,
-    subagentAgent: agentName,
-  };
-}

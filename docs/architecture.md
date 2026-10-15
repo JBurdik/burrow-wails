@@ -80,8 +80,11 @@ start reads the row through `claudeLaunchFor`, whoever asked.
   one frontend door (`sendToChat` dispatches on transport), so moving them is a Go change.
 
 `spawn` with a parent thread runs in Go (`chatspawn.go`): profile → agent → row with launch
-settings (else the parent's) → `ChatSend`. The parent's transcript row is still drawn by
-the UI (`subagent_row`), best-effort; plan PR3 moves it into the parent's `chat_stream`.
+settings (else the parent's) → `ChatSend`. The parent's transcript row is written by Go
+into the **parent's** `chat_stream` as a `chat-note` row carrying `subagentChatId` /
+`subagentAgent` (`publishSubagentRow`; a UI-spawned Codex/ACP child goes through
+`publish_subagent_row`), so it needs no client and replays after a restart. The old path —
+the UI read-modify-writing the parent's `chat_messages` — raced the parent's own save.
 
 **`parent_chat_id` is what makes a sub-agent belong to a thread rather than sit beside
 it.** A `spawn` made from inside a chat (carrying `parent_chat_id`, injected from
@@ -170,7 +173,12 @@ session did not own was written into the dead instance (a Codex
 `requestUserInput` arriving while unmounted was invisible on remount and did not
 block eviction). The component now `attachView`s a small `ChatViewHooks` (scroll,
 question/plan draft resets, ACP selector restore, `send` for the queue drain) on
-mount and `release()`s on unmount. A session is only torn down when it is **idle** — a running turn or a
+mount and `release()`s on unmount. Its interface is **closed**: refs come back
+`Readonly`, and every change from outside is a named intent (`postUserMessage`,
+`startTurn`, `failTurn`, `runtimeReset`, `notice`, …). Before this, `restartClaude`
+cleared pending refs by hand and `controlBridge` pushed rows straight into
+`S.messages`, so the idle invariant below held only as long as every caller
+remembered it. A session is only torn down when it is **idle** — a running turn or a
 pending permission keeps streaming behind an unmounted view (ported from
 t3code's `shouldEvictThreadDetailSubscription`). That is what lets chat leaves
 render with `v-if` (`Terminal.isChatVisible`), so "is the user looking at this"

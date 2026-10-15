@@ -48,15 +48,15 @@ type ProviderRuntimeEvent struct {
 	Failed     bool           `json:"failed,omitempty"`
 
 	// turn.completed
-	InputTokens  int     `json:"inputTokens,omitempty"`
-	OutputTokens int     `json:"outputTokens,omitempty"`
+	InputTokens  int `json:"inputTokens,omitempty"`
+	OutputTokens int `json:"outputTokens,omitempty"`
 
 	// context.usage — the window total plus the split behind it
-	ContextTokens       int `json:"contextTokens,omitempty"`
-	ContextWindow       int `json:"contextWindow,omitempty"`
-	CacheReadTokens     int `json:"cacheReadTokens,omitempty"`
-	CacheCreationTokens int `json:"cacheCreationTokens,omitempty"`
-	CostUSD      float64 `json:"costUsd,omitempty"`
+	ContextTokens       int     `json:"contextTokens,omitempty"`
+	ContextWindow       int     `json:"contextWindow,omitempty"`
+	CacheReadTokens     int     `json:"cacheReadTokens,omitempty"`
+	CacheCreationTokens int     `json:"cacheCreationTokens,omitempty"`
+	CostUSD             float64 `json:"costUsd,omitempty"`
 
 	// turn.failed / session.title / session.id
 	Message   string `json:"message,omitempty"`
@@ -70,6 +70,9 @@ type ProviderRuntimeEvent struct {
 	Role   string   `json:"role,omitempty"`   // message.note: the ChatMessage role to render
 	Images []string `json:"images,omitempty"` // message.note / message.patch_user
 	TurnMs int      `json:"turnMs,omitempty"` // message.patch_user
+	// message.note "spawned sub-agent" row: which child chat it opens.
+	SubagentChatID int64  `json:"subagentChatId,omitempty"`
+	SubagentAgent  string `json:"subagentAgent,omitempty"`
 
 	// request.opened / request.resolved. The request's own payload stays on the
 	// raw channel (the UI answers it there); these two only say THAT the turn
@@ -93,9 +96,9 @@ const (
 	EvtTurnCompleted = "turn.completed"
 	// How full the model's context window was on the last request of the turn.
 	EvtContextUsage = "context.usage"
-	EvtTurnFailed    = "turn.failed"
-	EvtSessionTitle  = "session.title"
-	EvtSessionID     = "session.id"
+	EvtTurnFailed   = "turn.failed"
+	EvtSessionTitle = "session.title"
+	EvtSessionID    = "session.id"
 	// The runtime process is gone; the next send has to spawn a replacement
 	// rather than write to a dead pipe. Distinct from turn.completed, which is
 	// only a turn boundary and leaves the process up.
@@ -652,6 +655,9 @@ type chatNoteEnvelope struct {
 	Text   string   `json:"text,omitempty"`
 	Images []string `json:"images,omitempty"`
 	TurnMs int      `json:"turnMs,omitempty"`
+	// A system-info row recording a spawned sub-agent (see publishSubagentRow).
+	SubagentChatID int64  `json:"subagentChatId,omitempty"`
+	SubagentAgent  string `json:"subagentAgent,omitempty"`
 }
 
 // chatNoteRoles are the ONLY ChatMessage roles (src/lib/chatTypes.ts) a "row"
@@ -691,10 +697,12 @@ func normalizeChatNote(line string, ord int64) []ProviderRuntimeEvent {
 			return nil
 		}
 		return []ProviderRuntimeEvent{{
-			Type:   EvtMessageNote,
-			Role:   env.Role,
-			Text:   env.Text,
-			Images: env.Images,
+			Type:           EvtMessageNote,
+			Role:           env.Role,
+			Text:           env.Text,
+			Images:         env.Images,
+			SubagentChatID: env.SubagentChatID,
+			SubagentAgent:  env.SubagentAgent,
 		}}
 	case "patch":
 		if env.TurnMs == 0 && len(env.Images) == 0 {

@@ -286,6 +286,8 @@ export namespace main {
 	    role?: string;
 	    images?: string[];
 	    turnMs?: number;
+	    subagentChatId?: number;
+	    subagentAgent?: string;
 	    requestId?: string;
 	    requestKind?: string;
 	    cleared?: boolean;
@@ -317,6 +319,8 @@ export namespace main {
 	        this.role = source["role"];
 	        this.images = source["images"];
 	        this.turnMs = source["turnMs"];
+	        this.subagentChatId = source["subagentChatId"];
+	        this.subagentAgent = source["subagentAgent"];
 	        this.requestId = source["requestId"];
 	        this.requestKind = source["requestKind"];
 	        this.cleared = source["cleared"];

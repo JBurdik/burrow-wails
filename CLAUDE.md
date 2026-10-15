@@ -141,8 +141,9 @@ transport, and their processes still start from AgentChat, which is why `SubAgen
 **`spawn` of a thread's sub-agent runs in Go** (`spawnSubagent`, `control.Deps.ChatRuntime`): profile
 (defaults duplicated from `subagentProfiles.ts`, test-guarded) → agent (arg / profile / parent's / default
 chat agent / first enabled) → row with launch settings (arg / profile / parent's) → `ChatSend(task)`. A
-non-claude agent returns *unhandled* and the UI path does it. The parent's transcript row is still the UI's
-(`subagent_row` action, best-effort). The Right Panel's button reaches the same code via
+non-claude agent returns *unhandled* and the UI path does it. The parent's transcript row is Go's: a
+`chat-note` row (`subagentChatId`/`subagentAgent`) in the **parent's** `chat_stream` (`publishSubagentRow`;
+the UI path calls `publish_subagent_row`), projected as `message.note`. The Right Panel's button reaches the same code via
 `spawn_subagent_chat`. Top-level chat and tab spawns stay UI.
 
 Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatTurns`,
@@ -159,8 +160,13 @@ for the drain — and `release()`s on unmount; the last view's hooks stay instal
 down when **idle** (`pendingRequests` — a typed `PendingRequest` union — empty and not busy; every answer
 goes through the one `respond(PendingAnswer)` door, which also closes a generic ACP prompt on write since
 only Codex sends `serverRequest/resolved` — a running turn or pending permission keeps
-streaming behind an unmounted view). That's what lets chat leaves render with `v-if`. Deps (`invoke`,
-`listen`, host) are injectable: `chatSession.test.ts` drives the reducers through fake listeners.
+streaming behind an unmounted view). That's what lets chat leaves render with `v-if`. **The interface is
+closed**: `ChatSession` hands every ref back `Readonly` (writable `SessionState` is module-private) plus
+intents — `notice`, `postUserMessage`/`startTurn`/`failTurn`, `runtimeReset` (the same settlement as a
+`session.reset` event, for Codex/ACP restarts the view still drives until PR4), `suppressDoneToast`,
+`requestContextReport`, `hydrate`, … — so nothing outside can break the idle invariant. The turn clock
+(`turnStartedAt` → `turnMs`) is the session's too. Deps (`invoke`, `listen`, host) are injectable:
+`chatSession.test.ts` drives it **only** through that interface and fake listeners.
 
 Every agent line is appended to SQLite `chat_stream(chat_id, ord, kind, line)` *before* it is emitted;
 `chat_stream_state.folded_ord` records how far the frontend folded it into `chat_messages`, so a trim

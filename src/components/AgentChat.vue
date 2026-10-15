@@ -874,16 +874,15 @@ const agentAccentColor = computed(() =>
 // handle stays correct for the component's whole life.
 const S = chatSession(props.chatId);
 const {
-  messages, busy, lastActivityAt, turnStartedAt, messageQueue, suppressNextDone,
+  messages, busy, lastActivityAt, turnStartedAt, messageQueue,
   sessionId, turnStats, sessionCost, runtimeStarted,
   pendingPermission, pendingQuestion, pendingPlan, pendingDiff,
-  acpPermReq, acpPermRpcId, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
+  acpPermReq, acpModes, acpConfigOptions,
   permissionResponsePending, codexUserInput, codexUserInputPending,
-  nativeControlResponsePending, acpRestorePushIds,
-  contextTokens, contextWindow, contextSplit, contextReport, contextReportPending, awaitingContextReport,
+  nativeControlResponsePending,
+  contextTokens, contextWindow, contextSplit, contextReport, contextReportPending,
   claudeGeneratedTitle,
   enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext,
-  removeFeedMarker,
 } = S;
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
@@ -942,43 +941,40 @@ watch([acpModes, acpConfigOptions], ([modes, configOptions]) => {
   if (!isAcpRuntime.value || (!modes && configOptions.length === 0)) return;
   setAcpCapabilities(props.chatId, { agentId: agentKind.value, modes, configOptions });
 }, { deep: true });
-// acpRestorePushIds (the session's): request ids of OUR OWN restore pushes.
-// The reply to a restore carries the adapter's selector set again, so
+// trackAcpControl(rid, restore) (the session's): request ids of OUR OWN restore
+// pushes. The reply to a restore carries the adapter's selector set again, so
 // re-restoring from it is what would ping-pong forever — skipping just those
 // replies breaks the loop, while every OTHER reset (session start, or the
 // reply to a user's mode/effort/model pick) still gets repaired.
 
 async function acpSelectMode(modeId: string, userPick = true) {
-  if (acpModes.value) acpModes.value.currentModeId = modeId;
+  S.showAcpSelection("mode", modeId);
   setAcpChatSetting(props.chatId, agentKind.value, "mode", modeId);
   try {
     const rid = await invoke<number>("acp_set_mode", { id: props.chatId, modeId });
-    acpControlIds.add(rid);
-    if (!userPick) acpRestorePushIds.add(rid);
+    S.trackAcpControl(rid, !userPick);
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set mode: ${e}` });
+    S.notice(`Failed to set mode: ${e}`);
   }
 }
 async function acpSelectModel(value: string, userPick = true) {
-  if (acpModelOption.value) acpModelOption.value.currentValue = value;
+  S.showAcpSelection("model", value);
   setAcpChatSetting(props.chatId, agentKind.value, "model", value);
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "model", value });
-    acpControlIds.add(rid);
-    if (!userPick) acpRestorePushIds.add(rid);
+    S.trackAcpControl(rid, !userPick);
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set model: ${e}` });
+    S.notice(`Failed to set model: ${e}`);
   }
 }
 async function acpSelectEffort(value: string, userPick = true) {
-  if (acpEffortOption.value) acpEffortOption.value.currentValue = value;
+  S.showAcpSelection("effort", value);
   setAcpChatSetting(props.chatId, agentKind.value, "effort", value);
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "effort", value });
-    acpControlIds.add(rid);
-    if (!userPick) acpRestorePushIds.add(rid);
+    S.trackAcpControl(rid, !userPick);
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set effort: ${e}` });
+    S.notice(`Failed to set effort: ${e}`);
   }
 }
 
@@ -1082,7 +1078,7 @@ function chatRow() {
 }
 async function persistLaunch(patch: LaunchSettingsPatch) {
   await setLaunchSettings(props.chatId, patch).catch((e: unknown) => {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Couldn't save the chat settings: ${e}` });
+    S.notice(`Couldn't save the chat settings: ${e}`);
   });
 }
 function seedLaunchRow() {
@@ -1586,19 +1582,8 @@ stallTimer = setInterval(() => { if (busy.value) nowTick.value = Date.now(); }, 
 const workingElapsed = computed(() =>
   turnStartedAt.value ? fmtDuration(nowTick.value - turnStartedAt.value) : "0s"
 );
-watch(busy, (val) => {
-  if (val) {
-    lastActivityAt.value = Date.now();
-    nowTick.value = Date.now();
-    turnStartedAt.value = Date.now();
-    return;
-  }
-  if (turnStartedAt.value) {
-    const lastUser = [...messages.value].reverse().find((m) => m.role === "user");
-    if (lastUser) lastUser.turnMs = Date.now() - turnStartedAt.value;
-    turnStartedAt.value = 0;
-  }
-}, { flush: "sync" });
+// The session stamps the turn (turnStartedAt, turnMs); the view only ticks.
+watch(busy, (val) => { if (val) nowTick.value = Date.now(); }, { flush: "sync" });
 const copiedMessageId = ref<number | null>(null);
 let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 // Set before an INTENTIONAL claude restart (mode switch / abort) so the `exit`
@@ -1752,18 +1737,10 @@ const ctxCardOpen = ref(false);
 // report whose useful part is one small table and whose bulk is a row per MCP
 // tool — well over a thousand of them — so it is sent out of band and the
 // table is lifted into the card instead of landing in the transcript.
-// contextReport / contextReportPending / awaitingContextReport: the session's.
+// contextReport / contextReportPending: the session's.
 
 async function loadContextReport() {
-  if (!canCompact.value || busy.value || contextReportPending.value) return;
-  contextReportPending.value = true;
-  awaitingContextReport.value = true;
-  try {
-    await invoke("chat_send", { chatId: props.chatId, text: "/context", images: [] });
-  } catch {
-    contextReportPending.value = false;
-    awaitingContextReport.value = false;
-  }
+  if (canCompact.value) await S.requestContextReport();
 }
 const CTX_R = 6;
 const CTX_C = 2 * Math.PI * CTX_R;
@@ -2012,7 +1989,7 @@ async function copyMessage(msg: ChatMessage) {
       copyFeedbackTimer = null;
     }, 1_200);
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Could not copy message: ${e}` });
+    S.notice(`Could not copy message: ${e}`);
     S.save();
   }
 }
@@ -2054,7 +2031,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
       const diff = await invoke<{ stdout: string }>("run_git", { cwd: props.cwd, args: ["diff", "HEAD~1", "--no-color"] });
       text = `Write a PR description for these changes:\n\n${stat.stdout}\n\`\`\`diff\n${diff.stdout.slice(0, 8000)}\n\`\`\``;
     } catch (e) {
-      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error reading git diff: ${e}` });
+      S.notice(`Error reading git diff: ${e}`);
       return null;
     }
   }
@@ -2087,11 +2064,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   // Only set when the /pr rewrite above didn't replace `text` with a generated
   // prompt — that one has no paste chip of its own to show.
   const displayText = text === strippedBaseline && hasPasteMarkers(raw) ? raw.trim() : undefined;
-  const sentId = S.nextMsgId++;
-  messages.value.push({ id: sentId, role: "user", text, images: msgImages, ...(displayText ? { displayText } : {}) });
-  // Claim the echo before the send goes out — a loopback round trip can land
-  // user.delta before the next line runs.
-  S.expectEcho(text);
+  const sentId = S.postUserMessage({ text, images: msgImages, displayText });
   // This is the durable start receipt. It captures the recovery checkpoint and
   // creates one audit row; provider completion freezes its final diff.
   await invoke("start_turn_audit", {
@@ -2099,7 +2072,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     subjectId: `chat:${props.chatId}`,
     label: text.slice(0, 60),
   }).catch(() => {});
-  busy.value = true;
+  S.startTurn();
 
   // Auto-title from first user message (only if still at default and Claude hasn't set one yet)
   if (!claudeGeneratedTitle.value) {
@@ -2116,13 +2089,11 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   if (usesRpcRuntime.value) {
     try {
       pendingImages.value = [];
-      acpPromptRpcId.value = await sendRpcRuntime(text, msgImages);
+      S.trackAcpPrompt(await sendRpcRuntime(text, msgImages));
       acceptFeedback();
       return { id: sentId, text };
     } catch (e) {
-      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
-      busy.value = false;
-      syncStore();
+      S.failTurn(e);
     }
     return null;
   }
@@ -2132,9 +2103,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     acceptFeedback();
     return { id: sentId, text };
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
-    busy.value = false;
-    syncStore();
+    S.failTurn(e);
     return null;
   }
 }
@@ -2212,16 +2181,12 @@ async function selectPermMode(mode: PermMode) {
         id: props.chatId,
         modeId: mode,
       });
-      acpControlIds.add(requestId);
+      S.trackAcpControl(requestId);
     } catch (err) {
       // Do not leave the picker claiming a policy that the server rejected.
       permMode.value = previousMode;
       savePermMode(props.chatId, previousMode);
-      messages.value.push({
-        id: S.nextMsgId++,
-        role: "assistant",
-        text: `Couldn't update the permission mode: ${String(err)}`,
-      });
+      S.notice(`Couldn't update the permission mode: ${String(err)}`);
       syncStore();
     }
     return;
@@ -2235,16 +2200,11 @@ async function selectPermMode(mode: PermMode) {
 // claude-cli it is the Go chat runtime's (chat_restart → session.reset).
 async function restartClaude() {
   if (usesRpcRuntime.value) {
-    suppressNextDone.value = true; // restart — don't toast on the teardown `exit`
+    S.suppressDoneToast(); // restart — don't toast on the teardown `exit`
     await stopRpcRuntime().catch(() => {});
     await startRpcRuntime().catch(() => {});
-    // Drop any in-flight permission gate — the rpc id is dead after restart.
-    removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
-    acpPermReq.value = null; acpPermRpcId.value = null;
-    busy.value = false;
-    const lastAcp = messages.value[messages.value.length - 1];
-    if (lastAcp?.partial) lastAcp.partial = false;
-    syncStore();
+    // The rpc ids behind any pending prompt are dead after a restart.
+    S.runtimeReset();
     return;
   }
   // The chat runtime stops the process and publishes session.reset, whose
@@ -2263,7 +2223,7 @@ async function abortTurn() {
   if (effectiveTransport.value === "codex-app-server" && !stalled.value) {
     const ok = await invoke("codex_interrupt", { id: props.chatId }).then(() => true, () => false);
     if (ok) {
-      suppressNextDone.value = true; // user stopped it — no "finished" toast
+      S.suppressDoneToast(); // user stopped it — no "finished" toast
       const started = turnStartedAt.value;
       setTimeout(() => {
         if (busy.value && turnStartedAt.value === started) void restartClaude();
@@ -2274,7 +2234,7 @@ async function abortTurn() {
   if (!usesRpcRuntime.value) {
     // Claude ends the turn in place (an `interrupt` control request); its
     // trailing result is not a "finished" toast. Go falls back to a restart.
-    suppressNextDone.value = true;
+    S.suppressDoneToast();
     await invoke("chat_interrupt", { chatId: props.chatId }).catch(() => {});
     return;
   }
@@ -2292,21 +2252,15 @@ async function clearChat() {
     // and publishes session.reset{cleared}; the reducer empties the transcript.
     await S.listenEvents();
     await invoke("chat_clear", { chatId: props.chatId }).catch((e: unknown) => {
-      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Could not clear the chat: ${e}` });
+      S.notice(`Could not clear the chat: ${e}`);
     });
     return;
   }
   await stopRpcRuntime().catch(() => {});
-  messages.value = [];
-  sessionId.value = "";
-  busy.value = false;
-  turnStats.value = null;
-  sessionCost.value = 0;
-  claudeGeneratedTitle.value = false;
-  acpPermRpcId.value = null;
+  S.runtimeReset({ cleared: true });
   clearMessageHistory(props.chatId);
   const startErr = await startRpcRuntime().catch((e: unknown) => e);
-  if (startErr) messages.value.push({ id: S.nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
+  if (startErr) S.notice(`Failed to start ${runtimeLabel.value}: ${startErr}`);
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -2319,11 +2273,10 @@ function onKeydown(e: KeyboardEvent) {
   if (busy.value && e.key === "Escape" && !pendingPermission.value && !pendingDiff.value) { e.preventDefault(); abortTurn(); nextTick(() => inputEl.value?.focus()); return; }
   if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); clearChat(); return; }
   if (e.key === "ArrowUp" && inputText.value === "" && !busy.value) {
-    const lastUser = [...messages.value].reverse().find((m) => m.role === "user");
-    if (lastUser) {
+    const recalled = S.recallLastUserMessage();
+    if (recalled !== null) {
       e.preventDefault();
-      inputText.value = lastUser.text;
-      messages.value = messages.value.filter((m) => m !== lastUser);
+      inputText.value = recalled;
       nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(inputText.value.length); });
       return;
     }
@@ -2478,10 +2431,10 @@ async function ensureRuntime(): Promise<unknown> {
       await scriptsStore.loadForPath(props.cwd);
       const startErr = await startRpcRuntime().catch((e: unknown) => e);
       if (startErr) {
-        messages.value.push({ id: S.nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
+        S.notice(`Failed to start ${runtimeLabel.value}: ${startErr}`);
         return startErr;
       }
-      runtimeStarted.value = true;
+      S.markRuntimeStarted();
       return null;
     }
     // claude-cli: nothing to start here — chat_send starts the process in Go.
@@ -2555,10 +2508,7 @@ onMounted(async () => {
   migrateLegacyChatConfig();
   if (isAcpRuntime.value && !acpModes.value && acpConfigOptions.value.length === 0) {
     const cached = getAcpCapabilities(props.chatId, agentKind.value);
-    if (cached) {
-      acpModes.value = cached.modes;
-      acpConfigOptions.value = cached.configOptions;
-    }
+    if (cached) S.seedAcpCapabilities(cached.modes, cached.configOptions);
   }
   // Only read the transcript back from SQLite when the session has none. A
   // non-empty session is the LIVE copy — it kept receiving while this view was
@@ -2567,10 +2517,7 @@ onMounted(async () => {
   if (messages.value.length === 0) {
     const loaded = await loadMessages(props.chatId);
     if (unmounted) return;
-    messages.value = loaded;
-    // Ids must continue past the loaded history, or new messages collide with
-    // old ones on the same `:key`.
-    S.nextMsgId = messages.value.reduce((max, m) => Math.max(max, m.id + 1), 0);
+    S.hydrate({ messages: loaded });
     // Catch up on anything the agent said after that transcript was written —
     // i.e. a turn that was in flight when the app was last closed or crashed.
     await replayChatStream(props.chatId);
@@ -2604,7 +2551,7 @@ onMounted(async () => {
   // still tighten via the perm-mode switch / Deny.
   if (props.compact) chats.addPermissionRule("Bash:burrow");
   const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
-  if (stored) sessionId.value = stored;
+  if (stored) S.hydrate({ sessionId: stored });
   S.sync();
   // The stream-json listener is JS-only and free — attach it even when the
   // runtime is still cold, so a later ensureRuntime() streams immediately.

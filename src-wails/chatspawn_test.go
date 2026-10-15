@@ -68,3 +68,18 @@ func TestSubagentProfileDefaultsMatchFrontend(t *testing.T) {
 		}
 	}
 }
+
+func TestSubagentNoteFoldsIntoParentRow(t *testing.T) {
+	events := NormalizeChatLine(chatNoteKind, subagentNote(42, "  fix the tests\nmore detail", "Claude"), 7)
+	got := foldEvents(events)
+	if len(got) != 1 {
+		t.Fatalf("want one row, got %+v", got)
+	}
+	m := got[0]
+	if m.Role != "system-info" || m.Text != "Spawned sub-agent: fix the tests" || m.SubagentChatID != 42 || m.SubagentAgent != "Claude" {
+		t.Fatalf("unexpected row %+v", m)
+	}
+	if got := foldEvents(NormalizeChatLine(chatNoteKind, subagentNote(1, "\n", "x"), 0)); len(got) != 1 || got[0].Text != "Spawned Sub-agent" {
+		t.Fatalf("empty task label: %+v", got)
+	}
+}
