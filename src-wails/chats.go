@@ -69,6 +69,15 @@ type Chat struct {
 	// cleared by a new turn. SaveChats never writes it. The desktop's sub-agent
 	// auto-archive sweep reads it so a result nobody has taken stays listed.
 	CollectedAt int64 `json:"collected_at"`
+	// Launch settings: how this chat's agent process is started. Read-only on
+	// the wire like collected_at — SaveChats never writes them, so a client
+	// that has never heard of them can't blank them. Written by CreateChat and
+	// the one-time backfill (backfillChatLaunchSettings); resolved for a start
+	// by resolveClaudeLaunch. "" = not set, fall back.
+	Effort             string `json:"effort"`
+	PermissionMode     string `json:"permission_mode"`
+	ProfileID          string `json:"profile_id"`
+	AppendSystemPrompt string `json:"append_system_prompt"`
 }
 
 func chatsSchema() []string {
@@ -89,7 +98,15 @@ func chatsSchema() []string {
 			archived_at       INTEGER NOT NULL DEFAULT 0,
 			last_activity_at  INTEGER NOT NULL DEFAULT 0,
 			parent_chat_id    INTEGER NOT NULL DEFAULT 0,
-			collected_at      INTEGER NOT NULL DEFAULT 0
+			collected_at      INTEGER NOT NULL DEFAULT 0,
+			effort            TEXT    NOT NULL DEFAULT '',
+			permission_mode   TEXT    NOT NULL DEFAULT '',
+			profile_id        TEXT    NOT NULL DEFAULT '',
+			append_system_prompt TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS chat_migrations (
+			name    TEXT PRIMARY KEY,
+			done_at INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS chats_workspace ON chats(workspace_id)`,
 	}
@@ -115,13 +132,15 @@ func chatsPostAlterSchema() []string {
 // existing database.
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, agent_kind, transport, model, branch,
-	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at`
+	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
+	effort, permission_mode, profile_id, append_system_prompt`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
 		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
-		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt)
+		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
+		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt)
 	return c, err
 }
 
@@ -159,11 +178,13 @@ func (a *App) CreateChat(c Chat) (Chat, error) {
 	res, err := a.db.Exec(
 		`INSERT INTO chats (workspace_id, title, pinned_title, claude_session_id,
 			message_count, agent_kind, transport, model, branch,
-			settled_override, archived_at, last_activity_at, parent_chat_id)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			settled_override, archived_at, last_activity_at, parent_chat_id,
+			effort, permission_mode, profile_id, append_system_prompt)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID, c.MessageCount,
 		c.AgentKind, c.Transport, c.Model, c.Branch,
 		c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID,
+		c.Effort, c.PermissionMode, c.ProfileID, c.AppendSystemPrompt,
 	)
 	if err != nil {
 		return Chat{}, err

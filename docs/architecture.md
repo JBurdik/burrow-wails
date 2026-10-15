@@ -38,6 +38,19 @@ per-file-per-anything, and `chats-changed` makes both converge within a round tr
 the status **is** the phase (`pty_phase`, keyed `chat:<id>`) — a second copy of it in a
 second table is exactly the drift the phase work removed.
 
+**Launch settings live on the row** (`effort`, `permission_mode`, `profile_id`,
+`append_system_prompt`, plus the existing `model`) — groundwork for the Go chat runtime,
+`docs/plans/006-chat-runtime.md`. They are **read-only on the wire**, like `collected_at`:
+`SaveChats` never writes them, so a client that predates them (an older desktop, the phone)
+cannot blank them by saving a row without them. `backfillChatLaunchSettings` copies the old
+per-device keys (`chatModelByChat`, `chatEffortByChat`, `chatPermissionMode.byChat`,
+`chatProfileSelection`) onto rows once, filling only empty columns, guarded by a
+`chat_migrations` marker; the legacy keys stay for one more release. `resolveClaudeLaunch`
+(`chatlaunch.go`, pure) turns a row into a Claude start: `profile_id` resolved against
+`config.json` `providers` (by id, then `providerAliases`, else the first enabled Claude
+instance), config dir = profile's, else the project's `.burrow/config.toml`
+`claude_config_dir`. Nothing calls it yet.
+
 **`parent_chat_id` is what makes a sub-agent belong to a thread rather than sit beside
 it.** A `spawn` made from inside a chat (carrying `parent_chat_id`, injected from
 `BURROW_CHAT_ID` by `bin/burrow` and `burrow-mcp` alike — see `docs/burrow.html`) creates a

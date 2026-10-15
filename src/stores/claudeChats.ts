@@ -49,6 +49,12 @@ export interface ClaudeSession {
   // When the parent took this sub-agent's result (wait_result/collect_results);
   // 0/undefined = not yet. Server-owned, never written back by this store.
   collectedAt?: number;
+  // Launch settings on the chat row (docs/plans/006-chat-runtime.md). Server-
+  // owned like collectedAt: SaveChats never writes them. Nothing reads them yet.
+  effort?: string;
+  permissionMode?: string;
+  profileId?: string;
+  appendSystemPrompt?: string;
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -166,6 +172,11 @@ interface ChatRow {
   parent_chat_id: number;
   // Read-only: Go sets it (wait_result/collect_results) and SaveChats ignores it.
   collected_at?: number;
+  // Read-only launch settings, same rule as collected_at.
+  effort?: string;
+  permission_mode?: string;
+  profile_id?: string;
+  append_system_prompt?: string;
 }
 
 // The one place the column names and the client's field names meet. `busy`
@@ -188,6 +199,10 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     lastActivityAt: r.last_activity_at || undefined,
     parentChatId: r.parent_chat_id || undefined,
     collectedAt: r.collected_at || undefined,
+    effort: r.effort || undefined,
+    permissionMode: r.permission_mode || undefined,
+    profileId: r.profile_id || undefined,
+    appendSystemPrompt: r.append_system_prompt || undefined,
     busy: false,
   };
 }

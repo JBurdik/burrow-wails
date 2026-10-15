@@ -115,6 +115,12 @@ A settled, seen, **collected** (`collected_at`, read-only on `Chat`) sub-agent i
 30 min by `chatAttention`'s desktop sweep (`subagentArchivable` in `chatTree.ts`) — client-side because
 `seenAt` is per-device. No Archived shelf for sub-agents: it just leaves the RP list.
 
+**Launch settings** (`effort`, `permission_mode`, `profile_id`, `append_system_prompt`, + `model`) are
+columns too, **read-only on the wire** (SaveChats never writes them, like `collected_at`); backfilled once
+from the per-device `config.json` keys (`chat_migrations` marker). `resolveClaudeLaunch` (`chatlaunch.go`)
+resolves them + profile (`providers`) + project `claude_config_dir` into Claude start params — not wired yet
+(plan: `docs/plans/006-chat-runtime.md`).
+
 Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatTurns`,
 `chatPermissionRules`. Phone-created chats are titled `Chat N (phone)`.
 
