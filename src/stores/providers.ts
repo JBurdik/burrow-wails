@@ -169,6 +169,10 @@ export const useProvidersStore = defineStore("providers", () => {
   async function probe(id: string, cwd = "") {
     const inst = instances.value.find((a) => a.id === id);
     if (!inst) return;
+    if (inst.providerId === "openai-compatible") {
+      setStatus(id, { installed: true, path: "Built-in coding agent", version: "", error: "" });
+      return;
+    }
     try {
       const r = await invoke<Omit<ProviderStatus, "checkedAt">>("probe_provider", { binary: binaryFor(inst), cwd });
       setStatus(id, r);

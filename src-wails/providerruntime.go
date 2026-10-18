@@ -427,6 +427,9 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 	// Burrow's own markers on the ACP channel, not the adapter's: the session
 	// handshake and the EOF. Both matter to any client.
 	switch strField(msg["_burrow"]) {
+	case "usage":
+		input, output := intOf(msg["inputTokens"]), intOf(msg["outputTokens"])
+		return []ProviderRuntimeEvent{{Type: EvtContextUsage, InputTokens: input, OutputTokens: output, ContextTokens: input + output, ContextWindow: intOf(msg["contextWindow"])}}
 	case "session":
 		if id := strField(msg["sessionId"]); id != "" {
 			return []ProviderRuntimeEvent{{Type: EvtSessionID, SessionID: id}}
@@ -502,7 +505,11 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 		if name == "" {
 			name = "Tool"
 		}
-		return []ProviderRuntimeEvent{{Type: EvtToolStarted, ToolCallID: id, Name: name}}
+		input := mapField(update["rawInput"])
+		if input == nil {
+			input = mapField(update["input"])
+		}
+		return []ProviderRuntimeEvent{{Type: EvtToolStarted, ToolCallID: id, Name: name, Input: input}}
 	case "tool_call_update":
 		status := strField(update["status"])
 		if status != "completed" && status != "failed" {

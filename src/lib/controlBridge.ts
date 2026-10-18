@@ -240,7 +240,7 @@ async function spawn(args: Record<string, unknown>) {
 
   // No explicit target → the user's Settings preference ("Spawn sub-agents as",
   // where "terminal" is this API's "tab").
-  const openAs = str(args.target) || (ui.spawnMode === "chat" ? "chat" : "tab");
+  const openAs = instance.providerId === "openai-compatible" ? "chat" : str(args.target) || (ui.spawnMode === "chat" ? "chat" : "tab");
   if (openAs === "chat") {
     if (instance.transport === "none") throw new Error("This provider does not offer an embedded chat.");
     const chats = useClaudeChatsStore();

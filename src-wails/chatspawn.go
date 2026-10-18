@@ -180,13 +180,13 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		return none, fmt.Errorf("This provider does not offer an embedded chat.")
 	}
 	transport := chatTransportOf(*inst)
-	if profile != nil && (!inst.Enabled || !oneOf(transport, "claude-cli", "codex-app-server")) {
-		return none, fmt.Errorf("Sub-agent profiles require an enabled Claude CLI or Codex app-server provider. Choose one in Settings > Sub-agent profiles.")
+	if profile != nil && (!inst.Enabled || (!oneOf(transport, "claude-cli", "codex-app-server") && inst.ProviderID != "openai-compatible")) {
+		return none, fmt.Errorf("Sub-agent profiles require an enabled Claude CLI, Codex app-server, or OpenAI Compatible provider. Choose one in Settings > Sub-agent profiles.")
 	}
 	// The parent's launch settings only mean something to the same runtime: a
 	// Claude model id is no Codex model, a Codex mode no Claude one.
 	var inherit Chat
-	if chatTransport(parent) == transport {
+	if chatTransport(parent) == transport && (inst.ProviderID != "openai-compatible" || parent.AgentKind == inst.ID) {
 		inherit = parent
 	}
 

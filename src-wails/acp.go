@@ -36,6 +36,7 @@ const (
 )
 
 type acpSession struct {
+	native    *openAISession // built-in agent, sharing ACP events and approvals
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	proto     acpProtocol
@@ -138,6 +139,8 @@ func (a *App) acpReg() *acpRegistry {
 
 // AcpStartOpts mirrors ClaudeChat.vue's acpStartPayload().
 type AcpStartOpts struct {
+	OpenAI          *OpenAIConfig     `json:"openai,omitempty"`
+	SystemPrompt    string            `json:"systemPrompt,omitempty"`
 	ID              string            `json:"id"`
 	Cwd             string            `json:"cwd"`
 	Command         string            `json:"command"` // adapter program: npx, gemini, codex, opencode…
@@ -702,6 +705,9 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 	if _, live := a.acpReg().get(opts.ID); live {
 		return nil
 	}
+	if opts.OpenAI != nil {
+		return a.startOpenAI(opts)
+	}
 	if opts.Kind == "codex" && opts.Command == "codex" {
 		return a.CodexStart(opts.ID, opts.Cwd, opts.Env, opts.ResumeSessionID)
 	}
@@ -1050,6 +1056,9 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		return 0, fmt.Errorf("acp adapter not running")
 	}
 	rpc := sess.rpcID()
+	if sess.native != nil {
+		return rpc, sess.native.send(rpc, text, images)
+	}
 
 	// Published AFTER each branch's write succeeds, not once up front —
 	// `acpReg().get(id)` above only proves the session is REGISTERED, not

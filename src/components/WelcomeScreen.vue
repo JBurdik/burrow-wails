@@ -86,6 +86,7 @@
             </div>
             <div class="composer-sendgroup">
               <ComposerPill
+                v-if="selectedAgent.providerId !== 'openai-compatible'"
                 :icon="launchMode === 'chat' ? PhChatCenteredText : PhTerminal"
                 :items="launchItems"
                 :active="launchMode"
@@ -548,7 +549,7 @@ async function submit() {
     }).catch(() => {});
   }
   const images = [...pendingImages.value];
-  const terminalPrompt = launchMode.value === "terminal" && images.length > 0
+  const terminalPrompt = launchMode.value === "terminal" && selectedAgent.value.providerId !== "openai-compatible" && images.length > 0
     ? promptWithImagePaths(prompt, await persistTerminalImages(images))
     : prompt;
   // Snapshot the user's picks now — store.open(t) below can change `target`'s
@@ -561,7 +562,7 @@ async function submit() {
   const permMode = selectedPermMode.value;
   const wasOpen = store.opened.some((w) => w.id === t.id);
   store.open(t);
-  const open = launchMode.value === "terminal"
+  const open = launchMode.value === "terminal" && agent.providerId !== "openai-compatible"
     ? () => termTabs.add(t.id, buildTerminalCommand(
         { kind: agent.kind, command: binaryFor(agent), model, permMode },
         terminalPrompt,

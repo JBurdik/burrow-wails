@@ -1241,7 +1241,7 @@ const update = useUpdateStore();
 
 // ── Select option lists ──
 const chatAgentOptions = computed(() =>
-  providers.chatAgents.map((a) => ({ value: a.id, label: `${a.name} (${transportLabel(a.transport as Exclude<typeof a.transport, "none">)})` })),
+  providers.chatAgents.map((a) => ({ value: a.id, label: a.providerId === "openai-compatible" ? a.name : `${a.name} (${transportLabel(a.transport as Exclude<typeof a.transport, "none">)})` })),
 );
 const SPAWN_MODE_OPTIONS = [
   { value: "terminal", label: "Terminal tab" },

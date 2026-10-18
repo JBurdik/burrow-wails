@@ -46,6 +46,7 @@ export interface ProviderCatalogEntry {
 }
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
+  { id: "openai-compatible", label: "OpenAI Compatible", binary: "", icon: "robot", color: "#06b6d4", kind: "custom", transport: "acp", transportArgs: [], supportsConfigDir: false },
   { id: "claude", label: "Claude Code", binary: "claude", icon: "claude", color: "#d97757", kind: "claude", transport: "claude-cli", transportArgs: [], supportsConfigDir: true, npmPackage: "@anthropic-ai/claude-code", homebrewFormula: "claude-code" },
   { id: "codex", label: "Codex", binary: "codex", icon: "openai", color: "#74aa9c", kind: "codex", transport: "codex-app-server", transportArgs: ["app-server"], supportsConfigDir: false, npmPackage: "@openai/codex", homebrewFormula: "codex" },
   { id: "gemini", label: "Gemini", binary: "gemini", icon: "gemini", color: "#1a73e8", kind: "gemini", transport: "acp", transportArgs: ["--acp"], supportsConfigDir: false, npmPackage: "@google/gemini-cli" },
@@ -81,6 +82,8 @@ export function providerIdForCommand(command: string): string {
  * shared and only the mode-specific extras differ.
  */
 export interface ProviderInstance {
+  /** Built-in coding agent connected directly to a model server. */
+  openai?: OpenAIConfig;
   id: string;
   /** Catalog entry id. */
   providerId: string;
@@ -138,6 +141,7 @@ export function newInstance(providerId: string, over: Partial<ProviderInstance> 
     transportArgs: [...p.transportArgs],
     chatShortcut: "",
     kind: p.kind,
+    ...(p.id === "openai-compatible" ? { openai: { baseUrl: "http://127.0.0.1:8080/v1", apiKey: "", model: "", contextWindow: 32768, maxOutputTokens: 4096 } } : {}),
     ...over,
   };
 }
@@ -154,8 +158,17 @@ export function binaryFor(a: Pick<ProviderInstance, "binary" | "providerId">): s
 
 /** Full command line for a terminal launch. */
 export function commandLine(a: ProviderInstance): string {
+  if (a.providerId === "openai-compatible") return "";
   const extra = [...a.args, ...a.terminalArgs.trim().split(/\s+/)].filter(Boolean);
   return [binaryFor(a), ...extra].join(" ").trim();
+}
+
+export interface OpenAIConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  contextWindow: number;
+  maxOutputTokens: number;
 }
 
 /**

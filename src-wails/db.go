@@ -47,6 +47,11 @@ func openDB(appDataDir string) (*sql.DB, error) {
 
 func migrate(db *sql.DB) error {
 	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS openai_sessions (
+			chat_id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			messages_json TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS workspaces (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
@@ -133,6 +138,8 @@ func migrate(db *sql.DB) error {
 	stmts = append(stmts, chatStreamSchema()...)
 	stmts = append(stmts, remoteDevicesSchema()...)
 	stmts = append(stmts, chatsSchema()...)
+	stmts = append(stmts, `CREATE TRIGGER IF NOT EXISTS openai_session_delete AFTER DELETE ON chats
+        BEGIN DELETE FROM openai_sessions WHERE chat_id = CAST(old.id AS TEXT); END`)
 	stmts = append(stmts, usageSchema()...)
 	stmts = append(stmts, diffCommentsSchema()...)
 	stmts = append(stmts, orchSchema()...)

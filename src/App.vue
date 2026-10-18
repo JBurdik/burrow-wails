@@ -663,6 +663,7 @@ function onKeydown(e: KeyboardEvent) {
 @import "tw-animate-css";
 @import "@/styles/status-dots.css";
 @import "@/styles/composer.css";
+@import "@/styles/chat-blocks.css";
 
 /* Bridges the runtime theme system (themes.ts sets these on :root via JS —
    switching a Burrow theme must re-skin Tailwind utility classes too, not

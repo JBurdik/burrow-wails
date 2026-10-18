@@ -193,7 +193,7 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
    * FIFO of follow-ups, DERIVED from the transcript's own `queued` entries.
    * There is deliberately no second array: the queue and its placeholder
    * bubbles used to be two structures synchronised by hand in five methods,
-   * and `moveQueuedMessageNext` only ever updated one of them — "Send Next"
+   * and `moveQueuedMessageNext` (now `moveQueuedMessage`) only ever updated one of them — "Send Next"
    * reordered what was sent while the transcript kept showing the old order.
    * Deriving it also makes the queue survive a relaunch for free, since the
    * placeholders are persisted with the transcript.
@@ -202,7 +202,8 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   enqueueMessage(text: string, images?: string[]): QueuedChatMessage;
   removeQueuedMessage(id: number): void;
   clearQueuedMessages(): void;
-  moveQueuedMessageNext(id: number): void;
+  /** Move a queued follow-up to position `toIndex` of the queue (0 = next). */
+  moveQueuedMessage(id: number, toIndex: number): void;
 
   /** Every request the agent is blocked on, whatever the transport. */
   pendingRequests: ComputedRef<PendingRequest[]>;
@@ -571,13 +572,16 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     clearQueuedMessages() {
       s.messages.value = s.messages.value.filter((message) => message.role !== "queued");
     },
-    moveQueuedMessageNext(id) {
+    moveQueuedMessage(id, toIndex) {
       const messages = s.messages.value;
-      const from = messages.findIndex((m) => m.id === id && m.role === "queued");
-      const head = messages.findIndex((m) => m.role === "queued");
-      if (from < 0 || from === head) return;
-      const [entry] = messages.splice(from, 1);
-      messages.splice(head, 0, entry);
+      const queue = messages.filter((m) => m.role === "queued");
+      const from = queue.findIndex((m) => m.id === id);
+      const to = Math.min(Math.max(toIndex, 0), queue.length - 1);
+      if (from < 0 || from === to) return;
+      // Land right before (moving up) or after (moving down) the entry now at `to`.
+      const target = queue[to];
+      const [entry] = messages.splice(messages.indexOf(queue[from]), 1);
+      messages.splice(messages.indexOf(target) + (to > from ? 1 : 0), 0, entry);
     },
     takeNextQueuedMessage() {
       const index = s.messages.value.findIndex((m) => m.role === "queued");

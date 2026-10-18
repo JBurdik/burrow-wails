@@ -322,7 +322,7 @@
                 @follow-up="jumpToFeedback"
               >
                 <!-- eslint-disable-next-line vue/no-v-html -->
-                <div class="md-body" v-html="renderMd(msg.text)" />
+                <div class="md-body" v-html="renderAssistantMd(msg)" @click="onRichBlockClick" />
               </TranscriptComments>
             </div>
             <button class="message-copy-btn mt-0.5" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
@@ -342,12 +342,28 @@
       </div>
 
       <!-- Queued follow-ups, pinned below the live turn (Claude desktop-style) -->
-      <div v-for="q in messageQueue" :key="q.id" class="flex flex-col items-end gap-0.5 px-4 py-[3px]">
-        <div class="inline-flex max-w-[min(460px,85%)] items-center gap-1.5 rounded-[14px] border border-dashed border-border bg-hover px-3 py-2 text-[13px] text-muted-foreground">
+      <!-- Drag to reorder (native DnD, the whole bubble is the handle). -->
+      <div
+        v-for="(q, qi) in messageQueue"
+        :key="q.id"
+        class="flex flex-col items-end gap-0.5 px-4 py-[3px]"
+        :class="{ 'opacity-40': draggingQueuedId === q.id }"
+        @dragover.prevent="draggingQueuedId != null && (dropQueuedIndex = qi)"
+        @drop.prevent="dropQueued(qi)"
+      >
+        <div
+          draggable="true"
+          class="inline-flex max-w-[min(460px,85%)] cursor-grab items-center gap-1.5 rounded-[14px] border border-dashed border-border bg-hover px-3 py-2 text-[13px] text-muted-foreground"
+          :class="{ 'border-[var(--chat-accent)]': dropQueuedIndex === qi && draggingQueuedId !== q.id }"
+          :title="messageQueue.length > 1 ? 'Drag to reorder' : undefined"
+          @dragstart="draggingQueuedId = q.id"
+          @dragend="draggingQueuedId = null; dropQueuedIndex = null"
+        >
           <span v-html="renderUserMd(q.text)" />
         </div>
         <div class="flex gap-2 text-[11px] text-muted-foreground">
           <button class="border-none bg-transparent p-0 hover:text-foreground" @click="removeQueued(q.id)">Remove</button>
+          <button class="border-none bg-transparent p-0 hover:text-foreground" title="Take it back into the composer" @click="editQueued(q)">Edit</button>
           <button class="border-none bg-transparent p-0 hover:text-foreground" @click="sendQueuedNow(q.id)" title="Interrupt the current turn and send this now">Send now</button>
         </div>
       </div>
@@ -656,7 +672,7 @@ import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
 import { chatSession, replayChatStream } from "@/lib/chatSession";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
-import type { ChatMessage } from "@/lib/chatTypes";
+import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { chatSettingKey } from "@/lib/chatSettings";
 import { splitMentions } from "@/lib/mentionTokens";
@@ -664,6 +680,7 @@ import { editOf, fmtDuration, mergeEdits, type FileEdit } from "@/lib/chatTurns"
 import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import { formatAnswers, renderChatMd } from "@/lib/chatBlocks";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import {
   getAcpCapabilities, getAcpChatSetting, getLastAcpSetting,
@@ -676,6 +693,48 @@ import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
 
 function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string);
+}
+
+// An assistant reply may carry ```visual / ```questions blocks (chatBlocks.ts).
+// A questions form counts as answered once any user message follows it.
+const answeredMsgIds = computed(() => {
+  const ids = new Set<number>();
+  let seenUser = false;
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const m = messages.value[i];
+    if (m.role === "user") seenUser = true;
+    else if (seenUser && m.role === "assistant") ids.add(m.id);
+  }
+  return ids;
+});
+function renderAssistantMd(msg: ChatMessage): string {
+  return DOMPurify.sanitize(renderChatMd(msg.text, answeredMsgIds.value.has(msg.id)));
+}
+
+// The questions form is v-html, so its clicks are delegated: selection state
+// lives in the DOM (aria-pressed) until Send reads it back.
+function onRichBlockClick(event: MouseEvent) {
+  const target = event.target as HTMLElement;
+  const opt = target.closest<HTMLButtonElement>(".cq-opt");
+  if (opt && !opt.disabled) {
+    const q = opt.closest<HTMLElement>(".cq-q");
+    const on = opt.getAttribute("aria-pressed") !== "true";
+    if (q?.dataset.cqMulti !== "1") q?.querySelectorAll(".cq-opt").forEach((o) => o.setAttribute("aria-pressed", "false"));
+    opt.setAttribute("aria-pressed", String(on));
+    return;
+  }
+  const action = target.closest<HTMLElement>("[data-cq-action]");
+  const form = action?.closest<HTMLElement>("[data-chat-questions]");
+  if (!action || !form) return;
+  const skip = action.dataset.cqAction === "skip";
+  const answers = [...form.querySelectorAll<HTMLElement>(".cq-q")].map((q) => ({
+    question: q.dataset.cqQuestion ?? "",
+    picked: skip ? [] : [...q.querySelectorAll<HTMLElement>('.cq-opt[aria-pressed="true"]')].map((o) => o.dataset.cqOpt ?? ""),
+    other: skip ? "" : q.querySelector<HTMLInputElement>(".cq-other")?.value ?? "",
+  }));
+  const notes = skip ? "" : form.querySelector<HTMLTextAreaElement>(".cq-notes")?.value ?? "";
+  form.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea").forEach((el) => (el.disabled = true));
+  void sendMessage(formatAnswers(answers, notes));
 }
 
 // A sent message that still carries a `wrapPaste` block (see composerDom.ts)
@@ -876,7 +935,7 @@ const {
   nativeControlResponsePending,
   contextTokens, contextWindow, contextSplit, contextReport, contextReportPending,
   claudeGeneratedTitle,
-  enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext,
+  enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessage,
 } = S;
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
@@ -1641,11 +1700,25 @@ function removeQueued(id: number) {
   removeQueuedMessage(id);
   S.save();
 }
+const draggingQueuedId = ref<number | null>(null);
+const dropQueuedIndex = ref<number | null>(null);
+function dropQueued(toIndex: number) {
+  if (draggingQueuedId.value != null) moveQueuedMessage(draggingQueuedId.value, toIndex);
+  draggingQueuedId.value = null;
+  dropQueuedIndex.value = null;
+  S.save();
+}
+function editQueued(q: QueuedChatMessage) {
+  removeQueued(q.id);
+  inputText.value = inputText.value.trim() ? `${q.text}\n${inputText.value}` : q.text;
+  if (q.images?.length) pendingImages.value = [...q.images, ...pendingImages.value];
+  nextTick(() => inputEl.value?.focus());
+}
 function sendQueuedNow(id: number) {
   // Interrupt, don't steer: a follow-up has to remain its own turn for every
   // provider (Codex, generic ACP). The abort clears `busy`, and the session's
   // drain then sends the queue head — which this message just became.
-  moveQueuedMessageNext(id);
+  moveQueuedMessage(id, 0);
   S.save();
   void abortTurn();
 }

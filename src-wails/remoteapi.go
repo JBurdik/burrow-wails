@@ -398,6 +398,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// path unchanged, then runs it (`exec.CommandContext(ctx, path,
 	// "--version")`, providers.go) — arbitrary host process execution, so
 	// operate scope, not read.
+	"openai_list_models": {Method: "OpenAIListModels", Args: []string{"config"}, Scope: scopeOrchOperate},
 	"probe_provider":     {Method: "ProbeProvider", Args: []string{"binary", "cwd"}, Scope: scopeOrchOperate},
 	"latest_npm_version": {Method: "LatestNpmVersion", Args: []string{"pkg"}, Scope: scopeOrchRead},
 	"update_provider":    {Method: "UpdateProvider", Args: []string{"binary", "pkg", "homebrewFormula", "cwd"}, Scope: scopeOrchOperate},

@@ -85,6 +85,12 @@ export function learnModels(agentId: string, entries: ModelEntry[]): void {
 // installed CLI's catalog changes).
 const probed = new Set<string>();
 export async function ensureModels(agentId: string, kind: string, cwd: string): Promise<void> {
+  const provider = getConfig<Array<{ id: string; providerId: string; openai?: { model: string } }>>("providers", []).find((p) => p.id === agentId);
+  if (provider?.providerId === "openai-compatible") {
+    const model = provider.openai?.model?.trim();
+    if (model && !(seen.value[agentId] ?? []).some((m) => m.id === model)) learnModels(agentId, [{ id: model, label: model }, ...(seen.value[agentId] ?? [])]);
+    return;
+  }
   if (kind !== "codex" || MODELS_BY_AGENT[agentId] || probed.has(agentId)) return;
   probed.add(agentId);
   try {

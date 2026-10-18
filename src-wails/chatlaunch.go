@@ -35,16 +35,17 @@ type ClaudeLaunch struct {
 // providerInstance is the subset of src/lib/providers.ts ProviderInstance a
 // Claude start needs, as stored in config.json under "providers".
 type providerInstance struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	ProviderID        string   `json:"providerId"`
-	Kind              string   `json:"kind"`
-	Transport         string   `json:"transport"`
-	Enabled           bool     `json:"enabled"`
-	Binary            string   `json:"binary"`
-	Args              []string `json:"args"`
-	ConfigDir         string   `json:"configDir"`
-	AutoCompactWindow string   `json:"autoCompactWindow"`
+	OpenAI            *OpenAIConfig `json:"openai,omitempty"`
+	ID                string        `json:"id"`
+	Name              string        `json:"name"`
+	ProviderID        string        `json:"providerId"`
+	Kind              string        `json:"kind"`
+	Transport         string        `json:"transport"`
+	Enabled           bool          `json:"enabled"`
+	Binary            string        `json:"binary"`
+	Args              []string      `json:"args"`
+	ConfigDir         string        `json:"configDir"`
+	AutoCompactWindow string        `json:"autoCompactWindow"`
 	// Codex / ACP starts only.
 	Env           map[string]string `json:"env"`
 	TransportArgs []string          `json:"transportArgs"`
@@ -78,6 +79,15 @@ func resolveRPCLaunch(c Chat, transport string, providers []providerInstance, al
 	}
 	for k, v := range p.Env {
 		opts.Env[k] = v
+	}
+	if p.ProviderID == "openai-compatible" {
+		if p.OpenAI == nil {
+			return opts, fmt.Errorf("configure the endpoint and model in Settings > Providers")
+		}
+		cfg := *p.OpenAI
+		opts.OpenAI = &cfg
+		opts.SystemPrompt = c.AppendSystemPrompt
+		return opts, nil
 	}
 	opts.Command = firstNonEmpty(strings.TrimSpace(p.Binary), catalogBinary[p.ProviderID], "npx")
 	opts.Args = p.TransportArgs

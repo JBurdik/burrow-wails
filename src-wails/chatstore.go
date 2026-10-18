@@ -167,6 +167,9 @@ func (a *App) DeleteChatMessages(chatID int) error {
 	if a.db == nil {
 		return nil
 	}
+	if _, err := a.db.Exec(`DELETE FROM openai_sessions WHERE chat_id = ?`, chatID); err != nil {
+		return err
+	}
 	if _, err := a.db.Exec(`DELETE FROM chat_messages WHERE chat_id = ?`, chatID); err != nil {
 		return err
 	}

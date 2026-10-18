@@ -328,10 +328,20 @@ describe("queued follow-ups", () => {
     const working = s.messages.value[s.messages.value.length - 1].id;
     const second = s.enqueueMessage("second");
 
-    s.moveQueuedMessageNext(second.id);
+    s.moveQueuedMessage(second.id, 0);
     expect(s.messageQueue.value.map((e) => e.id)).toEqual([second.id, first.id]);
     expect(s.messages.value.map((m) => m.id)).toEqual([second.id, first.id, working]);
     expect(s.messageQueue.value[0]).toEqual({ id: second.id, text: "second" });
+    dropChatSession(42);
+  });
+
+  it("moves a queued message down (drag reorder)", () => {
+    const s = chatSession(42, fakeDeps().deps);
+    const [a, b, c] = ["a", "b", "c"].map((t) => s.enqueueMessage(t));
+    s.moveQueuedMessage(a.id, 2);
+    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["b", "c", "a"]);
+    s.moveQueuedMessage(a.id, 1);
+    expect(s.messageQueue.value.map((e) => e.id)).toEqual([b.id, a.id, c.id]);
     dropChatSession(42);
   });
 });
