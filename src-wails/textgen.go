@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -649,4 +650,72 @@ func chatTitleFromOutput(out []byte) string {
 		return sanitizeChatTitle(result.Title)
 	}
 	return sanitizeChatTitle(string(out))
+}
+
+// ── catch me up ──────────────────────────────────────────────────────────────
+
+const catchUpSchema = `{"type":"object","properties":{"summary":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"tag":{"type":"string","enum":["needs_you","blocked","in_progress","done","untested"]},"text":{"type":"string"}},"required":["tag","text"],"additionalProperties":false}}},"required":["summary","items"],"additionalProperties":false}`
+
+// CatchUpItem is one line of a catch-up card, tagged by what it asks of the user.
+type CatchUpItem struct {
+	Tag  string `json:"tag"`
+	Text string `json:"text"`
+}
+
+// CatchUp is the "where is this chat at" card: one sentence plus tagged items.
+type CatchUp struct {
+	Summary string        `json:"summary"`
+	Items   []CatchUpItem `json:"items"`
+}
+
+var catchUpTags = map[string]bool{"needs_you": true, "blocked": true, "in_progress": true, "done": true, "untested": true}
+
+// GenerateCatchUp reads the tail of a chat (the frontend sends the last ~30
+// messages as plain "User:/Agent:" text) and answers what the session is doing,
+// what needs the user, what is blocked, in progress, done or untested. Uses the
+// text-generation model, never the chat's own agent, so nothing is sent into
+// the session. Idea from maddada/Ghostex's "Catch me up".
+func (a *App) GenerateCatchUp(cwd, selection, transcript string) (CatchUp, error) {
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" {
+		return CatchUp{}, fmt.Errorf("nothing to catch up on")
+	}
+	prompt := strings.Join([]string{
+		"You brief a developer returning to a coding-agent chat they have not watched.",
+		"Return a JSON object with keys: summary, items.",
+		"Rules:",
+		"- summary: one sentence, what the session is working on right now",
+		"- items: at most 6, each {tag, text}; text is one short line, concrete (files, features, decisions)",
+		"- tag needs_you: a question or decision waiting on the user; blocked: stuck on something external",
+		"- tag in_progress: started, not finished; done: finished; untested: finished but not verified",
+		"- put needs_you items first; skip anything trivial; no filler",
+		"",
+		"Transcript (oldest first):",
+		limitSection(transcript, 24000),
+	}, "\n")
+	out, err := generateTextJSON(cwd, selection, prompt, catchUpSchema)
+	if err != nil {
+		return CatchUp{}, err
+	}
+	return catchUpFromOutput(out)
+}
+
+func catchUpFromOutput(out []byte) (CatchUp, error) {
+	if extracted, err := extractGeneratedJSON(out); err == nil {
+		out = extracted
+	}
+	var c CatchUp
+	if err := json.Unmarshal(out, &c); err != nil {
+		return CatchUp{}, fmt.Errorf("catch up: unreadable answer: %w", err)
+	}
+	c.Summary = strings.TrimSpace(c.Summary)
+	items := c.Items[:0]
+	for _, it := range c.Items {
+		it.Text = strings.TrimSpace(it.Text)
+		if it.Text != "" && catchUpTags[it.Tag] {
+			items = append(items, it)
+		}
+	}
+	c.Items = items
+	return c, nil
 }

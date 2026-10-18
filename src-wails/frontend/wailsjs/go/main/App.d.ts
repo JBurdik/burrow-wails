@@ -123,6 +123,8 @@ export function FormatSource(arg1:string,arg2:string,arg3:string):Promise<string
 
 export function GenerateBranchName(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
+export function GenerateCatchUp(arg1:string,arg2:string,arg3:string):Promise<main.CatchUp>;
+
 export function GenerateChatTitle(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function GenerateCommitMessage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.GitOutput>;
@@ -214,6 +216,8 @@ export function MarkCollected(arg1:number):Promise<void>;
 export function MarkDiffNotesSent(arg1:Array<number>):Promise<void>;
 
 export function NotifyFloatGrid(arg1:string,arg2:number,arg3:number):Promise<void>;
+
+export function OpenAIListModels(arg1:main.OpenAIConfig):Promise<Array<main.OpenAIModel>>;
 
 export function OpenGitPanelWindow():Promise<void>;
 

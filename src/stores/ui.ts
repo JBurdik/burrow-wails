@@ -104,7 +104,10 @@ interface Prefs {
   // ── Floating mission-control chat ──
   floatChatEnabled: boolean; // master toggle for the bottom-right control chat button
   floatChatOpen: boolean; // expanded (true) vs collapsed to a button (false)
-  sidebarVisible: boolean; // left sidebar shown (default off — opens via ⌘B / titlebar toggle)
+  // Left sidebar hidden via ⌘B / the titlebar toggle. Stored inverted on purpose:
+  // the old `sidebarVisible` key was saved as false everywhere while a v-show bug
+  // kept the sidebar on screen, so honouring it would hide everyone's sidebar.
+  sidebarHidden: boolean;
   sidebarWidth: number; // left sidebar panel width in px
   rightPanelWidth: number; // right panel width in px
   toastPosition: ToastPosition; // screen anchor for toast notifications
@@ -205,8 +208,8 @@ const DEFAULT_PREFS: Prefs = {
   petsLeveling: true,
   floatChatEnabled: true,
   floatChatOpen: false,
-  sidebarVisible: false,
-  sidebarWidth: 220,
+  sidebarHidden: false,
+  sidebarWidth: 240,
   rightPanelWidth: 300,
   toastPosition: "sidebar",
   defaultChatAgent: "claude",
@@ -321,8 +324,8 @@ export const useUIStore = defineStore("ui", () => {
 
   // The compose screen is its own route now (`/`), so "is the composer up" is
   // not a ref anyone can forget to clear — see welcomeVisible below.
-  const sidebarVisible = ref(loaded.sidebarVisible ?? false);
-  const sidebarWidth = ref(loaded.sidebarWidth ?? 220);
+  const sidebarVisible = ref(!(loaded.sidebarHidden ?? false));
+  const sidebarWidth = ref(loaded.sidebarWidth ?? 240);
   const rightPanelWidth = ref(loaded.rightPanelWidth ?? 300);
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "sidebar");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
@@ -383,8 +386,8 @@ export const useUIStore = defineStore("ui", () => {
     petsLeveling.value = p.petsLeveling;
     floatChatEnabled.value = p.floatChatEnabled;
     floatChatOpen.value = p.floatChatOpen;
-    sidebarVisible.value = p.sidebarVisible ?? false;
-    sidebarWidth.value = p.sidebarWidth ?? 220;
+    sidebarVisible.value = !(p.sidebarHidden ?? false);
+    sidebarWidth.value = p.sidebarWidth ?? 240;
     rightPanelWidth.value = p.rightPanelWidth ?? 300;
     toastPosition.value = p.toastPosition ?? "sidebar";
     defaultChatAgent.value = p.defaultChatAgent ?? "claude";
@@ -544,7 +547,7 @@ export const useUIStore = defineStore("ui", () => {
         petsLeveling: petsLeveling.value,
         floatChatEnabled: floatChatEnabled.value,
         floatChatOpen: floatChatOpen.value,
-        sidebarVisible: sidebarVisible.value,
+        sidebarHidden: !sidebarVisible.value,
         sidebarWidth: sidebarWidth.value,
         rightPanelWidth: rightPanelWidth.value,
         toastPosition: toastPosition.value,
@@ -776,6 +779,9 @@ export const useUIStore = defineStore("ui", () => {
   function pickProjectThenWelcome() {
     spotlightApi.value?.show({ projectOnly: true });
   }
+  function openSpotlight() {
+    spotlightApi.value?.show();
+  }
 
   return {
     settingsOpen,
@@ -856,6 +862,7 @@ export const useUIStore = defineStore("ui", () => {
     closeWelcome,
     registerSpotlightApi,
     pickProjectThenWelcome,
+    openSpotlight,
     sidebarVisible,
     toggleSidebar,
     sidebarWidth,

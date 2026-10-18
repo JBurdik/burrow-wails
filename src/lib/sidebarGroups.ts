@@ -57,3 +57,34 @@ export function buildActivityRows(
     Number(pinned(b.tab)) - Number(pinned(a.tab)) || b.ts - a.ts || b.tab.id - a.tab.id;
   return { live: live.sort(order), settledChats: settledChats.sort(order) };
 }
+
+// ── project groups ───────────────────────────────────────────────────────────
+
+/** A repo and its rows (its own tabs plus its worktrees' tabs), feed order kept. */
+export interface RepoGroup {
+  repoId: number;
+  rows: ActivityRow[];
+}
+
+/**
+ * Group the flat feed under each row's repo (a worktree folds into its parent),
+ * groups ordered by their newest row, rows keeping feed order. `alwaysShow`
+ * repos (the active one) get a header even with no rows.
+ */
+export function groupByRepo(rows: ActivityRow[], alwaysShow: number[] = []): RepoGroup[] {
+  const byRepo = new Map<number, RepoGroup>();
+  for (const row of rows) {
+    const repoId = row.ws.parent_id ?? row.ws.id;
+    let group = byRepo.get(repoId);
+    if (!group) byRepo.set(repoId, (group = { repoId, rows: [] }));
+    group.rows.push(row);
+  }
+  for (const id of alwaysShow) if (!byRepo.has(id)) byRepo.set(id, { repoId: id, rows: [] });
+  return [...byRepo.values()];
+}
+
+/** `git diff --shortstat` → {added, removed}; empty output (clean tree) → zeros. */
+export function parseShortstat(out: string): { added: number; removed: number } {
+  const num = (re: RegExp) => Number(out.match(re)?.[1] ?? 0);
+  return { added: num(/(\d+) insertions?\(\+\)/), removed: num(/(\d+) deletions?\(-\)/) };
+}

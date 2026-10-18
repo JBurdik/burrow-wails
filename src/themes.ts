@@ -91,6 +91,97 @@ const STONKS_LIGHT_BG =
 
 export const THEMES: Theme[] = [
   {
+    key: "plum",
+    label: "Plum",
+    isDark: true,
+    // The default look since 2026-10: warm, quiet plum-black chrome with a
+    // lavender accent, after maddada/Ghostex's dark theme. Design source:
+    // docs/design/burrow-ghostex-feel.fig.
+    vars: {
+      "bg-base": "#241A20",
+      "bg-panel": "#2C2127",
+      "bg-hover": "#352A30",
+      "bg-selected": "#3A2E34",
+      border: "#3D3137",
+      "text-primary": "#ECE6E9",
+      "text-secondary": "#A79CA2",
+      "text-muted": "#7E7379",
+      accent: "#A895F5",
+      "accent-dim": "#7C6FD8",
+      green: "#7FBF8E",
+      yellow: "#F2C14E",
+      red: "#D9827A",
+    },
+    xterm: {
+      background: "#1E161B",
+      foreground: "#ECE6E9",
+      cursor: "#E0876A",
+      cursorAccent: "#1E161B",
+      selectionBackground: "#4A3D44",
+      black: "#2C2127",
+      red: "#D9827A",
+      green: "#7FBF8E",
+      yellow: "#F2C14E",
+      blue: "#8AB4F8",
+      magenta: "#C79BE8",
+      cyan: "#7FC8C8",
+      white: "#C9C0C5",
+      brightBlack: "#6E6268",
+      brightRed: "#EBA59E",
+      brightGreen: "#A3D9AF",
+      brightYellow: "#F7D885",
+      brightBlue: "#B3CDFB",
+      brightMagenta: "#DDBDF2",
+      brightCyan: "#A6DEDE",
+      brightWhite: "#F4EEF1",
+    },
+    shiki: "github-dark",
+  },
+  {
+    key: "plum-light",
+    label: "Plum Light",
+    isDark: false,
+    vars: {
+      "bg-base": "#F7F4F6",
+      "bg-panel": "#FFFFFF",
+      "bg-hover": "#EFE9ED",
+      "bg-selected": "#E6DDE3",
+      border: "#DDD3D9",
+      "text-primary": "#2A1F25",
+      "text-secondary": "#6B5F66",
+      "text-muted": "#93878E",
+      accent: "#6E5BD8",
+      "accent-dim": "#5646B8",
+      green: "#2F8A4A",
+      yellow: "#B07F0E",
+      red: "#C0503F",
+    },
+    xterm: {
+      background: "#FFFFFF",
+      foreground: "#2A1F25",
+      cursor: "#C2583A",
+      cursorAccent: "#FFFFFF",
+      selectionBackground: "#E6DDE3",
+      black: "#2A1F25",
+      red: "#C0503F",
+      green: "#2F8A4A",
+      yellow: "#B07F0E",
+      blue: "#3D6FD6",
+      magenta: "#8E4FB8",
+      cyan: "#2A8A8A",
+      white: "#93878E",
+      brightBlack: "#6B5F66",
+      brightRed: "#D26A59",
+      brightGreen: "#43A35E",
+      brightYellow: "#C99520",
+      brightBlue: "#5A87E2",
+      brightMagenta: "#A56BCC",
+      brightCyan: "#3CA3A3",
+      brightWhite: "#2A1F25",
+    },
+    shiki: "github-light",
+  },
+  {
     key: "dark",
     label: "Dark",
     isDark: true,
@@ -1180,7 +1271,7 @@ export const THEMES: Theme[] = [
   },
 ];
 
-export const DEFAULT_THEME_KEY = "dark";
+export const DEFAULT_THEME_KEY = "plum";
 
 export function findTheme(key: string): Theme {
   return THEMES.find((t) => t.key === key) ?? THEMES[0];
@@ -1198,6 +1289,7 @@ export interface ThemeFamily {
 }
 
 export const THEME_FAMILIES: ThemeFamily[] = [
+  { key: "plum", label: "Plum", light: "plum-light", dark: "plum" },
   { key: "burrow", label: "Burrow", light: "light", dark: "dark" },
   { key: "ps-gray", label: "Photoshop Gray", light: "ps-gray", dark: "ps-gray-dark" },
   { key: "monokai", label: "Monokai", light: "monokai-light", dark: "monokai" },
@@ -1212,7 +1304,7 @@ export const THEME_FAMILIES: ThemeFamily[] = [
   { key: "stonks", label: "Stonks 🚀 (meme)", light: "stonks-light", dark: "stonks" },
 ];
 
-export const DEFAULT_FAMILY_KEY = "burrow";
+export const DEFAULT_FAMILY_KEY = "plum";
 
 export function findFamily(key: string): ThemeFamily {
   return THEME_FAMILIES.find((f) => f.key === key) ?? THEME_FAMILIES[0];

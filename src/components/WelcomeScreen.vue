@@ -1,5 +1,5 @@
 <template>
-  <div class="welcome drop-zone">
+  <div class="welcome surface-glow drop-zone">
     <template v-if="target">
       <h1 class="welcome-title">
         What should we build in

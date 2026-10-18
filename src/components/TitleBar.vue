@@ -1,10 +1,18 @@
 <template>
   <!-- data-tauri-drag-region makes the whole bar draggable with native decorations: true -->
+  <!-- Ghostex-style top row: no bar of its own. The left part is the top of
+       the sidebar column (same width and fill), the rest belongs to the main
+       area: navigation, what you're looking at, and the controls. -->
   <div
-    class="relative z-[100] flex h-[var(--titlebar-height)] shrink-0 items-center border-b border-border bg-panel [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)] [padding-top:env(titlebar-area-y,0px)]"
-    :style="isDev ? { backgroundColor: 'color-mix(in srgb, var(--bg-panel), #dc2626 40%)' } : isBeta ? { backgroundColor: 'color-mix(in srgb, var(--bg-panel), #a21caf 40%)' } : undefined"
+    class="relative z-[100] flex h-[var(--titlebar-height)] shrink-0 items-center [padding-top:env(titlebar-area-y,0px)]"
     data-tauri-drag-region
   >
+    <div
+      class="flex h-full shrink-0 items-center gap-0.5 pr-2"
+      :class="sidebarVisible && 'border-r border-border'"
+      :style="sidebarVisible ? { width: 'var(--sidebar-width)', background: 'var(--sidebar-bg)' } : undefined"
+      data-tauri-drag-region
+    >
     <!-- Spacer for native macOS traffic lights (~72px) -->
     <div class="w-[72px] shrink-0" data-tauri-drag-region />
 
@@ -21,7 +29,7 @@
     <!-- Notification center -->
     <div class="relative ml-1 flex shrink-0 [-webkit-app-region:no-drag]">
       <button
-        class="notif-btn relative flex items-center rounded-[var(--radius-nav)] border border-border bg-panel p-[5px] text-secondary-foreground [-webkit-app-region:no-drag] hover:bg-hover hover:text-foreground"
+        class="notif-btn tb-btn relative [-webkit-app-region:no-drag]"
         :class="[notifOpen && 'text-accent', bellColorClass, bellPulse && 'notif-bell-pulse']"
         title="Notifications"
         @click.stop="toggleNotif"
@@ -80,12 +88,19 @@
       </div>
     </div>
 
-    <div class="flex flex-1 items-center justify-center gap-1.5" data-tauri-drag-region>
-      <button v-if="workspaceName" class="flex items-center rounded-[var(--radius-nav)] border border-border bg-panel px-[5px] py-[3px] text-secondary-foreground [-webkit-app-region:no-drag] hover:bg-hover hover:text-foreground" @click="$emit('back')" title="Switch workspace">
-        <PhHouse :size="13" />
-      </button>
-      <span class="font-mono text-[11px] text-secondary-foreground" data-tauri-drag-region>{{ workspaceName || "Burrow" }}</span>
-      <CommitPushMenu v-if="branch" />
+      <div class="flex-1" data-tauri-drag-region />
+      <button class="tb-btn [-webkit-app-region:no-drag]" title="Search (⌘P)" @click="ui.openSpotlight()"><PhMagnifyingGlass :size="15" /></button>
+    </div>
+
+    <!-- Main area: back · home · forward, then what's on screen. -->
+    <div class="flex min-w-0 flex-1 items-center gap-1 pl-3" data-tauri-drag-region>
+      <button class="tb-btn [-webkit-app-region:no-drag]" title="Back" @click="router.back()"><PhCaretLeft :size="14" /></button>
+      <button class="tb-btn [-webkit-app-region:no-drag]" title="New thread" @click="ui.openWelcome()"><PhCircle :size="12" weight="bold" /></button>
+      <button class="tb-btn [-webkit-app-region:no-drag]" title="Forward" @click="router.forward()"><PhCaretRight :size="14" /></button>
+      <span class="ml-2 min-w-0 truncate text-[13.5px] font-medium text-foreground" data-tauri-drag-region>{{ screenTitle }}</span>
+      <span v-if="isDev || isBeta" class="shrink-0 rounded-[5px] border border-border px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" data-tauri-drag-region>{{ isDev ? "dev" : "beta" }}</span>
+      <div class="min-w-4 flex-1" data-tauri-drag-region />
+      <CommitPushMenu v-if="branch" class="[-webkit-app-region:no-drag]" />
     </div>
 
     <div class="flex shrink-0 items-center gap-0.5 pr-2 [-webkit-app-region:no-drag]">
@@ -190,12 +205,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhHouse, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhSkull, PhCopy, PhRobot, PhGitBranch, PhGear } from "@phosphor-icons/vue";
+import { PhMagnifyingGlass, PhCaretLeft, PhCaretRight, PhCircle, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhSkull, PhCopy, PhRobot, PhGitBranch, PhGear } from "@phosphor-icons/vue";
 import { useNotificationsStore, type HistoryItem, type NotifSource } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import CommitPushMenu from "./CommitPushMenu.vue";
+import { useUIStore } from "@/stores/ui";
+import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { router } from "@/router";
 
 const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?: string; rightPanelVisible?: boolean; sidebarVisible?: boolean }>();
 defineEmits(["back", "toggle-rightpanel", "toggle-sidebar"]);
@@ -240,6 +258,18 @@ const notifStore = useNotificationsStore();
 const notifOpen = ref(false);
 const wsStore = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
+const ui = useUIStore();
+const chats = useClaudeChatsStore();
+
+/** What the main area shows: the open thread or tab, else the composer or project. */
+const screenTitle = computed(() => {
+  if (ui.welcomeVisible || !ui.viewingTabs) return props.workspaceName ? `New thread · ${props.workspaceName}` : "Burrow";
+  const ws = wsStore.active;
+  if (!ws) return "Burrow";
+  const tab = termTabs.tabsByWs[ws.id]?.find((t) => t.id === termTabs.activeByWs[ws.id]);
+  if (!tab) return ws.name;
+  return (tab.chatId != null ? chats.sessions.find((c) => c.id === tab.chatId)?.title : undefined) ?? tab.title;
+});
 
 // Rows opened this viewing stay marked as unread even after markAllRead() fires,
 // by rendering against a cutoff snapshot captured before the store clears it.
@@ -485,17 +515,18 @@ const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
 
 <style scoped>
 .tb-btn {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
-  padding: 4px 5px;
-  border-radius: var(--radius-nav);
+  gap: 4px;
+  padding: 5px 6px;
+  border-radius: 7px;
   -webkit-app-region: no-drag;
 }
-.tb-btn:hover { background: var(--surface-elevated); color: var(--text-primary); }
+.tb-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .tb-btn:disabled { opacity: 0.35; cursor: default; }
 .tb-btn:disabled:hover { background: var(--surface); color: var(--text-secondary); }
 

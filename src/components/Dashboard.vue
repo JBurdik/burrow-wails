@@ -13,7 +13,7 @@
   `run_git` Tauri command directly (the git store only tracks the active cwd).
 -->
 <template>
-  <div class="flex h-full flex-col overflow-hidden bg-base text-foreground">
+  <div class="surface-glow flex h-full flex-col overflow-hidden bg-base text-foreground">
     <header class="flex shrink-0 items-center gap-2.5 border-b border-border px-5 py-3.5">
       <PhSquaresFour :size="20" weight="bold" class="text-accent" />
       <h1 class="m-0 text-base font-[650]">Dashboard</h1>

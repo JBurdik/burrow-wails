@@ -142,7 +142,29 @@ export namespace forge {
 
 export namespace main {
 	
+	export class OpenAIConfig {
+	    baseUrl: string;
+	    apiKey: string;
+	    model: string;
+	    contextWindow: number;
+	    maxOutputTokens: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new OpenAIConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.baseUrl = source["baseUrl"];
+	        this.apiKey = source["apiKey"];
+	        this.model = source["model"];
+	        this.contextWindow = source["contextWindow"];
+	        this.maxOutputTokens = source["maxOutputTokens"];
+	    }
+	}
 	export class AcpStartOpts {
+	    openai?: OpenAIConfig;
+	    systemPrompt?: string;
 	    id: string;
 	    cwd: string;
 	    command: string;
@@ -160,6 +182,8 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.openai = this.convertValues(source["openai"], OpenAIConfig);
+	        this.systemPrompt = source["systemPrompt"];
 	        this.id = source["id"];
 	        this.cwd = source["cwd"];
 	        this.command = source["command"];
@@ -171,6 +195,24 @@ export namespace main {
 	        this.resumeSessionId = source["resumeSessionId"];
 	        this.emitHistory = source["emitHistory"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class AdvertisedEndpoint {
 	    kind: string;
@@ -216,6 +258,53 @@ export namespace main {
 	        this.defaultEffort = source["defaultEffort"];
 	    }
 	}
+	export class CatchUpItem {
+	    tag: string;
+	    text: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CatchUpItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tag = source["tag"];
+	        this.text = source["text"];
+	    }
+	}
+	export class CatchUp {
+	    summary: string;
+	    items: CatchUpItem[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CatchUp(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.summary = source["summary"];
+	        this.items = this.convertValues(source["items"], CatchUpItem);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class Chat {
 	    id: number;
 	    workspace_id: number;
@@ -833,6 +922,21 @@ export namespace main {
 	        this.ws_url = source["ws_url"];
 	        this.ticket = source["ticket"];
 	        this.environment_id = source["environment_id"];
+	    }
+	}
+	
+	export class OpenAIModel {
+	    id: string;
+	    label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OpenAIModel(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
 	    }
 	}
 	export class OpenTarget {

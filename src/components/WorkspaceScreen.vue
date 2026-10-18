@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-1 flex-col items-center justify-center gap-10 overflow-y-auto bg-base p-10">
+  <div class="surface-glow flex flex-1 flex-col items-center justify-center gap-10 overflow-y-auto bg-base p-10">
     <div class="flex flex-col items-center gap-2.5 text-center">
       <div class="flex items-center gap-2.5">
         <PhTerminalWindow :size="28" weight="duotone" class="text-accent" />

@@ -56,6 +56,7 @@ textarea {
    element is rarely truly empty. The component sets data-empty off the model. */
 .composer-editable[data-empty]::before {
   content: attr(data-placeholder);
+  white-space: pre-line; /* placeholders may be two lines (Ghostex-style hint) */
   color: var(--text-muted);
   pointer-events: none;
 }
@@ -163,29 +164,53 @@ textarea {
   flex: 1;
 }
 
+/* Ghostex-style toolbar: quiet "ghost" pills, the model picker (first pill) is
+   the one filled chip. Design: docs/design/burrow-ghostex-feel.fig. */
 .composer-pill {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   white-space: nowrap;
-  height: 27px;
+  height: 28px;
   padding: 0 9px;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-chip);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 12.5px;
   font-family: var(--font-ui);
   transition: color .12s ease-out, background .12s ease-out, border-color .12s ease-out;
 }
 .composer-pill:hover,
 .composer-pill[data-state="open"] {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 8%, var(--surface-elevated));
-  border-color: color-mix(in srgb, var(--text-primary) 20%, var(--border));
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
-.composer-pill-label { font-size: 12px; font-weight: 650; }
+.composer-pillbar > .mp:first-of-type > .composer-pill {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.composer-pillbar > .mp:first-of-type > .composer-pill:hover {
+  background: color-mix(in srgb, var(--text-primary) 10%, var(--bg-hover));
+}
+/* The effort pill right after the model reads as part of one chip:
+   "Opus 5.5  Medium ⌄" — muted second half, shared fill, no seam. */
+.composer-pillbar > .mp:first-of-type:has(+ .composer-pill) > .composer-pill {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 4px;
+}
+.composer-pillbar > .mp:first-of-type + .composer-pill {
+  margin-left: -3px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-left: 4px;
+}
+.composer-pillbar > .mp:first-of-type + .composer-pill:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 10%, var(--bg-hover)); }
+.composer-pill-label { font-size: 12.5px; font-weight: 500; }
 .composer-pill-caret { opacity: .6; margin-left: -1px; }
 .composer-pill-active {
   color: var(--accent);
@@ -281,22 +306,17 @@ textarea {
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: var(--radius-pill, 999px);
-  /* --agent-accent is set per chat; the welcome composer has none and falls
-     back to the theme accent. */
-  background: var(--agent-accent, var(--accent));
-  color: #fff;
+  border-radius: 8px;
+  /* Light square on dark (dark on light): the one high-contrast control. */
+  background: var(--text-primary);
+  color: var(--bg-base);
   cursor: pointer;
-  transition: background .12s ease-out, opacity .12s ease-out, transform .15s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background .12s ease-out, opacity .12s ease-out;
 }
-.composer-send:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 80%, #000);
-  transform: translateY(-1px);
-}
-.composer-send:active:not(:disabled) { transform: translateY(0); }
-.composer-send:disabled { opacity: 0.35; cursor: default; }
-.composer-send-abort { background: var(--red, #dc2626); }
-.composer-send-abort:hover:not(:disabled) { background: color-mix(in srgb, var(--red, #dc2626) 80%, #000); }
+.composer-send:hover:not(:disabled) { background: color-mix(in srgb, var(--text-primary) 85%, var(--bg-base)); }
+.composer-send:disabled { opacity: 0.3; cursor: default; }
+.composer-send-abort { background: color-mix(in srgb, var(--red, #dc2626) 28%, var(--bg-panel)); color: var(--red, #dc2626); }
+.composer-send-abort:hover:not(:disabled) { background: color-mix(in srgb, var(--red, #dc2626) 40%, var(--bg-panel)); }
 .composer-send-stalled { animation: composer-send-stalled-pulse 1.6s ease-in-out infinite; }
 @keyframes composer-send-stalled-pulse {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red, #dc2626) 55%, transparent); }

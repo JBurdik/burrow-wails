@@ -242,6 +242,10 @@ export function GenerateBranchName(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GenerateBranchName'](arg1, arg2, arg3, arg4);
 }
 
+export function GenerateCatchUp(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GenerateCatchUp'](arg1, arg2, arg3);
+}
+
 export function GenerateChatTitle(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GenerateChatTitle'](arg1, arg2, arg3, arg4);
 }
@@ -424,6 +428,10 @@ export function MarkDiffNotesSent(arg1) {
 
 export function NotifyFloatGrid(arg1, arg2, arg3) {
   return window['go']['main']['App']['NotifyFloatGrid'](arg1, arg2, arg3);
+}
+
+export function OpenAIListModels(arg1) {
+  return window['go']['main']['App']['OpenAIListModels'](arg1);
 }
 
 export function OpenGitPanelWindow() {

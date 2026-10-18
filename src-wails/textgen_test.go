@@ -184,3 +184,16 @@ func TestChatTitleFromOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestCatchUpFromOutput(t *testing.T) {
+	c, err := catchUpFromOutput([]byte("Sure:\n```json\n{\"summary\":\" Reworking the chat \",\"items\":[{\"tag\":\"needs_you\",\"text\":\"Pick a storage\"},{\"tag\":\"bogus\",\"text\":\"x\"},{\"tag\":\"done\",\"text\":\" \"}]}\n```"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Summary != "Reworking the chat" || len(c.Items) != 1 || c.Items[0].Tag != "needs_you" {
+		t.Fatalf("got %+v", c)
+	}
+	if _, err := catchUpFromOutput([]byte("no json here")); err == nil {
+		t.Fatal("want an error for prose")
+	}
+}

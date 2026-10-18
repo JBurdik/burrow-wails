@@ -1,6 +1,29 @@
 <template>
   <Transition name="update-pop">
-    <div v-if="show" class="fixed bottom-4 right-4 z-[9998] flex w-80 gap-2.5 rounded-xl border border-border bg-panel p-3.5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]">
+    <!-- Docked in the sidebar: one quiet row; clicking it IS the action. -->
+    <div
+      v-if="show && docked"
+      class="sb-notice group"
+      role="button"
+      tabindex="0"
+      :title="u.notes || ''"
+      @click="u.installed ? u.relaunch() : !u.downloading && u.downloadAndInstall()"
+    >
+      <PhCheckCircle v-if="u.installed" :size="15" weight="fill" class="shrink-0 text-[var(--green)]" />
+      <PhArrowCircleUp v-else :size="15" weight="fill" class="shrink-0 text-accent" />
+      <span class="min-w-0 flex-1">
+        <span class="block truncate text-[12.5px] text-foreground">{{ u.installed ? "Update ready" : `Burrow v${u.newVersion}` }}</span>
+        <span v-if="u.downloading" class="mt-1 block h-[3px] overflow-hidden rounded-full bg-hover">
+          <span class="block h-full rounded-full bg-accent" :class="{ 'w-[35%] animate-[update-slide_1.1s_ease-in-out_infinite]': u.progress < 0 }" :style="u.progress >= 0 ? { width: Math.round(u.progress * 100) + '%' } : {}" />
+        </span>
+        <span v-else class="block truncate text-[11px] text-muted-foreground">{{ u.installed ? "Click to restart" : "Click to install" }}</span>
+      </span>
+      <button v-if="!u.installed && !u.downloading" class="sb-notice-x" title="Later" @click.stop="u.dismiss()"><PhX :size="11" /></button>
+    </div>
+    <div
+      v-else-if="show"
+      class="fixed bottom-4 right-4 z-[9998] flex w-80 gap-2.5 rounded-xl border border-border bg-panel p-3.5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+    >
       <div class="mt-px shrink-0 text-accent" :class="{ 'text-secondary-foreground': u.downloading }">
         <PhArrowCircleUp v-if="!u.installed" :size="20" weight="fill" />
         <PhCheckCircle v-else :size="20" weight="fill" />
@@ -50,8 +73,10 @@
 </template>
 
 <script setup lang="ts">
+/** docked: rendered inside the sidebar's bottom stack instead of floating in a corner. */
+defineProps<{ docked?: boolean }>();
 import { computed } from "vue";
-import { PhArrowCircleUp, PhCheckCircle } from "@phosphor-icons/vue";
+import { PhArrowCircleUp, PhCheckCircle, PhX } from "@phosphor-icons/vue";
 import { useUpdateStore } from "@/stores/update";
 
 const u = useUpdateStore();

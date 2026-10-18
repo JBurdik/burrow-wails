@@ -1,9 +1,10 @@
 <template>
-  <div class="claude-chat drop-zone flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
-    <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
+  <div class="claude-chat surface-glow drop-zone flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
+    <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden">
 
     <!-- Chat title bar -->
-    <div v-if="activeSession?.title" class="chat-title-bar flex flex-shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[12px] font-medium text-foreground">
+    <!-- Only when embedded (Right Panel sub-agent): a full-size chat shows its title in the window's top row. -->
+    <div v-if="compact && activeSession?.title" class="chat-title-bar flex flex-shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[12px] font-medium text-foreground">
       <span class="min-w-0 flex-1 truncate">{{ activeSession.title }}</span>
       <span v-if="turnCount > 0" class="flex-shrink-0 text-[11px] font-normal text-muted-foreground">{{ turnCount }} turn{{ turnCount === 1 ? '' : 's' }}</span>
       <span v-if="activeModelLabel" class="flex flex-shrink-0 items-center gap-1 text-[11px] font-normal text-muted-foreground">
@@ -137,6 +138,7 @@
       @cancel="cancelCodexUserInput"
     />
 
+    <div class="relative flex min-h-0 flex-1">
     <div ref="scrollEl" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
@@ -181,19 +183,38 @@
           </div>
         </template>
 
-        <!-- Changed files this turn touched, with a +/- diffstat -->
+        <!-- Files this turn edited: a diffstat card whose rows expand into the
+             edit's own before/after lines (Ghostex-style inline diff). -->
         <template v-else-if="msg.role === 'changed-files'">
-          <div class="flex items-start gap-2.5 px-4 py-[3px]">
+          <div class="flex items-start gap-2.5 px-4 py-1">
             <div class="w-[26px] flex-shrink-0" />
-            <div class="changed-files max-w-[min(560px,90%)]">
-              <div class="changed-files-head">
-                <PhGitDiff :size="11" class="flex-shrink-0" />
-                <span>Changed files ({{ msg.files.length }})</span>
-                <span class="ml-auto flex-shrink-0 font-mono text-[10px]"><span class="diff-add">+{{ msg.added }}</span> <span class="diff-del">−{{ msg.removed }}</span></span>
+            <div class="diff-card min-w-0 max-w-[720px] flex-1">
+              <div class="diff-card-head">
+                <span class="diff-card-icon"><PhPencilSimple :size="14" /></span>
+                <div class="min-w-0">
+                  <div class="text-[13px] font-semibold text-foreground">Edited {{ msg.files.length }} {{ msg.files.length === 1 ? 'file' : 'files' }}</div>
+                  <div class="truncate text-[11px] text-muted-foreground">{{ diffDirs(msg.files) }}</div>
+                </div>
+                <span class="ml-auto flex-shrink-0 font-mono text-[12px]"><span class="diff-add">+{{ msg.added }}</span> <span class="diff-del">−{{ msg.removed }}</span></span>
+                <span class="diff-ratio"><span class="diff-ratio-add" :style="{ width: diffRatio(msg.added, msg.removed) + '%' }" /></span>
               </div>
-              <div v-for="f in msg.files" :key="f.path" class="changed-files-row cursor-pointer" :title="f.path" @click="openChangedFileDiff(f.path)">
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ basename(f.path) }}</span>
-                <span class="ml-auto flex-shrink-0 font-mono text-[10px]"><span class="diff-add">+{{ f.added }}</span> <span class="diff-del">−{{ f.removed }}</span></span>
+              <div v-for="(f, fi) in msg.files" :key="f.path">
+                <div class="diff-file-row" :title="f.path" @click="toggleDiff(msg.id, f.path, fi)">
+                  <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': diffOpen(msg.id, f.path, fi) }" />
+                  <PhFileText :size="13" class="flex-shrink-0 text-[var(--chat-info)]" />
+                  <span class="max-w-[55%] flex-shrink-0 truncate font-semibold text-foreground">{{ basename(f.path) }}</span>
+                  <span class="min-w-0 truncate text-muted-foreground" style="direction: rtl; text-align: left;">{{ dirOf(f.path) }}</span>
+                  <span class="ml-auto flex-shrink-0 font-mono text-[11px]"><span class="diff-add">+{{ f.added }}</span> <span class="diff-del">−{{ f.removed }}</span></span>
+                  <span class="diff-blocks"><i v-for="(b, bi) in diffBlocks(f.added, f.removed)" :key="bi" :class="b" /></span>
+                  <button class="diff-open" title="Open the file's diff" @click.stop="openChangedFileDiff(f.path)"><PhArrowSquareOut :size="12" /></button>
+                </div>
+                <div v-if="diffOpen(msg.id, f.path, fi)" class="diff-lines">
+                  <template v-for="(l, li) in hunkLines(f.hunks).lines" :key="li">
+                    <div v-if="l.kind === 'sep'" class="diff-sep">⋯</div>
+                    <div v-else class="diff-line" :class="l.kind === 'add' ? 'diff-line-add' : 'diff-line-del'"><span class="diff-sign">{{ l.kind === 'add' ? '+' : '−' }}</span>{{ l.text || ' ' }}</div>
+                  </template>
+                  <div v-if="hunkLines(f.hunks).hidden" class="diff-more" @click="openChangedFileDiff(f.path)">{{ hunkLines(f.hunks).hidden }} more lines — open diff</div>
+                </div>
               </div>
             </div>
           </div>
@@ -202,7 +223,7 @@
         <!-- User message -->
         <template v-else-if="msg.role === 'user'">
           <div class="group flex items-end justify-end gap-1.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
-            <div class="bubble-user max-w-[72%] rounded-[var(--radius-bubble)] px-3.5 py-2.5 text-[13px] leading-[1.55]" style="background: var(--accent); color: #fff;">
+            <div class="bubble-user max-w-[72%] rounded-[18px] px-4 py-2.5 text-[13px] leading-[1.55]" style="background: var(--bg-selected); color: var(--text-primary);">
               <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
                 <img
                   v-for="(img, i) in msg.images"
@@ -340,34 +361,26 @@
         <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
         <span class="ml-1 text-[11px] italic text-muted-foreground tabular-nums">Working for {{ workingElapsed }}</span>
       </div>
-
-      <!-- Queued follow-ups, pinned below the live turn (Claude desktop-style) -->
-      <!-- Drag to reorder (native DnD, the whole bubble is the handle). -->
-      <div
-        v-for="(q, qi) in messageQueue"
-        :key="q.id"
-        class="flex flex-col items-end gap-0.5 px-4 py-[3px]"
-        :class="{ 'opacity-40': draggingQueuedId === q.id }"
-        @dragover.prevent="draggingQueuedId != null && (dropQueuedIndex = qi)"
-        @drop.prevent="dropQueued(qi)"
-      >
-        <div
-          draggable="true"
-          class="inline-flex max-w-[min(460px,85%)] cursor-grab items-center gap-1.5 rounded-[14px] border border-dashed border-border bg-hover px-3 py-2 text-[13px] text-muted-foreground"
-          :class="{ 'border-[var(--chat-accent)]': dropQueuedIndex === qi && draggingQueuedId !== q.id }"
-          :title="messageQueue.length > 1 ? 'Drag to reorder' : undefined"
-          @dragstart="draggingQueuedId = q.id"
-          @dragend="draggingQueuedId = null; dropQueuedIndex = null"
-        >
-          <span v-html="renderUserMd(q.text)" />
-        </div>
-        <div class="flex gap-2 text-[11px] text-muted-foreground">
-          <button class="border-none bg-transparent p-0 hover:text-foreground" @click="removeQueued(q.id)">Remove</button>
-          <button class="border-none bg-transparent p-0 hover:text-foreground" title="Take it back into the composer" @click="editQueued(q)">Edit</button>
-          <button class="border-none bg-transparent p-0 hover:text-foreground" @click="sendQueuedNow(q.id)" title="Interrupt the current turn and send this now">Send now</button>
-        </div>
       </div>
+    </div>
+    <!-- Minimap (after Ghostex): one dash per prompt you sent, longer for
+         longer prompts; hover previews it, click jumps to it. -->
+    <div v-if="minimapPrompts.length >= 2" class="minimap-rail" @mouseleave="minimapHover = null">
+      <button
+        v-for="(p, i) in minimapPrompts"
+        :key="p.id"
+        class="minimap-dash"
+        :class="{ 'is-current': p.id === minimapCurrent, 'is-hover': minimapHover?.id === p.id }"
+        :style="{ width: p.width + 'px' }"
+        :aria-label="`Jump to prompt ${i + 1}`"
+        @mouseenter="minimapHover = { ...p, index: i }"
+        @click="jumpToMessage(p.id)"
+      />
+      <div v-if="minimapHover" class="minimap-preview">
+        <div class="mb-1 text-[11px] text-muted-foreground">Prompt {{ minimapHover.index + 1 }} of {{ minimapPrompts.length }}</div>
+        <div class="line-clamp-6 whitespace-pre-wrap text-[12.5px] leading-[1.5] text-foreground">{{ minimapHover.text }}</div>
       </div>
+    </div>
     </div>
 
     <!-- Jump back to live: only while scrolled up (autoscroll paused) -->
@@ -383,7 +396,7 @@
     </div>
 
     <!-- New-style input bar -->
-    <div class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
+    <div class="flex-shrink-0 px-[18px] pb-2 pt-2.5">
       <div class="mx-auto w-full max-w-[760px]">
       <!-- Branch-changed banner: session.branch (created-on snapshot) vs. current workspace branch -->
       <div v-if="branchChanged && !branchBannerDismissed" class="mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -392,6 +405,42 @@
         <span v-if="restoreBranchError" class="flex-shrink-0 text-destructive">{{ restoreBranchError }}</span>
         <button class="flex-shrink-0 font-medium text-foreground hover:underline disabled:opacity-50" :disabled="restoringBranch" @click="restoreBranch">{{ restoringBranch ? 'Restoring…' : 'Restore branch' }}</button>
         <button class="flex-shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss" @click="branchBannerDismissed = true"><PhX :size="11" weight="bold" /></button>
+      </div>
+      <div v-if="catchUp.open" class="catchup-card mb-2">
+        <div class="flex items-center gap-2">
+          <PhSparkle :size="14" class="text-foreground" />
+          <span class="text-[13px] font-semibold text-foreground">Catch me up</span>
+          <span v-if="catchUp.loading" class="text-[11.5px] text-muted-foreground">Reading the last {{ CATCH_UP_MESSAGES }} messages…</span>
+          <span class="ml-auto flex items-center gap-3 text-[11.5px] text-secondary-foreground">
+            <button class="hover:text-foreground disabled:opacity-40" :disabled="catchUp.loading" @click="runCatchUp">Refresh</button>
+            <button class="hover:text-foreground disabled:opacity-40" :disabled="!catchUp.summary" @click="copyCatchUp">{{ catchUp.copied ? 'Copied' : 'Copy' }}</button>
+            <button class="hover:text-foreground" title="Close" @click="catchUp.open = false"><PhX :size="12" /></button>
+          </span>
+        </div>
+        <p v-if="catchUp.error" class="mt-1.5 text-[12.5px] text-[var(--red)]">{{ catchUp.error }}</p>
+        <template v-else-if="catchUp.summary">
+          <p class="mt-1.5 text-[13px] leading-[1.5] text-foreground">{{ catchUp.summary }}</p>
+          <div v-for="(it, i) in catchUp.items" :key="i" class="mt-1.5 flex items-start gap-2 text-[12.5px] leading-[1.5] text-foreground">
+            <span class="catchup-tag" :class="'tag-' + it.tag">{{ CATCH_UP_LABELS[it.tag] ?? it.tag }}</span>
+            <span>{{ it.text }}</span>
+          </div>
+        </template>
+      </div>
+      <div v-if="subagentChildren.length" class="subagents-card mb-2">
+        <button class="subagents-head" @click="subagentsCollapsed = !subagentsCollapsed">
+          <PhUsersThree :size="14" class="flex-shrink-0 text-secondary-foreground" />
+          <span class="font-semibold text-foreground">Sub-agents</span>
+          <span class="text-muted-foreground">{{ subagentChildren.length }} {{ subagentChildren.length === 1 ? 'thread' : 'threads' }}</span>
+          <PhCaretDown :size="11" class="ml-auto text-muted-foreground transition-transform" :class="{ '-rotate-90': subagentsCollapsed }" />
+        </button>
+        <template v-if="!subagentsCollapsed">
+          <button v-for="c in subagentChildren" :key="c.id" class="subagent-row" :title="c.title" @click="openSubagentFromTranscript(c.id)">
+            <span class="status-dot shrink-0" :class="subagentDotClass(c.id)" />
+            <span class="shrink-0 font-medium text-foreground">{{ c.title }}</span>
+            <span class="subagent-badge" :class="'tone-' + subagentState(c.id).tone">{{ subagentState(c.id).label }}</span>
+            <span class="min-w-0 truncate text-muted-foreground">{{ subagentDetail[c.id] }}</span>
+          </button>
+        </template>
       </div>
       <TranscriptFeedbackBar
         :count="transcriptFeedback.pending.value.length"
@@ -405,7 +454,30 @@
            inside it: .chat-input-box is overflow-hidden, and an inline list
            pushed the whole toolbar down as the user typed. -->
       <ComposerSuggestions :items="suggestions" :active-index="activeIndex" @pick="completion.apply" />
-      <div class="chat-input-box overflow-hidden rounded-[var(--radius-composer)] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, var(--accent)) 4%, var(--chat-surface));">
+      <div class="chat-input-box overflow-hidden rounded-[18px] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: var(--bg-panel);">
+        <!-- Queued follow-ups live inside the composer (Ghostex-style): one row
+             each, drag to reorder, play = interrupt and send now, pencil = take
+             it back into the input. -->
+        <div v-if="messageQueue.length" class="flex flex-col gap-1.5 px-2.5 pt-2.5">
+          <div
+            v-for="(q, qi) in messageQueue"
+            :key="q.id"
+            draggable="true"
+            class="queue-row group flex cursor-grab items-center gap-2 rounded-[9px] border border-border px-2.5 py-1.5 text-[13px] text-secondary-foreground"
+            :class="{ 'opacity-40': draggingQueuedId === q.id, 'queue-row-drop': dropQueuedIndex === qi && draggingQueuedId !== q.id }"
+            @dragstart="draggingQueuedId = q.id"
+            @dragend="draggingQueuedId = null; dropQueuedIndex = null"
+            @dragover.prevent="draggingQueuedId != null && (dropQueuedIndex = qi)"
+            @drop.prevent="dropQueued(qi)"
+          >
+            <PhDotsSixVertical :size="13" class="flex-shrink-0 text-muted-foreground" />
+            <span class="min-w-0 flex-1 truncate">{{ q.text }}</span>
+            <PhImage v-if="q.images?.length" :size="12" class="flex-shrink-0 text-muted-foreground" />
+            <button class="queue-act" title="Interrupt the current turn and send this now" @click="sendQueuedNow(q.id)"><PhPlay :size="12" weight="fill" /></button>
+            <button class="queue-act" title="Take it back into the composer" @click="editQueued(q)"><PhPencilSimple :size="12" /></button>
+            <button class="queue-act" title="Remove from queue" @click="removeQueued(q.id)"><PhX :size="12" /></button>
+          </div>
+        </div>
         <!-- Working indicator — sits above the textarea, only for tool activity.
              Thinking has its own bubble in the chat body, so it's not duplicated here. -->
         <div v-if="currentActivity" class="flex items-center gap-1.5 border-b border-border px-3 pb-1 pt-1.5">
@@ -461,11 +533,19 @@
             </div>
           </div>
         </div>
+        <div class="relative">
+        <button
+          v-if="showCatchUpBtn"
+          class="catchup-btn"
+          title="Summarize where this chat is at (text-generation model, nothing is sent to the agent)"
+          @click="runCatchUp"
+        ><PhSparkle :size="13" /> Catch me up</button>
         <ComposerTextInput
           ref="inputEl"
           v-model="inputText"
-          class="chat-input composer-input box-border block max-h-40 min-h-10 w-full border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground outline-none"
-          :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
+          class="chat-input composer-input box-border block max-h-40 min-h-12 w-full border-none bg-transparent px-4 pb-1 pt-3 font-sans text-[14px] leading-[1.55] text-foreground outline-none"
+          :class="showCatchUpBtn && 'pr-[132px]'"
+          :placeholder="busy ? 'Keep typing — Enter queues it for when the agent is free.\nUse @ to mention a file and $ for skills.' : 'Press Enter to send a message.\nUse @ to mention a file and $ for skills.'"
           :skills="completion.skills.value"
           :commands="allCommands"
           :files="completion.files.value"
@@ -473,8 +553,9 @@
           @input="onInput"
           @paste="onPaste"
         />
+        </div>
           <ComposerImages v-model="pendingImages" class="px-3 pb-1.5" />
-          <div class="composer-toolbar px-2 pb-2 pt-1.5">
+          <div class="composer-toolbar px-2.5 pb-2.5 pt-2">
           <!-- Left: share selection, model dropdown, perm mode -->
           <div class="composer-pillbar">
             <button
@@ -496,7 +577,7 @@
             <!-- Claude Agent SDK effort is forwarded to the local Claude Code CLI. -->
             <ComposerPill
               v-if="effectiveTransport === 'claude-cli'"
-              :label="selectedEffortLabel"
+              :label="selectedEffortLabel.replace(/ effort$/, '')"
               :items="CLAUDE_EFFORTS"
               :active="selectedEffort"
               title="Claude reasoning effort"
@@ -517,7 +598,6 @@
             <ComposerPill
               v-if="effectiveTransport === 'claude-cli'"
               :icon="PERM_ICON[permMode]"
-              :label="permMeta.label"
               :items="permItems"
               :active="permMode"
               :danger="permMeta.danger"
@@ -620,14 +700,12 @@
         </div>
       </div>
       </div>
-      <WorkspaceTargetPicker
-        :mode="chatWorkspace?.parent_id ? 'new' : 'current'"
-        :current-branch="chatBranch"
-        :detail="chatWorkspace?.worktree_branch || undefined"
-        appearance="attached"
-        wide
-        readonly
-      />
+      <!-- Where this chat works, as one quiet line (Ghostex-style) — it was a
+           read-only target bar, which looked like a control and wasn't. -->
+      <div class="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+        <PhGitBranch v-if="chatWorkspace?.parent_id" :size="11" />
+        <span class="truncate">{{ chatRepoName }} · {{ chatBranch }}</span>
+      </div>
       </div>
 
       <!-- Status line below input — hidden when nothing to show -->
@@ -646,12 +724,13 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { childrenOf } from "@/stores/chatTree";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useImageLightbox } from "@/composables/useImageLightbox";
@@ -668,7 +747,6 @@ import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
-import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
 import { chatSession, replayChatStream } from "@/lib/chatSession";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
@@ -676,7 +754,7 @@ import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { chatSettingKey } from "@/lib/chatSettings";
 import { splitMentions } from "@/lib/mentionTokens";
-import { editOf, fmtDuration, mergeEdits, type FileEdit } from "@/lib/chatTurns";
+import { editOf, fmtDuration, hunkLines, mergeEdits, type FileEdit } from "@/lib/chatTurns";
 import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -866,6 +944,11 @@ const chatAgents = useProvidersStore();
 const editorCtx = useEditorContextStore();
 const { showImage } = useImageLightbox();
 const chatWorkspace = computed(() => workspaces.workspaces.find((workspace) => workspace.id === props.workspaceId));
+const chatRepoName = computed(() => {
+  const ws = chatWorkspace.value;
+  const repo = ws?.parent_id ? workspaces.workspaces.find((w) => w.id === ws.parent_id) : ws;
+  return repo?.name ?? "";
+});
 const chatBranch = computed(() => chatWorkspace.value?.worktree_branch || git.branchByWs[props.workspaceId] || "HEAD");
 
 // Branch-changed banner: the branch a chat was created on (session.branch,
@@ -1290,7 +1373,10 @@ function openSubagentFromTranscript(chatId: number) {
 // field RightPanel's Sub-agents list reads. Listeners are set up lazily, one
 // per distinct subagentChatId this transcript has ever shown (a spawn row
 // never disappears, so there is nothing to unsubscribe until unmount).
+// This thread's live children (the Sub-agents card above the composer).
+const subagentChildren = computed(() => (props.chatId ? childrenOf(chats.sessions, props.chatId) : []));
 const subagentPhase = reactive<Record<number, string>>({});
+const subagentDetail = reactive<Record<number, string>>({});
 const subagentPhaseUnsubs: Array<() => void> = [];
 // `listen()` is async; a component unmounted before it resolves would have
 // already run onBeforeUnmount's forEach below by the time the `.then()`
@@ -1301,12 +1387,18 @@ const subagentPhaseUnsubs: Array<() => void> = [];
 // is in flight; here, it's this component itself going away.
 let subagentPhaseUnmounted = false;
 watch(
-  () => messages.value.filter((m) => m.role === "system-info" && m.subagentChatId).map((m) => m.subagentChatId as number),
+  () => [
+    ...messages.value.filter((m) => m.role === "system-info" && m.subagentChatId).map((m) => m.subagentChatId as number),
+    ...subagentChildren.value.map((c) => c.id),
+  ],
   (ids) => {
     for (const id of ids) {
       if (id in subagentPhase) continue;
       subagentPhase[id] = "idle";
-      listen<Phase>(`phase-chat:${id}`, (ev) => { subagentPhase[id] = ev.payload?.state ?? "idle"; }).then((un) => {
+      listen<Phase>(`phase-chat:${id}`, (ev) => {
+        subagentPhase[id] = ev.payload?.state ?? "idle";
+        subagentDetail[id] = ev.payload?.detail ?? "";
+      }).then((un) => {
         if (subagentPhaseUnmounted) { un(); return; }
         subagentPhaseUnsubs.push(un);
       });
@@ -1324,6 +1416,18 @@ onBeforeUnmount(() => {
   subagentPhaseUnmounted = true;
   subagentPhaseUnsubs.forEach((un) => un());
 });
+
+// Sub-agents card above the composer: this thread's live children, one row
+// each, with the state that matters to the parent (Ghostex "Threads" card).
+const subagentsCollapsed = ref(false);
+function subagentState(chatId: number): { label: string; tone: string } {
+  const state = subagentPhase[chatId];
+  if (state === "waiting_input" || state === "waiting_approval") return { label: "Needs you", tone: "needs" };
+  if (state === "running") return { label: "Running", tone: "running" };
+  if (state === "failed") return { label: "Failed", tone: "failed" };
+  if (state === "done") return { label: "Done", tone: "done" };
+  return { label: "Idle", tone: "idle" };
+}
 
 // The robot icon already says "sub-agent"; the stored prefix only eats width.
 function subagentLabel(text: string): string {
@@ -1435,6 +1539,33 @@ const grouping = computed(() => {
   }
   return { display, groupIdByMsgId, groupsById };
 });
+// Inline diff card. The first file starts open; a click flips it.
+const diffToggles = reactive<Record<string, boolean>>({});
+function diffOpen(msgId: string, path: string, index: number): boolean {
+  return diffToggles[`${msgId}:${path}`] ?? index === 0;
+}
+function toggleDiff(msgId: string, path: string, index: number) {
+  diffToggles[`${msgId}:${path}`] = !diffOpen(msgId, path, index);
+}
+function dirOf(path: string): string {
+  const rel = props.cwd && path.startsWith(props.cwd + "/") ? path.slice(props.cwd.length + 1) : path;
+  return rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "";
+}
+function diffDirs(files: FileEdit[]): string {
+  const dirs = [...new Set(files.map((f) => dirOf(f.path).replace(/\/$/, "")).filter(Boolean))];
+  return dirs.slice(0, 3).join(" · ") + (dirs.length > 3 ? ` · +${dirs.length - 3}` : "");
+}
+function diffRatio(added: number, removed: number): number {
+  return added + removed ? Math.round((added / (added + removed)) * 100) : 0;
+}
+/** GitHub-style five blocks: green/red in proportion, grey for the rest of a small change. */
+function diffBlocks(added: number, removed: number): string[] {
+  const total = added + removed;
+  const filled = Math.min(5, Math.max(1, Math.ceil(total / 10)));
+  const green = total ? Math.round((added / total) * filled) : 0;
+  return Array.from({ length: 5 }, (_, i) => (i < green ? "b-add" : i < filled ? "b-del" : "b-off"));
+}
+
 // Turn fold + per-turn changed-files summary. A turn starts at a user message
 // and ends at the next one (or at the end of an idle chat). Once it's settled,
 // its thinking/tool rows collapse behind one "Worked for Xs" row and the files
@@ -1916,6 +2047,31 @@ const atBottom = ref(true);
 function onScroll() {
   const el = scrollEl.value;
   if (el) atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+  updateMinimapCurrent();
+}
+
+// ── minimap ──
+const minimapPrompts = computed(() =>
+  messages.value
+    .filter((m) => m.role === "user" && m.text?.trim())
+    .map((m) => ({ id: m.id, text: m.text.slice(0, 480), width: m.text.length > 400 ? 24 : m.text.length > 150 ? 16 : m.text.length > 50 ? 11 : 8 })),
+);
+const minimapHover = ref<{ id: number; text: string; index: number } | null>(null);
+const minimapCurrent = ref<number | null>(null);
+/** The prompt whose message sits nearest the top of the viewport (last one above it). */
+function updateMinimapCurrent() {
+  const el = scrollEl.value;
+  if (!el || minimapPrompts.value.length < 2) return;
+  const top = el.getBoundingClientRect().top + 40;
+  let current: number | null = minimapPrompts.value[0].id;
+  for (const p of minimapPrompts.value) {
+    const node = el.querySelector(`[data-message-id="${p.id}"]`);
+    if (node && node.getBoundingClientRect().top <= top) current = p.id;
+  }
+  minimapCurrent.value = current;
+}
+function jumpToMessage(id: number) {
+  scrollEl.value?.querySelector(`[data-message-id="${id}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 function scrollToBottom(force = false) {
   if (!force && !atBottom.value) return;
@@ -1924,6 +2080,45 @@ function scrollToBottom(force = false) {
     atBottom.value = true;
   });
 }
+
+// Catch me up (after Ghostex): the text-generation model reads the chat's tail
+// and answers in a card above the composer. Nothing reaches the agent.
+const CATCH_UP_MESSAGES = 30;
+const CATCH_UP_LABELS: Record<string, string> = {
+  needs_you: "Needs you", blocked: "Blocked", in_progress: "In progress", done: "Done", untested: "Untested",
+};
+const showCatchUpBtn = computed(() => !inputText.value.trim() && messages.value.length > 2 && !catchUp.open);
+const catchUp = reactive({
+  open: false, loading: false, error: "", copied: false, summary: "",
+  items: [] as { tag: string; text: string }[],
+});
+async function runCatchUp() {
+  const chatAtStart = props.chatId;
+  Object.assign(catchUp, { open: true, loading: true, error: "", copied: false });
+  const transcript = messages.value
+    .filter((m) => (m.role === "user" || m.role === "assistant") && m.text?.trim())
+    .slice(-CATCH_UP_MESSAGES)
+    .map((m) => `${m.role === "user" ? "User" : "Agent"}: ${m.text.slice(0, 1500)}`)
+    .join("\n\n");
+  try {
+    const res = await invoke<{ summary: string; items: { tag: string; text: string }[] }>("generate_catch_up", {
+      cwd: props.cwd, model: uiStore.textGenerationModel, transcript,
+    });
+    if (props.chatId !== chatAtStart) return;
+    Object.assign(catchUp, { summary: res.summary, items: res.items ?? [] });
+  } catch (e) {
+    if (props.chatId === chatAtStart) catchUp.error = `Couldn't catch up: ${e}`;
+  } finally {
+    if (props.chatId === chatAtStart) catchUp.loading = false;
+  }
+}
+async function copyCatchUp() {
+  const text = [catchUp.summary, ...catchUp.items.map((it) => `- ${CATCH_UP_LABELS[it.tag] ?? it.tag}: ${it.text}`)].join("\n");
+  await navigator.clipboard.writeText(text).catch(() => {});
+  catchUp.copied = true;
+  setTimeout(() => { catchUp.copied = false; }, 1500);
+}
+watch(() => props.chatId, () => Object.assign(catchUp, { open: false, summary: "", items: [], error: "" }));
 
 // Upgrade the heuristic title with a model-written one (headless `claude -p`,
 // same cheap model as the commit-message button). Fire-and-forget: the
@@ -2676,20 +2871,17 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
   --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></svg>');
 }
 
-/* A user bubble already sits on the accent surface, so the assistant's dark
-   code-block fill would fight it — quiet the fences down inside the bubble. */
+/* The user bubble is a quiet neutral surface (--bg-selected), so fences and
+   chips inside it only need a faint tint of the text color. */
 .bubble-user .md-body :deep(pre) {
-  background: rgba(0, 0, 0, 0.28);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 12%, transparent);
 }
-.bubble-user .md-body :deep(code) { background: rgba(0, 0, 0, 0.25); color: inherit; }
-.bubble-user .md-body :deep(a) { color: inherit; }
-/* The paste chip's default styling (composer.css) is accent-on-transparent,
-   which disappears against a bubble whose own background IS the accent color —
-   invert to white-on-dark here so it still reads as a chip. */
+.bubble-user .md-body :deep(code) { background: color-mix(in srgb, var(--text-primary) 10%, transparent); color: inherit; }
+.bubble-user .md-body :deep(a) { color: var(--chat-info); }
 .bubble-user .md-body :deep(.composer-inline-chip) {
-  background: rgba(0, 0, 0, 0.25);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 18%, transparent);
   color: inherit;
   cursor: pointer;
 }
@@ -2720,30 +2912,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
   background: color-mix(in srgb, var(--red, #ef4444) 8%, var(--surface-elevated));
   border-color: color-mix(in srgb, var(--red, #ef4444) 30%, transparent);
 }
-.changed-files {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  font-size: 11px;
-  color: var(--text-secondary, rgba(255,255,255,0.55));
-}
-.changed-files-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 6%, transparent);
-  border-bottom: 1px solid var(--border);
-}
-.changed-files-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  font-family: var(--font-mono, monospace);
-}
-.changed-files-row + .changed-files-row { border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
 .tool-caret {
   flex-shrink: 0;
   color: var(--agent-accent, var(--accent));
@@ -2924,11 +3092,71 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .md-body :deep(th), .md-body :deep(td) { border: 1px solid var(--chat-border); padding: 5px 10px; }
 .md-body :deep(th) { background: color-mix(in srgb, var(--chat-text) 5%, transparent); font-weight: 600; }
 
+/* Inline diff card (changed-files row). */
+.diff-card { border: 1px solid var(--chat-border); border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }
+.diff-card-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+.diff-card-icon { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px; color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 16%, transparent); }
+.diff-ratio { width: 90px; height: 5px; flex-shrink: 0; border-radius: 3px; overflow: hidden; background: var(--red, #D9827A); }
+.diff-ratio-add { display: block; height: 100%; background: var(--chat-success); }
+.diff-file-row { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12.5px; cursor: pointer; border-top: 1px solid var(--chat-border); background: color-mix(in srgb, var(--chat-text) 3%, transparent); }
+.diff-file-row:hover { background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
+.diff-blocks { display: flex; gap: 2px; flex-shrink: 0; }
+.diff-blocks i { width: 7px; height: 7px; border-radius: 2px; }
+.diff-blocks .b-add { background: var(--chat-success); }
+.diff-blocks .b-del { background: var(--red, #D9827A); }
+.diff-blocks .b-off { background: var(--chat-border); }
+.diff-open { display: flex; padding: 3px; border: none; border-radius: 5px; background: transparent; color: var(--chat-text-secondary); cursor: pointer; }
+.diff-open:hover { color: var(--chat-text); background: color-mix(in srgb, var(--chat-text) 8%, transparent); }
+.diff-lines { border-top: 1px solid var(--chat-border); padding: 4px 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.6; overflow-x: auto; }
+.diff-line { padding: 0 14px; white-space: pre; color: var(--chat-text-secondary); }
+.diff-line-add { background: color-mix(in srgb, var(--chat-success) 14%, transparent); color: color-mix(in srgb, var(--chat-success) 55%, var(--chat-text)); }
+.diff-line-del { background: color-mix(in srgb, var(--red, #D9827A) 14%, transparent); color: color-mix(in srgb, var(--red, #D9827A) 55%, var(--chat-text)); }
+.diff-sign { display: inline-block; width: 16px; opacity: 0.7; user-select: none; }
+.diff-sep { padding: 0 14px; color: var(--chat-muted); user-select: none; }
+.diff-more { padding: 4px 14px; font-family: var(--font-sans); font-size: 11.5px; color: var(--chat-text-secondary); cursor: pointer; }
+.diff-more:hover { color: var(--chat-text); }
+
+/* Transcript minimap rail. */
+.minimap-rail { position: absolute; top: 72px; right: 10px; z-index: 5; display: flex; flex-direction: column; align-items: flex-end; gap: 9px; padding: 6px 4px; max-height: calc(100% - 140px); overflow: hidden; }
+.minimap-dash { height: 2px; border: none; border-radius: 1px; padding: 0; background: color-mix(in srgb, var(--chat-text) 28%, transparent); cursor: pointer; transition: width .12s, background-color .12s; }
+.minimap-dash::before { content: ""; display: block; height: 10px; margin-top: -4px; }
+.minimap-dash.is-current { background: var(--chat-text); }
+.minimap-dash.is-hover { background: var(--chat-accent); width: 28px !important; }
+.minimap-preview { position: absolute; top: 0; right: 40px; width: 320px; padding: 10px 12px; border: 1px solid var(--chat-border); border-radius: 12px; background: var(--chat-surface); box-shadow: 0 12px 32px rgba(0,0,0,.35); pointer-events: none; }
+
+/* Catch me up: button in the empty composer, card above it. */
+.catchup-btn { position: absolute; top: 8px; right: 10px; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--chat-border); background: var(--chat-surface); color: var(--chat-text); font-size: 12px; cursor: pointer; }
+.catchup-btn:hover { background: color-mix(in srgb, var(--chat-text) 6%, var(--chat-surface)); }
+.catchup-card { border: 1px solid var(--chat-border); border-radius: 14px; padding: 12px 14px; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }
+.catchup-tag { flex-shrink: 0; margin-top: 1px; padding: 0 6px; border-radius: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.catchup-tag.tag-needs_you { color: var(--chat-warn); background: color-mix(in srgb, var(--chat-warn) 16%, transparent); }
+.catchup-tag.tag-blocked { color: var(--red, #D9827A); background: color-mix(in srgb, var(--red, #D9827A) 14%, transparent); }
+.catchup-tag.tag-in_progress { color: var(--chat-info); background: color-mix(in srgb, var(--chat-info) 14%, transparent); }
+.catchup-tag.tag-done { color: var(--chat-success); background: color-mix(in srgb, var(--chat-success) 14%, transparent); }
+.catchup-tag.tag-untested { color: var(--chat-text-secondary); background: color-mix(in srgb, var(--chat-text) 8%, transparent); }
+
+/* Sub-agents card above the composer. */
+.subagents-card { border: 1px solid var(--chat-border); border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }
+.subagents-head { display: flex; width: 100%; align-items: center; gap: 8px; padding: 9px 14px; font-size: 12.5px; border: none; background: transparent; cursor: pointer; }
+.subagent-row { display: flex; width: 100%; align-items: center; gap: 9px; padding: 6px 14px; font-size: 12.5px; text-align: left; border: none; border-top: 1px solid color-mix(in srgb, var(--chat-border) 60%, transparent); background: transparent; cursor: pointer; }
+.subagent-row:hover { background: color-mix(in srgb, var(--chat-text) 5%, transparent); }
+.subagent-badge { flex-shrink: 0; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+.subagent-badge.tone-needs { color: var(--chat-warn); background: color-mix(in srgb, var(--chat-warn) 16%, transparent); }
+.subagent-badge.tone-running { color: var(--chat-info); background: color-mix(in srgb, var(--chat-info) 14%, transparent); }
+.subagent-badge.tone-done { color: var(--chat-success); background: color-mix(in srgb, var(--chat-success) 14%, transparent); }
+.subagent-badge.tone-failed { color: var(--red, #D9827A); background: color-mix(in srgb, var(--red, #D9827A) 14%, transparent); }
+.subagent-badge.tone-idle { color: var(--chat-text-secondary); background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
+
+/* Queued follow-up rows inside the composer. */
+.queue-row { background: color-mix(in srgb, var(--chat-text) 3%, transparent); }
+.queue-row-drop { border-color: var(--chat-accent); }
+.queue-act { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent; color: var(--chat-text-secondary); cursor: pointer; }
+.queue-act:hover { background: color-mix(in srgb, var(--chat-text) 8%, transparent); color: var(--chat-text); }
+
 /* Chat input box: quiet by default, agent-accent ring on focus so the active
    composer is unambiguous without a heavy persistent border. */
 .chat-input-box:focus-within {
-  border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 55%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, var(--accent)) 14%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 22%, var(--border));
 }
 
 .chat-input-box { position: relative; z-index: 1; }

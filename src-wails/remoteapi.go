@@ -235,6 +235,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"forge_install_cli":       {Method: "ForgeInstallCLI", Args: []string{"provider"}, Scope: scopeOrchOperate},
 	"generate_commit_message": {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy", "rules"}, Scope: scopeOrchOperate},
 	"generate_chat_title":     {Method: "GenerateChatTitle", Args: []string{"cwd", "model", "policy", "text"}, Scope: scopeOrchOperate},
+	"generate_catch_up":       {Method: "GenerateCatchUp", Args: []string{"cwd", "model", "transcript"}, Scope: scopeOrchOperate},
 	"generate_branch_name":    {Method: "GenerateBranchName", Args: []string{"cwd", "model", "policy", "message"}, Scope: scopeOrchOperate},
 	"generate_pr_content":     {Method: "GeneratePrContent", Args: []string{"cwd", "model", "policy", "rules", "baseBranch", "headBranch"}, Scope: scopeOrchOperate},
 

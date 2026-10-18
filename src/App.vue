@@ -19,7 +19,9 @@
       @shortcuts="openShortcutsFromDocs"
     />
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
-      <Sidebar v-show="ui.sidebarVisible" class="panel-sidebar" />
+      <!-- Wrapped: Sidebar has several root nodes (Teleports), so v-show/class on the
+           component itself silently did nothing and the sidebar never hid. -->
+      <div v-show="ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
       <div v-show="ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
       <div class="ide-main">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
@@ -84,8 +86,9 @@
     <PathPicker />
     <ToastStack />
     <PtyPermissionToasts />
-    <UpdateBanner />
-    <ProviderUpdateBanner />
+    <!-- Docked in the sidebar while it shows; floating only when it is hidden (⌘B). -->
+    <UpdateBanner v-if="!ui.sidebarVisible" />
+    <ProviderUpdateBanner v-if="!ui.sidebarVisible" />
     <DiagramModal v-if="diagramContent !== null" />
     <ImageLightbox v-if="lightboxSrc !== null" />
     <Teleport to="body"><PetOverlay v-if="ui.petsEnabled" /></Teleport>
@@ -129,10 +132,10 @@ import Dashboard from "@/components/Dashboard.vue";
 import Settings from "@/components/Settings.vue";
 import Spotlight from "@/components/Spotlight.vue";
 import FileDropOverlay from "@/components/FileDropOverlay.vue";
-import ToastStack from "@/components/ToastStack.vue";
-import PtyPermissionToasts from "@/components/PtyPermissionToasts.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
 import ProviderUpdateBanner from "@/components/ProviderUpdateBanner.vue";
+import ToastStack from "@/components/ToastStack.vue";
+import PtyPermissionToasts from "@/components/PtyPermissionToasts.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
@@ -728,28 +731,30 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 :root {
-  /* pen.dev-derived palette: near-black bg, flat bordered dark-purple chrome.
-     Mirrors themes.ts's "dark" entry (DEFAULT_THEME_KEY) — this block is only
+  /* Plum palette (warm plum-black chrome, lavender accent).
+     Mirrors themes.ts's "plum" entry (DEFAULT_THEME_KEY) — this block is only
      the pre-JS paint; stores/ui.ts's applyTheme() overwrites these same
      `--${key}` custom properties from the active Theme on mount/switch. */
-  --bg-base: #0A0B0F;
-  --terminal-bg: #0A0B0F;
-  --bg-panel: #14161C;
-  --bg-dropdown: #14161C;
-  --bg-hover: #1B1E26;
-  --bg-selected: #241f38;
-  --border: #262A33;
-  --text-primary: #F2F3F5;
-  --text-secondary: #8B909C;
-  --text-muted: #5C6270;
-  --accent: #7C6FF0;
-  --accent-dim: #5B4FC9;
-  --green: #4ADE80;
-  --yellow: #FBBF24;
-  --red: #F87171;
+  --bg-base: #241A20;
+  --terminal-bg: #1E161B;
+  --bg-panel: #2C2127;
+  --bg-dropdown: #2C2127;
+  --bg-hover: #352A30;
+  --bg-selected: #3A2E34;
+  --border: #3D3137;
+  --text-primary: #ECE6E9;
+  --text-secondary: #A79CA2;
+  --text-muted: #7E7379;
+  --accent: #A895F5;
+  --accent-dim: #7C6FD8;
+  --green: #7FBF8E;
+  --yellow: #F2C14E;
+  --red: #D9827A;
   --font-mono: "JetBrains Mono", "0xProto Nerd Font", "Fira Code", "Cascadia Code", monospace;
   --font-ui: "JetBrains Mono", "0xProto Nerd Font", "Fira Code", monospace;
-  --sidebar-width: 220px;
+  --sidebar-width: 240px;
+  /* The sidebar column (and the titlebar strip above it) sits a step darker than the work area. */
+  --sidebar-bg: color-mix(in srgb, var(--bg-base) 88%, black);
   --right-panel-width: 300px;
   --titlebar-height: 36px;
 
@@ -778,6 +783,26 @@ function onKeydown(e: KeyboardEvent) {
   --radius-avatar: 10px;
   --radius-pill: 999px;
 }
+
+/* Subtle glow on the big surfaces (sidebar, chat, welcome, dashboard, RP),
+   derived from the active theme's accent so every theme gets it for free.
+   It's a background-IMAGE layered over each surface's own background-color,
+   so opaque panels keep their color and only gain the tint. */
+:root {
+  --bg-gradient:
+    radial-gradient(120% 70% at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%),
+    radial-gradient(90% 60% at 100% 100%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 65%),
+    linear-gradient(180deg, color-mix(in srgb, var(--text-primary) 2%, transparent), transparent 40%);
+}
+.surface-glow { background-image: var(--bg-gradient); }
+
+/* Quiet one-line notices docked at the bottom of the sidebar (app / agent
+   updates): the whole row is the action, the × only shows on hover. */
+.sb-notice { display: flex; width: 100%; align-items: center; gap: 9px; padding: 7px 8px 7px 10px; border-radius: 9px; text-align: left; cursor: pointer; background: color-mix(in srgb, var(--text-primary) 4%, transparent); transition: background-color .12s; }
+.sb-notice:hover { background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.sb-notice-x { display: flex; flex-shrink: 0; padding: 3px; border-radius: 5px; color: var(--text-muted); opacity: 0; transition: opacity .12s; }
+.sb-notice:hover .sb-notice-x { opacity: 1; }
+.sb-notice-x:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
 
 body {
   background-color: var(--bg-base);

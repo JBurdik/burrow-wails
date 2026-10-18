@@ -1,6 +1,18 @@
 <template>
   <Transition name="update-pop">
-    <div v-if="show" class="fixed bottom-[108px] right-4 z-[9998] flex w-80 gap-2.5 rounded-xl border border-border bg-panel p-3.5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]">
+    <!-- Docked in the sidebar: one quiet row; clicking it IS the action. -->
+    <div v-if="show && docked" class="sb-notice group" role="button" tabindex="0" :title="error || 'Update the agent CLIs (right-click: provider settings)'" @click="!updating && installUpdates()" @contextmenu.prevent="ui.openSettings('providers')">
+      <PhArrowCircleUp :size="15" weight="fill" class="shrink-0 text-[var(--yellow)]" />
+      <span class="min-w-0 flex-1">
+        <span class="block truncate text-[12.5px] text-foreground">{{ outdated.length }} agent update{{ outdated.length === 1 ? "" : "s" }}</span>
+        <span class="block truncate text-[11px]" :class="error ? 'text-[var(--red)]' : 'text-muted-foreground'">{{ error || (updating ? "Installing…" : "Click to install") }}</span>
+      </span>
+      <button class="sb-notice-x" title="Dismiss" @click.stop="dismiss"><PhX :size="11" /></button>
+    </div>
+    <div
+      v-else-if="show"
+      class="fixed bottom-[108px] right-4 z-[9998] flex w-80 gap-2.5 rounded-xl border border-border bg-panel p-3.5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+    >
       <div class="mt-px shrink-0 text-amber-500">
         <PhWarning :size="20" weight="fill" />
       </div>
@@ -29,8 +41,10 @@
 </template>
 
 <script setup lang="ts">
+/** docked: rendered inside the sidebar's bottom stack instead of floating in a corner. */
+defineProps<{ docked?: boolean }>();
 import { ref, computed } from "vue";
-import { PhWarning, PhX } from "@phosphor-icons/vue";
+import { PhArrowCircleUp, PhWarning, PhX } from "@phosphor-icons/vue";
 import { useProvidersStore } from "@/stores/providers";
 import { useUIStore } from "@/stores/ui";
 import { configReady, getConfig, setConfig } from "@/lib/config";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildActivityRows } from "./sidebarGroups";
+import { buildActivityRows, groupByRepo, parseShortstat, type ActivityRow } from "./sidebarGroups";
 import type { Workspace } from "@/stores/workspace";
 import type { TabSummary } from "@/stores/terminalTabs";
 
@@ -89,5 +89,22 @@ describe("buildActivityRows pinning", () => {
     });
     expect(live.map((r) => r.tab.id)).toEqual([100]);
     expect(settledChats.map((r) => r.tab.id)).toEqual([102, 101]);
+  });
+});
+
+describe("groupByRepo", () => {
+  const row = (wsId: number, parent: number | null, tabId: string) =>
+    ({ ws: { id: wsId, parent_id: parent }, tab: { id: tabId }, ts: 0 }) as unknown as ActivityRow;
+  it("folds worktrees into their repo, keeps feed order, adds empty always-shown repos", () => {
+    const groups = groupByRepo([row(1, null, "a"), row(5, 2, "b"), row(1, null, "c"), row(2, null, "d")], [2, 9]);
+    expect(groups.map((g) => [g.repoId, g.rows.map((r) => r.tab.id)])).toEqual([[1, ["a", "c"]], [2, ["b", "d"]], [9, []]]);
+  });
+});
+
+describe("parseShortstat", () => {
+  it("reads insertions and deletions, either may be missing", () => {
+    expect(parseShortstat(" 3 files changed, 142 insertions(+), 37 deletions(-)\n")).toEqual({ added: 142, removed: 37 });
+    expect(parseShortstat(" 1 file changed, 1 insertion(+)")).toEqual({ added: 1, removed: 0 });
+    expect(parseShortstat("")).toEqual({ added: 0, removed: 0 });
   });
 });

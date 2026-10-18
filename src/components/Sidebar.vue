@@ -1,29 +1,20 @@
 <template>
-  <aside class="flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-panel [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
-    <!-- Search: filters workspaces/chats/tabs below by substring -->
-    <div class="px-1.5 pt-1.5">
-      <input
-        v-model="searchQuery"
-        type="text"
-        placeholder="Filter…"
-        class="w-full rounded-md border border-border/65 bg-transparent px-2 py-1 text-[11.5px] text-foreground outline-none placeholder:text-muted-foreground focus:border-accent/60"
-        @keydown.esc="clearSearch"
-      />
-    </div>
-    <!-- Project filter: "All projects" or one repo, narrows the feed below -->
-    <div class="flex shrink-0 items-center gap-1 p-1.5 pb-1" ref="filterEl">
+  <aside class="surface-glow flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-[var(--sidebar-bg)] [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
+    <!-- Top row: new thread + quiet icon actions. The project picker is a
+         menu now: the feed below is already grouped by project. -->
+    <div class="flex shrink-0 items-center gap-1 px-2 pb-1 pt-2" ref="filterEl">
       <button
-        class="flex min-w-0 flex-1 items-center gap-[7px] rounded-[7px] px-1.5 py-1.5 text-left transition-colors hover:bg-hover"
-        :class="filterOpen && 'bg-hover'"
-        @click.stop="filterOpen = !filterOpen"
+        v-if="active"
+        class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
+        :class="ui.welcomeVisible && 'bg-hover text-foreground'"
+        @click="ui.openWelcome()"
       >
-        <PhFolder :size="13" weight="fill" class="shrink-0 text-accent" />
-        <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-foreground">{{ filterProjectId == null ? "All projects" : (repoById(filterProjectId)?.name ?? "All projects") }}</span>
-        <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground" />
+        <PhPlus :size="14" class="shrink-0" />
+        <span class="truncate whitespace-nowrap">New thread</span>
       </button>
-      <button class="flex shrink-0 items-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground active:scale-90" title="Open folder…" @click="pickFolder">
-        <PhFolderPlus :size="14" />
-      </button>
+      <span v-else class="flex-1" />
+      <button class="sb-icon" title="Projects" :class="filterOpen && 'text-foreground'" @click.stop="filterOpen = !filterOpen"><PhFolders :size="15" /></button>
+      <button class="sb-icon" title="Open folder…" @click="pickFolder"><PhFolderPlus :size="15" /></button>
       <Teleport to="body">
         <div v-if="filterOpen" class="fixed z-[1000] max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-panel p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]" :style="filterMenuStyle" @click.stop>
           <button
@@ -51,147 +42,87 @@
         </div>
       </Teleport>
     </div>
-
-    <!-- Every new thread starts on the composer; this is its only entry point. -->
-    <div v-if="active" class="flex shrink-0 items-center gap-1 px-1.5 pb-1.5">
-      <button
-        class="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-border/65 bg-transparent px-2 py-1.5 text-[11px] font-medium text-secondary-foreground transition-colors hover:border-border hover:bg-hover hover:text-foreground active:scale-[0.985]"
-        :class="ui.welcomeVisible && 'border-accent/45 bg-accent/[0.08] text-foreground'"
-        @click="ui.openWelcome()"
-      >
-        <PhPlus :size="12" class="text-accent" />
-        New thread
-      </button>
-      <button v-if="activeRepo" class="flex shrink-0 items-center rounded-md border border-border/65 p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-foreground active:scale-90" title="New worktree" @click="openWtDialog(activeRepo)"><PhGitBranch :size="13" /></button>
+    <div v-if="filterProjectId != null" class="mx-2 mb-1 flex items-center gap-1.5 rounded-lg bg-hover px-2.5 py-1 text-[12px] text-secondary-foreground">
+      Only <span class="truncate font-medium text-foreground">{{ repoById(filterProjectId)?.name }}</span>
+      <button class="ml-auto text-muted-foreground hover:text-foreground" title="Show all projects" @click="filterProjectId = null"><PhX :size="11" weight="bold" /></button>
     </div>
 
     <div class="flex-1 overflow-y-auto pb-2" @scroll="cancelHoverCard">
-      <!-- Live feed: every open project's tabs, newest activity first -->
-      <div
-        v-for="row in filteredLive"
-        :key="rowKey(row)"
-        class="group relative cursor-pointer border-b border-border/40 px-2.5 py-[7px] transition-colors hover:rounded-lg hover:bg-hover"
-        :class="[
-          isActiveRow(row) && 'rounded-lg bg-selected',
-          row.tab.isAgent && `agent-state-${attentionState(row)}`,
-        ]"
-        @click="selectTab(row)"
-        @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
-        @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
-        @mouseleave="cancelHoverCard"
-      >
-        <span v-if="isActiveRow(row)" class="absolute inset-y-0 left-0 w-[2px] bg-accent" />
-
-        <!-- line 1: project + when -->
-        <div class="flex items-center gap-1.5">
-          <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-3.5 w-3.5 shrink-0 rounded-[3px] object-cover" />
-          <PhFolder v-else :size="14" weight="fill" class="shrink-0 text-accent/80" />
-          <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[10.5px] text-muted-foreground">{{ repoName(row.ws) }}</span>
-          <!-- Status ↔ Settle swap via visibility in one grid cell — display
-               swapping resized the row and made it jump on hover. -->
-          <span class="grid shrink-0 justify-items-end">
-            <span
-              class="flex items-center gap-1 [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible"
-              :class="statusClass(row.tab.status)"
-            >
-              <PhWarningCircle
-                v-if="attentionState(row) === 'needs-input'"
-                :size="10"
-                weight="fill"
-                class="shrink-0 text-[var(--yellow)]"
-                aria-hidden="true"
-              />
-              <span
-                v-else-if="attentionState(row) === 'done-unread'"
-                class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--blue)]"
-                title="Unread completion"
-                role="status"
-                aria-label="Unread completion"
-              />
-              <span>{{ statusText(row) }}</span>
-            </span>
-            <button
-              class="invisible flex items-center gap-[3px] self-center rounded px-1 text-[10px] font-semibold leading-none text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-[var(--green)] group-hover:visible"
-              title="Settle"
-              @click.stop="toggleSettled(row.tab, row.ws.id)"
-            >
-              <PhCheck :size="11" weight="bold" />
-              Settle
-            </button>
+      <!-- Live feed, grouped by project (Ghostex-style): a header per repo with
+           its uncommitted diffstat, one compact line per thread, a thread's
+           sub-agents indented under it. Branch/model/PR live in the hover card. -->
+      <div v-for="group in liveGroups" :key="group.repoId" class="px-2 pt-1.5">
+        <div class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover" @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
+          <button class="flex min-w-0 flex-1 items-center gap-2 text-left" @click="toggleGroup(group.repoId)">
+            <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground transition-transform" :class="collapsedGroups.has(group.repoId) && '-rotate-90'" />
+            <img v-if="store.icons[group.repoId]" :src="store.icons[group.repoId]" class="h-[18px] w-[18px] shrink-0 rounded-[5px] object-cover" />
+            <span v-else class="sb-repo-tile" :style="{ background: repoColor(group.repoId) }">{{ (repoById(group.repoId)?.name ?? '?').slice(0, 1).toUpperCase() }}</span>
+            <span class="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{{ repoById(group.repoId)?.name ?? '…' }}</span>
+          </button>
+          <span v-if="repoDiff[group.repoId] && (repoDiff[group.repoId]!.added || repoDiff[group.repoId]!.removed)" class="shrink-0 text-[11.5px] tabular-nums group-hover/hdr:hidden" :title="'Uncommitted changes'">
+            <span class="text-[var(--green)]">+{{ repoDiff[group.repoId]!.added }}</span>
+            <span class="ml-1 text-[var(--red)]">-{{ repoDiff[group.repoId]!.removed }}</span>
           </span>
+          <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!)"><PhPlus :size="13" /></button>
         </div>
-
-        <!-- line 2: thread title -->
-        <div class="mt-[3px] flex items-center gap-1.5">
-          <component
-            v-if="row.tab.agentIcon"
-            :is="agentIconComp(row.tab.agentIcon)"
-            :size="14"
-            class="shrink-0"
-            :class="[row.tab.isChat ? 'text-[var(--yellow)]' : 'ws-term-icon-agent text-accent']"
-          />
-          <PhChatCenteredText v-else-if="row.tab.isChat" :size="14" class="shrink-0 text-[var(--yellow)]" />
-          <PhRobot v-else-if="row.tab.isAgent" :size="14" class="ws-term-icon-agent shrink-0 text-accent" />
-          <PhTerminal v-else :size="14" class="shrink-0 text-muted-foreground" />
-          <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" aria-label="Pinned" />
-          <input
-            v-if="editingTab?.wsId === row.ws.id && editingTab?.tabId === row.tab.id"
-            v-model="editingTabTitle"
-            class="ws-term-rename-input m-0 w-full min-w-0 flex-1 border-0 border-b border-accent bg-transparent p-0 text-[12px] font-semibold text-foreground outline-none"
-            @blur="commitTabRename"
-            @keydown.enter.prevent="commitTabRename"
-            @keydown.esc.prevent="cancelTabRename"
-            @click.stop
-          />
-          <span
-            v-else
-            class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-semibold text-foreground"
-            @dblclick.stop="startTabRename(row.ws.id, row.tab)"
-          >{{ row.tab.title }}</span>
-          <PhX
-            :size="10"
-            weight="bold"
-            class="shrink-0 rounded-sm p-px text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:!text-destructive"
-            title="Close tab"
-            @click.stop="termTabs.close(row.ws.id, row.tab.id)"
-          />
-        </div>
-
-        <!-- line 3: branch + badges -->
-        <div class="mt-[3px] flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <PhGitBranch v-if="row.ws.parent_id" :size="9" class="shrink-0 text-accent" />
-          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ branchOf(row.ws) || row.tab.branch }}</span>
-          <span class="ml-auto flex shrink-0 items-center gap-1">
-            <SubagentBadge :summary="subagentActivity(row)" />
-            <span v-if="row.tab.model" class="rounded bg-hover px-1 font-mono text-[9px] leading-[1.5] text-muted-foreground" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
-            <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
-            <span
-              v-if="row.tab.bottomTerms"
-              class="flex items-center gap-[2px] rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]"
-              :title="`${row.tab.bottomTerms} bottom terminal(s) running (⌘J)`"
-            ><PhTerminal :size="9" />{{ row.tab.bottomTerms > 1 ? row.tab.bottomTerms : "" }}</span>
-            <span v-if="row.tab.isAgent && (row.tab.round ?? 0) > 1" class="text-[9px] font-semibold opacity-70" :title="`${row.tab.round} messages sent this session`">↺{{ row.tab.round }}</span>
-            <span
-              v-if="git.prByWs[row.ws.id]"
-              class="flex items-center gap-[3px] rounded-[7px] bg-hover px-[5px] py-px pl-1 font-mono text-[9px] font-semibold leading-none"
-              :class="prClass(git.prByWs[row.ws.id]!)"
-              :title="prTitle(git.prByWs[row.ws.id]!)"
-            ><span class="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />#{{ git.prByWs[row.ws.id]!.number }}</span>
-            <PhBell v-if="row.tab.status === 'permission'" :size="10" weight="fill" class="text-[var(--yellow)]" title="Permission required" />
-            <span
-              v-if="row.tab.status && row.tab.status !== 'idle'"
-              class="status-dot"
-              :class="`status-${row.tab.status}`"
-              :title="attentionLabel(attentionState(row))"
-              role="status"
-            >{{ row.tab.status === 'running' ? spinnerFrame : '' }}</span>
-          </span>
-        </div>
+        <template v-if="!collapsedGroups.has(group.repoId)">
+          <template v-for="row in group.rows" :key="rowKey(row)">
+            <div
+              class="sb-row group relative mt-px flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[7px]"
+              :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`]"
+              @click="selectTab(row)"
+              @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+              @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
+              @mouseleave="cancelHoverCard"
+            >
+              <PhCrown v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" :size="14" weight="fill" class="shrink-0 text-[var(--yellow)]" />
+              <PhGitBranch v-else-if="row.ws.parent_id" :size="14" class="shrink-0 text-muted-foreground" />
+              <component v-else-if="row.tab.agentIcon" :is="agentIconComp(row.tab.agentIcon)" :size="14" class="shrink-0 text-[#E0876A]" />
+              <PhChatCenteredText v-else-if="row.tab.isChat" :size="14" class="shrink-0 text-muted-foreground" />
+              <PhTerminal v-else :size="14" class="shrink-0 text-muted-foreground" />
+              <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" />
+              <input
+                v-if="editingTab?.wsId === row.ws.id && editingTab?.tabId === row.tab.id"
+                v-model="editingTabTitle"
+                class="ws-term-rename-input m-0 w-full min-w-0 flex-1 border-0 border-b border-accent bg-transparent p-0 text-[13.5px] text-foreground outline-none"
+                @blur="commitTabRename"
+                @keydown.enter.prevent="commitTabRename"
+                @keydown.esc.prevent="cancelTabRename"
+                @click.stop
+              />
+              <span v-else class="min-w-0 flex-1 truncate text-[13.5px]" :class="isActiveRow(row) ? 'font-medium text-foreground' : 'text-foreground/90'" @dblclick.stop="startTabRename(row.ws.id, row.tab)">{{ row.tab.title }}</span>
+              <span v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="flex shrink-0 items-center gap-0.5 text-[11.5px] text-secondary-foreground group-hover:hidden"><PhUsersThree :size="12" />{{ childrenOfChat(row.tab.chatId).length }}</span>
+              <span class="flex shrink-0 items-center gap-1 text-[11.5px] tabular-nums group-hover:hidden" :class="statusClass(row.tab.status)">
+                <PhWarningCircle v-if="attentionState(row) === 'needs-input'" :size="11" weight="fill" class="text-[var(--yellow)]" />
+                <span v-else-if="attentionState(row) === 'done-unread'" class="h-[7px] w-[7px] rounded-full bg-[var(--blue)]" title="Unread completion" />
+                <span v-else-if="row.tab.status === 'running'" class="sb-spark">{{ spinnerFrame }}</span>
+                <span v-if="row.tab.status !== 'running' && attentionState(row) !== 'done-unread'">{{ statusText(row) }}</span>
+              </span>
+              <span class="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                <button class="sb-row-act" title="Settle" @click.stop="toggleSettled(row.tab, row.ws.id)"><PhCheck :size="12" weight="bold" /></button>
+                <button class="sb-row-act hover:!text-destructive" title="Close tab" @click.stop="termTabs.close(row.ws.id, row.tab.id)"><PhX :size="11" weight="bold" /></button>
+              </span>
+            </div>
+            <div v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="ml-[22px]">
+              <button
+                v-for="c in childrenOfChat(row.tab.chatId)"
+                :key="c.id"
+                class="sb-row flex w-full items-center gap-2 rounded-lg px-2.5 py-[6px] text-left"
+                :title="c.title"
+                @click="openSubagent(c.id, row.ws.id)"
+              >
+                <PhAsterisk :size="13" weight="bold" class="shrink-0" :class="c.status === 'idle' || !c.status ? 'text-muted-foreground' : 'text-[#E0876A]'" />
+                <span class="min-w-0 flex-1 truncate text-[13px] text-foreground/85">{{ c.title }}</span>
+                <span v-if="c.status && c.status !== 'idle'" class="status-dot" :class="`status-${c.status}`" />
+                <span v-else class="text-[11px] text-muted-foreground">{{ ago(c.lastActivityAt ?? 0) }}</span>
+              </button>
+            </div>
+          </template>
+        </template>
       </div>
 
       <div v-if="!filteredLive.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
-        <template v-if="searchQuery.trim()">No matches for “{{ searchQuery.trim() }}”.</template>
-        <template v-else-if="store.workspaces.length === 0">No projects.<br />Open a folder to start.</template>
+        <template v-if="store.workspaces.length === 0">No projects.<br />Open a folder to start.</template>
         <template v-else-if="active">No threads here yet.<br />Start one above.</template>
         <template v-else>Nothing open.<br />Pick a project up top.</template>
       </div>
@@ -286,6 +217,12 @@
 
     </div>
 
+    <!-- App + provider update banners, docked above the toasts (Ghostex keeps
+         its notices in the sidebar, not floating over the work). -->
+    <div class="flex shrink-0 flex-col gap-1 px-2 pb-1.5 empty:hidden">
+      <UpdateBanner docked />
+      <ProviderUpdateBanner docked />
+    </div>
     <!-- Toasts docked above the bottom bar (toastPosition "sidebar"), t3code-style. -->
     <TransitionGroup v-if="ui.toastPosition === 'sidebar'" tag="div" name="sb-toast" class="flex shrink-0 flex-col gap-1 px-1.5 empty:hidden [&:not(:empty)]:pb-1">
       <button
@@ -593,7 +530,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
 import {
   PhFolder,
   PhFolderPlus,
@@ -602,7 +539,6 @@ import {
   PhX,
   PhTerminal,
   PhRobot,
-  PhBell,
   PhPlus,
   PhGitBranch,
   PhChatCenteredText,
@@ -617,9 +553,14 @@ import {
   PhArchive,
   PhPushPin,
   PhWarningCircle,
+  PhFolders,
+  PhCrown,
+  PhUsersThree,
+  PhAsterisk,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
-import SubagentBadge from "./SubagentBadge.vue";
+import UpdateBanner from "./UpdateBanner.vue";
+import ProviderUpdateBanner from "./ProviderUpdateBanner.vue";
 import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
@@ -631,9 +572,7 @@ import { spinnerFrame } from "@/lib/spinner";
 import { agentIconComp } from "@/lib/agentIcons";
 import {
   getAgentAttentionState,
-  summarizeChildActivity,
   type AgentAttentionState,
-  type ChildActivitySummary,
   type TermStatus,
 } from "@/lib/terminalStatus";
 import { useGitStore, type PrInfo } from "@/stores/git";
@@ -641,15 +580,11 @@ import { useNotificationsStore } from "@/stores/notifications";
 import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
 import { isChatPinned, toggleChatPin, unpinChat } from "@/lib/pinnedChats";
 import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
-import { buildActivityRows, type ActivityRow } from "@/lib/sidebarGroups";
+import { buildActivityRows, groupByRepo, parseShortstat, type ActivityRow } from "@/lib/sidebarGroups";
+import { childrenOf } from "@/stores/chatTree";
 import { toggleTabSettled } from "@/lib/settledTabs";
 import { getProjectSettings } from "@/lib/projectSettings";
 
-/** "claude-opus-4-8" → "opus-4-8"; drops the vendor prefix + date suffix so the
- *  badge stays one short token. */
-function shortModel(id: string): string {
-  return id.replace(/^(claude|gpt|gemini)-/, "").replace(/-\d{8}$/, "");
-}
 
 import { useScriptsStore, type Script } from "@/stores/scripts";
 
@@ -722,44 +657,70 @@ const feed = computed(() =>
   }),
 );
 
-const subagentActivityByParent = computed(() => {
-  const statuses = new Map<number, TermStatus[]>();
-  for (const session of chats.sessions) {
-    if (session.parentChatId == null || session.archivedAt) continue;
-    const list = statuses.get(session.parentChatId) ?? [];
-    list.push(session.status ?? "idle");
-    statuses.set(session.parentChatId, list);
+// Search lives in Spotlight now (⌘P, the sidebar's magnifier opens it).
+const filteredLive = computed(() => feed.value.live);
+const filteredSettled = computed(() => feed.value.settledChats);
+
+// ── project groups (Ghostex-style feed) ─────────────────────────────────────
+const liveGroups = computed(() =>
+  groupByRepo(filteredLive.value, activeRepo.value ? [activeRepo.value.id] : []),
+);
+
+const COLLAPSED_KEY = "burrow.sidebar.collapsedRepos";
+function loadCollapsed(): Set<number> {
+  try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]")); } catch { return new Set(); }
+}
+const collapsedGroups = reactive(loadCollapsed());
+function toggleGroup(repoId: number) {
+  if (collapsedGroups.has(repoId)) collapsedGroups.delete(repoId);
+  else collapsedGroups.add(repoId);
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedGroups])); } catch { /* private mode */ }
+}
+
+const REPO_TILE_COLORS = ["#7C6FF0", "#4C8B6A", "#C26A4A", "#3D7FB8", "#A0558C", "#8A7A3A"];
+function repoColor(repoId: number): string {
+  return REPO_TILE_COLORS[repoId % REPO_TILE_COLORS.length];
+}
+
+// Uncommitted +/− per repo header (`git diff --shortstat HEAD`: staged and
+// unstaged tracked changes; untracked files don't count).
+// ponytail: polled every 15 s + on window focus for the repos on screen; a
+// file watcher in Go is the upgrade if this ever shows up in a profile.
+const repoDiff = reactive<Record<number, { added: number; removed: number } | undefined>>({});
+async function refreshRepoDiffs() {
+  for (const g of liveGroups.value) {
+    const repo = repoById(g.repoId);
+    if (!repo) continue;
+    // Not gated on `is_git`: a stale row can say false for a real repo; a
+    // non-repo simply fails here and keeps no stat.
+    const out = await invoke<{ stdout: string; success: boolean }>("run_git", { cwd: repo.path, args: ["diff", "--shortstat", "HEAD"] }).catch(() => null);
+    if (out?.success) repoDiff[g.repoId] = parseShortstat(out.stdout);
   }
-  const summaries = new Map<number, ChildActivitySummary>();
-  for (const [parentId, childStatuses] of statuses) {
-    const summary = summarizeChildActivity(childStatuses);
-    if (summary) summaries.set(parentId, summary);
-  }
-  return summaries;
+}
+watch(() => liveGroups.value.map((g) => g.repoId).join(","), () => void refreshRepoDiffs(), { immediate: true });
+let diffTimer: number | undefined;
+onMounted(() => {
+  diffTimer = window.setInterval(() => void refreshRepoDiffs(), 15_000);
+  window.addEventListener("focus", refreshRepoDiffs);
+});
+onUnmounted(() => {
+  window.clearInterval(diffTimer);
+  window.removeEventListener("focus", refreshRepoDiffs);
 });
 
-// ── search ───────────────────────────────────────────────────────────────────
-// Plain substring match over workspace name + tab title; a row survives the
-// filter if either side matches, which is what keeps a project visible for a
-// matching thread inside it without a separate "workspace" row to filter.
-const searchQuery = ref("");
-function matchesSearch(ws: Workspace, title: string): boolean {
-  const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return true;
-  return repoName(ws).toLowerCase().includes(q) || title.toLowerCase().includes(q);
+function childrenOfChat(chatId: number): ClaudeSession[] {
+  return childrenOf(chats.sessions, chatId);
 }
-function clearSearch() {
-  searchQuery.value = "";
+const openRightPanelSubagent = inject<(chatId: number, workspaceId: number) => void>("openRightPanelSubagent", () => {});
+function openSubagent(chatId: number, wsId: number) {
+  openRightPanelSubagent(chatId, wsId);
 }
-
-const filteredLive = computed(() => feed.value.live.filter((row) => matchesSearch(row.ws, row.tab.title)));
-const filteredSettled = computed(() => feed.value.settledChats.filter((row) => matchesSearch(row.ws, row.tab.title)));
 
 const settledChatsLimit = ref(12);
 const settledChatsVisible = computed(() => filteredSettled.value.slice(0, settledChatsLimit.value));
 const archivedChats = computed(() => {
   const all = active.value ? chats.archivedSessionsForWs(active.value.id) : [];
-  return active.value ? all.filter((s) => matchesSearch(active.value!, s.title)) : all;
+  return all;
 });
 
 function unarchiveAndOpen(chatId: number) {
@@ -946,19 +907,7 @@ function attentionState(row: ActivityRow): AgentAttentionState {
   return getAgentAttentionState(row.tab.status, termTabs.isCompletionUnseen(row.ws.id, row.tab.id));
 }
 
-function subagentActivity(row: ActivityRow): ChildActivitySummary | null {
-  return row.tab.chatId == null ? null : subagentActivityByParent.value.get(row.tab.chatId) ?? null;
-}
 
-function attentionLabel(state: AgentAttentionState): string {
-  switch (state) {
-    case "error": return "Error";
-    case "needs-input": return "Needs input";
-    case "done-unread": return "Done unread";
-    case "working": return "Working";
-    default: return "Idle";
-  }
-}
 
 function prClass(info: PrInfo): string {
   if (info.checks === "fail") return "text-destructive bg-[color-mix(in_srgb,var(--red)_14%,transparent)]";
@@ -1389,4 +1338,15 @@ async function confirmCreate() {
 .agent-state-error .ws-term-icon-agent { color: var(--red); }
 .agent-state-done-unread .ws-term-icon-agent { color: var(--green); }
 .agent-state-idle .ws-term-icon-agent { color: var(--text-muted); }
+
+/* Ghostex-style feed */
+.sb-icon { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 7px; color: var(--text-muted); transition: background-color .12s, color .12s; }
+.sb-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sb-repo-tile { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; font-size: 10px; font-weight: 700; color: #fff; }
+.sb-row { transition: background-color .12s; border: 1px solid transparent; }
+.sb-row:hover { background: var(--bg-hover); }
+.sb-row-active { background: var(--bg-selected); border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+.sb-row-act { display: flex; padding: 3px; border-radius: 5px; color: var(--text-muted); }
+.sb-row-act:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.sb-spark { color: #E0876A; font-size: 12px; }
 </style>
