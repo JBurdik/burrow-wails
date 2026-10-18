@@ -14,52 +14,71 @@
         :style="{ left: pos.left + 'px', bottom: pos.bottom + 'px' }"
         @click.stop
       >
-        <div class="mp-rail">
+        <div class="mp-tabs">
           <button
-            class="mp-rail-btn"
+            class="mp-tab"
             :class="{ active: tab === 'fav' }"
             title="Favorites"
-            @click="tab = 'fav'"
+            @click="setTab('fav')"
           ><PhStar :size="15" weight="fill" /></button>
           <button
             v-for="a in providers"
             :key="a.id"
-            class="mp-rail-btn"
+            class="mp-tab"
             :class="{ active: tab === a.id }"
             :title="a.name"
-            @click="tab = a.id"
+            @click="setTab(a.id)"
           ><component :is="agentIconComp(a.icon)" :size="15" /></button>
         </div>
 
-        <div class="mp-main">
-          <div class="mp-search">
-            <PhMagnifyingGlass :size="12" />
-            <input ref="searchEl" v-model="query" placeholder="Search models…" spellcheck="false" />
-          </div>
-          <div class="mp-list hide-scrollbar">
+        <div ref="listEl" class="mp-list hide-scrollbar">
+          <button
+            v-for="(row, i) in rows"
+            :key="row.agentId + '/' + row.id"
+            class="mp-row"
+            :class="{ cursor: i === cursor, current: row.agentId === agentId && row.id === modelId }"
+            @mousemove="cursor = i"
+            @click="pick(row)"
+          >
+            <component v-if="tab === 'fav'" :is="agentIconComp(agentById(row.agentId).icon)" :size="12" class="mp-row-icon" />
+            <span class="mp-row-label">{{ row.label }}</span>
+            <PhCheck v-if="row.agentId === agentId && row.id === modelId" :size="12" weight="bold" class="mp-row-check" />
+            <span v-if="i < 9" class="mp-kbd">Alt+{{ i + 1 }}</span>
+            <span
+              class="mp-star"
+              :class="{ on: isFavorite(row.agentId, row.id) }"
+              :title="isFavorite(row.agentId, row.id) ? 'Remove from favorites' : 'Add to favorites'"
+              @click.stop="toggleFavorite(row.agentId, row.id)"
+            ><PhStar :size="13" :weight="isFavorite(row.agentId, row.id) ? 'fill' : 'regular'" /></span>
+          </button>
+          <div v-if="!rows.length" class="mp-empty">{{ tab === 'fav' ? 'Star a model to pin it here' : 'No models' }}</div>
+        </div>
+
+        <!-- Only what the active transport supports — the parent decides. -->
+        <div v-if="settings?.length" class="mp-settings">
+          <template v-for="s in settings" :key="s.key">
             <button
-              v-for="(row, i) in rows"
-              :key="row.agentId + '/' + row.id"
-              class="mp-row"
-              :class="{ active: row.agentId === agentId && row.id === modelId }"
-              @click="pick(row.agentId, row.id)"
-            >
-              <span class="mp-row-main">
-                <span class="mp-row-label">{{ row.label }}</span>
-                <span class="mp-row-sub">
-                  <component :is="agentIconComp(agentById(row.agentId).icon)" :size="10" />
-                  {{ agentById(row.agentId).name }}
-                </span>
-              </span>
-              <span v-if="tab === 'fav' && i < 9" class="mp-kbd">⌘{{ i + 1 }}</span>
-              <span
-                class="mp-star"
-                :class="{ on: isFavorite(row.agentId, row.id) }"
-                @click.stop="toggleFavorite(row.agentId, row.id)"
-              ><PhStar :size="12" :weight="isFavorite(row.agentId, row.id) ? 'fill' : 'regular'" /></span>
-            </button>
-            <div v-if="!rows.length" class="mp-empty">No models</div>
-          </div>
+              v-if="s.toggle"
+              class="mp-set mp-set-toggle"
+              :class="{ on: s.active === s.items[1]?.id }"
+              @click="emit('setting', s.key, (s.active === s.items[1]?.id ? s.items[0] : s.items[1]).id)"
+            >{{ s.label }}</button>
+            <label v-else class="mp-set">
+              <span class="mp-set-label">{{ s.label }}</span>
+              <select :value="s.active" @change="emit('setting', s.key, ($event.target as HTMLSelectElement).value)">
+                <option v-for="it in s.items" :key="it.id" :value="it.id">{{ it.label }}</option>
+              </select>
+              <PhCaretDown :size="9" weight="bold" class="mp-set-caret" />
+            </label>
+          </template>
+        </div>
+
+        <div class="mp-hint">
+          <span><kbd>↑↓</kbd> model</span>
+          <span v-if="effortSetting"><kbd>←→</kbd> effort</span>
+          <span v-if="providers.length"><kbd>⇥</kbd> agent</span>
+          <span><kbd>↵</kbd> this chat</span>
+          <span><kbd>⌥↵</kbd> default</span>
         </div>
       </div>
     </Teleport>
@@ -68,10 +87,23 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount, watch } from "vue";
-import { PhCaretDown, PhStar, PhMagnifyingGlass } from "@phosphor-icons/vue";
+import { PhCaretDown, PhCheck, PhStar } from "@phosphor-icons/vue";
 import { useProvidersStore } from "@/stores/providers";
+import { useUIStore } from "@/stores/ui";
 import { agentIconComp } from "@/lib/agentIcons";
+import { setConfig } from "@/lib/config";
+import { setLastAcpSetting } from "@/lib/acpSettings";
 import { visibleModelsFor, modelLabel, favorites, parseFav, isFavorite, toggleFavorite, ensureModels, type ModelEntry } from "@/lib/chatModels";
+
+/** One quick setting row entry. `key: "effort"` is what ←→ steps through;
+ *  `toggle` renders a switch where items[0] = off, items[1] = on. */
+export interface PickerSetting {
+  key: string;
+  label: string;
+  items: { id: string; label: string }[];
+  active: string;
+  toggle?: boolean;
+}
 
 const props = defineProps<{
   agentId: string;
@@ -82,13 +114,20 @@ const props = defineProps<{
   models?: ModelEntry[];
   /** Working dir used when probing a CLI for its model catalog. */
   cwd?: string;
+  /** The chat's quick settings (effort, plan mode, permissions…). */
+  settings?: PickerSetting[];
 }>();
-const emit = defineEmits<{ (e: "select", agentId: string, modelId: string): void }>();
+const emit = defineEmits<{
+  (e: "select", agentId: string, modelId: string): void;
+  (e: "setting", key: string, value: string): void;
+}>();
 
 const chatAgents = useProvidersStore();
+const ui = useUIStore();
 const agentById = (id: string) => chatAgents.resolve(id);
 const agent = computed(() => chatAgents.resolve(props.agentId));
 const providers = computed(() => (props.lockAgent ? [agent.value] : chatAgents.chatAgents));
+const effortSetting = computed(() => props.settings?.find((s) => s.key === "effort"));
 
 // Provider-default models have no name of their own — show the agent instead.
 const triggerLabel = computed(() => {
@@ -97,7 +136,7 @@ const triggerLabel = computed(() => {
 });
 
 // Runtime-reported models only describe the CURRENT agent; other providers in
-// the rail still come from the catalog.
+// the tab row still come from the catalog.
 function listFor(agentId: string): ModelEntry[] {
   if (props.models?.length && agentId === props.agentId) return props.models;
   return visibleModelsFor(agentId);
@@ -105,10 +144,10 @@ function listFor(agentId: string): ModelEntry[] {
 
 const open = ref(false);
 const tab = ref<string>("fav");
-const query = ref("");
+const cursor = ref(0);
 const btnEl = ref<HTMLElement>();
 const panelEl = ref<HTMLElement>();
-const searchEl = ref<HTMLInputElement>();
+const listEl = ref<HTMLElement>();
 const pos = ref({ left: 0, bottom: 0 });
 
 interface Row { agentId: string; id: string; label: string }
@@ -125,34 +164,38 @@ const favRows = computed<Row[]>(() =>
     })),
 );
 
-const rows = computed<Row[]>(() => {
-  const base = tab.value === "fav"
-    ? favRows.value
-    : listFor(tab.value).map((m) => ({ agentId: tab.value, id: m.id, label: m.label }));
-  const q = query.value.trim().toLowerCase();
-  return q ? base.filter((r) => r.label.toLowerCase().includes(q) || r.id.toLowerCase().includes(q)) : base;
-});
+function rowsFor(t: string): Row[] {
+  return t === "fav" ? favRows.value : listFor(t).map((m) => ({ agentId: t, id: m.id, label: m.label }));
+}
+const rows = computed(() => rowsFor(tab.value));
+// The tab the picker opens on — also what Alt+N from the composer indexes.
+const homeTab = () => (favRows.value.length ? "fav" : props.agentId);
+
+function setTab(t: string) {
+  tab.value = t;
+  const i = rows.value.findIndex((r) => r.agentId === props.agentId && r.id === props.modelId);
+  cursor.value = Math.max(0, i);
+}
 
 function toggle() {
   open.value ? close() : show();
 }
 
+const PANEL_W = 340;
 function show() {
   const r = btnEl.value?.getBoundingClientRect();
   if (r) {
     pos.value = {
-      left: Math.min(Math.max(8, r.left), window.innerWidth - 372),
+      left: Math.min(Math.max(8, r.left), window.innerWidth - PANEL_W - 8),
       bottom: Math.max(8, window.innerHeight - r.top + 6),
     };
   }
-  tab.value = favRows.value.length ? "fav" : props.agentId;
-  query.value = "";
+  setTab(homeTab());
   // Fill in catalogs we don't know statically (Codex answers model/list).
   for (const a of providers.value) void ensureModels(a.id, a.kind, props.cwd ?? "");
   open.value = true;
   window.addEventListener("mousedown", onOutside, true);
   window.addEventListener("keydown", onKey, true);
-  nextTick(() => searchEl.value?.focus());
 }
 
 function close() {
@@ -167,23 +210,85 @@ function onOutside(e: MouseEvent) {
   close();
 }
 
-// ⌘1-9 jump straight to a favourite, but only while the popover is open — the
-// app already owns global ⌘1-9 for workspace switching.
-function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape") { close(); return; }
-  if (!(e.metaKey || e.ctrlKey)) return;
-  const n = Number(e.key);
-  if (!n || n > 9) return;
-  const row = favRows.value[n - 1];
-  if (!row) return;
-  e.preventDefault();
-  pick(row.agentId, row.id);
+function stepEffort(dir: number) {
+  const s = effortSetting.value;
+  if (!s) return;
+  const i = s.items.findIndex((it) => it.id === s.active);
+  const next = s.items[Math.min(s.items.length - 1, Math.max(0, i + dir))];
+  if (next && next.id !== s.active) emit("setting", s.key, next.id);
 }
 
-function pick(agentId: string, modelId: string) {
-  emit("select", agentId, modelId);
+function moveCursor(dir: number) {
+  const n = rows.value.length;
+  if (!n) return;
+  cursor.value = (cursor.value + dir + n) % n;
+  nextTick(() => listEl.value?.children[cursor.value]?.scrollIntoView({ block: "nearest" }));
+}
+
+function cycleTab(dir: number) {
+  const tabs = ["fav", ...providers.value.map((a) => a.id)];
+  setTab(tabs[(tabs.indexOf(tab.value) + dir + tabs.length) % tabs.length]);
+}
+
+/** Alt+1-9 — `code`, not `key`: on macOS Option+digit types "¡™£…". */
+function altDigit(e: KeyboardEvent): number {
+  if (!e.altKey || e.metaKey || e.ctrlKey) return 0;
+  const m = /^Digit([1-9])$/.exec(e.code);
+  return m ? Number(m[1]) : 0;
+}
+
+// Captured on window while open, so the composer textarea never sees them.
+function onKey(e: KeyboardEvent) {
+  // A focused <select> in the settings row owns its own arrows.
+  if (e.target instanceof HTMLSelectElement && e.key !== "Escape") return;
+  const n = altDigit(e);
+  const handled = (() => {
+    if (n) { const row = rows.value[n - 1]; if (row) pick(row); return true; }
+    switch (e.key) {
+      case "Escape": close(); return true;
+      case "ArrowDown": moveCursor(1); return true;
+      case "ArrowUp": moveCursor(-1); return true;
+      case "ArrowLeft": stepEffort(-1); return true;
+      case "ArrowRight": stepEffort(1); return true;
+      case "Tab": cycleTab(e.shiftKey ? -1 : 1); return true;
+      case "Enter": {
+        const row = rows.value[cursor.value];
+        if (row) (e.altKey ? pickDefault(row) : pick(row));
+        return true;
+      }
+    }
+    return false;
+  })();
+  if (handled) { e.preventDefault(); e.stopPropagation(); }
+}
+
+function pick(row: Row) {
+  emit("select", row.agentId, row.id);
   close();
 }
+
+// ⌥↵: make it what the NEXT new chat starts with, leave this one alone. Same
+// keys the welcome composer and AgentChat seed new chats from.
+function pickDefault(row: Row) {
+  ui.defaultChatAgent = row.agentId;
+  if (row.id) {
+    if (chatAgents.resolve(row.agentId).kind === "claude") setConfig("chatLastUsedModel", row.id);
+    else setLastAcpSetting(row.agentId, "model", row.id);
+  }
+  close();
+}
+
+/** Alt+N from the composer: the Nth row of the tab the picker would open on.
+ *  Returns false when the event isn't one, so the caller can carry on. */
+function handleComposerKey(e: KeyboardEvent): boolean {
+  const n = altDigit(e);
+  const row = n ? rowsFor(homeTab())[n - 1] : undefined;
+  if (!row) return false;
+  e.preventDefault();
+  emit("select", row.agentId, row.id);
+  return true;
+}
+defineExpose({ handleComposerKey });
 
 watch(() => props.lockAgent, () => close());
 onBeforeUnmount(close);
@@ -196,95 +301,123 @@ onBeforeUnmount(close);
   position: fixed;
   z-index: 4000;
   display: flex;
-  width: 364px;
-  height: 300px;
+  flex-direction: column;
+  width: 340px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
   overflow: hidden;
+  font-family: var(--font-ui);
 }
 
-.mp-rail {
+.mp-tabs {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 6px;
-  border-right: 1px solid var(--border);
-  background: var(--bg-base);
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
 }
-.mp-rail-btn {
+.mp-tab {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border: none;
-  border-radius: 7px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
   background: none;
   color: var(--text-muted);
   cursor: pointer;
 }
-.mp-rail-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-.mp-rail-btn.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.mp-tab:hover { color: var(--text-primary); }
+.mp-tab.active { color: var(--text-primary); border-bottom-color: var(--accent); }
 
-.mp-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-
-.mp-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 9px 11px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-}
-.mp-search input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: none;
-  outline: none;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-family: var(--font-ui);
-}
-.mp-search input::placeholder { color: var(--text-muted); }
-
-.mp-list { flex: 1; overflow-y: auto; padding: 5px; }
+.mp-list { max-height: 264px; overflow-y: auto; padding: 5px; }
 
 .mp-row {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
+  height: 32px;
   text-align: left;
   background: none;
   border: none;
   border-radius: 8px;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 7px 8px;
+  padding: 0 8px 0 10px;
 }
-.mp-row:hover { background: var(--bg-hover); }
-.mp-row.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.mp-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.mp-row-label { font-size: 12.5px; color: var(--text-primary); }
-.mp-row-sub { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text-muted); }
+.mp-row.cursor { background: var(--bg-hover); }
+.mp-row-icon { flex-shrink: 0; color: var(--text-muted); }
+.mp-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-primary); }
+.mp-row.current .mp-row-label { font-weight: 600; }
+.mp-row-check { flex-shrink: 0; color: var(--accent); }
 
 .mp-kbd {
   flex-shrink: 0;
   font-size: 10px;
+  line-height: 1;
   color: var(--text-muted);
-  background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 1px 4px;
+  padding: 2px 4px;
 }
 
 .mp-star { flex-shrink: 0; display: flex; color: var(--text-muted); opacity: 0.45; }
 .mp-star:hover { opacity: 1; color: var(--text-primary); }
-.mp-star.on { opacity: 1; color: #eab308; }
+.mp-star.on { opacity: 1; color: var(--yellow, #eab308); }
 
-.mp-empty { padding: 16px 10px; font-size: 11.5px; color: var(--text-muted); text-align: center; }
+.mp-empty { padding: 18px 10px; font-size: 11.5px; color: var(--text-muted); text-align: center; }
+
+.mp-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+}
+.mp-set {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.mp-set:hover { background: var(--bg-hover); color: var(--text-primary); }
+.mp-set-label { color: var(--text-muted); }
+.mp-set select {
+  appearance: none;
+  field-sizing: content; /* as wide as the chosen option, not the longest */
+  background: none;
+  border: none;
+  outline: none;
+  padding: 0 10px 0 0;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.mp-set-caret { position: absolute; right: 8px; pointer-events: none; color: var(--text-muted); }
+.mp-set-toggle.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+.mp-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.mp-hint kbd { font-family: inherit; color: var(--text-secondary); }
 </style>

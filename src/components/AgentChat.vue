@@ -568,11 +568,14 @@
             </button>
             <!-- Agent + model in one popover (the old header bar is gone) -->
             <ModelPicker
+              ref="modelPickerEl"
               :agent-id="agentKind"
               :model-id="effectiveTransport === 'claude-cli' ? selectedModel : acpActiveModelId"
               :models="liveModels.length ? liveModels : undefined"
               :cwd="cwd"
+              :settings="pickerSettings"
               @select="onPickModel"
+              @setting="onPickerSetting"
             />
             <!-- Claude Agent SDK effort is forwarded to the local Claude Code CLI. -->
             <ComposerPill
@@ -739,7 +742,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } from "reka-ui";
-import ModelPicker from "@/components/ModelPicker.vue";
+import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
@@ -1733,6 +1736,7 @@ let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingImages = ref<string[]>([]); // data URIs
 const scrollEl = ref<HTMLElement | null>(null);
 const inputEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
+const modelPickerEl = ref<InstanceType<typeof ModelPicker> | null>(null);
 
 // @file / $skill / /command completion and the skill pills, shared with the
 // welcome composer (lib/composerCompletion.ts) so the two cannot drift.
@@ -1807,6 +1811,36 @@ function acpModeIcon(id: string): unknown { return ACP_MODE_ICON[id] ?? PhShield
 const permItems = computed<ComposerPillItem[]>(() => PERM_MODES.map((m) => ({
   id: m, ...PERM_META[m], icon: PERM_ICON[m],
 })));
+
+// The model picker's quick-settings row: the same state and handlers as the
+// composer pills, only what this transport supports.
+const pickerSettings = computed<PickerSetting[]>(() => {
+  if (effectiveTransport.value === "claude-cli") {
+    return [
+      { key: "effort", label: "Effort", items: CLAUDE_EFFORTS.map((o) => ({ id: o.id, label: o.label.replace(/ effort$/, "") })), active: selectedEffort.value },
+      { key: "plan", label: "Plan", toggle: true, items: [{ id: "default", label: "Off" }, { id: "plan", label: "On" }], active: permMode.value },
+      { key: "perm", label: "Permissions", items: permItems.value, active: permMode.value },
+    ];
+  }
+  const out: PickerSetting[] = [];
+  if (isAcpRuntime.value && acpEffortOption.value) {
+    out.push({ key: "effort", label: "Effort", items: acpEffortItems.value, active: acpEffortOption.value.currentValue });
+  }
+  if (isAcpRuntime.value && acpModes.value) {
+    const modes = acpModeItems.value;
+    if (modes.some((m) => m.id === "plan")) {
+      out.push({ key: "acp-plan", label: "Plan", toggle: true, items: [{ id: modes.find((m) => m.id !== "plan")!.id, label: "Off" }, { id: "plan", label: "On" }], active: acpModes.value.currentModeId });
+    }
+    out.push({ key: "mode", label: "Permissions", items: modes, active: acpModes.value.currentModeId });
+  }
+  return out;
+});
+function onPickerSetting(key: string, value: string) {
+  const claude = effectiveTransport.value === "claude-cli";
+  if (key === "effort") void (claude ? selectEffort(value as ClaudeEffort) : acpSelectEffort(value));
+  else if (key === "perm" || key === "plan") void selectPermMode(value as PermMode);
+  else if (key === "mode" || key === "acp-plan") void acpSelectMode(value);
+}
 
 
 // Is the user actually looking at this chat right now?
@@ -2401,6 +2435,7 @@ async function clearChat() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  if (modelPickerEl.value?.handleComposerKey(e)) return;
   if (pendingPermission.value || pendingDiff.value) {
     if (e.key === "y" || e.key === "Y") { e.preventDefault(); respondPermission(true); return; }
     if (e.key === "n" || e.key === "N") { e.preventDefault(); respondPermission(false); return; }

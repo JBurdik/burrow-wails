@@ -47,7 +47,15 @@
         <template #toolbar>
           <div class="composer-toolbar">
             <div class="composer-pillbar">
-              <ModelPicker :agent-id="selectedAgentId" :model-id="selectedModel" :cwd="target.path" @select="onModelSelect" />
+              <ModelPicker
+                ref="modelPickerEl"
+                :agent-id="selectedAgentId"
+                :model-id="selectedModel"
+                :cwd="target.path"
+                :settings="pickerSettings"
+                @select="onModelSelect"
+                @setting="onPickerSetting"
+              />
               <template v-if="isClaude">
                 <ComposerPill
                   :label="selectedEffortLabel"
@@ -136,7 +144,7 @@ import { getLastAcpSetting, setLastAcpSetting } from "@/lib/acpSettings";
 import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { visibleModelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
-import ModelPicker from "@/components/ModelPicker.vue";
+import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
@@ -201,6 +209,7 @@ const { suggestions, activeIndex } = completion;
 function onComposerKeydown(e: KeyboardEvent) {
   // Completion first: Enter picks the highlighted suggestion instead of sending.
   if (completion.handleKeydown(e)) return;
+  if (modelPickerEl.value?.handleComposerKey(e)) return;
   if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
     e.preventDefault();
     submit();
@@ -475,6 +484,28 @@ const CODEX_PERM_MODES: ComposerPillItem[] = [
 const codexPermMode = computed(() => lastAcp("mode") ?? "auto");
 const codexPermLabel = computed(() => CODEX_PERM_MODES.find((m) => m.id === codexPermMode.value)?.label ?? "Auto");
 function pickCodexPermMode(id: string) { saveAcp("mode", id); }
+
+// The model picker's quick-settings row — the same state as the pills above.
+const modelPickerEl = ref<InstanceType<typeof ModelPicker> | null>(null);
+const pickerSettings = computed<PickerSetting[]>(() => {
+  if (isClaude.value) {
+    return [
+      { key: "effort", label: "Effort", items: CLAUDE_EFFORTS.map((o) => ({ id: o.id, label: o.label.replace(/ effort$/, "") })), active: selectedEffort.value },
+      { key: "plan", label: "Plan", toggle: true, items: [{ id: "default", label: "Off" }, { id: "plan", label: "On" }], active: selectedPermMode.value },
+      { key: "perm", label: "Permissions", items: permItems.value, active: selectedPermMode.value },
+    ];
+  }
+  if (!isCodex.value) return [];
+  const out: PickerSetting[] = [];
+  if (codexEfforts.value.length) out.push({ key: "effort", label: "Effort", items: codexEffortItems.value, active: codexEffort.value });
+  out.push({ key: "mode", label: "Permissions", items: CODEX_PERM_MODES, active: codexPermMode.value });
+  return out;
+});
+function onPickerSetting(key: string, value: string) {
+  if (key === "effort") (isClaude.value ? pickEffort : pickCodexEffort)(value);
+  else if (key === "perm" || key === "plan") pickPermMode(value);
+  else if (key === "mode") pickCodexPermMode(value);
+}
 
 // Chat UI (rich conversation) or a plain PTY running the agent's own CLI. The
 // prompt is the same either way — only the surface it lands in differs.
