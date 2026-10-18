@@ -325,6 +325,7 @@ export namespace main {
 	    permission_mode: string;
 	    profile_id: string;
 	    append_system_prompt: string;
+	    slept_at: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chat(source);
@@ -351,6 +352,7 @@ export namespace main {
 	        this.permission_mode = source["permission_mode"];
 	        this.profile_id = source["profile_id"];
 	        this.append_system_prompt = source["append_system_prompt"];
+	        this.slept_at = source["slept_at"];
 	    }
 	}
 	export class ProviderRuntimeEvent {

@@ -74,6 +74,10 @@ export function ChatInterrupt(arg1) {
   return window['go']['main']['App']['ChatInterrupt'](arg1);
 }
 
+export function ChatMarkActive(arg1) {
+  return window['go']['main']['App']['ChatMarkActive'](arg1);
+}
+
 export function ChatRestart(arg1) {
   return window['go']['main']['App']['ChatRestart'](arg1);
 }

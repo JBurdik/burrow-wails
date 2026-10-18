@@ -196,6 +196,8 @@ func migrate(db *sql.DB) error {
 		// A pending rewind/fork resume point (chatrewind.go), cleared once the
 		// forked session reports its own id.
 		`ALTER TABLE chats ADD COLUMN resume_at TEXT NOT NULL DEFAULT ''`,
+		// Auto-sleep stamp (chatsleep.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN slept_at INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {

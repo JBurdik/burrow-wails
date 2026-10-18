@@ -112,6 +112,7 @@ interface Prefs {
   rightPanelWidth: number; // right panel width in px
   toastPosition: ToastPosition; // screen anchor for toast notifications
   defaultChatAgent: string; // default agent for new chat sessions (chatAgents store id)
+  chatAutoSleepMinutes: number; // stop an idle chat's process after N minutes, 0 = off (read by Go, src-wails/chatsleep.go)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
   // Background text generation (commit messages, PR content, branch names,
   // chat titles) — "kind::provider::model::effort", effort optional.
@@ -214,6 +215,7 @@ const DEFAULT_PREFS: Prefs = {
   toastPosition: "sidebar",
   defaultChatAgent: "claude",
   spawnMode: "terminal",
+  chatAutoSleepMinutes: 60,
   textGenerationModel: DEFAULT_TEXT_GENERATION_MODEL,
   textGenerationPolicy: "default",
   textGenerationRules: "",
@@ -330,6 +332,7 @@ export const useUIStore = defineStore("ui", () => {
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "sidebar");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
+  const chatAutoSleepMinutes = ref<number>(loaded.chatAutoSleepMinutes ?? 60);
   const textGenerationModel = ref<string>(loaded.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL);
   const textGenerationPolicy = ref<TextGenerationPolicy>(loaded.textGenerationPolicy ?? "default");
   const textGenerationRules = ref<string>(loaded.textGenerationRules ?? "");
@@ -392,6 +395,7 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition.value = p.toastPosition ?? "sidebar";
     defaultChatAgent.value = p.defaultChatAgent ?? "claude";
     spawnMode.value = p.spawnMode ?? "terminal";
+    chatAutoSleepMinutes.value = p.chatAutoSleepMinutes ?? 60;
     textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
     textGenerationPolicy.value = p.textGenerationPolicy ?? "default";
     textGenerationRules.value = p.textGenerationRules ?? "";
@@ -553,6 +557,7 @@ export const useUIStore = defineStore("ui", () => {
         toastPosition: toastPosition.value,
         defaultChatAgent: defaultChatAgent.value,
         spawnMode: spawnMode.value,
+        chatAutoSleepMinutes: chatAutoSleepMinutes.value,
         textGenerationModel: textGenerationModel.value,
         textGenerationPolicy: textGenerationPolicy.value,
         textGenerationRules: textGenerationRules.value,
@@ -572,7 +577,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, chatAutoSleepMinutes, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -870,6 +875,7 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition,
     defaultChatAgent,
     spawnMode,
+    chatAutoSleepMinutes,
     textGenerationModel,
     textGenerationPolicy,
     textGenerationRules,

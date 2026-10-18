@@ -39,6 +39,8 @@ export function ChatFork(arg1:number,arg2:number,arg3:string):Promise<main.Chat>
 
 export function ChatInterrupt(arg1:number):Promise<void>;
 
+export function ChatMarkActive(arg1:number):Promise<void>;
+
 export function ChatRestart(arg1:number):Promise<void>;
 
 export function ChatRewind(arg1:number,arg2:number,arg3:string):Promise<void>;

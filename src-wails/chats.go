@@ -78,6 +78,9 @@ type Chat struct {
 	PermissionMode     string `json:"permission_mode"`
 	ProfileID          string `json:"profile_id"`
 	AppendSystemPrompt string `json:"append_system_prompt"`
+	// Read-only on the wire: when auto-sleep stopped this chat's idle process
+	// (chatsleep.go); 0 once a send starts it again.
+	SleptAt int64 `json:"slept_at"`
 }
 
 func chatsSchema() []string {
@@ -103,7 +106,8 @@ func chatsSchema() []string {
 			permission_mode   TEXT    NOT NULL DEFAULT '',
 			profile_id        TEXT    NOT NULL DEFAULT '',
 			append_system_prompt TEXT NOT NULL DEFAULT '',
-			resume_at         TEXT    NOT NULL DEFAULT ''
+			resume_at         TEXT    NOT NULL DEFAULT '',
+			slept_at          INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS chat_migrations (
 			name    TEXT PRIMARY KEY,
@@ -134,14 +138,14 @@ func chatsPostAlterSchema() []string {
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, agent_kind, transport, model, branch,
 	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
-	effort, permission_mode, profile_id, append_system_prompt`
+	effort, permission_mode, profile_id, append_system_prompt, slept_at`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
 		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
-		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt)
+		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt)
 	return c, err
 }
 

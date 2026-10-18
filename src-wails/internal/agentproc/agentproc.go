@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 type Manager struct {
@@ -35,11 +34,6 @@ type Session struct {
 	// `exit` ends the NEW turn in the UI. The caller that stopped it already
 	// owns the teardown, so from then on the old process is silenced.
 	stopped atomic.Bool
-
-	// lastSeen is the last time this session did anything: a prompt written to
-	// stdin, or a line streamed back. Both matter — a long turn writes no stdin
-	// but streams constantly, so tracking only writes would reap a working agent.
-	lastSeen time.Time
 }
 
 func NewManager() *Manager {
@@ -72,7 +66,7 @@ func (m *Manager) Start(id, command string, args []string, cwd string, env []str
 		return err
 	}
 
-	sess := &Session{ID: id, cmd: c, stdin: stdin, onLine: onLine, onExit: onExit, lastSeen: time.Now()}
+	sess := &Session{ID: id, cmd: c, stdin: stdin, onLine: onLine, onExit: onExit}
 	m.mu.Lock()
 	m.sessions[id] = sess
 	m.mu.Unlock()
@@ -81,7 +75,6 @@ func (m *Manager) Start(id, command string, args []string, cwd string, env []str
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 		for scanner.Scan() {
-			m.touch(sess)
 			if !sess.stopped.Load() {
 				onLine(scanner.Text())
 			}
@@ -101,44 +94,8 @@ func (m *Manager) Send(id string, data string) error {
 	if !ok {
 		return fmt.Errorf("unknown agent session: %s", id)
 	}
-	m.touch(sess)
 	_, err := io.WriteString(sess.stdin, data)
 	return err
-}
-
-func (m *Manager) touch(sess *Session) {
-	m.mu.Lock()
-	sess.lastSeen = time.Now()
-	m.mu.Unlock()
-}
-
-// ReapIdle stops every session that has been silent for longer than `idle` and
-// returns their ids. An agent CLI holds ~150 MB even doing nothing, so a chat
-// nobody has touched in half an hour should give the memory back; the transcript
-// is on disk and the next prompt resumes the session.
-//
-// Silence is the only signal needed: a live turn streams output continuously, so
-// an in-flight agent can never look idle (no separate "is a turn running" check,
-// which the frontend would have to keep in sync).
-func (m *Manager) ReapIdle(idle time.Duration) []string {
-	cutoff := time.Now().Add(-idle)
-	m.mu.Lock()
-	var stale []*Session
-	for id, sess := range m.sessions {
-		if sess.lastSeen.Before(cutoff) {
-			stale = append(stale, sess)
-			delete(m.sessions, id)
-		}
-	}
-	m.mu.Unlock()
-
-	ids := make([]string, 0, len(stale))
-	for _, sess := range stale {
-		sess.stdin.Close()
-		_ = killProcessTree(sess.cmd)
-		ids = append(ids, sess.ID)
-	}
-	return ids
 }
 
 // Alive reports whether a session is currently running under this id.
