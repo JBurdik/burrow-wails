@@ -12,27 +12,19 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 import { PhX } from "@phosphor-icons/vue";
-import mermaid from "mermaid";
 import { useDiagram } from "@/composables/useDiagram";
+import { escapeHtml } from "@/lib/chatBlocks";
+import { renderMermaid } from "@/lib/mermaidRender";
 
 const { diagramContent, closeDiagram } = useDiagram();
 const containerRef = ref<HTMLElement | null>(null);
 
-const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: isDark ? "dark" : "default",
-});
-
 async function render(content: string) {
   if (!containerRef.value) return;
   try {
-    const id = `burrow-diagram-${Date.now()}`;
-    const { svg } = await mermaid.render(id, content);
-    containerRef.value.innerHTML = svg;
+    containerRef.value.innerHTML = await renderMermaid(content);
   } catch (e) {
-    containerRef.value.innerHTML = `<pre style="color:red;padding:1em">${String(e)}</pre>`;
+    containerRef.value.innerHTML = `<pre style="color:red;padding:1em">${escapeHtml(e)}</pre>`;
   }
 }
 
@@ -59,8 +51,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 /* mermaid renders raw SVG via innerHTML — :deep() needed to reach it,
    Tailwind classes can't target dynamically-injected markup. */
 .diagram-svg :deep(svg) {
-  max-width: 80vw;
-  max-height: 70vh;
-  height: auto;
+  /* mermaid writes an inline max-width (its natural size); scale up to fill. */
+  width: 80vw;
+  max-width: 80vw !important;
+  height: 70vh;
 }
 </style>
