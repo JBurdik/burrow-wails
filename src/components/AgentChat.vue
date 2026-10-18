@@ -223,6 +223,23 @@
         <!-- User message -->
         <template v-else-if="msg.role === 'user'">
           <div class="group flex items-end justify-end gap-1.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
+            <div class="flex flex-shrink-0 items-center self-center">
+              <button class="message-copy-btn" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
+                <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
+                <PhCopy v-else :size="13" />
+              </button>
+              <button class="message-copy-btn" aria-label="Edit" title="Edit — put this text back in the composer" @click="editMessage(msg)">
+                <PhPencilSimple :size="13" />
+              </button>
+              <template v-if="canBranch">
+                <button class="message-copy-btn" aria-label="Rewind to here" title="Rewind to here — drop this message and everything after it, then edit and resend" @click="rewindTo(msg)">
+                  <PhArrowCounterClockwise :size="13" />
+                </button>
+                <button class="message-copy-btn" aria-label="Fork from here" title="Fork from here — continue this conversation in a new chat" @click="forkFrom(msg)">
+                  <PhGitFork :size="13" />
+                </button>
+              </template>
+            </div>
             <div class="bubble-user max-w-[72%] rounded-[18px] px-4 py-2.5 text-[13px] leading-[1.55]" style="background: var(--bg-selected); color: var(--text-primary);">
               <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
                 <img
@@ -326,7 +343,7 @@
 
         <!-- Assistant message -->
         <template v-else>
-          <div class="flex items-start gap-2.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
+          <div class="group flex items-start gap-2.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
             <div v-if="isFirstOfRun(msgIdx)" class="agent-avatar mt-0.5 flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center">
               <component :is="currentAgentIcon" :size="14" :style="{ color: 'var(--agent-accent)' }" />
             </div>
@@ -346,10 +363,15 @@
                 <div class="md-body" v-html="renderAssistantMd(msg)" @click="onRichBlockClick" />
               </TranscriptComments>
             </div>
-            <button class="message-copy-btn mt-0.5" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
-              <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
-              <PhCopy v-else :size="13" />
-            </button>
+            <div class="mt-0.5 flex flex-shrink-0 items-center">
+              <button class="message-copy-btn" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
+                <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
+                <PhCopy v-else :size="13" />
+              </button>
+              <button v-if="canBranch && finalReplyIds.has(msg.id)" class="message-copy-btn" aria-label="Fork from here" title="Fork from here — continue this conversation in a new chat" @click="forkFrom(msg)">
+                <PhGitFork :size="13" />
+              </button>
+            </div>
           </div>
         </template>
       </div>
@@ -727,7 +749,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { listen } from "@tauri-apps/api/event";
@@ -739,6 +761,7 @@ import { useEditorContextStore } from "@/stores/editorContext";
 import { useImageLightbox } from "@/composables/useImageLightbox";
 import { useGitStore } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } from "reka-ui";
@@ -2211,6 +2234,51 @@ function cancelCodexUserInput() {
 // Reply to a rich ACP permission request with the chosen adapter optionId.
 async function acpRespond(optionId: string, optName: string, kind: string) {
   await S.respond({ kind: "acpOption", optionId, label: optName, reject: kind.startsWith("reject") });
+}
+
+// Rewind / fork ride Claude's --resume-session-at (chatrewind.go); Codex and
+// generic ACP have nothing like it, so they only get Copy / Edit.
+const canBranch = computed(() => !isAcpRuntime.value);
+// The reply that closes each settled turn: the last assistant bubble before the
+// next prompt, with no tool call or thinking after it.
+const finalReplyIds = computed(() => {
+  const ids = new Set<number>();
+  let last: number | null = null;
+  for (const m of messages.value) {
+    if (m.role === "assistant") last = m.partial ? null : m.id;
+    else if (m.role === "tool" || m.role === "thinking") last = null;
+    else if (m.role === "user" || m.role === "queued") {
+      if (last !== null) ids.add(last);
+      last = null;
+    }
+  }
+  if (last !== null && !busy.value) ids.add(last);
+  return ids;
+});
+const termTabs = useTerminalTabsStore();
+
+function putInComposer(msg: ChatMessage) {
+  inputText.value = msg.displayText ?? msg.text;
+  pendingImages.value = msg.images ? [...msg.images] : [];
+  nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(inputText.value.length); });
+}
+
+function editMessage(msg: ChatMessage) {
+  putInComposer(msg);
+}
+
+async function rewindTo(msg: ChatMessage) {
+  const snapshot = { ...msg };
+  if (await S.rewind(msg)) putInComposer(snapshot);
+}
+
+async function forkFrom(msg: ChatMessage) {
+  const id = await S.fork(msg);
+  if (id === null) return;
+  // The tab opener looks the chat up in the store; an unknown id would mint a
+  // new empty chat instead.
+  await chats.reload();
+  termTabs.openChat(props.workspaceId, id);
 }
 
 async function copyMessage(msg: ChatMessage) {

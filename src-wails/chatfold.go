@@ -49,6 +49,11 @@ type ChatMessage struct {
 	// is part of the persisted shape, so it has to round-trip too.
 	AcpMsgID string `json:"_acpMsgId,omitempty"`
 
+	// UUID is the latest Claude record uuid that touched this message — the
+	// resume point a rewind or fork hands `--resume-session-at`
+	// (chatrewind.go). Empty for other transports and older transcripts.
+	UUID string `json:"uuid,omitempty"`
+
 	SubagentChatID int64  `json:"subagentChatId,omitempty"`
 	SubagentAgent  string `json:"subagentAgent,omitempty"`
 }
@@ -147,6 +152,7 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 			// only ever set by the native transport, which is what tells
 			// them apart.
 			ToolRawName: ev.Input != nil,
+			UUID:        ev.UUID,
 		})
 		return true
 
@@ -170,6 +176,9 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 		}
 		st.messages[idx].ToolOutput = ev.Output
 		st.messages[idx].ToolFailed = ev.Failed
+		if ev.UUID != "" {
+			st.messages[idx].UUID = ev.UUID
+		}
 		return true
 
 	default:
@@ -213,6 +222,9 @@ func appendChunk(st *foldState, role string, ev ProviderRuntimeEvent, partial bo
 		} else {
 			last.Text += text
 		}
+		if ev.UUID != "" {
+			last.UUID = ev.UUID
+		}
 		return true
 	}
 
@@ -227,6 +239,7 @@ func appendChunk(st *foldState, role string, ev ProviderRuntimeEvent, partial bo
 	if acpID != "" {
 		msg.AcpMsgID = acpID
 	}
+	msg.UUID = ev.UUID
 	st.messages = append(st.messages, msg)
 	return true
 }

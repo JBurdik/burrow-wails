@@ -26,6 +26,7 @@ export interface ChatMessage {
   toolRawName?: boolean; // true when `text` is a raw tool name (native transport) vs already-human ACP title
   turnMs?: number;      // on a user message: how long the turn it opened took (persisted with the message)
   _acpMsgId?: string;   // ACP messageId — identity for incremental chunk append
+  uuid?: string;        // latest Claude record uuid behind this message — the rewind/fork resume point (chatrewind.go)
   // Set on a "system-info" row that records a spawn: the thread delegated, and
   // this is the child it created. The id is what makes the row clickable —
   // clicking opens the Right Panel on that sub-agent.

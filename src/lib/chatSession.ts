@@ -237,6 +237,14 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   interrupt(): Promise<void>;
   /** Wipe the transcript and the agent session; Go publishes session.reset{cleared}. */
   clear(): Promise<void>;
+  /**
+   * Drop this user message and everything after it; the agent's next turn
+   * continues from just before it (Claude only, `chat_rewind`). Resolves false
+   * when Go refused (already reported).
+   */
+  rewind(message: ChatMessage): Promise<boolean>;
+  /** A new chat continuing from this message's turn (`chat_fork`). Resolves its id, or null. */
+  fork(message: ChatMessage): Promise<number | null>;
   /** A selector push we sent; `restore` marks our own restore push, whose reply must not restore again. */
   trackAcpControl(rpcId: number, restore?: boolean): void;
   /** Optimistically show an ACP selector pick ("mode", or a config option id) before the adapter confirms. */
@@ -513,6 +521,33 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       // The reset that empties the transcript arrives on the events channel.
       await s.listenEvents();
       await s.deps.invoke("chat_clear", { chatId }).catch((e: unknown) => s.notice(`Could not clear the chat: ${e}`));
+    },
+    async rewind(message) {
+      const before = s.messages.value;
+      const index = before.findIndex((m) => m.id === message.id && m.role === message.role);
+      if (index < 0) return false;
+      // Cut first: a save racing the call must write the truncated transcript,
+      // not put the dropped turns back. Queued follow-ups stay queued.
+      s.messages.value = [...before.slice(0, index), ...before.slice(index).filter((m) => m.role === "queued")];
+      try {
+        await s.deps.invoke("chat_rewind", { chatId, index, text: message.text });
+        return true;
+      } catch (e) {
+        s.messages.value = before;
+        s.notice(`Could not rewind: ${e}`);
+        return false;
+      }
+    },
+    async fork(message) {
+      const index = s.messages.value.findIndex((m) => m.id === message.id && m.role === message.role);
+      if (index < 0) return null;
+      try {
+        const chat = await s.deps.invoke<{ id: number }>("chat_fork", { chatId, index, text: message.text });
+        return chat.id;
+      } catch (e) {
+        s.notice(`Could not fork: ${e}`);
+        return null;
+      }
     },
     trackAcpControl(rpcId, restore = false) {
       s.acpControlIds.add(rpcId);

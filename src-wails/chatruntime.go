@@ -94,7 +94,9 @@ func (a *App) ensureClaude(c Chat) error {
 		return nil
 	}
 	cwd := a.chatCwd(c)
-	return a.startClaude(id, cwd, c.ClaudeSessionID, a.claudeLaunchFor(c, cwd))
+	l := a.claudeLaunchFor(c, cwd)
+	l.ResumeAt = a.chatResumeAt(c.ID)
+	return a.startClaude(id, cwd, c.ClaudeSessionID, l)
 }
 
 // startRPC starts a Codex app-server or ACP adapter session and registers it
@@ -268,7 +270,7 @@ func (a *App) ChatClear(chatID int64) error {
 	if err := a.DeleteChatMessages(int(chatID)); err != nil {
 		return err
 	}
-	if _, err := a.db.Exec(`UPDATE chats SET claude_session_id = '', message_count = 0 WHERE id = ?`, chatID); err != nil {
+	if _, err := a.db.Exec(`UPDATE chats SET claude_session_id = '', resume_at = '', message_count = 0 WHERE id = ?`, chatID); err != nil {
 		return err
 	}
 	a.emitChatLine(id, chatRuntimeKind, "clear")
@@ -386,7 +388,9 @@ func (a *App) recordChatSessionID(id, sessionID string) {
 	if chatID <= 0 || sessionID == "" || a.db == nil {
 		return
 	}
-	res, err := a.db.Exec(`UPDATE chats SET claude_session_id = ? WHERE id = ? AND claude_session_id != ?`, sessionID, chatID, sessionID)
+	// A new id is also what a rewind/fork start reports (--fork-session), so
+	// it consumes the pending resume point with it.
+	res, err := a.db.Exec(`UPDATE chats SET claude_session_id = ?, resume_at = '' WHERE id = ? AND claude_session_id != ?`, sessionID, chatID, sessionID)
 	if err == nil {
 		if n, _ := res.RowsAffected(); n > 0 {
 			busEmit("chats-changed", nil)

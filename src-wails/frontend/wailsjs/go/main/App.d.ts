@@ -35,9 +35,13 @@ export function ChatClear(arg1:number):Promise<void>;
 
 export function ChatFoldedOrd(arg1:string):Promise<number>;
 
+export function ChatFork(arg1:number,arg2:number,arg3:string):Promise<main.Chat>;
+
 export function ChatInterrupt(arg1:number):Promise<void>;
 
 export function ChatRestart(arg1:number):Promise<void>;
+
+export function ChatRewind(arg1:number,arg2:number,arg3:string):Promise<void>;
 
 export function ChatSend(arg1:number,arg2:string,arg3:Array<string>):Promise<void>;
 

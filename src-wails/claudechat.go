@@ -163,6 +163,12 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 	}
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
+		// Always forked: the session being resumed keeps its full history, so
+		// a fork's parent is untouched and a rewind can still be undone by
+		// hand. The new id is recorded from system/init (recordChatSessionID).
+		if l.ResumeAt != "" {
+			args = append(args, "--resume-session-at", l.ResumeAt, "--fork-session")
+		}
 	}
 	// The Burrow rule rides every chat; it is no longer in the global CLAUDE.md.
 	sys := docAsset("agentdocs/claude-rule.md")

@@ -193,6 +193,9 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE chats ADD COLUMN permission_mode TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE chats ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE chats ADD COLUMN append_system_prompt TEXT NOT NULL DEFAULT ''`,
+		// A pending rewind/fork resume point (chatrewind.go), cleared once the
+		// forked session reports its own id.
+		`ALTER TABLE chats ADD COLUMN resume_at TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
