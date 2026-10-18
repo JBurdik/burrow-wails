@@ -299,6 +299,7 @@ func (w *chatStreamWriter) foldedOrd(chatID string) (int64, bool, error) {
 // assuming every emitted line was actually processed — false across a crash,
 // and the trim would then delete lines nobody rendered.
 func (a *App) emitChatLine(chatID, kind, line string) {
+	a.chatRT.touchChat(chatID, time.Now())
 	var ord int64 = -1
 	if w := a.chatStream(); w != nil {
 		ord = w.append(chatID, kind, line)

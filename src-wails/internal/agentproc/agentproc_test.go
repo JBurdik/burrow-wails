@@ -40,52 +40,6 @@ func TestStopAllKillsEveryLiveSession(t *testing.T) {
 	}
 }
 
-func TestReapIdleStopsOnlySilentSessions(t *testing.T) {
-	m := NewManager()
-	defer m.StopAll()
-	for _, id := range []string{"stale", "fresh"} {
-		if err := m.Start(id, "sleep", []string{"60"}, "", nil, func(string) {}, func() {}); err != nil {
-			t.Fatalf("start %s: %v", id, err)
-		}
-	}
-	// Backdate one session past the threshold; the other stays recent.
-	m.mu.Lock()
-	m.sessions["stale"].lastSeen = time.Now().Add(-time.Hour)
-	m.mu.Unlock()
-
-	reaped := m.ReapIdle(30 * time.Minute)
-
-	if len(reaped) != 1 || reaped[0] != "stale" {
-		t.Fatalf("reaped = %v, want [stale]", reaped)
-	}
-	if m.Alive("stale") {
-		t.Fatal("stale session survived the sweep")
-	}
-	if !m.Alive("fresh") {
-		t.Fatal("fresh session was reaped")
-	}
-}
-
-// A streaming turn writes no stdin, so output alone has to keep it alive.
-func TestOutputKeepsSessionFromBeingReaped(t *testing.T) {
-	m := NewManager()
-	defer m.StopAll()
-	lines := make(chan string, 1)
-	if err := m.Start("busy", "echo", []string{"hello"}, "", nil,
-		func(l string) { lines <- l }, func() {}); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	m.mu.Lock()
-	m.sessions["busy"].lastSeen = time.Now().Add(-time.Hour)
-	m.mu.Unlock()
-
-	<-lines // the streamed line must have touched lastSeen
-
-	if reaped := m.ReapIdle(30 * time.Minute); len(reaped) != 0 {
-		t.Fatalf("reaped a session that just streamed output: %v", reaped)
-	}
-}
-
 // Send now = Stop + Start under the same id + send. The killed process exits
 // asynchronously; its exit must not reach the channel the replacement now owns.
 func TestStoppedSessionIsSilenced(t *testing.T) {

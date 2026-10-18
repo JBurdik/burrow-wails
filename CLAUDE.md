@@ -150,6 +150,16 @@ Go-emitted `{"_burrow":"turn"[,"error"]}` marker** (→ `turn.completed` / `turn
 response to the runtime's own `session/prompt` or Codex's terminal turn notification — the rpc id never
 leaves Go, so there is no client-side prompt correlation any more.
 
+**Auto-sleep** (`chatsleep.go`): a sweep (1 min) stops a live chat process whose phase is settled
+(idle/done/failed/stale, no open ACP turn) and that had no activity for `uiPrefs.chatAutoSleepMinutes`
+(Settings → General, default 60, 0 = off; read fresh from `config.json`). Activity = a send, a start,
+any streamed line, or `chat_mark_active` — `chatAttention` pings it every minute for each chat on screen
+while the window has focus, which is how "never sleep a watched chat" reaches Go. The row gets
+`slept_at` (read-only on the wire; moon in Sidebar + composer); the next `chat_send` resumes and clears
+it — opening a chat does not wake it. It replaced `agentproc.ReapIdle`, which reaped on stdout silence
+and so killed a CLI blocked on a permission prompt. PTY agent tabs are **not** slept: killing one loses the
+TUI, and restoring it means relaunching `claude --resume <id>` into the same tab (not built).
+
 **`spawn` of a thread's sub-agent runs in Go** (`spawnSubagent`, `control.Deps.ChatRuntime`): profile
 (defaults duplicated from `subagentProfiles.ts`, test-guarded) → agent (arg / profile / parent's / default
 chat agent / first enabled) → row with launch settings (arg / profile / the parent's **when it runs on the

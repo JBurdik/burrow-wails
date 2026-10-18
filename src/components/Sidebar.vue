@@ -81,6 +81,7 @@
               <PhChatCenteredText v-else-if="row.tab.isChat" :size="14" class="shrink-0 text-muted-foreground" />
               <PhTerminal v-else :size="14" class="shrink-0 text-muted-foreground" />
               <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" />
+              <PhMoon v-if="chatIsAsleep(row.tab.chatId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground opacity-70" title="Sleeping — sending a message wakes it" />
               <input
                 v-if="editingTab?.wsId === row.ws.id && editingTab?.tabId === row.tab.id"
                 v-model="editingTabTitle"
@@ -557,6 +558,7 @@ import {
   PhCrown,
   PhUsersThree,
   PhAsterisk,
+  PhMoon,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
 import UpdateBanner from "./UpdateBanner.vue";
@@ -565,7 +567,7 @@ import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore, type TabSummary } from "@/stores/terminalTabs";
-import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
+import { chatAsleep, useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
 import { useUIStore } from "@/stores/ui";
 import { router } from "@/router";
 import { spinnerFrame } from "@/lib/spinner";
@@ -592,6 +594,7 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const chats = useClaudeChatsStore();
+const chatIsAsleep = (chatId: number | null | undefined) => chatId != null && chatAsleep(chats.sessions.find((s) => s.id === chatId));
 const ui = useUIStore();
 const git = useGitStore();
 const notif = useNotificationsStore();

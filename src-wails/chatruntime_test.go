@@ -248,7 +248,7 @@ func TestChatSendStartsAgainAfterReap(t *testing.T) {
 	}
 	// The CLI reports its session; the runtime records it on the row.
 	fake.onLine["1"](`{"type":"system","subtype":"init","session_id":"sess-9"}`)
-	_ = fake.Stop("1") // ReapIdle
+	_ = fake.Stop("1") // auto-sleep
 	if err := a.ChatSend(c.ID, "two", nil); err != nil {
 		t.Fatal(err)
 	}

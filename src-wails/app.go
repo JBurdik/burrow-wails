@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"burrow/internal/agentphase"
 	"burrow/internal/agentproc"
@@ -258,7 +257,7 @@ func (a *App) startup(ctx context.Context) {
 	// Warm the font list so the Settings pickers don't pay the ~1 s scan.
 	go ListFonts()
 
-	go a.reapIdleAgents()
+	go a.chatSleepLoop()
 
 	a.initControl(dataDir)
 
@@ -455,26 +454,6 @@ func (a *App) GetPtyForeground(id string) string {
 		return ""
 	}
 	return name
-}
-
-// Idle-agent reaping, modelled on t3code's ProviderSessionReaper (same
-// thresholds): a chat's CLI is only worth its ~150 MB while something is
-// happening on it. Killing it emits the usual exit event, so the frontend marks
-// the chat cold and the next prompt spawns a replacement with --resume.
-const (
-	agentIdleThreshold = 30 * time.Minute
-	agentSweepInterval = 5 * time.Minute
-)
-
-func (a *App) reapIdleAgents() {
-	for range time.Tick(agentSweepInterval) {
-		if a.claudeAgents == nil {
-			continue
-		}
-		if reaped := a.claudeAgents.ReapIdle(agentIdleThreshold); len(reaped) > 0 {
-			log.Printf("reaped %d idle agent session(s): %v", len(reaped), reaped)
-		}
-	}
 }
 
 // cleanupOnShutdown kills every agent CLI subprocess we started. Without it

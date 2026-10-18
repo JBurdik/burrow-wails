@@ -87,6 +87,13 @@
             </div>
             <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Auto-sleep idle chats</span>
+                <span class="text-[11px] text-muted-foreground">Stop a finished chat's agent process after this long without activity to free memory. Sending a message wakes it with its full context. Never sleeps a running turn, a pending question or a chat on screen.</span>
+              </div>
+              <Select v-model="chatAutoSleep" class="min-w-[200px]" :options="AUTO_SLEEP_OPTIONS" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>
                 <span class="text-[11px] text-muted-foreground">Default model for generated text — chat titles, commit messages, pull request content and branch names. Kept cheap by default.</span>
               </div>
@@ -1249,6 +1256,17 @@ const update = useUpdateStore();
 const chatAgentOptions = computed(() =>
   providers.chatAgents.map((a) => ({ value: a.id, label: a.providerId === "openai-compatible" ? a.name : `${a.name} (${transportLabel(a.transport as Exclude<typeof a.transport, "none">)})` })),
 );
+const AUTO_SLEEP_OPTIONS = [
+  { value: "0", label: "Off" },
+  { value: "15", label: "After 15 min" },
+  { value: "30", label: "After 30 min" },
+  { value: "60", label: "After 1 hour" },
+  { value: "120", label: "After 2 hours" },
+];
+const chatAutoSleep = computed({
+  get: () => String(ui.chatAutoSleepMinutes),
+  set: (value: string) => { ui.chatAutoSleepMinutes = Number(value); },
+});
 const SPAWN_MODE_OPTIONS = [
   { value: "terminal", label: "Terminal tab" },
   { value: "chat", label: "Chat" },

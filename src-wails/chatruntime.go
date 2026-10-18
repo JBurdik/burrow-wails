@@ -27,7 +27,8 @@ import (
 // ACP (acp.go). Each starts from the row the same way whoever asked.
 
 type chatRuntime struct {
-	locks sync.Map // chat id string → *sync.Mutex
+	locks  sync.Map // chat id string → *sync.Mutex
+	active sync.Map // chat id string → time.Time of last activity (chatsleep.go)
 
 	ctrlSeq     atomic.Int64
 	ctrlMu      sync.Mutex
@@ -150,7 +151,7 @@ func (a *App) ensureRPC(c Chat, transport string) error {
 
 // ChatSend is the one door for a prompt, whatever the transport: it starts the
 // process if there is none (resuming the row's session — also what makes a
-// send after agentproc.ReapIdle work) and then sends.
+// send after auto-sleep work, chatsleep.go) and then sends.
 func (a *App) ChatSend(chatID int64, text string, images []string) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
@@ -158,16 +159,19 @@ func (a *App) ChatSend(chatID int64, text string, images []string) error {
 	}
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
+	a.chatRT.touchChat(id, time.Now())
 	if t := chatTransport(c); t != "claude-cli" {
 		if err := a.ensureRPC(c, t); err != nil {
 			return fmt.Errorf("start %s: %w", t, err)
 		}
+		a.markChatAwake(chatID)
 		_, err := a.AcpSend(id, text, images)
 		return err
 	}
 	if err := a.ensureClaude(c); err != nil {
 		return fmt.Errorf("start claude: %w", err)
 	}
+	a.markChatAwake(chatID)
 	return a.ClaudeSend(id, text, c.ClaudeSessionID, images)
 }
 

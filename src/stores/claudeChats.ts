@@ -55,6 +55,9 @@ export interface ClaudeSession {
   permissionMode?: string;
   profileId?: string;
   appendSystemPrompt?: string;
+  // When auto-sleep stopped the idle process (src-wails/chatsleep.go); the
+  // next send wakes it. Server-owned like collectedAt.
+  sleptAt?: number;
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -118,6 +121,15 @@ interface ChatRow {
   permission_mode?: string;
   profile_id?: string;
   append_system_prompt?: string;
+  slept_at?: number;
+}
+
+/**
+ * Auto-sleep stopped this chat's process and nothing has woken it. The status
+ * check covers a wake whose `chats-changed` this client skipped as its own echo.
+ */
+export function chatAsleep(session: Pick<ClaudeSession, "sleptAt" | "status"> | undefined): boolean {
+  return !!session?.sleptAt && !["running", "waiting", "permission"].includes(session.status ?? "");
 }
 
 // The one place the column names and the client's field names meet. `busy`
@@ -144,6 +156,7 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     permissionMode: r.permission_mode || undefined,
     profileId: r.profile_id || undefined,
     appendSystemPrompt: r.append_system_prompt || undefined,
+    sleptAt: r.slept_at || undefined,
     busy: false,
   };
 }

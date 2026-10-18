@@ -133,9 +133,21 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     const count = Math.max(0, (watchers.get(chatId) ?? 0) + (value ? 1 : -1));
     if (count === 0) watchers.delete(chatId);
     else watchers.set(chatId, count);
-    if (value && windowFocused()) markSeen(chatId);
-    else refresh(chatId);
+    if (value && windowFocused()) {
+      markSeen(chatId);
+      markActive(chatId);
+    } else refresh(chatId);
   }
+
+  // Auto-sleep (src-wails/chatsleep.go) never stops a chat that is on screen
+  // while the window has focus — Go learns that from this heartbeat, which
+  // counts as activity. Well inside the shortest (15 min) sleep window.
+  function markActive(chatId: number): void {
+    void invoke("chat_mark_active", { chatId }).catch(() => {});
+  }
+  setInterval(() => {
+    for (const chatId of watchers.keys()) if (isWatching(chatId)) markActive(chatId);
+  }, 60_000);
 
   function forget(chatId: number): void {
     unlisteners.get(chatId)?.();

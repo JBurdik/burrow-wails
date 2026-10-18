@@ -588,6 +588,7 @@
             >
               <PhTextAa :size="13" />
             </button>
+            <span v-if="asleep" class="composer-pill pointer-events-none opacity-70" title="Sleeping: the agent process was stopped to free memory. Sending a message wakes it."><PhMoon :size="13" weight="fill" /></span>
             <!-- Agent + model in one popover (the old header bar is gone) -->
             <ModelPicker
               ref="modelPickerEl"
@@ -749,12 +750,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
-import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { chatAsleep, useClaudeChatsStore } from "@/stores/claudeChats";
 import { childrenOf } from "@/stores/chatTree";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { useEditorContextStore } from "@/stores/editorContext";
@@ -954,6 +955,7 @@ async function sendTranscriptNotes() {
 const emit = defineEmits<{ (e: "prompt-sent"): void }>();
 
 const chats = useClaudeChatsStore();
+const asleep = computed(() => chatAsleep(chats.sessions.find((s) => s.id === props.chatId)));
 const chatAttention = useChatAttentionStore();
 // Whether this instance holds one of chatAttention's watch counts. Tracked so
 // mount/unmount and isWatching flips stay balanced.
