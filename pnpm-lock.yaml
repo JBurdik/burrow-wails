@@ -93,7 +93,7 @@ importers:
         specifier: ^18.0.5
         version: 18.0.5
       mermaid:
-        specifier: ^11.16.0
+        specifier: 11.16.0
         version: 11.16.0
       pinia:
         specifier: ^2.2.0

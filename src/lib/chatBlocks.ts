@@ -2,6 +2,9 @@
 //
 //   ```visual     charts (a Vega-Lite subset), stat tiles, tables, text, columns
 //   ```questions  a form: every question at once, clickable choices, one Send
+//   ```mermaid    a diagram card (rendered after insertion, see mermaidRender.ts)
+//   {"page": …}   inside ```visual: a card that opens an agent-written HTML file
+//                 in a sandboxed iframe — never inline in the transcript
 //
 // Both are plain JSON in the fence, so they work for every provider (Claude,
 // Codex, ACP) with no protocol support — the agent learns the format from the
@@ -57,7 +60,7 @@ export function renderVisual(text: string): string | null {
 }
 
 function isPart(p: Part): boolean {
-  return ["chart", "stats", "table", "text", "columns"].some((k) => k in p);
+  return ["chart", "stats", "table", "text", "columns", "page"].some((k) => k in p);
 }
 
 function renderPart(part: Part): string {
@@ -68,6 +71,7 @@ function renderPart(part: Part): string {
   else if (Array.isArray(part.stats)) body = statsPart(part.stats as Part[]);
   else if (part.table && typeof part.table === "object") body = tablePart(part.table as Part);
   else if (typeof part.text === "string") body = `<div class="cv-text">${plainMarked.parse(part.text) as string}</div>`;
+  else if (part.page && typeof part.page === "object") body = pagePart(part.page as Part);
   else if (Array.isArray(part.columns)) body = `<div class="cv-columns">${(part.columns as Part[]).map((c) => `<div class="cv-col">${renderPart(c)}</div>`).join("")}</div>`;
   return `<div class="cv-part">${title}${body}</div>`;
 }
@@ -90,6 +94,45 @@ function tablePart(table: Part): string {
   const head = columns.length ? `<thead><tr>${columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>` : "";
   const body = rows.map((r) => `<tr>${cells(r).map((v) => `<td${typeof v === "number" ? ' class="cv-num"' : ""}>${fmtNum(v)}</td>`).join("")}</tr>`).join("");
   return `<div class="cv-table-wrap"><table class="cv-table">${head}<tbody>${body}</tbody></table></div>`;
+}
+
+// Only the card is rendered here; AgentChat reads the file and shows it in
+// HtmlPageModal (sandboxed iframe, see pageSrcdoc) when Open is clicked.
+function pagePart(page: Part): string {
+  const path = typeof page.path === "string" ? page.path.trim() : "";
+  if (!/\.html?$/i.test(path)) return "";
+  const title = escapeHtml(page.title || path.split("/").pop());
+  const desc = page.description ? `<div class="cv-page-desc">${escapeHtml(page.description)}</div>` : "";
+  return `<div class="cv-page"><div class="cv-page-body"><div class="cv-page-title">${title}</div>${desc}</div>`
+    + `<button type="button" class="cv-page-open" data-cv-page="${escapeHtml(path)}" data-cv-page-title="${title}">Open</button></div>`;
+}
+
+// The CSP goes first so it is in force before any agent markup is parsed: no
+// fetch / websocket / form post anywhere (the app's loopback endpoints
+// included), inline script and style only. The iframe's sandbox (scripts, no
+// same-origin) is the other half.
+const PAGE_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'">`;
+export function pageSrcdoc(html: string): string {
+  return html.replace(/^(\s*<!doctype[^>]*>)?/i, (doctype) => `${doctype}${PAGE_CSP}`);
+}
+
+// ── mermaid ─────────────────────────────────────────────────────────────────
+
+/** A closed fence only: a block still streaming in stays a plain code block. */
+function fenceClosed(raw: string): boolean {
+  return /\n {0,3}(`{3,}|~{3,})[ \t]*\n*$/.test(raw);
+}
+
+// The placeholder IS the fallback: a plain code block until AgentChat swaps the
+// rendered SVG into .cm-diagram (and adds .cm-ok, which reveals the toolbar).
+// Invalid source never gets .cm-ok, so it stays exactly a code block.
+// The source rides URI-encoded: DOMPurify drops any attribute whose value
+// contains `-->` (an mXSS guard), and nearly every flowchart has one.
+export function renderMermaidPlaceholder(text: string): string {
+  const src = escapeHtml(text);
+  return `<div class="cm-mermaid" data-mermaid-src="${encodeURIComponent(text)}">`
+    + `<div class="cm-tools"><span class="cm-label">Diagram</span><button type="button" data-cm-action="copy" title="Copy source">Copy</button><button type="button" data-cm-action="open" title="Open full size">Open</button></div>`
+    + `<div class="cm-diagram"><pre><code class="language-mermaid">${src}</code></pre></div></div>`;
 }
 
 // A Vega-Lite subset: mark bar | line | area | point (circle, square) | arc,
@@ -263,6 +306,7 @@ const chatMarked = new Marked({
       const lang = (token.lang ?? "").trim().split(/\s+/)[0];
       if (lang === "visual") return renderVisual(token.text) ?? false;
       if (lang === "questions") return renderQuestions(token.text, answeredCtx) ?? false;
+      if (lang === "mermaid" && token.text.trim() && fenceClosed(token.raw)) return renderMermaidPlaceholder(token.text);
       return false;
     },
   },

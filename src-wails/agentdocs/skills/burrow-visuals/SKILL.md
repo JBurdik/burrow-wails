@@ -1,12 +1,13 @@
 ---
 name: burrow-visuals
-description: Show charts, stat tiles and tables inline in a Burrow chat with a fenced ```visual block, or ask the user several questions at once as a clickable form with a ```questions block. Use only inside a Burrow chat (the BURROW_CHAT_ID environment variable is set), when a chart, table or set of numbers says it better than prose, or when you need the user's decisions on two or more questions.
+description: Show charts, stat tiles, tables and mermaid diagrams inline in a Burrow chat (```visual / ```mermaid blocks), link an HTML page you wrote as an openable card, or ask the user several questions at once as a clickable form with a ```questions block. Use only inside a Burrow chat (the BURROW_CHAT_ID environment variable is set), when a chart, table or set of numbers says it better than prose, or when you need the user's decisions on two or more questions.
 ---
 
 # burrow-visuals
 
-A Burrow chat draws two kinds of fenced code block natively. Both hold **one
-JSON object** and nothing else. Invalid JSON is shown as a plain code block, so
+A Burrow chat draws three kinds of fenced code block natively. `visual` and
+`questions` hold **one JSON object** and nothing else; `mermaid` holds mermaid
+source. Invalid JSON is shown as a plain code block, so
 check your JSON before you send it.
 
 They only render in a Burrow **chat** (`BURROW_CHAT_ID` is set). A Burrow
@@ -28,6 +29,8 @@ The block is one of:
     objects keyed by column name, and then `columns` is optional.
   - `{"text": "markdown"}`
   - `{"columns": [part, …]}`: parts side by side
+  - `{"page": {"title": "…", "path": "…", "description"?: "…"}}`: a card with
+    an Open button for an HTML page you wrote (see below)
 
 ### Chart subset
 
@@ -52,6 +55,34 @@ The block is one of:
     "encoding": {"x": {"field": "pkg"}, "y": {"field": "n"}}}}
 ]}
 ```
+
+## ```mermaid
+
+Use it for structure prose explains badly: a flow or state machine, a sequence
+of calls between components, an ER model, a dependency graph. Not for data
+(use a chart) and not for a list of steps (use a list). Keep it small, a dozen
+nodes or so; plain labels only (no HTML in labels). Invalid source is shown as
+a code block.
+
+```mermaid
+flowchart LR
+  UI -->|invoke| Go --> SQLite
+```
+
+## Page cards
+
+For a mockup or a small interactive tool, write **one self-contained HTML
+file** (inline CSS and JS; images as `data:` URLs) and link it with a page
+part. Put it under `$BURROW_SESSION_DIR` unless it belongs in the project. The
+path is absolute or relative to the chat's working directory and must end in
+`.html`.
+
+```visual
+{"rows": [{"page": {"title": "Settings mockup", "description": "Two layouts side by side", "path": "/abs/path/settings.html"}}]}
+```
+
+The page opens in a sandbox: scripts run, but it has **no network at all**
+(no fetch, no CDN scripts or fonts, no form posts) and no access to the app.
 
 ## ```questions
 

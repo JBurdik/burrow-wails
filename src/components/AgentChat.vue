@@ -744,11 +744,12 @@
     </div>
     </div><!-- end .chat-main -->
 
+    <HtmlPageModal v-if="pageView" v-bind="pageView" @close="pageView = null" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch, inject } from "vue";
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
 import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
@@ -784,7 +785,10 @@ import { editOf, fmtDuration, hunkLines, mergeEdits, type FileEdit } from "@/lib
 import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { formatAnswers, renderChatMd } from "@/lib/chatBlocks";
+import { escapeHtml, formatAnswers, renderChatMd } from "@/lib/chatBlocks";
+import { cachedMermaid, renderMermaid } from "@/lib/mermaidRender";
+import { useDiagram } from "@/composables/useDiagram";
+import HtmlPageModal from "./HtmlPageModal.vue";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import {
   getAcpCapabilities, getAcpChatSetting, getLastAcpSetting,
@@ -819,6 +823,15 @@ function renderAssistantMd(msg: ChatMessage): string {
 // lives in the DOM (aria-pressed) until Send reads it back.
 function onRichBlockClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
+  const cm = target.closest<HTMLElement>("[data-cm-action]");
+  if (cm) {
+    const src = decodeURIComponent(cm.closest<HTMLElement>(".cm-mermaid")?.dataset.mermaidSrc ?? "");
+    if (cm.dataset.cmAction === "open") useDiagram().showDiagram(src);
+    else void navigator.clipboard.writeText(src);
+    return;
+  }
+  const page = target.closest<HTMLElement>("[data-cv-page]");
+  if (page) { void openPage(page.dataset.cvPage ?? "", page.dataset.cvPageTitle ?? ""); return; }
   const opt = target.closest<HTMLButtonElement>(".cq-opt");
   if (opt && !opt.disabled) {
     const q = opt.closest<HTMLElement>(".cq-q");
@@ -839,6 +852,50 @@ function onRichBlockClick(event: MouseEvent) {
   const notes = skip ? "" : form.querySelector<HTMLTextAreaElement>(".cq-notes")?.value ?? "";
   form.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea").forEach((el) => (el.disabled = true));
   void sendMessage(formatAnswers(answers, notes));
+}
+
+// ```mermaid blocks arrive as placeholders (a plain code block carrying the
+// source); swap in the rendered SVG after every patch. A cached diagram swaps
+// synchronously — v-html re-inserts the placeholder on every streamed token,
+// and this runs before paint, so it doesn't flicker. Invalid source rejects
+// and stays a code block.
+function hydrateMermaid() {
+  for (const el of scrollEl.value?.querySelectorAll<HTMLElement>(".cm-mermaid:not([data-cm-state])") ?? []) {
+    el.dataset.cmState = "pending";
+    const src = decodeURIComponent(el.dataset.mermaidSrc ?? "");
+    const show = (svg: string) => {
+      const box = el.querySelector(".cm-diagram");
+      if (!box) return;
+      box.innerHTML = svg;
+      el.classList.add("cm-ok");
+      el.dataset.cmState = "ok";
+    };
+    const hit = cachedMermaid(src);
+    if (hit) show(hit);
+    else renderMermaid(src).then(show, () => (el.dataset.cmState = "failed"));
+  }
+}
+onMounted(hydrateMermaid);
+onUpdated(hydrateMermaid);
+// A theme switch doesn't re-run v-html; re-render the diagrams already shown.
+// (useUIStore() here: the `uiStore` const is declared further down.)
+watch(() => [useUIStore().theme, useUIStore().themeMode], () => nextTick(() => {
+  scrollEl.value?.querySelectorAll<HTMLElement>(".cm-mermaid[data-cm-state='ok']").forEach((el) => delete el.dataset.cmState);
+  hydrateMermaid();
+}));
+
+// Page cards (```visual {"page": …}): the agent's HTML file opens in a
+// sandboxed iframe modal, never inline in the transcript.
+const pageView = ref<{ title: string; path: string; html: string } | null>(null);
+async function openPage(path: string, title: string) {
+  const abs = path.startsWith("/") ? path : `${props.cwd}/${path}`;
+  let html: string;
+  try {
+    html = await invoke<string>("read_text_file_checked", { path: abs });
+  } catch (e) {
+    html = `<p style="font:13px system-ui;color:#b91c1c;padding:16px">Could not read ${escapeHtml(abs)}: ${escapeHtml(e)}</p>`;
+  }
+  pageView.value = { title: title || abs, path: abs, html };
 }
 
 // A sent message that still carries a `wrapPaste` block (see composerDom.ts)
