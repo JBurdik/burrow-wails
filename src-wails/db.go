@@ -215,6 +215,11 @@ func migrate(db *sql.DB) error {
 	if err := migrateChatSearch(db); err != nil {
 		return err
 	}
+	for _, s := range promptSearchSchema() {
+		if _, err := db.Exec(s); err != nil {
+			return err
+		}
+	}
 	return migratePtyPhaseColumns(db)
 }
 

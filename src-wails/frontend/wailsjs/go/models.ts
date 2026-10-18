@@ -973,6 +973,30 @@ export namespace main {
 	        this.locked = source["locked"];
 	    }
 	}
+	export class PromptSearchHit {
+	    agent: string;
+	    cwd: string;
+	    session_id: string;
+	    ts: number;
+	    snippet: string;
+	    text: string;
+	    resumable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PromptSearchHit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agent = source["agent"];
+	        this.cwd = source["cwd"];
+	        this.session_id = source["session_id"];
+	        this.ts = source["ts"];
+	        this.snippet = source["snippet"];
+	        this.text = source["text"];
+	        this.resumable = source["resumable"];
+	    }
+	}
 	export class ProviderLatest {
 	    version: string;
 	    error: string;

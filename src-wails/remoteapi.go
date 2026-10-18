@@ -450,6 +450,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"load_chat_events_since": {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
 	"load_chat_stream_since": {Method: "LoadChatStreamSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
 	"search_chats":           {Method: "SearchChats", Args: []string{"query", "limit"}, Scope: scopeOrchRead},
+	"search_prompts":         {Method: "SearchPrompts", Args: []string{"query", "agent", "limit"}, Scope: scopeOrchRead},
 	"delete_chat_messages":   {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"publish_chat_note":      {Method: "PublishChatNote", Args: []string{"chatId", "note"}, Scope: scopeOrchOperate},
 

@@ -13,7 +13,7 @@
               spellcheck="false"
               autocomplete="off"
               @keydown.esc.prevent="close"
-              @keydown.enter.prevent="activate"
+              @keydown.enter.prevent="activate($event)"
               @keydown.up.prevent="move(-1)"
               @keydown.down.prevent="move(1)"
               @keydown.tab.prevent="cycleFilter($event.shiftKey ? -1 : 1)"
@@ -28,6 +28,18 @@
                 :class="filter === f.key ? 'bg-selected text-foreground' : 'text-muted-foreground hover:bg-hover hover:text-foreground'"
                 @mousedown.prevent="filter = f.key"
               >{{ f.label }}</button>
+              <template v-if="filter === 'prompts'">
+                <div class="mx-1 h-4 w-px bg-border" />
+                <button
+                  v-for="a in PROMPT_AGENTS"
+                  :key="a.key"
+                  type="button"
+                  tabindex="-1"
+                  class="h-[26px] rounded-lg px-2 font-sans text-[12px] transition-colors duration-75"
+                  :class="promptAgent === a.key ? 'bg-selected text-foreground' : 'text-muted-foreground hover:bg-hover hover:text-foreground'"
+                  @mousedown.prevent="promptAgent = a.key"
+                >{{ a.label }}</button>
+              </template>
             </div>
           </div>
 
@@ -45,22 +57,29 @@
               >
                 <img v-if="item.iconUrl" :src="item.iconUrl" class="h-4 w-4 shrink-0 rounded-[4px] object-cover" />
                 <component v-else :is="item.icon" :size="16" :color="item.color" class="shrink-0" />
-                <span class="max-w-[55%] shrink-0 truncate font-sans text-[13px] text-foreground">{{ item.title }}</span>
-                <span v-if="item.desc" class="min-w-0 flex-1 truncate font-sans text-[12px] text-muted-foreground/80">{{ item.desc }}</span>
-                <div v-else class="flex-1" />
+                <span class="truncate font-sans text-[13px] text-foreground" :class="item.segments ? 'min-w-0 flex-1' : 'max-w-[55%] shrink-0'">
+                  <template v-if="item.segments"><template v-for="(seg, i) in item.segments" :key="i"><mark v-if="seg.match" class="s-mark">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template></template></template>
+                  <template v-else>{{ item.title }}</template>
+                </span>
+                <span v-if="item.desc" class="truncate font-sans text-[12px] text-muted-foreground/80" :class="item.segments ? 'max-w-[35%] shrink-0' : 'min-w-0 flex-1'">{{ item.desc }}</span>
+                <div v-else-if="!item.segments" class="flex-1" />
                 <span v-if="item.badge" class="shrink-0 rounded-md bg-hover px-1.5 py-0.5 font-sans text-[10.5px] text-muted-foreground">{{ item.badge }}</span>
                 <kbd v-if="item.shortcut" class="s-key shrink-0">{{ item.shortcut }}</kbd>
               </div>
             </template>
             <div v-if="!sections.length" class="px-4 py-6 text-center font-sans text-[12px] text-muted-foreground/70">
-              {{ !hasQuery && (filter === "files" || filter === "chats") ? "Type to search" : "No matches" }}
+              {{ !hasQuery && (filter === "files" || filter === "chats" || filter === "prompts") ? "Type to search" : "No matches" }}
             </div>
           </div>
 
           <div class="flex h-9 shrink-0 items-center gap-3 border-t border-border px-5 font-sans text-[11px] text-muted-foreground/80">
             <span><kbd class="s-key">↑↓</kbd> navigate</span>
             <span class="opacity-50">·</span>
-            <span><kbd class="s-key">↵</kbd> open</span>
+            <span><kbd class="s-key">↵</kbd> {{ selectedItem?.alt ? (selectedItem.resumable ? "resume" : "copy prompt") : "open" }}</span>
+            <template v-if="selectedItem?.alt && selectedItem.resumable">
+              <span class="opacity-50">·</span>
+              <span><kbd class="s-key">⌘↵</kbd> copy prompt</span>
+            </template>
             <template v-if="!projectOnly">
               <span class="opacity-50">·</span>
               <span><kbd class="s-key">⇥</kbd> filter</span>
@@ -91,6 +110,9 @@ import { useUIStore } from "@/stores/ui";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
+import { binaryFor } from "@/lib/providers";
+import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
+import OpenAIIcon from "@/components/icons/OpenAIIcon.vue";
 import router from "@/router";
 import { pickDir } from "@/lib/pickPath";
 import type { Component } from "vue";
@@ -132,28 +154,43 @@ const hits = ref<SearchHit[]>([]);
 // active project.
 interface ChatHit { chat_id: number; workspace_id: number; title: string; snippet: string; ts: number }
 const chatHits = ref<ChatHit[]>([]);
+// Every prompt the user typed into Claude Code / Codex, in or out of Burrow
+// (promptsearch.go indexes the agents' own history.jsonl). The match inside
+// `snippet` is wrapped in \x02 … \x03.
+interface PromptHit { agent: string; cwd: string; session_id: string; ts: number; snippet: string; text: string; resumable: boolean }
+const promptHits = ref<PromptHit[]>([]);
+type PromptAgent = "" | "claude" | "codex";
+const PROMPT_AGENTS: { key: PromptAgent; label: string }[] = [
+  { key: "", label: "Any agent" },
+  { key: "claude", label: "Claude" },
+  { key: "codex", label: "Codex" },
+];
+const promptAgent = ref<PromptAgent>("");
 let searchTimer: number | undefined;
 let searchSeq = 0;
 
-watch(query, (q) => {
+watch([query, promptAgent], ([q]) => {
   clearTimeout(searchTimer);
   const term = q.trim();
   const cwd = wsStore.active?.path;
   if (term.length < 2 || projectOnly.value) {
     hits.value = [];
     chatHits.value = [];
+    promptHits.value = [];
     return;
   }
   const seq = ++searchSeq;
   searchTimer = window.setTimeout(async () => {
-    const [found, chats] = await Promise.all([
+    const [found, chats, prompts] = await Promise.all([
       cwd ? invoke<SearchHit[]>("search_files", { cwd, query: term, limit: 24 }).catch(() => []) : [],
       invoke<ChatHit[]>("search_chats", { query: term, limit: 8 }).catch(() => []),
+      invoke<PromptHit[]>("search_prompts", { query: term, agent: promptAgent.value, limit: 20 }).catch(() => []),
     ]);
     // Drop a slow reply whose query the user has already typed past.
     if (seq === searchSeq) {
       hits.value = found;
       chatHits.value = chats;
+      promptHits.value = prompts;
     }
   }, 140);
 });
@@ -167,11 +204,12 @@ const ICON_MAP: Record<string, Component> = {
 };
 
 // Filter chips (⇥ cycles). "commands" covers everything runnable.
-type Filter = "all" | "files" | "chats" | "commands";
+type Filter = "all" | "files" | "chats" | "prompts" | "commands";
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "files", label: "Files" },
   { key: "chats", label: "Chats" },
+  { key: "prompts", label: "Prompts" },
   { key: "commands", label: "Commands" },
 ];
 const filter = ref<Filter>("all");
@@ -190,7 +228,12 @@ interface SpotlightItem {
   color: string;
   shortcut?: string;
   badge?: string;
+  /** Title rendered with highlighted matches instead of `title`. */
+  segments?: { text: string; match: boolean }[];
   action: () => void;
+  /** ⌘↵ */
+  alt?: () => void;
+  resumable?: boolean;
 }
 
 const MUTED = "#8b8b8b";
@@ -316,6 +359,75 @@ async function openChatHit(h: ChatHit) {
   termTabs.openChat(ws.id, h.chat_id);
 }
 
+function relTime(ms: number): string {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  if (s < 86400 * 30) return `${Math.round(s / 86400)}d ago`;
+  return new Date(ms).toLocaleDateString();
+}
+
+// snippet() marks matches with \x02 … \x03 — split into text segments so the
+// highlight is markup Vue escapes, never v-html of a prompt.
+function markSegments(snippet: string) {
+  return snippet.replace(/\s+/g, " ").split(/(\x02[^\x03]*\x03)/).filter(Boolean).map((part) =>
+    part.startsWith("\x02") ? { text: part.slice(1, -1), match: true } : { text: part, match: false });
+}
+
+const promptItems = computed<SpotlightItem[]>(() =>
+  promptHits.value.map((h, i) => ({
+    id: `prompt-${i}`,
+    title: h.text,
+    segments: markSegments(h.snippet),
+    desc: [h.cwd.split("/").filter(Boolean).pop(), relTime(h.ts), h.resumable ? "" : "expired"].filter(Boolean).join(" · "),
+    icon: (h.agent === "codex" ? OpenAIIcon : ClaudeIcon) as Component,
+    color: h.agent === "codex" ? "#74aa9c" : "#d97757",
+    // An expired session (transcript pruned) can't resume: ↵ copies instead.
+    action: () => { close(); void (h.resumable ? resumePrompt(h) : copyPrompt(h.text)); },
+    alt: () => { close(); void copyPrompt(h.text); },
+    resumable: h.resumable,
+  })),
+);
+
+// The project the session ran in: exact path, else the deepest workspace that
+// contains it (a subdirectory of a repo), else the active one — the tab still
+// starts in the session's cwd, which is what `claude --resume` keys on.
+function workspaceFor(cwd: string) {
+  const all = wsStore.workspaces;
+  return all.find((w) => w.path === cwd)
+    ?? all.filter((w) => cwd.startsWith(w.path.replace(/\/$/, "") + "/")).sort((a, b) => b.path.length - a.path.length)[0]
+    ?? wsStore.active;
+}
+
+// Same path as the control API's new_tab: open the workspace, ask its Terminal
+// for a tab running the command, then route to it.
+async function resumePrompt(h: PromptHit) {
+  // The id lands in a shell command line; history files are not ours to trust.
+  if (!/^[\w-]+$/.test(h.session_id)) return;
+  const inst = providers.active.find((i) => i.providerId === h.agent);
+  const bin = inst ? binaryFor(inst) : h.agent;
+  const cmd = h.agent === "codex" ? `${bin} resume ${h.session_id}` : `${bin} --resume ${h.session_id}`;
+  const target = workspaceFor(h.cwd);
+  if (!target) {
+    notifStore.push({ type: "error", title: "Open a project first", source: "system" });
+    return;
+  }
+  wsStore.open(target);
+  const ptyId = await termTabs.add(target.id, cmd, h.cwd ? { cwd: h.cwd } : undefined);
+  if (ptyId !== undefined) await router.push(`/ws/${target.id}/tab/${ptyId}`);
+}
+
+// ponytail: clipboard, not a composer insert — composers live in several
+// components with no shared door; paste lands it wherever the caret is.
+async function copyPrompt(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    notifStore.push({ type: "done", title: "Prompt copied", source: "system" });
+  } catch (e) {
+    notifStore.push({ type: "error", title: "Couldn't copy the prompt", body: String(e), source: "system" });
+  }
+}
+
 // Empty query = context + commands (your projects, then everything runnable).
 // Agents, scripts and file hits only appear once you type — running a raw
 // agent isn't a default action, and search results are meaningless empty.
@@ -326,6 +438,7 @@ const sections = computed(() => {
   }
   if (filter.value === "files") return [{ key: "files", label: "Files", items: fileItems.value }].filter((s) => s.items.length);
   if (filter.value === "chats") return [{ key: "chats", label: "In chats", items: chatItems.value }].filter((s) => s.items.length);
+  if (filter.value === "prompts") return [{ key: "prompts", label: "Prompts", items: promptItems.value }].filter((s) => s.items.length);
   if (filter.value === "commands") {
     return [
       { key: "commands", label: "Commands", items: commandItems.value },
@@ -340,6 +453,7 @@ const sections = computed(() => {
         { key: "scripts", label: "SCRIPTS", items: scriptItems.value },
         { key: "commands", label: "COMMANDS", items: commandItems.value },
         { key: "chats", label: "IN CHATS", items: chatItems.value },
+        { key: "prompts", label: "PROMPTS", items: promptItems.value.slice(0, 6) },
         { key: "files", label: "IN FILES", items: fileItems.value },
       ]
     : [
@@ -373,8 +487,12 @@ function move(dir: 1 | -1) {
   });
 }
 
-function activate() {
-  flatItems.value.find((i) => i.id === selectedId.value)?.action();
+const selectedItem = computed(() => flatItems.value.find((i) => i.id === selectedId.value));
+
+function activate(e: KeyboardEvent) {
+  const item = selectedItem.value;
+  if (e.metaKey && item?.alt) item.alt();
+  else item?.action();
 }
 
 function openSettingsAt(section: string) {
@@ -421,6 +539,8 @@ function show(opts?: { projectOnly?: boolean }) {
   query.value = "";
   hits.value = [];
   chatHits.value = [];
+  promptHits.value = [];
+  promptAgent.value = "";
   nextTick(() => {
     inputRef.value?.focus();
     selectFirst();
@@ -450,6 +570,12 @@ defineExpose({ show, close, newProject });
 
 /* Custom scrollbar (::-webkit-scrollbar has no Tailwind utility) and the
    Vue <Transition> phase classes stay as real CSS. */
+.s-mark {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 500;
+}
+
 .s-results::-webkit-scrollbar { width: 4px; }
 .s-results::-webkit-scrollbar-track { background: transparent; }
 .s-results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }

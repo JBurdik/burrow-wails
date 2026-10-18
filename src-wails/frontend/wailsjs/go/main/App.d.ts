@@ -315,6 +315,8 @@ export function SearchChats(arg1:string,arg2:number):Promise<Array<main.ChatSear
 
 export function SearchFiles(arg1:string,arg2:string,arg3:number):Promise<Array<main.SearchHit>>;
 
+export function SearchPrompts(arg1:string,arg2:string,arg3:number):Promise<Array<main.PromptSearchHit>>;
+
 export function SendFloatSnapshot(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
 export function SetBurrowMcpMaxDepth(arg1:number):Promise<void>;

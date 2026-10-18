@@ -626,6 +626,10 @@ export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3);
 }
 
+export function SearchPrompts(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SearchPrompts'](arg1, arg2, arg3);
+}
+
 export function SendFloatSnapshot(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['SendFloatSnapshot'](arg1, arg2, arg3, arg4);
 }

@@ -21,12 +21,13 @@ import (
 // App is the Wails-bound struct exposing methods to the frontend, replacing
 // the #[tauri::command] surface in src-tauri/src/lib.rs.
 type App struct {
-	ctx    context.Context
-	db     *sql.DB
-	daemon *DaemonClient
-	phases *PhaseStore
-	perms  *permRegistry
-	poller *phasePoller
+	ctx     context.Context
+	db      *sql.DB
+	daemon  *DaemonClient
+	phases  *PhaseStore
+	perms   *permRegistry
+	poller  *phasePoller
+	prompts *promptIndexer // nil until startup; refresh is nil-safe
 
 	streamOnce sync.Once
 	streamW    *chatStreamWriter
@@ -259,6 +260,7 @@ func (a *App) startup(ctx context.Context) {
 	go ListFonts()
 
 	go a.reapIdleAgents()
+	a.startPromptIndex()
 
 	a.initControl(dataDir)
 
