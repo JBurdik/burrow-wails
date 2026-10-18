@@ -357,6 +357,7 @@ export namespace main {
 	    type: string;
 	    messageId?: string;
 	    text?: string;
+	    uuid?: string;
 	    toolCallId?: string;
 	    name?: string;
 	    input?: Record<string, any>;
@@ -390,6 +391,7 @@ export namespace main {
 	        this.type = source["type"];
 	        this.messageId = source["messageId"];
 	        this.text = source["text"];
+	        this.uuid = source["uuid"];
 	        this.toolCallId = source["toolCallId"];
 	        this.name = source["name"];
 	        this.input = source["input"];

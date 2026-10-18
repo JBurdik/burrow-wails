@@ -39,6 +39,10 @@ type ProviderRuntimeEvent struct {
 	// text.delta / thinking.delta
 	MessageID string `json:"messageId,omitempty"`
 	Text      string `json:"text,omitempty"`
+	// UUID is the Claude stream-json record's own uuid (text / thinking /
+	// tool.started / tool.completed). The folded message keeps the latest one,
+	// which is what `--resume-session-at` takes for a rewind or fork.
+	UUID string `json:"uuid,omitempty"`
 
 	// tool.started / tool.completed
 	ToolCallID string         `json:"toolCallId,omitempty"`
@@ -269,6 +273,7 @@ func claudeAssistant(event map[string]any) []ProviderRuntimeEvent {
 		messageID = "claude-turn"
 	}
 
+	uuid := strField(event["uuid"])
 	out := []ProviderRuntimeEvent{}
 	// Context occupancy, and the only honest source for it: one assistant
 	// message's usage is one API request's prompt, so input + both cache halves
@@ -297,14 +302,14 @@ func claudeAssistant(event map[string]any) []ProviderRuntimeEvent {
 		}
 	}
 	if thinking != "" {
-		out = append(out, ProviderRuntimeEvent{Type: EvtThinkingDelta, MessageID: messageID, Text: thinking})
+		out = append(out, ProviderRuntimeEvent{Type: EvtThinkingDelta, MessageID: messageID, Text: thinking, UUID: uuid})
 	}
 
 	for _, block := range blocksOf(msg["content"]) {
 		switch strField(block["type"]) {
 		case "text":
 			if text := strField(block["text"]); text != "" {
-				out = append(out, ProviderRuntimeEvent{Type: EvtTextDelta, MessageID: messageID, Text: text})
+				out = append(out, ProviderRuntimeEvent{Type: EvtTextDelta, MessageID: messageID, Text: text, UUID: uuid})
 			}
 		case "tool_use":
 			id := strField(block["id"])
@@ -319,7 +324,7 @@ func claudeAssistant(event map[string]any) []ProviderRuntimeEvent {
 			if input == nil {
 				input = map[string]any{}
 			}
-			out = append(out, ProviderRuntimeEvent{Type: EvtToolStarted, ToolCallID: id, Name: name, Input: input})
+			out = append(out, ProviderRuntimeEvent{Type: EvtToolStarted, ToolCallID: id, Name: name, Input: input, UUID: uuid})
 		}
 	}
 	return out
@@ -344,6 +349,7 @@ func claudeToolResults(event map[string]any) []ProviderRuntimeEvent {
 			ToolCallID: id,
 			Output:     clip(toolResultText(block["content"])),
 			Failed:     failed,
+			UUID:       strField(event["uuid"]),
 		})
 	}
 	return out

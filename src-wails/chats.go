@@ -102,7 +102,8 @@ func chatsSchema() []string {
 			effort            TEXT    NOT NULL DEFAULT '',
 			permission_mode   TEXT    NOT NULL DEFAULT '',
 			profile_id        TEXT    NOT NULL DEFAULT '',
-			append_system_prompt TEXT NOT NULL DEFAULT ''
+			append_system_prompt TEXT NOT NULL DEFAULT '',
+			resume_at         TEXT    NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS chat_migrations (
 			name    TEXT PRIMARY KEY,

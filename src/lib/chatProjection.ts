@@ -21,6 +21,8 @@ export interface ChatEvent {
   type: string;
   messageId?: string;
   text?: string;
+  /** Claude stream-json record uuid (text/thinking/tool events). */
+  uuid?: string;
   toolCallId?: string;
   name?: string;
   input?: Record<string, unknown>;
@@ -89,6 +91,7 @@ export function applyChatEvent(state: ChatProjectionState, event: ChatEvent): bo
         // human summary; an ACP title is already a sentence. `input` is only
         // ever set by the native transport, which is what tells them apart.
         toolRawName: Boolean(event.input),
+        ...(event.uuid ? { uuid: event.uuid } : {}),
       });
       return true;
     }
@@ -101,6 +104,7 @@ export function applyChatEvent(state: ChatProjectionState, event: ChatEvent): bo
       if (!tool) return false;
       tool.toolOutput = event.output ?? "";
       tool.toolFailed = event.failed === true;
+      if (event.uuid) tool.uuid = event.uuid;
       return true;
     }
 
@@ -147,6 +151,7 @@ function appendChunk(
     } else {
       last.text += text;
     }
+    if (event.uuid) last.uuid = event.uuid;
     return true;
   }
   state.messages.push({
@@ -155,6 +160,7 @@ function appendChunk(
     text,
     ...(partial ? { partial: true } : {}),
     ...(acpId ? { _acpMsgId: acpId } : {}),
+    ...(event.uuid ? { uuid: event.uuid } : {}),
   });
   return true;
 }

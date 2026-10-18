@@ -135,7 +135,12 @@ then push the row's model / effort / permission mode into the fresh session — 
 restart) / `chat_clear` (wipe `chat_messages` + `chat_stream` +
 session id) all publish **`session.reset`** (stream kind `chat-runtime`, `{cleared}` for clear); the
 `chatSession` reducer — same branch as `session.exited` — drops every pending request, closes the partial,
-clears busy. `chat_set_launch_settings(id, patch)` writes the row and applies live — Claude via confirmed
+clears busy. **Rewind / fork** (`chatrewind.go`, Claude only — Codex/ACP refuse and the UI hides them):
+`chat_rewind(id, index, text)` cuts the transcript before a user message (folded_ord jumps past every recorded
+line, ords keep counting) and `chat_fork` copies it through that turn into a new row with the parent's session;
+both park the cut's Claude record uuid (`ChatMessage.uuid`, stamped by the fold) in `chats.resume_at`, and the
+next start adds the hidden `--resume-session-at <uuid> --fork-session` — the resumed session file is never
+modified. The forked session's id (system/init) clears `resume_at`. `chat_set_launch_settings(id, patch)` writes the row and applies live — Claude via confirmed
 `set_model` / `set_permission_mode` control requests, Codex/ACP via `AcpSetConfig` / `AcpSetMode` — else
 restarts (`row_only` = record only). Process starters: `chatProcs` (`agentproc.Manager` / test fake) and
 `App.rpcStarter` (nil = real `CodexStart`/`AcpStart`; tests register a session over a buffer).

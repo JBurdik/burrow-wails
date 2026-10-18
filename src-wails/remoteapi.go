@@ -367,6 +367,8 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_send":                {Method: "ChatSend", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
 	"chat_restart":             {Method: "ChatRestart", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_clear":               {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_rewind":              {Method: "ChatRewind", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
+	"chat_fork":                {Method: "ChatFork", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_interrupt":           {Method: "ChatInterrupt", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_set_launch_settings": {Method: "ChatSetLaunchSettings", Args: []string{"chatId", "patch"}, Scope: scopeOrchOperate},
 	"spawn_subagent_chat": {Method: "SpawnSubagentChat", Args: []string{

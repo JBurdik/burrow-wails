@@ -581,6 +581,7 @@ export function isActivitySync(
     archivedSessionsForWs,
     activeSession,
     create,
+    reload,
     ensureSession,
     setActive,
     remove,

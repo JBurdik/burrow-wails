@@ -66,12 +66,20 @@ export function ChatFoldedOrd(arg1) {
   return window['go']['main']['App']['ChatFoldedOrd'](arg1);
 }
 
+export function ChatFork(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatFork'](arg1, arg2, arg3);
+}
+
 export function ChatInterrupt(arg1) {
   return window['go']['main']['App']['ChatInterrupt'](arg1);
 }
 
 export function ChatRestart(arg1) {
   return window['go']['main']['App']['ChatRestart'](arg1);
+}
+
+export function ChatRewind(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatRewind'](arg1, arg2, arg3);
 }
 
 export function ChatSend(arg1, arg2, arg3) {

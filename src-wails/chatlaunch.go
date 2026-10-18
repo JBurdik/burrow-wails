@@ -30,6 +30,9 @@ type ClaudeLaunch struct {
 	ProfileCommand     string
 	ProfileArgs        string
 	AutoCompactWindow  string
+	// ResumeAt is a pending rewind/fork point (chats.resume_at): with a resume
+	// session the start adds `--resume-session-at <uuid> --fork-session`.
+	ResumeAt string
 }
 
 // providerInstance is the subset of src/lib/providers.ts ProviderInstance a

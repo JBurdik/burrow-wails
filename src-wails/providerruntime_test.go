@@ -46,7 +46,7 @@ func TestNormalizeClaudeStreamLine(t *testing.T) {
 		{
 			name: "message id falls back to uuid, then to a constant",
 			line: `{"type":"assistant","uuid":"u9","message":{"content":[{"type":"text","text":"x"}]}}`,
-			want: []ProviderRuntimeEvent{{Type: EvtTextDelta, MessageID: "u9", Text: "x"}},
+			want: []ProviderRuntimeEvent{{Type: EvtTextDelta, MessageID: "u9", Text: "x", UUID: "u9"}},
 		},
 		{
 			name: "a tool_use with no id is dropped — nothing could match its result",
