@@ -1,23 +1,23 @@
 <template>
   <div class="flex flex-col overflow-hidden border-t border-border bg-[var(--terminal-bg)]">
-    <div class="flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-1.5 hide-scrollbar">
+    <div class="flex h-9 shrink-0 items-center gap-1 overflow-x-auto px-2 hide-scrollbar">
       <button
         v-for="id in state.ptyIds"
         :key="id"
-        class="group flex h-6 shrink-0 items-center gap-1.5 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
-        :class="state.activeId === id && 'bg-accent/15 text-foreground'"
+        class="group flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12px] transition-colors duration-75"
+        :class="state.activeId === id ? 'bg-selected text-foreground' : 'text-muted-foreground hover:bg-hover hover:text-foreground'"
         @click="$emit('select', id)"
       >
         <PhTerminal :size="12" class="shrink-0" />
         <span>Terminal</span>
         <span
-          class="ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-black/10 hover:text-foreground group-hover:opacity-100"
+          class="ml-0.5 flex h-4 w-4 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-hover hover:text-foreground group-hover:opacity-100"
           role="button"
           aria-label="Close terminal"
           @click.stop="$emit('close', id)"
         ><PhX :size="10" /></span>
       </button>
-      <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-hover hover:text-foreground" title="New terminal" @click="$emit('add')">
+      <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-hover hover:text-foreground" title="New terminal" @click="$emit('add')">
         <PhPlus :size="13" />
       </button>
     </div>

@@ -22,13 +22,13 @@ const forwarded = useForwardProps(delegated);
     @update:model-value="(v) => emits('update:checked', v as boolean)"
     :class="
       cn(
-        'peer inline-flex h-5 w-9 shrink-0 cursor-pointer appearance-none items-center rounded-full border border-border transition-colors data-[state=checked]:bg-accent data-[state=unchecked]:bg-hover',
+        'peer inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer appearance-none items-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-transparent data-[state=checked]:bg-success data-[state=unchecked]:border-border data-[state=unchecked]:bg-hover',
         props.class,
       )
     "
   >
     <SwitchThumb
-      class="pointer-events-none block h-3.5 w-3.5 translate-x-0.5 rounded-full bg-white shadow transition-transform data-[state=checked]:translate-x-[18px]"
+      class="pointer-events-none block h-4 w-4 translate-x-[2px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.25)] transition-transform data-[state=checked]:translate-x-[18px]"
     />
   </SwitchRoot>
 </template>
