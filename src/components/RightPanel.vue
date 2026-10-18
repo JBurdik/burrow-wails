@@ -30,8 +30,8 @@
           <button
             v-for="tab in paneTabs(pi)"
             :key="tab.id"
-            class="group flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-nav)] px-2 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
-            :class="act(pi) === tab.id && 'bg-accent/15 text-foreground'"
+            class="group flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
+            :class="act(pi) === tab.id && 'bg-selected text-foreground hover:bg-selected hover:text-foreground'"
             draggable="true"
             :title="`${tab.label} — drag or right-click to move to the ${pi === 0 ? 'bottom' : 'top'} pane`"
             @click="layout.panes[pi].active = tab.id"
@@ -43,6 +43,7 @@
               <span class="absolute inset-0 hidden items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground group-hover:flex" role="button" :aria-label="`Close ${tab.label}`" @click.stop="closeSurface(tab.id)"><PhX :size="12" /></span>
             </span>
             <span class="font-medium">{{ tab.label }}</span>
+            <span v-if="surfaceCount(tab.id)" class="tabular-nums text-muted-foreground">{{ surfaceCount(tab.id) }}</span>
           </button>
           <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="layout.panes[pi].active = null"><PhPlus :size="15" /></button>
         </div>
@@ -52,24 +53,25 @@
       </div>
 
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-    <div v-if="!act(pi)" class="flex flex-1 items-center justify-center overflow-y-auto p-5">
-      <div class="w-full max-w-[420px]">
-        <div class="mb-5 text-center">
-          <h2 class="m-0 text-sm font-semibold text-foreground">Open a surface</h2>
-          <p class="mt-1 text-[11px] text-muted-foreground">Choose what to show in the right panel.</p>
+    <div v-if="!act(pi)" class="flex flex-1 items-center justify-center overflow-y-auto p-4">
+      <div class="w-full max-w-[440px]">
+        <div class="mb-4 px-0.5">
+          <h2 class="m-0 text-[15px] font-semibold text-foreground">Open a surface</h2>
+          <p class="mt-1 text-[11.5px] text-muted-foreground">Choose what to show in this panel.</p>
         </div>
-        <div class="grid gap-2" :class="cq.is.md ? 'grid-cols-2' : 'grid-cols-1'">
+        <div class="grid gap-2" :class="cq.width.value >= 280 ? 'grid-cols-2' : 'grid-cols-1'">
           <button
             v-for="tab in tabs"
             :key="tab.id"
-            class="group flex min-h-[66px] items-start gap-3 rounded-[var(--radius-card)] border border-border/70 bg-panel px-3 py-3 text-left transition-colors hover:border-accent/45 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            class="group relative flex min-h-[84px] flex-col gap-1 rounded-xl border border-border/70 bg-transparent p-3 text-left transition-colors hover:border-border hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             @click="pickSurface(pi, tab.id)"
           >
-            <component :is="tab.icon" :size="16" class="mt-0.5 shrink-0 text-secondary-foreground group-hover:text-accent" />
-            <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span class="text-xs font-semibold text-foreground">{{ tab.label }}</span>
-              <span class="text-[10.5px] leading-relaxed text-muted-foreground">{{ tab.description }}</span>
+            <span class="flex items-start gap-2 pr-5">
+              <component :is="tab.icon" :size="15" class="mt-px shrink-0 text-secondary-foreground group-hover:text-foreground" />
+              <span class="min-w-0 break-words text-[12.5px] font-semibold leading-tight text-foreground">{{ tab.label }}</span>
             </span>
+            <span class="text-[11px] leading-snug text-muted-foreground">{{ tab.description }}</span>
+            <span v-if="surfaceCount(tab.id)" class="absolute right-3 top-3 text-[10.5px] tabular-nums text-muted-foreground/70">{{ surfaceCount(tab.id) }}</span>
           </button>
         </div>
       </div>
@@ -101,10 +103,10 @@
     <!-- Git tab -->
     <div v-else-if="act(pi) === 'git'" class="flex flex-1 flex-col overflow-hidden overflow-y-auto">
       <!-- Header -->
-      <div class="flex shrink-0 items-center justify-between border-b border-border px-2 py-[5px]">
-        <div class="flex items-center gap-1 font-mono text-[11px] text-secondary-foreground">
-          <PhGitBranch :size="12" class="shrink-0 text-warning" />
-          <span>{{ git.branch || "—" }}</span>
+      <div class="flex shrink-0 items-center justify-between gap-2 border-b border-border px-2.5 py-1.5">
+        <div class="flex min-w-0 items-center gap-1 text-[11.5px] text-secondary-foreground">
+          <PhGitBranch :size="12" class="shrink-0 text-muted-foreground" />
+          <span class="truncate" :title="git.branch">{{ git.branch || "—" }}</span>
           <span v-if="git.ahead > 0" class="text-[10px] text-success" title="Commits ahead of upstream">↑{{ git.ahead }}</span>
           <span v-if="git.behind > 0" class="text-[10px] text-warning" title="Commits behind upstream">↓{{ git.behind }}</span>
         </div>
@@ -194,11 +196,12 @@
           <div
             v-for="f in git.staged"
             :key="'s:' + f.path"
-            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
+            class="group mx-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-[3px] transition-colors hover:bg-hover"
             @click="git.showDiff(f.path, true)"
           >
-            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-success">{{ f.x }}</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span class="w-3 shrink-0 text-center font-mono text-[10.5px] font-semibold" :class="letterClass(f.x)">{{ f.x }}</span>
+            <span class="flex-1 truncate text-[11.5px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span v-if="fileStats['s:' + f.path]" class="shrink-0 font-mono text-[10.5px] tabular-nums group-hover:hidden"><span class="text-success">+{{ fileStats['s:' + f.path][0] }}</span> <span class="text-destructive">−{{ fileStats['s:' + f.path][1] }}</span></span>
             <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-foreground group-hover:block" @click.stop="git.unstageFile(f.path)" title="Unstage">−</button>
           </div>
 
@@ -227,43 +230,65 @@
           <div
             v-for="f in git.unstaged"
             :key="'u:' + f.path"
-            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
+            class="group mx-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-[3px] transition-colors hover:bg-hover"
             @click="git.showDiff(f.path, false)"
           >
-            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-warning">{{ f.y }}</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span class="w-3 shrink-0 text-center font-mono text-[10.5px] font-semibold" :class="letterClass(f.y)">{{ f.y }}</span>
+            <span class="flex-1 truncate text-[11.5px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span v-if="fileStats['u:' + f.path]" class="shrink-0 font-mono text-[10.5px] tabular-nums group-hover:hidden"><span class="text-success">+{{ fileStats['u:' + f.path][0] }}</span> <span class="text-destructive">−{{ fileStats['u:' + f.path][1] }}</span></span>
             <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-success group-hover:block" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
           </div>
           <div
             v-for="f in git.untracked"
             :key="'t:' + f.path"
-            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
+            class="group mx-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-[3px] transition-colors hover:bg-hover"
           >
-            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-muted-foreground">?</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span class="w-3 shrink-0 text-center font-mono text-[10.5px] font-semibold text-success">A</span>
+            <span class="flex-1 truncate text-[11.5px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span class="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">new</span>
             <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-success group-hover:block" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
           </div>
 
           <!-- Commit -->
-          <div class="mt-1.5 flex shrink-0 flex-col gap-[5px] border-t border-border p-2">
-            <textarea
-              v-model="git.commitMsg"
-              class="commit-input box-border w-full min-h-[52px] max-h-[100px] resize-none rounded-[var(--radius-chip)] border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 font-sans text-[11px] leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/60"
-              placeholder="Commit message…"
-              rows="3"
-              @keydown.ctrl.enter="git.commit()"
-              @keydown.meta.enter="git.commit()"
-            />
-            <div class="flex gap-[5px]">
+          <div class="m-2 mt-2.5 flex shrink-0 flex-col gap-2">
+            <div class="rounded-xl border border-border/70 bg-[color-mix(in_srgb,var(--text-primary)_3%,transparent)] focus-within:border-border">
+              <div class="flex items-center gap-1.5 px-2.5 pt-2 text-[10.5px] text-muted-foreground">
+                <PhSparkle :size="11" />
+                <span class="flex-1">{{ git.generating ? "Generating…" : "Commit message" }}</span>
+                <button
+                  class="rounded-md px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
+                  :disabled="git.generating || !git.hasWorkingTreeChanges"
+                  title="Generate a commit message from the changes"
+                  @click="git.generateCommitMessage()"
+                >{{ git.commitMsg.trim() ? "Regenerate" : "Generate" }}</button>
+              </div>
+              <textarea
+                v-model="git.commitMsg"
+                class="commit-input box-border block w-full min-h-[52px] max-h-[120px] resize-none border-0 bg-transparent px-2.5 pb-2 pt-1 font-sans text-[11.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
+                placeholder="Leave empty to generate on commit"
+                rows="3"
+                @keydown.ctrl.enter="git.commit()"
+                @keydown.meta.enter="git.commit()"
+              />
+            </div>
+            <div class="flex gap-1.5">
               <button
-                class="flex flex-1 items-center justify-center gap-[5px] rounded-[var(--radius-chip)] border-0 bg-accent px-2.5 py-[5px] font-sans text-[11px] font-semibold text-white transition-colors hover:bg-accent-dim disabled:cursor-default disabled:opacity-35"
-                :disabled="!git.commitMsg.trim() || git.staged.length === 0"
+                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border-0 bg-[var(--text-primary)] px-2.5 py-1.5 font-sans text-[11.5px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-35"
+                :disabled="!git.hasWorkingTreeChanges || git.committing || git.generating"
                 @click="git.commit()"
               >
                 <PhGitCommit :size="12" />
                 Commit
               </button>
-              <CommitPushMenu />
+              <button
+                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-transparent px-2.5 py-1.5 font-sans text-[11.5px] font-medium text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
+                :disabled="!git.hasWorkingTreeChanges || git.committing || git.generating || git.pushing"
+                title="Stage all changes, commit, then push"
+                @click="commitAndPush"
+              >
+                <PhArrowUp :size="12" />
+                Commit + push
+              </button>
             </div>
           </div>
 
@@ -644,7 +669,7 @@ import {
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
-  PhSpinner, PhWarningCircle, PhRows, PhArrowsInSimple, PhPlay, PhFileText,
+  PhSpinner, PhWarningCircle, PhRows, PhSparkle, PhArrowsInSimple, PhPlay, PhFileText,
 } from "@phosphor-icons/vue";
 import {
   closeBottom, closeSurface as closeLayoutSurface, emptyLayout, isShown, loadLayouts, moveTo, openBottom, openIn,
@@ -676,7 +701,6 @@ import SubagentProfilePicker from "@/components/agents/SubagentProfilePicker.vue
 import DiffTab from "./DiffTab.vue";
 import { fetchReviewDiff, type ReviewDiffScope, type TurnReview } from "@/lib/reviewDiff";
 import { useTurnReviewRefresh } from "@/composables/useTurnReviewRefresh";
-import CommitPushMenu from "./CommitPushMenu.vue";
 import BrowserPane from "./BrowserPane.vue";
 import XTerm from "./XTerm.vue";
 import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
@@ -989,12 +1013,12 @@ async function openCommitDiff(c: GitCommit) {
 // look incomplete for newly opened folders.
 const tabs = computed(() => {
   const all = [
-    { id: "git", label: "Changes", icon: PhGitBranch, description: "Inspect, stage and commit workspace changes." },
-    { id: "pull-requests", label: "Pull requests", icon: PhGitBranch, description: "Check pull requests for this workspace." },
+    { id: "git", label: "Git", icon: PhGitBranch, description: "Inspect, stage and commit workspace changes." },
+    { id: "pull-requests", label: "PRs", icon: PhGitBranch, description: "Check pull requests for this workspace." },
     { id: "explorer", label: "Files", icon: PhFiles, description: "Browse the current workspace." },
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
-    { id: "agents", label: "Sub-agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
+    { id: "agents", label: "Agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "dev-servers", label: "Dev servers", icon: PhPlugsConnected, description: "See and kill dev servers running in this workspace." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
@@ -1003,6 +1027,46 @@ const tabs = computed(() => {
   if (docPath.value) all.push({ id: "doc", label: docPath.value.split("/").pop()!, icon: PhFileText, description: "Rendered markdown document." });
   return [...all, ...extensionSurfaces.value];
 });
+
+// Push the repo the commit landed in (git.commit returns it), not whichever
+// one is selected once an auto-generated message has come back.
+async function commitAndPush() {
+  const dir = await git.commit().catch(() => undefined); // the store already toasted the failure
+  if (dir) await git.push(dir);
+}
+
+function letterClass(code: string): string {
+  if (code === "A" || code === "?") return "text-success";
+  if (code === "D") return "text-destructive";
+  return "text-warning";
+}
+
+// Per-file +/− for the Git surface rows, keyed "s:<path>" (staged) / "u:<path>".
+// ponytail: two numstat calls per status refresh; untracked files show "new".
+const fileStats = ref<Record<string, [number, number]>>({});
+async function loadFileStats() {
+  const dir = props.cwd;
+  if (!dir || git.error || !shown("git")) return;
+  const run = (args: string[]) =>
+    invoke<{ stdout: string; code: number }>("run_git", { cwd: dir, args }).then((o) => (o.code === 0 ? o.stdout : "")).catch(() => "");
+  const [staged, unstaged] = await Promise.all([run(["diff", "--cached", "--numstat"]), run(["diff", "--numstat"])]);
+  const out: Record<string, [number, number]> = {};
+  for (const [prefix, text] of [["s:", staged], ["u:", unstaged]] as const) {
+    for (const line of text.split("\n")) {
+      const [ins, del, path] = line.split("\t");
+      if (path && ins !== "-") out[prefix + path] = [Number(ins) || 0, Number(del) || 0];
+    }
+  }
+  if (dir === props.cwd) fileStats.value = out;
+}
+watch(() => [git.staged, git.unstaged, props.cwd, shown("git")], () => void loadFileStats(), { immediate: true });
+
+/** The muted number beside a surface's label ("Changes 5"); 0 renders nothing. */
+function surfaceCount(id: string): number {
+  if (id === "git") return git.error ? 0 : git.staged.length + git.unstaged.length + git.untracked.length;
+  if (id === "agents") return childList.value.length;
+  return 0;
+}
 
 function extSurface(pi: PaneIndex) {
   const id = act(pi);
