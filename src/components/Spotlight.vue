@@ -1,66 +1,74 @@
 <template>
   <Teleport to="body">
     <Transition name="spotlight">
-      <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[165px]" @mousedown.self="close">
-        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-xl border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.55)] [backdrop-filter:var(--blur-overlay,none)]">
-          <div class="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
-            <PhMagnifyingGlass :size="17" class="shrink-0 text-accent" />
+      <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/50 pt-[140px]" @mousedown.self="close">
+        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-2xl border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.45)] [backdrop-filter:var(--blur-overlay,none)]">
+          <div class="flex h-[60px] shrink-0 items-center gap-3 border-b border-border px-5">
+            <PhMagnifyingGlass :size="18" class="shrink-0 text-muted-foreground" />
             <input
               ref="inputRef"
               v-model="query"
               :placeholder="projectOnly ? 'Search projects…' : 'Search projects, agents, commands, files…'"
-              class="min-w-0 flex-1 border-0 bg-transparent font-sans text-[15px] text-foreground outline-none placeholder:text-muted-foreground/50 [caret-color:var(--accent)]"
+              class="min-w-0 flex-1 border-0 bg-transparent font-sans text-[16px] text-foreground outline-none placeholder:text-muted-foreground/60 [caret-color:var(--accent)]"
               spellcheck="false"
               autocomplete="off"
               @keydown.esc.prevent="close"
               @keydown.enter.prevent="activate"
               @keydown.up.prevent="move(-1)"
               @keydown.down.prevent="move(1)"
+              @keydown.tab.prevent="cycleFilter($event.shiftKey ? -1 : 1)"
             />
-            <kbd class="shrink-0 rounded border border-border bg-hover px-2 py-0.5 font-mono text-[11px] text-muted-foreground">esc</kbd>
+            <div v-if="!projectOnly" class="flex shrink-0 items-center gap-0.5">
+              <button
+                v-for="f in FILTERS"
+                :key="f.key"
+                type="button"
+                tabindex="-1"
+                class="h-[26px] rounded-lg px-2.5 font-sans text-[12px] transition-colors duration-75"
+                :class="filter === f.key ? 'bg-selected text-foreground' : 'text-muted-foreground hover:bg-hover hover:text-foreground'"
+                @mousedown.prevent="filter = f.key"
+              >{{ f.label }}</button>
+            </div>
           </div>
 
-          <div ref="resultsRef" class="s-results min-h-0 flex-1 overflow-y-auto py-1.5">
-            <template v-for="(section, si) in sections" :key="section.key">
-              <div class="flex h-[26px] items-center px-4 font-sans text-[10px] font-semibold tracking-[0.06em] text-muted-foreground/60">{{ section.label }}</div>
+          <div ref="resultsRef" class="s-results min-h-0 flex-1 overflow-y-auto px-2 py-2">
+            <template v-for="section in sections" :key="section.key">
+              <div class="flex h-7 items-center px-3 pt-1 font-sans text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground/70">{{ section.label }}</div>
               <div
                 v-for="item in section.items"
                 :key="item.id"
                 :data-id="item.id"
-                class="mx-1 flex h-[46px] cursor-pointer items-center gap-3 rounded-md px-3 transition-colors duration-75"
+                class="flex h-[38px] cursor-pointer items-center gap-3 rounded-lg px-3 transition-colors duration-75"
                 :class="selectedId === item.id ? 'bg-selected' : 'hover:bg-hover'"
                 @mouseenter="selectedId = item.id"
                 @click="item.action()"
               >
-                <div
-                  class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] border"
-                  :style="{ background: tint(item.color), borderColor: `${item.color}33` }"
-                >
-                  <img v-if="item.iconUrl" :src="item.iconUrl" class="h-5 w-5 rounded-[4px] object-cover" />
-                  <component v-else :is="item.icon" :size="14" :color="item.color" />
-                </div>
-                <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span class="truncate font-sans text-[13px] font-medium text-foreground">{{ item.title }}</span>
-                  <span v-if="item.desc" class="truncate font-mono text-[11px] text-muted-foreground/70">{{ item.desc }}</span>
-                </div>
-                <span v-if="item.badge" class="shrink-0 rounded border border-accent/25 bg-accent/10 px-1.5 py-0.5 font-sans text-[10px] text-accent">{{ item.badge }}</span>
-                <kbd
-                  v-if="item.shortcut"
-                  class="shrink-0 rounded border border-border bg-hover px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
-                >{{ item.shortcut }}</kbd>
+                <img v-if="item.iconUrl" :src="item.iconUrl" class="h-4 w-4 shrink-0 rounded-[4px] object-cover" />
+                <component v-else :is="item.icon" :size="16" :color="item.color" class="shrink-0" />
+                <span class="max-w-[55%] shrink-0 truncate font-sans text-[13px] text-foreground">{{ item.title }}</span>
+                <span v-if="item.desc" class="min-w-0 flex-1 truncate font-sans text-[12px] text-muted-foreground/80">{{ item.desc }}</span>
+                <div v-else class="flex-1" />
+                <span v-if="item.badge" class="shrink-0 rounded-md bg-hover px-1.5 py-0.5 font-sans text-[10.5px] text-muted-foreground">{{ item.badge }}</span>
+                <kbd v-if="item.shortcut" class="s-key shrink-0">{{ item.shortcut }}</kbd>
               </div>
-              <div v-if="si < sections.length - 1" class="my-1 h-px bg-border/60" />
             </template>
-            <div v-if="!sections.length" class="px-4 py-6 text-center font-sans text-[12px] text-muted-foreground/60">
-              No matches
+            <div v-if="!sections.length" class="px-4 py-6 text-center font-sans text-[12px] text-muted-foreground/70">
+              {{ !hasQuery && (filter === "files" || filter === "chats") ? "Type to search" : "No matches" }}
             </div>
           </div>
 
-          <div class="flex h-9 shrink-0 items-center gap-4 border-t border-border bg-base px-4 text-[11px] text-muted-foreground/70">
+          <div class="flex h-9 shrink-0 items-center gap-3 border-t border-border px-5 font-sans text-[11px] text-muted-foreground/80">
             <span><kbd class="s-key">↑↓</kbd> navigate</span>
-            <span><kbd class="s-key">↵</kbd> run</span>
+            <span class="opacity-50">·</span>
+            <span><kbd class="s-key">↵</kbd> open</span>
+            <template v-if="!projectOnly">
+              <span class="opacity-50">·</span>
+              <span><kbd class="s-key">⇥</kbd> filter</span>
+            </template>
+            <span class="opacity-50">·</span>
+            <span><kbd class="s-key">esc</kbd> close</span>
             <div class="flex-1" />
-            <span class="truncate font-mono text-muted-foreground/50">{{ wsStore.active?.name ?? "no project" }}</span>
+            <span class="truncate text-muted-foreground/60">{{ wsStore.active?.name ?? "no project" }}</span>
           </div>
         </div>
       </div>
@@ -158,10 +166,19 @@ const ICON_MAP: Record<string, Component> = {
   terminal: PhTerminal,
 };
 
-// Icon-chip background: the accent colour at ~11% over the panel.
-function tint(hex: string): string {
-  if (!hex.startsWith("#") || hex.length < 7) return "var(--bg-hover)";
-  return `${hex}1f`;
+// Filter chips (⇥ cycles). "commands" covers everything runnable.
+type Filter = "all" | "files" | "chats" | "commands";
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "files", label: "Files" },
+  { key: "chats", label: "Chats" },
+  { key: "commands", label: "Commands" },
+];
+const filter = ref<Filter>("all");
+function cycleFilter(dir: 1 | -1) {
+  if (projectOnly.value) return;
+  const i = FILTERS.findIndex((f) => f.key === filter.value);
+  filter.value = FILTERS[(i + dir + FILTERS.length) % FILTERS.length].key;
 }
 
 interface SpotlightItem {
@@ -307,6 +324,15 @@ const sections = computed(() => {
     return [{ key: "projects", label: "PROJECTS", items: projectItems.value }]
       .filter((s) => s.items.length);
   }
+  if (filter.value === "files") return [{ key: "files", label: "Files", items: fileItems.value }].filter((s) => s.items.length);
+  if (filter.value === "chats") return [{ key: "chats", label: "In chats", items: chatItems.value }].filter((s) => s.items.length);
+  if (filter.value === "commands") {
+    return [
+      { key: "commands", label: "Commands", items: commandItems.value },
+      { key: "agents", label: "Agents", items: agentItems.value },
+      { key: "scripts", label: "Scripts", items: scriptItems.value },
+    ].filter((s) => s.items.length);
+  }
   const all = hasQuery.value
     ? [
         { key: "agents", label: "AGENTS", items: agentItems.value },
@@ -391,6 +417,7 @@ async function newProject() {
 function show(opts?: { projectOnly?: boolean }) {
   isOpen.value = true;
   projectOnly.value = !!opts?.projectOnly;
+  filter.value = "all";
   query.value = "";
   hits.value = [];
   chatHits.value = [];
@@ -409,12 +436,15 @@ defineExpose({ show, close, newProject });
 
 <style scoped>
 .s-key {
-  border-radius: 3px;
+  display: inline-block;
+  min-width: 18px;
+  border-radius: 5px;
   border: 1px solid var(--border);
-  background: var(--bg-hover);
-  padding: 1px 5px;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  padding: 0 5px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
   color: var(--text-secondary);
 }
 

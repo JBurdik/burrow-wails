@@ -68,11 +68,15 @@
           :data-leaf-id="pane.leaf.id"
           @mousedown.capture="activateLeaf(pane.leaf.id)"
         >
-          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[26px] shrink-0 items-center gap-[5px] border-b border-border bg-[var(--surface)] px-2 text-[11px] text-secondary-foreground" @mousedown.stop>
-            <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="10" class="shrink-0 text-muted-foreground" />
-            <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="10" class="shrink-0 text-muted-foreground" />
-            <PhRobot v-else-if="pane.leaf.isAgent" :size="10" class="shrink-0 text-accent" />
-            <PhTerminal v-else :size="10" class="shrink-0 text-muted-foreground" />
+          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[30px] shrink-0 items-center gap-1.5 border-b border-border/60 px-1.5 text-[12px]" @mousedown.stop>
+            <div
+              class="flex h-[22px] min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 transition-colors duration-75"
+              :class="focusedLeafId === pane.leaf.id ? 'bg-selected text-foreground' : 'text-muted-foreground'"
+            >
+            <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="12" class="shrink-0 text-muted-foreground" />
+            <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="12" class="shrink-0 text-muted-foreground" />
+            <PhRobot v-else-if="pane.leaf.isAgent" :size="12" class="shrink-0 text-accent" />
+            <PhTerminal v-else :size="12" class="shrink-0 text-muted-foreground" />
             <span v-if="pane.leaf.leafType === 'editor' && pane.leaf.dirty" class="dirty-dot h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground" />
             <span
               v-else-if="pane.leaf.status !== 'idle'"
@@ -80,9 +84,10 @@
               :class="`status-${pane.leaf.status}`"
               :title="pane.leaf.status === 'error' ? pane.leaf.statusDetail : undefined"
             >{{ pane.leaf.status === 'running' ? spinnerFrame : '' }}</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px]">{{ pane.leaf.title }}</span>
-            <button class="flex shrink-0 items-center rounded-[3px] p-0.5 text-muted-foreground opacity-40 transition-opacity group-hover:opacity-80 hover:!opacity-100 hover:!text-destructive hover:!bg-destructive/[0.15]" @click.stop="closePane(pane.leaf.id)" title="Close pane">
-              <PhX :size="9" weight="bold" />
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{{ pane.leaf.title }}</span>
+            </div>
+            <button class="flex shrink-0 items-center rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-70 hover:!bg-hover hover:!opacity-100" @click.stop="closePane(pane.leaf.id)" title="Close pane">
+              <PhX :size="11" />
             </button>
           </div>
           <PtyPermissionBanner v-if="!pane.leaf.leafType || pane.leaf.leafType === 'terminal'" :pty-id="pane.leaf.id" />
