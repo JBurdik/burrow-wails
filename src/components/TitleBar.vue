@@ -39,49 +39,59 @@
           {{ notifStore.unreadCount > 9 ? "9+" : notifStore.unreadCount }}
         </span>
       </button>
-      <div v-if="notifOpen" class="tb-menu left-0 right-auto w-[440px] max-w-[calc(100vw-2rem)] overflow-hidden p-0" @click.stop>
-        <div class="flex items-center justify-between border-b border-border px-2.5 pb-1.5 pt-2">
-          <span class="text-[11px] font-semibold text-foreground">Notifications</span>
-          <button
-            v-if="notifStore.history.length"
-            class="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-hover hover:text-secondary-foreground"
-            @click="notifStore.clearHistory()"
-          >Clear all</button>
+      <!-- Ghostex-style reading panel: header actions, UNREAD / READ card groups. -->
+      <div v-if="notifOpen" class="tb-menu notif-panel left-0 right-auto flex max-h-[min(520px,calc(100vh-4rem))] w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0" @click.stop>
+        <div class="flex h-9 shrink-0 items-stretch border-b border-border">
+          <span class="flex items-center whitespace-nowrap pl-3 pr-10 text-[13px] font-bold text-foreground">Notifications</span>
+          <button class="notif-action" :disabled="!notifStore.unreadCount" @click="jumpToNextUnread"><PhCaretRight :size="12" />Next unread</button>
+          <button class="notif-action" :disabled="!notifStore.unreadCount" @click="notifStore.markAllRead()"><PhCheck :size="12" />Mark all read</button>
+          <button class="notif-action rounded-tr-[5px]" :disabled="!notifStore.history.length" @click="notifStore.clearHistory()"><PhX :size="12" />Clear all</button>
         </div>
-        <div class="flex items-center gap-1 border-b border-border px-2.5 py-1.5">
+        <div v-if="notifStore.history.length" class="flex shrink-0 items-center gap-1 border-b border-border px-2.5 py-1.5">
           <button
             v-for="f in notifFilters"
             :key="f.id"
-            class="rounded-[var(--radius-nav)] border border-border px-1.5 py-0.5 text-[10px] hover:bg-hover"
-            :class="notifFilter === f.id ? 'border-accent bg-hover text-accent' : 'text-muted-foreground'"
+            class="rounded-[5px] px-2 py-0.5 text-[11px] font-medium"
+            :class="notifFilter === f.id ? 'bg-hover text-foreground' : 'text-muted-foreground hover:bg-hover hover:text-foreground'"
             @click="notifFilter = f.id"
           >{{ f.label }}</button>
         </div>
-        <div v-if="!groupedHistory.length" class="px-3 py-5 text-center text-xs text-muted-foreground">{{ notifStore.history.length ? "Nothing here" : "No notifications" }}</div>
-        <div v-else class="max-h-[320px] overflow-y-auto p-1">
-          <template v-for="group in groupedHistory" :key="group.key">
-            <div class="sticky top-0 z-10 bg-panel px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{{ group.label }}</div>
-            <div
-              v-for="item in group.items"
-              :key="item.id"
-              class="notif-item flex items-start gap-1.5 rounded border-l-2 p-[7px_8px] hover:bg-hover"
-              :class="[item.workspaceId && 'cursor-pointer', typeBorderClass(item.type), isCapturedUnread(item.id) ? 'bg-hover' : 'opacity-70']"
-              @click="navigateToNotif(item.workspaceId, item.tabId)"
-            >
-              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" :class="isCapturedUnread(item.id) ? 'bg-accent' : 'bg-transparent'" />
-              <PhCheckCircle v-if="item.type === 'done'" :size="13" class="mt-px shrink-0 text-success" />
-              <PhWarning v-else-if="item.type === 'error'" :size="13" class="mt-px shrink-0 text-destructive" />
-              <PhInfo v-else :size="13" class="mt-px shrink-0 text-accent" />
-              <component :is="sourceIcon(item)" :size="10" class="mt-[3px] shrink-0 text-muted-foreground" />
-              <div class="min-w-0 flex-1">
-                <div class="flex items-baseline gap-1">
-                  <div class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px]" :class="isCapturedUnread(item.id) ? 'font-semibold text-foreground' : 'font-medium text-secondary-foreground'">{{ item.title }}</div>
-                  <span v-if="item.count && item.count > 1" class="shrink-0 text-[9px] text-muted-foreground">×{{ item.count }}</span>
+        <div v-if="!notifStore.history.length" class="flex flex-col items-center gap-1.5 px-6 py-10 text-center">
+          <PhBell :size="32" class="text-muted-foreground opacity-60" />
+          <div class="mt-1 text-[13px] font-medium text-foreground">No notifications yet</div>
+          <div class="text-[11.5px] text-muted-foreground">Agents that finish or need you will show up here.</div>
+        </div>
+        <div v-else-if="!notifGroups.length" class="px-3 py-8 text-center text-xs text-muted-foreground">Nothing here</div>
+        <div v-else class="min-h-0 flex-1 overflow-y-auto p-2.5 pt-2">
+          <template v-for="group in notifGroups" :key="group.label">
+            <div class="px-0.5 pb-[7px] pt-1 text-[11px] font-bold text-muted-foreground" :class="group.label === 'READ' && notifGroups.length > 1 && 'mt-2.5'">{{ group.label }}</div>
+            <div class="flex flex-col gap-[7px]">
+              <div
+                v-for="item in group.items"
+                :key="item.id"
+                class="notif-card group relative flex min-h-[72px] shrink-0 cursor-pointer items-start gap-2.5 rounded-md border p-2 pt-[9px]"
+                :class="notifStore.isUnread(item) ? 'is-unread' : 'is-read'"
+                :style="{ '--notif-accent': item.type === 'error' ? 'var(--color-destructive)' : 'var(--color-accent)' }"
+                @click="openNotif(item)"
+                @contextmenu.prevent="notifStore.setRead(item.id, notifStore.isUnread(item))"
+              >
+                <div class="notif-tile flex size-7 shrink-0 items-center justify-center rounded-md">
+                  <component :is="kindIcon(item)" :size="16" />
                 </div>
-                <div v-if="item.body" class="mt-px overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-secondary-foreground">{{ item.body }}</div>
-                <div v-if="contextChip(item)" class="mt-px overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-muted-foreground">{{ contextChip(item) }}</div>
+                <div class="flex min-w-0 flex-1 flex-col gap-[7px]">
+                  <div class="flex h-[18px] min-w-0 items-center gap-2">
+                    <span class="min-w-0 flex-1 truncate text-[13px] font-bold text-foreground">{{ item.title || "Session" }}<span v-if="item.count && item.count > 1" class="ml-1 font-medium text-muted-foreground">×{{ item.count }}</span></span>
+                    <span class="shrink-0 text-[11px] leading-4 text-muted-foreground">{{ relTime(item.ts) }}</span>
+                  </div>
+                  <div v-if="item.body" class="line-clamp-2 text-[12px] font-medium leading-[16.2px] text-muted-foreground">{{ item.body }}</div>
+                  <div class="notif-meta truncate pr-7 text-[11px] font-medium">{{ metaLine(item) }}</div>
+                </div>
+                <button
+                  class="notif-check absolute bottom-2 right-2 hidden size-[22px] items-center justify-center rounded-[5px] border group-hover:flex"
+                  :title="notifStore.isUnread(item) ? 'Mark read' : 'Dismiss'"
+                  @click.stop="notifStore.isUnread(item) ? notifStore.setRead(item.id, true) : notifStore.remove(item.id)"
+                ><PhCheck :size="14" /></button>
               </div>
-              <span class="mt-0.5 shrink-0 text-[9px] text-muted-foreground">{{ relTime(item.ts) }}</span>
             </div>
           </template>
         </div>
@@ -205,7 +215,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhMagnifyingGlass, PhCaretLeft, PhCaretRight, PhCircle, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheckCircle, PhWarning, PhInfo, PhSkull, PhCopy, PhRobot, PhGitBranch, PhGear } from "@phosphor-icons/vue";
+import { PhMagnifyingGlass, PhCaretLeft, PhCaretRight, PhCircle, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheck, PhX, PhWarning, PhInfo, PhSkull, PhCopy, PhRobot, PhGitBranch } from "@phosphor-icons/vue";
 import { useNotificationsStore, type HistoryItem, type NotifSource } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -271,29 +281,26 @@ const screenTitle = computed(() => {
   return (tab.chatId != null ? chats.sessions.find((c) => c.id === tab.chatId)?.title : undefined) ?? tab.title;
 });
 
-// Rows opened this viewing stay marked as unread even after markAllRead() fires,
-// by rendering against a cutoff snapshot captured before the store clears it.
-const capturedUnreadIds = ref<Set<number>>(new Set());
-function isCapturedUnread(id: number): boolean {
-  return capturedUnreadIds.value.has(id);
-}
-
-function navigateToNotif(workspaceId?: number, tabId?: number) {
-  if (!workspaceId) return;
-  const ws = wsStore.workspaces.find((w) => w.id === workspaceId);
+function openNotif(item: HistoryItem) {
+  notifStore.setRead(item.id, true);
+  if (!item.workspaceId) return;
+  const ws = wsStore.workspaces.find((w) => w.id === item.workspaceId);
   if (ws) {
     wsStore.open(ws);
-    if (tabId != null) termTabs.activate(workspaceId, tabId);
+    if (item.tabId != null) termTabs.activate(item.workspaceId, item.tabId);
   }
+  notifOpen.value = false;
+}
+
+/** Newest unread row with somewhere to go; history is newest-first. */
+function jumpToNextUnread() {
+  const item = notifStore.history.find((i) => notifStore.isUnread(i) && i.workspaceId) ?? notifStore.history.find(notifStore.isUnread);
+  if (item) openNotif(item);
   notifOpen.value = false;
 }
 
 function toggleNotif() {
   notifOpen.value = !notifOpen.value;
-  if (notifOpen.value) {
-    capturedUnreadIds.value = new Set(notifStore.history.filter((i) => notifStore.isUnread(i)).map((i) => i.id));
-    notifStore.markAllRead();
-  }
 }
 
 function relTime(ts: number): string {
@@ -304,18 +311,19 @@ function relTime(ts: number): string {
   return `${Math.floor(diff / 86_400_000)}d`;
 }
 
-function contextChip(item: HistoryItem): string | null {
-  if (!item.workspaceId) return null;
-  const wsName = wsStore.workspaces.find((w) => w.id === item.workspaceId)?.name;
-  if (!wsName) return null;
-  const tabTitle = item.tabId != null ? termTabs.tabsByWs[item.workspaceId]?.find((t) => t.id === item.tabId)?.title : undefined;
-  return tabTitle ? `${wsName} · ${tabTitle}` : wsName;
+const KIND_LABEL: Record<HistoryItem["type"], string> = { done: "Finished", error: "Failed", info: "Notification", pending: "Running" };
+const SOURCE_ICON = { agent: PhRobot, git: PhGitBranch, system: PhInfo };
+
+function kindIcon(item: HistoryItem) {
+  if (item.type === "error") return PhWarning;
+  return SOURCE_ICON[item.source ?? "system"];
 }
 
-function typeBorderClass(type: HistoryItem["type"]): string {
-  if (type === "done") return "border-l-success";
-  if (type === "error") return "border-l-destructive";
-  return "border-l-accent";
+/** "Project · Tab · Finished", the kind alone when the row has no workspace. */
+function metaLine(item: HistoryItem): string {
+  const ws = item.workspaceId ? wsStore.workspaces.find((w) => w.id === item.workspaceId)?.name : undefined;
+  const tab = ws && item.tabId != null ? termTabs.tabsByWs[item.workspaceId!]?.find((t) => t.id === item.tabId)?.title : undefined;
+  return [ws, tab, KIND_LABEL[item.type]].filter(Boolean).join(" · ");
 }
 
 const notifFilters: { id: "all" | NotifSource; label: string }[] = [
@@ -325,33 +333,15 @@ const notifFilters: { id: "all" | NotifSource; label: string }[] = [
 ];
 const notifFilter = ref<"all" | NotifSource>("all");
 
-function sourceIcon(item: HistoryItem) {
-  const source = item.source ?? "system";
-  if (source === "agent") return PhRobot;
-  if (source === "git") return PhGitBranch;
-  return PhGear;
-}
-
-const filteredHistory = computed(() =>
-  notifFilter.value === "all"
+const notifGroups = computed(() => {
+  const shown = notifFilter.value === "all"
     ? notifStore.history
-    : notifStore.history.filter((i) => (i.source ?? "system") === notifFilter.value)
-);
-
-const NOTIF_GROUP_NOW_MS = 5 * 60_000;
-const groupedHistory = computed(() => {
-  const now = Date.now();
-  const startOfToday = new Date().setHours(0, 0, 0, 0);
-  const buckets: { now: HistoryItem[]; today: HistoryItem[]; earlier: HistoryItem[] } = { now: [], today: [], earlier: [] };
-  for (const item of filteredHistory.value as HistoryItem[]) {
-    if (now - item.ts < NOTIF_GROUP_NOW_MS) buckets.now.push(item);
-    else if (item.ts >= startOfToday) buckets.today.push(item);
-    else buckets.earlier.push(item);
-  }
+    : notifStore.history.filter((i) => (i.source ?? "system") === notifFilter.value);
+  const unread = shown.filter(notifStore.isUnread);
+  const read = shown.filter((i) => !notifStore.isUnread(i));
   return [
-    { key: "now", label: "Now", items: buckets.now },
-    { key: "today", label: "Today", items: buckets.today },
-    { key: "earlier", label: "Earlier", items: buckets.earlier },
+    { label: "UNREAD", items: unread },
+    { label: "READ", items: read },
   ].filter((g) => g.items.length > 0);
 });
 
@@ -564,6 +554,57 @@ const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
 .tb-menu-item:disabled { opacity: 0.4; cursor: default; }
 .tb-menu-item:disabled:hover { background: none; color: var(--text-secondary); }
 .tb-menu-item-danger:hover { background: color-mix(in srgb, var(--color-destructive) 15%, transparent); color: var(--color-destructive); }
+
+.notif-action {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-left: 1px solid var(--border);
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--text-primary) 78%, transparent);
+}
+.notif-action:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.notif-action:disabled { opacity: 0.4; cursor: default; }
+
+/* Cards: accent-tinted while unread (red for errors), neutral and dimmed once read. */
+.notif-card.is-unread {
+  border-color: color-mix(in srgb, var(--notif-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--notif-accent) 5%, transparent);
+}
+.notif-card.is-unread:hover {
+  border-color: color-mix(in srgb, var(--notif-accent) 48%, transparent);
+  background: color-mix(in srgb, var(--notif-accent) 10%, transparent);
+}
+.notif-card.is-read {
+  opacity: 0.72;
+  border-color: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 2.5%, transparent);
+}
+.notif-card.is-read:hover {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--text-primary) 18%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+.notif-tile { color: var(--text-secondary); background: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+.is-unread .notif-tile { color: var(--notif-accent); background: color-mix(in srgb, var(--notif-accent) 16%, transparent); }
+.notif-meta { color: var(--text-muted); }
+.is-unread .notif-meta { color: color-mix(in srgb, var(--notif-accent) 85%, var(--text-primary)); }
+.notif-check {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+.notif-check:hover { background: color-mix(in srgb, var(--text-primary) 22%, transparent); }
+.is-unread .notif-check {
+  border-color: color-mix(in srgb, var(--notif-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--notif-accent) 18%, transparent);
+}
+.is-unread .notif-check:hover { background: color-mix(in srgb, var(--notif-accent) 32%, transparent); }
 
 @keyframes notif-bell-pulse {
   0% { transform: scale(1); }

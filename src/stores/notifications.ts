@@ -17,6 +17,9 @@ export interface HistoryItem extends Toast {
   ts: number;
   // absent or 1 = a single occurrence; bumped by insertHistory's dedup.
   count?: number;
+  // Per-row read state (Ghostex model). Absent = fall back to the readTs cutoff,
+  // which is all a row persisted before this field existed has.
+  read?: boolean;
 }
 
 let nextId = 0;
@@ -63,7 +66,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
   }
 
   function isUnread(item: HistoryItem): boolean {
-    return item.ts > readTs.value;
+    return item.read === undefined ? item.ts > readTs.value : !item.read;
   }
 
   const unreadCount = computed(() => history.value.filter(isUnread).length);
@@ -96,6 +99,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     ) {
       newest.count = (newest.count ?? 1) + 1;
       newest.ts = now;
+      newest.read = false;
     } else {
       history.value.unshift({ ...entry, source, ts: now });
       if (history.value.length > 50) history.value.pop();
@@ -133,6 +137,19 @@ export const useNotificationsStore = defineStore("notifications", () => {
   // already-read. No sequence counter for this — millisecond races are fine.
   function markAllRead() {
     readTs.value = Date.now();
+    for (const item of history.value) item.read = true;
+    persist();
+  }
+
+  function setRead(id: number, read: boolean) {
+    const item = history.value.find((i) => i.id === id);
+    if (!item) return;
+    item.read = read;
+    persist();
+  }
+
+  function remove(id: number) {
+    history.value = history.value.filter((i) => i.id !== id);
     persist();
   }
 
@@ -153,6 +170,8 @@ export const useNotificationsStore = defineStore("notifications", () => {
     resolve,
     dismiss,
     markAllRead,
+    setRead,
+    remove,
     clearHistory,
   };
 });

@@ -91,4 +91,21 @@ describe("notifications store", () => {
     const s = useNotificationsStore();
     expect(s.history).toEqual([]);
   });
+
+  it("per-row read: open one, toggle back, dedup bump re-unreads", () => {
+    const s = useNotificationsStore();
+    s.push({ title: "A", type: "done" });
+    s.push({ title: "B", type: "info" });
+    const [b, a] = s.history;
+    s.setRead(a.id, true);
+    expect(s.unreadCount).toBe(1);
+    s.setRead(a.id, false);
+    expect(s.unreadCount).toBe(2);
+    s.markAllRead();
+    expect(s.unreadCount).toBe(0);
+    s.push({ title: "B", type: "info" });
+    expect(s.isUnread(s.history[0])).toBe(true);
+    s.remove(b.id);
+    expect(s.history.map((i) => i.title)).toEqual(["A"]);
+  });
 });
