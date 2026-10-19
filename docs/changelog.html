@@ -79,12 +79,29 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
-  <!-- v0.5.1 -->
+  <!-- v0.5.2 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.5.2</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">říjen 2026</span>
+  </div>
+
+  <div class="section perf">
+    <div class="section-label">Výkon</div>
+    <ul>
+      <li><strong>Zpráva v chatu se odešle hned</strong> — před každým tahem se dělá git checkpoint (<code>start_turn_audit</code>) a odeslání na něj čeká. Dočasný index se plnil přes <code>read-tree HEAD</code>, který nemá stat cache, takže <code>add -A</code> znovu hashoval každý soubor — a <code>CreateCheckpoint</code> snapshot dělal dvakrát. V repu s velkými soubory to byly ~4 s před každou zprávou, teď ~40 ms: snapshot startuje z kopie skutečného indexu a strom se počítá jen jednou.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- v0.5.1 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.5.1</span>
-      <span class="tag tag-latest">nejnovější</span>
-      <span class="date">říjen 2026</span>
+            <span class="date">říjen 2026</span>
     </div>
 
     <div class="section fix">
