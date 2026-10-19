@@ -800,6 +800,12 @@ function onKeydown(e: KeyboardEvent) {
 :root[data-animated] { --sidebar-bg: var(--bg-base); }
 :root[data-animated] .terminal-tab-content { background: transparent; }
 :root[data-animated] .settings-root { background-color: var(--anim-floor); }
+/* Full-screen overlays without their own canvas: solid, or the app shows through. */
+:root[data-animated] .docs-screen,
+:root[data-animated] .onboarding { background: var(--anim-floor); }
+/* Floating menus / popovers / banners (Sidebar's context menus are fixed
+   bg-panel divs) sit over content — they need the opaque dropdown bg. */
+:root[data-animated] .fixed.bg-panel { background-color: var(--bg-dropdown); }
 
 /* Subtle glow on the big surfaces (sidebar, chat, welcome, dashboard, RP),
    derived from the active theme's accent so every theme gets it for free;
