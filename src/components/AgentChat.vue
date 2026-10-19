@@ -580,7 +580,6 @@
             <span v-if="asleep" class="composer-pill pointer-events-none opacity-70" title="Sleeping: the agent process was stopped to free memory. Sending a message wakes it."><PhMoon :size="13" weight="fill" /></span>
             <!-- Agent + model in one popover (the old header bar is gone) -->
             <ModelPicker
-              ref="modelPickerEl"
               :agent-id="agentKind"
               :model-id="effectiveTransport === 'claude-cli' ? selectedModel : acpActiveModelId"
               :models="liveModels.length ? liveModels : undefined"
@@ -1808,7 +1807,6 @@ let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingImages = ref<string[]>([]); // data URIs
 const scrollEl = ref<HTMLElement | null>(null);
 const inputEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
-const modelPickerEl = ref<InstanceType<typeof ModelPicker> | null>(null);
 
 // @file / $skill / /command completion and the skill pills, shared with the
 // welcome composer (lib/composerCompletion.ts) so the two cannot drift.
@@ -2566,7 +2564,6 @@ async function clearChat() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (modelPickerEl.value?.handleComposerKey(e)) return;
   if (pendingPermission.value || pendingDiff.value) {
     if (e.key === "y" || e.key === "Y") { e.preventDefault(); respondPermission(true); return; }
     if (e.key === "n" || e.key === "N") { e.preventDefault(); respondPermission(false); return; }

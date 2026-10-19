@@ -48,7 +48,6 @@
           <div class="composer-toolbar">
             <div class="composer-pillbar">
               <ModelPicker
-                ref="modelPickerEl"
                 :agent-id="selectedAgentId"
                 :model-id="selectedModel"
                 :cwd="target.path"
@@ -209,7 +208,6 @@ const { suggestions, activeIndex } = completion;
 function onComposerKeydown(e: KeyboardEvent) {
   // Completion first: Enter picks the highlighted suggestion instead of sending.
   if (completion.handleKeydown(e)) return;
-  if (modelPickerEl.value?.handleComposerKey(e)) return;
   if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
     e.preventDefault();
     submit();
@@ -486,7 +484,6 @@ const codexPermLabel = computed(() => CODEX_PERM_MODES.find((m) => m.id === code
 function pickCodexPermMode(id: string) { saveAcp("mode", id); }
 
 // The model picker's quick-settings row — the same state as the pills above.
-const modelPickerEl = ref<InstanceType<typeof ModelPicker> | null>(null);
 const pickerSettings = computed<PickerSetting[]>(() => {
   if (isClaude.value) {
     return [

@@ -43,7 +43,6 @@
             <component v-if="tab === 'fav'" :is="agentIconComp(agentById(row.agentId).icon)" :size="12" class="mp-row-icon" />
             <span class="mp-row-label">{{ row.label }}</span>
             <PhCheck v-if="row.agentId === agentId && row.id === modelId" :size="12" weight="bold" class="mp-row-check" />
-            <span v-if="i < 9" class="mp-kbd">Alt+{{ i + 1 }}</span>
             <span
               class="mp-star"
               :class="{ on: isFavorite(row.agentId, row.id) }"
@@ -168,7 +167,7 @@ function rowsFor(t: string): Row[] {
   return t === "fav" ? favRows.value : listFor(t).map((m) => ({ agentId: t, id: m.id, label: m.label }));
 }
 const rows = computed(() => rowsFor(tab.value));
-// The tab the picker opens on — also what Alt+N from the composer indexes.
+// The tab the picker opens on.
 const homeTab = () => (favRows.value.length ? "fav" : props.agentId);
 
 function setTab(t: string) {
@@ -230,20 +229,11 @@ function cycleTab(dir: number) {
   setTab(tabs[(tabs.indexOf(tab.value) + dir + tabs.length) % tabs.length]);
 }
 
-/** Alt+1-9 — `code`, not `key`: on macOS Option+digit types "¡™£…". */
-function altDigit(e: KeyboardEvent): number {
-  if (!e.altKey || e.metaKey || e.ctrlKey) return 0;
-  const m = /^Digit([1-9])$/.exec(e.code);
-  return m ? Number(m[1]) : 0;
-}
-
 // Captured on window while open, so the composer textarea never sees them.
 function onKey(e: KeyboardEvent) {
   // A focused <select> in the settings row owns its own arrows.
   if (e.target instanceof HTMLSelectElement && e.key !== "Escape") return;
-  const n = altDigit(e);
   const handled = (() => {
-    if (n) { const row = rows.value[n - 1]; if (row) pick(row); return true; }
     switch (e.key) {
       case "Escape": close(); return true;
       case "ArrowDown": moveCursor(1); return true;
@@ -278,17 +268,6 @@ function pickDefault(row: Row) {
   close();
 }
 
-/** Alt+N from the composer: the Nth row of the tab the picker would open on.
- *  Returns false when the event isn't one, so the caller can carry on. */
-function handleComposerKey(e: KeyboardEvent): boolean {
-  const n = altDigit(e);
-  const row = n ? rowsFor(homeTab())[n - 1] : undefined;
-  if (!row) return false;
-  e.preventDefault();
-  emit("select", row.agentId, row.id);
-  return true;
-}
-defineExpose({ handleComposerKey });
 
 watch(() => props.lockAgent, () => close());
 onBeforeUnmount(close);
@@ -356,15 +335,6 @@ onBeforeUnmount(close);
 .mp-row.current .mp-row-label { font-weight: 600; }
 .mp-row-check { flex-shrink: 0; color: var(--accent); }
 
-.mp-kbd {
-  flex-shrink: 0;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 4px;
-}
 
 .mp-star { flex-shrink: 0; display: flex; color: var(--text-muted); opacity: 0.45; }
 .mp-star:hover { opacity: 1; color: var(--text-primary); }
