@@ -398,7 +398,7 @@
     <div class="relative h-0">
       <button
         v-if="!atBottom"
-        class="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] text-secondary-foreground transition-colors hover:bg-hover"
+        class="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-[var(--bg-dropdown)] px-2.5 py-1 text-[11px] text-secondary-foreground transition-colors hover:bg-hover"
         title="Jump to latest"
         @click="scrollToBottom(true)"
       >

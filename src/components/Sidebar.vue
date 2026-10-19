@@ -16,7 +16,7 @@
       <button class="sb-icon" title="Projects" :class="filterOpen && 'text-foreground'" @click.stop="filterOpen = !filterOpen"><PhFolders :size="15" /></button>
       <button class="sb-icon" title="Open folder…" @click="pickFolder"><PhFolderPlus :size="15" /></button>
       <Teleport to="body">
-        <div v-if="filterOpen" class="fixed z-[1000] max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-panel p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]" :style="filterMenuStyle" @click.stop>
+        <div v-if="filterOpen" class="fixed z-[1000] max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-[var(--bg-dropdown)] p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]" :style="filterMenuStyle" @click.stop>
           <button
             class="flex w-full items-center gap-[7px] rounded-md border-0 bg-transparent px-2 py-1.5 text-left font-ui text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground"
             :class="filterProjectId == null && 'bg-selected text-foreground'"
@@ -281,7 +281,7 @@
     <!-- Scripts popover -->
     <div
       v-if="scriptsOpen"
-      class="fixed z-[1000] min-w-[240px] max-w-[420px] rounded-lg border border-border bg-panel p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+      class="fixed z-[1000] min-w-[240px] max-w-[420px] rounded-lg border border-border bg-[var(--bg-dropdown)] p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
       :style="scriptsMenuStyle"
       @click.stop
     >
@@ -306,7 +306,7 @@
          Shared by live/settled/archived rows via hoverInfoFrom{Row,Archived}. -->
     <div
       v-if="hoverInfo"
-      class="pointer-events-none fixed z-[900] w-64 max-w-[calc(100vw-16px)] rounded-lg border border-border bg-panel p-2.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+      class="pointer-events-none fixed z-[900] w-64 max-w-[calc(100vw-16px)] rounded-lg border border-border bg-[var(--bg-dropdown)] p-2.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
       :style="hoverStyle"
     >
       <div class="mb-1.5 wrap-break-word text-[11px] font-semibold leading-[1.4] text-foreground">{{ hoverInfo.title }}</div>
@@ -364,7 +364,7 @@
     <!-- Row context menu -->
     <div
       v-if="rowMenu"
-      class="fixed z-[1000] w-[196px] rounded-lg border border-border bg-panel p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+      class="fixed z-[1000] w-[196px] rounded-lg border border-border bg-[var(--bg-dropdown)] p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
       :style="rowMenuStyle"
       @click.stop
     >

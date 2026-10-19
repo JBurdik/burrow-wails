@@ -65,7 +65,7 @@
     <!-- Branch dropdown -->
     <template v-if="showBranchDropdown">
       <div class="fixed inset-0 z-[99]" @click="showBranchDropdown = false" />
-      <div class="absolute left-[240px] top-[42px] z-[100] max-h-[260px] min-w-[220px] overflow-y-auto rounded-[5px] border border-border bg-panel py-[3px] shadow-[0_6px_20px_rgba(0,0,0,0.35)]">
+      <div class="absolute left-[240px] top-[42px] z-[100] max-h-[260px] min-w-[220px] overflow-y-auto rounded-[5px] border border-border bg-[var(--bg-dropdown)] py-[3px] shadow-[0_6px_20px_rgba(0,0,0,0.35)]">
         <div
           v-for="b in git.branches"
           :key="b"

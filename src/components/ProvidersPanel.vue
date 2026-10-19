@@ -24,7 +24,7 @@
           </Button>
           <div
             v-if="addOpen"
-            class="absolute right-0 top-[calc(100%+6px)] z-30 grid w-[240px] gap-0.5 rounded-lg border border-border bg-base p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+            class="absolute right-0 top-[calc(100%+6px)] z-30 grid w-[240px] gap-0.5 rounded-lg border border-border bg-[var(--bg-dropdown)] p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
             @click.stop
           >
             <div class="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">New instance</div>

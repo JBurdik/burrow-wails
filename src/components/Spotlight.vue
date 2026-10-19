@@ -2,7 +2,7 @@
   <Teleport to="body">
     <Transition name="spotlight">
       <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/50 pt-[140px]" @mousedown.self="close">
-        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-2xl border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.45)] [backdrop-filter:var(--blur-overlay,none)]">
+        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-2xl border border-border bg-[var(--bg-dropdown)] shadow-[0_24px_64px_rgba(0,0,0,0.45)] [backdrop-filter:var(--blur-overlay,none)]">
           <div class="flex h-[60px] shrink-0 items-center gap-3 border-b border-border px-5">
             <PhMagnifyingGlass :size="18" class="shrink-0 text-muted-foreground" />
             <input

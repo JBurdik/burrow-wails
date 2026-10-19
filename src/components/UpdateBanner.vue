@@ -22,7 +22,7 @@
     </div>
     <div
       v-else-if="show"
-      class="fixed bottom-4 right-4 z-[9998] flex w-80 gap-2.5 rounded-xl border border-border bg-panel p-3.5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+      class="fixed bottom-4 right-4 z-[9998] flex w-80 gap-2.5 rounded-xl border border-border bg-[var(--bg-dropdown)] p-3.5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
     >
       <div class="mt-px shrink-0 text-accent" :class="{ 'text-secondary-foreground': u.downloading }">
         <PhArrowCircleUp v-if="!u.installed" :size="20" weight="fill" />

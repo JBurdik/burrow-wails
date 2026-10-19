@@ -282,7 +282,7 @@ onBeforeUnmount(close);
   display: flex;
   flex-direction: column;
   width: 340px;
-  background: var(--bg-panel);
+  background: var(--bg-dropdown);
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
