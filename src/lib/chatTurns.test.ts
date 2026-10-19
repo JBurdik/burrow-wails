@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { editOf, fmtDuration, hunkLines, mergeEdits } from "./chatTurns";
+import { editOf, fmtDuration, hunkLines, isProjectPath, mergeEdits } from "./chatTurns";
 
 describe("editOf", () => {
   it("ignores tool calls with no edit content (Read/Grep)", () => {
@@ -57,5 +57,14 @@ describe("hunkLines", () => {
     expect(hunkLines(e[0].hunks).lines.map((l) => `${l.kind}:${l.text}`))
       .toEqual(["del:x", "add:y", "add:z", "sep:", "del:p", "add:q"]);
     expect(hunkLines(e[0].hunks, 2)).toMatchObject({ hidden: 4 });
+  });
+});
+
+describe("isProjectPath", () => {
+  it("keeps files under the project and drops the agent's own notes elsewhere", () => {
+    expect(isProjectPath("/repo/src/a.ts", "/repo")).toBe(true);
+    expect(isProjectPath("src/a.ts", "/repo")).toBe(true);
+    expect(isProjectPath("/repo-other/a.ts", "/repo")).toBe(false);
+    expect(isProjectPath("/Users/me/.claude/projects/x/memory/note.md", "/repo")).toBe(false);
   });
 });

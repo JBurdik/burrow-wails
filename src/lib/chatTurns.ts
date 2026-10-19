@@ -77,3 +77,16 @@ export function hunkLines(hunks: { old: string; new: string }[] | undefined, max
   });
   return { lines: all.slice(0, max), hidden: Math.max(0, all.length - max) };
 }
+
+/**
+ * Whether an edited path belongs to the project the chat works in. The diff
+ * card shows only those: an agent also writes its own memory notes
+ * (~/.claude/projects/…/memory), plans and scratch files, which are not changes
+ * to review. A relative path is relative to the project, so it counts.
+ */
+export function isProjectPath(path: string, root: string): boolean {
+  if (!path.startsWith("/")) return true;
+  if (!root) return false;
+  const base = root.endsWith("/") ? root : `${root}/`;
+  return path === root || path.startsWith(base);
+}

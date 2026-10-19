@@ -771,7 +771,7 @@ import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { chatSettingKey } from "@/lib/chatSettings";
 import { splitMentions } from "@/lib/mentionTokens";
-import { editOf, fmtDuration, hunkLines, mergeEdits, type FileEdit } from "@/lib/chatTurns";
+import { editOf, fmtDuration, hunkLines, isProjectPath, mergeEdits, type FileEdit } from "@/lib/chatTurns";
 import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -1670,15 +1670,18 @@ const displayItems = computed<DisplayRow[]>(() => {
     const folded = settled && (foldedTurns[user.id] ?? hasLaterTurn);
     const label = user.turnMs ? `Worked ${fmtDuration(user.turnMs)}` : "Worked";
     const toolCount = turnRows.filter((r) => r.role === "tool").length;
-    const fileCount = new Set(turnRows.flatMap((r) => (r.role === "tool" ? [editOf((r as ChatMessage).toolInput)?.path] : [])).filter(Boolean)).size;
+    const projectEdit = (r: ChatMessage | ToolGroupHeader) => {
+      if (r.role !== "tool") return null;
+      const e = editOf((r as ChatMessage).toolInput);
+      return e && isProjectPath(e.path, props.cwd) ? e : null;
+    };
+    const fileCount = new Set(turnRows.map((r) => projectEdit(r)?.path).filter(Boolean)).size;
 
     const edits: FileEdit[] = [];
     let foldEmitted = false;
     for (const r of turnRows) {
-      if (r.role === "tool") {
-        const e = editOf((r as ChatMessage).toolInput);
-        if (e) edits.push(e);
-      }
+      const e = projectEdit(r);
+      if (e) edits.push(e);
       if (settled && WORK_ROLES.has(r.role)) {
         if (!foldEmitted) {
           out.push({ role: "turn-fold", id: `fold-${user.id}`, turnKey: user.id, label, folded, toolCount, fileCount });
