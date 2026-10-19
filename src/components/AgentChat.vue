@@ -160,7 +160,6 @@
         <!-- Collapsed tool-call group pill ("Ran N commands" / "Used N tools") -->
         <template v-if="msg.role === 'tool-group-header'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
             <div class="tool-row" :class="{ 'tool-row-failed': groupHasFailure(msg.items) }" @click="toggleGroup(msg.groupId)">
               <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': isGroupExpanded(msg.groupId) }" />
               <component :is="groupIcon(msg.items)" :size="12" class="tool-icon" />
@@ -174,12 +173,14 @@
         <!-- Settled turn: its thinking/tool rows fold behind this one row -->
         <template v-else-if="msg.role === 'turn-fold'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
-            <div class="tool-row" @click="foldedTurns[msg.turnKey] = !msg.folded">
-              <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': !msg.folded }" />
-              <PhClock :size="11" class="tool-icon" />
-              <span>{{ msg.label }}</span>
-            </div>
+            <button class="worked-bar" @click="foldedTurns[msg.turnKey] = !msg.folded">
+              <PhCaretRight :size="12" weight="bold" class="tool-caret" :class="{ 'tool-caret-open': !msg.folded }" />
+              <span class="font-semibold text-foreground">{{ msg.label }}</span>
+              <span class="ml-auto flex items-center gap-1.5">
+                <span v-if="msg.toolCount" class="worked-pill"><PhWrench :size="12" />{{ msg.toolCount }} tool {{ msg.toolCount === 1 ? 'call' : 'calls' }}</span>
+                <span v-if="msg.fileCount" class="worked-pill"><PhPencilSimple :size="12" />{{ msg.fileCount }} {{ msg.fileCount === 1 ? 'file' : 'files' }}</span>
+              </span>
+            </button>
           </div>
         </template>
 
@@ -187,7 +188,6 @@
              edit's own before/after lines (Ghostex-style inline diff). -->
         <template v-else-if="msg.role === 'changed-files'">
           <div class="flex items-start gap-2.5 px-4 py-1">
-            <div class="w-[26px] flex-shrink-0" />
             <div class="diff-card min-w-0 max-w-[720px] flex-1">
               <div class="diff-card-head">
                 <span class="diff-card-icon"><PhPencilSimple :size="14" /></span>
@@ -258,8 +258,6 @@
                 </template>
               </div>
             </div>
-            <div v-if="isLastOfRun(msgIdx)" class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-border bg-hover text-[11px] font-bold text-secondary-foreground">U</div>
-            <div v-else class="w-[26px] flex-shrink-0" />
           </div>
         </template>
 
@@ -267,7 +265,6 @@
         <template v-else-if="msg.role === 'tool'">
           <template v-if="!groupIdOf(msg.id) || isGroupExpanded(groupIdOf(msg.id))">
             <div class="group flex items-start gap-2.5 px-4 py-[3px]">
-              <div class="w-[26px] flex-shrink-0" />
               <div class="tool-row" :class="`tool-row-${toolStatus(msg)}`" @click="msg.toolExpanded = !msg.toolExpanded">
                 <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': msg.toolExpanded }" />
                 <component :is="toolIconFor(msg)" :size="12" class="tool-icon" />
@@ -278,7 +275,6 @@
               </div>
             </div>
             <div v-if="msg.toolExpanded" class="flex items-start gap-2.5 px-4 py-[3px]">
-              <div class="w-[26px] flex-shrink-0" />
               <div class="flex flex-col gap-1.5">
                 <div v-if="msg.toolInput && Object.keys(msg.toolInput).length" class="flex flex-col gap-[3px]">
                   <div v-for="k in ['file_path','command','pattern','url','description']" :key="k" v-show="msg.toolInput[k] !== undefined" class="flex max-w-[min(560px,90vw)] gap-1.5 font-mono text-[10px]">
@@ -320,7 +316,6 @@
         <!-- Permission log -->
         <template v-else-if="msg.role === 'permission'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
             <div class="bubble-permission" :class="msg.text.startsWith('✓') ? 'perm-granted' : 'perm-rejected'">
               <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ msg.text }}</span>
             </div>
@@ -330,7 +325,6 @@
         <!-- Thinking -->
         <template v-else-if="msg.role === 'thinking'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
             <div class="max-w-[90%]">
               <div class="tool-row" @click="thinkingExpanded[msg.id] = !thinkingExpanded[msg.id]">
                 <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': thinkingExpanded[msg.id] }" />
@@ -343,12 +337,8 @@
 
         <!-- Assistant message -->
         <template v-else>
-          <div class="group flex items-start gap-2.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
-            <div v-if="isFirstOfRun(msgIdx)" class="agent-avatar mt-0.5 flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center">
-              <component :is="currentAgentIcon" :size="14" :style="{ color: 'var(--agent-accent)' }" />
-            </div>
-            <div v-else class="mt-0.5 w-[26px] flex-shrink-0" />
-            <div class="min-w-0 flex-1 pt-1 text-[13px] leading-[1.65] text-foreground">
+          <div class="group flex items-start gap-2.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-3 pb-1' : 'py-[1px]'">
+            <div class="min-w-0 flex-1 pt-1 text-[14.5px] leading-[1.7] text-foreground">
               <TranscriptComments
                 :message-id="msg.id"
                 :text="msg.text"
@@ -376,12 +366,11 @@
         </template>
       </div>
 
-      <div v-if="busy" class="flex items-center gap-1.5 px-4 py-1.5">
-        <div class="agent-avatar flex h-[22px] w-[22px] items-center justify-center">
-          <component :is="currentAgentIcon" :size="12" :style="{ color: 'var(--agent-accent)' }" />
-        </div>
-        <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
-        <span class="ml-1 text-[11px] italic text-muted-foreground tabular-nums">Working for {{ workingElapsed }}</span>
+      <!-- Working line (Ghostex-style): a slowly spinning spark, a playful verb, the clock. -->
+      <div v-if="busy" class="flex items-center gap-2 px-4 py-2">
+        <PhSparkle :size="15" weight="fill" class="working-spark" />
+        <span class="text-[13px] text-secondary-foreground">{{ workingVerb }}…</span>
+        <span class="text-[12px] tabular-nums text-muted-foreground">{{ workingElapsed }}</span>
       </div>
       </div>
     </div>
@@ -751,7 +740,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { listen } from "@tauri-apps/api/event";
@@ -1656,7 +1645,7 @@ function diffBlocks(added: number, removed: number): string[] {
 // its thinking/tool rows collapse behind one "Worked for Xs" row and the files
 // it touched are summed into a diffstat card — the transcript stays readable
 // when scrolling back over a long session.
-interface TurnFoldRow { role: "turn-fold"; id: string; turnKey: number; label: string; folded: boolean; partial?: false }
+interface TurnFoldRow { role: "turn-fold"; id: string; turnKey: number; label: string; folded: boolean; toolCount: number; fileCount: number; partial?: false }
 interface ChangedFilesRow { role: "changed-files"; id: string; files: FileEdit[]; added: number; removed: number; partial?: false }
 type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow;
 
@@ -1679,7 +1668,9 @@ const displayItems = computed<DisplayRow[]>(() => {
     // The last turn is settled only once the chat is idle; earlier ones always are.
     const settled = hasLaterTurn || !busy.value;
     const folded = settled && (foldedTurns[user.id] ?? hasLaterTurn);
-    const label = user.turnMs ? `Worked for ${fmtDuration(user.turnMs)}` : "Worked";
+    const label = user.turnMs ? `Worked ${fmtDuration(user.turnMs)}` : "Worked";
+    const toolCount = turnRows.filter((r) => r.role === "tool").length;
+    const fileCount = new Set(turnRows.flatMap((r) => (r.role === "tool" ? [editOf((r as ChatMessage).toolInput)?.path] : [])).filter(Boolean)).size;
 
     const edits: FileEdit[] = [];
     let foldEmitted = false;
@@ -1690,7 +1681,7 @@ const displayItems = computed<DisplayRow[]>(() => {
       }
       if (settled && WORK_ROLES.has(r.role)) {
         if (!foldEmitted) {
-          out.push({ role: "turn-fold", id: `fold-${user.id}`, turnKey: user.id, label, folded });
+          out.push({ role: "turn-fold", id: `fold-${user.id}`, turnKey: user.id, label, folded, toolCount, fileCount });
           foldEmitted = true;
         }
         if (folded) continue;
@@ -1718,10 +1709,6 @@ const displayItems = computed<DisplayRow[]>(() => {
 function isFirstOfRun(idx: number): boolean {
   const items = displayItems.value;
   return items[idx - 1]?.role !== items[idx].role;
-}
-function isLastOfRun(idx: number): boolean {
-  const items = displayItems.value;
-  return items[idx + 1]?.role !== items[idx].role;
 }
 function groupIdOf(msgId: number): string | undefined {
   return grouping.value.groupIdByMsgId.get(msgId);
@@ -1969,6 +1956,20 @@ function sendQueuedNow(id: number) {
   S.save();
   void abortTurn();
 }
+
+// The working line's verb rotates every few seconds — a small sign of life
+// that reads better than three dots (Ghostex does the same).
+const WORKING_VERBS = ["Working", "Thinking", "Reading", "Tinkering", "Pondering", "Wrangling", "Skedaddling", "Noodling", "Untangling", "Cooking"];
+const workingVerbIndex = ref(0);
+let workingVerbTimer: number | undefined;
+watch(busy, (on) => {
+  window.clearInterval(workingVerbTimer);
+  if (!on) return;
+  workingVerbIndex.value = Math.floor(Math.random() * WORKING_VERBS.length);
+  workingVerbTimer = window.setInterval(() => { workingVerbIndex.value = (workingVerbIndex.value + 1) % WORKING_VERBS.length; }, 4000);
+}, { immediate: true });
+onBeforeUnmount(() => window.clearInterval(workingVerbTimer));
+const workingVerb = computed(() => WORKING_VERBS[workingVerbIndex.value]);
 
 // Context meter. The window is whatever the CLI says the model had on the last
 // turn (a [1m] model is five times a 200k one); 200k until it has said.
@@ -3049,34 +3050,33 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 }
 
 /* Tool row — quiet activity-log line, expandable */
+/* Tool rows read as quiet text lines (Ghostex): "› Read chatSession.ts". No
+   chip chrome; a running or failed row only changes its colour. */
 .tool-row {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 9px 3px 6px;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-chip);
-  font-size: 11px;
+  gap: 7px;
+  padding: 3px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  font-size: 13px;
   color: var(--text-secondary, rgba(255,255,255,0.55));
   cursor: pointer;
   user-select: none;
   max-width: 100%;
   overflow: hidden;
-  transition: background .1s, color .1s, border-color .1s;
+  transition: background .1s, color .1s;
 }
 .tool-row:hover {
-  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 13%, var(--surface-elevated));
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
   color: var(--text-primary);
 }
-.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 35%, var(--border)); }
-.tool-row-failed {
-  background: color-mix(in srgb, var(--red, #ef4444) 8%, var(--surface-elevated));
-  border-color: color-mix(in srgb, var(--red, #ef4444) 30%, transparent);
-}
+.tool-row-running { color: var(--text-primary); }
+.tool-row-failed { color: var(--red, #ef4444); }
 .tool-caret {
   flex-shrink: 0;
-  color: var(--agent-accent, var(--accent));
+  color: var(--text-muted);
   transition: transform .15s;
 }
 .tool-caret-open { transform: rotate(90deg); }
@@ -3253,6 +3253,14 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .md-body :deep(table) { border-collapse: collapse; font-size: 12px; margin: 8px 0; }
 .md-body :deep(th), .md-body :deep(td) { border: 1px solid var(--chat-border); padding: 5px 10px; }
 .md-body :deep(th) { background: color-mix(in srgb, var(--chat-text) 5%, transparent); font-weight: 600; }
+
+/* Ghostex-style "Worked 42s" bar and the working spark. */
+.worked-bar { display: flex; width: 100%; align-items: center; gap: 9px; padding: 9px 14px; border: none; border-radius: 12px; font-size: 13.5px; text-align: left; cursor: pointer; background: color-mix(in srgb, var(--chat-text) 4%, var(--chat-bg)); }
+.worked-bar:hover { background: color-mix(in srgb, var(--chat-text) 7%, var(--chat-bg)); }
+.worked-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--chat-border); font-size: 11.5px; color: var(--chat-text-secondary); }
+.working-spark { color: #E0876A; animation: working-spin 9s linear infinite, working-pulse 1.6s ease-in-out infinite; }
+@keyframes working-spin { to { transform: rotate(360deg); } }
+@keyframes working-pulse { 50% { opacity: .55; } }
 
 /* Inline diff card (changed-files row). */
 .diff-card { border: 1px solid var(--chat-border); border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }
