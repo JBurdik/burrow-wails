@@ -748,7 +748,7 @@
                     <!-- Badge marks the theme this scheme is currently set to. -->
                     <span
                       v-if="assignedFamily(side.scheme) === card.family.key"
-                      class="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-accent text-[var(--bg-base)]"
+                      class="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-accent text-[var(--bg-solid,var(--bg-base))]"
                     >
                       <component :is="side.scheme === 'dark' ? PhMoon : PhSun" :size="10" weight="fill" />
                     </span>

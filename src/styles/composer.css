@@ -309,7 +309,7 @@ textarea {
   border-radius: 8px;
   /* Light square on dark (dark on light): the one high-contrast control. */
   background: var(--text-primary);
-  color: var(--bg-base);
+  color: var(--bg-solid, var(--bg-base));
   cursor: pointer;
   transition: background .12s ease-out, opacity .12s ease-out;
 }

@@ -273,7 +273,7 @@
             </div>
             <div class="flex gap-1.5">
               <button
-                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border-0 bg-[var(--text-primary)] px-2.5 py-1.5 font-sans text-[11.5px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-35"
+                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border-0 bg-[var(--text-primary)] px-2.5 py-1.5 font-sans text-[11.5px] font-semibold text-[var(--bg-solid,var(--bg-base))] transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-35"
                 :disabled="!git.hasWorkingTreeChanges || git.committing || git.generating"
                 @click="git.commit()"
               >

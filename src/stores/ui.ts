@@ -434,6 +434,10 @@ export const useUIStore = defineStore("ui", () => {
     for (const [k, v] of Object.entries(t.vars)) {
       root.style.setProperty(`--${k}`, v);
     }
+    // bg-base stays opaque here even when a wallpaper / animated backdrop makes
+    // --bg-base translucent below: it's the ink on filled buttons (send, badges),
+    // and a translucent ink makes an enabled button look disabled.
+    root.style.setProperty("--bg-solid", t.vars["bg-base"]);
     // Match the terminal frame/pane exactly to the xterm canvas background, so
     // there's no tonal "border" around the terminal content.
     if (t.xterm.background) root.style.setProperty("--terminal-bg", t.xterm.background);
@@ -469,8 +473,10 @@ export const useUIStore = defineStore("ui", () => {
       root.style.setProperty("--anim-floor", t.vars["bg-base"]);
       root.style.setProperty("--bg-image", `linear-gradient(${t.vars["bg-base"]}, ${t.vars["bg-base"]})`);
       root.style.setProperty("--bg-base", hexToRgba(t.vars["bg-base"], 0.5));
-      root.style.setProperty("--bg-panel", hexToRgba(t.vars["bg-panel"], 0.72));
+      root.style.setProperty("--bg-panel", hexToRgba(t.vars["bg-panel"], 0.6));
       root.style.setProperty("--terminal-bg", "transparent");
+      // Frosted panels would smear the backdrop into mush — keep them clear.
+      root.style.setProperty("--blur-panels", "none");
       root.style.setProperty("--bg-dropdown", t.vars["bg-panel"]);
     } else {
       root.style.setProperty("--bg-dropdown", "var(--bg-panel)");

@@ -797,6 +797,7 @@ function onKeydown(e: KeyboardEvent) {
    and Settings (a fixed overlay with its own canvas) sits on the opaque floor
    instead of letting the app show through. */
 :root[data-animated] .surface-glow { --glow-base: transparent; }
+:root[data-animated] { --sidebar-bg: var(--bg-base); }
 :root[data-animated] .terminal-tab-content { background: transparent; }
 :root[data-animated] .settings-root { background-color: var(--anim-floor); }
 
