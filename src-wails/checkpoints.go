@@ -69,9 +69,14 @@ func snapshotTree(cwd string) (string, error) {
 	defer os.Remove(idx)
 	env := []string{"GIT_INDEX_FILE=" + idx}
 
-	// Seed from HEAD so `add -A` only has to walk the delta. Fails (harmlessly)
-	// in a repo with no commits yet, where the empty index is already correct.
-	runGitEnv(cwd, env, "read-tree", "HEAD")
+	// Seed from a copy of the real index: its stat cache lets `add -A` hash
+	// only changed files (`read-tree HEAD` has none, so every file was rehashed
+	// — seconds per send in a repo with big tracked files). `add -A` then makes
+	// the copy match the worktree, so staged-vs-unstaged state doesn't matter.
+	// No index (fresh repo) → seed from HEAD, harmless failure with no commits.
+	if real, ok := gitLine(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index"); !ok || copyFile(real, idx) != nil {
+		runGitEnv(cwd, env, "read-tree", "HEAD")
+	}
 
 	// ponytail: plain `add -A`, so anything the repo does not .gitignore lands
 	// in the snapshot. If a workspace tracks huge un-ignored build output this
@@ -86,13 +91,9 @@ func snapshotTree(cwd string) (string, error) {
 	return strings.TrimSpace(out.Stdout), nil
 }
 
-// snapshotCommit wraps snapshotTree in a commit object parented on HEAD, and
-// pins it with a ref so gc keeps it. Returns (commit, tree).
-func snapshotCommit(cwd, msg string) (string, string, error) {
-	tree, err := snapshotTree(cwd)
-	if err != nil {
-		return "", "", err
-	}
+// snapshotCommit wraps a snapshotTree result in a commit object parented on
+// HEAD, and pins it with a ref so gc keeps it. Returns (commit, tree).
+func snapshotCommit(cwd, tree, msg string) (string, string, error) {
 	args := []string{"commit-tree", tree, "-m", msg}
 	if head, ok := gitLine(cwd, "rev-parse", "HEAD"); ok && head != "" {
 		args = append(args, "-p", head)
@@ -104,6 +105,14 @@ func snapshotCommit(cwd, msg string) (string, string, error) {
 	commit := strings.TrimSpace(out.Stdout)
 	runGitEnv(cwd, nil, "update-ref", cpRefPrefix+commit, commit)
 	return commit, tree, nil
+}
+
+func copyFile(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, b, 0o600)
 }
 
 func isGitRepo(cwd string) bool {
@@ -132,7 +141,7 @@ func (a *App) CreateCheckpoint(cwd, ptyID, label string) (Checkpoint, error) {
 		return Checkpoint{}, nil
 	}
 
-	commit, tree, err := snapshotCommit(cwd, "burrow checkpoint: "+label)
+	commit, tree, err := snapshotCommit(cwd, tree, "burrow checkpoint: "+label)
 	if err != nil {
 		return Checkpoint{}, err
 	}
