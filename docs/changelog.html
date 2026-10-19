@@ -79,11 +79,77 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.5.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.5.0</span>
+      <span class="tag tag-latest">nejnovější</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Nový vzhled (inspirovaný Ghostex)</div>
+      <ul>
+        <li><strong>Redesign celé aplikace</strong> — nové výchozí téma <strong>Plum</strong>, sidebar seskupený po projektech s počtem necommitnutých <code>+/-</code> řádků a sub-agenty pod svým threadem, titlebar s navigací zpět/vpřed a názvem otevřeného threadu, místo barevného pruhu malý odznak DEV/BETA.</li>
+        <li><strong>Chat transcript</strong> — bez avatarů, odpovědi přes celou šířku ve větším písmu, bubliny jen pro tvé zprávy. Hotový turn se sbalí za lištu „Worked 42s“ s počtem tool callů a souborů, nahoře minimapa a karta s diffem každého turnu.</li>
+        <li><strong>Composer, model picker, Spotlight, Settings, pravý panel</strong> — vše přestylované: model a effort v jednom chipu, picker s taby agentů a oblíbenými, Spotlight s filtry (Tab přepíná), Settings jako karty se segmented ovládáním, pravý panel s mřížkou surfaces.</li>
+        <li><strong>Mission Control</strong> — dashboard s kartami agentů ze všech workspaců ve třech drahách (Needs you / Running / Review); oprávnění z PTY tabu jde odklepnout přímo na kartě.</li>
+        <li><strong>Notifikace</strong> — panel jako čtečka: skupiny Nepřečtené / Přečtené, „Next unread“, „Mark all read“. Otevření panelu už neoznačí vše jako přečtené.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Témata</div>
+      <ul>
+        <li><strong>Nové rodiny Fire, Matcha, Peach a Synthwave</strong> — každá s tmavou i světlou variantou. Synthwave má výrazný fialový glow (téma si může nastavit vlastní barvu a sílu glow).</li>
+        <li><strong>Animovaná pozadí</strong> — <strong>Matrix 💊</strong> (padající znaky), Nebula ✨ (hvězdy), Tide 🫧 (bubliny) a Stonks (rakety 🚀). Plochy jsou nad animací poloprůhledné, terminál, kontextová menu a dialogy zůstávají neprůhledné a čitelné. Animace běží max. 20–30 fps, stojí ve skrytém okně a respektuje „omezit pohyb“.</li>
+        <li><strong>Glow bez pruhů</strong> — přechod na plochách byl poskládaný z několika průhledných vrstev a WebKit každou zaokrouhlí zvlášť na 8 bitů, takže byly vidět stupně. Teď je to jedna neprůhledná vrstva s hladkou (kosinovou) křivkou.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Chaty</div>
+      <ul>
+        <li><strong>Chat runtime v Go pro všechny transporty</strong> — Claude, Codex i obecné ACP: proces chatu drží Go podle id chatu, takže <code>spawn</code>, telefon i <code>chat_send</code> fungují i bez otevřeného okna. Nastavení spuštění (model, effort, permission mode, profil) jsou sloupce v databázi.</li>
+        <li><strong>Rewind a fork</strong> — u tvé zprávy „Rewind to here“ / „Fork from here“ (jen Claude). Původní session soubor se nikdy nemění, jede se přes <code>--resume-session-at</code> + <code>--fork-session</code>.</li>
+        <li><strong>Auto-sleep</strong> — nečinný chat (výchozí 60 min, Settings → General) uspí svůj proces; další zpráva ho probudí a naváže session. Sledovaný chat nikdy neusne. Nahrazuje starý reaper, který zabíjel CLI čekající na schválení oprávnění.</li>
+        <li><strong>Mermaid diagramy a HTML stránky v chatu</strong> — <code>```mermaid</code> se vykreslí jako karta, agentem napsaná <code>.html</code> stránka jako karta otevíraná v sandboxovaném iframu bez sítě. K tomu bloky <code>```visual</code> (grafy, tabulky) a <code>```questions</code> (formulář s otázkami).</li>
+        <li><strong>OpenAI-kompatibilní provider</strong> — vestavěný agent pro libovolný <code>/v1/chat/completions</code> server (llama.cpp, LM Studio, Ollama).</li>
+        <li><strong>Fronta zpráv</strong> — čekající zprávy jdou přetahovat a vrátit k úpravě do composeru. „Catch me up“ shrne, co se v chatu stalo.</li>
+        <li><strong>Hotové sub-agenty</strong> — po 30 minutách od přečtení a vyzvednutí výsledku se samy archivují, seznam v pravém panelu už neroste do nekonečna.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Hledání a pravý panel</div>
+      <ul>
+        <li><strong>Fulltext v chatech i promptech</strong> — Spotlight hledá v přepisech chatů (FTS5) a nově i ve všech promptech poslaných do Claude Code a Codexu (<code>~/.claude/history.jsonl</code>, <code>~/.codex/history.jsonl</code>). Enter obnoví session v novém tabu, ⌘Enter zkopíruje prompt.</li>
+        <li><strong>Pravý panel na dvě části</strong> — dva panely s vlastními taby, surfaces se přesouvají tažením, rozložení si pamatuje každý workspace.</li>
+        <li><strong><code>burrow serve</code></strong> — agent spustí dev server v terminálu pravého panelu, kde ho vidíš a můžeš do něj psát, místo backgroundovaného procesu v Bash toolu.</li>
+        <li><strong>Markdown dokumenty</strong> — klik na lokální <code>.md</code> odkaz v chatu ho otevře vykreslený v pravém panelu s osnovou a živým reloadem.</li>
+        <li><strong>Terminál navazuje po výpadku spojení</strong> — daemon čísluje výstup každého PTY a drží poslední 1 MiB; po reconnectu se dotáhne přesně chybějící kus místo prázdné díry.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Diff karta ukazovala soubory mimo projekt</strong> — počítaly se všechny zapsané soubory, takže turn, který uložil jen agentovu paměťovou poznámku, ji hlásil jako změnu. Teď jen cesty uvnitř pracovního adresáře chatu.</li>
+        <li><strong>Sidebar nešel skrýt</strong> — <code>v-show</code> na komponentě s více root elementy Vue ignoruje; preference se nově ukládá jako <code>sidebarHidden</code>.</li>
+        <li><strong>Plná tlačítka vypadala disabled</strong> — ikona na tlačítku (send, odznaky) brala barvu z <code>--bg-base</code>, který je u animovaných témat a s tapetou průhledný. Nově z neprůhledného <code>--bg-solid</code>.</li>
+        <li><strong>Ztracené události po reconnectu</strong> — dvě souběžná vysílání mohla doručit seq N+1 před N a klient pak N zahodil natrvalo. Číslování a rozeslání teď běží pod jedním zámkem.</li>
+        <li><strong>Welcome screen padal při načtení</strong> — composer četl <code>target</code> dřív, než byl deklarován (TDZ <code>ReferenceError</code>).</li>
+        <li><strong>Odebrány zkratky Alt+1–9</strong> pro výběr modelu (v composeru i v pickeru) — šipky, Tab a Enter v pickeru zůstávají.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.11 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.11</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">říjen 2026</span>
     </div>
 
