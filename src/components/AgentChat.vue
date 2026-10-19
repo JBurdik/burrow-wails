@@ -1,5 +1,5 @@
 <template>
-  <div class="claude-chat surface-glow drop-zone flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
+  <div class="claude-chat surface-glow [--glow-base:var(--bg-base)] drop-zone flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
     <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden">
 
     <!-- Chat title bar -->

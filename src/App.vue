@@ -1,5 +1,11 @@
 <template>
   <div class="ide-root">
+    <AnimatedBackdrop
+      v-if="ui.activeTheme.animated && !ui.bgImageUrl"
+      :key="ui.theme"
+      v-bind="ui.activeTheme.animated"
+      :floor="ui.activeTheme.vars['bg-base']"
+    />
     <TitleBar
       :workspace-name="displayWs?.name"
       :branch="git.cwd === displayWs?.path ? git.branch : ''"
@@ -125,6 +131,7 @@ import { useRoute } from "vue-router";
 import { router, routeId } from "@/router";
 import { PhX } from "@phosphor-icons/vue";
 import TitleBar from "@/components/TitleBar.vue";
+import AnimatedBackdrop from "@/components/AnimatedBackdrop.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import Terminal from "@/components/Terminal.vue";
 import RightPanel from "@/components/RightPanel.vue";
@@ -784,17 +791,41 @@ function onKeydown(e: KeyboardEvent) {
   --radius-pill: 999px;
 }
 
+/* Animated themes (ui.ts applyTheme sets data-animated): surfaces are
+   translucent over the backdrop canvas, so drop every extra layer that would
+   stack more cover on top — the glow mixes into nothing, split gaps go clear,
+   and Settings (a fixed overlay with its own canvas) sits on the opaque floor
+   instead of letting the app show through. */
+:root[data-animated] .surface-glow { --glow-base: transparent; }
+:root[data-animated] .terminal-tab-content { background: transparent; }
+:root[data-animated] .settings-root { background-color: var(--anim-floor); }
+
 /* Subtle glow on the big surfaces (sidebar, chat, welcome, dashboard, RP),
-   derived from the active theme's accent so every theme gets it for free.
-   It's a background-IMAGE layered over each surface's own background-color,
-   so opaque panels keep their color and only gain the tint. */
-:root {
-  --bg-gradient:
-    radial-gradient(120% 70% at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%),
-    radial-gradient(90% 60% at 100% 100%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 65%),
-    linear-gradient(180deg, color-mix(in srgb, var(--text-primary) 2%, transparent), transparent 40%);
+   derived from the active theme's accent so every theme gets it for free;
+   a theme can override color + strength (Theme.glow → --glow-color/-strength).
+   Opaque: every stop is the accent mixed into the surface's own bg
+   (--glow-base, set on the surface; inherited, so a nested surface sets its
+   own), so nothing composites over anything.
+   The falloff is a raised cosine sampled into many stops — CSS interpolates
+   linearly between stops and every kink in the slope reads as a band; the
+   cosine has none and reaches the base with zero slope. Declared on the
+   class, not :root, so var(--glow-base) resolves per element. */
+.surface-glow {
+  background-image: radial-gradient(120% 70% at 0% 0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 1.000), var(--glow-base, var(--bg-base))) 0.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.983), var(--glow-base, var(--bg-base))) 5.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.933), var(--glow-base, var(--bg-base))) 10.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.853), var(--glow-base, var(--bg-base))) 15.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.750), var(--glow-base, var(--bg-base))) 20.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.630), var(--glow-base, var(--bg-base))) 25.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.500), var(--glow-base, var(--bg-base))) 30.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.370), var(--glow-base, var(--bg-base))) 35.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.250), var(--glow-base, var(--bg-base))) 40.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.147), var(--glow-base, var(--bg-base))) 45.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.067), var(--glow-base, var(--bg-base))) 50.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.017), var(--glow-base, var(--bg-base))) 55.0%,
+    color-mix(in srgb, var(--glow-color, var(--accent)) calc(var(--glow-strength, 7%) * 0.000), var(--glow-base, var(--bg-base))) 60.0%);
 }
-.surface-glow { background-image: var(--bg-gradient); }
 
 /* Quiet one-line notices docked at the bottom of the sidebar (app / agent
    updates): the whole row is the action, the × only shows on hover. */
@@ -809,6 +840,9 @@ body {
   /* Meme themes set --bg-image to a tiled wallpaper; normal themes = none. */
   background-image: var(--bg-image, none);
   background-attachment: fixed;
+  /* Own stacking context, so AnimatedBackdrop's z-index:-1 canvas paints above this
+     background and below every surface (without it the canvas sat under it). */
+  isolation: isolate;
   color: var(--text-primary);
   font-family: var(--font-ui);
   overflow: hidden;

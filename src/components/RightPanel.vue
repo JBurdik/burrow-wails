@@ -1,7 +1,7 @@
 <template>
   <aside
     ref="panelEl"
-    class="surface-glow flex h-full shrink-0 grow-0 overflow-hidden bg-panel text-xs [backdrop-filter:var(--blur-panels,none)]"
+    class="surface-glow [--glow-base:var(--bg-panel)] flex h-full shrink-0 grow-0 overflow-hidden bg-panel text-xs [backdrop-filter:var(--blur-panels,none)]"
     :class="props.open ? 'w-[var(--right-panel-width,300px)] basis-[var(--right-panel-width,300px)] border-l border-border' : 'w-0 basis-0'"
   >
     <!-- v-show, not v-if: closing the panel must keep XTerm/BrowserPane mounted,

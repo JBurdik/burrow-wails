@@ -9,7 +9,7 @@
   >
     <div
       class="flex h-full shrink-0 items-center gap-0.5 pr-2"
-      :class="sidebarVisible && 'border-r border-border'"
+      :class="sidebarVisible && 'relative after:absolute after:right-0 after:top-1/2 after:h-4 after:w-px after:-translate-y-1/2 after:bg-border'"
       :style="sidebarVisible ? { width: 'var(--sidebar-width)', background: 'var(--sidebar-bg)' } : undefined"
       data-tauri-drag-region
     >
@@ -98,8 +98,8 @@
       </div>
     </div>
 
-      <div class="flex-1" data-tauri-drag-region />
       <button class="tb-btn [-webkit-app-region:no-drag]" title="Search (⌘P)" @click="ui.openSpotlight()"><PhMagnifyingGlass :size="15" /></button>
+      <div class="flex-1" data-tauri-drag-region />
     </div>
 
     <!-- Main area: back · home · forward, then what's on screen. -->

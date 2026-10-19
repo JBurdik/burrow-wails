@@ -1,5 +1,12 @@
 <template>
   <div class="settings-root fixed inset-0 z-[1000] flex overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]">
+    <AnimatedBackdrop
+      v-if="ui.activeTheme.animated && !ui.bgImageUrl"
+      :key="ui.theme"
+      v-bind="ui.activeTheme.animated"
+      :floor="ui.activeTheme.vars['bg-base']"
+      contained
+    />
       <!-- Nav: the sidebar column's darker surface. Top padding clears the
            macOS traffic lights. -->
       <nav class="flex w-[232px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-[var(--sidebar-bg)] px-2.5 pb-3 pt-[52px]">
@@ -1192,6 +1199,7 @@ import Segmented from "@/components/ui/segmented/Segmented.vue";
 import { testNtfy } from "@/lib/ntfy";
 import { useUpdateStore } from "@/stores/update";
 import { THEME_FAMILIES, findTheme } from "@/themes";
+import AnimatedBackdrop from "@/components/AnimatedBackdrop.vue";
 import { soundsForKind, playSound, type SoundKind } from "@/lib/sounds";
 import { eventToShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";

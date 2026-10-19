@@ -442,6 +442,8 @@ export const useUIStore = defineStore("ui", () => {
     // Frosted-glass backdrop for translucent themes; else none. (No bundled theme
     // sets this — transparent/vibrancy themes were removed for causing lag.)
     root.style.setProperty("--backdrop-blur", t.backdropBlur ?? "none");
+    root.style.setProperty("--glow-color", t.glow?.color ?? "var(--accent)");
+    root.style.setProperty("--glow-strength", `${t.glow?.strength ?? 7}%`);
     // Per-element blur vars — each surface reads its own, independent of theme.
     const mkBlur = (n: number) => (n > 0 ? `blur(${n}px)` : "none");
     root.style.setProperty("--blur-panels", mkBlur(blurPanels.value));
@@ -460,9 +462,22 @@ export const useUIStore = defineStore("ui", () => {
       // Dropdowns float over content and need to stay legible — clamp opacity higher.
       root.style.setProperty("--bg-dropdown", hexToRgba(t.vars["bg-panel"], Math.min(1, Math.max(0.88, op))));
       if (!t.backdropBlur) root.style.setProperty("--backdrop-blur", "blur(20px)");
+    } else if (t.animated) {
+      // Animated backdrop (AnimatedBackdrop.vue): bg-base becomes an opaque floor
+      // under the canvas, surfaces go translucent over it, and the terminal pane
+      // goes clear — xterm paints its own opaque bg, so output stays readable.
+      root.style.setProperty("--anim-floor", t.vars["bg-base"]);
+      root.style.setProperty("--bg-image", `linear-gradient(${t.vars["bg-base"]}, ${t.vars["bg-base"]})`);
+      root.style.setProperty("--bg-base", hexToRgba(t.vars["bg-base"], 0.5));
+      root.style.setProperty("--bg-panel", hexToRgba(t.vars["bg-panel"], 0.72));
+      root.style.setProperty("--terminal-bg", "transparent");
+      root.style.setProperty("--bg-dropdown", t.vars["bg-panel"]);
     } else {
       root.style.setProperty("--bg-dropdown", "var(--bg-panel)");
     }
+    // App.vue's [data-animated] rules key off this (glow, split gaps, Settings).
+    if (t.animated && !bgImageUrl.value) root.dataset.animated = t.animated.kind;
+    else delete root.dataset.animated;
   }
 
   // Load a wallpaper from disk (base64 → blob URL) and apply it.
