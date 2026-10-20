@@ -1084,6 +1084,11 @@ async function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, i
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
   activateTab(tab.id);
+  // From the welcome composer (WelcomeScreen.submit), which waits for this tab
+  // instead of revealing the workspace's previous one while the chat is created.
+  if (initialPrompt && uiStore.welcomeVisible && wsStore.active?.id === props.workspaceId) {
+    void router.push(`/ws/${props.workspaceId}/tab/${tab.id}`);
+  }
   // ClaudeChat sends this itself once its runtime is up (a chat leaf has no
   // xtermRefs entry, and its CLI/ACP session isn't ready on the next tick).
   if (initialPrompt) {

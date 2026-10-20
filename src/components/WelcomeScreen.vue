@@ -603,7 +603,10 @@ async function submit() {
   worktreeBranch.value = "";
   // Leaving the composer for the tabs is the navigation that ends this screen —
   // it also covers the dashboard case the old explicit setMode("terminal") did.
-  ui.closeWelcome();
+  // Not for a chat: its tab exists only after create_chat's round trip, and
+  // leaving now showed the workspace's previous tab until then. Terminal's
+  // openClaudeChat navigates to the new tab itself.
+  if (launchMode.value === "terminal" && agent.providerId !== "openai-compatible") ui.closeWelcome();
 }
 </script>
 
