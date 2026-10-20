@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div class="fixed inset-0 z-[1500] flex items-center justify-center bg-black/60" @click.self="cancel">
-      <div class="flex max-h-[85vh] w-[480px] flex-col overflow-hidden rounded-[10px] border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+      <div class="flex max-h-[85vh] w-[480px] flex-col overflow-hidden rounded-[10px] border border-border bg-[var(--bg-dropdown)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
         <div class="border-b border-border/70 px-5 py-4">
           <h2 class="text-sm font-semibold text-foreground">Commit changes</h2>
           <p class="mt-1 text-[11px] text-muted-foreground">

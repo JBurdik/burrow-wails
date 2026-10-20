@@ -597,7 +597,7 @@
 
     <!-- Manual sub-agent spawn dialog — same shape as Sidebar.vue's rename dialog -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="spawnDialogOpen" @click.self="spawnDialogOpen = false">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">Spawn a sub-agent</h3>
         <SubagentProfilePicker v-model="spawnProfile" @configure="configureSpawnProfiles" />
         <textarea
@@ -619,8 +619,8 @@
     <!-- Closing a sub-agent deletes it: an archived child would be reachable
          from nowhere (archivedSessionsForWs filters children out), so it asks
          rather than hiding the work somewhere the user cannot get it back. -->
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="closeChildId !== null" @click.self="closeChildId = null">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="closeChildId !== null" @click.self="closeChildId = null" @keydown.esc="closeChildId = null">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">Close this sub-agent?</h3>
         <p class="m-0 text-[12px] leading-relaxed text-muted-foreground">
           <span class="text-secondary-foreground">{{ chatTitle(closeChildId) }}</span> and its transcript are deleted, and its
@@ -628,7 +628,7 @@
         </p>
         <div class="flex justify-end gap-2">
           <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="closeChildId = null">Cancel</button>
-          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" @click="confirmCloseChild">Close</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" v-focus @click="confirmCloseChild">Close</button>
         </div>
       </div>
     </div>
@@ -636,8 +636,8 @@
 
     <!-- Restore confirm — overwrites files on disk, so it always asks first -->
     <Teleport to="body">
-      <div class="fixed inset-0 z-[100] flex items-center justify-center bg-base/60" v-if="restoreTarget" @click.self="restoreTarget = null">
-        <div class="flex w-[430px] flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-panel p-6">
+      <div class="fixed inset-0 z-[100] flex items-center justify-center bg-base/60" v-if="restoreTarget" @click.self="restoreTarget = null" @keydown.esc="restoreTarget = null">
+        <div class="flex w-[430px] flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-[var(--bg-dropdown)] p-6">
           <h3 class="text-sm font-semibold text-foreground">Restore checkpoint “{{ restoreTarget!.label || restoreTarget!.commit.slice(0, 7) }}”?</h3>
           <p class="text-[11.5px] leading-[1.7] text-secondary-foreground">
             Every file in this workspace goes back to how it looked at
@@ -650,7 +650,7 @@
           <p v-if="restoreError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ restoreError }}</p>
           <div class="flex justify-end gap-2">
             <button class="flex items-center gap-[5px] rounded-[var(--radius-chip)] border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-muted-foreground hover:text-foreground" @click="restoreTarget = null">Cancel</button>
-            <button class="flex items-center gap-[5px] rounded-[var(--radius-chip)] border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" :disabled="restoreBusy" @click="confirmRestore">
+            <button class="flex items-center gap-[5px] rounded-[var(--radius-chip)] border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" :disabled="restoreBusy" v-focus @click="confirmRestore">
               {{ restoreBusy ? "Restoring…" : "Restore" }}
             </button>
           </div>
@@ -712,6 +712,8 @@ import { addTerm, findServed, installPanelTerminals, onlyShell, removeTerm, type
 const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: [] }>();
 const git = useGitStore();
+// Confirm dialogs focus their action: Enter confirms, Esc cancels.
+const vFocus = { mounted: (el: HTMLElement) => el.focus() };
 const fileTree = useFileTreeStore();
 const chats = useClaudeChatsStore();
 const subagents = useSubagentsStore();

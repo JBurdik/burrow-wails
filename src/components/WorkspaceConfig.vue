@@ -1,6 +1,6 @@
 <template>
   <div class="fixed inset-0 z-[800] flex items-center justify-center bg-black/55" @click.self="$emit('close')">
-    <div class="flex max-h-[80vh] w-[640px] flex-col overflow-hidden rounded-[10px] border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.6)]" @keydown.esc.stop="$emit('close')">
+    <div class="flex max-h-[80vh] w-[640px] flex-col overflow-hidden rounded-[10px] border border-border bg-[var(--bg-dropdown)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]" @keydown.esc.stop="$emit('close')">
       <!-- Header -->
       <div class="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <span class="text-[13px] font-semibold text-foreground">{{ ws?.name ?? 'Project' }} — Project Config</span>

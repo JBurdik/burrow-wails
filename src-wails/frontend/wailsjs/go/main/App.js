@@ -94,6 +94,10 @@ export function ChatSetLaunchSettings(arg1, arg2) {
   return window['go']['main']['App']['ChatSetLaunchSettings'](arg1, arg2);
 }
 
+export function ChatSleep(arg1) {
+  return window['go']['main']['App']['ChatSleep'](arg1);
+}
+
 export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }

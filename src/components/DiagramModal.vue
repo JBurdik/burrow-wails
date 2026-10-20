@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60" @click.self="close">
-      <div class="relative max-h-[85vh] max-w-[90vw] overflow-auto rounded-[10px] bg-panel p-8 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+      <div class="relative max-h-[85vh] max-w-[90vw] overflow-auto rounded-[10px] bg-[var(--bg-dropdown)] p-8 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
         <button class="absolute right-2.5 top-2.5 flex items-center rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" @click="close"><PhX :size="16" /></button>
         <div ref="containerRef" class="diagram-svg" />
       </div>

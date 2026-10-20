@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60" @click.self="emit('close')">
-      <div class="flex h-[85vh] w-[90vw] max-w-[1200px] flex-col overflow-hidden rounded-[14px] border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+      <div class="flex h-[85vh] w-[90vw] max-w-[1200px] flex-col overflow-hidden rounded-[14px] border border-border bg-[var(--bg-dropdown)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
         <div class="flex items-center gap-2 border-b border-border px-3 py-2">
           <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{{ title }}</span>
           <span class="truncate font-mono text-[11px] text-muted-foreground" :title="path">{{ path }}</span>

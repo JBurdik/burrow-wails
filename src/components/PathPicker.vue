@@ -2,7 +2,7 @@
   <Teleport to="body">
     <Transition name="pathpick">
       <div v-if="req" class="fixed inset-0 z-[9500] flex justify-center bg-black/60 pt-[140px]" @mousedown.self="cancel">
-        <div class="pp-modal flex max-h-[560px] w-[620px] flex-col self-start overflow-hidden rounded-xl border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.6)] [backdrop-filter:var(--blur-overlay,none)]">
+        <div class="pp-modal flex max-h-[560px] w-[620px] flex-col self-start overflow-hidden rounded-xl border border-border bg-[var(--bg-dropdown)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] [backdrop-filter:var(--blur-overlay,none)]">
           <div class="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
             <component :is="fileMode ? PhFileImage : PhFolderOpen" :size="18" class="shrink-0 text-accent" />
             <input

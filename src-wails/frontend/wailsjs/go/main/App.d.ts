@@ -49,6 +49,8 @@ export function ChatSend(arg1:number,arg2:string,arg3:Array<string>):Promise<voi
 
 export function ChatSetLaunchSettings(arg1:number,arg2:main.LaunchSettingsPatch):Promise<void>;
 
+export function ChatSleep(arg1:number):Promise<boolean>;
+
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
 export function CheckpointDiff(arg1:string,arg2:string):Promise<string>;

@@ -101,7 +101,7 @@
               </span>
               <span class="hidden shrink-0 items-center gap-0.5 group-hover:flex">
                 <button class="sb-row-act" title="Settle" @click.stop="toggleSettled(row.tab, row.ws.id)"><PhCheck :size="12" weight="bold" /></button>
-                <button class="sb-row-act hover:!text-destructive" title="Close tab" @click.stop="termTabs.close(row.ws.id, row.tab.id)"><PhX :size="11" weight="bold" /></button>
+                <button class="sb-row-act hover:!text-destructive" title="Delete thread" @click.stop="deleteThread(row.ws.id, row.tab)"><PhX :size="11" weight="bold" /></button>
               </span>
             </div>
             <div v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="ml-[22px]">
@@ -411,19 +411,19 @@
     <!-- Generic destructive confirm — window.confirm() is a silent no-op in the
          Wails webview (no native dialog delegate wired up), so any delete that
          needs a confirmation must go through this instead. -->
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="confirmDialog" @click.self="confirmDialog = null">
-      <div class="flex w-[380px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-5">
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="confirmDialog" @click.self="confirmDialog = null" @keydown.esc="confirmDialog = null">
+      <div class="flex w-[380px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-5">
         <p class="text-[12.5px] leading-[1.6] text-foreground">{{ confirmDialog.message }}</p>
         <div class="flex justify-end gap-2">
           <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="confirmDialog = null">Cancel</button>
-          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" @click="runConfirm">Delete</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" v-focus @click="runConfirm">Delete</button>
         </div>
       </div>
     </div>
 
     <!-- Delete confirm — destructive: a worktree delete removes files from disk -->
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="deleteTarget" @click.self="deleteTarget = null">
-      <div class="flex w-[420px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="deleteTarget" @click.self="deleteTarget = null" @keydown.esc="deleteTarget = null">
+      <div class="flex w-[420px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">
           Delete {{ deleteTarget!.parent_id ? "worktree" : "project" }} “{{ deleteTarget!.worktree_branch || deleteTarget!.name }}”?
         </h3>
@@ -443,7 +443,7 @@
         <p v-if="deleteError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ deleteError }}</p>
         <div class="flex justify-end gap-2">
           <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="deleteTarget = null">Cancel</button>
-          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-default disabled:opacity-50" @click="confirmDelete" :disabled="deleteBusy">
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-default disabled:opacity-50" v-focus @click="confirmDelete" :disabled="deleteBusy">
             {{ deleteBusy ? "Deleting…" : "Delete" }}
           </button>
         </div>
@@ -452,7 +452,7 @@
 
     <!-- Rename dialog -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="renameId !== null" @click.self="renameId = null">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">Rename workspace</h3>
         <input
           v-model="renameName"
@@ -471,7 +471,7 @@
 
     <!-- Name dialog -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="pendingPath" @click.self="pendingPath = ''">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">Name this workspace</h3>
         <p class="overflow-hidden text-ellipsis whitespace-nowrap rounded border border-border bg-base px-2 py-1.5 font-mono text-[11px] text-secondary-foreground">{{ pendingPath }}</p>
         <input
@@ -491,7 +491,7 @@
 
     <!-- New worktree dialog -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="wtParent" @click.self="closeWtDialog">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">New worktree — {{ wtParent?.name }}</h3>
         <label class="-mb-1.5 text-[11px] font-semibold text-secondary-foreground">Branch</label>
         <input
@@ -745,6 +745,9 @@ function unarchiveAndOpen(chatId: number) {
   if (!active.value) return;
   termTabs.openChat(active.value.id, chatId);
 }
+// Confirm dialogs focus their action, so Enter confirms and Esc (bubbling to
+// the overlay) cancels without reaching for the mouse.
+const vFocus = { mounted: (el: HTMLElement) => el.focus() };
 const confirmDialog = ref<{ message: string; onConfirm: () => void } | null>(null);
 function runConfirm() {
   confirmDialog.value?.onConfirm();
