@@ -156,7 +156,7 @@ leaves Go, so there is no client-side prompt correlation any more.
 any streamed line, or `chat_mark_active` — `chatAttention` pings it every minute for each chat on screen
 while the window has focus, which is how "never sleep a watched chat" reaches Go. The row gets
 `slept_at` (read-only on the wire; moon in Sidebar + composer); the next `chat_send` resumes and clears
-it — opening a chat does not wake it. It replaced `agentproc.ReapIdle`, which reaped on stdout silence
+it — opening a chat does not wake it. A **manual** settle (`settle()` in `claudeChats.ts` → `chat_sleep`) sleeps the chat immediately through the same `sleepChat` (same phase/open-turn guards, no idle window; unsettle does not wake it). It replaced `agentproc.ReapIdle`, which reaped on stdout silence
 and so killed a CLI blocked on a permission prompt. PTY agent tabs are **not** slept: killing one loses the
 TUI, and restoring it means relaunching `claude --resume <id>` into the same tab (not built).
 

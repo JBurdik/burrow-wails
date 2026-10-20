@@ -510,6 +510,8 @@ export function isActivitySync(
     if (!s) return;
     s.settledOverride = "settled";
     persist();
+    // Manual settle only: stop the process now (Go refuses unless the phase is settled).
+    void invoke("chat_sleep", { chatId: id }).catch(() => {});
   }
 
   function unsettle(id: number) {

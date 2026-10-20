@@ -105,6 +105,38 @@ func TestSleepIdleChatsSweep(t *testing.T) {
 	}
 }
 
+// Manual settle sleeps a settled chat at once, but never a running one.
+func TestChatSleepManual(t *testing.T) {
+	a, fake, wsID, _ := runtimeApp(t)
+	store, err := NewPhaseStore(a.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.phases = store
+	writeConfig(t, map[string]any{"providers": []any{claudeAt("claude", "")}})
+
+	settled, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
+	running, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
+	for _, c := range []Chat{settled, running} {
+		if err := a.ChatSend(c.ID, "hi", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.phases.Apply("chat:1", agentphase.Event{Kind: agentphase.HookRunning})
+	a.phases.Apply("chat:1", agentphase.Event{Kind: agentphase.HookDone})
+	a.phases.Apply("chat:2", agentphase.Event{Kind: agentphase.HookRunning})
+
+	if a.ChatSleep(running.ID) || !fake.Alive("2") {
+		t.Fatal("slept a running chat")
+	}
+	if !a.ChatSleep(settled.ID) || fake.Alive("1") {
+		t.Fatal("settled chat not slept")
+	}
+	if row, _ := a.chatByID(settled.ID); row.SleptAt == 0 {
+		t.Fatal("no slept_at")
+	}
+}
+
 func TestChatAutoSleepSetting(t *testing.T) {
 	a, _, _, _ := runtimeApp(t)
 	writeConfig(t, map[string]any{})

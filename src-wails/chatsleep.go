@@ -83,20 +83,33 @@ func (a *App) sleepIdleChats(now time.Time, idle time.Duration) []string {
 		return true
 	})
 	for _, id := range ids {
-		if a.sleepChat(id, now, idle) {
+		if a.sleepChat(id, now, idle, false) {
 			slept = append(slept, id)
 		}
 	}
 	return slept
 }
 
+// ChatSleep puts one chat to sleep right now (manual settle). Same guards as
+// the sweep — settled phase, no open turn — minus the idle window; otherwise a
+// silent no-op.
+func (a *App) ChatSleep(chatID int64) bool {
+	return a.sleepChat(strconv.FormatInt(chatID, 10), time.Now(), 0, true)
+}
+
 // sleepChat decides and stops under the chat lock, so a send can't land
-// between the check and the kill.
-func (a *App) sleepChat(id string, now time.Time, idle time.Duration) bool {
+// between the check and the kill. manual skips the idle-window test (and the
+// need for a recorded activity).
+func (a *App) sleepChat(id string, now time.Time, idle time.Duration, manual bool) bool {
 	defer a.chatRT.lock(id)()
-	last, ok := a.chatRT.active.Load(id)
-	if !ok {
-		return false
+	var last any = time.Time{}
+	if manual {
+		idle = time.Nanosecond
+	} else {
+		var ok bool
+		if last, ok = a.chatRT.active.Load(id); !ok {
+			return false
+		}
 	}
 	claudeLive := a.claudeMgr().Alive(id)
 	sess, rpcLive := a.acpReg().get(id)
