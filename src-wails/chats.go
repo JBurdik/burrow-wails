@@ -261,10 +261,23 @@ func (a *App) DeleteChat(id int64) error {
 	if id <= 0 {
 		return sql.ErrNoRows
 	}
-	// The transcript goes with the row (children's too): its chat_fts entries
-	// are dropped by trigger, so a deleted chat stops turning up in search.
-	if _, err := a.db.Exec(`DELETE FROM chat_messages WHERE chat_id = ? OR chat_id IN (SELECT id FROM chats WHERE parent_chat_id = ?)`, id, id); err != nil {
-		return err
+	// The transcript AND the raw stream go with the row (children's too): its
+	// chat_fts entries are dropped by trigger, so a deleted chat stops turning
+	// up in search. The stream used to stay behind — 20k rows per deleted chat.
+	ids := []int64{id}
+	if rows, err := a.db.Query(`SELECT id FROM chats WHERE parent_chat_id = ?`, id); err == nil {
+		for rows.Next() {
+			var c int64
+			if rows.Scan(&c) == nil {
+				ids = append(ids, c)
+			}
+		}
+		rows.Close()
+	}
+	for _, c := range ids {
+		if err := a.DeleteChatMessages(int(c)); err != nil {
+			return err
+		}
 	}
 	if _, err := a.db.Exec(`DELETE FROM chats WHERE parent_chat_id = ?`, id); err != nil {
 		return err
@@ -370,6 +383,26 @@ func (a *App) archiveLegacyManagerChats() {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		log.Printf("chats: archived %d legacy Manager thread(s)", n)
+	}
+}
+
+// pruneOrphanChatStreams drops chat_stream / chat_stream_state rows whose chat
+// row is gone. Older builds' DeleteChat removed the transcript but not the
+// stream, so every deleted chat kept up to chatStreamKeep raw lines forever.
+// Idempotent; cheap once there is nothing left to drop.
+func (a *App) pruneOrphanChatStreams() {
+	if a.db == nil {
+		return
+	}
+	for _, t := range []string{"chat_stream", "chat_stream_state"} {
+		res, err := a.db.Exec(`DELETE FROM ` + t + ` WHERE CAST(chat_id AS INTEGER) NOT IN (SELECT id FROM chats)`)
+		if err != nil {
+			log.Printf("chats: pruning orphan %s: %v", t, err)
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("chats: pruned %d orphan %s row(s)", n, t)
+		}
 	}
 }
 

@@ -231,6 +231,8 @@ func (a *App) startup(ctx context.Context) {
 	// Upgrade path: the Manager is gone, so its `control = 1` rows would
 	// otherwise come back as ordinary chats.
 	a.archiveLegacyManagerChats()
+	// DeleteChat used to leave the raw stream behind; drop what it orphaned.
+	a.pruneOrphanChatStreams()
 	// Per-chat launch settings move from config.json onto the rows, once.
 	a.backfillChatLaunchSettings()
 

@@ -134,6 +134,14 @@
           <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('settled') && '-rotate-90'" />
           Settled
           <span class="opacity-60">{{ filteredSettled.length }}</span>
+          <span
+            role="button"
+            class="ml-auto rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground"
+            title="Delete all settled threads (pinned ones are kept)"
+            @click.stop="deleteAllSettled"
+          >
+            <PhTrash :size="10" />
+          </span>
         </button>
         <template v-if="!collapsed.includes('settled')">
           <div
@@ -748,6 +756,20 @@ function deletePermanently(chatId: number) {
     onConfirm: () => {
       unpinChat(chatId);
       chats.remove(chatId);
+    },
+  };
+}
+function deleteAllSettled() {
+  const rows = filteredSettled.value.filter((r) => !(r.tab.isChat && isChatPinned(r.tab.chatId)));
+  if (!rows.length) return;
+  confirmDialog.value = {
+    message: `Delete ${rows.length} settled thread${rows.length === 1 ? "" : "s"} permanently? Pinned ones are kept. This cannot be undone.`,
+    onConfirm: async () => {
+      // Sequential: remove() stops each chat's process before deleting its row.
+      for (const r of rows) {
+        termTabs.close(r.ws.id, r.tab.id);
+        if (r.tab.isChat && r.tab.chatId != null) await chats.remove(r.tab.chatId);
+      }
     },
   };
 }
