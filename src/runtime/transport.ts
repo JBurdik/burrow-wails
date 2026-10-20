@@ -68,6 +68,17 @@ interface Pending {
  */
 export const MAX_CONNECT_FAILURES = 7;
 
+/**
+ * Calls this client keeps on the wire at once; the rest wait in the outbox.
+ * The server refuses a call past its per-connection cap (`maxInFlightCalls`,
+ * 64, remotews.go) with `too_many_calls` — and a startup or reconnect flush
+ * easily sends more than that in one burst, which is how a first `chat_send`
+ * got refused and the message never started a turn. Below 64 because the
+ * server frees a slot only after its reply is queued: a client sending its next
+ * call the instant a reply lands could otherwise hit a slot not yet released.
+ */
+export const MAX_IN_FLIGHT = 48;
+
 export function createTransport(
   getEndpoint: EndpointSource,
   opts: {
@@ -95,6 +106,8 @@ export function createTransport(
   // onMounted while the connection is still being made, and failing those
   // would make startup order matter.
   let outbox: string[] = [];
+  // Calls sent on the current socket and not yet answered (MAX_IN_FLIGHT).
+  let inFlight = 0;
   // Listeners are client-side: the server fans every event out to every
   // connection, so this map is the routing table and it must outlive a
   // socket — otherwise a reconnect silently stops delivering pty bytes.
@@ -117,8 +130,10 @@ export function createTransport(
 
   function flush() {
     if (!ws || ws.readyState !== 1) return;
-    for (const frame of outbox) ws.send(frame);
-    outbox = [];
+    while (outbox.length > 0 && inFlight < MAX_IN_FLIGHT) {
+      ws.send(outbox.shift()!);
+      inFlight++;
+    }
   }
 
   function failPending(reason: string) {
@@ -129,6 +144,7 @@ export function createTransport(
     // verbatim for a call the caller was already told failed, and the
     // eventual reply would have nowhere to go (its id is no longer pending).
     outbox = [];
+    inFlight = 0;
   }
 
   /**
@@ -207,6 +223,8 @@ export function createTransport(
       const p = pending.get(frame.id);
       if (!p) return;
       pending.delete(frame.id);
+      inFlight = Math.max(0, inFlight - 1);
+      flush();
       if (frame.error) p.reject(new Error(frame.error.message || frame.error.code || "call failed"));
       else p.resolve(frame.result);
       return;
@@ -264,8 +282,8 @@ export function createTransport(
       const frame = JSON.stringify({ t: "call", id, cmd, args });
       return new Promise<T>((resolve, reject) => {
         pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-        if (ws && ws.readyState === 1) ws.send(frame);
-        else outbox.push(frame);
+        outbox.push(frame);
+        flush();
       });
     },
 
