@@ -311,6 +311,13 @@
               </div>
               <Switch :checked="ui.debugOverlay" @update:checked="(v: boolean) => ui.debugOverlay = v" />
             </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Show internal IDs</span>
+                <span class="text-[11px] text-muted-foreground">Show chat and tab ids in the sidebar hover card, for bug reports</span>
+              </div>
+              <Switch :checked="ui.debugIds" @update:checked="(v: boolean) => ui.debugIds = v" />
+            </div>
           </div>
         </section>
 

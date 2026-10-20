@@ -77,6 +77,7 @@ interface Prefs {
   maxAgents: number; // soft per-workspace sub-agent cap for the /burrow skill
   mcpMaxDepth: number; // recursion depth cap for Burrow MCP spawning tools
   debugOverlay: boolean; // show the per-terminal diagnostic overlay (XTerm.vue)
+  debugIds: boolean; // show chat / tab ids in the Sidebar hover card, for bug reports
   floatCorner: string; // which screen corner floating windows snap+stack to
   worktreesDir: string; // parent dir for git worktrees: <dir>/<repo>/<branch>
   defaultProjectDir: string; // starting folder for "Add project" dir pickers
@@ -187,6 +188,7 @@ const DEFAULT_PREFS: Prefs = {
   maxAgents: 3,
   mcpMaxDepth: 3,
   debugOverlay: false,
+  debugIds: false,
   floatCorner: "top-right",
   worktreesDir: "~/burrow-worktrees",
   defaultProjectDir: "~/",
@@ -292,6 +294,7 @@ export const useUIStore = defineStore("ui", () => {
   const maxAgents = ref(loaded.maxAgents);
   const mcpMaxDepth = ref(loaded.mcpMaxDepth);
   const debugOverlay = ref(loaded.debugOverlay);
+  const debugIds = ref(loaded.debugIds ?? false);
   const floatCorner = ref(loaded.floatCorner);
   const worktreesDir = ref(loaded.worktreesDir);
   const defaultProjectDir = ref(loaded.defaultProjectDir);
@@ -368,6 +371,7 @@ export const useUIStore = defineStore("ui", () => {
     maxAgents.value = p.maxAgents;
     mcpMaxDepth.value = p.mcpMaxDepth;
     debugOverlay.value = p.debugOverlay;
+    debugIds.value = p.debugIds ?? false;
     floatCorner.value = p.floatCorner;
     worktreesDir.value = p.worktreesDir;
     defaultProjectDir.value = p.defaultProjectDir ?? "~/";
@@ -550,6 +554,7 @@ export const useUIStore = defineStore("ui", () => {
         maxAgents: maxAgents.value,
         mcpMaxDepth: mcpMaxDepth.value,
         debugOverlay: debugOverlay.value,
+        debugIds: debugIds.value,
         floatCorner: floatCorner.value,
         worktreesDir: worktreesDir.value,
         defaultProjectDir: defaultProjectDir.value,
@@ -595,7 +600,7 @@ export const useUIStore = defineStore("ui", () => {
     [uiFont, uiFontSize, uiScale, terminalFont, terminalFontSize, swapPanels, theme, themeMode,
      preferredDarkTheme, preferredLightTheme,
      soundEnabled, soundDoneEnabled, soundWaitingEnabled, soundDoneId, soundDoneCustomPath,
-     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, defaultProjectDir, mode,
+     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
      sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, chatAutoSleepMinutes, textGenerationModel, textGenerationPolicy, textGenerationRules],
@@ -849,6 +854,7 @@ export const useUIStore = defineStore("ui", () => {
     maxAgents,
     mcpMaxDepth,
     debugOverlay,
+    debugIds,
     floatCorner,
     worktreesDir,
     defaultProjectDir,

@@ -342,6 +342,7 @@
           <span class="truncate">Last activity {{ ago(hoverInfo.ts) }}</span>
         </div>
         <div v-if="hoverInfo.sessionId" class="min-w-0 truncate font-mono text-[9.5px] text-muted-foreground" :title="hoverInfo.sessionId">{{ hoverInfo.sessionId }}</div>
+        <div v-if="ui.debugIds && hoverInfo.debugId" class="min-w-0 truncate font-mono text-[9.5px] text-muted-foreground">{{ hoverInfo.debugId }}</div>
         <div
           v-if="git.prByWs[hoverInfo.ws.id]"
           class="flex min-w-0 items-center gap-1.5"
@@ -803,6 +804,8 @@ interface HoverInfo {
   round?: number;
   sessionId?: string;
   status?: TermStatus;
+  /** Settings → Developer → Show internal IDs. */
+  debugId?: string;
   ts: number;
 }
 
@@ -821,6 +824,7 @@ function hoverInfoFromRow(row: ActivityRow): HoverInfo {
     round: row.tab.isAgent ? row.tab.round : undefined,
     sessionId: row.tab.sessionId,
     status: row.tab.status,
+    debugId: row.tab.chatId != null ? `chat ${row.tab.chatId}` : `tab ${row.tab.id}`,
     ts: row.ts,
   };
 }
@@ -832,6 +836,7 @@ function hoverInfoFromArchived(s: ClaudeSession, ws: Workspace): HoverInfo {
     model: s.model,
     round: s.messageCount,
     sessionId: s.claudeSessionId,
+    debugId: `chat ${s.id}`,
     ts: s.archivedAt ?? Date.now(),
   };
 }
