@@ -198,10 +198,14 @@ const WINDOW_MS = 5 * 60 * 60 * 1000; // 5 hours
  * status settling) that a restore replays for every chat it restores.
  */
 export function isActivitySync(
-  prev: Pick<ClaudeSession, "status" | "messageCount">,
-  patch: Pick<Partial<ClaudeSession>, "status" | "messageCount">,
+  prev: Pick<ClaudeSession, "status" | "messageCount" | "busy">,
+  patch: Pick<Partial<ClaudeSession>, "status" | "messageCount" | "busy">,
 ): boolean {
   if (patch.status === "running" && prev.status !== "running") return true;
+  // A count that grows while idle is a view catching up (opening a chat folds
+  // lines it streamed unwatched), not new activity — stamping it "now" made
+  // merely clicking a thread jump its project to the top of the sidebar.
+  if (!(patch.busy ?? prev.busy)) return false;
   return patch.messageCount !== undefined && patch.messageCount > (prev.messageCount ?? 0);
 }
 

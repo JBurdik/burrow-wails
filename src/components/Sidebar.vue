@@ -63,7 +63,7 @@
             <span class="text-[var(--green)]">+{{ repoDiff[group.repoId]!.added }}</span>
             <span class="ml-1 text-[var(--red)]">-{{ repoDiff[group.repoId]!.removed }}</span>
           </span>
-          <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!)"><PhPlus :size="13" /></button>
+          <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!, false)"><PhPlus :size="13" /></button>
         </div>
         <template v-if="!collapsedGroups.has(group.repoId)">
           <template v-for="row in group.rows" :key="rowKey(row)">
@@ -966,10 +966,11 @@ function prTitle(info: PrInfo): string {
 /**
  * Picking a project in the filter both narrows the feed and opens that repo on
  * the composer — the sidebar no longer lists projects, so this is how a repo
- * with no threads gets mounted at all.
+ * with no threads gets mounted at all. A group header's "+" passes
+ * `narrow = false`: it starts a thread, it doesn't pick a filter.
  */
-function pickProject(repo: Workspace) {
-  filterProjectId.value = repo.id;
+function pickProject(repo: Workspace, narrow = true) {
+  if (narrow) filterProjectId.value = repo.id;
   filterOpen.value = false;
   // Navigate to welcome BEFORE store.open(): App.vue's watcher on
   // ws.active?.id force-navigates to /ws/:id whenever the active workspace
