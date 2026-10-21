@@ -12,6 +12,7 @@ import {
   variantFor,
 } from "@/themes";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { isWeb } from "@/lib/viewport";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { router, tabsOrWelcome, workspaceRoute } from "@/router";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -268,6 +269,31 @@ function normalize(parsed: unknown): Prefs {
   return { ...DEFAULT_PREFS };
 }
 
+// uiPrefs lives in the paired Mac's config.json, shared by every client. Layout
+// is per-device: an iPad closing its right panel must not close the desktop's.
+// A browser client keeps these keys in its own localStorage and writes the
+// shared blob back with the values it found there.
+const LAYOUT_KEYS = ["uiScale", "uiFontSize", "swapPanels", "rightPanelVisible", "sidebarHidden", "sidebarWidth", "rightPanelWidth"] as const;
+const WEB_LAYOUT_KEY = "burrow.layout.web";
+
+function webLayout(): Partial<Prefs> {
+  if (!isWeb) return {};
+  try { return JSON.parse(localStorage.getItem(WEB_LAYOUT_KEY) ?? "{}"); } catch { return {}; }
+}
+
+function splitWebLayout(prefs: Prefs): Prefs {
+  if (!isWeb) return prefs;
+  const shared = getConfig<Partial<Prefs>>(CONFIG_KEY, {});
+  const local: Record<string, unknown> = {};
+  const out: Record<string, unknown> = { ...prefs };
+  for (const k of LAYOUT_KEYS) {
+    local[k] = prefs[k];
+    if (k in shared) out[k] = shared[k];
+  }
+  try { localStorage.setItem(WEB_LAYOUT_KEY, JSON.stringify(local)); } catch { /* private mode */ }
+  return out as unknown as Prefs;
+}
+
 export const useUIStore = defineStore("ui", () => {
   const settingsOpen = ref(false);
 
@@ -344,7 +370,7 @@ export const useUIStore = defineStore("ui", () => {
 
   configReady.then(() => {
     migrateFromLocalStorage(PREFS_KEY, CONFIG_KEY);
-    const p = normalize(getConfig<unknown>(CONFIG_KEY, DEFAULT_PREFS));
+    const p = normalize({ ...getConfig<object>(CONFIG_KEY, DEFAULT_PREFS), ...webLayout() });
     uiFont.value = p.uiFont;
     uiFontSize.value = p.uiFontSize;
     uiScale.value = p.uiScale;
@@ -531,7 +557,7 @@ export const useUIStore = defineStore("ui", () => {
   function savePrefs() {
     setConfig(
       CONFIG_KEY,
-      {
+      splitWebLayout({
         uiFont: uiFont.value,
         uiFontSize: uiFontSize.value,
         uiScale: uiScale.value,
@@ -587,7 +613,7 @@ export const useUIStore = defineStore("ui", () => {
         textGenerationModel: textGenerationModel.value,
         textGenerationPolicy: textGenerationPolicy.value,
         textGenerationRules: textGenerationRules.value,
-      } satisfies Prefs,
+      } satisfies Prefs),
     );
   }
 

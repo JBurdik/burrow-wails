@@ -1,5 +1,5 @@
 <template>
-  <div class="ide-root">
+  <div class="ide-root" :class="{ 'is-web': isWeb, 'is-compact': compact }">
     <AnimatedBackdrop
       v-if="ui.activeTheme.animated && !ui.bgImageUrl"
       :key="ui.theme"
@@ -11,8 +11,8 @@
       :branch="git.cwd === displayWs?.path ? git.branch : ''"
       :folder-path="displayWs?.path"
       :right-panel-visible="ui.rightPanelVisible"
-      :sidebar-visible="ui.sidebarVisible"
-      @toggle-sidebar="ui.toggleSidebar()"
+      :sidebar-visible="!compact && ui.sidebarVisible"
+      @toggle-sidebar="compact ? (drawerOpen = !drawerOpen) : ui.toggleSidebar()"
       @back="ws.close()"
       @toggle-rightpanel="ui.toggleRightPanel()"
     />
@@ -27,8 +27,8 @@
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
       <!-- Wrapped: Sidebar has several root nodes (Teleports), so v-show/class on the
            component itself silently did nothing and the sidebar never hid. -->
-      <div v-show="ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
-      <div v-show="ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
+      <div v-show="compact ? drawerOpen : ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
+      <div v-show="!compact && ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
       <div class="ide-main">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
              them on a mode switch ran XTerm.onBeforeUnmount → detach_pty + dispose;
@@ -60,7 +60,9 @@
         </div>
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
       </div>
-      <div v-show="ui.rightPanelVisible" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
+      <!-- Phone: the sidebar and the right panel float over the one surface on screen. -->
+      <div v-if="compact && (drawerOpen || ui.rightPanelVisible)" class="compact-backdrop" @click="drawerOpen = false; ui.rightPanelVisible = false" />
+      <div v-show="!compact && ui.rightPanelVisible" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
       <RightPanel
         ref="rightPanelRef"
         class="panel-right"
@@ -131,6 +133,7 @@ import { useRoute } from "vue-router";
 import { router, routeId } from "@/router";
 import { PhX } from "@phosphor-icons/vue";
 import TitleBar from "@/components/TitleBar.vue";
+import { compact, isWeb } from "@/lib/viewport";
 import AnimatedBackdrop from "@/components/AnimatedBackdrop.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import Terminal from "@/components/Terminal.vue";
@@ -328,10 +331,18 @@ const displayWs = computed<Workspace | null>(() =>
   showWelcome.value ? (welcomeEl.value?.target ?? ws.active) : ws.active,
 );
 
-const panelStyles = computed(() => ({
-  '--sidebar-width': ui.sidebarWidth + 'px',
-  '--right-panel-width': ui.rightPanelWidth + 'px',
-}));
+const panelStyles = computed(() => compact.value
+  // auto + the fixed insets below size them; vw would be scaled again by the UI zoom on #app.
+  ? { '--sidebar-width': 'auto', '--right-panel-width': 'auto' }
+  : { '--sidebar-width': ui.sidebarWidth + 'px', '--right-panel-width': ui.rightPanelWidth + 'px' });
+
+// Compact (phone) layout: the sidebar is a drawer that closes once you have
+// picked something, and the right panel starts closed — it would cover everything.
+const drawerOpen = ref(false);
+watch(() => route.fullPath, () => { drawerOpen.value = false; });
+const closeRightOnCompact = () => { if (compact.value) ui.rightPanelVisible = false; };
+watch(compact, closeRightOnCompact);
+configReady.then(closeRightOnCompact); // after the ui store restored its prefs
 
 function startResize(side: 'left' | 'right', e: MouseEvent) {
   resizing = side;
@@ -911,6 +922,34 @@ body {
 .resize-handle:active {
   background: var(--accent);
   opacity: 0.4;
+}
+
+/* Browser clients (iPad, phone): no traffic lights, no "open on this Mac",
+   and the bar clears the status bar of a home-screen web app. */
+.is-web { --titlebar-height: calc(40px + env(safe-area-inset-top, 0px)); }
+.is-web .titlebar { padding-top: env(safe-area-inset-top, 0px); }
+.is-web .ide-body { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.is-web .tb-traffic,
+.is-web .tb-web-hide,
+.is-compact .tb-wide { display: none !important; }
+
+.is-compact .panel-sidebar,
+.is-compact .panel-right {
+  position: fixed;
+  top: var(--titlebar-height);
+  bottom: 0;
+  z-index: 60;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-shadow: 0 0 24px rgb(0 0 0 / 0.4);
+}
+.is-compact .panel-sidebar { left: 0; right: 56px; background: var(--bg-base); } /* the sidebar's own fill is translucent */
+.is-compact .panel-right { left: 0; right: 0; background: var(--bg-base); }
+
+.compact-backdrop {
+  position: fixed;
+  inset: var(--titlebar-height) 0 0 0;
+  z-index: 55;
+  background: rgb(0 0 0 / 0.45);
 }
 
 .panels-swapped .panel-sidebar { order: 5; }

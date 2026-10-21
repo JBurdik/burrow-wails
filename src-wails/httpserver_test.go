@@ -23,7 +23,7 @@ func TestAssetsServeMobileShellAndManifest(t *testing.T) {
 		t.Skip("dist-mobile/app is empty — run `pnpm build:mobile`")
 	}
 	for path, want := range map[string]string{
-		"/":                     "<div id=\"mobile-app\">",
+		"/":                     "<div id=\"app\">",
 		"/manifest.webmanifest": "\"display\": \"standalone\"",
 	} {
 		rec := get(s, path)

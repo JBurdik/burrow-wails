@@ -4,7 +4,7 @@
        the sidebar column (same width and fill), the rest belongs to the main
        area: navigation, what you're looking at, and the controls. -->
   <div
-    class="relative z-[100] flex h-[var(--titlebar-height)] shrink-0 items-center [padding-top:env(titlebar-area-y,0px)]"
+    class="titlebar relative z-[100] flex h-[var(--titlebar-height)] shrink-0 items-center [padding-top:env(titlebar-area-y,0px)]"
     data-tauri-drag-region
   >
     <div
@@ -14,7 +14,7 @@
       data-tauri-drag-region
     >
     <!-- Spacer for native macOS traffic lights (~72px) -->
-    <div class="w-[72px] shrink-0" data-tauri-drag-region />
+    <div class="tb-traffic w-[72px] shrink-0" data-tauri-drag-region />
 
     <!-- Sidebar toggle — the sidebar is hidden by default (⌘B) -->
     <button
@@ -104,17 +104,18 @@
 
     <!-- Main area: back · home · forward, then what's on screen. -->
     <div class="flex min-w-0 flex-1 items-center gap-1 pl-3" data-tauri-drag-region>
-      <button class="tb-btn [-webkit-app-region:no-drag]" title="Back" @click="router.back()"><PhCaretLeft :size="14" /></button>
+      <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Back" @click="router.back()"><PhCaretLeft :size="14" /></button>
       <button class="tb-btn [-webkit-app-region:no-drag]" title="New thread" @click="ui.openWelcome()"><PhCircle :size="12" weight="bold" /></button>
-      <button class="tb-btn [-webkit-app-region:no-drag]" title="Forward" @click="router.forward()"><PhCaretRight :size="14" /></button>
+      <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Forward" @click="router.forward()"><PhCaretRight :size="14" /></button>
       <span class="ml-2 min-w-0 truncate text-[13.5px] font-medium text-foreground" data-tauri-drag-region>{{ screenTitle }}</span>
       <span v-if="isDev || isBeta" class="shrink-0 rounded-[5px] border border-border px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" data-tauri-drag-region>{{ isDev ? "dev" : "beta" }}</span>
       <div class="min-w-4 flex-1" data-tauri-drag-region />
-      <CommitPushMenu v-if="branch" class="[-webkit-app-region:no-drag]" />
+      <CommitPushMenu v-if="branch" class="tb-wide [-webkit-app-region:no-drag]" />
     </div>
 
     <div class="flex shrink-0 items-center gap-0.5 pr-2 [-webkit-app-region:no-drag]">
-      <div class="relative flex gap-0">
+      <!-- Opens an app on the Mac: no use to a browser client. -->
+      <div class="tb-web-hide relative flex gap-0">
         <button
           class="tb-btn rounded-l-[var(--radius-nav)] rounded-r-none pr-1.5"
           :title="lastOpenTarget.id === 'finder' ? 'Reveal in Finder' : `Open in ${lastOpenTarget.name}`"
@@ -149,7 +150,7 @@
           <button class="tb-menu-item" @click="copyPath()"><PhCopy :size="14" />Copy Path</button>
         </div>
       </div>
-      <div class="relative flex">
+      <div class="tb-wide relative flex">
         <button
           class="tb-btn"
           title="System & daemon stats"

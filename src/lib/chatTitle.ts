@@ -1,4 +1,4 @@
-// Shared by AgentChat.vue (desktop) and src/mobile/store.ts: a chat starts
+// Shared by AgentChat.vue and the welcome composer: a chat starts
 // life titled "Chat N" (or "Chat N (phone)" for one the phone created), gets
 // upgraded to a cheap local heuristic off the first prompt the instant it is
 // sent, then — fire-and-forget — to a model-written title once generate_chat_title
