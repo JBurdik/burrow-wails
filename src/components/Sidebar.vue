@@ -70,8 +70,12 @@
             <div
               class="sb-row group relative mt-px flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[7px]"
               :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`]"
-              @click="selectTab(row)"
+              @click="onRowClick(row)"
               @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+              @pointerdown="startLongPress(row, $event)"
+              @pointermove="moveLongPress"
+              @pointerup="cancelLongPress"
+              @pointercancel="cancelLongPress"
               @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
               @mouseleave="cancelHoverCard"
             >
@@ -99,10 +103,12 @@
                 <span v-else-if="row.tab.status === 'running'" class="sb-spark">{{ spinnerFrame }}</span>
                 <span v-if="row.tab.status !== 'running' && attentionState(row) !== 'done-unread'">{{ statusText(row) }}</span>
               </span>
-              <span class="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+              <span class="sb-hover-acts hidden shrink-0 items-center gap-0.5 group-hover:flex">
                 <button class="sb-row-act" title="Settle" @click.stop="toggleSettled(row.tab, row.ws.id)"><PhCheck :size="12" weight="bold" /></button>
                 <button class="sb-row-act hover:!text-destructive" title="Delete thread" @click.stop="deleteThread(row.ws.id, row.tab)"><PhX :size="11" weight="bold" /></button>
               </span>
+              <!-- Touch has no hover and no right click: this opens the same menu. -->
+              <button class="sb-row-more sb-row-act" title="More" aria-label="Thread actions" @click.stop="openRowMenu(row.ws, row.tab, $event)"><PhDotsThree :size="16" weight="bold" /></button>
             </div>
             <div v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="ml-[22px]">
               <button
@@ -148,8 +154,12 @@
             v-for="row in settledChatsVisible"
             :key="rowKey(row)"
             class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:rounded-lg hover:bg-hover hover:opacity-100"
-            @click="selectTab(row)"
+            @click="onRowClick(row)"
             @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+            @pointerdown="startLongPress(row, $event)"
+            @pointermove="moveLongPress"
+            @pointerup="cancelLongPress"
+            @pointercancel="cancelLongPress"
             @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
             @mouseleave="cancelHoverCard"
           >
@@ -159,9 +169,9 @@
               <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
               <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
               <span class="grid shrink-0 justify-items-end">
-                <span class="[grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
+                <span class="sb-ago [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
                 <button
-                  class="invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
+                  class="sb-unsettle invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
                   title="Move back to active"
                   @click.stop="toggleSettled(row.tab, row.ws.id)"
                 >
@@ -574,6 +584,7 @@ import {
   PhUsersThree,
   PhAsterisk,
   PhMoon,
+  PhDotsThree,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
 import UpdateBanner from "./UpdateBanner.vue";
@@ -1034,8 +1045,40 @@ const rowMenuStyle = computed(() =>
       }
     : {},
 );
-function openRowMenu(ws: Workspace, tab: TabSummary | null, e: MouseEvent) {
+function openRowMenu(ws: Workspace, tab: TabSummary | null, e: { clientX: number; clientY: number }) {
   rowMenu.value = { ws, tab, x: e.clientX, y: e.clientY };
+}
+
+// Long press = right click on touch (iOS Safari never fires `contextmenu` for it).
+// Mouse and pen keep right click; a finger that moves is a scroll, not a press.
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
+let longPress: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
+let swallowClick = false;
+function startLongPress(row: ActivityRow, e: PointerEvent) {
+  cancelLongPress();
+  if (e.pointerType !== "touch") return;
+  const { clientX: x, clientY: y } = e;
+  longPress = {
+    x, y,
+    timer: setTimeout(() => {
+      longPress = null;
+      swallowClick = true; // the finger lifting after this must not open the row
+      navigator.vibrate?.(10);
+      openRowMenu(row.ws, row.tab, { clientX: x, clientY: y });
+    }, LONG_PRESS_MS),
+  };
+}
+function moveLongPress(e: PointerEvent) {
+  if (longPress && Math.hypot(e.clientX - longPress.x, e.clientY - longPress.y) > LONG_PRESS_SLOP) cancelLongPress();
+}
+function cancelLongPress() {
+  if (longPress) clearTimeout(longPress.timer);
+  longPress = null;
+}
+function onRowClick(row: ActivityRow) {
+  if (swallowClick) { swallowClick = false; return; }
+  selectTab(row);
 }
 /** Run an action against the menu's row, then close the menu. */
 function withMenu(fn: (ws: Workspace, tab: TabSummary | null) => void) {
@@ -1383,7 +1426,17 @@ async function confirmCreate() {
 .sb-icon { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 7px; color: var(--text-muted); transition: background-color .12s, color .12s; }
 .sb-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
 .sb-repo-tile { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; font-size: 10px; font-weight: 700; color: #fff; }
-.sb-row { transition: background-color .12s; border: 1px solid transparent; }
+.sb-row { transition: background-color .12s; border: 1px solid transparent; -webkit-touch-callout: none; }
+.sb-row-more { display: none; }
+/* Finger, no hover: the ⋮ replaces the hover-only buttons, and the settled
+   row's restore button replaces its age. */
+@media (pointer: coarse) {
+  .sb-row-more { display: flex; padding: 6px; }
+  .sb-hover-acts { display: none !important; }
+  .sb-unsettle { visibility: visible !important; padding: 6px; }
+  .sb-ago { visibility: hidden; }
+  .sb-row { padding-top: 10px; padding-bottom: 10px; }
+}
 .sb-row:hover { background: var(--bg-hover); }
 .sb-row-active { background: var(--bg-selected); border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
 .sb-row-act { display: flex; padding: 3px; border-radius: 5px; color: var(--text-muted); }
