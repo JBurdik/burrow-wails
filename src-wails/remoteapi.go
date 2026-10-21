@@ -446,15 +446,16 @@ var remoteAllowed = map[string]remoteCmd{
 	"set_burrow_mcp_max_depth": {Method: "SetBurrowMcpMaxDepth", Args: []string{"n"}, Scope: scopeOrchOperate},
 
 	// Chat transcripts (SQLite — they outgrew config.json)
-	"load_chat_messages":     {Method: "LoadChatMessages", Args: []string{"chatId"}, Scope: scopeOrchRead},
-	"save_chat_messages":     {Method: "SaveChatMessages", Args: []string{"chatId", "messages", "foldedOrd"}, Scope: scopeOrchOperate},
-	"chat_folded_ord":        {Method: "ChatFoldedOrd", Args: []string{"chatId"}, Scope: scopeOrchRead},
-	"load_chat_events_since": {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
-	"load_chat_stream_since": {Method: "LoadChatStreamSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
-	"search_chats":           {Method: "SearchChats", Args: []string{"query", "limit"}, Scope: scopeOrchRead},
-	"search_prompts":         {Method: "SearchPrompts", Args: []string{"query", "agent", "limit"}, Scope: scopeOrchRead},
-	"delete_chat_messages":   {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"publish_chat_note":      {Method: "PublishChatNote", Args: []string{"chatId", "note"}, Scope: scopeOrchOperate},
+	"load_chat_messages":      {Method: "LoadChatMessages", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"load_chat_messages_page": {Method: "LoadChatMessagesPage", Args: []string{"chatId", "before", "limit"}, Scope: scopeOrchRead},
+	"save_chat_messages":      {Method: "SaveChatMessages", Args: []string{"chatId", "messages", "foldedOrd"}, Scope: scopeOrchOperate},
+	"chat_folded_ord":         {Method: "ChatFoldedOrd", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"load_chat_events_since":  {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
+	"load_chat_stream_since":  {Method: "LoadChatStreamSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
+	"search_chats":            {Method: "SearchChats", Args: []string{"query", "limit"}, Scope: scopeOrchRead},
+	"search_prompts":          {Method: "SearchPrompts", Args: []string{"query", "agent", "limit"}, Scope: scopeOrchRead},
+	"delete_chat_messages":    {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"publish_chat_note":       {Method: "PublishChatNote", Args: []string{"chatId", "note"}, Scope: scopeOrchOperate},
 
 	// App config file
 	"read_config":  {Method: "ReadConfig", Args: nil, Scope: scopeOrchRead},

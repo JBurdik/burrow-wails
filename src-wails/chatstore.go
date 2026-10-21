@@ -55,6 +55,74 @@ func (a *App) LoadChatMessages(chatID int) (string, error) {
 	return a.loadStoredChatMessages(chatID)
 }
 
+// ChatMessagesPage is one window of a transcript: Messages are the rows
+// [Start, Start+len), Total is the whole transcript's length. A client that
+// holds only a window must treat Start as "this many earlier messages exist".
+type ChatMessagesPage struct {
+	Messages []json.RawMessage `json:"messages"`
+	Start    int               `json:"start"`
+	Total    int               `json:"total"`
+}
+
+// LoadChatMessagesPage returns up to `limit` messages ending just before index
+// `before` (before < 0 = the newest). It exists so a client opening a long chat
+// — an iPad over a tailnet, where the images inlined in old user messages
+// alone were megabytes — reads the tail first and fetches older ones on demand.
+// Index here is the message's position in the transcript, which is also its
+// chat_messages.ord (the fold and SaveChatMessages both write ord = index).
+func (a *App) LoadChatMessagesPage(chatID int, before int, limit int) (ChatMessagesPage, error) {
+	if limit <= 0 {
+		limit = 60
+	}
+	page := func(total int) (start, end int) {
+		end = total
+		if before >= 0 && before < total {
+			end = before
+		}
+		return max(0, end-limit), end
+	}
+
+	// Same precedence as LoadChatMessages: the in-memory fold is ahead of the table.
+	if w := a.chatStream(); w != nil {
+		if msgs := w.chatTailMessages(strconv.Itoa(chatID)); msgs != nil {
+			start, end := page(len(msgs))
+			out := make([]json.RawMessage, 0, end-start)
+			for _, m := range msgs[start:end] {
+				raw, err := json.Marshal(m)
+				if err != nil {
+					return ChatMessagesPage{}, err
+				}
+				out = append(out, raw)
+			}
+			return ChatMessagesPage{Messages: out, Start: start, Total: len(msgs)}, nil
+		}
+	}
+	if a.db == nil {
+		return ChatMessagesPage{Messages: []json.RawMessage{}}, nil
+	}
+	var total int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM chat_messages WHERE chat_id = ?`, chatID).Scan(&total); err != nil {
+		return ChatMessagesPage{}, err
+	}
+	start, end := page(total)
+	rows, err := a.db.Query(
+		`SELECT payload_json FROM chat_messages WHERE chat_id = ? AND ord >= ? AND ord < ? ORDER BY ord`,
+		chatID, start, end)
+	if err != nil {
+		return ChatMessagesPage{}, err
+	}
+	defer rows.Close()
+	out := make([]json.RawMessage, 0, end-start)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return ChatMessagesPage{}, err
+		}
+		out = append(out, json.RawMessage(payload))
+	}
+	return ChatMessagesPage{Messages: out, Start: start, Total: total}, rows.Err()
+}
+
 // loadStoredChatMessages reads the table, ignoring any in-memory fold. This is
 // what adoption reads (loadChatTail), so it must never consult the tails map:
 // that is the state being built.

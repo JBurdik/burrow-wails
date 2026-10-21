@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -189,5 +191,60 @@ func TestMigrateChatHistoryNoopWithoutKey(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".bak"); err == nil {
 		t.Fatal("wrote a backup for a no-op migration")
+	}
+}
+
+func TestLoadChatMessagesPageWindowsFromTheTail(t *testing.T) {
+	a := newTestApp(t)
+	var in []string
+	for i := 0; i < 10; i++ {
+		in = append(in, fmt.Sprintf(`{"id":%d,"role":"user","text":"m%d"}`, i, i))
+	}
+	if err := a.SaveChatMessages(9, "["+strings.Join(in, ",")+"]", -1); err != nil {
+		t.Fatal(err)
+	}
+	texts := func(p ChatMessagesPage) []string {
+		var out []string
+		for _, raw := range p.Messages {
+			var m struct{ Text string }
+			_ = json.Unmarshal(raw, &m)
+			out = append(out, m.Text)
+		}
+		return out
+	}
+	newest, err := a.LoadChatMessagesPage(9, -1, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newest.Start != 6 || newest.Total != 10 || strings.Join(texts(newest), ",") != "m6,m7,m8,m9" {
+		t.Fatalf("newest page: %+v %v", newest, texts(newest))
+	}
+	older, _ := a.LoadChatMessagesPage(9, newest.Start, 4)
+	if older.Start != 2 || strings.Join(texts(older), ",") != "m2,m3,m4,m5" {
+		t.Fatalf("older page: %+v %v", older, texts(older))
+	}
+	oldest, _ := a.LoadChatMessagesPage(9, older.Start, 4)
+	if oldest.Start != 0 || strings.Join(texts(oldest), ",") != "m0,m1" {
+		t.Fatalf("oldest page should be short and start at 0: %+v %v", oldest, texts(oldest))
+	}
+	empty, err := a.LoadChatMessagesPage(404, -1, 4)
+	if err != nil || len(empty.Messages) != 0 || empty.Total != 0 {
+		t.Fatalf("unknown chat: %+v %v", empty, err)
+	}
+}
+
+// The in-memory fold is ahead of the table; a page must index into it the same way.
+func TestLoadChatMessagesPageReadsTheLiveFold(t *testing.T) {
+	a := newTestApp(t)
+	if err := a.SaveChatMessages(9, `[{"id":0,"role":"user","text":"old0"},{"id":1,"role":"assistant","text":"old1"}]`, -1); err != nil {
+		t.Fatal(err)
+	}
+	a.emitChatLine("9", chatUserKind, "live")
+	p, err := a.LoadChatMessagesPage(9, -1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Total != 3 || p.Start != 1 || len(p.Messages) != 2 || !strings.Contains(string(p.Messages[1]), "live") {
+		t.Fatalf("page over the live fold: %+v", p)
 	}
 }

@@ -653,3 +653,38 @@ describe("answering a pending request", () => {
     dropChatSession(76);
   });
 });
+
+// A long chat is opened from its tail. The window must never be written back as
+// the whole transcript — save_chat_messages replaces the chat's stored rows.
+describe("a windowed transcript", () => {
+  const msg = (id: number, role: "user" | "assistant" = "user") => ({ id, role, text: `m${id}` });
+
+  it("does not save while earlier messages are not loaded, and saves once they are", async () => {
+    const f = fakeDeps();
+    const s = chatSession(90, f.deps);
+    s.hydrate({ messages: [msg(8), msg(9)], hiddenBefore: 8 });
+    expect(s.hiddenBefore.value).toBe(8);
+
+    s.save();
+    expect(f.invoke.mock.calls.some(([cmd]) => cmd === "save_chat_messages")).toBe(false);
+
+    f.invoke.mockResolvedValueOnce({ messages: Array.from({ length: 8 }, (_, i) => msg(i)), start: 0, total: 10 });
+    await s.loadEarlier();
+    expect(f.invoke).toHaveBeenCalledWith("load_chat_messages_page", { chatId: 90, before: 8, limit: 60 });
+    expect(s.messages.value.map((m) => m.id)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(s.hiddenBefore.value).toBe(0);
+
+    s.save();
+    expect(f.invoke.mock.calls.some(([cmd]) => cmd === "save_chat_messages")).toBe(true);
+    dropChatSession(90);
+  });
+
+  it("offsets the rewind index by what is not loaded", async () => {
+    const f = fakeDeps();
+    const s = chatSession(91, f.deps);
+    s.hydrate({ messages: [msg(8), msg(9, "assistant"), msg(10)], hiddenBefore: 8 });
+    await s.rewind(s.messages.value[2] as never);
+    expect(f.invoke).toHaveBeenCalledWith("chat_rewind", { chatId: 91, index: 10, text: "m10" });
+    dropChatSession(91);
+  });
+});

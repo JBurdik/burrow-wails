@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"testing"
+	"time"
 )
 
 // captureTrimLog redirects the package logger for the duration of one trim
@@ -29,7 +30,7 @@ func drainChatStream(t *testing.T, a *App, chatID string) {
 	w := a.chatStream()
 	marker := "__drain__"
 	ord := w.append(chatID, "claude-data", marker)
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 3000; i++ {
 		var n int
 		if err := a.db.QueryRow(`SELECT COUNT(*) FROM chat_stream WHERE chat_id = ? AND ord = ?`, chatID, ord).Scan(&n); err != nil {
 			t.Fatalf("drain query: %v", err)
@@ -40,6 +41,7 @@ func drainChatStream(t *testing.T, a *App, chatID string) {
 			}
 			return
 		}
+		time.Sleep(time.Millisecond) // the writer is another goroutine; under -race it needs real time
 	}
 	t.Fatal("chat stream writer did not flush")
 }

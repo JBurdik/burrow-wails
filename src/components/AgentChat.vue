@@ -141,13 +141,36 @@
     <div class="relative flex min-h-0 flex-1">
     <div ref="scrollEl" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
-      <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+      <!-- A remount starts with no messages until the transcript is read back, which on
+           a slow link (remote client) takes long enough to read as an empty conversation. -->
+      <div v-if="messages.length === 0 && transcriptLoading" class="flex flex-col gap-6 px-4 py-4" aria-busy="true" aria-label="Loading conversation">
+        <div class="ml-auto h-9 w-2/5 animate-pulse rounded-2xl bg-hover" />
+        <div class="flex flex-col gap-2">
+          <div class="h-3 w-full animate-pulse rounded bg-hover" />
+          <div class="h-3 w-11/12 animate-pulse rounded bg-hover" />
+          <div class="h-3 w-3/5 animate-pulse rounded bg-hover" />
+        </div>
+        <div class="ml-auto h-9 w-1/3 animate-pulse rounded-2xl bg-hover" />
+        <div class="flex flex-col gap-2">
+          <div class="h-3 w-10/12 animate-pulse rounded bg-hover" />
+          <div class="h-3 w-2/3 animate-pulse rounded bg-hover" />
+        </div>
+      </div>
+      <div v-else-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
         <div class="chat-empty-avatar mb-2 flex h-11 w-11 items-center justify-center rounded-[var(--radius-avatar)] border border-border" style="background: var(--surface-elevated);" aria-hidden="true">
           <component :is="currentAgentIcon" :size="28" :style="{ color: 'var(--agent-accent)' }" />
         </div>
         <span class="text-[9px] font-semibold uppercase tracking-[.08em] text-muted-foreground">New conversation</span>
         <span class="text-base font-semibold text-foreground">Start a focused conversation</span>
         <span class="mt-0.5 font-mono text-[11px] text-muted-foreground">Working in {{ cwdDisplay }}</span>
+      </div>
+
+      <div v-if="hiddenBefore > 0" class="flex justify-center py-2">
+        <button
+          class="rounded-md border border-border px-3 py-1 text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-50"
+          :disabled="loadingEarlier"
+          @click="loadEarlierKeepingScroll"
+        >{{ loadingEarlier ? "Loading…" : `Load earlier (${hiddenBefore} more)` }}</button>
       </div>
 
       <div
@@ -764,7 +787,7 @@ import ComposerImages from "@/components/composer/ComposerImages.vue";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
-import { chatSession, replayChatStream } from "@/lib/chatSession";
+import { chatSession, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
 import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
@@ -1083,7 +1106,7 @@ const agentAccentColor = computed(() =>
 // handle stays correct for the component's whole life.
 const S = chatSession(props.chatId);
 const {
-  messages, busy, lastActivityAt, turnStartedAt, messageQueue,
+  messages, hiddenBefore, loadingEarlier, busy, lastActivityAt, turnStartedAt, messageQueue,
   turnStats, sessionCost,
   pendingPermission, pendingQuestion, pendingPlan, pendingDiff,
   acpPermReq, acpModes, acpConfigOptions,
@@ -1756,13 +1779,19 @@ interface AccountInfo {
 // version re-serialised every chat's history — 5.6 MB per saved message once a
 // few dozen chats had accumulated. Migration of existing histories happens once
 // in Go at startup.
-async function loadMessages(chatId: number): Promise<ChatMessage[]> {
+async function loadMessages(chatId: number): Promise<{ messages: ChatMessage[]; hiddenBefore: number }> {
+  // The newest window only — the rest is one "Load earlier" away. An older
+  // backend without the paged call falls back to reading everything.
+  try {
+    const page = await invoke<ChatMessagesPage>("load_chat_messages_page", { chatId, before: -1, limit: TRANSCRIPT_PAGE });
+    if (Array.isArray(page?.messages)) return { messages: page.messages, hiddenBefore: page.start };
+  } catch { /* fall through */ }
   try {
     const raw = await invoke<string>("load_chat_messages", { chatId });
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as ChatMessage[]) : [];
+    return { messages: Array.isArray(parsed) ? (parsed as ChatMessage[]) : [], hiddenBefore: 0 };
   } catch {
-    return [];
+    return { messages: [], hiddenBefore: 0 };
   }
 }
 
@@ -2191,6 +2220,17 @@ function updateMinimapCurrent() {
 function jumpToMessage(id: number) {
   scrollEl.value?.querySelector(`[data-message-id="${id}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
+// Older messages land ABOVE the viewport: without compensating, the view would
+// jump to the top of the newly inserted block instead of staying on what you read.
+async function loadEarlierKeepingScroll() {
+  const el = scrollEl.value;
+  const prevHeight = el?.scrollHeight ?? 0;
+  const prevTop = el?.scrollTop ?? 0;
+  await S.loadEarlier();
+  await nextTick();
+  if (el) el.scrollTop = prevTop + (el.scrollHeight - prevHeight);
+}
+
 function scrollToBottom(force = false) {
   if (!force && !atBottom.value) return;
   nextTick(() => {
@@ -2738,6 +2778,8 @@ function onWindowFocus() {
   if (watchingNow()) chatAttention.markSeen(props.chatId);
 }
 
+// True until this mount has read the transcript back (see the skeleton in the template).
+const transcriptLoading = ref(true);
 onMounted(async () => {
   // Point the session's view hooks at this mount and take a reference. The
   // session already holds the listeners and reduces the stream itself, so no
@@ -2773,14 +2815,19 @@ onMounted(async () => {
   // unmounted, so it is ahead of the DB, and assigning over it would throw the
   // newer part away (exactly the hole this plan is about).
   if (messages.value.length === 0) {
-    const loaded = await loadMessages(props.chatId);
-    if (unmounted) return;
-    S.hydrate({ messages: loaded });
+    try {
+      const loaded = await loadMessages(props.chatId);
+      if (unmounted) return;
+      S.hydrate({ messages: loaded.messages, hiddenBefore: loaded.hiddenBefore });
+    } finally {
+      transcriptLoading.value = false;
+    }
     // Catch up on anything the agent said after that transcript was written —
     // i.e. a turn that was in flight when the app was last closed or crashed.
     await replayChatStream(props.chatId);
     if (unmounted) return;
   }
+  transcriptLoading.value = false;
   // A remount is how you come back to a chat now (fáze 3 unmounts hidden chat
   // leaves), so land on the newest message. The activeByWs watcher below cannot
   // do it: the active id is already this chat before the fresh instance mounts,

@@ -103,6 +103,15 @@ export type PendingAnswer =
 // nothing would re-emit it and the ring would vanish until the next turn.
 // Stale after an external /clear, and self-healing on the next turn.
 // ponytail: one unpruned map; revisit if someone keeps thousands of chats.
+/** Messages per window when a transcript is read back (`load_chat_messages_page`). */
+export const TRANSCRIPT_PAGE = 60;
+/** One window of a transcript: rows [start, start+messages.length) of `total`. */
+export interface ChatMessagesPage {
+  messages: ChatMessage[];
+  start: number;
+  total: number;
+}
+
 const CTX_STORE_KEY = "burrow.ctxTokens";
 type CtxEntry = { tokens: number; window: number; split?: CtxSplit | null };
 function readCtxStore(): Record<string, CtxEntry> {
@@ -121,6 +130,14 @@ function hasFocus(): boolean {
 interface SessionState {
   // ── transcript ──
   messages: Ref<ChatMessage[]>;
+  /**
+   * How many EARLIER messages exist in storage that `messages` does not hold
+   * (a long chat is opened from its tail, `loadEarlier` fetches the rest).
+   * While it is > 0, `messages` is a window, so nothing may write it back as
+   * the whole transcript — see `save`.
+   */
+  hiddenBefore: Ref<number>;
+  loadingEarlier: Ref<boolean>;
 
   // ── turn state ──
   busy: Ref<boolean>;
@@ -256,7 +273,9 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   /** Ask the CLI for `/context` out of band; its report is lifted out of the stream. */
   requestContextReport(): Promise<void>;
   /** First paint from storage, for a session that has no transcript yet. */
-  hydrate(state: { messages?: ChatMessage[]; sessionId?: string }): void;
+  hydrate(state: { messages?: ChatMessage[]; hiddenBefore?: number; sessionId?: string }): void;
+  /** Fetch the next page of older messages into the window (`load_chat_messages_page`). */
+  loadEarlier(): Promise<void>;
   /** Take the last user message back out to edit it (↑ in an empty composer). */
   recallLastUserMessage(): string | null;
 
@@ -421,6 +440,8 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     view: null,
     pendingSends: new Set<string>(),
     messages: ref<ChatMessage[]>([]),
+    hiddenBefore: ref(0),
+    loadingEarlier: ref(false),
     nextMsgId: 0,
     lastOrd: -1,
     replayed: false,
@@ -530,7 +551,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       // not put the dropped turns back. Queued follow-ups stay queued.
       s.messages.value = [...before.slice(0, index), ...before.slice(index).filter((m) => m.role === "queued")];
       try {
-        await s.deps.invoke("chat_rewind", { chatId, index, text: message.text });
+        await s.deps.invoke("chat_rewind", { chatId, index: index + s.hiddenBefore.value, text: message.text });
         return true;
       } catch (e) {
         s.messages.value = before;
@@ -542,7 +563,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       const index = s.messages.value.findIndex((m) => m.id === message.id && m.role === message.role);
       if (index < 0) return null;
       try {
-        const chat = await s.deps.invoke<{ id: number }>("chat_fork", { chatId, index, text: message.text });
+        const chat = await s.deps.invoke<{ id: number }>("chat_fork", { chatId, index: index + s.hiddenBefore.value, text: message.text });
         return chat.id;
       } catch (e) {
         s.notice(`Could not fork: ${e}`);
@@ -580,9 +601,27 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         s.awaitingContextReport.value = false;
       }
     },
-    hydrate({ messages, sessionId }) {
+    async loadEarlier() {
+      if (s.loadingEarlier.value || s.hiddenBefore.value <= 0) return;
+      s.loadingEarlier.value = true;
+      try {
+        const page = await s.deps.invoke<ChatMessagesPage>("load_chat_messages_page", {
+          chatId, before: s.hiddenBefore.value, limit: TRANSCRIPT_PAGE,
+        });
+        const older = page.messages;
+        const have = new Set(s.messages.value.map((m) => `${m.role}:${m.id}`));
+        s.messages.value = [...older.filter((m) => !have.has(`${m.role}:${m.id}`)), ...s.messages.value];
+        s.hiddenBefore.value = page.start;
+      } catch (e) {
+        s.notice(`Could not load earlier messages: ${e}`);
+      } finally {
+        s.loadingEarlier.value = false;
+      }
+    },
+    hydrate({ messages, hiddenBefore, sessionId }) {
       if (messages && s.messages.value.length === 0) {
         s.messages.value = messages;
+        s.hiddenBefore.value = hiddenBefore ?? 0;
         // Ids must continue past the loaded history, or new messages collide
         // with old ones on the same `:key`.
         s.nextMsgId = messages.reduce((max, m) => Math.max(max, m.id + 1), s.nextMsgId);
@@ -640,6 +679,11 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.pendingSends.add(text);
     },
     save() {
+      // A window is not the transcript: save_chat_messages replaces the whole
+      // chat, so writing this would delete everything above it. Go folds and
+      // persists the stream itself (chattranscript.go); what this skips is only
+      // client-made rows (notes), which are not worth a truncated history.
+      if (s.hiddenBefore.value > 0) return;
       // Partial messages are mid-stream and get re-sent; the cap only guards
       // against a pathological chat, not storage (a row per message is cheap).
       const toSave = s.messages.value.filter((m) => !m.partial).slice(-2000);
@@ -652,7 +696,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     sync() {
       s.deps.host.syncChat(chatId, {
         busy: s.busy.value,
-        messageCount: s.messages.value.filter((m) => m.role !== "tool").length,
+        messageCount: s.messages.value.filter((m) => m.role !== "tool").length + s.hiddenBefore.value,
       });
       // The remote mirror is discovery + reconnect history only; incremental
       // updates travel over the stream itself.
@@ -976,6 +1020,7 @@ function resetRuntime(s: InternalSession, cleared: boolean) {
   dropPendingRequests(s);
   if (cleared) {
     s.messages.value = [];
+    s.hiddenBefore.value = 0;
     s.sessionId.value = "";
     s.turnStats.value = null;
     s.sessionCost.value = 0;
