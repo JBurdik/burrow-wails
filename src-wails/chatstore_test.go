@@ -14,8 +14,17 @@ func newTestApp(t *testing.T) *App {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
-	return &App{db: db}
+	a := &App{db: db}
+	t.Cleanup(func() {
+		// The chat stream writer inserts on its own goroutine. Let its queue
+		// land first, or a late INSERT hits a closed DB / recreates the WAL in
+		// a TempDir that is being removed ("directory not empty").
+		if a.streamW != nil {
+			drainChatStream(t, a, "__cleanup__")
+		}
+		db.Close()
+	})
+	return a
 }
 
 func TestSaveAndLoadChatMessagesRoundTrip(t *testing.T) {
