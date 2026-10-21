@@ -688,3 +688,31 @@ describe("a windowed transcript", () => {
     dropChatSession(91);
   });
 });
+
+describe("images left out of a transcript page", () => {
+  const withStub = () => ({ id: 1, role: "user" as const, text: "look", images: ["burrow-image://7/0", "data:image/png;base64,AAAA"] });
+
+  it("are fetched by their stub and replaced in place", async () => {
+    const f = fakeDeps();
+    const s = chatSession(92, f.deps);
+    s.hydrate({ messages: [withStub()] });
+    f.invoke.mockResolvedValueOnce("data:image/png;base64,REAL");
+    const row = s.messages.value[0];
+    expect(await s.loadImage(row, 0)).toBe("data:image/png;base64,REAL");
+    expect(f.invoke).toHaveBeenCalledWith("load_chat_image", { chatId: 92, index: 7, image: 0 });
+    expect(s.messages.value[0].images).toEqual(["data:image/png;base64,REAL", "data:image/png;base64,AAAA"]);
+    // an inline image needs no round trip
+    expect(await s.loadImage(row, 1)).toBe("data:image/png;base64,AAAA");
+    expect(f.invoke).toHaveBeenCalledTimes(1);
+    dropChatSession(92);
+  });
+
+  it("block saving while a stub is held — it would replace the stored image", () => {
+    const f = fakeDeps();
+    const s = chatSession(93, f.deps);
+    s.hydrate({ messages: [withStub()] });
+    s.save();
+    expect(f.invoke.mock.calls.some(([cmd]) => cmd === "save_chat_messages")).toBe(false);
+    dropChatSession(93);
+  });
+});

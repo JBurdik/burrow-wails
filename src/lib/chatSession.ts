@@ -8,6 +8,7 @@ import {
   applyChatEvent, isProjectedEvent, settleTranscript, type ChatEventBatch, type ChatProjectionState,
 } from "@/lib/chatProjection";
 import { parseAcpPermRequest } from "@/lib/acpParser";
+import { isImageStub, parseImageStub } from "@/lib/chatImages";
 import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import { appChatHost, type ChatHost } from "@/lib/chatHost";
 
@@ -276,6 +277,8 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   hydrate(state: { messages?: ChatMessage[]; hiddenBefore?: number; sessionId?: string }): void;
   /** Fetch the next page of older messages into the window (`load_chat_messages_page`). */
   loadEarlier(): Promise<void>;
+  /** Resolve image `i` of a message that arrived as a stub (`load_chat_image`); returns its data URL. */
+  loadImage(message: ChatMessage, i: number): Promise<string>;
   /** Take the last user message back out to edit it (↑ in an empty composer). */
   recallLastUserMessage(): string | null;
 
@@ -601,6 +604,17 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         s.awaitingContextReport.value = false;
       }
     },
+    async loadImage(message, i) {
+      const src = message.images?.[i] ?? "";
+      const ref = parseImageStub(src);
+      if (!ref) return src;
+      const data = await s.deps.invoke<string>("load_chat_image", { chatId, index: ref.index, image: ref.image });
+      // The row the view holds is this session's own object — replace the stub
+      // in place so every reader (the bubble, ↑-to-edit, a later save) sees the image.
+      const row = s.messages.value.find((m) => m.id === message.id && m.role === message.role);
+      if (row?.images?.[i] === src) row.images[i] = data;
+      return data;
+    },
     async loadEarlier() {
       if (s.loadingEarlier.value || s.hiddenBefore.value <= 0) return;
       s.loadingEarlier.value = true;
@@ -684,6 +698,8 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       // persists the stream itself (chattranscript.go); what this skips is only
       // client-made rows (notes), which are not worth a truncated history.
       if (s.hiddenBefore.value > 0) return;
+      // Same for a transcript still holding image stubs: they would replace the stored images.
+      if (s.messages.value.some((m) => m.images?.some(isImageStub))) return;
       // Partial messages are mid-stream and get re-sent; the cap only guards
       // against a pathological chat, not storage (a row per message is cheap).
       const toSave = s.messages.value.filter((m) => !m.partial).slice(-2000);

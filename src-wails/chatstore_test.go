@@ -248,3 +248,40 @@ func TestLoadChatMessagesPageReadsTheLiveFold(t *testing.T) {
 		t.Fatalf("page over the live fold: %+v", p)
 	}
 }
+
+func TestPageStubsLargeImagesAndLoadChatImageReturnsThem(t *testing.T) {
+	a := newTestApp(t)
+	big := "data:image/png;base64," + strings.Repeat("A", chatImageStubMin)
+	small := "data:image/png;base64,AAAA"
+	in := fmt.Sprintf(`[{"id":0,"role":"assistant","text":"hi"},{"id":1,"role":"user","text":"look","images":[%q,%q]}]`, big, small)
+	if err := a.SaveChatMessages(9, in, -1); err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.LoadChatMessagesPage(9, -1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Messages) != 2 || strings.Contains(string(p.Messages[1]), "AAAAAAAA") {
+		t.Fatalf("large image must not travel in the page: %.200s", p.Messages[1])
+	}
+	var m struct {
+		Text   string
+		Images []string
+	}
+	_ = json.Unmarshal(p.Messages[1], &m)
+	if m.Text != "look" || len(m.Images) != 2 || m.Images[0] != chatImageStubPrefix+"1/0" || m.Images[1] != small {
+		t.Fatalf("want a stub for the big image and the small one inline: %+v", m)
+	}
+	got, err := a.LoadChatImage(9, 1, 0)
+	if err != nil || got != big {
+		t.Fatalf("LoadChatImage = %.40q, %v", got, err)
+	}
+	if _, err := a.LoadChatImage(9, 1, 5); err == nil {
+		t.Fatal("an out-of-range image must be an error")
+	}
+	// The stored transcript is untouched: a full read still has the image.
+	full, _ := a.LoadChatMessages(9)
+	if !strings.Contains(full, big) {
+		t.Fatal("stubbing must only affect the page, never the stored transcript")
+	}
+}

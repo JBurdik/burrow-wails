@@ -265,14 +265,20 @@
             </div>
             <div class="bubble-user max-w-[72%] rounded-[18px] px-4 py-2.5 text-[13px] leading-[1.55]" style="background: var(--bg-selected); color: var(--text-primary);">
               <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
-                <img
-                  v-for="(img, i) in msg.images"
-                  :key="i"
-                  :src="img"
-                  class="block max-h-40 max-w-[200px] cursor-pointer rounded object-cover"
-                  :alt="`Image ${i + 1}`"
-                  @click="showImage(img)"
-                />
+                <template v-for="(img, i) in msg.images" :key="i">
+                  <button
+                    v-if="isImageStub(img)"
+                    class="flex h-16 items-center gap-1.5 rounded border border-border px-3 text-[11.5px] text-secondary-foreground hover:bg-hover"
+                    @click="openStubImage(msg, i)"
+                  ><PhImage :size="14" />{{ loadingImages.has(`${msg.id}:${i}`) ? "Loading…" : "Show image" }}</button>
+                  <img
+                    v-else
+                    :src="img"
+                    class="block max-h-40 max-w-[200px] cursor-pointer rounded object-cover"
+                    :alt="`Image ${i + 1}`"
+                    @click="showImage(img)"
+                  />
+                </template>
               </div>
               <div class="md-body">
                 <template v-for="(seg, segIdx) in userMsgSegments(msg)" :key="segIdx">
@@ -787,6 +793,7 @@ import ComposerImages from "@/components/composer/ComposerImages.vue";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
+import { isImageStub } from "@/lib/chatImages";
 import { chatSession, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
 import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
@@ -2358,9 +2365,26 @@ const finalReplyIds = computed(() => {
 });
 const termTabs = useTerminalTabsStore();
 
-function putInComposer(msg: ChatMessage) {
+// Images a transcript page left out (chatImages.ts) are fetched on click.
+const loadingImages = reactive(new Set<string>());
+async function openStubImage(msg: ChatMessage, i: number) {
+  const key = `${msg.id}:${i}`;
+  if (loadingImages.has(key)) return;
+  loadingImages.add(key);
+  try {
+    showImage(await S.loadImage(msg, i));
+  } catch (e) {
+    S.notice(`Could not load the image: ${e}`);
+  } finally {
+    loadingImages.delete(key);
+  }
+}
+
+async function putInComposer(msg: ChatMessage) {
   inputText.value = msg.displayText ?? msg.text;
-  pendingImages.value = msg.images ? [...msg.images] : [];
+  // A stub in the composer would be SENT as the image, so fetch the real ones first.
+  const images = msg.images ? await Promise.all(msg.images.map((img, i) => (isImageStub(img) ? S.loadImage(msg, i).catch(() => "") : img))) : [];
+  pendingImages.value = images.filter(Boolean);
   nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(inputText.value.length); });
 }
 

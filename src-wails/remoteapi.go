@@ -448,6 +448,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// Chat transcripts (SQLite — they outgrew config.json)
 	"load_chat_messages":      {Method: "LoadChatMessages", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"load_chat_messages_page": {Method: "LoadChatMessagesPage", Args: []string{"chatId", "before", "limit"}, Scope: scopeOrchRead},
+	"load_chat_image":         {Method: "LoadChatImage", Args: []string{"chatId", "index", "image"}, Scope: scopeOrchRead},
 	"save_chat_messages":      {Method: "SaveChatMessages", Args: []string{"chatId", "messages", "foldedOrd"}, Scope: scopeOrchOperate},
 	"chat_folded_ord":         {Method: "ChatFoldedOrd", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"load_chat_events_since":  {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},

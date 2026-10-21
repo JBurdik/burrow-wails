@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // Chat transcript storage. Modelled on t3code's `projection_thread_messages`:
@@ -70,57 +72,138 @@ type ChatMessagesPage struct {
 // alone were megabytes — reads the tail first and fetches older ones on demand.
 // Index here is the message's position in the transcript, which is also its
 // chat_messages.ord (the fold and SaveChatMessages both write ord = index).
+//
+// Inline images are NOT sent: each becomes a stub (see stubChatImages) the
+// client resolves with LoadChatImage when the user asks for it.
 func (a *App) LoadChatMessagesPage(chatID int, before int, limit int) (ChatMessagesPage, error) {
 	if limit <= 0 {
 		limit = 60
 	}
-	page := func(total int) (start, end int) {
-		end = total
+	msgs, start, total, err := a.chatMessagesWindow(chatID, func(total int) (int, int) {
+		end := total
 		if before >= 0 && before < total {
 			end = before
 		}
 		return max(0, end-limit), end
+	})
+	if err != nil {
+		return ChatMessagesPage{}, err
 	}
+	for i, m := range msgs {
+		msgs[i] = stubChatImages(m, start+i)
+	}
+	return ChatMessagesPage{Messages: msgs, Start: start, Total: total}, nil
+}
 
-	// Same precedence as LoadChatMessages: the in-memory fold is ahead of the table.
+// chatImageStubPrefix marks an image the page left out: "<prefix><index>/<n>"
+// names image n of the message at transcript index `index`.
+const chatImageStubPrefix = "burrow-image://"
+
+// chatImageStubMin: a data URL shorter than this is cheaper to send than to
+// ask for (and a stub is itself ~25 bytes).
+const chatImageStubMin = 4096
+
+// stubChatImages replaces the large inline images of one message with stubs.
+// Messages without images — nearly all of them — are returned untouched
+// without being parsed.
+func stubChatImages(raw json.RawMessage, index int) json.RawMessage {
+	if !bytes.Contains(raw, []byte(`"images"`)) {
+		return raw
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return raw
+	}
+	var images []string
+	if json.Unmarshal(m["images"], &images) != nil || len(images) == 0 {
+		return raw
+	}
+	changed := false
+	for i, img := range images {
+		if len(img) >= chatImageStubMin && strings.HasPrefix(img, "data:") {
+			images[i] = fmt.Sprintf("%s%d/%d", chatImageStubPrefix, index, i)
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	m["images"], _ = json.Marshal(images)
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// LoadChatImage returns image `image` of the message at transcript `index` as
+// the data URL it was stored with.
+func (a *App) LoadChatImage(chatID int, index int, image int) (string, error) {
+	msgs, _, _, err := a.chatMessagesWindow(chatID, func(total int) (int, int) {
+		if index < 0 || index >= total {
+			return 0, 0
+		}
+		return index, index + 1
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(msgs) != 1 {
+		return "", fmt.Errorf("no message %d in chat %d", index, chatID)
+	}
+	var m struct {
+		Images []string `json:"images"`
+	}
+	if err := json.Unmarshal(msgs[0], &m); err != nil {
+		return "", err
+	}
+	if image < 0 || image >= len(m.Images) {
+		return "", fmt.Errorf("message %d has no image %d", index, image)
+	}
+	return m.Images[image], nil
+}
+
+// chatMessagesWindow reads rows [start, end) as `pick` chooses them from the
+// transcript's length — from the live fold when this process has one (it is
+// ahead of the table, same precedence as LoadChatMessages), else the table.
+func (a *App) chatMessagesWindow(chatID int, pick func(total int) (start, end int)) (msgs []json.RawMessage, start, total int, err error) {
 	if w := a.chatStream(); w != nil {
-		if msgs := w.chatTailMessages(strconv.Itoa(chatID)); msgs != nil {
-			start, end := page(len(msgs))
+		if live := w.chatTailMessages(strconv.Itoa(chatID)); live != nil {
+			start, end := pick(len(live))
 			out := make([]json.RawMessage, 0, end-start)
-			for _, m := range msgs[start:end] {
+			for _, m := range live[start:end] {
 				raw, err := json.Marshal(m)
 				if err != nil {
-					return ChatMessagesPage{}, err
+					return nil, 0, 0, err
 				}
 				out = append(out, raw)
 			}
-			return ChatMessagesPage{Messages: out, Start: start, Total: len(msgs)}, nil
+			return out, start, len(live), nil
 		}
 	}
 	if a.db == nil {
-		return ChatMessagesPage{Messages: []json.RawMessage{}}, nil
+		return []json.RawMessage{}, 0, 0, nil
 	}
-	var total int
 	if err := a.db.QueryRow(`SELECT COUNT(*) FROM chat_messages WHERE chat_id = ?`, chatID).Scan(&total); err != nil {
-		return ChatMessagesPage{}, err
+		return nil, 0, 0, err
 	}
-	start, end := page(total)
+	start, end := pick(total)
 	rows, err := a.db.Query(
 		`SELECT payload_json FROM chat_messages WHERE chat_id = ? AND ord >= ? AND ord < ? ORDER BY ord`,
 		chatID, start, end)
 	if err != nil {
-		return ChatMessagesPage{}, err
+		return nil, 0, 0, err
 	}
 	defer rows.Close()
 	out := make([]json.RawMessage, 0, end-start)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
-			return ChatMessagesPage{}, err
+			return nil, 0, 0, err
 		}
 		out = append(out, json.RawMessage(payload))
 	}
-	return ChatMessagesPage{Messages: out, Start: start, Total: total}, rows.Err()
+	return out, start, total, rows.Err()
 }
 
 // loadStoredChatMessages reads the table, ignoring any in-memory fold. This is
