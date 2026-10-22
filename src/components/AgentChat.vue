@@ -2887,6 +2887,9 @@ onMounted(async () => {
   // immediately.
   await S.listenClaude();
   await S.listenAcp();
+  // A request that arrived before these listeners existed (a view mounted late —
+  // slow link, chat started elsewhere) is not replayed by the stream; ask for it.
+  await S.recoverPendingRequests();
   // No drain here: it already ran above, unconditionally. Two drains in one
   // mount each take their own message and send both turns at once.
   if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);

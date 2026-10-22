@@ -1,6 +1,7 @@
 package main
 
 import (
+	"burrow/internal/agentphase"
 	"bytes"
 	"fmt"
 	"log"
@@ -262,5 +263,37 @@ func TestLoadChatEventsSinceReplaysAsDomainEvents(t *testing.T) {
 	}
 	if got[1].Ord != 2 || got[1].Events[0].Type != EvtThinkingDelta {
 		t.Fatalf("second batch wrong: %+v", got[1])
+	}
+}
+
+func TestPendingChatRequestsSurviveAViewThatMountedLate(t *testing.T) {
+	a := newTestApp(t)
+	store, err := NewPhaseStore(a.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.phases = store
+	const id = "77"
+	req := func(rid, tool string) string {
+		return `{"type":"control_request","request_id":"` + rid + `","request":{"subtype":"can_use_tool","tool_name":"` + tool + `","input":{}}}`
+	}
+
+	// An earlier, finished turn must not leak into the next one's answer.
+	a.emitChatLine(id, "claude-data", req("old", "Bash"))
+	a.emitChatLine(id, "claude-data", claudeResultLine)
+	drainChatStream(t, a, id)
+	if got, _ := a.LoadPendingChatRequests(id); len(got) != 0 {
+		t.Fatalf("a settled chat has nothing pending: %+v", got)
+	}
+
+	a.emitChatLine(id, "claude-data", claudeTextLine("m1", "let me ask"))
+	a.emitChatLine(id, "claude-data", req("q1", "AskUserQuestion"))
+	drainChatStream(t, a, id) // the writer is async; the query reads the table
+	if st := store.Get("chat:" + id).State; st != agentphase.WaitingApproval && st != agentphase.WaitingInput {
+		t.Fatalf("phase should be waiting, got %q", st)
+	}
+	got, err := a.LoadPendingChatRequests(id)
+	if err != nil || len(got) != 1 || !strings.Contains(got[0].Line, `"q1"`) {
+		t.Fatalf("want exactly the open request: %+v %v", got, err)
 	}
 }

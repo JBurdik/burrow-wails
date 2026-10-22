@@ -2,9 +2,11 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,8 +121,8 @@ type chatStreamWriter struct {
 
 func newChatStreamWriter(db *sql.DB) *chatStreamWriter {
 	w := &chatStreamWriter{
-		db:      db,
-		ch:      make(chan chatStreamRow, chatStreamQueue),
+		db:          db,
+		ch:          make(chan chatStreamRow, chatStreamQueue),
 		nextOrd:     map[string]int64{},
 		appends:     map[string]int{},
 		tails:       map[string]*chatTail{},
@@ -494,4 +496,83 @@ func (a *App) deleteChatStream(chatID string) error {
 	}
 	_, err := a.db.Exec(`DELETE FROM chat_stream WHERE chat_id = ?`, chatID)
 	return err
+}
+
+// pendingScanLines bounds how far back LoadPendingChatRequests looks: a request
+// that is still unanswered is among the newest lines of its turn.
+const pendingScanLines = 400
+
+// LoadPendingChatRequests returns the raw permission / question requests a chat
+// is still blocked on, oldest first, so a view that mounts AFTER the request was
+// emitted can open it. The live listeners only see lines emitted while they are
+// attached, and replayChatStream deliberately re-plays domain events, not raw
+// lines (a raw replay would re-open requests answered before a restart) — so
+// without this a request that arrived while no view was mounted (a phone opening
+// the chat over a slow link, a chat started from the welcome composer) is
+// unanswerable for good.
+//
+// Gated on the chat's phase: only waiting_input / waiting_approval can have an
+// open request, which is what keeps an answered one from coming back.
+func (a *App) LoadPendingChatRequests(chatID string) ([]ChatStreamLine, error) {
+	if a.db == nil {
+		return []ChatStreamLine{}, nil
+	}
+	if st := a.phases.Get("chat:" + chatID).State; st != agentphase.WaitingInput && st != agentphase.WaitingApproval {
+		return []ChatStreamLine{}, nil
+	}
+	rows, err := a.db.Query(
+		`SELECT ord, kind, line FROM chat_stream WHERE chat_id = ? ORDER BY ord DESC LIMIT ?`,
+		chatID, pendingScanLines,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var found []ChatStreamLine // newest first while walking back
+	cancelled := map[string]bool{}
+scan:
+	for rows.Next() {
+		var l ChatStreamLine
+		if err := rows.Scan(&l.Ord, &l.Kind, &l.Line); err != nil {
+			return nil, err
+		}
+		switch l.Kind {
+		case "claude-data":
+			var m struct {
+				Type      string `json:"type"`
+				RequestID string `json:"request_id"`
+				Request   struct {
+					Subtype string `json:"subtype"`
+				} `json:"request"`
+			}
+			if json.Unmarshal([]byte(l.Line), &m) != nil {
+				continue
+			}
+			switch {
+			case m.Type == "result":
+				break scan // the turn before this one: nothing older can be open
+			case m.Type == "control_cancel_request":
+				cancelled[m.RequestID] = true
+			case m.Type == "control_request" && m.Request.Subtype == "can_use_tool" && !cancelled[m.RequestID]:
+				found = append(found, l)
+			}
+		case "acp-data":
+			if strings.Contains(l.Line, `"_burrow":"turn"`) {
+				break scan
+			}
+		case "acp-req":
+			found = append(found, l)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(found)-1; i < j; i, j = i+1, j-1 {
+		found[i], found[j] = found[j], found[i]
+	}
+	if found == nil {
+		found = []ChatStreamLine{}
+	}
+	return found, nil
 }

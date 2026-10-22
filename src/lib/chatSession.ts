@@ -277,6 +277,11 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   hydrate(state: { messages?: ChatMessage[]; hiddenBefore?: number; sessionId?: string }): void;
   /** Fetch the next page of older messages into the window (`load_chat_messages_page`). */
   loadEarlier(): Promise<void>;
+  /**
+   * Open the permission / question the agent is blocked on, if it arrived while
+   * no view was listening. Call after listenClaude/listenAcp (`load_pending_chat_requests`).
+   */
+  recoverPendingRequests(): Promise<void>;
   /** Resolve image `i` of a message that arrived as a stub (`load_chat_image`); returns its data URL. */
   loadImage(message: ChatMessage, i: number): Promise<string>;
   /** Take the last user message back out to edit it (↑ in an empty composer). */
@@ -783,6 +788,18 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
           if (e.payload.ord > s.lastOrd) s.lastOrd = e.payload.ord;
           onEvents(s, e.payload);
         });
+      }
+    },
+    async recoverPendingRequests() {
+      try {
+        const lines = await s.deps.invoke<StreamEvent[]>("load_pending_chat_requests", { chatId });
+        for (const ev of lines ?? []) {
+          // onLine already ignores a request that was answered or is on screen.
+          if (ev.kind === "claude-data") feed(s, ev, onLine);
+          else if (ev.kind === "acp-req") feed(s, ev, onAcpReq);
+        }
+      } catch {
+        // Best effort: an older backend has no such call, and the live path still works.
       }
     },
     async listenClaude() {

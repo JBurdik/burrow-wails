@@ -716,3 +716,32 @@ describe("images left out of a transcript page", () => {
     dropChatSession(93);
   });
 });
+
+describe("a request that arrived before the view mounted", () => {
+  const ask = (rid: string) => ({
+    ord: 5, kind: "claude-data",
+    line: JSON.stringify({ type: "control_request", request_id: rid, request: { subtype: "can_use_tool", tool_name: "AskUserQuestion", input: { questions: [{ question: "A or B?", options: [] }] } } }),
+  });
+
+  it("is opened from the stream, once", async () => {
+    const f = fakeDeps();
+    const s = chatSession(94, f.deps);
+    f.invoke.mockResolvedValue([ask("q1")]);
+    await s.recoverPendingRequests();
+    expect(f.invoke).toHaveBeenCalledWith("load_pending_chat_requests", { chatId: 94 });
+    expect(s.pendingQuestion.value?.requestId).toBe("q1");
+    const rows = s.messages.value.length;
+    await s.recoverPendingRequests(); // a second mount / refresh must not stack a duplicate
+    expect(s.messages.value.length).toBe(rows);
+    dropChatSession(94);
+  });
+
+  it("stays quiet when the backend has no such call", async () => {
+    const f = fakeDeps();
+    const s = chatSession(95, f.deps);
+    f.invoke.mockRejectedValue(new Error("unknown command"));
+    await expect(s.recoverPendingRequests()).resolves.toBeUndefined();
+    expect(s.pendingQuestion.value).toBeNull();
+    dropChatSession(95);
+  });
+});
