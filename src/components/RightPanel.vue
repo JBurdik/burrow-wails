@@ -431,6 +431,7 @@
               :style="childProvider(child)?.color ? { color: childProvider(child)!.color } : undefined"
             />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ child.title }}</span>
+            <span v-if="child.model" class="max-w-[90px] shrink-0 truncate rounded-[var(--radius-nav)] bg-hover px-1 text-[9.5px] text-muted-foreground" :title="child.model">{{ modelLabel(child.agentKind ?? "", child.model) }}</span>
             <!-- The status slot is separate from the close control so rows do
                  not resize. Done+read intentionally renders nothing; blue is
                  reserved for an unread completion. -->
@@ -682,6 +683,7 @@ import { useSubagentsStore } from "@/stores/subagents";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { useProvidersStore } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
+import { modelLabel } from "@/lib/chatModels";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { activeChatIdFor, childrenOf } from "@/stores/chatTree";
 import { nextSubAgentView } from "@/lib/subAgentView";

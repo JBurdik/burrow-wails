@@ -410,8 +410,16 @@ export function LoadChatEventsSince(arg1, arg2) {
   return window['go']['main']['App']['LoadChatEventsSince'](arg1, arg2);
 }
 
+export function LoadChatImage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LoadChatImage'](arg1, arg2, arg3);
+}
+
 export function LoadChatMessages(arg1) {
   return window['go']['main']['App']['LoadChatMessages'](arg1);
+}
+
+export function LoadChatMessagesPage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LoadChatMessagesPage'](arg1, arg2, arg3);
 }
 
 export function LoadChatStreamSince(arg1, arg2) {

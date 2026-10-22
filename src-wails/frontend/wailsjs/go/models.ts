@@ -451,6 +451,22 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ChatMessagesPage {
+	    messages: number[][];
+	    start: number;
+	    total: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatMessagesPage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.messages = source["messages"];
+	        this.start = source["start"];
+	        this.total = source["total"];
+	    }
+	}
 	export class ChatSearchHit {
 	    chat_id: number;
 	    workspace_id: number;

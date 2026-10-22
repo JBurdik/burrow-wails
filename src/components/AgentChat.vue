@@ -2013,7 +2013,8 @@ const workingVerb = computed(() => WORKING_VERBS[workingVerbIndex.value]);
 const CONTEXT_FALLBACK = 200_000;
 // contextTokens / contextWindow / contextSplit are the session's (remembered
 // per chat there, so the ring survives a remount).
-const contextMax = computed(() => contextWindow.value || CONTEXT_FALLBACK);
+// ponytail: >200k used with no window reported yet can only be a 1M model.
+const contextMax = computed(() => contextWindow.value || (contextTokens.value > CONTEXT_FALLBACK ? 1_000_000 : CONTEXT_FALLBACK));
 const contextUsageRatio = computed(() => Math.min(contextTokens.value / contextMax.value, 1));
 const contextUsageClass = computed(() => {
   const r = contextUsageRatio.value;

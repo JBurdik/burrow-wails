@@ -245,9 +245,12 @@ async function spawn(args: Record<string, unknown>) {
     if (instance.transport === "none") throw new Error("This provider does not offer an embedded chat.");
     const chats = useClaudeChatsStore();
     const session = await chats.create(target.id, { agentKind: instance.id, launchSettings });
-    // The row is what the chat runtime starts the process from.
+    // The row is what the chat runtime starts the process from. A bare --model
+    // (no profile) belongs there too, or the chat starts on the default.
     if (launchSettings) {
       await setLaunchSettings(session.id, { model: launchSettings.model, permission_mode: launchSettings.permissionMode, row_only: true });
+    } else if (str(args.model)) {
+      await setLaunchSettings(session.id, { model: str(args.model), row_only: true });
     }
     // The tab's own view sends the task as its first prompt.
     useTerminalTabsStore().openChat(target.id, session.id, instance.id, task);

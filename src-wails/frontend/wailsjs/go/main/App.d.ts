@@ -207,7 +207,11 @@ export function ListWorkspaces():Promise<Array<main.Workspace>>;
 
 export function LoadChatEventsSince(arg1:string,arg2:number):Promise<Array<main.ChatEventBatch>>;
 
+export function LoadChatImage(arg1:number,arg2:number,arg3:number):Promise<string>;
+
 export function LoadChatMessages(arg1:number):Promise<string>;
+
+export function LoadChatMessagesPage(arg1:number,arg2:number,arg3:number):Promise<main.ChatMessagesPage>;
 
 export function LoadChatStreamSince(arg1:string,arg2:number):Promise<Array<main.ChatStreamLine>>;
 
