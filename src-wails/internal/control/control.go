@@ -188,6 +188,8 @@ type ChatRuntime interface {
 // SpawnRequest is spawn's chat half, as the caller gave it.
 type SpawnRequest struct {
 	Task, Profile, Agent, Model, Cwd string
+	// PermissionMode empty = the profile's, else the parent's own.
+	PermissionMode string
 	// Name titles the sub-agent; empty = the task's first line.
 	Name         string
 	ParentChatID int64

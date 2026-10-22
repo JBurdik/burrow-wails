@@ -44,6 +44,20 @@ func TestSpawnSubagentRunsInGo(t *testing.T) {
 		t.Fatalf("profile not applied: %+v task=%q", child, got.Task)
 	}
 
+	// An explicit mode beats the profile's, but may only narrow the parent's.
+	got, err = a.spawnSubagent(control.SpawnRequest{Task: "x", Profile: "scout", PermissionMode: "default", ParentChatID: parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child, _ = a.chatByID(got.ChatID); child.PermissionMode != "default" {
+		t.Fatalf("explicit mode not applied: %+v", child)
+	}
+	for _, mode := range []string{"full-access", "dontAsk", "yolo"} {
+		if _, err := a.spawnSubagent(control.SpawnRequest{Task: "x", PermissionMode: mode, ParentChatID: parent.ID}); err == nil {
+			t.Fatalf("mode %q must be refused under an acceptEdits parent", mode)
+		}
+	}
+
 	// A Codex child runs in the runtime too, and does not inherit a Claude
 	// parent's model / effort / mode — they mean nothing to Codex.
 	got, err = a.spawnSubagent(control.SpawnRequest{Task: "x", Agent: "codex", ParentChatID: parent.ID})

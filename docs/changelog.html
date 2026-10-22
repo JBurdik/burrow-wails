@@ -79,12 +79,66 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.6.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.6.0</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">říjen 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Burrow v mobilu a na iPadu</div>
+    <ul>
+      <li><strong>Vzdálený klient je celá desktopová aplikace</strong> — PWA měla vlastní store, pohledy i reducer chatu. Teď spouští desktopový <code>App.vue</code> přes stejný <code>/v2/ws</code>: na iPadu plný layout, na telefonu kompaktní. Z <code>src/mobile</code> zbylo jen párování. Rozložení panelů a zoom se ukládají per zařízení, takže iPad nepřepisuje layout desktopu.</li>
+      <li><strong>Telefon jako mobilní aplikace</strong> — spodní navigace Threads / Inbox / Project / More. Inbox řadí živá vlákna do <em>Čeká na tebe</em> / <em>Hotovo nepřečteno</em> / <em>Běží</em> (s badgem), Project ukazuje větev a ahead/behind a otevírá Changes, PR, dev servery a sub-agenty. Vlákno má hlavičku se zpět a akcemi (stop, restart, clear), přepínání tabů nahrazuje route, takže funguje nativní swipe-back na iOS i back na Androidu.</li>
+      <li><strong>Klávesnice na iOS nepřekrývá composer</strong> — aplikace je připnutá na visual viewport a klávesnice ji zmenší, místo aby ji Safari posouval.</li>
+      <li><strong>Menu vlákna dotykem</strong> — iOS Safari při dlouhém stisku nevyvolá <code>contextmenu</code>, takže přejmenovat/připnout/smazat nešlo. Teď long press (500 ms) a na dotykových zařízeních tlačítko ⋮ místo hover-only akcí.</li>
+      <li><strong>Mac zůstane vzhůru pro telefon</strong> — se zapnutým vzdáleným přístupem drží <code>caffeinate -is</code> (jen na adaptéru). Telefon ukáže banner, když je Mac nedostupný (po 3 s), a panel dev serverů nabízí Preview odkaz na tailnet IP.</li>
+      <li><strong>Chyba startu místo prázdné obrazovky</strong> — telefon nemá devtools, takže selhaný start klient teď vypíše (s Reload / Zapomenout zařízení). <code>mobile.html</code> a <code>sw.js</code> se servírují bez cache — zastaralý entry point odkazující na smazaný bundle byl další prázdná obrazovka.</li>
+    </ul>
+  </div>
+
+  <div class="section perf">
+    <div class="section-label">Dlouhé chaty</div>
+    <ul>
+      <li><strong>Chat se otevírá od nejnovějších zpráv</strong> — dřív se při otevření načítal celý transcript; na iPadu přes tailnet to bylo 5–10 s. <code>load_chat_messages_page</code> vrací okno zpráv a tlačítko „Načíst starší“ přidá předchozí stránku se zachovanou pozicí scrollu. Dokud je načtené jen okno, frontend transcript neukládá (<code>save_chat_messages</code> přepisuje celý chat a smazal by vše nad oknem).</li>
+      <li><strong>Obrázky se načtou až na kliknutí</strong> — staré zprávy mají screenshoty inline v base64 (jeden měl 3,2 MB). Stránka nese místo každého data URL nad 4 KB stub a <code>load_chat_image</code> vrátí originál po kliknutí na „Zobrazit obrázek“. Uložený transcript se nemění.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Vlákna a sub-agenti</div>
+    <ul>
+      <li><strong>Ruční uspání chatu</strong> — odložení (settle) chatu volá <code>chat_sleep</code> a proces hned zastaví, se stejnými pojistkami jako auto-sleep (běžící chat se neuspí).</li>
+      <li><strong>Hromadné smazání odložených vláken</strong> — koš v sekci Settled smaže všechna odložená vlákna kromě připnutých. <code>DeleteChat</code> navíc maže i <code>chat_stream</code> řádky chatu a jeho sub-agentů; start aplikace uklidí ty, které osiřely ve starších verzích.</li>
+      <li><strong><code>burrow spawn --name</code></strong> — sub-agent dostane krátký název místo prvního řádku úkolu, ať se dají v panelu rozlišit.</li>
+      <li><strong><code>burrow spawn --permission-mode</code></strong> — vlákno může sub-agentovi zúžit oprávnění (např. <code>plan</code> pro průzkum). Nikdy ne víc, než má samo — širší režim spawn odmítne.</li>
+      <li><strong>Model sub-agenta</strong> — v Right Panelu je u každého sub-agenta vidět model a holé <code>--model</code> (bez profilu) se opravdu propíše do chatu.</li>
+      <li><strong>Interní ID v hover kartě</strong> — přepínač „Show internal IDs“ v Nastavení ukáže id chatu/tabu, hodí se do bug reportů.</li>
+      <li><strong>Dialogy</strong> — pozadí jako dropdowny, fokus na potvrzovacím tlačítku, Esc ruší.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Ztracené dotazy na oprávnění</strong> — request se otevíral jen v živém listeneru a replay přehrává doménové eventy, ne surové řádky. Dotaz poslaný dřív, než se view připojilo (telefon na pomalé lince, chat z welcome composeru), se nikdy neukázal a agent zůstal navždy blokovaný. <code>load_pending_chat_requests</code> vrátí otevřené requesty aktuálního tahu (jen ve fázi <code>waiting_*</code>).</li>
+      <li><strong>Otevření chatu přeskupovalo projekty v sidebaru</strong> — dohnání řádků streamovaných mimo pohled se počítalo jako aktivita. Teď jen když chat běží.</li>
+      <li><strong>Problikávání předchozího tabu při startu chatu</strong> — composer se zavřel dřív, než <code>create_chat</code> vrátil; teď se naviguje až na hotový tab.</li>
+      <li><strong><code>too_many_calls</code> po reconnectu</strong> — flush fronty poslal všechna volání najednou a přetekl serverový limit 64. Klient drží max. 48 volání v letu.</li>
+      <li><strong>Kontextové okno nad 200k</strong> — když agent limit neuvádí a použití přesáhne 200k, počítá se s 1M.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
   <!-- v0.5.2 -->
 <div class="release">
   <div class="release-header">
     <span class="version">v0.5.2</span>
-    <span class="tag tag-latest">nejnovější</span>
-    <span class="date">říjen 2026</span>
+        <span class="date">říjen 2026</span>
   </div>
 
   <div class="section perf">

@@ -45,6 +45,7 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "profile", Type: "string", Desc: "Saved sub-agent role: scout, worker, or reviewer (Settings > Sub-agent profiles)"},
 			{Name: "agent", Type: "string", Desc: "Agent instance to run (name or id from list_agents); defaults to the user's default"},
 			{Name: "model", Type: "string", Desc: "Model override for this task, e.g. claude-haiku-4-5-20251001 for mechanical work"},
+			{Name: "permission_mode", Type: "string", Desc: "Chat sub-agent's permission mode: plan, default, acceptEdits, auto, dontAsk or full-access; defaults to the profile's, else the parent thread's own. Never more permissive than the parent"},
 			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work; defaults to the caller's"},
 			{Name: "target", Type: "string", Desc: "tab (default; live terminal, result capture) or chat (structured). Ignored when spawning from a chat thread — that sub-agent is always a chat"},
 			{Name: "capture", Type: "boolean", Desc: "Capture the agent's final message for wait_result (tab target only, default true; a chat sub-agent is waited on with chat_id instead)"},
@@ -201,7 +202,7 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	if parent > 0 && c.deps.ChatRuntime != nil {
 		got, err := c.deps.ChatRuntime.SpawnSubagent(SpawnRequest{
 			Task: p.Str("task"), Profile: p.Str("profile"), Agent: p.Str("agent"),
-			Model: p.Str("model"), Cwd: p.Str("cwd"), Name: p.Str("name"), ParentChatID: parent,
+			Model: p.Str("model"), PermissionMode: p.Str("permission_mode"), Cwd: p.Str("cwd"), Name: p.Str("name"), ParentChatID: parent,
 		})
 		if err != nil {
 			return nil, err

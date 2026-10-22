@@ -426,6 +426,10 @@ export function LoadChatStreamSince(arg1, arg2) {
   return window['go']['main']['App']['LoadChatStreamSince'](arg1, arg2);
 }
 
+export function LoadPendingChatRequests(arg1) {
+  return window['go']['main']['App']['LoadPendingChatRequests'](arg1);
+}
+
 export function LocalEndpoint() {
   return window['go']['main']['App']['LocalEndpoint']();
 }

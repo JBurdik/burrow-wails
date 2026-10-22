@@ -215,6 +215,8 @@ export function LoadChatMessagesPage(arg1:number,arg2:number,arg3:number):Promis
 
 export function LoadChatStreamSince(arg1:string,arg2:number):Promise<Array<main.ChatStreamLine>>;
 
+export function LoadPendingChatRequests(arg1:string):Promise<Array<main.ChatStreamLine>>;
+
 export function LocalEndpoint():Promise<main.LocalEndpointInfo>;
 
 export function LspSend(arg1:string,arg2:string):Promise<void>;

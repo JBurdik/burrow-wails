@@ -190,6 +190,16 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		inherit = parent
 	}
 
+	if req.PermissionMode != "" {
+		if permRank(req.PermissionMode) < 0 {
+			return none, fmt.Errorf("Unknown permission mode %q. Use plan, default, acceptEdits, auto, dontAsk or full-access.", req.PermissionMode)
+		}
+		// An agent may narrow its sub-agent, never widen it past itself.
+		if permRank(req.PermissionMode) > permRank(parent.PermissionMode) {
+			return none, fmt.Errorf("A sub-agent cannot run in %q: the parent thread runs in %q.", req.PermissionMode, firstNonEmpty(parent.PermissionMode, "default"))
+		}
+	}
+
 	// Workspace: the one the caller's cwd names (a worktree spawn nests under
 	// the worktree), else the parent's.
 	wsID := parent.WorkspaceID
@@ -208,7 +218,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		Transport:      transport,
 		Model:          firstNonEmpty(req.Model, profileField(profile, func(p *subagentProfile) string { return p.Model }), inherit.Model),
 		Effort:         inherit.Effort,
-		PermissionMode: firstNonEmpty(profileField(profile, func(p *subagentProfile) string { return p.PermissionMode }), inherit.PermissionMode),
+		PermissionMode: firstNonEmpty(req.PermissionMode, profileField(profile, func(p *subagentProfile) string { return p.PermissionMode }), inherit.PermissionMode),
 		ProfileID:      inst.ID,
 		LastActivityAt: time.Now().UnixMilli(),
 	}
@@ -287,4 +297,22 @@ func subagentNote(childChatID int64, task, agentName string) string {
 		SubagentChatID: childChatID, SubagentAgent: agentName,
 	})
 	return string(note)
+}
+
+// permRank orders the permission vocabulary by how much runs unasked; -1 is
+// unknown. ponytail: auto and acceptEdits tie, both write without asking.
+func permRank(mode string) int {
+	switch mode {
+	case "plan":
+		return 0
+	case "", "default", "supervised":
+		return 1
+	case "acceptEdits", "auto-accept-edits", "auto", "auto-review":
+		return 2
+	case "dontAsk":
+		return 3
+	case "full-access", "bypassPermissions", "danger-full-access":
+		return 4
+	}
+	return -1
 }
