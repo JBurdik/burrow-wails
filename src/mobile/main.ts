@@ -90,3 +90,24 @@ function showUnreachable(down: boolean) {
     bar.textContent = `Mac unreachable: asleep, offline, or Burrow not running. Reconnecting…${since}`;
   }, 3000);
 }
+
+// iOS doesn't shrink the layout viewport for the on-screen keyboard: it pans
+// the *visual* viewport over it to reveal the focused input. Pin the app to
+// the visual viewport (App.vue: `.is-web #app` is fixed at --app-top /
+// --app-h) so the composer sits right above the keyboard wherever iOS pans.
+// Never scroll back ourselves — fighting that pan is what made the input
+// jump and vanish while typing.
+const vv = window.visualViewport;
+if (vv) {
+  const fit = () => {
+    const app = document.getElementById("app");
+    // UI scale is CSS `zoom` on #app (ui store), which scales these px too.
+    const zoom = (app && parseFloat(getComputedStyle(app).zoom)) || 1;
+    const root = document.documentElement.style;
+    root.setProperty("--app-h", `${vv.height / zoom}px`);
+    root.setProperty("--app-top", `${vv.offsetTop / zoom}px`);
+  };
+  vv.addEventListener("resize", fit);
+  vv.addEventListener("scroll", fit);
+  fit();
+}

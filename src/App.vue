@@ -7,12 +7,13 @@
       :floor="ui.activeTheme.vars['bg-base']"
     />
     <TitleBar
+      v-if="!compact"
       :workspace-name="displayWs?.name"
       :branch="git.cwd === displayWs?.path ? git.branch : ''"
       :folder-path="displayWs?.path"
       :right-panel-visible="ui.rightPanelVisible"
       :sidebar-visible="!compact && ui.sidebarVisible"
-      @toggle-sidebar="compact ? (drawerOpen = !drawerOpen) : ui.toggleSidebar()"
+      @toggle-sidebar="ui.toggleSidebar()"
       @back="ws.close()"
       @toggle-rightpanel="ui.toggleRightPanel()"
     />
@@ -24,12 +25,24 @@
       @onboarding="openOnboarding"
       @shortcuts="openShortcutsFromDocs"
     />
+    <!-- Phone shell (src/components/phone/, docs/superpowers/specs/2026-10-22-phone-shell-design.md):
+         the same panels, one per screen, chosen by the route; headers sit here. -->
+    <template v-if="compact">
+      <PhoneHeader v-if="phone === 'threads'" title="Threads">
+        <template #actions>
+          <button class="phone-icon-btn" aria-label="Search" @click="ui.openSpotlight()"><PhMagnifyingGlass :size="21" /></button>
+          <button class="phone-icon-btn" aria-label="New thread" @click="ui.openWelcome()"><PhPlus :size="22" /></button>
+        </template>
+      </PhoneHeader>
+      <ThreadHeader v-else-if="phone === 'thread'" />
+      <PhoneHeader v-else-if="phone === 'project-surface'" :title="surfaceTitle" :subtitle="ws.active?.name" back />
+    </template>
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
       <!-- Wrapped: Sidebar has several root nodes (Teleports), so v-show/class on the
            component itself silently did nothing and the sidebar never hid. -->
-      <div v-show="compact ? drawerOpen : ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
+      <div v-show="compact ? phone === 'threads' : ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
       <div v-show="!compact && ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
-      <div class="ide-main">
+      <div v-show="!compact || phone === 'thread'" class="ide-main">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
              them on a mode switch ran XTerm.onBeforeUnmount → detach_pty + dispose;
              returning replayed the daemon ring-buffer into a fresh fit → scrambled
@@ -60,13 +73,16 @@
         </div>
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
       </div>
-      <!-- Phone: the sidebar and the right panel float over the one surface on screen. -->
-      <div v-if="compact && ui.rightPanelVisible" class="compact-backdrop" @click="ui.rightPanelVisible = false" />
+      <InboxScreen v-if="compact && phone === 'inbox'" />
+      <ProjectScreen v-else-if="compact && phone === 'project'" />
+      <MoreScreen v-else-if="compact && phone === 'more'" />
       <div v-show="!compact && ui.rightPanelVisible" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
       <RightPanel
         ref="rightPanelRef"
         class="panel-right"
-        :open="ui.rightPanelVisible"
+        :class="{ 'phone-hidden': compact && phone !== 'project-surface' }"
+        :open="compact ? phone === 'project-surface' : ui.rightPanelVisible"
+        :force-surface="compact && phone === 'project-surface' ? String(route.params.surface) : undefined"
         :cwd="displayWs?.path ?? ''"
         :workspace-id="displayWs?.id"
         :is-git="displayWs?.is_git !== false"
@@ -80,6 +96,7 @@
       :workspace-id="ws.active.parent_id ?? ws.active.id"
       @close="showProjectConfig = false"
     />
+    <BottomNav v-if="compact && showsBottomNav(route.name)" />
     <FileDropOverlay />
     <Spotlight
       ref="spotlightRef"
@@ -131,8 +148,15 @@
 import { ref, reactive, onMounted, onBeforeUnmount, computed, provide, watch, nextTick, useTemplateRef } from "vue";
 import { useRoute } from "vue-router";
 import { router, routeId } from "@/router";
-import { PhX } from "@phosphor-icons/vue";
+import { PhMagnifyingGlass, PhPlus, PhX } from "@phosphor-icons/vue";
 import TitleBar from "@/components/TitleBar.vue";
+import PhoneHeader from "@/components/phone/PhoneHeader.vue";
+import ThreadHeader from "@/components/phone/ThreadHeader.vue";
+import BottomNav from "@/components/phone/BottomNav.vue";
+import InboxScreen from "@/components/phone/InboxScreen.vue";
+import ProjectScreen from "@/components/phone/ProjectScreen.vue";
+import MoreScreen from "@/components/phone/MoreScreen.vue";
+import { isPhoneOnlyRoute, phoneScreen, showsBottomNav } from "@/lib/phoneNav";
 import { compact, isWeb } from "@/lib/viewport";
 import AnimatedBackdrop from "@/components/AnimatedBackdrop.vue";
 import Sidebar from "@/components/Sidebar.vue";
@@ -290,7 +314,8 @@ watch(
 // underneath them (a `burrow spawn` from an agent running elsewhere).
 watch(
   () => [ws.active?.id ?? null, activeTabs.value?.length ?? null] as const,
-  ([id, n], [prevId]) => { if (id === prevId && n === 0) ui.openWelcome(); },
+  // On a phone the thread list, not a composer, is where an emptied workspace leaves you.
+  ([id, n], [prevId]) => { if (id === prevId && n === 0) void (compact.value ? router.replace("/") : ui.openWelcome()); },
 );
 
 // Screen stays mounted behind v-show, so re-focus its composer each time it shows.
@@ -336,14 +361,16 @@ const panelStyles = computed(() => compact.value
   ? { '--sidebar-width': 'auto', '--right-panel-width': 'auto' }
   : { '--sidebar-width': ui.sidebarWidth + 'px', '--right-panel-width': ui.rightPanelWidth + 'px' });
 
-// Compact (phone) layout: the sidebar is a drawer that closes once you have
-// picked something, and the right panel starts closed — it would cover everything.
-// The list is the phone's home screen: it is open on launch (once the startup
-// navigation, which the route watcher below would count as "picked something",
-// has settled) and the route watcher closes it when a thread is chosen.
-const drawerOpen = ref(false);
-if (compact.value) router.isReady().then(() => setTimeout(() => { drawerOpen.value = true; }, 0));
-watch(() => route.fullPath, () => { drawerOpen.value = false; });
+// Phone shell: which screen the route shows (src/lib/phoneNav.ts). The thread
+// list is the Sidebar, a project section is the RightPanel with one surface
+// forced, a thread is the terminal host — the same mounted panels, shown one
+// at a time.
+const phone = computed(() => phoneScreen(route.name));
+const SURFACE_TITLES: Record<string, string> = { git: "Changes", "pull-requests": "Pull requests", "dev-servers": "Dev servers", agents: "Sub-agents" };
+const surfaceTitle = computed(() => SURFACE_TITLES[String(route.params.surface)] ?? "Project");
+// Widening past phone width on a phone-only screen (rotation, split view):
+// the desktop has nothing to show there.
+watch(compact, (on) => { if (!on && isPhoneOnlyRoute(route.name)) void router.replace("/"); });
 const closeRightOnCompact = () => { if (compact.value) ui.rightPanelVisible = false; };
 watch(compact, closeRightOnCompact);
 configReady.then(closeRightOnCompact); // after the ui store restored its prefs
@@ -937,19 +964,31 @@ body {
 .is-web .tb-web-hide,
 .is-compact .tb-wide { display: none !important; }
 
+/* Phone shell: one in-flow panel per screen, no floating drawers. */
+.is-compact .ide-body { flex-direction: column; }
 .is-compact .panel-sidebar,
-.is-compact .panel-right {
-  position: fixed;
-  top: var(--titlebar-height);
-  bottom: 0;
-  z-index: 60;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  box-shadow: 0 0 24px rgb(0 0 0 / 0.4);
+.is-compact .panel-right { flex: 1 1 0; min-height: 0; width: 100%; background: var(--bg-base); }
+.is-compact .panel-sidebar > aside,
+.is-compact .panel-right { width: 100% !important; flex-basis: 100% !important; min-width: 0; border-left: 0; }
+.is-compact:has(.phone-nav) .ide-body { padding-bottom: 0; }
+/* Pinned to the visual viewport (src/mobile/main.ts sets --app-top/--app-h),
+   so the iOS keyboard shrinks the app instead of covering the composer. */
+.is-web #app { position: fixed; left: 0; right: 0; top: var(--app-top, 0px); width: auto; height: var(--app-h, 100dvh); }
+/* No title bar on a phone; overlays that sit below it start at the notch. */
+.is-compact { --titlebar-height: env(safe-area-inset-top, 0px); }
+.is-compact .phone-hidden { display: none !important; }
+/* A detail slides in when it appears (display:none → shown restarts the
+   animation); back has no animation, iOS swipe-back draws its own. */
+.is-compact .ide-main,
+.is-compact .panel-right { animation: phone-push-in 0.22s ease-out; }
+@keyframes phone-push-in { from { transform: translateX(28%); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .is-compact .ide-main, .is-compact .panel-right { animation: none; } }
+.phone-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; flex-shrink: 0; border-radius: 10px;
+  color: var(--text-primary);
 }
-/* Phone: the thread list is a screen of its own, not a drawer over the chat. */
-.is-compact .panel-sidebar { left: 0; right: 0; background: var(--bg-base); box-shadow: none; }
-.is-compact .panel-sidebar > aside { width: 100%; flex-basis: 100%; min-width: 0; }
-.is-web #app { height: 100dvh; }
+.phone-icon-btn:active { background: var(--bg-hover); }
 /* Phone chat: nothing may widen the page — wide code blocks scroll inside
    themselves — and the desk-only chrome (minimap rail, "Catch me up") goes. */
 .is-compact .chat-messages { overflow-x: hidden; }
@@ -957,15 +996,7 @@ body {
 .is-compact .chat-messages .md-body { min-width: 0; overflow-wrap: anywhere; }
 .is-compact .chat-message .bubble-user { max-width: 88%; }
 .is-compact .minimap-rail { display: none; }
-.is-compact .catchup-btn { display: none; } /* the sidebar's own fill is translucent */
-.is-compact .panel-right { left: 0; right: 0; background: var(--bg-base); }
-
-.compact-backdrop { /* phone: only the right panel still floats */
-  position: fixed;
-  inset: var(--titlebar-height) 0 0 0;
-  z-index: 55;
-  background: rgb(0 0 0 / 0.45);
-}
+.is-compact .catchup-btn { display: none; }
 
 .panels-swapped .panel-sidebar { order: 5; }
 .panels-swapped .panel-resize-left { order: 4; }

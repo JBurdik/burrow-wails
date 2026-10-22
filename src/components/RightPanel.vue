@@ -13,19 +13,19 @@
     <template v-for="pi in PANES" :key="pi">
     <div
       v-if="pi === 1"
-      v-show="paneVisible(0) && paneVisible(1)"
+      v-show="paneVisible(0) && paneVisible(1) && !props.forceSurface"
       class="h-[5px] shrink-0 cursor-row-resize border-t border-border transition-colors hover:bg-accent/40"
       title="Drag to resize"
       @pointerdown.prevent="startSplitDrag"
     />
     <section
-      v-show="paneVisible(pi)"
+      v-show="paneVisible(pi) && !(props.forceSurface && pi === 1)"
       class="flex min-h-0 flex-col overflow-hidden"
       :style="paneStyle(pi)"
       @dragover="onSurfaceDragOver"
       @drop="onSurfaceDrop(pi, $event)"
     >
-      <div class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
+      <div v-show="!props.forceSurface" class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
         <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto hide-scrollbar">
           <button
             v-for="tab in paneTabs(pi)"
@@ -711,7 +711,7 @@ import { initPtyCounter, nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
 import { addTerm, findServed, installPanelTerminals, onlyShell, removeTerm, type RpTerm, type RpTerms, type ServeRequest, type ServeResult } from "@/lib/rpTerminals";
 
-const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
+const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean; forceSurface?: string }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: [] }>();
 const git = useGitStore();
 // Confirm dialogs focus their action: Enter confirms, Esc cancels.
@@ -910,7 +910,7 @@ function paneVisible(pi: PaneIndex): boolean {
   return pi === 0 ? l.maximized !== 1 : l.bottomOpen && l.maximized !== 0;
 }
 function paneStyle(pi: PaneIndex) {
-  if (!(paneVisible(0) && paneVisible(1))) return { flex: "1 1 0" };
+  if (props.forceSurface || !(paneVisible(0) && paneVisible(1))) return { flex: "1 1 0" };
   const share = pi === 0 ? layout.value.split : 1 - layout.value.split;
   return { flex: `${share} 1 0` };
 }
@@ -1223,6 +1223,10 @@ function openDoc(path: string) {
 }
 
 defineExpose({ openGitTab, openSubagent, openDoc });
+
+// Phone shell (/project/:surface): one surface, full screen, no tab strip or
+// second pane — the phone's own header and back arrow replace them.
+watch([() => props.forceSurface, wsKey], ([id]) => { if (id) pickSurface(0, id); }, { immediate: true });
 
 // --- Checkpoints (History tab) ---
 interface Checkpoint {

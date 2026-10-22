@@ -12,7 +12,7 @@ import {
   variantFor,
 } from "@/themes";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
-import { isWeb } from "@/lib/viewport";
+import { compact, isWeb } from "@/lib/viewport";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { router, tabsOrWelcome, workspaceRoute } from "@/router";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -793,7 +793,12 @@ export const useUIStore = defineStore("ui", () => {
   // ChatView is simply unmounted); our terminals must stay mounted to keep the
   // PTY stream and the chat event listeners alive, so the state is explicit
   // instead of implied by the DOM.
-  const welcomeVisible = computed(() => router.currentRoute.value.name === "welcome");
+  // On a phone `/` is the thread list (src/components/phone/) and the composer
+  // is `/new`; on the desktop `/new` redirects to `/`, so both count here.
+  const welcomeVisible = computed(() => {
+    const name = router.currentRoute.value.name;
+    return name === "new" || (name === "welcome" && !compact.value);
+  });
   const viewingTabs = computed(() => {
     const name = router.currentRoute.value.name;
     return name === "workspace" || name === "tab";
@@ -817,7 +822,7 @@ export const useUIStore = defineStore("ui", () => {
   }
 
   function openWelcome() {
-    return router.push("/");
+    return router.push(compact.value ? "/new" : "/");
   }
   // Dismissing the composer is an explicit "show me the tabs", so it goes there
   // even when the workspace has nothing live yet — a tab being opened in the
