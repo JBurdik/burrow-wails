@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -303,7 +304,9 @@ func (d *DaemonClient) Foreground(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return resp.Name, nil
+	// Claude Code's npm package now runs a native `bin/claude.exe`, so p_comm is
+	// "claude.exe" — every `^claude$` match (poll, auto-title) missed it.
+	return strings.TrimSuffix(resp.Name, ".exe"), nil
 }
 
 // ForegroundPid is the foreground process group id of a PTY, 0 when unknown

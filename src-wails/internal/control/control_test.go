@@ -235,6 +235,24 @@ func TestSpawnFromChatForcesChatTargetAndCarriesParent(t *testing.T) {
 	}
 }
 
+// detach lets a chat open a top-level chat/tab of its own instead of a child.
+func TestSpawnDetachedFromChatHonoursTargetAndDropsParent(t *testing.T) {
+	ui := &fakeUI{result: SpawnResult{ChatID: 9, Target: "chat"}}
+	c := newTestCore(t, Deps{UI: ui})
+
+	if _, err := c.Call(context.Background(), ScopeLocal, "spawn", Params{
+		"task":           "plan the next release",
+		"target":         "chat",
+		"detach":         true,
+		"parent_chat_id": float64(7),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ui.args["target"] != "chat" || ui.args["parent_chat_id"] != int64(0) {
+		t.Errorf("target = %v, parent_chat_id = %v, want chat, 0", ui.args["target"], ui.args["parent_chat_id"])
+	}
+}
+
 // Depth is capped at one level: recursive agent trees run away in cost and the
 // panel that shows them is a flat list.
 func TestSubAgentCannotSpawn(t *testing.T) {
