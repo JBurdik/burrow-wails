@@ -147,5 +147,12 @@ func (s *HTTPServer) handleAssets(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// The embedded FS has no modtime, so the browser gets no validator and an
+	// installed PWA decides freshness for itself. The entry points name
+	// hashed assets that change every build: a stale mobile.html pointing at a
+	// deleted bundle is a blank screen. Hashed files under /assets/ never change.
+	if !strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 	http.ServeFileFS(w, r, sub, name)
 }
