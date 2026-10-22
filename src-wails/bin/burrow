@@ -9,7 +9,7 @@
 # is generated from the app's verb registry, so it can never drift from reality).
 # Common ones:
 #
-#   burrow spawn "<task>" [--agent A] [--model M] [--cwd DIR] [--target tab|chat]
+#   burrow spawn "<task>" [--name TITLE] [--agent A] [--model M] [--cwd DIR] [--target tab|chat]
 #       Delegate a task to a sub-agent in a new tab (or chat). Prints the tab id
 #       and a result token.
 #   burrow wait <token> [--timeout S]       Block for that sub-agent's result.

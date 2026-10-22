@@ -267,6 +267,7 @@ async function spawn(args: Record<string, unknown>) {
     background: true,
   });
   if (ptyId === undefined) throw new Error("the workspace did not open a tab (is it still loading?)");
+  if (str(args.name).trim()) useTerminalTabsStore().rename(target.id, ptyId, str(args.name).trim());
   return { pty_id: ptyId, workspace_id: target.id, agent: instance.name };
 }
 

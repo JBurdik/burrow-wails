@@ -203,7 +203,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 	row := Chat{
 		WorkspaceID:    wsID,
 		ParentChatID:   parent.ID,
-		Title:          subagentTitle(req.Task),
+		Title:          subagentTitle(firstNonEmpty(strings.TrimSpace(req.Name), req.Task)),
 		AgentKind:      inst.ID,
 		Transport:      transport,
 		Model:          firstNonEmpty(req.Model, profileField(profile, func(p *subagentProfile) string { return p.Model }), inherit.Model),

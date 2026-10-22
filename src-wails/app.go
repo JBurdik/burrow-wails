@@ -152,6 +152,7 @@ func (a *App) setHttpEnabled(enabled bool) error {
 		}
 	}
 	a.httpSrvRunning = enabled
+	setRemoteAwake(enabled)
 	return nil
 }
 

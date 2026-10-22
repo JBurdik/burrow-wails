@@ -96,6 +96,10 @@ type TailscaleStatus struct {
 	DNSName   *string `json:"dns_name"`
 	Serving   bool    `json:"serving"`
 	ServeURL  *string `json:"serve_url"`
+	// IP is this node's tailnet IPv4. Dev server previews link to it rather
+	// than the MagicDNS name: Vite's host check lets a bare IP through and
+	// blocks any hostname it wasn't told about.
+	IP *string `json:"ip"`
 }
 
 func (a *App) GetTailscaleStatus() TailscaleStatus {
@@ -111,7 +115,8 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 	}
 	var ts struct {
 		Self struct {
-			DNSName string `json:"DNSName"`
+			DNSName      string   `json:"DNSName"`
+			TailscaleIPs []string `json:"TailscaleIPs"`
 		} `json:"Self"`
 		BackendState string `json:"BackendState"`
 	}
@@ -120,6 +125,12 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 		if ts.Self.DNSName != "" {
 			name := strings.TrimSuffix(ts.Self.DNSName, ".")
 			status.DNSName = &name
+		}
+		for _, ip := range ts.Self.TailscaleIPs {
+			if strings.Contains(ip, ".") {
+				status.IP = &ip
+				break
+			}
 		}
 	}
 

@@ -62,7 +62,7 @@ Start a dev server, watcher or any process that does not exit with serve, never 
 	case "orchestration":
 		fmt.Fprint(&out, `# Burrow reference: orchestration
 
-Use one focused task per agent. Put the desired outcome, scope, exclusions, and report-back in spawn, then supervise rather than guessing.
+Use one focused task per agent. Put the desired outcome, scope, exclusions, and report-back in spawn, then supervise rather than guessing. Give every spawn a short --name (a few words, e.g. "Fix login test"): it is the sub-agent's title in the UI, and without it the user sees the first line of the task.
 
 For a chat worker, identify it by chat_id, steer it with chat_send, and wait with wait_result --chat-id. For a tab worker, identify it by pty_id, steer it with send_to_tab, inspect it with tab_output, and wait with its token. agent_status is the shared dashboard for both doors; waiting and permission mean the user must respond.
 

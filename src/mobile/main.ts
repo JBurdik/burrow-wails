@@ -45,6 +45,7 @@ if (loadRemoteCredentials()) {
     const { appTransport } = await import("@/lib/wailsCompat/core");
     appTransport().onState((up) => {
       if (!up && !loadRemoteCredentials()) location.reload();
+      showUnreachable(!up);
     });
   }).catch(showBootError);
 } else {
@@ -60,4 +61,32 @@ if (loadRemoteCredentials()) {
 if ("serviceWorker" in navigator) {
   // Relative to the document, so it also works under Tailscale Serve's /burrow/ prefix.
   navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
+
+// The transport reconnects on its own, silently; without this a sleeping Mac
+// just looks like a UI that stopped updating. 3 s of grace so a blip or the
+// first connect doesn't flash it.
+let unreachableTimer: ReturnType<typeof setTimeout> | undefined;
+let lastUp: Date | null = null;
+function showUnreachable(down: boolean) {
+  clearTimeout(unreachableTimer);
+  let bar = document.getElementById("burrow-unreachable");
+  if (!down) {
+    lastUp = new Date();
+    bar?.remove();
+    return;
+  }
+  unreachableTimer = setTimeout(() => {
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "burrow-unreachable";
+      bar.setAttribute("role", "status");
+      bar.style.cssText =
+        "position:fixed;top:0;left:0;right:0;z-index:9999;padding:calc(env(safe-area-inset-top) + 6px) 12px 6px;" +
+        "background:var(--destructive,#b91c1c);color:#fff;font:500 12px/1.4 system-ui,sans-serif;text-align:center";
+      document.body.appendChild(bar);
+    }
+    const since = lastUp ? ` · last connected ${lastUp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
+    bar.textContent = `Mac unreachable: asleep, offline, or Burrow not running. Reconnecting…${since}`;
+  }, 3000);
 }

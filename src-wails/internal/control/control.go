@@ -188,7 +188,9 @@ type ChatRuntime interface {
 // SpawnRequest is spawn's chat half, as the caller gave it.
 type SpawnRequest struct {
 	Task, Profile, Agent, Model, Cwd string
-	ParentChatID                     int64
+	// Name titles the sub-agent; empty = the task's first line.
+	Name         string
+	ParentChatID int64
 }
 
 // SpawnedChat is what SpawnSubagent created. Task is the prompt actually sent

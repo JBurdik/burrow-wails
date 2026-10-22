@@ -1214,6 +1214,7 @@ export namespace main {
 	    dns_name?: string;
 	    serving: boolean;
 	    serve_url?: string;
+	    ip?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TailscaleStatus(source);
@@ -1226,6 +1227,7 @@ export namespace main {
 	        this.dns_name = source["dns_name"];
 	        this.serving = source["serving"];
 	        this.serve_url = source["serve_url"];
+	        this.ip = source["ip"];
 	    }
 	}
 	export class TerminalTab {
