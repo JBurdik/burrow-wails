@@ -61,7 +61,7 @@
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
       </div>
       <!-- Phone: the sidebar and the right panel float over the one surface on screen. -->
-      <div v-if="compact && (drawerOpen || ui.rightPanelVisible)" class="compact-backdrop" @click="drawerOpen = false; ui.rightPanelVisible = false" />
+      <div v-if="compact && ui.rightPanelVisible" class="compact-backdrop" @click="ui.rightPanelVisible = false" />
       <div v-show="!compact && ui.rightPanelVisible" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
       <RightPanel
         ref="rightPanelRef"
@@ -338,7 +338,11 @@ const panelStyles = computed(() => compact.value
 
 // Compact (phone) layout: the sidebar is a drawer that closes once you have
 // picked something, and the right panel starts closed — it would cover everything.
+// The list is the phone's home screen: it is open on launch (once the startup
+// navigation, which the route watcher below would count as "picked something",
+// has settled) and the route watcher closes it when a thread is chosen.
 const drawerOpen = ref(false);
+if (compact.value) router.isReady().then(() => setTimeout(() => { drawerOpen.value = true; }, 0));
 watch(() => route.fullPath, () => { drawerOpen.value = false; });
 const closeRightOnCompact = () => { if (compact.value) ui.rightPanelVisible = false; };
 watch(compact, closeRightOnCompact);
@@ -942,10 +946,21 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
   box-shadow: 0 0 24px rgb(0 0 0 / 0.4);
 }
-.is-compact .panel-sidebar { left: 0; right: 56px; background: var(--bg-base); } /* the sidebar's own fill is translucent */
+/* Phone: the thread list is a screen of its own, not a drawer over the chat. */
+.is-compact .panel-sidebar { left: 0; right: 0; background: var(--bg-base); box-shadow: none; }
+.is-compact .panel-sidebar > aside { width: 100%; flex-basis: 100%; min-width: 0; }
+.is-web #app { height: 100dvh; }
+/* Phone chat: nothing may widen the page — wide code blocks scroll inside
+   themselves — and the desk-only chrome (minimap rail, "Catch me up") goes. */
+.is-compact .chat-messages { overflow-x: hidden; }
+.is-compact .chat-messages pre { max-width: 100%; overflow-x: auto; }
+.is-compact .chat-messages .md-body { min-width: 0; overflow-wrap: anywhere; }
+.is-compact .chat-message .bubble-user { max-width: 88%; }
+.is-compact .minimap-rail { display: none; }
+.is-compact .catchup-btn { display: none; } /* the sidebar's own fill is translucent */
 .is-compact .panel-right { left: 0; right: 0; background: var(--bg-base); }
 
-.compact-backdrop {
+.compact-backdrop { /* phone: only the right panel still floats */
   position: fixed;
   inset: var(--titlebar-height) 0 0 0;
   z-index: 55;

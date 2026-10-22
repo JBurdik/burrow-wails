@@ -27,7 +27,7 @@
     </button>
 
     <!-- Notification center -->
-    <div class="relative ml-1 flex shrink-0 [-webkit-app-region:no-drag]">
+    <div class="tb-wide relative ml-1 flex shrink-0 [-webkit-app-region:no-drag]">
       <button
         class="notif-btn tb-btn relative [-webkit-app-region:no-drag]"
         :class="[notifOpen && 'text-accent', bellColorClass, bellPulse && 'notif-bell-pulse']"
@@ -105,10 +105,10 @@
     <!-- Main area: back · home · forward, then what's on screen. -->
     <div class="flex min-w-0 flex-1 items-center gap-1 pl-3" data-tauri-drag-region>
       <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Back" @click="router.back()"><PhCaretLeft :size="14" /></button>
-      <button class="tb-btn [-webkit-app-region:no-drag]" title="New thread" @click="ui.openWelcome()"><PhCircle :size="12" weight="bold" /></button>
+      <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="New thread" @click="ui.openWelcome()"><PhCircle :size="12" weight="bold" /></button>
       <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Forward" @click="router.forward()"><PhCaretRight :size="14" /></button>
       <span class="ml-2 min-w-0 truncate text-[13.5px] font-medium text-foreground" data-tauri-drag-region>{{ screenTitle }}</span>
-      <span v-if="isDev || isBeta" class="shrink-0 rounded-[5px] border border-border px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" data-tauri-drag-region>{{ isDev ? "dev" : "beta" }}</span>
+      <span v-if="isDev || isBeta" class="tb-wide shrink-0 rounded-[5px] border border-border px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" data-tauri-drag-region>{{ isDev ? "dev" : "beta" }}</span>
       <div class="min-w-4 flex-1" data-tauri-drag-region />
       <CommitPushMenu v-if="branch" class="tb-wide [-webkit-app-region:no-drag]" />
     </div>
