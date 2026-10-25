@@ -584,8 +584,8 @@
           ref="inputEl"
           v-model="inputText"
           class="chat-input composer-input box-border block max-h-40 min-h-12 w-full border-none bg-transparent px-4 pb-1 pt-3 font-sans text-[14px] leading-[1.55] text-foreground outline-none"
-          :class="showCatchUpBtn && 'pr-[132px]'"
-          :placeholder="busy ? 'Keep typing — Enter queues it for when the agent is free.\nUse @ to mention a file and $ for skills.' : 'Press Enter to send a message.\nUse @ to mention a file and $ for skills.'"
+          :class="[showCatchUpBtn && 'pr-[132px]', phone && '!min-h-0 !pt-2.5']"
+          :placeholder="phone ? (busy ? 'Queue a message…' : 'Message…') : busy ? 'Keep typing — Enter queues it for when the agent is free.\nUse @ to mention a file and $ for skills.' : 'Press Enter to send a message.\nUse @ to mention a file and $ for skills.'"
           :skills="completion.skills.value"
           :commands="allCommands"
           :files="completion.files.value"
@@ -597,7 +597,14 @@
           <ComposerImages v-model="pendingImages" class="px-3 pb-1.5" />
           <div class="composer-toolbar px-2.5 pb-2.5 pt-2">
           <!-- Left: share selection, model dropdown, perm mode -->
-          <div class="composer-pillbar">
+          <!-- Phone: attach + a toggle that folds the model/effort/permission
+               pills away, so the composer is one line of text and one of buttons. -->
+          <template v-if="phone">
+            <button class="composer-pill" title="Attach image" @click="imagePicker?.click()"><PhPaperclip :size="16" /></button>
+            <input ref="imagePicker" type="file" accept="image/*" multiple hidden @change="onPickImages" />
+            <button class="composer-pill" :class="{ 'text-foreground': phoneSettingsOpen }" title="Model and permissions" @click="phoneSettingsOpen = !phoneSettingsOpen"><PhSlidersHorizontal :size="16" /></button>
+          </template>
+          <div v-show="!phone || phoneSettingsOpen" class="composer-pillbar">
             <button
               v-if="editorCtx.selection"
               class="composer-pill"
@@ -672,6 +679,7 @@
             />
           </div>
 
+          <span v-if="phone && !phoneSettingsOpen" class="flex-1" />
           <!-- Right: cost badge + abort/send -->
           <div class="composer-sendgroup">
             <HoverCardRoot v-if="contextUsageRatio > 0" v-model:open="ctxCardOpen" :open-delay="120" :close-delay="120">
@@ -745,7 +753,7 @@
       </div>
       <!-- Where this chat works, as one quiet line (Ghostex-style) — it was a
            read-only target bar, which looked like a control and wasn't. -->
-      <div class="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+      <div v-if="!phone" class="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
         <PhGitBranch v-if="chatWorkspace?.parent_id" :size="11" />
         <span class="truncate">{{ chatRepoName }} · {{ chatBranch }}</span>
       </div>
@@ -768,9 +776,10 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
+import { compact as phone } from "@/lib/viewport";
 import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
 import { chatAsleep, useClaudeChatsStore } from "@/stores/claudeChats";
@@ -2656,6 +2665,14 @@ function onInput() {
   void completion.update();
 }
 
+function addImageFile(file: File) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result === "string") pendingImages.value.push(reader.result);
+  };
+  reader.readAsDataURL(file);
+}
+
 function onPaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items;
   if (!items) return;
@@ -2663,14 +2680,19 @@ function onPaste(e: ClipboardEvent) {
     if (item.type.startsWith("image/")) {
       e.preventDefault();
       const file = item.getAsFile();
-      if (!file) continue;
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") pendingImages.value.push(reader.result);
-      };
-      reader.readAsDataURL(file);
+      if (file) addImageFile(file);
     }
   }
+}
+
+// Phone has no clipboard paste of screenshots worth relying on: a file picker
+// (photo library / camera) feeds the same pendingImages.
+const imagePicker = ref<HTMLInputElement | null>(null);
+const phoneSettingsOpen = ref(false);
+function onPickImages(e: Event) {
+  const input = e.target as HTMLInputElement;
+  for (const file of Array.from(input.files ?? [])) if (file.type.startsWith("image/")) addImageFile(file);
+  input.value = "";
 }
 
 function onWindowKeydown(e: KeyboardEvent) {
