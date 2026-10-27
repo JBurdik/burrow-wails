@@ -341,6 +341,11 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 	// successful response merely means the turn is now running and its terminal
 	// notification remains authoritative.
 	if method == "" {
+		// A reply to a request Go issued itself (codexCall, chatbgtasks.go) —
+		// never a turn's: its error must not end the turn.
+		if deliverCodexReply(sess, msg) {
+			return
+		}
 		// The turn/start ack is the first place the running turn's id appears.
 		if tid, _ := mapOf(mapOf(msg["result"])["turn"])["id"].(string); tid != "" {
 			sess.mu.Lock()
@@ -399,6 +404,12 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 				"sessionUpdate": "agent_thought_chunk",
 				"content":       map[string]any{"text": delta},
 			}}})
+	case "turn/plan/updated":
+		// Codex's checklist (update_plan). Re-emitted as ACP's standard `plan`
+		// update so it is persisted in chat_stream and NormalizeAcpLine turns
+		// it into the same TodoWrite row a Claude plan is — the Progress
+		// surface reads that, live and after a restart.
+		emit(map[string]any{"method": "session/update", "params": map[string]any{"update": codexPlanUpdate(params)}})
 	case "turn/started":
 		if tid, _ := mapOf(params["turn"])["id"].(string); tid != "" {
 			sess.mu.Lock()
@@ -509,9 +520,40 @@ func codexToolCall(item map[string]any) (id, title string, input map[string]any,
 	}
 }
 
+// codexPlanUpdate maps a `turn/plan/updated` notification ({explanation,
+// plan: [{step, status: pending|inProgress|completed}]}) onto ACP's `plan`
+// session update ({entries: [{content, status, priority}]}).
+func codexPlanUpdate(params map[string]any) map[string]any {
+	entries := []any{}
+	steps, _ := params["plan"].([]any)
+	for _, raw := range steps {
+		step := mapOf(raw)
+		content, _ := step["step"].(string)
+		if content == "" {
+			continue
+		}
+		status, _ := step["status"].(string)
+		switch status {
+		case "inProgress":
+			status = "in_progress"
+		case "completed":
+		default:
+			status = "pending"
+		}
+		entries = append(entries, map[string]any{"content": content, "status": status, "priority": "medium"})
+	}
+	update := map[string]any{"sessionUpdate": "plan", "entries": entries}
+	if explanation, _ := params["explanation"].(string); explanation != "" {
+		update["explanation"] = explanation
+	}
+	return update
+}
+
 func codexToolFailed(item map[string]any) bool {
 	status, _ := item["status"].(string)
-	if status == "failed" || status == "error" {
+	// "declined" = the user refused the approval: the command never ran and
+	// the patch was never applied.
+	if status == "failed" || status == "error" || status == "declined" {
 		return true
 	}
 	return mapOf(item["error"])["message"] != nil

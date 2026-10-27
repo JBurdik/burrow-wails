@@ -39,6 +39,8 @@ export function ChatFork(arg1:number,arg2:number,arg3:string):Promise<main.Chat>
 
 export function ChatInterrupt(arg1:number):Promise<void>;
 
+export function ChatListBgTerminals(arg1:number):Promise<Array<main.CodexBgTerminal>>;
+
 export function ChatMarkActive(arg1:number):Promise<void>;
 
 export function ChatRestart(arg1:number):Promise<void>;
@@ -50,6 +52,8 @@ export function ChatSend(arg1:number,arg2:string,arg3:Array<string>):Promise<voi
 export function ChatSetLaunchSettings(arg1:number,arg2:main.LaunchSettingsPatch):Promise<void>;
 
 export function ChatSleep(arg1:number):Promise<boolean>;
+
+export function ChatStopTask(arg1:number,arg2:string):Promise<void>;
 
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
@@ -215,6 +219,8 @@ export function LoadChatMessagesPage(arg1:number,arg2:number,arg3:number):Promis
 
 export function LoadChatStreamSince(arg1:string,arg2:number):Promise<Array<main.ChatStreamLine>>;
 
+export function LoadChatTaskLinesSince(arg1:string,arg2:number):Promise<Array<main.ChatStreamLine>>;
+
 export function LoadPendingChatRequests(arg1:string):Promise<Array<main.ChatStreamLine>>;
 
 export function LocalEndpoint():Promise<main.LocalEndpointInfo>;
@@ -243,6 +249,8 @@ export function PickFile(arg1:string,arg2:Array<string>):Promise<string>;
 
 export function PickFiles(arg1:string,arg2:Array<string>):Promise<Array<string>>;
 
+export function PlanUsage():Promise<main.PlanUsage>;
+
 export function ProbeProvider(arg1:string,arg2:string):Promise<main.ProviderProbe>;
 
 export function PtySince(arg1:string,arg2:number):Promise<main.ptyChunk>;
@@ -258,6 +266,8 @@ export function ReadConfig():Promise<string>;
 export function ReadDirShallow(arg1:string):Promise<Array<main.DirEntry>>;
 
 export function ReadFileBase64(arg1:string):Promise<string>;
+
+export function ReadFileTail(arg1:string,arg2:number):Promise<string>;
 
 export function ReadKeybindings():Promise<string>;
 

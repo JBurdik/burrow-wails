@@ -516,6 +516,8 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 			input = mapField(update["input"])
 		}
 		return []ProviderRuntimeEvent{{Type: EvtToolStarted, ToolCallID: id, Name: name, Input: input}}
+	case "plan":
+		return acpPlanEvents(update)
 	case "tool_call_update":
 		status := strField(update["status"])
 		if status != "completed" && status != "failed" {
@@ -737,5 +739,37 @@ func normalizeChatNote(line string, ord int64) []ProviderRuntimeEvent {
 		}}
 	default:
 		return nil
+	}
+}
+
+// acpPlanEvents turns ACP's `plan` session update (generic ACP agents, and
+// Codex's turn/plan/updated re-emitted by pumpCodexLine) into the same finished
+// `TodoWrite` tool row a Claude plan is, so one reader (chatTodos.ts
+// latestTodos) serves every provider. A plan update replaces the whole list,
+// exactly like TodoWrite. The fixed call id is safe: the projection pushes a
+// row per tool.started and completes the LAST row with that id — the one just
+// pushed.
+func acpPlanEvents(update map[string]any) []ProviderRuntimeEvent {
+	todos := []any{}
+	entries, _ := update["entries"].([]any)
+	for _, raw := range entries {
+		entry := mapField(raw)
+		content := strField(entry["content"])
+		if content == "" {
+			continue
+		}
+		status := strField(entry["status"])
+		if status != "in_progress" && status != "completed" {
+			status = "pending"
+		}
+		todos = append(todos, map[string]any{"content": content, "status": status})
+	}
+	input := map[string]any{"todos": todos}
+	if explanation := strField(update["explanation"]); explanation != "" {
+		input["explanation"] = explanation
+	}
+	return []ProviderRuntimeEvent{
+		{Type: EvtToolStarted, ToolCallID: "acp-plan", Name: "TodoWrite", Input: input},
+		{Type: EvtToolCompleted, ToolCallID: "acp-plan", Output: ""},
 	}
 }

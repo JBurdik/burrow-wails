@@ -282,6 +282,7 @@
         @click="ui.toggleDashboard()"
       ><PhSquaresFour :size="14" /></button>
       <span class="flex-1" />
+      <PlanUsageIndicator />
       <div class="relative" ref="scriptsEl">
         <button
           class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground active:scale-90"
@@ -589,6 +590,7 @@ import {
 import GitPanel from "./GitPanel.vue";
 import UpdateBanner from "./UpdateBanner.vue";
 import ProviderUpdateBanner from "./ProviderUpdateBanner.vue";
+import PlanUsageIndicator from "./PlanUsageIndicator.vue";
 import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";

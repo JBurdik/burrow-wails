@@ -74,6 +74,10 @@ export function ChatInterrupt(arg1) {
   return window['go']['main']['App']['ChatInterrupt'](arg1);
 }
 
+export function ChatListBgTerminals(arg1) {
+  return window['go']['main']['App']['ChatListBgTerminals'](arg1);
+}
+
 export function ChatMarkActive(arg1) {
   return window['go']['main']['App']['ChatMarkActive'](arg1);
 }
@@ -96,6 +100,10 @@ export function ChatSetLaunchSettings(arg1, arg2) {
 
 export function ChatSleep(arg1) {
   return window['go']['main']['App']['ChatSleep'](arg1);
+}
+
+export function ChatStopTask(arg1, arg2) {
+  return window['go']['main']['App']['ChatStopTask'](arg1, arg2);
 }
 
 export function CheckUpdate() {
@@ -426,6 +434,10 @@ export function LoadChatStreamSince(arg1, arg2) {
   return window['go']['main']['App']['LoadChatStreamSince'](arg1, arg2);
 }
 
+export function LoadChatTaskLinesSince(arg1, arg2) {
+  return window['go']['main']['App']['LoadChatTaskLinesSince'](arg1, arg2);
+}
+
 export function LoadPendingChatRequests(arg1) {
   return window['go']['main']['App']['LoadPendingChatRequests'](arg1);
 }
@@ -482,6 +494,10 @@ export function PickFiles(arg1, arg2) {
   return window['go']['main']['App']['PickFiles'](arg1, arg2);
 }
 
+export function PlanUsage() {
+  return window['go']['main']['App']['PlanUsage']();
+}
+
 export function ProbeProvider(arg1, arg2) {
   return window['go']['main']['App']['ProbeProvider'](arg1, arg2);
 }
@@ -512,6 +528,10 @@ export function ReadDirShallow(arg1) {
 
 export function ReadFileBase64(arg1) {
   return window['go']['main']['App']['ReadFileBase64'](arg1);
+}
+
+export function ReadFileTail(arg1, arg2) {
+  return window['go']['main']['App']['ReadFileTail'](arg1, arg2);
 }
 
 export function ReadKeybindings() {

@@ -159,7 +159,9 @@ var remoteAllowed = map[string]remoteCmd{
 
 	// Environment. environment_id is also what the WS handler test calls,
 	// because it is safe on a bare &App{} — most commands are not.
-	"environment_id":   {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
+	"environment_id": {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
+	// Subscription usage limits (planusage.go). Never carries a token.
+	"plan_usage":       {Method: "PlanUsage", Args: nil, Scope: scopeOrchRead},
 	"remote_endpoints": {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
 
 	// Paired devices. Both sit on access:* and are therefore desktop-only,
@@ -341,6 +343,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"read_text_file":         {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
 	"read_text_file_checked": {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
 	"read_file_base64":       {Method: "ReadFileBase64", Args: []string{"path"}, Scope: scopeOrchRead},
+	"read_file_tail":         {Method: "ReadFileTail", Args: []string{"path", "maxBytes"}, Scope: scopeOrchRead},
 	"home_dir":               {Method: "HomeDir", Args: nil, Scope: scopeOrchRead},
 	"config_file_path":       {Method: "ConfigFilePath", Args: nil, Scope: scopeOrchRead},
 	"create_dir":             {Method: "CreateDir", Args: []string{"path"}, Scope: scopeOrchOperate},
@@ -372,6 +375,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_rewind":              {Method: "ChatRewind", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_fork":                {Method: "ChatFork", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_interrupt":           {Method: "ChatInterrupt", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_stop_task":           {Method: "ChatStopTask", Args: []string{"chatId", "taskId"}, Scope: scopeOrchOperate},
 	"chat_set_launch_settings": {Method: "ChatSetLaunchSettings", Args: []string{"chatId", "patch"}, Scope: scopeOrchOperate},
 	"spawn_subagent_chat": {Method: "SpawnSubagentChat", Args: []string{
 		"parentChatId", "task", "profile", "agent", "model", "cwd",
@@ -454,6 +458,8 @@ var remoteAllowed = map[string]remoteCmd{
 	"load_chat_events_since":     {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
 	"load_pending_chat_requests": {Method: "LoadPendingChatRequests", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"load_chat_stream_since":     {Method: "LoadChatStreamSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
+	"load_chat_task_lines_since": {Method: "LoadChatTaskLinesSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
+	"chat_list_bg_terminals":     {Method: "ChatListBgTerminals", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"search_chats":               {Method: "SearchChats", Args: []string{"query", "limit"}, Scope: scopeOrchRead},
 	"search_prompts":             {Method: "SearchPrompts", Args: []string{"query", "agent", "limit"}, Scope: scopeOrchRead},
 	"delete_chat_messages":       {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},

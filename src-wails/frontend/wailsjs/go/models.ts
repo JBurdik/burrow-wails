@@ -625,6 +625,24 @@ export namespace main {
 	        this.available = source["available"];
 	    }
 	}
+	export class CodexBgTerminal {
+	    itemId: string;
+	    processId: string;
+	    command: string;
+	    cwd: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CodexBgTerminal(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.itemId = source["itemId"];
+	        this.processId = source["processId"];
+	        this.command = source["command"];
+	        this.cwd = source["cwd"];
+	    }
+	}
 	export class ControlVerbArg {
 	    name: string;
 	    type: string;
@@ -991,6 +1009,94 @@ export namespace main {
 	        this.locked = source["locked"];
 	    }
 	}
+	export class PlanUsageRow {
+	    label: string;
+	    percent: number;
+	    resets_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanUsageRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.label = source["label"];
+	        this.percent = source["percent"];
+	        this.resets_at = source["resets_at"];
+	    }
+	}
+	export class PlanUsageProvider {
+	    kind: string;
+	    plan: string;
+	    status: string;
+	    reason?: string;
+	    rows: PlanUsageRow[];
+	    extra?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanUsageProvider(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.plan = source["plan"];
+	        this.status = source["status"];
+	        this.reason = source["reason"];
+	        this.rows = this.convertValues(source["rows"], PlanUsageRow);
+	        this.extra = source["extra"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PlanUsage {
+	    providers: PlanUsageProvider[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.providers = this.convertValues(source["providers"], PlanUsageProvider);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
 	export class PromptSearchHit {
 	    agent: string;
 	    cwd: string;

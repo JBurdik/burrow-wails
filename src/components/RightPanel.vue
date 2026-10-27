@@ -337,6 +337,12 @@
 
     <DevServersSurface v-else-if="act(pi) === 'dev-servers'" :cwd="props.cwd" />
 
+    <BackgroundTasksSurface v-else-if="act(pi) === 'background'" :chat-id="activeChatId" />
+
+    <OutputsSurface v-else-if="act(pi) === 'outputs'" :chat-id="activeChatId" :cwd="props.cwd" />
+
+    <ProgressSurface v-else-if="act(pi) === 'progress'" :chat-id="activeChatId" />
+
     <MarkdownDocSurface v-else-if="act(pi) === 'doc' && docPath" :path="docPath" :cwd="props.cwd" />
 
     <div v-else-if="act(pi) === 'diff'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -670,7 +676,8 @@ import {
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
-  PhSpinner, PhWarningCircle, PhRows, PhSparkle, PhArrowsInSimple, PhPlay, PhFileText,
+  PhSpinner, PhWarningCircle, PhRows, PhSparkle, PhArrowsInSimple, PhPlay, PhFileText, PhFileCode,
+  PhListChecks,
 } from "@phosphor-icons/vue";
 import {
   closeBottom, closeSurface as closeLayoutSurface, emptyLayout, isShown, loadLayouts, moveTo, openBottom, openIn,
@@ -695,6 +702,10 @@ import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
 import DevServersSurface from "./DevServersSurface.vue";
+import BackgroundTasksSurface from "./BackgroundTasksSurface.vue";
+import { PhTerminalWindow } from "@phosphor-icons/vue";
+import OutputsSurface from "./OutputsSurface.vue";
+import ProgressSurface from "./ProgressSurface.vue";
 import MarkdownDocSurface from "./MarkdownDocSurface.vue";
 import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
@@ -1023,8 +1034,11 @@ const tabs = computed(() => {
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
     { id: "agents", label: "Agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
+    { id: "progress", label: "Progress", icon: PhListChecks, description: "The active chat's live todo list." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "dev-servers", label: "Dev servers", icon: PhPlugsConnected, description: "See and kill dev servers running in this workspace." },
+    { id: "background", label: "Background", icon: PhTerminalWindow, description: "Background shell tasks the active chat launched." },
+    { id: "outputs", label: "Outputs", icon: PhFileCode, description: "Files this chat created or edited." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
   // Only exists once something opened a document (chat link, ⌘-click…).
