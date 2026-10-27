@@ -29,7 +29,9 @@ import { jumpToDefinition } from "@codemirror/lsp-client";
 import { useUIStore } from "@/stores/ui";
 import { useEditorContextStore } from "@/stores/editorContext";
 
-const props = defineProps<{ leafId: number; path: string; cwd: string; initialLine?: number }>();
+// saveOnUnmount: hosts that unmount the editor on every tab switch (Right Panel)
+// write unsaved text out instead of dropping it.
+const props = defineProps<{ leafId: number; path: string; cwd: string; initialLine?: number; saveOnUnmount?: boolean }>();
 const emit = defineEmits<{
   title: [t: string];
   dirty: [d: boolean];
@@ -333,6 +335,9 @@ watch(
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
+  if (props.saveOnUnmount && lastDirty && view) {
+    void invoke("write_text_file", { path: props.path, content: view.state.doc.toString() }).catch((e) => emit("error", String(e)));
+  }
   view?.destroy();
   view = null;
 });

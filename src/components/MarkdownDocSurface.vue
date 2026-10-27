@@ -6,7 +6,9 @@ import DOMPurify from "dompurify";
 import { PhArrowClockwise, PhPencilSimple, PhWarningCircle } from "@phosphor-icons/vue";
 import { dirOf } from "@/lib/localLink";
 
-const props = defineProps<{ path: string; cwd: string }>();
+// inlineEdit: the host toggles to its own editor (`edit`) instead of opening the main one.
+const props = defineProps<{ path: string; cwd: string; inlineEdit?: boolean }>();
+const emit = defineEmits<{ edit: [] }>();
 const activeTerm = inject<() => { openFileInTab(path: string, name: string, line?: number, pin?: boolean): void } | undefined>("activeTerm");
 
 const raw = ref<string | null>(null);
@@ -76,6 +78,7 @@ function onClick(e: MouseEvent) {
 }
 
 function edit() {
+  if (props.inlineEdit) return emit("edit");
   activeTerm?.()?.openFileInTab(props.path, crumbs.value[crumbs.value.length - 1] ?? props.path, undefined, true);
 }
 </script>

@@ -345,6 +345,34 @@
 
     <MarkdownDocSurface v-else-if="act(pi) === 'doc' && docPath" :path="docPath" :cwd="props.cwd" />
 
+    <MarkdownDocSurface
+      v-else-if="act(pi)?.startsWith(FILE_PREFIX) && isMarkdown(act(pi)!) && !mdEditing[act(pi)!]"
+      :path="act(pi)!.slice(FILE_PREFIX.length)"
+      :cwd="props.cwd"
+      inline-edit
+      @edit="mdEditing[act(pi)!] = true"
+    />
+
+    <div v-else-if="act(pi)?.startsWith(FILE_PREFIX)" class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      <button
+        v-if="isMarkdown(act(pi)!)"
+        class="absolute right-3 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-[var(--radius-nav)] bg-panel text-muted-foreground hover:bg-hover hover:text-foreground"
+        title="Preview"
+        aria-label="Preview"
+        @click="mdEditing[act(pi)!] = false"
+      >
+        <PhEye :size="13" />
+      </button>
+      <CodeEditor
+        :key="act(pi)!"
+        :leaf-id="0"
+        :path="act(pi)!.slice(FILE_PREFIX.length)"
+        :cwd="props.cwd"
+        save-on-unmount
+        @saved="git.refresh(true)"
+      />
+    </div>
+
     <div v-else-if="act(pi) === 'diff'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <PhGitCommit :size="13" class="shrink-0 text-secondary-foreground" />
@@ -669,14 +697,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, inject, onMounted, onBeforeUnmount } from "vue";
+import { ref, reactive, computed, watch, inject, provide, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
-  PhSpinner, PhWarningCircle, PhRows, PhSparkle, PhArrowsInSimple, PhPlay, PhFileText, PhFileCode,
+  PhSpinner, PhWarningCircle, PhRows, PhSparkle, PhArrowsInSimple, PhPlay, PhFileText, PhFileCode, PhEye,
   PhListChecks,
 } from "@phosphor-icons/vue";
 import {
@@ -707,6 +735,7 @@ import { PhTerminalWindow } from "@phosphor-icons/vue";
 import OutputsSurface from "./OutputsSurface.vue";
 import ProgressSurface from "./ProgressSurface.vue";
 import MarkdownDocSurface from "./MarkdownDocSurface.vue";
+import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
 import { useUIStore } from "@/stores/ui";
@@ -740,7 +769,7 @@ const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensio
 // projects shows the other project's open tabs.
 const NO_WS = -1;
 type DiffScope = ReviewDiffScope;
-interface WsUiState { diffScope: DiffScope; openChildId: number | null; docPath: string }
+interface WsUiState { diffScope: DiffScope; openChildId: number | null; docPath: string; files: string[] }
 const wsUiStates = reactive<Record<number, WsUiState>>({});
 const wsKey = computed(() => props.workspaceId ?? NO_WS);
 // The open document survives a restart, like the layout that shows it.
@@ -749,6 +778,21 @@ function storedDoc(id: number): string {
   try { return JSON.parse(localStorage.getItem(DOC_KEY) ?? "{}")[id] ?? ""; } catch { return ""; }
 }
 const docPath = computed(() => wsUi(wsKey.value).docPath);
+// Files opened from the explorer: one surface per file, id `file:<path>`.
+const FILE_PREFIX = "file:";
+const FILES_KEY = "burrow.rpFiles";
+const isMarkdown = (id: string) => /\.(md|markdown|mdx)$/i.test(id);
+/** Markdown file tabs open rendered; true = switched to the editor. Per surface id, not persisted. */
+const mdEditing = reactive<Record<string, boolean>>({});
+function storedFiles(id: number): string[] {
+  try { const v = JSON.parse(localStorage.getItem(FILES_KEY) ?? "{}")[id]; return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function saveFiles(id: number) {
+  try {
+    const all = JSON.parse(localStorage.getItem(FILES_KEY) ?? "{}");
+    localStorage.setItem(FILES_KEY, JSON.stringify({ ...all, [id]: wsUi(id).files }));
+  } catch { /* per-device convenience only */ }
+}
 
 // Task-tool invocations, narrowed to the thread that's actually open (was:
 // every chat in the workspace) — both this and the Sub-agents list below
@@ -890,8 +934,13 @@ function openSubagent(chatId: number, workspaceId: number) {
   openIn(layoutFor(workspaceId), "agents");
   state.openChildId = chatId;
 }
+/** Open a surface (Background, Progress, Outputs, …) in a workspace's panel
+ *  from outside it — a transcript row that names one. The caller shows the panel. */
+function openPanelSurface(id: string, workspaceId: number) {
+  openIn(layoutFor(workspaceId), id);
+}
 function wsUi(id: number): WsUiState {
-  return (wsUiStates[id] ??= { diffScope: { kind: "workspace" }, openChildId: null, docPath: storedDoc(id) });
+  return (wsUiStates[id] ??= { diffScope: { kind: "workspace" }, openChildId: null, docPath: storedDoc(id), files: storedFiles(id) });
 }
 // ── Layout: two stacked panes per workspace, persisted per device ─────────────
 const PANES = [0, 1] as const;
@@ -1043,6 +1092,7 @@ const tabs = computed(() => {
   ];
   // Only exists once something opened a document (chat link, ⌘-click…).
   if (docPath.value) all.push({ id: "doc", label: docPath.value.split("/").pop()!, icon: PhFileText, description: "Rendered markdown document." });
+  for (const p of wsUi(wsKey.value).files) all.push({ id: FILE_PREFIX + p, label: p.split("/").pop()!, icon: PhFileCode, description: p });
   return [...all, ...extensionSurfaces.value];
 });
 
@@ -1219,6 +1269,11 @@ function closeSurface(id: string) {
     s?.terms.forEach((t) => killPty(t.id));
     delete termsByWs[wsKey.value];
   }
+  if (id.startsWith(FILE_PREFIX)) {
+    const state = wsUi(wsKey.value);
+    state.files = state.files.filter((p) => FILE_PREFIX + p !== id);
+    saveFiles(wsKey.value);
+  }
   closeLayoutSurface(layout.value, id);
 }
 
@@ -1236,7 +1291,21 @@ function openDoc(path: string) {
   void openSurface("doc");
 }
 
-defineExpose({ openGitTab, openSubagent, openDoc });
+/** Open a file from the explorer as its own panel tab. A new one joins the
+ *  pane that already holds file tabs, so dragging them to the bottom pane
+ *  keeps the tree visible on top. */
+function openFile(path: string) {
+  const state = wsUi(wsKey.value);
+  const pane = state.files.map((p) => paneOf(layout.value, FILE_PREFIX + p)).find((i) => i !== -1) ?? 0;
+  if (!state.files.includes(path)) {
+    state.files.push(path);
+    saveFiles(wsKey.value);
+  }
+  void openSurface(FILE_PREFIX + path, pane);
+}
+provide("openFileInPanel", openFile);
+
+defineExpose({ openGitTab, openSubagent, openPanelSurface, openDoc, openFile });
 
 // Phone shell (/project/:surface): one surface, full screen, no tab strip or
 // second pane — the phone's own header and back arrow replace them.
