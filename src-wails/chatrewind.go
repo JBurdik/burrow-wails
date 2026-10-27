@@ -184,6 +184,7 @@ func (a *App) truncateChatTranscript(id string, keep []ChatMessage) error {
 	if err := a.SaveChatMessages(chatID, string(payload), next); err != nil {
 		return err
 	}
+	w.flush()
 	_, err = a.db.Exec(`DELETE FROM chat_stream WHERE chat_id = ? AND ord < ?`, id, next)
 	return err
 }

@@ -94,6 +94,7 @@ type ChatStreamLine struct {
 type chatStreamRow struct {
 	chatID string
 	line   ChatStreamLine
+	done   chan struct{} // flush barrier: closed once every earlier row is written
 }
 
 // chatStreamWriter serialises appends onto one goroutine so the stream path
@@ -166,6 +167,15 @@ func (w *chatStreamWriter) append(chatID, kind, line string) int64 {
 	return ord
 }
 
+// flush blocks until every row queued before the call is in chat_stream. A
+// delete by ord range needs it: a line already numbered but still queued would
+// otherwise be inserted after the delete and survive the cut.
+func (w *chatStreamWriter) flush() {
+	done := make(chan struct{})
+	w.ch <- chatStreamRow{done: done}
+	<-done
+}
+
 // loadMaxOrdLocked resumes a chat's numbering across app restarts, so a replay
 // after a crash sees one continuous sequence. Runs once per chat per run.
 func (w *chatStreamWriter) loadMaxOrdLocked(chatID string) int64 {
@@ -182,6 +192,10 @@ func (w *chatStreamWriter) loadMaxOrdLocked(chatID string) int64 {
 
 func (w *chatStreamWriter) run() {
 	for row := range w.ch {
+		if row.done != nil {
+			close(row.done)
+			continue
+		}
 		if _, err := w.db.Exec(
 			`INSERT OR REPLACE INTO chat_stream (chat_id, ord, kind, line) VALUES (?, ?, ?, ?)`,
 			row.chatID, row.line.Ord, row.line.Kind, row.line.Line,
