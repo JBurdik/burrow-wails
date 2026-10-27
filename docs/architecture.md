@@ -154,6 +154,64 @@ remotely-created one used to be indistinguishable from the fifty above it in the
 which is how the chat in the original bug report managed to be on screen and still
 impossible to find.
 
+### Steer, side chats, review, recaps, transcript notes
+
+**Steer (`chatsteer.go`, `chat_steer`).** A queued follow-up can go *into* the running turn
+instead of waiting for it to end. Claude: a plain stdin user line — the CLI picks it up at the
+next tool boundary of the same turn and ends it with one `result` (spiked on claude 2.1.311).
+Codex: `turn/steer {expectedTurnId}`, so a steer that lost the race with the turn's end is
+refused rather than starting a new turn. Generic ACP has no such request and refuses. Only a
+`running` phase is steerable: a user line written while an approval is pending would repaint
+the phase as running over the open request. A refusal leaves the message in the queue, so
+nothing is lost. Limit: a Claude turn with no tool boundary left may finish first, and the
+steer then becomes its own turn.
+
+**Side chats (`chatside.go`, `chat_side_create`, `SideChatSurface.vue`).** A quick question
+*about* a chat that must not disturb it. The row is `parent_chat_id` = that chat, `kind =
+'side'`, and its first start **forks the parent's current session** instead of copying a
+transcript: Claude `--resume <parent session> --fork-session` (`resume_at = "@latest"`,
+`sideForkLatest` — no `--resume-session-at`, the fork is at the session's end; the CLI reads
+the append-only session file, so this works mid-turn), Codex `thread/fork` from a separate
+app-server, generic ACP refused. The parent's process, session and running turn are never
+touched. The forked session's id clears `resume_at`, like a rewind fork. A never-started side
+chat of the same parent is reused instead of piling up empty rows. It is **not** a sub-agent:
+`UncollectedChildren` (so `collect_results`) and `chatTree.ts` skip `kind = 'side'`. It runs
+with the parent's permission mode — a side chat can edit files while the parent runs.
+
+**One-click review (`review.go`, `review_changes`).** The Diff surface's Review button creates a
+chat (a child of the active chat when there is one) on the default chat agent and reviews the
+workspace's changes — uncommitted, or against a base branch (`auto` = origin's HEAD, else
+main / master). Codex runs its native `review/start` on the thread (armed like `turn/start`, so
+the usual turn end closes it) and its `exitedReviewMode` result is re-emitted as agent text;
+every other agent gets `reviewPrompt` through `ChatSend`. Not live-tested on Codex.
+
+**Recaps (`chatrecap.go`, `chats.recap`).** One line under a chat's title in the Sidebar saying
+where it stands. Generated in Go after a live turn completes (opened by a user prompt, produced
+assistant text, ended in `turn.completed`), at most every 2 min per chat, through the same
+textgen model preference as chat titles — so every provider gets it with no per-transport
+code. `chats.recap` is read-only on the wire like `collected_at`; an empty answer never
+overwrites a shown recap. Settings → General "Chat recaps" (`uiPrefs.chatRecaps`, absent = on,
+unreadable config = off).
+
+**Clickable transcript notes (`publishSurfaceNote`, `chatturnnotes.go`, `chatbgnotes.go`).**
+Go writes `chat-note` rows carrying a `surface` into the chat's own `chat_stream`; clicking one
+opens that Right Panel surface (Progress / Outputs / Background). Turn notes ("Plan: 2/5 — …"
+on the turn's first plan, "Changed N files" at its end) hang off the tail of `emitChatLine`, so
+they are derived from neutral events for every provider; background-task notes come from the
+live Claude reader only (Codex background terminals have no stream signal, only a poll). Both
+are **live only by construction**: nothing that replays a stream goes through those callers,
+and the notes are themselves stream rows, so a replay renders them from the log instead of
+deriving them twice. A turn interrupted by an app restart gets no notes.
+
+**Plan usage (`planusage.go`, `plan_usage`, `PlanUsageIndicator.vue`).** Session / weekly
+subscription limits in the Sidebar. Claude: `GET api.anthropic.com/api/oauth/usage` with the
+Claude Code OAuth token from the Keychain (`Claude Code-credentials`, else
+`~/.claude/.credentials.json`), read fresh per fetch and **never refreshed** — rotating the
+refresh token would log the CLI out — and never logged or emitted. Codex: a short-lived
+`codex app-server` asking `account/rateLimits/read`. Cached (Claude 60 s, Codex 120 s; shorter
+after failure); a provider routed through Bedrock / Vertex / an API key in
+`~/.claude/settings.json` is reported as not applicable.
+
 ### Transcript search (`src-wails/chatsearch.go`)
 
 Spotlight's "IN CHATS" section is `SearchChats(query, limit)` over an FTS5 table `chat_fts`.

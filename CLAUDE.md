@@ -138,7 +138,14 @@ session id) all publish **`session.reset`** (stream kind `chat-runtime`, `{clear
 clears busy. **Steer** (`chat_steer`, `chatsteer.go`): a queued follow-up delivered INTO the running turn —
 Claude = a plain stdin user line (the CLI picks it up at the next tool boundary, same turn, one `result`),
 Codex = `turn/steer {expectedTurnId}`; generic ACP refuses. Only a `running` phase is steerable (a user line
-would repaint a pending approval as running); a refusal leaves the message queued. **Rewind / fork** (`chatrewind.go`, Claude only — Codex/ACP refuse and the UI hides them):
+would repaint a pending approval as running); a refusal leaves the message queued. **Side chat** (`chat_side_create`, `chatside.go`): `kind='side'`
+child that **forks the parent's current session** on first start (Claude `--fork-session`, `resume_at="@latest"`;
+Codex `thread/fork`; ACP refused) — parent untouched, not a sub-agent (`collect_results` / Sub-agents skip it).
+**Review** (`review_changes`, `review.go`): new chat reviewing the workspace diff — Codex native `review/start`, else a
+prompt. **Recap** (`chatrecap.go`): one-line `chats.recap` (read-only on the wire) via textgen after a live completed
+turn, ≤ 1 per 2 min, Settings → General. **Transcript notes** (`publishSurfaceNote`): Go-written `chat-note` rows with a
+`surface` (plan, changed files, Claude background tasks) that open the RP surface; live only — replays never derive
+them again. Full rationale: `docs/architecture.md` → "Steer, side chats, review, recaps, transcript notes". **Rewind / fork** (`chatrewind.go`, Claude only — Codex/ACP refuse and the UI hides them):
 `chat_rewind(id, index, text)` cuts the transcript before a user message (folded_ord jumps past every recorded
 line, ords keep counting) and `chat_fork` copies it through that turn into a new row with the parent's session;
 both park the cut's Claude record uuid (`ChatMessage.uuid`, stamped by the fold) in `chats.resume_at`, and the
