@@ -151,6 +151,9 @@ type AcpStartOpts struct {
 	EnvFile         string            `json:"envFile"`
 	ResumeSessionID string            `json:"resumeSessionId"`
 	EmitHistory     bool              `json:"emitHistory"`
+	// Fork ResumeSessionID instead of resuming it (a side chat, chatside.go).
+	// Codex only; never on the wire.
+	Fork bool `json:"-"`
 }
 
 // jsonRPCReader reads newline JSON from the child and can wait for one response id.
@@ -366,6 +369,20 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 			emit(map[string]any{"method": "session/update", "params": map[string]any{"update": update}})
 		}
 	case "item/completed":
+		// Review mode (`review/start`) delivers the finished review as one
+		// exitedReviewMode item; render it as the assistant's message.
+		if item := mapOf(params["item"]); item["type"] == "exitedReviewMode" {
+			if text, _ := item["review"].(string); strings.TrimSpace(text) != "" {
+				messageID, _ := item["id"].(string)
+				emit(map[string]any{"method": "session/update", "params": map[string]any{
+					"update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"messageId":     firstNonEmpty(messageID, "codex-review"),
+						"content":       map[string]any{"text": text},
+					}}})
+			}
+			return
+		}
 		if toolCallID, _, _, ok := codexToolCall(mapOf(params["item"])); ok {
 			item := mapOf(params["item"])
 			failed := codexToolFailed(item)
@@ -910,6 +927,14 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 // CodexStart runs Codex through its native app-server (not an ACP adapter), and
 // asks it for the model catalog so the model picker has real options.
 func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID string) error {
+	return a.codexStart(id, cwd, env, resumeSessionID, false)
+}
+
+// codexStart is CodexStart; fork = thread/fork resumeSessionID into a new
+// thread instead of resuming it (a side chat). A failed fork fails the start:
+// silently falling back to a fresh thread would answer the side question with
+// no context.
+func (a *App) codexStart(id, cwd string, env map[string]string, resumeSessionID string, fork bool) error {
 	if _, live := a.acpReg().get(id); live {
 		return nil
 	}
@@ -966,7 +991,27 @@ func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID 
 		"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
 	}
 	var resp map[string]any
-	if tid := strings.TrimSpace(resumeSessionID); tid != "" {
+	if tid := strings.TrimSpace(resumeSessionID); fork && tid != "" {
+		// thread/fork loads the parent thread from its rollout on disk, so the
+		// parent's own app-server (possibly mid-turn) is never touched.
+		if err := sess.write(map[string]any{
+			"jsonrpc": "2.0", "id": next, "method": "thread/fork",
+			"params": map[string]any{
+				"threadId": tid, "cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
+			},
+		}); err != nil {
+			return fail(err)
+		}
+		r, err := reader.await(next, nil)
+		if err != nil {
+			return fail(err)
+		}
+		next++
+		if e, bad := r["error"]; bad {
+			return fail(fmt.Errorf("codex thread/fork: %v", e))
+		}
+		resp = r
+	} else if tid := strings.TrimSpace(resumeSessionID); tid != "" {
 		if err := sess.write(map[string]any{
 			"jsonrpc": "2.0", "id": next, "method": "thread/resume",
 			"params": map[string]any{

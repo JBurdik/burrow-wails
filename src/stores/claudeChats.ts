@@ -58,6 +58,11 @@ export interface ClaudeSession {
   // When auto-sleep stopped the idle process (src-wails/chatsleep.go); the
   // next send wakes it. Server-owned like collectedAt.
   sleptAt?: number;
+  // One-line session recap (src-wails/chatrecap.go). Server-owned like collectedAt.
+  recap?: string;
+  // "side" = a side chat of parentChatId (src-wails/chatside.go), not a
+  // sub-agent. Server-owned like collectedAt.
+  kind?: "side";
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -122,6 +127,8 @@ interface ChatRow {
   profile_id?: string;
   append_system_prompt?: string;
   slept_at?: number;
+  recap?: string;
+  kind?: string;
 }
 
 /**
@@ -157,6 +164,8 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     profileId: r.profile_id || undefined,
     appendSystemPrompt: r.append_system_prompt || undefined,
     sleptAt: r.slept_at || undefined,
+    recap: r.recap || undefined,
+    kind: r.kind === "side" ? "side" : undefined,
     busy: false,
   };
 }

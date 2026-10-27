@@ -4,7 +4,7 @@
 
     <!-- Chat title bar -->
     <!-- Only when embedded (Right Panel sub-agent): a full-size chat shows its title in the window's top row. -->
-    <div v-if="compact && activeSession?.title" class="chat-title-bar flex flex-shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[12px] font-medium text-foreground">
+    <div v-if="compact && activeSession?.title" class="chat-title-bar flex flex-shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[12px] font-medium text-foreground" :title="activeSession.recap || undefined">
       <span class="min-w-0 flex-1 truncate">{{ activeSession.title }}</span>
       <span v-if="turnCount > 0" class="flex-shrink-0 text-[11px] font-normal text-muted-foreground">{{ turnCount }} turn{{ turnCount === 1 ? '' : 's' }}</span>
       <span v-if="activeModelLabel" class="flex flex-shrink-0 items-center gap-1 text-[11px] font-normal text-muted-foreground">
@@ -514,10 +514,21 @@
              each, drag to reorder, play = interrupt and send now, pencil = take
              it back into the input. -->
         <div v-if="messageQueue.length" class="flex flex-col gap-1.5 px-2.5 pt-2.5">
+          <div v-if="messageQueue.length > 1" class="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <button v-if="messageQueue.length > 3" class="queue-act" style="width:auto;padding:0 6px" :title="queueCollapsed ? 'Expand queued messages' : 'Collapse queued messages'" @click="queueCollapsed = !queueCollapsed">
+              <component :is="queueCollapsed ? PhCaretRight : PhCaretDown" :size="11" /><span class="ml-1">{{ messageQueue.length }} queued</span>
+            </button>
+            <span v-else>{{ messageQueue.length }} queued</span>
+            <button class="queue-act ml-auto" style="width:auto;padding:0 6px" @click="clearQueued">Clear {{ messageQueue.length }} queued messages</button>
+          </div>
+          <template v-if="!queueCollapsed || messageQueue.length <= 3">
           <div
             v-for="(q, qi) in messageQueue"
             :key="q.id"
             draggable="true"
+            tabindex="0"
+            @keydown.alt.up.prevent="moveQueuedBy(q.id, qi, -1)"
+            @keydown.alt.down.prevent="moveQueuedBy(q.id, qi, 1)"
             class="queue-row group flex cursor-grab items-center gap-2 rounded-[9px] border border-border px-2.5 py-1.5 text-[13px] text-secondary-foreground"
             :class="{ 'opacity-40': draggingQueuedId === q.id, 'queue-row-drop': dropQueuedIndex === qi && draggingQueuedId !== q.id }"
             @dragstart="draggingQueuedId = q.id"
@@ -526,12 +537,22 @@
             @drop.prevent="dropQueued(qi)"
           >
             <PhDotsSixVertical :size="13" class="flex-shrink-0 text-muted-foreground" />
-            <span class="min-w-0 flex-1 truncate">{{ q.text }}</span>
+            <input
+              v-if="editingQueuedId === q.id"
+              v-model="editingQueuedText"
+              class="min-w-0 flex-1 bg-transparent outline-none"
+              @keydown.enter.prevent="commitQueuedEdit"
+              @keydown.esc.stop.prevent="editingQueuedId = null"
+              @blur="commitQueuedEdit"
+            />
+            <span v-else class="min-w-0 flex-1 truncate">{{ q.text }}</span>
             <PhImage v-if="q.images?.length" :size="12" class="flex-shrink-0 text-muted-foreground" />
+            <button v-if="steerable" class="queue-act" title="Steer: deliver this into the running turn now (⌘↵ in the composer)" @click="void S.steer(q.id)"><PhArrowRight :size="12" /></button>
             <button class="queue-act" title="Interrupt the current turn and send this now" @click="sendQueuedNow(q.id)"><PhPlay :size="12" weight="fill" /></button>
-            <button class="queue-act" title="Take it back into the composer" @click="editQueued(q)"><PhPencilSimple :size="12" /></button>
+            <button class="queue-act" title="Edit this queued message" @click="startQueuedEdit(q)"><PhPencilSimple :size="12" /></button>
             <button class="queue-act" title="Remove from queue" @click="removeQueued(q.id)"><PhX :size="12" /></button>
           </div>
+          </template>
         </div>
         <!-- Working indicator — sits above the textarea, only for tool activity.
              Thinking has its own bubble in the chat body, so it's not duplicated here. -->
@@ -629,6 +650,7 @@
               <PhTextAa :size="13" />
             </button>
             <span v-if="asleep" class="composer-pill pointer-events-none opacity-70" title="Sleeping: the agent process was stopped to free memory. Sending a message wakes it."><PhMoon :size="13" weight="fill" /></span>
+            <button v-if="!compact && !phone && sideChatAvailable" class="composer-pill" title="Side chat: ask a quick question about this chat without disturbing it" aria-label="Side chat" @click="openSideChat"><PhChatsCircle :size="13" /></button>
             <!-- Agent + model in one popover (the old header bar is gone) -->
             <ModelPicker
               :agent-id="agentKind"
@@ -799,6 +821,9 @@ import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
 import { chatAsleep, useClaudeChatsStore } from "@/stores/claudeChats";
 import { childrenOf } from "@/stores/chatTree";
+import { canSideChat } from "@/stores/chatTree";
+import { newSideChat } from "@/lib/sideChat";
+import { PhChatsCircle } from "@phosphor-icons/vue";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useImageLightbox } from "@/composables/useImageLightbox";
@@ -818,7 +843,7 @@ import ComposerPill, { type ComposerPillItem } from "@/components/composer/Compo
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
 import { isImageStub } from "@/lib/chatImages";
-import { chatSession, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
+import { chatSession, canSteer, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
 import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
@@ -829,6 +854,7 @@ import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { escapeHtml, formatAnswers, renderChatMd } from "@/lib/chatBlocks";
+import { linkifyFileRefs } from "@/lib/localLink";
 import { cachedMermaid, renderMermaid } from "@/lib/mermaidRender";
 import { useDiagram } from "@/composables/useDiagram";
 import HtmlPageModal from "./HtmlPageModal.vue";
@@ -859,7 +885,7 @@ const answeredMsgIds = computed(() => {
   return ids;
 });
 function renderAssistantMd(msg: ChatMessage): string {
-  return DOMPurify.sanitize(renderChatMd(msg.text, answeredMsgIds.value.has(msg.id)));
+  return DOMPurify.sanitize(linkifyFileRefs(renderChatMd(msg.text, answeredMsgIds.value.has(msg.id))));
 }
 
 // The questions form is v-html, so its clicks are delegated: selection state
@@ -1121,6 +1147,8 @@ const effectiveTransport = computed<ChatTransport>(() =>
   props.transport ?? (currentAgent.value ? chatTransportFor(currentAgent.value) : 'claude-cli')
 );
 const usesRpcRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
+// Steer (chat_steer): a queued follow-up delivered into the running turn.
+const steerable = computed(() => busy.value && canSteer(effectiveTransport.value));
 // Codex's app-server bridge reports the same modes/configOptions shape, so
 // everything ACP-flavoured (effort, mode, history) applies to it too.
 const isAcpRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
@@ -1145,7 +1173,7 @@ const {
   nativeControlResponsePending,
   contextTokens, contextWindow, contextSplit, contextReport, contextReportPending,
   claudeGeneratedTitle,
-  enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessage,
+  enqueueMessage, removeQueuedMessage, editQueuedMessage, clearQueuedMessages, moveQueuedMessage,
 } = S;
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
@@ -1499,6 +1527,18 @@ function openSubagentFromTranscript(chatId: number) {
 const openRightPanelSurface = inject<(surface: string, workspaceId: number) => void>("openRightPanelSurface", () => {});
 function openSurfaceFromTranscript(surface: string) {
   openRightPanelSurface(surface, props.workspaceId);
+}
+// Side chat (src-wails/chatside.go): a fork of this chat's current session in
+// the Right Panel. Needs a session to fork — before the first answer there is
+// nothing to ask about.
+const sideChatAvailable = computed(() => !!activeSession.value?.claudeSessionId && canSideChat(activeSession.value));
+async function openSideChat() {
+  try {
+    await newSideChat(props.chatId);
+    openRightPanelSurface("side-chat", props.workspaceId);
+  } catch (e) {
+    S.notice(`Could not start a side chat: ${e}`);
+  }
 }
 function surfaceIcon(surface: string) {
   return surface === "background" ? PhTerminalWindow : surface === "progress" ? PhListChecks : surface === "outputs" ? PhFileCode : PhArrowSquareOut;
@@ -2011,11 +2051,28 @@ function dropQueued(toIndex: number) {
   dropQueuedIndex.value = null;
   S.save();
 }
-function editQueued(q: QueuedChatMessage) {
-  removeQueued(q.id);
-  inputText.value = inputText.value.trim() ? `${q.text}\n${inputText.value}` : q.text;
-  if (q.images?.length) pendingImages.value = [...q.images, ...pendingImages.value];
-  nextTick(() => inputEl.value?.focus());
+const editingQueuedId = ref<number | null>(null);
+const editingQueuedText = ref("");
+const queueCollapsed = ref(false);
+function startQueuedEdit(q: QueuedChatMessage) {
+  editingQueuedId.value = q.id;
+  editingQueuedText.value = q.text;
+}
+function commitQueuedEdit() {
+  const id = editingQueuedId.value;
+  if (id == null) return;
+  editingQueuedId.value = null;
+  editQueuedMessage(id, editingQueuedText.value);
+  S.save();
+}
+function moveQueuedBy(id: number, index: number, delta: number) {
+  moveQueuedMessage(id, index + delta);
+  S.save();
+}
+function clearQueued() {
+  if (!window.confirm(`Clear ${messageQueue.value.length} queued messages?`)) return;
+  clearQueuedMessages();
+  S.save();
 }
 function sendQueuedNow(id: number) {
   // Interrupt, don't steer: a follow-up has to remain its own turn for every
@@ -2681,6 +2738,12 @@ function onKeydown(e: KeyboardEvent) {
   // Suggestion nav claims Arrow/Tab/Enter/Escape while the list is open, so it
   // has to run before the Enter-sends check below.
   if (completion.handleKeydown(e)) return;
+  // ⌘/Ctrl+Enter while busy: queue it, then steer it into the running turn.
+  if (e.key === "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey) && steerable.value) {
+    e.preventDefault();
+    void sendMessage().then((queued) => { if (queued) void S.steer(queued.id); });
+    return;
+  }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
 
@@ -3369,6 +3432,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .md-body :deep(h2) { font-size: 14px; }
 .md-body :deep(h3) { font-size: 13px; }
 .md-body :deep(a) { color: var(--chat-accent); text-decoration: underline; text-underline-offset: 2px; }
+.md-body :deep(a[data-file-ref]) { cursor: pointer; }
 .md-body :deep(hr) { border: none; border-top: 1px solid var(--chat-border); margin: 10px 0; }
 .md-body :deep(table) { border-collapse: collapse; font-size: 12px; margin: 8px 0; }
 .md-body :deep(th), .md-body :deep(td) { border: 1px solid var(--chat-border); padding: 5px 10px; }

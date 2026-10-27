@@ -12,8 +12,8 @@
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { PhFileX } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
-import { EditorState, Compartment, Prec } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorState, Compartment, Prec, StateEffect, StateField } from "@codemirror/state";
+import { Decoration, EditorView, keymap } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
 import { basicSetup } from "codemirror";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -31,7 +31,7 @@ import { useEditorContextStore } from "@/stores/editorContext";
 
 // saveOnUnmount: hosts that unmount the editor on every tab switch (Right Panel)
 // write unsaved text out instead of dropping it.
-const props = defineProps<{ leafId: number; path: string; cwd: string; initialLine?: number; saveOnUnmount?: boolean }>();
+const props = defineProps<{ leafId: number; path: string; cwd: string; initialLine?: number; range?: { from: number; to: number } | null; saveOnUnmount?: boolean }>();
 const emit = defineEmits<{
   title: [t: string];
   dirty: [d: boolean];
@@ -297,6 +297,7 @@ onMounted(async () => {
       })] : []),
       oneDark,
       themeCompartment.of(editorTheme()),
+      refHighlightField,
       EditorView.updateListener.of((u) => {
         if (u.docChanged) recomputeDirty();
         if (u.selectionSet || u.focusChanged) publishSelection(u.state);
@@ -313,7 +314,8 @@ onMounted(async () => {
     ],
   });
   view = new EditorView({ state, parent: host.value });
-  if (props.initialLine) revealLine(props.initialLine);
+  if (props.range) revealLines(props.range.from, props.range.to);
+  else if (props.initialLine) revealLine(props.initialLine);
 
   // Counter-zoom now and whenever the pane resizes (incl. when this tab becomes
   // visible again after being display:none, which fires a 0→real size change).
@@ -351,12 +353,48 @@ function revealLine(line: number) {
   view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
 }
 
-defineExpose({ focus, save, isDirty, formatDocument, revealLine });
+// Temporary line-range highlight for a `path#L5-L20` link from the chat.
+const setRefRange = StateEffect.define<{ from: number; to: number } | null>();
+const refLine = Decoration.line({ class: "cm-ref-line" });
+const refHighlightField = StateField.define({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setRefRange)) continue;
+      if (!e.value) { deco = Decoration.none; continue; }
+      const last = tr.state.doc.lines;
+      const from = Math.min(Math.max(1, e.value.from), last);
+      const to = Math.min(Math.max(from, e.value.to), last);
+      const ranges = [];
+      for (let n = from; n <= to; n++) ranges.push(refLine.range(tr.state.doc.line(n).from));
+      deco = Decoration.set(ranges);
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+let refTimer: ReturnType<typeof setTimeout> | undefined;
+function revealLines(from: number, to: number) {
+  if (!view) return;
+  revealLine(from);
+  view.dispatch({ effects: setRefRange.of({ from, to }) });
+  clearTimeout(refTimer);
+  refTimer = setTimeout(() => view?.dispatch({ effects: setRefRange.of(null) }), 4000);
+}
+watch(() => props.range, (r) => { if (r) revealLines(r.from, r.to); });
+onBeforeUnmount(() => clearTimeout(refTimer));
+
+defineExpose({ focus, save, isDirty, formatDocument, revealLine, revealLines });
 </script>
 
 <style scoped>
 /* CodeMirror mounts its own DOM under .editor-host — reach it with :deep(). */
 .editor-host :deep(.cm-editor) {
   height: 100%;
+}
+.editor-host :deep(.cm-ref-line) {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: background 0.4s;
 }
 </style>

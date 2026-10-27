@@ -81,6 +81,12 @@ type Chat struct {
 	// Read-only on the wire: when auto-sleep stopped this chat's idle process
 	// (chatsleep.go); 0 once a send starts it again.
 	SleptAt int64 `json:"slept_at"`
+	// Read-only on the wire: the one-line session recap (chatrecap.go).
+	Recap string `json:"recap"`
+	// Read-only on the wire: "" = a thread or sub-agent, "side" = a side chat
+	// (chatside.go) — a fork of its parent_chat_id for a quick question, never
+	// listed or collected as a sub-agent.
+	Kind string `json:"kind"`
 }
 
 func chatsSchema() []string {
@@ -107,7 +113,9 @@ func chatsSchema() []string {
 			profile_id        TEXT    NOT NULL DEFAULT '',
 			append_system_prompt TEXT NOT NULL DEFAULT '',
 			resume_at         TEXT    NOT NULL DEFAULT '',
-			slept_at          INTEGER NOT NULL DEFAULT 0
+			slept_at          INTEGER NOT NULL DEFAULT 0,
+			recap             TEXT    NOT NULL DEFAULT '',
+			kind              TEXT    NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS chat_migrations (
 			name    TEXT PRIMARY KEY,
@@ -138,14 +146,14 @@ func chatsPostAlterSchema() []string {
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, agent_kind, transport, model, branch,
 	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
-	effort, permission_mode, profile_id, append_system_prompt, slept_at`
+	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
 		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
-		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt)
+		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind)
 	return c, err
 }
 
@@ -646,7 +654,7 @@ func (a *App) UncollectedChildren(parentChatID int64) ([]int64, error) {
 	if a.db == nil {
 		return out, nil
 	}
-	rows, err := a.db.Query(`SELECT id FROM chats WHERE parent_chat_id = ? AND collected_at = 0 ORDER BY id`, parentChatID)
+	rows, err := a.db.Query(`SELECT id FROM chats WHERE parent_chat_id = ? AND collected_at = 0 AND kind != 'side' ORDER BY id`, parentChatID)
 	if err != nil {
 		return out, err
 	}

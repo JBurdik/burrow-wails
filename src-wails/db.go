@@ -198,6 +198,10 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE chats ADD COLUMN resume_at TEXT NOT NULL DEFAULT ''`,
 		// Auto-sleep stamp (chatsleep.go), read-only on the wire.
 		`ALTER TABLE chats ADD COLUMN slept_at INTEGER NOT NULL DEFAULT 0`,
+		// One-line session recap (chatrecap.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN recap TEXT NOT NULL DEFAULT ''`,
+		// "side" marks a side chat (chatside.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {

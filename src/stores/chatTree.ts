@@ -21,7 +21,8 @@ export function subagentArchivable(
   delayMs = SUBAGENT_AUTOARCHIVE_MS,
 ): boolean {
   if (!session.parentChatId || session.archivedAt || session.busy || watching) return false;
-  if (!session.collectedAt) return false;
+  // A side chat has no result to collect: settled + seen is enough.
+  if (!session.collectedAt && session.kind !== "side") return false;
   if (!phase || !["done", "failed", "idle"].includes(phase.state)) return false;
   if (!seenAt || seenAt < phase.turn_ended_at) return false;
   return now - Math.max(seenAt, phase.updated_at) >= delayMs;
@@ -42,7 +43,23 @@ export function subagentArchivable(
  *  and its listeners dropped when its PARENT is removed/archived, and this
  *  function is exactly what would skip it. Use allChildrenOf for that. */
 export function childrenOf(sessions: ClaudeSession[], parentChatId: number): ClaudeSession[] {
-  return sessions.filter((s) => s.parentChatId === parentChatId && !s.archivedAt).sort((a, b) => a.id - b.id);
+  return sessions.filter((s) => s.parentChatId === parentChatId && !s.archivedAt && s.kind !== "side").sort((a, b) => a.id - b.id);
+}
+
+/** Side chats of one thread (src-wails/chatside.go), NEWEST first, archived
+ *  ones excluded — the Side chat surface's list. Never sub-agents. */
+export function sideChatsOf(sessions: ClaudeSession[], parentChatId: number): ClaudeSession[] {
+  return sessions.filter((s) => s.parentChatId === parentChatId && !s.archivedAt && s.kind === "side").sort((a, b) => b.id - a.id);
+}
+
+/** Whether a chat can have side chats: mirrors Go's sideChatSupported minus
+ *  the session check (chatTransport: Claude or Codex, never generic ACP, and
+ *  never a side chat itself). */
+export function canSideChat(session: ClaudeSession | undefined): boolean {
+  if (!session || session.kind === "side") return false;
+  const t = session.transport;
+  if (t === "claude-cli" || t === "codex-app-server") return true;
+  return !t && (!session.agentKind || session.agentKind === "claude");
 }
 
 /** Sub-agents of one thread, oldest first, INCLUDING archived ones — for

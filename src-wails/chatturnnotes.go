@@ -53,6 +53,7 @@ func (a *App) chatTurnNotes(chatID, kind string, events []ProviderRuntimeEvent) 
 	if kind == chatNoteKind || len(events) == 0 {
 		return
 	}
+	a.chatRecapHook(chatID, kind, events) // session recap (chatrecap.go)
 	notes := a.turnNotesFor(chatID, kind, events)
 	if len(notes) == 0 {
 		return

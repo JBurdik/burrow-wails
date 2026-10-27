@@ -219,6 +219,8 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   messageQueue: ComputedRef<QueuedChatMessage[]>;
   enqueueMessage(text: string, images?: string[]): QueuedChatMessage;
   removeQueuedMessage(id: number): void;
+  /** Rewrite a queued follow-up's text in place (position kept); an empty text is ignored. Never touches the running turn. */
+  editQueuedMessage(id: number, text: string): void;
   clearQueuedMessages(): void;
   /** Move a queued follow-up to position `toIndex` of the queue (0 = next). */
   moveQueuedMessage(id: number, toIndex: number): void;
@@ -249,6 +251,14 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
    * (already reported in the transcript).
    */
   send(prompt: UserPrompt): Promise<number | null>;
+  /**
+   * Deliver queued follow-up `queuedId` INTO the running turn now (`chat_steer`)
+   * instead of after it — Claude CLI and Codex only (`canSteer`). The queued
+   * placeholder becomes a user bubble; the turn stays the same turn (still busy).
+   * Resolves false when nothing was sent — no running turn, or the provider
+   * refused — and the message is back in the queue at its old position.
+   */
+  steer(queuedId: number): Promise<boolean>;
   /** Stop the process; Go publishes session.reset and the next send starts a fresh one. */
   restart(): Promise<void>;
   /** End the running turn (no "finished" toast); Go restarts if the provider can't stop in place. */
@@ -372,6 +382,15 @@ interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionS
   claudeUL: UnlistenFn | null;
   acpDataUL: UnlistenFn | null;
   acpReqUL: UnlistenFn | null;
+}
+
+/**
+ * Whether a chat on `transport` can take a message mid-turn (`chat_steer`):
+ * Claude CLI picks a stdin user line up at the next tool boundary, Codex has
+ * `turn/steer`. Generic ACP has neither. An empty transport is an old Claude row.
+ */
+export function canSteer(transport: string | undefined): boolean {
+  return !transport || transport === "claude-cli" || transport === "codex-app-server";
 }
 
 /** A transcript entry read back as a queue entry; [] for anything else. */
@@ -538,6 +557,32 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         return null;
       }
     },
+    async steer(queuedId) {
+      const index = s.messages.value.findIndex((m) => m.id === queuedId && m.role === "queued");
+      if (index < 0 || !s.busy.value || !canSteer(s.deps.host.chat(chatId)?.transport)) return false;
+      const [entry] = s.messages.value.splice(index, 1);
+      const prompt = { text: entry.text, images: entry.images };
+      const id = s.postUserMessage(prompt);
+      s.save();
+      s.sync();
+      s.view?.scrollToBottom(true);
+      try {
+        await s.deps.invoke("chat_steer", { chatId, text: prompt.text, images: prompt.images ?? [] });
+        return true;
+      } catch (e) {
+        // Nothing was sent or recorded: un-claim the echo and put the entry
+        // back where it was. The turn may have ended meanwhile (its drain ran
+        // without this entry), so drain again — a no-op while still busy.
+        s.pendingSends.delete(prompt.text);
+        const rest = s.messages.value.filter((m) => !(m.id === id && m.role === "user"));
+        rest.splice(Math.min(index, rest.length), 0, entry);
+        s.messages.value = rest;
+        s.save();
+        if (!s.busy.value) s.drain();
+        else console.warn("[chat] steer refused, left queued:", e);
+        return false;
+      }
+    },
     async restart() {
       await s.deps.invoke("chat_restart", { chatId }).catch(() => {});
     },
@@ -661,6 +706,11 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     },
     removeQueuedMessage(id) {
       s.messages.value = s.messages.value.filter((message) => message.id !== id || message.role !== "queued");
+    },
+    editQueuedMessage(id, text) {
+      const next = text.trim();
+      if (!next) return;
+      s.messages.value = s.messages.value.map((m) => (m.id === id && m.role === "queued" ? { ...m, text: next } : m));
     },
     clearQueuedMessages() {
       s.messages.value = s.messages.value.filter((message) => message.role !== "queued");

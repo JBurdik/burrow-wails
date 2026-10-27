@@ -374,14 +374,17 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_mark_active":         {Method: "ChatMarkActive", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_rewind":              {Method: "ChatRewind", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_fork":                {Method: "ChatFork", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
+	"chat_side_create":         {Method: "ChatSideCreate", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_interrupt":           {Method: "ChatInterrupt", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_steer":               {Method: "ChatSteer", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
 	"chat_stop_task":           {Method: "ChatStopTask", Args: []string{"chatId", "taskId"}, Scope: scopeOrchOperate},
 	"chat_set_launch_settings": {Method: "ChatSetLaunchSettings", Args: []string{"chatId", "patch"}, Scope: scopeOrchOperate},
 	"spawn_subagent_chat": {Method: "SpawnSubagentChat", Args: []string{
 		"parentChatId", "task", "profile", "agent", "model", "cwd",
 	}, Scope: scopeOrchOperate},
-	"claude_stop":  {Method: "ClaudeStop", Args: []string{"id"}, Scope: scopeOrchOperate},
-	"claude_abort": {Method: "ClaudeAbort", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"review_changes": {Method: "ReviewChanges", Args: []string{"workspaceId", "parentChatId", "base"}, Scope: scopeOrchOperate},
+	"claude_stop":    {Method: "ClaudeStop", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"claude_abort":   {Method: "ClaudeAbort", Args: []string{"id"}, Scope: scopeOrchOperate},
 
 	// ACP / Codex — the Go bridge owns the JSON-RPC handshake and emits
 	// acp-data-<id> / acp-req-<id> under the frontend's chat id. Starting and

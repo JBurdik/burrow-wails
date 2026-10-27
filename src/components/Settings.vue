@@ -101,6 +101,13 @@
             </div>
             <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Chat recaps</span>
+                <span class="text-[11px] text-muted-foreground">Show a one-line summary of where each chat stands under its title. Generated in the background after a turn finishes, using the text generation model below.</span>
+              </div>
+              <Switch :checked="ui.chatRecaps" @update:checked="(v: boolean) => ui.chatRecaps = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>
                 <span class="text-[11px] text-muted-foreground">Default model for generated text — chat titles, commit messages, pull request content and branch names. Kept cheap by default.</span>
               </div>

@@ -189,7 +189,7 @@ import { useChatAttentionStore } from "@/stores/chatAttention";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
 import PathPicker from "@/components/PathPicker.vue";
 import { pickDir } from "@/lib/pickPath";
-import { looksLikeMdPath, resolveLocalLink } from "@/lib/localLink";
+import { dirOf, looksLikeMdPath, resolveLocalLink } from "@/lib/localLink";
 import { installControlBridge } from "@/lib/controlBridge";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -523,12 +523,49 @@ provide('openRightPanelSurface', openRightPanelSurface);
 // A file link in rendered markdown (chat, an open document): markdown opens
 // rendered in the panel, anything else in the editor. Without this a relative
 // href navigates the whole WKWebView away. External URLs are main.ts's job.
+// Existence is checked against the parent dir listing (cached per dir) so a
+// stray `foo.ts:12` in prose that isn't a real file does nothing.
+const dirListings = new Map<string, Promise<Set<string>>>();
+function fileExists(path: string): Promise<boolean> {
+  const dir = dirOf(path);
+  let listing = dirListings.get(dir);
+  if (!listing) {
+    listing = invoke<{ name: string; isDir: boolean }[]>("read_dir_shallow", { path: dir })
+      .then((es) => new Set(es.filter((e) => !e.isDir).map((e) => e.name)))
+      .catch(() => new Set<string>());
+    dirListings.set(dir, listing);
+    setTimeout(() => dirListings.delete(dir), 30_000);
+  }
+  return listing.then((names) => names.has(path.slice(dir.length + 1)));
+}
+
+function openLocalFile(link: NonNullable<ReturnType<typeof resolveLocalLink>>) {
+  if (link.line !== undefined) {
+    // A line reference lands in the Right Panel editor, highlighted.
+    ui.rightPanelVisible = true;
+    rightPanelRef.value?.openFile(link.path, { from: link.line, to: link.lineEnd ?? link.line });
+  } else if (link.markdown) rightPanelRef.value?.openDoc(link.path);
+  else activeTerm()?.openFileInTab(link.path, link.path.split("/").pop() ?? link.path);
+}
+
+// A file link in rendered markdown (chat, an open document): markdown opens
+// rendered in the panel, anything else in the editor. Without this a relative
+// href navigates the whole WKWebView away. External URLs are main.ts's job.
 function onLocalLinkClick(e: MouseEvent) {
   const target = e.target as Element | null;
   const scope = target?.closest?.(".md-body, [data-link-base]");
   const root = ws.active?.path;
   if (!scope || !root) return;
   const base = scope.closest("[data-link-base]")?.getAttribute("data-link-base") || root;
+  const ref = target!.closest("[data-file-ref]");
+  if (ref) {
+    // Linkified `path:line` text: no href, so there is nothing to cancel.
+    const link = resolveLocalLink(ref.getAttribute("data-file-ref"), base);
+    if (!link) return;
+    e.stopPropagation();
+    void fileExists(link.path).then((ok) => { if (ok) openLocalFile(link); });
+    return;
+  }
   const a = target!.closest("a[href]");
   const code = !a && target!.closest("code");
   const raw = a ? a.getAttribute("href") : code && !code.closest("pre") && looksLikeMdPath(code.textContent ?? "") ? code.textContent : null;
@@ -536,8 +573,7 @@ function onLocalLinkClick(e: MouseEvent) {
   if (!link) return;
   e.preventDefault();
   e.stopPropagation();
-  if (link.markdown) rightPanelRef.value?.openDoc(link.path);
-  else activeTerm()?.openFileInTab(link.path, link.path.split("/").pop() ?? link.path, link.line);
+  openLocalFile(link);
 }
 
 

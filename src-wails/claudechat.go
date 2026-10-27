@@ -166,7 +166,10 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 		// Always forked: the session being resumed keeps its full history, so
 		// a fork's parent is untouched and a rewind can still be undone by
 		// hand. The new id is recorded from system/init (recordChatSessionID).
-		if l.ResumeAt != "" {
+		if l.ResumeAt == sideForkLatest {
+			// A side chat: fork at the session's end (chatside.go).
+			args = append(args, "--fork-session")
+		} else if l.ResumeAt != "" {
 			args = append(args, "--resume-session-at", l.ResumeAt, "--fork-session")
 		}
 	}

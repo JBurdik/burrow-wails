@@ -344,6 +344,43 @@ describe("queued follow-ups", () => {
     expect(s.messageQueue.value.map((e) => e.id)).toEqual([b.id, a.id, c.id]);
     dropChatSession(42);
   });
+
+  it("drains in displayed order after a reorder, and never interrupts to manage the queue", async () => {
+    const f = fakeDeps();
+    const s = chatSession(44, f.deps);
+    const view = fakeView();
+    s.attachView(view);
+    s.retain();
+    s.startTurn();
+    await nextTick();
+    const [a, b, c] = ["a", "b", "c"].map((t) => s.enqueueMessage(t));
+    s.moveQueuedMessage(c.id, 0);
+    s.removeQueuedMessage(b.id);
+    s.editQueuedMessage(a.id, "  a edited ");
+    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["c", "a edited"]);
+    expect(s.busy.value).toBe(true);
+    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_interrupt");
+    s.release();
+    await endTurn(s, f);
+    await nextTick();
+    await nextTick();
+    expect(view.send).toHaveBeenCalledWith("c", undefined);
+    dropChatSession(44);
+  });
+
+  it("edits in place (blank ignored) and clears every queued message but keeps the transcript", () => {
+    const s = chatSession(45, fakeDeps().deps);
+    s.notice("working");
+    const [a, b] = ["a", "b"].map((t) => s.enqueueMessage(t));
+    s.editQueuedMessage(b.id, "b2");
+    s.editQueuedMessage(a.id, "   ");
+    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["a", "b2"]);
+    s.clearQueuedMessages();
+    expect(s.messageQueue.value).toEqual([]);
+    expect(s.messages.value.map((m) => m.role)).not.toContain("queued");
+    expect(s.messages.value.length).toBe(1);
+    dropChatSession(45);
+  });
 });
 
 // The reducers, driven through the session's own seam: lines in on the
@@ -743,5 +780,51 @@ describe("a request that arrived before the view mounted", () => {
     await expect(s.recoverPendingRequests()).resolves.toBeUndefined();
     expect(s.pendingQuestion.value).toBeNull();
     dropChatSession(95);
+  });
+});
+
+// Steer: a queued follow-up delivered into the running turn (`chat_steer`).
+describe("steer", () => {
+  it("turns the queued entry into a user bubble in the same turn and claims its echo", async () => {
+    const f = fakeDeps();
+    f.host.chat.mockReturnValue({ transport: "codex-app-server" } as never);
+    const s = chatSession(71, f.deps);
+    s.attachView(fakeView());
+    await s.listenEvents();
+    s.startTurn();
+    const a = s.enqueueMessage("first");
+    const b = s.enqueueMessage("steer me", ["data:image/png;base64,AA=="]);
+    expect(await s.steer(b.id)).toBe(true);
+    expect(f.invoke).toHaveBeenCalledWith("chat_steer", { chatId: 71, text: "steer me", images: ["data:image/png;base64,AA=="] });
+    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_send");
+    expect(s.messageQueue.value.map((e) => e.id)).toEqual([a.id]);
+    expect(s.messages.value.filter((m) => m.role === "user").map((m) => m.text)).toEqual(["steer me"]);
+    expect(s.busy.value).toBe(true);
+    // Go's echo of the steered prompt is ours: no second bubble.
+    f.emit("chat-event-71", { ord: 5, events: [{ type: "user.delta", messageId: "u5", text: "steer me" }] });
+    expect(s.messages.value.filter((m) => m.role === "user").length).toBe(1);
+    dropChatSession(71);
+  });
+
+  it("puts the entry back where it was when Go refuses, and never steers a generic-ACP chat", async () => {
+    const f = fakeDeps();
+    f.host.chat.mockReturnValue({ transport: "claude-cli" } as never);
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_steer") throw new Error("no running turn to steer");
+      return undefined;
+    });
+    const s = chatSession(72, f.deps);
+    s.attachView(fakeView());
+    s.startTurn();
+    const [a, b, c] = ["a", "b", "c"].map((t) => s.enqueueMessage(t));
+    expect(await s.steer(b.id)).toBe(false);
+    expect(s.messageQueue.value.map((e) => e.id)).toEqual([a.id, b.id, c.id]);
+    expect(s.messages.value.map((m) => m.role)).not.toContain("user");
+
+    f.host.chat.mockReturnValue({ transport: "acp" } as never);
+    f.invoke.mockClear();
+    expect(await s.steer(a.id)).toBe(false);
+    expect(f.invoke).not.toHaveBeenCalledWith("chat_steer", expect.anything());
+    dropChatSession(72);
   });
 });

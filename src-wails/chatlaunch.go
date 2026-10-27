@@ -108,7 +108,10 @@ func (a *App) rpcLaunchFor(c Chat, transport, cwd string) (AcpStartOpts, error) 
 	if raw, err := a.ReadConfig(); err == nil {
 		_ = json.Unmarshal([]byte(raw), &cfg)
 	}
-	return resolveRPCLaunch(c, transport, cfg.Providers, cfg.Aliases, cwd, projectClaudeConfigDir(cwd), projectSetting(cwd, "env_file"))
+	opts, err := resolveRPCLaunch(c, transport, cfg.Providers, cfg.Aliases, cwd, projectClaudeConfigDir(cwd), projectSetting(cwd, "env_file"))
+	// A side chat's first start forks its parent's thread (chatside.go).
+	opts.Fork = opts.ResumeSessionID != "" && a.chatResumeAt(c.ID) == sideForkLatest
+	return opts, err
 }
 
 // resolveClaudeLaunch is pure: the row's launch settings, its profile looked up

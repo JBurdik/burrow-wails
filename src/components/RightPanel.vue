@@ -343,6 +343,8 @@
 
     <ProgressSurface v-else-if="act(pi) === 'progress'" :chat-id="activeChatId" />
 
+    <SideChatSurface v-else-if="act(pi) === 'side-chat'" :chat-id="activeChatId" :cwd="props.cwd" />
+
     <MarkdownDocSurface v-else-if="act(pi) === 'doc' && docPath" :path="docPath" :cwd="props.cwd" />
 
     <MarkdownDocSurface
@@ -368,6 +370,7 @@
         :leaf-id="0"
         :path="act(pi)!.slice(FILE_PREFIX.length)"
         :cwd="props.cwd"
+        :range="fileRange[act(pi)!]"
         save-on-unmount
         @saved="git.refresh(true)"
       />
@@ -392,6 +395,7 @@
           </optgroup>
         </select>
         <button class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="scopedDiffLoading" @click="loadScopedDiff(true)"><PhArrowClockwise :size="12" :class="scopedDiffLoading && 'animate-spin'" /></button>
+        <button class="flex shrink-0 items-center gap-1 rounded-[var(--radius-nav)] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50" :title="diffScope.kind === 'branch' ? 'Have an agent review the branch changes' : 'Have an agent review the uncommitted changes'" :disabled="reviewing || !props.workspaceId" @click="startReview"><PhSparkle :size="12" />Review</button>
       </div>
       <div v-if="scopedDiffError" role="alert" class="p-3 text-[11px] text-destructive">{{ scopedDiffError }}</div>
       <div v-if="scopedDiffLoading && !scopedDiff" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
@@ -734,6 +738,8 @@ import BackgroundTasksSurface from "./BackgroundTasksSurface.vue";
 import { PhTerminalWindow } from "@phosphor-icons/vue";
 import OutputsSurface from "./OutputsSurface.vue";
 import ProgressSurface from "./ProgressSurface.vue";
+import SideChatSurface from "./SideChatSurface.vue";
+import { PhChatsCircle } from "@phosphor-icons/vue";
 import MarkdownDocSurface from "./MarkdownDocSurface.vue";
 import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
@@ -784,6 +790,8 @@ const FILES_KEY = "burrow.rpFiles";
 const isMarkdown = (id: string) => /\.(md|markdown|mdx)$/i.test(id);
 /** Markdown file tabs open rendered; true = switched to the editor. Per surface id, not persisted. */
 const mdEditing = reactive<Record<string, boolean>>({});
+/** Line range a chat link asked for, per file surface id; a fresh object per click re-triggers the editor's reveal. */
+const fileRange = reactive<Record<string, { from: number; to: number } | undefined>>({});
 function storedFiles(id: number): string[] {
   try { const v = JSON.parse(localStorage.getItem(FILES_KEY) ?? "{}")[id]; return Array.isArray(v) ? v : []; } catch { return []; }
 }
@@ -907,6 +915,23 @@ const spawnProfile = ref("worker");
 const spawning = ref(false);
 const spawnError = ref("");
 function configureSpawnProfiles() { spawnDialogOpen.value = false; useUIStore().openSettings("subagent-profiles"); }
+// One-click review: Go creates the chat (a sub-agent of the active thread, else
+// a top-level chat) and starts it; Codex runs its native review/start.
+const reviewing = ref(false);
+async function startReview() {
+  if (!props.workspaceId || reviewing.value) return;
+  reviewing.value = true;
+  scopedDiffError.value = "";
+  try {
+    const res = await invoke<{ chat_id: number }>("review_changes", {
+      workspaceId: props.workspaceId, parentChatId: activeChatId.value ?? 0,
+      base: diffScope.value.kind === "branch" ? "auto" : "",
+    });
+    if (activeChatId.value) openChild(res.chat_id);
+    else terminalTabs.openChat(props.workspaceId, res.chat_id);
+  } catch (error) { scopedDiffError.value = String(error); }
+  finally { reviewing.value = false; }
+}
 function openSpawnDialog() {
   if (!activeChatId.value || !props.workspaceId) return;
   spawnTask.value = "";
@@ -1084,6 +1109,7 @@ const tabs = computed(() => {
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
     { id: "agents", label: "Agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
     { id: "progress", label: "Progress", icon: PhListChecks, description: "The active chat's live todo list." },
+    { id: "side-chat", label: "Side chat", icon: PhChatsCircle, description: "Ask a quick question about the active chat without disturbing it." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "dev-servers", label: "Dev servers", icon: PhPlugsConnected, description: "See and kill dev servers running in this workspace." },
     { id: "background", label: "Background", icon: PhTerminalWindow, description: "Background shell tasks the active chat launched." },
@@ -1294,8 +1320,13 @@ function openDoc(path: string) {
 /** Open a file from the explorer as its own panel tab. A new one joins the
  *  pane that already holds file tabs, so dragging them to the bottom pane
  *  keeps the tree visible on top. */
-function openFile(path: string) {
+function openFile(path: string, range?: { from: number; to: number }) {
   const state = wsUi(wsKey.value);
+  if (range) {
+    fileRange[FILE_PREFIX + path] = { ...range };
+    // A line range needs the editor, not the rendered preview.
+    if (isMarkdown(path)) mdEditing[FILE_PREFIX + path] = true;
+  }
   const pane = state.files.map((p) => paneOf(layout.value, FILE_PREFIX + p)).find((i) => i !== -1) ?? 0;
   if (!state.files.includes(path)) {
     state.files.push(path);

@@ -135,7 +135,10 @@ then push the row's model / effort / permission mode into the fresh session — 
 restart) / `chat_clear` (wipe `chat_messages` + `chat_stream` +
 session id) all publish **`session.reset`** (stream kind `chat-runtime`, `{cleared}` for clear); the
 `chatSession` reducer — same branch as `session.exited` — drops every pending request, closes the partial,
-clears busy. **Rewind / fork** (`chatrewind.go`, Claude only — Codex/ACP refuse and the UI hides them):
+clears busy. **Steer** (`chat_steer`, `chatsteer.go`): a queued follow-up delivered INTO the running turn —
+Claude = a plain stdin user line (the CLI picks it up at the next tool boundary, same turn, one `result`),
+Codex = `turn/steer {expectedTurnId}`; generic ACP refuses. Only a `running` phase is steerable (a user line
+would repaint a pending approval as running); a refusal leaves the message queued. **Rewind / fork** (`chatrewind.go`, Claude only — Codex/ACP refuse and the UI hides them):
 `chat_rewind(id, index, text)` cuts the transcript before a user message (folded_ord jumps past every recorded
 line, ords keep counting) and `chat_fork` copies it through that turn into a new row with the parent's session;
 both park the cut's Claude record uuid (`ChatMessage.uuid`, stamped by the fold) in `chats.resume_at`, and the

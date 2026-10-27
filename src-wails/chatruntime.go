@@ -107,7 +107,7 @@ func (a *App) startRPC(opts AcpStartOpts, transport string) error {
 		return a.rpcStarter(opts, transport)
 	}
 	if transport == "codex-app-server" {
-		return a.CodexStart(opts.ID, opts.Cwd, opts.Env, opts.ResumeSessionID)
+		return a.codexStart(opts.ID, opts.Cwd, opts.Env, opts.ResumeSessionID, opts.Fork)
 	}
 	return a.AcpStart(opts)
 }

@@ -110,6 +110,7 @@
               <!-- Touch has no hover and no right click: this opens the same menu. -->
               <button class="sb-row-more sb-row-act" title="More" aria-label="Thread actions" @click.stop="openRowMenu(row.ws, row.tab, $event)"><PhDotsThree :size="16" weight="bold" /></button>
             </div>
+            <div v-if="chatRecapOf(row.tab.chatId)" class="ml-[22px] truncate px-2.5 pb-1 text-[11px] leading-tight text-muted-foreground" :title="chatRecapOf(row.tab.chatId)">{{ chatRecapOf(row.tab.chatId) }}</div>
             <div v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="ml-[22px]">
               <button
                 v-for="c in childrenOfChat(row.tab.chatId)"
@@ -623,6 +624,7 @@ const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const chats = useClaudeChatsStore();
 const chatIsAsleep = (chatId: number | null | undefined) => chatId != null && chatAsleep(chats.sessions.find((s) => s.id === chatId));
+const chatRecapOf = (chatId: number | null | undefined) => (chatId != null && ui.chatRecaps ? chats.sessions.find((s) => s.id === chatId)?.recap : undefined);
 const ui = useUIStore();
 const git = useGitStore();
 const notif = useNotificationsStore();
