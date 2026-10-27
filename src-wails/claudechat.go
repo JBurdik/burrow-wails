@@ -226,6 +226,7 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 		func(line string) {
 			a.observeClaudeLine(id, line)
 			a.emitChatLine(id, "claude-data", line)
+			a.noteBgTaskLine(id, line) // after the line, outside every lock (chatbgnotes.go)
 		},
 		func() { a.emitChatLine(id, "claude-data", `{"type":"exit"}`) },
 	)

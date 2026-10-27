@@ -335,6 +335,21 @@
           </div>
         </template>
 
+        <!-- Surface marker (background task, plan, changed files): a pointer to a Right Panel surface -->
+        <template v-else-if="msg.role === 'system-info' && msg.surface">
+          <div class="flex justify-center px-4 py-1">
+            <button
+              class="flex max-w-[min(440px,85%)] items-center gap-1.5 rounded-[20px] border border-border bg-hover px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-accent/45 hover:text-foreground"
+              :title="msg.text"
+              @click="openSurfaceFromTranscript(msg.surface)"
+            >
+              <component :is="surfaceIcon(msg.surface)" :size="11" class="shrink-0" />
+              <span class="truncate">{{ msg.text }}</span>
+              <PhArrowRight :size="10" class="shrink-0" />
+            </button>
+          </div>
+        </template>
+
         <!-- System info marker (permission requested, plan ready, etc.) -->
         <template v-else-if="msg.role === 'system-info'">
           <div class="flex justify-center px-4 py-1">
@@ -776,7 +791,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { compact as phone } from "@/lib/viewport";
@@ -1479,6 +1494,14 @@ function openChangedFileDiff(path: string) {
 const openRightPanelSubagent = inject<(chatId: number, workspaceId: number) => void>("openRightPanelSubagent", () => {});
 function openSubagentFromTranscript(chatId: number) {
   openRightPanelSubagent(chatId, props.workspaceId);
+}
+// Same for a row naming a panel surface (icons match RightPanel's tab strip).
+const openRightPanelSurface = inject<(surface: string, workspaceId: number) => void>("openRightPanelSurface", () => {});
+function openSurfaceFromTranscript(surface: string) {
+  openRightPanelSurface(surface, props.workspaceId);
+}
+function surfaceIcon(surface: string) {
+  return surface === "background" ? PhTerminalWindow : surface === "progress" ? PhListChecks : surface === "outputs" ? PhFileCode : PhArrowSquareOut;
 }
 
 // Live dot on a transcript's spawn row, straight off the bus — same event and

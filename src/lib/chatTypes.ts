@@ -32,6 +32,8 @@ export interface ChatMessage {
   // clicking opens the Right Panel on that sub-agent.
   subagentChatId?: number;
   subagentAgent?: string;
+  /** system-info row that opens this Right Panel surface when clicked. */
+  surface?: string;
 }
 
 /** A user prompt held until the active turn reaches a terminal boundary. */

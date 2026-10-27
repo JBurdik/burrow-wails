@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"slices"
 	"strconv"
@@ -102,5 +103,17 @@ func TestSubagentNoteFoldsIntoParentRow(t *testing.T) {
 	}
 	if got := foldEvents(NormalizeChatLine(chatNoteKind, subagentNote(1, "\n", "x"), 0)); len(got) != 1 || got[0].Text != "Spawned Sub-agent" {
 		t.Fatalf("empty task label: %+v", got)
+	}
+}
+
+func TestSurfaceNoteFoldsIntoRowWithSurface(t *testing.T) {
+	note, _ := json.Marshal(chatNoteEnvelope{Form: "row", Role: "system-info", Text: "Changed 3 files", Surface: "outputs"})
+	events := NormalizeChatLine(chatNoteKind, string(note), 3)
+	if len(events) != 1 || events[0].Surface != "outputs" {
+		t.Fatalf("normalize dropped the surface: %+v", events)
+	}
+	got := foldEvents(events)
+	if len(got) != 1 || got[0].Role != "system-info" || got[0].Text != "Changed 3 files" || got[0].Surface != "outputs" {
+		t.Fatalf("fold dropped the surface: %+v", got)
 	}
 }

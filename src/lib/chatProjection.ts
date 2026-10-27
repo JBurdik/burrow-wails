@@ -45,6 +45,7 @@ export interface ChatEvent {
   images?: string[];
   subagentChatId?: number;
   subagentAgent?: string;
+  surface?: string;
 }
 
 export interface ChatEventBatch {
@@ -118,6 +119,7 @@ export function applyChatEvent(state: ChatProjectionState, event: ChatEvent): bo
         text: event.text,
         ...(event.images?.length ? { images: event.images } : {}),
         ...(event.subagentChatId ? { subagentChatId: event.subagentChatId, subagentAgent: event.subagentAgent } : {}),
+        ...(event.surface ? { surface: event.surface } : {}),
       });
       return true;
     }

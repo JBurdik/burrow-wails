@@ -138,6 +138,15 @@ describe("message.note", () => {
     ]);
   });
 
+  it("keeps the Right Panel surface a note row points at", () => {
+    // chatspawn.go publishSurfaceNote: background task / plan / changed files.
+    const state: ChatProjectionState = { messages: [], nextMsgId: 0 };
+    expect(applyChatEvent(state, {
+      type: "message.note", role: "system-info", text: "Changed 3 files", surface: "outputs",
+    })).toBe(true);
+    expect(state.messages).toEqual([{ id: 0, role: "system-info", text: "Changed 3 files", surface: "outputs" }]);
+  });
+
   it("ignores a note with no role or text", () => {
     const state: ChatProjectionState = { messages: [], nextMsgId: 0 };
     expect(applyChatEvent(state, { type: "message.note", text: "x" })).toBe(false);

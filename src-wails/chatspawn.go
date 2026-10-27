@@ -285,6 +285,14 @@ func (a *App) publishSubagentRow(parentChatID, childChatID int64, task, agentNam
 	a.emitChatLine(strconv.FormatInt(parentChatID, 10), chatNoteKind, subagentNote(childChatID, task, agentName))
 }
 
+// publishSurfaceNote records a system-info row in a chat's transcript that
+// opens a Right Panel surface ("background", "progress", "outputs") when
+// clicked. Same path as publishSubagentRow: persisted, replayed, live.
+func (a *App) publishSurfaceNote(chatID int64, surface, text string) {
+	note, _ := json.Marshal(chatNoteEnvelope{Form: "row", Role: "system-info", Text: text, Surface: surface})
+	a.emitChatLine(strconv.FormatInt(chatID, 10), chatNoteKind, string(note))
+}
+
 // subagentNote is the chat-note line for that row: the task's first line as
 // the label, and the child it opens.
 func subagentNote(childChatID int64, task, agentName string) string {

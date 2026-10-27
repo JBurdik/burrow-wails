@@ -333,6 +333,11 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 		// keeps NormalizeChatLine at one call per line: two readings of the
 		// same line that had to agree anyway.
 		a.foldChatLine(chatID, ord, events)
+
+		// Plan / changed-files transcript notes (chatturnnotes.go). Last, so a
+		// note lands after the line that triggered it; it re-enters this
+		// function as a chat-note line, which it ignores.
+		a.chatTurnNotes(chatID, kind, events)
 	}
 }
 

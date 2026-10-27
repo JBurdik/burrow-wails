@@ -77,6 +77,8 @@ type ProviderRuntimeEvent struct {
 	// message.note "spawned sub-agent" row: which child chat it opens.
 	SubagentChatID int64  `json:"subagentChatId,omitempty"`
 	SubagentAgent  string `json:"subagentAgent,omitempty"`
+	// message.note row that opens a Right Panel surface when clicked.
+	Surface string `json:"surface,omitempty"`
 
 	// request.opened / request.resolved. The request's own payload stays on the
 	// raw channel (the UI answers it there); these two only say THAT the turn
@@ -680,6 +682,8 @@ type chatNoteEnvelope struct {
 	// A system-info row recording a spawned sub-agent (see publishSubagentRow).
 	SubagentChatID int64  `json:"subagentChatId,omitempty"`
 	SubagentAgent  string `json:"subagentAgent,omitempty"`
+	// A system-info row that opens this Right Panel surface (see publishSurfaceNote).
+	Surface string `json:"surface,omitempty"`
 }
 
 // chatNoteRoles are the ONLY ChatMessage roles (src/lib/chatTypes.ts) a "row"
@@ -725,6 +729,7 @@ func normalizeChatNote(line string, ord int64) []ProviderRuntimeEvent {
 			Images:         env.Images,
 			SubagentChatID: env.SubagentChatID,
 			SubagentAgent:  env.SubagentAgent,
+			Surface:        env.Surface,
 		}}
 	case "patch":
 		if env.TurnMs == 0 && len(env.Images) == 0 {

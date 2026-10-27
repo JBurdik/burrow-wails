@@ -511,6 +511,15 @@ function openRightPanelSubagent(chatId: number, workspaceId: number) {
 
 provide('openRightPanelSubagent', openRightPanelSubagent);
 
+// Same for a transcript row that names a panel surface (a background task
+// started, a plan created, files changed): open it in the chat's workspace.
+function openRightPanelSurface(surface: string, workspaceId: number) {
+  ui.rightPanelVisible = true;
+  rightPanelRef.value?.openPanelSurface(surface, workspaceId);
+}
+
+provide('openRightPanelSurface', openRightPanelSurface);
+
 // A file link in rendered markdown (chat, an open document): markdown opens
 // rendered in the panel, anything else in the editor. Without this a relative
 // href navigates the whole WKWebView away. External URLs are main.ts's job.

@@ -56,6 +56,7 @@ type ChatMessage struct {
 
 	SubagentChatID int64  `json:"subagentChatId,omitempty"`
 	SubagentAgent  string `json:"subagentAgent,omitempty"`
+	Surface        string `json:"surface,omitempty"`
 }
 
 // foldState is the mutable accumulator threaded through folding one event
@@ -107,6 +108,7 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 			Images:         ev.Images,
 			SubagentChatID: ev.SubagentChatID,
 			SubagentAgent:  ev.SubagentAgent,
+			Surface:        ev.Surface,
 		})
 		return true
 
