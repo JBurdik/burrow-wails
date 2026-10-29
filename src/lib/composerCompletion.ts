@@ -64,9 +64,13 @@ interface RawSkill { dir: string; name: string; description: string; source: Ski
 
 // Keyed by cwd: the personal skills are the same everywhere, but the project
 // ones are not, and one fetch per repo is cheap enough not to split the call.
-const skillCache = new Map<string, Promise<ComposerSkill[]>>();
+// Entries expire after a minute, or a skill installed while the app runs never
+// shows up until a restart.
+const SKILL_TTL_MS = 60_000;
+const skillCache = new Map<string, { at: number; list: Promise<ComposerSkill[]> }>();
 function loadSkills(cwd: string): Promise<ComposerSkill[]> {
-  let hit = skillCache.get(cwd);
+  const cached = skillCache.get(cwd);
+  let hit = cached && Date.now() - cached.at < SKILL_TTL_MS ? cached.list : undefined;
   if (!hit) {
     hit = invoke<RawSkill[]>("list_skills", { cwd })
       .then((skills) => {
@@ -86,7 +90,7 @@ function loadSkills(cwd: string): Promise<ComposerSkill[]> {
         return [...merged.values()].sort((a, b) => a.label.localeCompare(b.label));
       })
       .catch(() => []); // browser-only dev without a backend
-    skillCache.set(cwd, hit);
+    skillCache.set(cwd, { at: Date.now(), list: hit });
   }
   return hit;
 }
@@ -141,8 +145,9 @@ export function useComposerCompletion(opts: ComposerCompletionOptions) {
   // per-repo, and the welcome composer's target is a dropdown away.
   const loadedFor = ref<string | null>(null);
   async function ensureSkills() {
+    // No early return on the same cwd: loadSkills' cache is what keeps this
+    // cheap, and its expiry is how a newly installed skill reaches an open composer.
     const cwd = opts.cwd();
-    if (loadedFor.value === cwd) return;
     loadedFor.value = cwd;
     const list = await loadSkills(cwd);
     if (loadedFor.value === cwd) skills.value = list;

@@ -36,9 +36,10 @@ func claudeSkillsDir() (string, error) {
 // — 44 of those is a payload nobody reads.
 const skillDescMax = 300
 
-// ponytail: single-line `key: value` frontmatter only. A folded block scalar
-// (`description: >`) reads as empty rather than as garbage, which is the safe
-// direction to be wrong in. Upgrade path: a real YAML parse if any skill needs it.
+// ponytail: top-level `key: value` lines plus block scalars (`description: >`,
+// `|`, `>-` …) whose indented continuation lines are joined with spaces —
+// caveman's and ponytail's skills use that, and the picker showed a bare ">".
+// Upgrade path: a real YAML parse if a skill needs quoting or flow syntax.
 func skillFrontmatter(path string) (name, desc string) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -52,10 +53,27 @@ func skillFrontmatter(path string) (name, desc string) {
 	if !sc.Scan() || strings.TrimSpace(sc.Text()) != "---" {
 		return "", "" // no frontmatter block at all
 	}
+	block := "" // key whose block scalar is being read
+	var parts []string
+	flush := func() {
+		if block == "description" {
+			desc = strings.Join(parts, " ")
+		}
+		block, parts = "", nil
+	}
 	for sc.Scan() {
 		line := sc.Text()
 		if strings.TrimSpace(line) == "---" {
 			break
+		}
+		if block != "" {
+			if t := strings.TrimSpace(line); t == "" || line != strings.TrimLeft(line, " \t") {
+				if t != "" {
+					parts = append(parts, t)
+				}
+				continue
+			}
+			flush()
 		}
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
@@ -66,6 +84,10 @@ func skillFrontmatter(path string) (name, desc string) {
 			continue
 		}
 		value = strings.TrimSpace(value)
+		if strings.TrimRight(value, "-+") == ">" || strings.TrimRight(value, "-+") == "|" {
+			block = strings.TrimSpace(key)
+			continue
+		}
 		switch strings.TrimSpace(key) {
 		case "name":
 			name = value
@@ -73,6 +95,7 @@ func skillFrontmatter(path string) (name, desc string) {
 			desc = value
 		}
 	}
+	flush()
 	if len(desc) > skillDescMax {
 		desc = strings.TrimSpace(desc[:skillDescMax]) + "…"
 	}
@@ -146,17 +169,14 @@ func collectPluginSkills() []SkillInfo {
 	if err != nil {
 		return nil
 	}
-	b, err := os.ReadFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"))
-	if err != nil {
-		return nil
-	}
 	var reg struct {
 		Plugins map[string][]struct {
 			InstallPath string `json:"installPath"`
 		} `json:"plugins"`
 	}
-	if json.Unmarshal(b, &reg) != nil {
-		return nil
+	// A missing or broken registry still leaves the plugins found on disk below.
+	if b, err := os.ReadFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json")); err == nil {
+		_ = json.Unmarshal(b, &reg)
 	}
 	keys := make([]string, 0, len(reg.Plugins))
 	for k := range reg.Plugins {
@@ -165,29 +185,63 @@ func collectPluginSkills() []SkillInfo {
 	sort.Strings(keys)
 	out := []SkillInfo{}
 	seen := map[string]bool{}
-	add := func(s SkillInfo) {
-		if !seen[s.Name] {
-			seen[s.Name] = true
-			out = append(out, s)
+	add := func(dir, plugin string) {
+		for _, s := range pluginEntries(dir, plugin) {
+			if !seen[s.Name] {
+				seen[s.Name] = true
+				out = append(out, s)
+			}
 		}
 	}
 	for _, key := range keys {
 		plugin, _, _ := strings.Cut(key, "@")
 		for _, inst := range reg.Plugins[key] {
-			for _, s := range collectSkills(filepath.Join(inst.InstallPath, "skills"), "plugin") {
-				s.Name = plugin + ":" + s.Name
-				add(s)
-			}
-			cmds, _ := os.ReadDir(filepath.Join(inst.InstallPath, "commands"))
-			for _, c := range cmds {
-				base, ok := strings.CutSuffix(c.Name(), ".md")
-				if !ok {
-					continue
-				}
-				_, desc := skillFrontmatter(filepath.Join(inst.InstallPath, "commands", c.Name()))
-				add(SkillInfo{Dir: "", Name: plugin + ":" + base, Description: desc, Source: "plugin", Enabled: true})
-			}
+			add(inst.InstallPath, plugin)
 		}
+	}
+	// Not in installed_plugins.json but loaded by Claude all the same: a plugin
+	// dropped into ~/.claude/skills (Superset installs itself there) and the
+	// ones claude.ai syncs into plugins/synced/<bucket>/<id>/.
+	dirs, _ := filepath.Glob(filepath.Join(home, ".claude", "skills", "*"))
+	synced, _ := filepath.Glob(filepath.Join(home, ".claude", "plugins", "synced", "*", "*"))
+	for _, dir := range append(dirs, synced...) {
+		if name := pluginName(dir); name != "" {
+			add(dir, name)
+		}
+	}
+	return out
+}
+
+// pluginName is the `name` from dir/.claude-plugin/plugin.json, "" when dir is
+// not a plugin.
+func pluginName(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, ".claude-plugin", "plugin.json"))
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(b, &m)
+	return m.Name
+}
+
+// pluginEntries lists one plugin dir's skills/*/SKILL.md and commands/*.md as
+// `plugin:name`.
+func pluginEntries(dir, plugin string) []SkillInfo {
+	out := []SkillInfo{}
+	for _, s := range collectSkills(filepath.Join(dir, "skills"), "plugin") {
+		s.Name = plugin + ":" + s.Name
+		out = append(out, s)
+	}
+	cmds, _ := os.ReadDir(filepath.Join(dir, "commands"))
+	for _, c := range cmds {
+		base, ok := strings.CutSuffix(c.Name(), ".md")
+		if !ok {
+			continue
+		}
+		_, desc := skillFrontmatter(filepath.Join(dir, "commands", c.Name()))
+		out = append(out, SkillInfo{Name: plugin + ":" + base, Description: desc, Source: "plugin", Enabled: true})
 	}
 	return out
 }
@@ -197,19 +251,18 @@ func isDir(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// ListSkills reports the user's own skills plus, when `cwd` names a repo, that
-// repo's checked-in ones, plus installed plugins' (only with a cwd, so the
-// composer sees them and Settings — which can toggle/delete — does not). Settings passes "" — it manages personal skills only,
-// which is what keeps SetSkillEnabled/DeleteSkill's `dir` unambiguous (they
-// resolve it against ~/.claude/skills and must never be handed a project row).
+// ListSkills reports the user's own skills, installed plugins' (Source
+// "plugin", read-only: Settings lists them without toggle/delete) and, when
+// `cwd` names a repo, that repo's checked-in ones. Settings passes "" — no
+// project rows, which is what keeps SetSkillEnabled/DeleteSkill's `dir`
+// unambiguous (they resolve it against ~/.claude/skills).
 func (a *App) ListSkills(cwd string) ([]SkillInfo, error) {
 	dir, err := claudeSkillsDir()
 	if err != nil {
 		return nil, err
 	}
-	out := collectSkills(dir, "personal")
+	out := append(collectSkills(dir, "personal"), collectPluginSkills()...)
 	if cwd != "" {
-		out = append(out, collectPluginSkills()...)
 		out = append(out, collectSkills(filepath.Join(cwd, ".claude", "skills"), "project")...)
 	}
 	return out, nil

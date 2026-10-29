@@ -1041,7 +1041,7 @@
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
               <h2 class="text-[15px] font-semibold text-foreground">Skills</h2>
-              <span class="text-xs text-muted-foreground">Agent skills installed in <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">~/.claude/skills</code></span>
+              <span class="text-xs text-muted-foreground">Agent skills installed in <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">~/.claude/skills</code> and Claude plugins</span>
             </div>
             <Button variant="outline" size="sm" class="ml-auto" :disabled="skillsLoading" @click="loadSkills">
               <PhArrowClockwise :size="11" :class="{ 'animate-spin': skillsLoading }" /> Refresh
@@ -1050,13 +1050,14 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2">
-            <div v-for="s in skills" :key="s.dir" class="flex items-start gap-3 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3" :class="{ 'opacity-55': !s.enabled }">
+            <div v-for="s in skills" :key="s.name" class="flex items-start gap-3 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3" :class="{ 'opacity-55': !s.enabled }">
               <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] bg-hover text-secondary-foreground"><PhSparkle :size="15" /></div>
               <div class="flex-1 min-w-0">
                 <div class="text-[13px] font-semibold text-foreground">{{ s.name }}</div>
                 <div class="mt-0.75 text-[11.5px] leading-snug text-secondary-foreground">{{ s.description || "No description" }}</div>
               </div>
-              <div class="flex shrink-0 items-center gap-1">
+              <span v-if="s.source === 'plugin'" class="shrink-0 text-[11px] text-muted-foreground">plugin</span>
+              <div v-else class="flex shrink-0 items-center gap-1">
                 <button
                   class="flex h-[26px] w-[26px] items-center justify-center rounded-[var(--radius-nav)] bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground"
                   :title="s.enabled ? 'Disable skill' : 'Enable skill'"
@@ -1645,7 +1646,7 @@ async function installAgentDocs() {
 }
 
 // ── Skills manager ────────────────────────────────────────────────────────────
-type SkillInfo = { name: string; description: string; dir: string; enabled: boolean };
+type SkillInfo = { name: string; description: string; dir: string; enabled: boolean; source: string };
 const skills = ref<SkillInfo[]>([]);
 const skillsLoading = ref(false);
 

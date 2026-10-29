@@ -164,3 +164,34 @@ func TestCollectPluginSkills(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+// Superset installs itself as a plugin inside ~/.claude/skills, and claude.ai
+// syncs org plugins into plugins/synced — neither is in installed_plugins.json.
+func TestCollectPluginSkillsOffRegistry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for dir, name := range map[string]string{
+		filepath.Join(home, ".claude", "skills", "superset"):              "superset",
+		filepath.Join(home, ".claude", "plugins", "synced", "b", "id"):    "obsidian-notes",
+		filepath.Join(home, ".claude", "plugins", "synced", "b", "id~g2"): "obsidian-notes",
+	} {
+		os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o755)
+		os.WriteFile(filepath.Join(dir, ".claude-plugin", "plugin.json"), []byte(`{"name":"`+name+`"}`), 0o644)
+		writeSkill(t, filepath.Join(dir, "skills", "s"), "---\nname: s\ndescription: d\n---\n")
+	}
+	var names []string
+	for _, s := range collectPluginSkills() {
+		names = append(names, s.Name)
+	}
+	if strings.Join(names, ",") != "superset:s,obsidian-notes:s" && strings.Join(names, ",") != "obsidian-notes:s,superset:s" {
+		t.Fatalf("got %v", names)
+	}
+}
+
+func TestSkillFrontmatterBlockScalar(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "SKILL.md")
+	os.WriteFile(p, []byte("---\nname: caveman\ndescription: >-\n  Talk short.\n  Keep facts.\nmetadata:\n  x: y\n---\n"), 0o644)
+	if name, desc := skillFrontmatter(p); name != "caveman" || desc != "Talk short. Keep facts." {
+		t.Fatalf("got %q %q", name, desc)
+	}
+}
