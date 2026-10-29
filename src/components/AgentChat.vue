@@ -493,7 +493,7 @@
             <span class="status-dot shrink-0" :class="subagentDotClass(c.id)" />
             <span class="shrink-0 font-medium text-foreground">{{ c.title }}</span>
             <span class="subagent-badge" :class="'tone-' + subagentState(c.id).tone">{{ subagentState(c.id).label }}</span>
-            <span class="min-w-0 truncate text-muted-foreground">{{ subagentDetail[c.id] }}</span>
+            <span class="min-w-0 truncate text-muted-foreground">{{ chatAttention.phaseFor(c.id)?.detail ?? subagentDetail[c.id] }}</span>
           </button>
         </template>
       </div>
@@ -1595,8 +1595,14 @@ onBeforeUnmount(() => {
 // Sub-agents card above the composer: this thread's live children, one row
 // each, with the state that matters to the parent (Ghostex "Threads" card).
 const subagentsCollapsed = ref(false);
+// The store holds every live chat's phase seeded from shell_snapshot; the local
+// listener only starts at mount, so on its own a child already running when
+// this view opened read "Idle" until its next phase change.
+function subagentStateOf(chatId: number): string | undefined {
+  return chatAttention.phaseFor(chatId)?.state ?? subagentPhase[chatId];
+}
 function subagentState(chatId: number): { label: string; tone: string } {
-  const state = subagentPhase[chatId];
+  const state = subagentStateOf(chatId);
   if (state === "waiting_input" || state === "waiting_approval") return { label: "Needs you", tone: "needs" };
   if (state === "running") return { label: "Running", tone: "running" };
   if (state === "failed") return { label: "Failed", tone: "failed" };
@@ -1610,7 +1616,7 @@ function subagentLabel(text: string): string {
 }
 
 function subagentDotClass(chatId: number): string {
-  const state = subagentPhase[chatId];
+  const state = subagentStateOf(chatId);
   if (state === "running") return "status-running";
   if (state === "waiting_input" || state === "waiting_approval") return "status-waiting";
   if (state === "done") return "status-done";
