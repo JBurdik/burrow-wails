@@ -74,7 +74,9 @@ _primary() {
     tab_rename)                  echo "pty_id title" ;;
     tab_close|focus_tab)         echo "pty_id" ;;
     focus_workspace|list_tabs)   echo "workspace_id" ;;
-    create_worktree|worktree_remove) echo "branch" ;;
+    create_worktree|worktree_remove|move_to_worktree) echo "branch" ;;
+    schedule)                    echo "text" ;;
+    schedule_cancel)             echo "id" ;;
     workspace_create)            echo "path" ;;
     pr_view|pr_merge)            echo "number" ;;
     diagram)                     echo "content" ;;

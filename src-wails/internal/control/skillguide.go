@@ -48,6 +48,13 @@ You only get that choice from a terminal tab. A spawn made FROM a chat thread is
 - wait_result: waits on a tab result token or on a chat_id, depending on the target the spawn actually produced.
 - collect_results: takes completed tab results and, when called from a chat parent, its completed chat-child results.
 
+## Managing your own chat
+
+From a chat, these act on the calling chat unless you pass --chat-id.
+
+- schedule sends a prompt to the chat later: --in 30m / 2h / 1d, or --at 15:04 / RFC3339. Use it as a wake-up — nothing else wakes a chat whose turn has ended — e.g. burrow schedule "Wake-up: check whether CI on #42 passed" --in 20m. It survives an app restart and is held until a running turn finishes. schedule_list and schedule_cancel manage pending ones.
+- move_to_worktree moves the chat into a worktree of its repo (reused if one exists on that branch, else created). It takes effect from the next turn: finish this turn working under the returned path (absolute paths), and the next prompt starts there with the conversation intact. leave_worktree moves it back to the parent repo and keeps the worktree. Claude and Codex chats only.
+
 ## Long-running processes
 
 Start a dev server, watcher or any process that does not exit with serve, never with background Bash, & or nohup. serve runs it in an interactive terminal in the user's Right Panel, so they can watch it and type into it, and returns its pty_id. Read the output with tab_output. Pass cwd to run it in a subdirectory. Calling serve again with the same command and cwd reuses that terminal and restarts the process if it was stopped. tab_close stops it; closing a terminal you started with serve needs no confirmation.
@@ -94,6 +101,7 @@ var delegationVerbNames = map[string]bool{
 var worktreeVerbNames = map[string]bool{
 	"create_worktree": true, "worktree_remove": true, "git_status": true,
 	"git_log": true, "git_diff": true, "run": true,
+	"move_to_worktree": true, "leave_worktree": true,
 }
 
 func writeVerbList(out *strings.Builder, verbs []Verb) {

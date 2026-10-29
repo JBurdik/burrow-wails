@@ -29,6 +29,7 @@ import (
 type chatRuntime struct {
 	locks  sync.Map // chat id string → *sync.Mutex
 	active sync.Map // chat id string → time.Time of last activity (chatsleep.go)
+	moved  sync.Map // chat id string → struct{}: live process runs in the old cwd (chatmove.go)
 
 	ctrlSeq     atomic.Int64
 	ctrlMu      sync.Mutex
@@ -91,6 +92,7 @@ func chatTransport(c Chat) string {
 
 func (a *App) ensureClaude(c Chat) error {
 	id := strconv.FormatInt(c.ID, 10)
+	a.restartIfMoved(id)
 	if a.claudeMgr().Alive(id) {
 		return nil
 	}
@@ -124,6 +126,7 @@ func (a *App) startRPC(opts AcpStartOpts, transport string) error {
 // than its row says. Model and effort are best-effort.
 func (a *App) ensureRPC(c Chat, transport string) error {
 	id := strconv.FormatInt(c.ID, 10)
+	a.restartIfMoved(id)
 	if _, live := a.acpReg().get(id); live {
 		return nil
 	}

@@ -74,9 +74,9 @@ func (f *fakeRPC) written(id string) string {
 }
 
 type fakeStart struct {
-	id, cmd string
-	args    []string
-	env     []string
+	id, cmd, cwd string
+	args         []string
+	env          []string
 }
 
 func newFakeProcs() *fakeProcs {
@@ -88,7 +88,7 @@ func (f *fakeProcs) Start(id, command string, args []string, cwd string, env []s
 	defer f.mu.Unlock()
 	f.alive[id] = true
 	f.onLine[id] = onLine
-	f.starts = append(f.starts, fakeStart{id: id, cmd: command, args: args, env: env})
+	f.starts = append(f.starts, fakeStart{id: id, cmd: command, cwd: cwd, args: args, env: env})
 	return nil
 }
 

@@ -228,9 +228,12 @@ func (a *App) SaveChats(chats []Chat) error {
 	}
 	defer tx.Rollback()
 
+	// workspace_id and branch are not written: set by CreateChat, changed only
+	// by moveChat (chatmove.go). A client saves on every streamed message, so a
+	// stale copy would otherwise move a chat straight back out of its worktree.
 	stmt, err := tx.Prepare(
-		`UPDATE chats SET workspace_id=?, title=?, pinned_title=?, claude_session_id=?,
-			message_count=?, agent_kind=?, transport=?, model=?, branch=?,
+		`UPDATE chats SET title=?, pinned_title=?, claude_session_id=?,
+			message_count=?, agent_kind=?, transport=?, model=?,
 			settled_override=?, archived_at=?, last_activity_at=?, parent_chat_id=? WHERE id=?`)
 	if err != nil {
 		return err
@@ -241,8 +244,8 @@ func (a *App) SaveChats(chats []Chat) error {
 		if c.ID <= 0 {
 			continue
 		}
-		if _, err := stmt.Exec(c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID,
-			c.MessageCount, c.AgentKind, c.Transport, c.Model, c.Branch,
+		if _, err := stmt.Exec(c.Title, c.PinnedTitle, c.ClaudeSessionID,
+			c.MessageCount, c.AgentKind, c.Transport, c.Model,
 			c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID, c.ID); err != nil {
 			return err
 		}
@@ -284,6 +287,9 @@ func (a *App) DeleteChat(id int64) error {
 	}
 	for _, c := range ids {
 		if err := a.DeleteChatMessages(int(c)); err != nil {
+			return err
+		}
+		if _, err := a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, c); err != nil {
 			return err
 		}
 	}

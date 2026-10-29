@@ -262,6 +262,7 @@ func (a *App) startup(ctx context.Context) {
 	go ListFonts()
 
 	go a.chatSleepLoop()
+	go a.chatScheduleLoop()
 	a.startPromptIndex()
 
 	a.initControl(dataDir)

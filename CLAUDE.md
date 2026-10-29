@@ -170,6 +170,18 @@ it — opening a chat does not wake it. A **manual** settle (`settle()` in `clau
 and so killed a CLI blocked on a permission prompt. PTY agent tabs are **not** slept: killing one loses the
 TUI, and restoring it means relaunching `claude --resume <id>` into the same tab (not built).
 
+**Self-management verbs** (`internal/control/verbs_self.go`, local-only, default to the caller's chat):
+`schedule` / `schedule_list` / `schedule_cancel` (`chatschedule.go`) — SQLite `chat_schedules`, a 15 s sweep
+delivers due items via `ChatSend` **only once the chat has settled** (`chatSettled`: phase not in flight, no
+open Codex/ACP turn) — `ChatSend` into a running turn is a steer, not a queue — one per chat per sweep, 5
+retries; `DeleteChat` drops a chat's items. `move_to_worktree` / `leave_worktree` (`chatmove.go`) rewrite
+`chats.workspace_id`/`branch` — **read-only to `SaveChats`** since then (a client saves per streamed message
+and would move it back) — and flag `chatRT.moved`; the next ensure **after the turn settles**
+(`restartIfMoved`) stops the old-cwd process so the start resumes in the new cwd. Claude's session file is
+symlinked into `<config>/projects/<new-cwd-slug>/` (2.1.311 resumes by id from any cwd and appends to the
+original; older CLIs / another `CLAUDE_CONFIG_DIR` look only there). Codex resumes with the new cwd; generic
+ACP refuses.
+
 **`spawn` of a thread's sub-agent runs in Go** (`spawnSubagent`, `control.Deps.ChatRuntime`): profile
 (defaults duplicated from `subagentProfiles.ts`, test-guarded) → agent (arg / profile / parent's / default
 chat agent / first enabled) → row with launch settings (arg / profile / the parent's **when it runs on the

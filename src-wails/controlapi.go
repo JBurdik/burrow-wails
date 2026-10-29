@@ -201,6 +201,8 @@ func (a *App) initControl(dataDir string) {
 		Chats:        a,
 		ChatStopper:  a,
 		ChatRuntime:  chatRuntimeAdapter{a},
+		Schedules:    scheduleAdapter{a},
+		ChatMover:    chatMoverAdapter{a},
 		PTYs:         a,
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")

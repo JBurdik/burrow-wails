@@ -132,6 +132,19 @@
     <tr><td>diagram</td><td>Render Mermaid source in a panel for the user.</td></tr>
   </table>
 
+  <h3>Self-management (the calling chat)</h3>
+  <p>
+    Default to the caller's chat (<code>parent_chat_id</code> from <code>BURROW_CHAT_ID</code>); <code>--chat-id</code> targets another.
+    Local-only: both drive an agent that holds tool permissions later or elsewhere.
+  </p>
+  <table>
+    <tr><th>Verb</th><th>What it does</th></tr>
+    <tr><td>schedule</td><td>Queue a prompt for a chat: <code>--in 30m|2h|1d</code> or <code>--at 15:04|2006-01-02 15:04|RFC3339</code> (a past clock time means tomorrow). A wake-up is just <code>"Wake-up: &lt;reason&gt;"</code>. Rows live in SQLite <code>chat_schedules</code>, so they survive a restart; a 15 s sweep (<code>chatschedule.go</code>) delivers due items through <code>ChatSend</code> (which resumes a stopped or slept process) — but only once the chat's phase has settled and no Codex/ACP turn is open, one per chat per sweep, because a send into a running turn is a steer, not a queued prompt. A failed delivery is retried 5× a minute apart; a deleted chat's items go with it.</td></tr>
+    <tr><td>schedule_list / schedule_cancel</td><td>Pending items, soonest first (<code>--all</code> for every chat); cancel by id.</td></tr>
+    <tr><td>move_to_worktree</td><td>Re-home a chat in a worktree of its repo — an existing worktree on <code>branch</code> is reused, else <code>create_worktree</code>'s machinery makes one. Updates <code>chats.workspace_id</code>/<code>branch</code> (both now read-only to <code>SaveChats</code>, or a client's save-per-message would move it back). The live process is replaced on the first send after the turn settles, never mid-turn (the caller is usually that turn). Claude: the session file is symlinked into the new cwd's <code>projects/&lt;slug&gt;/</code> (claude 2.1.311 resumes across cwds on its own; older CLIs and a different <code>CLAUDE_CONFIG_DIR</code> don't). Codex: <code>thread/resume</code> takes the new cwd. Generic ACP: refused.</td></tr>
+    <tr><td>leave_worktree</td><td>Move the chat back to the worktree's parent repo. The worktree stays (<code>worktree_remove</code> deletes it).</td></tr>
+  </table>
+
   <h3>Repo, worktrees, pull requests</h3>
   <table>
     <tr><th>Verb</th><th>What it does</th></tr>

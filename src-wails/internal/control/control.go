@@ -228,6 +228,10 @@ type Deps struct {
 	ChatStopper ChatStopper
 	// ChatRuntime is optional: nil sends every chat spawn/send to the UI.
 	ChatRuntime ChatRuntime
+	// Schedules and ChatMover back the agent self-management verbs
+	// (verbs_self.go). nil = those verbs refuse.
+	Schedules Schedules
+	ChatMover ChatMover
 	// PTYs reports live PTY ids for orchestration dispatch liveness. Optional:
 	// nil means "no proof either way", so absence of the capability itself
 	// must never be read as absence of the process.
@@ -246,6 +250,7 @@ func New(deps Deps) *Core {
 	c.register(navigationVerbs(c)...)
 	c.register(vcsVerbs(c)...)
 	c.register(orchVerbs(c)...)
+	c.register(selfVerbs(c)...)
 	return c
 }
 
