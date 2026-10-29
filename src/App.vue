@@ -190,6 +190,8 @@ import { FIXED_SHORTCUTS } from "@/lib/keymap";
 import PathPicker from "@/components/PathPicker.vue";
 import { pickDir } from "@/lib/pickPath";
 import { dirOf, looksLikeMdPath, resolveLocalLink } from "@/lib/localLink";
+import { classifyChatLink, localUrl, prRef, repoKey } from "@/lib/chatLinks";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { installControlBridge } from "@/lib/controlBridge";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -584,6 +586,60 @@ function onLocalLinkClick(e: MouseEvent) {
   openLocalFile(link);
 }
 
+// A link in a chat transcript opens BESIDE the chat, like Claude Desktop: this
+// repo's PR → the PRs surface on that PR, a localhost dev server → the Browser
+// surface (src/lib/chatLinks.ts says why nothing else does). ⌘/Ctrl-click, a
+// modified or middle click and every other link fall through to main.ts →
+// system browser. On `window`, capturing: main.ts's handler sits on
+// `document` and would otherwise open the system browser first.
+const repoKeysByCwd = new Map<string, Promise<string[]>>();
+function repoKeysFor(cwd: string): Promise<string[]> {
+  let keys = repoKeysByCwd.get(cwd);
+  if (!keys) {
+    keys = invoke<{ stdout: string }>("run_git", { cwd, args: ["remote", "-v"] })
+      .then((r) => [...new Set(r.stdout.split("\n").map((l) => repoKey(l.split(/\s+/)[1] ?? "")).filter((k): k is string => !!k))])
+      .catch(() => []);
+    repoKeysByCwd.set(cwd, keys);
+    setTimeout(() => repoKeysByCwd.delete(cwd), 60_000);
+  }
+  return keys;
+}
+function openOutside(href: string) {
+  if ((window as any).runtime) void shellOpen(href);
+  else window.open(href, "_blank", "noopener");
+}
+function onChatLinkClick(e: MouseEvent) {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = (e.target as Element | null)?.closest?.(".chat-messages a[href]") as HTMLAnchorElement | null;
+  if (!a) return;
+  const href = a.href;
+  const local = localUrl(href);
+  const pr = !local && prRef(href);
+  if (!local && !pr) return;
+  const wsId = Number(a.closest("[data-workspace-id]")?.getAttribute("data-workspace-id")) || ws.active?.id;
+  const workspace = ws.workspaces.find((w) => w.id === wsId);
+  if (!workspace) return;
+  if (local) {
+    // The phone has no Browser surface, and its localhost is not this machine.
+    if (compact.value) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    ui.rightPanelVisible = true;
+    rightPanelRef.value?.openBrowserUrl(local, workspace.id);
+    return;
+  }
+  // Whose PR it is needs the remotes (async): take the click now, and hand a
+  // foreign PR to the system browser ourselves.
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  void repoKeysFor(workspace.path).then((keys) => {
+    const t = classifyChatLink(href, keys);
+    if (t?.kind !== "pr") return openOutside(href);
+    if (compact.value) void router.push("/project/pull-requests");
+    else ui.rightPanelVisible = true;
+    rightPanelRef.value?.openPullRequest(t.number, t.url, workspace.id);
+  });
+}
 
 async function openNewWorkspace() {
   const dir = await pickDir({ title: "Add project", start: ui.defaultProjectDir || "~/" });
@@ -646,6 +702,7 @@ onMounted(async () => {
   playStartupChime();
   window.addEventListener("keydown", onKeydown);
   document.addEventListener("click", onLocalLinkClick, true);
+  window.addEventListener("click", onChatLinkClick, true);
   window.addEventListener('mousemove', onResizeMove);
   window.addEventListener('mouseup', onResizeUp);
   setTimeout(() => update.check({ silent: true }), 3000);
@@ -673,6 +730,7 @@ onBeforeUnmount(() => {
   welcomeBottom.ptyIds.forEach((id) => void invoke("kill_pty", { id }).catch(() => {}));
   window.removeEventListener("keydown", onKeydown);
   document.removeEventListener("click", onLocalLinkClick, true);
+  window.removeEventListener("click", onChatLinkClick, true);
   window.removeEventListener('mousemove', onResizeMove);
   window.removeEventListener('mouseup', onResizeUp);
   if (updateTimer) clearInterval(updateTimer);

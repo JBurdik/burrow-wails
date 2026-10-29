@@ -7,7 +7,12 @@ import { usePullRequests, type PrScope } from "@/composables/usePullRequests";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<{ cwd: string }>();
+const props = defineProps<{
+  cwd: string;
+  /** Open this PR's detail (a chat link to it). `n` makes a repeat click re-open it. */
+  openRequest?: { number: number; url: string; n: number };
+}>();
+const emit = defineEmits<{ opened: [] }>();
 const pr = usePullRequests(() => props.cwd);
 const scopes: Array<{ id: PrScope; label: string }> = [{ id: "assigned", label: "Assigned" }, { id: "created", label: "Created" }, { id: "all", label: "All" }];
 const stateLabel = computed(() => pr.selected.value?.isDraft ? "Draft" : pr.selected.value?.state === "merged" ? "Merged" : "Open");
@@ -15,6 +20,13 @@ const checkCount = computed(() => pr.selected.value?.checks?.length ?? 0);
 
 watch(() => props.cwd, () => { pr.selected.value = null; pr.loadForge(); pr.refresh(); }, { immediate: true });
 watch(pr.scope, () => pr.refresh());
+// After the cwd watch above (which clears the selection on mount). `select`
+// shows the stub at once and swaps in `forge_pr_view`'s full detail.
+watch(() => props.openRequest, (req) => {
+  if (!req || !props.cwd) return;
+  void pr.select({ number: req.number, title: `#${req.number}`, url: req.url, state: "open", isDraft: false, headRefName: "", baseRefName: "" });
+  emit("opened");
+}, { immediate: true });
 
 async function setProvider(provider: string) {
   if (!provider) return;

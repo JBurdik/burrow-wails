@@ -333,7 +333,7 @@
       </div>
     </div>
 
-    <PullRequestsPanel v-else-if="act(pi) === 'pull-requests'" :cwd="props.cwd" />
+    <PullRequestsPanel v-else-if="act(pi) === 'pull-requests'" :cwd="props.cwd" :open-request="prOpen[wsKey]" @opened="delete prOpen[wsKey]" />
 
     <DevServersSurface v-else-if="act(pi) === 'dev-servers'" :cwd="props.cwd" />
 
@@ -596,7 +596,14 @@
          changes pane, nowhere else.) -->
     <div class="hidden">
       <Teleport v-for="id in browserWsIds" :key="'b' + id" :to="hostSlot(id, 'browser')" :disabled="!hostSlot(id, 'browser')">
-        <BrowserPane v-show="id === wsKey && isShown(layout, 'browser')" class="min-h-0 flex-1" />
+        <BrowserPane
+          v-show="id === wsKey && isShown(layout, 'browser')"
+          class="min-h-0 flex-1"
+          :request="browserNav[id]"
+          :can-ask="id === wsKey && !!activeChatId"
+          :agent-name="activeChatAgentName"
+          @ask-start="askToStartServer"
+        />
       </Teleport>
       <!-- The wrapper is load-bearing: XTerm has a fragment root, so v-show on
            it is ignored and the shell stayed painted over every other surface. -->
@@ -727,6 +734,7 @@ import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { activeChatIdFor, childrenOf } from "@/stores/chatTree";
 import { nextSubAgentView } from "@/lib/subAgentView";
 import { perform } from "@/lib/controlBridge";
+import { chatSession } from "@/lib/chatSession";
 import { getAgentAttentionState, type AgentAttentionState } from "@/lib/terminalStatus";
 import FileTreeNode from "./FileTreeNode.vue";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
@@ -958,6 +966,36 @@ function openSubagent(chatId: number, workspaceId: number) {
   const state = wsUi(workspaceId);
   openIn(layoutFor(workspaceId), "agents");
   state.openChildId = chatId;
+}
+/** A chat link to a dev server: show it in that workspace's Browser surface.
+ *  The caller shows the panel. */
+const browserNav = reactive<Record<number, { url: string; n: number }>>({});
+function openBrowserUrl(url: string, workspaceId: number) {
+  openIn(layoutFor(workspaceId), "browser");
+  ensureBrowserPane(workspaceId);
+  browserNav[workspaceId] = { url, n: (browserNav[workspaceId]?.n ?? 0) + 1 };
+}
+/** A chat link to one of this repo's pull requests: the PRs surface, on its detail. */
+const prOpen = reactive<Record<number, { number: number; url: string; n: number }>>({});
+function openPullRequest(number: number, url: string, workspaceId: number) {
+  openIn(layoutFor(workspaceId), "pull-requests");
+  prOpen[workspaceId] = { number, url, n: (prOpen[workspaceId]?.n ?? 0) + 1 };
+}
+const activeChatAgentName = computed(() => {
+  const chat = activeChatId.value ? chats.sessions.find((s) => s.id === activeChatId.value) : undefined;
+  return chat ? providers.resolve(chat.agentKind)?.name : undefined;
+});
+/** The Browser surface's "Nothing listening" button: ask the chat on screen,
+ *  through the same doors as its composer — queued behind a running turn, else sent. */
+function askToStartServer(port: number) {
+  const id = activeChatId.value;
+  if (!id) return;
+  const text = `Start the dev server on port ${port} so I can preview it at http://localhost:${port}.`;
+  const session = chatSession(id);
+  if (session.busy.value) {
+    session.enqueueMessage(text);
+    session.save();
+  } else void session.send({ text });
 }
 /** Open a surface (Background, Progress, Outputs, …) in a workspace's panel
  *  from outside it — a transcript row that names one. The caller shows the panel. */
@@ -1336,7 +1374,7 @@ function openFile(path: string, range?: { from: number; to: number }) {
 }
 provide("openFileInPanel", openFile);
 
-defineExpose({ openGitTab, openSubagent, openPanelSurface, openDoc, openFile });
+defineExpose({ openGitTab, openSubagent, openPanelSurface, openBrowserUrl, openPullRequest, openDoc, openFile });
 
 // Phone shell (/project/:surface): one surface, full screen, no tab strip or
 // second pane — the phone's own header and back arrow replace them.

@@ -139,7 +139,7 @@
     />
 
     <div class="relative flex min-h-0 flex-1">
-    <div ref="scrollEl" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
+    <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <!-- A remount starts with no messages until the transcript is read back, which on
            a slow link (remote client) takes long enough to read as an empty conversation. -->

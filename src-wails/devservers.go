@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -172,4 +173,25 @@ func (a *App) KillDevServer(pid int) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return syscall.Kill(-pgid, syscall.SIGKILL)
+}
+
+// PortListening reports whether anything accepts a TCP connection on this
+// machine's loopback at port — the Right Panel's Browser surface asks before
+// framing a localhost URL, so a dead dev server shows "Nothing listening"
+// instead of WebKit's blank error frame. IPv4 first, then IPv6: Vite and
+// friends often bind only ::1 for "localhost". A short timeout because a
+// loopback connect is answered (accepted or refused) immediately.
+func (a *App) PortListening(port int) bool {
+	if port <= 0 || port > 65535 {
+		return false
+	}
+	p := strconv.Itoa(port)
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		c, err := net.DialTimeout("tcp", net.JoinHostPort(host, p), 300*time.Millisecond)
+		if err == nil {
+			_ = c.Close()
+			return true
+		}
+	}
+	return false
 }

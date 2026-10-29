@@ -156,6 +156,9 @@ var remoteAllowed = map[string]remoteCmd{
 	// rather than terminal:operate itself (it isn't a PTY).
 	"list_dev_servers": {Method: "ListDevServers", Args: []string{"workspacePath"}, Scope: scopeOrchRead},
 	"kill_dev_server":  {Method: "KillDevServer", Args: []string{"pid"}, Scope: scopeOrchOperate},
+	// The Browser surface's "Nothing listening on localhost:N" check: a
+	// loopback connect on the host, no data read or written.
+	"port_listening": {Method: "PortListening", Args: []string{"port"}, Scope: scopeOrchRead},
 
 	// Environment. environment_id is also what the WS handler test calls,
 	// because it is safe on a bare &App{} — most commands are not.
