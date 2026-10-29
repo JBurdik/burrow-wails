@@ -63,7 +63,7 @@
             @select="(id) => welcomeBottom.activeId = id"
           />
           <Terminal
-            v-for="w in ws.opened"
+            v-for="w in mountedWorkspaces"
             v-show="ws.active && w.id === ws.active.id && !showWelcome"
             :key="w.id"
             :workspace-id="w.id"
@@ -253,6 +253,14 @@ const activeTabs = computed(() => (ws.active ? tabsStore.tabsByWs[ws.active.id] 
 // watched/seen logic — which is how a tab hidden behind the composer counted as
 // watched. The ui store now only reads the route back out.
 const showWelcome = computed(() => ui.welcomeVisible);
+// A remote client restores every workspace the desktop has open (config.json
+// is shared) and would mount all their terminals, each replaying up to 1 MiB of
+// scrollback; iOS kills the page for that (white screen). The desktop keeps
+// them mounted because a re-attach corrupts the scrollback — a phone pays that
+// for one remount instead.
+const mountedWorkspaces = computed(() =>
+  isWeb ? ws.opened.filter((w) => w.id === ws.active?.id) : ws.opened,
+);
 
 // ── route ⇄ stores ───────────────────────────────────────────────────────────
 // The URL names the workspace and tab; the stores hold the objects. These two

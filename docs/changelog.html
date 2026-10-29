@@ -79,11 +79,60 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.7.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.7.0</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">říjen 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Řízení běžícího chatu</div>
+    <ul>
+      <li><strong>Steer</strong> — zpráva z fronty jde rovnou do běžícího turnu (Cmd/Ctrl+Enter), místo aby čekala na jeho konec. Claude ji dostane jako řádek na stdin a přečte ji na další hranici nástroje, Codex přes <code>turn/steer</code>. Jde jen ve fázi <code>running</code>; odmítnutá zpráva zůstane ve frontě.</li>
+      <li><strong>Side chat</strong> — rychlá otázka k vláknu, která ho neruší. Při prvním startu forkne aktuální session rodiče (Claude <code>--fork-session</code>, Codex <code>thread/fork</code>), takže má celý kontext a rodičovský proces ani běžící turn se nedotkne. Otevírá se v Right Panelu a není to sub-agent.</li>
+      <li><strong>Review jedním klikem</strong> — tlačítko Review v Diff panelu založí chat, který zreviduje změny workspace (necommitnuté, nebo proti base větvi). Codex používá nativní <code>review/start</code>, ostatní agenti review prompt.</li>
+      <li><strong>Úprava fronty</strong> — zprávu ve frontě jde upravit inline, přesouvat Alt+↑/↓, smazat celou frontu nebo ji sbalit.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Right Panel</div>
+    <ul>
+      <li><strong>Progress, Outputs, Background</strong> — živý todo list aktivního chatu (u Codexu z <code>turn/plan/updated</code>), soubory, které chat vytvořil nebo upravil, a shell úlohy na pozadí s výstupem a tlačítkem Stop (Claude <code>stop_task</code>, Codex background terminály).</li>
+      <li><strong>Klikací poznámky v transcriptu</strong> — Go zapíše do chatu řádek „Plan: 2/5 — …“, „Changed N files“ nebo start/konec úlohy na pozadí; klik otevře odpovídající panel. Poznámky vznikají jen živě, replay je jen přehraje z logu.</li>
+      <li><strong>Soubory z exploreru jako taby</strong> — klik otevře soubor jako tab v Right Panelu (dvojklik dál v hlavním editoru), Markdown se zobrazí vyrenderovaný s přepínačem edit/preview.</li>
+      <li><strong>Odkazy <code>soubor#L10-20</code></strong> — odkazy na soubor s řádky v odpovědi agenta otevřou soubor a skočí na dané řádky.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Přehled</div>
+    <ul>
+      <li><strong>Limity předplatného</strong> — v Sidebaru je vidět čerpání session/týdenního limitu Claude a Codexu. Claude token se čte z Keychainu při každém dotazu a nikdy se neobnovuje (rotace refresh tokenu by odhlásila CLI).</li>
+      <li><strong>Recap vlákna</strong> — pod názvem chatu v Sidebaru jeden řádek, kde vlákno stojí. Generuje se po dokončeném turnu (nejvýš jednou za 2 min) stejným modelem jako názvy chatů; vypínač v Nastavení → General.</li>
+      <li><strong>Kompaktní composer na telefonu</strong> — jednořádkový placeholder, výběr modelu/effortu/oprávnění schovaný za přepínač a sponka pro přiložení fotky.</li>
+      <li><strong><code>burrow spawn --detach</code></strong> — vlákno může otevřít samostatný chat nebo tab místo sub-agenta.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Bílá obrazovka v PWA</strong> — telefon si ze sdíleného <code>config.json</code> obnovil všechny workspacy otevřené na Macu a namountoval všechny jejich terminály (32 xtermů, každý s přehráním až 1 MiB historie); iOS stránku zabil. Vzdálený klient teď mountuje jen terminály aktivního workspace.</li>
+      <li><strong>Zaseknutý status PTY tabů</strong> — hook server odmítal <code>ptyId</code> poslané jako číslo (400, spolknuté <code>curl -sf</code>), takže se ztrácely konce turnů a žádosti o oprávnění. A nový Claude Code běží jako <code>claude.exe</code>, což poll nepoznal a tab zůstal v <code>running</code>.</li>
+      <li><strong>Rewind mazal příliš brzy</strong> — poslední zpráva se do <code>chat_stream</code> zapisuje asynchronně, takže ji <code>DELETE</code> při rewindu mohl předběhnout a nechat v transcriptu. Rewind teď nejdřív počká na zápis fronty.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
   <!-- v0.6.0 -->
 <div class="release">
   <div class="release-header">
     <span class="version">v0.6.0</span>
-    <span class="tag tag-latest">nejnovější</span>
     <span class="date">říjen 2026</span>
   </div>
 
