@@ -51,7 +51,11 @@ export function ChatSend(arg1:number,arg2:string,arg3:Array<string>):Promise<voi
 
 export function ChatSetLaunchSettings(arg1:number,arg2:main.LaunchSettingsPatch):Promise<void>;
 
+export function ChatSideCreate(arg1:number):Promise<main.Chat>;
+
 export function ChatSleep(arg1:number):Promise<boolean>;
+
+export function ChatSteer(arg1:number,arg2:string,arg3:Array<string>):Promise<void>;
 
 export function ChatStopTask(arg1:number,arg2:string):Promise<void>;
 
@@ -314,6 +318,8 @@ export function ResizePty(arg1:string,arg2:number,arg3:number):Promise<void>;
 export function RestartDaemon():Promise<void>;
 
 export function RestoreCheckpoint(arg1:string,arg2:string):Promise<main.Checkpoint>;
+
+export function ReviewChanges(arg1:number,arg2:number,arg3:string):Promise<Record<string, any>>;
 
 export function RevokeRemoteDevice(arg1:string):Promise<void>;
 

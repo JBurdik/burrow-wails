@@ -98,8 +98,16 @@ export function ChatSetLaunchSettings(arg1, arg2) {
   return window['go']['main']['App']['ChatSetLaunchSettings'](arg1, arg2);
 }
 
+export function ChatSideCreate(arg1) {
+  return window['go']['main']['App']['ChatSideCreate'](arg1);
+}
+
 export function ChatSleep(arg1) {
   return window['go']['main']['App']['ChatSleep'](arg1);
+}
+
+export function ChatSteer(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatSteer'](arg1, arg2, arg3);
 }
 
 export function ChatStopTask(arg1, arg2) {
@@ -624,6 +632,10 @@ export function RestartDaemon() {
 
 export function RestoreCheckpoint(arg1, arg2) {
   return window['go']['main']['App']['RestoreCheckpoint'](arg1, arg2);
+}
+
+export function ReviewChanges(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ReviewChanges'](arg1, arg2, arg3);
 }
 
 export function RevokeRemoteDevice(arg1) {

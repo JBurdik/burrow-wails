@@ -326,6 +326,8 @@ export namespace main {
 	    profile_id: string;
 	    append_system_prompt: string;
 	    slept_at: number;
+	    recap: string;
+	    kind: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chat(source);
@@ -353,6 +355,8 @@ export namespace main {
 	        this.profile_id = source["profile_id"];
 	        this.append_system_prompt = source["append_system_prompt"];
 	        this.slept_at = source["slept_at"];
+	        this.recap = source["recap"];
+	        this.kind = source["kind"];
 	    }
 	}
 	export class ProviderRuntimeEvent {
@@ -380,6 +384,7 @@ export namespace main {
 	    turnMs?: number;
 	    subagentChatId?: number;
 	    subagentAgent?: string;
+	    surface?: string;
 	    requestId?: string;
 	    requestKind?: string;
 	    cleared?: boolean;
@@ -414,6 +419,7 @@ export namespace main {
 	        this.turnMs = source["turnMs"];
 	        this.subagentChatId = source["subagentChatId"];
 	        this.subagentAgent = source["subagentAgent"];
+	        this.surface = source["surface"];
 	        this.requestId = source["requestId"];
 	        this.requestKind = source["requestKind"];
 	        this.cleared = source["cleared"];
