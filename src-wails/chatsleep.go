@@ -51,6 +51,8 @@ func (r *chatRuntime) touchChat(id string, now time.Time) {
 // minute for each chat that is on screen while the window has focus).
 func (a *App) ChatMarkActive(chatID int64) {
 	a.chatRT.touchChat(strconv.FormatInt(chatID, 10), time.Now())
+	// Also what keeps a watched chat from buzzing the phone (pushtrigger.go).
+	a.push.watch("chat:"+strconv.FormatInt(chatID, 10), time.Now())
 }
 
 // chatAutoSleepIdle reads the setting fresh each sweep. Absent = the default,

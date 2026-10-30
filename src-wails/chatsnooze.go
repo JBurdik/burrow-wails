@@ -68,6 +68,7 @@ func (a *App) wakeSnoozedChats(now time.Time) []int64 {
 		busEmit("chats-changed", nil)
 		for _, id := range woke {
 			busEmit("chat-snooze-woke", map[string]int64{"chat_id": id})
+			a.pushChat(id, "snooze")
 		}
 	}
 	return woke

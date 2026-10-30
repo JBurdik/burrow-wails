@@ -221,7 +221,10 @@ func (a *App) startup(ctx context.Context) {
 	} else {
 		a.phases = ps
 		a.perms = newPermRegistry(ps)
-		ps.onChange = a.perms.phaseChanged
+		ps.onChange = func(id string, prev, next agentphase.Phase) {
+			a.perms.phaseChanged(id, next)
+			a.pushPhaseChanged(id, prev, next)
+		}
 	}
 
 	// Chat transcripts used to live in config.json; move them into SQLite before
