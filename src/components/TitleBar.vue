@@ -107,49 +107,14 @@
       <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Back" @click="router.back()"><PhCaretLeft :size="14" /></button>
       <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="New thread" @click="ui.openWelcome()"><PhCircle :size="12" weight="bold" /></button>
       <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Forward" @click="router.forward()"><PhCaretRight :size="14" /></button>
-      <span class="ml-2 min-w-0 truncate text-[13.5px] font-medium text-foreground" data-tauri-drag-region>{{ screenTitle }}</span>
-      <span v-if="isDev || isBeta" class="tb-wide shrink-0 rounded-[5px] border border-border px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" data-tauri-drag-region>{{ isDev ? "dev" : "beta" }}</span>
+      <span class="ml-2 min-w-0 truncate text-[13.5px] font-medium text-foreground" data-tauri-drag-region>
+        <span v-if="crumbProject" class="text-muted-foreground">{{ crumbProject }} / </span>{{ screenTitle }}
+      </span>
+      <span v-if="releaseChannel && ui.channelMarker !== 'off'" class="tb-wide shrink-0 rounded-[5px] border border-border px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" data-tauri-drag-region>{{ releaseChannel }}</span>
       <div class="min-w-4 flex-1" data-tauri-drag-region />
-      <CommitPushMenu v-if="branch" class="tb-wide [-webkit-app-region:no-drag]" />
     </div>
 
     <div class="flex shrink-0 items-center gap-0.5 pr-2 [-webkit-app-region:no-drag]">
-      <!-- Opens an app on the Mac: no use to a browser client. -->
-      <div class="tb-web-hide relative flex gap-0">
-        <button
-          class="tb-btn rounded-l-[var(--radius-nav)] rounded-r-none pr-1.5"
-          :title="lastOpenTarget.id === 'finder' ? 'Reveal in Finder' : `Open in ${lastOpenTarget.name}`"
-          :disabled="!folderPath"
-          @click.stop="openIn(lastOpenTarget.id)"
-        >
-          <img v-if="lastOpenTarget.icon" :src="lastOpenTarget.icon" class="h-3.5 w-3.5 shrink-0" />
-          <PhFolderOpen v-else :size="14" />
-          <span class="text-[11px] font-medium">{{ lastOpenTarget.name }}</span>
-        </button>
-        <button
-          class="tb-btn rounded-l-none rounded-r-[var(--radius-nav)] border-l border-border pl-[5px] pr-[5px]"
-          title="Open folder in…"
-          :disabled="!folderPath"
-          @click.stop="toggleMenu"
-        >
-          <PhCaretDown :size="9" />
-        </button>
-        <div v-if="menuOpen" class="tb-menu" @click.stop>
-          <button
-            v-for="t in openTargets"
-            :key="t.id"
-            class="tb-menu-item"
-            :class="lastOpenIn === t.id && '!text-accent'"
-            @click="openIn(t.id)"
-          >
-            <img v-if="t.icon" :src="t.icon" class="h-3.5 w-3.5 shrink-0" />
-            <PhFolderNotchOpen v-else :size="14" />
-            {{ t.id === "finder" ? "Reveal in Finder" : `Open in ${t.name}` }}
-          </button>
-          <div class="my-1 h-px bg-border" />
-          <button class="tb-menu-item" @click="copyPath()"><PhCopy :size="14" />Copy Path</button>
-        </div>
-      </div>
       <div class="tb-wide relative flex">
         <button
           class="tb-btn"
@@ -203,6 +168,18 @@
       </div>
       <button
         class="tb-btn"
+        :class="detailsOpen && 'text-accent'"
+        :disabled="!folderPath"
+        :title="detailsOpen ? 'Hide thread details' : 'Show thread details'"
+        @click="$emit('toggle-details')"
+      >
+        <PhInfo :size="14" />
+      </button>
+      <button class="tb-btn" title="Toggle bottom terminal" @click="$emit('toggle-bottom')">
+        <PhTerminalWindow :size="14" />
+      </button>
+      <button
+        class="tb-btn"
         :class="rightPanelVisible && 'text-accent'"
         :title="rightPanelVisible ? 'Hide explorer & git' : 'Show explorer & git'"
         @click="$emit('toggle-rightpanel')"
@@ -216,53 +193,18 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhMagnifyingGlass, PhCaretLeft, PhCaretRight, PhCircle, PhSidebarSimple, PhFolderOpen, PhCaretDown, PhFolderNotchOpen, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheck, PhX, PhWarning, PhInfo, PhSkull, PhCopy, PhRobot, PhGitBranch } from "@phosphor-icons/vue";
+import { PhMagnifyingGlass, PhCaretLeft, PhCaretRight, PhCircle, PhSidebarSimple, PhCaretDown, PhGauge, PhCpu, PhMemory, PhStack, PhBroom, PhArrowsClockwise, PhBell, PhCheck, PhX, PhWarning, PhInfo, PhSkull, PhRobot, PhTerminalWindow, PhGitBranch } from "@phosphor-icons/vue";
 import { useNotificationsStore, type HistoryItem, type NotifSource } from "@/stores/notifications";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
-import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
-import CommitPushMenu from "./CommitPushMenu.vue";
 import { useUIStore } from "@/stores/ui";
+import { releaseChannel } from "@/lib/releaseChannel";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { router } from "@/router";
 
-const props = defineProps<{ workspaceName?: string; branch?: string; folderPath?: string; rightPanelVisible?: boolean; sidebarVisible?: boolean }>();
-defineEmits(["back", "toggle-rightpanel", "toggle-sidebar"]);
+const props = defineProps<{ workspaceName?: string; folderPath?: string; rightPanelVisible?: boolean; sidebarVisible?: boolean; detailsOpen?: boolean }>();
+defineEmits(["back", "toggle-rightpanel", "toggle-sidebar", "toggle-details", "toggle-bottom"]);
 
-const menuOpen = ref(false);
-type OpenTarget = { id: string; name: string; icon: string };
-const FINDER_TARGET: OpenTarget = { id: "finder", name: "Finder", icon: "" };
-
-// "Open in…" targets are the installed apps Go finds in /Applications
-// (see ListOpenTargets in fs.go), fetched once and cached for the session.
-const openTargets = ref<OpenTarget[]>([FINDER_TARGET]);
-let openTargetsLoaded = false;
-async function loadOpenTargets() {
-  if (openTargetsLoaded) return;
-  openTargetsLoaded = true;
-  try {
-    openTargets.value = await invoke<OpenTarget[]>("list_open_targets", {});
-  } catch (e) {
-    console.error("list_open_targets failed", e);
-  }
-}
-
-// Last-used target is remembered per project (keyed by folder path), not globally.
-const LAST_OPEN_IN_LEGACY_KEY = "tb-last-open-in";
-const LAST_OPEN_IN_CONFIG_KEY = "titlebarLastOpenInByProject";
-const lastOpenInByProject = ref<Record<string, string>>({});
-configReady.then(() => {
-  migrateFromLocalStorage(LAST_OPEN_IN_LEGACY_KEY, LAST_OPEN_IN_CONFIG_KEY);
-  const stored = getConfig<Record<string, string> | string>(LAST_OPEN_IN_CONFIG_KEY, {});
-  lastOpenInByProject.value = typeof stored === "string" ? {} : stored;
-});
-const lastOpenIn = computed(() => (props.folderPath && lastOpenInByProject.value[props.folderPath]) || "finder");
-const lastOpenTarget = computed(() => openTargets.value.find((t) => t.id === lastOpenIn.value) ?? FINDER_TARGET);
-
-function toggleMenu() {
-  menuOpen.value = !menuOpen.value;
-  if (menuOpen.value) loadOpenTargets();
-}
 
 // ── Notification center ─────────────────────────────────────────────────────
 const notifStore = useNotificationsStore();
@@ -271,6 +213,12 @@ const wsStore = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const ui = useUIStore();
 const chats = useClaudeChatsStore();
+
+/** Breadcrumb head: the project, when the title below is a thread or tab in it. */
+const crumbProject = computed(() => {
+  const name = ui.welcomeVisible || !ui.viewingTabs ? "" : wsStore.active?.name ?? "";
+  return name === screenTitle.value ? "" : name;
+});
 
 /** What the main area shows: the open thread or tab, else the composer or project. */
 const screenTitle = computed(() => {
@@ -467,32 +415,13 @@ async function restartDaemon() {
   }
 }
 
-async function openIn(target: string) {
-  menuOpen.value = false;
-  if (!props.folderPath) return;
-  lastOpenInByProject.value = { ...lastOpenInByProject.value, [props.folderPath]: target };
-  setConfig(LAST_OPEN_IN_CONFIG_KEY, lastOpenInByProject.value);
-  try {
-    await invoke("open_path_in", { path: props.folderPath, target });
-  } catch (e) {
-    console.error("open_path_in failed", e);
-  }
-}
-
-async function copyPath() {
-  menuOpen.value = false;
-  if (!props.folderPath) return;
-  await navigator.clipboard.writeText(props.folderPath);
-}
 
 function onDocClick() {
-  menuOpen.value = false;
   notifOpen.value = false;
   if (statsOpen.value) { statsOpen.value = false; clearInterval(statsTimer); }
 }
 onMounted(() => {
   window.addEventListener("click", onDocClick);
-  loadOpenTargets();
 });
 onBeforeUnmount(() => {
   window.removeEventListener("click", onDocClick);
@@ -500,8 +429,6 @@ onBeforeUnmount(() => {
   clearTimeout(bellPulseTimer);
 });
 
-const isDev = import.meta.env.DEV;
-const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
 </script>
 
 <style scoped>

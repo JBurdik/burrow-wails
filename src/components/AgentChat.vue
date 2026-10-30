@@ -139,6 +139,7 @@
     />
 
     <div class="relative flex min-h-0 flex-1">
+    <ThreadFindBar :messages="messages" :container="scrollEl" @reveal="revealForFind" />
     <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <!-- A remount starts with no messages until the transcript is read back, which on
@@ -180,6 +181,9 @@
         class="chat-message"
         :class="[`role-${msg.role}`, { partial: msg.partial }]"
       >
+        <div v-if="msg.id === watermarkRowId" class="flex items-center gap-2 px-4 pt-1 pb-2 text-[11px] font-medium text-primary" role="separator" aria-label="New messages">
+          <span class="h-px flex-1 bg-primary/40" />New<span class="h-px flex-1 bg-primary/40" />
+        </div>
         <!-- Collapsed tool-call group pill ("Ran N commands" / "Used N tools") -->
         <template v-if="msg.role === 'tool-group-header'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
@@ -719,6 +723,7 @@
           <span v-if="phone && !phoneSettingsOpen" class="flex-1" />
           <!-- Right: cost badge + abort/send -->
           <div class="composer-sendgroup">
+            <ComposerStash ref="stashEl" v-model:text="inputText" v-model:images="pendingImages" />
             <HoverCardRoot v-if="contextUsageRatio > 0" v-model:open="ctxCardOpen" :open-delay="120" :close-delay="120">
               <HoverCardTrigger as-child>
                 <div class="ctx-ring" :class="contextUsageClass">
@@ -825,6 +830,7 @@ import { canSideChat } from "@/stores/chatTree";
 import { newSideChat } from "@/lib/sideChat";
 import { PhChatsCircle } from "@phosphor-icons/vue";
 import { useChatAttentionStore } from "@/stores/chatAttention";
+import { visitWatermark } from "@/lib/visitWatermark";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useImageLightbox } from "@/composables/useImageLightbox";
 import { useGitStore } from "@/stores/git";
@@ -837,8 +843,11 @@ import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
+import ThreadFindBar from "@/components/ThreadFindBar.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
+import ComposerStash from "@/components/composer/ComposerStash.vue";
+import { isStashShortcut } from "@/lib/promptStash";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
@@ -1085,9 +1094,13 @@ const chatAttention = useChatAttentionStore();
 // Whether this instance holds one of chatAttention's watch counts. Tracked so
 // mount/unmount and isWatching flips stay balanced.
 let attentionHeld = false;
+// The receipt as it was when this visit began; null once the user sends.
+const visitSeenAt = ref<number | null>(null);
 function holdAttention(value: boolean) {
   if (value === attentionHeld) return;
   attentionHeld = value;
+  // Freeze the receipt for the "New" divider before watching marks it seen.
+  if (value) visitSeenAt.value = chatAttention.seenAtFor(props.chatId);
   chatAttention.setWatching(props.chatId, value);
 }
 const workspaces = useWorkspaceStore();
@@ -1759,6 +1772,18 @@ type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow;
 const WORK_ROLES = new Set(["thinking", "tool", "tool-group-header"]);
 const foldedTurns = reactive<Record<number, boolean>>({});
 
+// The display row the "New" divider sits above: the first one holding a
+// message at or after the watermark. ponytail: a watermark inside a folded
+// turn lands on the next visible row; unfold-to-it if that ever matters.
+const watermarkRowId = computed(() => {
+  const target = visitWatermark(messages.value, visitSeenAt.value);
+  if (target === null) return null;
+  const pos = new Map(messages.value.map((m, i) => [m.id, i]));
+  const from = pos.get(target) ?? Infinity;
+  const row = displayItems.value.find((r) => (pos.get(r.role === "tool-group-header" ? (r as ToolGroupHeader).items[(r as ToolGroupHeader).items.length - 1].id : (r as ChatMessage).id) ?? -1) >= from);
+  return row?.id ?? null;
+});
+
 const displayItems = computed<DisplayRow[]>(() => {
   const src = grouping.value.display;
   const out: DisplayRow[] = [];
@@ -1831,6 +1856,20 @@ function isGroupExpanded(groupId: string | undefined): boolean {
 }
 function toggleGroup(groupId: string) {
   toolGroupExpanded[groupId] = !isGroupExpanded(groupId);
+}
+// ⌘F landed on a message: open every fold hiding it (its turn, its tool
+// group, the tool/thinking row itself).
+function revealForFind(id: number) {
+  const i = messages.value.findIndex((m) => m.id === id);
+  const msg = messages.value[i];
+  if (msg?.role !== "tool" && msg?.role !== "thinking") return;
+  for (let u = i - 1; u >= 0; u--) {
+    if (messages.value[u].role === "user") { foldedTurns[messages.value[u].id] = false; break; }
+  }
+  const group = groupIdOf(id);
+  if (group) toolGroupExpanded[group] = true;
+  if (msg.role === "tool") msg.toolExpanded = true;
+  else thinkingExpanded[id] = true;
 }
 
 // Built-in claude slash commands
@@ -1919,6 +1958,7 @@ let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 // Set before an INTENTIONAL claude restart (mode switch / abort) so the `exit`
 // event that teardown emits doesn't fire a spurious "Claude finished" toast.
 const pendingImages = ref<string[]>([]); // data URIs
+const stashEl = ref<InstanceType<typeof ComposerStash> | null>(null);
 const scrollEl = ref<HTMLElement | null>(null);
 const inputEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
 
@@ -2611,6 +2651,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   syncStore();
   const sentId = await S.send({ text, images: msgImages, displayText });
   if (sentId === null) return null;
+  visitSeenAt.value = null;
   acceptFeedback();
   return { id: sentId, text };
 }
@@ -2732,6 +2773,7 @@ function onKeydown(e: KeyboardEvent) {
   if (pendingPlan.value && e.key === "Escape") { e.preventDefault(); respondPlan(false); return; }
   if (busy.value && e.key === "Escape" && !pendingPermission.value && !pendingDiff.value) { e.preventDefault(); abortTurn(); nextTick(() => inputEl.value?.focus()); return; }
   if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); clearChat(); return; }
+  if (isStashShortcut(e)) { e.preventDefault(); stashEl.value?.stash(); return; }
   if (e.key === "ArrowUp" && inputText.value === "" && !busy.value) {
     const recalled = S.recallLastUserMessage();
     if (recalled !== null) {

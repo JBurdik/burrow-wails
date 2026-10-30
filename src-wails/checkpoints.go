@@ -126,7 +126,13 @@ func isGitRepo(cwd string) bool {
 // CreateCheckpoint snapshots cwd. Returns a zero-id Checkpoint (no error) when
 // there is nothing to record: not a git repo, or the tree is byte-identical to
 // the newest checkpoint — an agent turn that changed no files gets no entry.
-func (a *App) CreateCheckpoint(cwd, ptyID, label string) (Checkpoint, error) {
+func (a *App) CreateCheckpoint(cwd, ptyID, label string) (cp Checkpoint, err error) {
+	withWorkspaceLock(cwd, func() { cp, err = a.createCheckpoint(cwd, ptyID, label) })
+	return cp, err
+}
+
+// createCheckpoint is CreateCheckpoint for a caller already holding cwd's lock.
+func (a *App) createCheckpoint(cwd, ptyID, label string) (Checkpoint, error) {
 	if !isGitRepo(cwd) {
 		return Checkpoint{}, nil
 	}
@@ -226,22 +232,34 @@ func (a *App) CheckpointDiff(cwd, commit string) (string, error) {
 			return frozen, nil
 		}
 	}
-	nowTree, err := snapshotTree(cwd)
-	if err != nil {
-		return "", err
-	}
-	out := runGitEnv(cwd, nil, "diff", commit, nowTree)
-	if !out.Success {
-		return "", gitErr(out)
-	}
-	return out.Stdout, nil
+	var diff string
+	var err error
+	// Locked so the diff never sees a half-restored tree.
+	withWorkspaceLock(cwd, func() {
+		var nowTree string
+		if nowTree, err = snapshotTree(cwd); err != nil {
+			return
+		}
+		out := runGitEnv(cwd, nil, "diff", commit, nowTree)
+		if !out.Success {
+			err = gitErr(out)
+			return
+		}
+		diff = out.Stdout
+	})
+	return diff, err
 }
 
 // RestoreCheckpoint puts the working tree back to a checkpoint. It snapshots
 // the current state first and returns that safety checkpoint, so a restore is
 // itself undoable. The index is left where it was (pointing at HEAD) — this
 // restores file contents, it does not stage or commit anything.
-func (a *App) RestoreCheckpoint(cwd, commit string) (Checkpoint, error) {
+func (a *App) RestoreCheckpoint(cwd, commit string) (cp Checkpoint, err error) {
+	withWorkspaceLock(cwd, func() { cp, err = a.restoreCheckpoint(cwd, commit) })
+	return cp, err
+}
+
+func (a *App) restoreCheckpoint(cwd, commit string) (Checkpoint, error) {
 	if !isGitRepo(cwd) {
 		return Checkpoint{}, errors.New("not a git repository")
 	}
@@ -249,7 +267,7 @@ func (a *App) RestoreCheckpoint(cwd, commit string) (Checkpoint, error) {
 		return Checkpoint{}, errors.New("checkpoint object is gone (pruned by git gc?)")
 	}
 
-	safety, err := a.CreateCheckpoint(cwd, "", "before restore")
+	safety, err := a.createCheckpoint(cwd, "", "before restore")
 	if err != nil {
 		return Checkpoint{}, fmt.Errorf("safety snapshot failed, refusing to restore: %w", err)
 	}

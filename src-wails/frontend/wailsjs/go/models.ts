@@ -328,6 +328,7 @@ export namespace main {
 	    slept_at: number;
 	    recap: string;
 	    kind: string;
+	    snoozed_until: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chat(source);
@@ -357,6 +358,7 @@ export namespace main {
 	        this.slept_at = source["slept_at"];
 	        this.recap = source["recap"];
 	        this.kind = source["kind"];
+	        this.snoozed_until = source["snoozed_until"];
 	    }
 	}
 	export class ProviderRuntimeEvent {
@@ -1327,6 +1329,7 @@ export namespace main {
 	    serving: boolean;
 	    serve_url?: string;
 	    ip?: string;
+	    https_enabled?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TailscaleStatus(source);
@@ -1340,6 +1343,7 @@ export namespace main {
 	        this.serving = source["serving"];
 	        this.serve_url = source["serve_url"];
 	        this.ip = source["ip"];
+	        this.https_enabled = source["https_enabled"];
 	    }
 	}
 	export class TerminalTab {

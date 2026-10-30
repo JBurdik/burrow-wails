@@ -164,8 +164,9 @@ var remoteAllowed = map[string]remoteCmd{
 	// because it is safe on a bare &App{} — most commands are not.
 	"environment_id": {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
 	// Subscription usage limits (planusage.go). Never carries a token.
-	"plan_usage":       {Method: "PlanUsage", Args: nil, Scope: scopeOrchRead},
-	"remote_endpoints": {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
+	"plan_usage":              {Method: "PlanUsage", Args: nil, Scope: scopeOrchRead},
+	"remote_endpoints":        {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
+	"remote_pairing_endpoint": {Method: "RemotePairingEndpoint", Args: nil, Scope: scopeAccessRead},
 
 	// Paired devices. Both sit on access:* and are therefore desktop-only,
 	// since a paired device is never granted access:write (remotedevices.go)
@@ -198,6 +199,12 @@ var remoteAllowed = map[string]remoteCmd{
 	// terminal, so this takes the orchestration scope instead. A paired device
 	// holds both, so the choice is about naming, not reach.
 	"stop_chat": {Method: "StopChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// Thread details card (chatdetails.go): the self-management verbs, aimed at
+	// a chat the desktop names.
+	"chat_schedule_list":    {Method: "ChatScheduleList", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_schedule_cancel":  {Method: "ChatScheduleCancel", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"chat_move_to_worktree": {Method: "ChatMoveToWorktree", Args: []string{"chatId", "branch"}, Scope: scopeOrchOperate},
+	"chat_leave_worktree":   {Method: "ChatLeaveWorktree", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 
 	// Diff review notes (diffcomments.go) — DiffTab.vue's batch review flow.
 	"list_diff_comments":        {Method: "ListDiffComments", Args: []string{"wsId"}, Scope: scopeOrchRead},
@@ -375,6 +382,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_clear":               {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_sleep":               {Method: "ChatSleep", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_mark_active":         {Method: "ChatMarkActive", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_snooze":              {Method: "ChatSnooze", Args: []string{"chatId", "untilMs"}, Scope: scopeOrchOperate},
 	"chat_rewind":              {Method: "ChatRewind", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_fork":                {Method: "ChatFork", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_side_create":         {Method: "ChatSideCreate", Args: []string{"chatId"}, Scope: scopeOrchOperate},

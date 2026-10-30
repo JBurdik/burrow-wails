@@ -1,5 +1,6 @@
 <template>
-  <aside class="surface-glow [--glow-base:var(--sidebar-bg)] flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-[var(--sidebar-bg)] [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
+  <aside class="surface-glow relative isolate [--glow-base:var(--sidebar-bg)] flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-[var(--sidebar-bg)] [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
+    <StageBackdrop />
     <!-- Top row: new thread + quiet icon actions. The project picker is a
          menu now: the feed below is already grouped by project. -->
     <div class="flex shrink-0 items-center gap-1 px-2 pb-1 pt-2" ref="filterEl">
@@ -51,8 +52,9 @@
       <!-- Live feed, grouped by project (Ghostex-style): a header per repo with
            its uncommitted diffstat, one compact line per thread, a thread's
            sub-agents indented under it. Branch/model/PR live in the hover card. -->
-      <div v-for="group in liveGroups" :key="group.repoId" class="px-2 pt-1.5">
-        <div class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover" @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
+      <div v-for="group in topGroups" :key="group.repoId" class="px-2 pt-1.5">
+        <div v-if="group.repoId === PINNED" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">Pinned</div>
+        <div v-else class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover" @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
           <button class="flex min-w-0 flex-1 items-center gap-2 text-left" @click="toggleGroup(group.repoId)">
             <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground transition-transform" :class="collapsedGroups.has(group.repoId) && '-rotate-90'" />
             <img v-if="store.icons[group.repoId]" :src="store.icons[group.repoId]" class="h-[18px] w-[18px] shrink-0 rounded-[5px] object-cover" />
@@ -65,8 +67,8 @@
           </span>
           <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!, false)"><PhPlus :size="13" /></button>
         </div>
-        <template v-if="!collapsedGroups.has(group.repoId)">
-          <template v-for="row in group.rows" :key="rowKey(row)">
+        <TransitionGroup v-if="!collapsedGroups.has(group.repoId)" tag="div" name="sb-move">
+          <div v-for="row in group.rows" :key="rowKey(row)">
             <div
               class="sb-row group relative mt-px flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[7px]"
               :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`]"
@@ -125,78 +127,15 @@
                 <span v-else class="text-[11px] text-muted-foreground">{{ ago(c.lastActivityAt ?? 0) }}</span>
               </button>
             </div>
-          </template>
-        </template>
+          </div>
+        </TransitionGroup>
       </div>
 
-      <div v-if="!filteredLive.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
+      <div v-if="!allRows.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
         <template v-if="store.workspaces.length === 0">No projects.<br />Open a folder to start.</template>
         <template v-else-if="active">No threads here yet.<br />Start one above.</template>
         <template v-else>Nothing open.<br />Pick a project up top.</template>
       </div>
-
-      <!-- Settled: chats the agent finished with, no attention needed right now -->
-      <template v-if="filteredSettled.length">
-        <button class="section-header" @click="toggleSection('settled')">
-          <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('settled') && '-rotate-90'" />
-          Settled
-          <span class="opacity-60">{{ filteredSettled.length }}</span>
-          <span
-            role="button"
-            class="ml-auto rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground"
-            title="Delete all settled threads (pinned ones are kept)"
-            @click.stop="deleteAllSettled"
-          >
-            <PhTrash :size="10" />
-          </span>
-        </button>
-        <template v-if="!collapsed.includes('settled')">
-          <div
-            v-for="row in settledChatsVisible"
-            :key="rowKey(row)"
-            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:rounded-lg hover:bg-hover hover:opacity-100"
-            @click="onRowClick(row)"
-            @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
-            @pointerdown="startLongPress(row, $event)"
-            @pointermove="moveLongPress"
-            @pointerup="cancelLongPress"
-            @pointercancel="cancelLongPress"
-            @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
-            @mouseleave="cancelHoverCard"
-          >
-            <div class="flex items-center gap-1.5">
-              <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : PhChatCenteredText" :size="10" class="shrink-0" />
-              <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="10" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" aria-label="Pinned" />
-              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
-              <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
-              <span class="grid shrink-0 justify-items-end">
-                <span class="sb-ago [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
-                <button
-                  class="sb-unsettle invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
-                  title="Move back to active"
-                  @click.stop="toggleSettled(row.tab, row.ws.id)"
-                >
-                  <PhArrowCounterClockwise :size="11" weight="bold" />
-                </button>
-              </span>
-            </div>
-            <div class="mt-[2px] flex items-center gap-1.5 pl-[15px]">
-              <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-2.5 w-2.5 shrink-0 rounded-[2px] object-cover" />
-              <PhFolder v-else :size="9" weight="fill" class="shrink-0 text-accent/80" />
-              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] opacity-70" :title="row.ws.name">{{ repoName(row.ws) }}</span>
-              <span v-if="git.prByWs[row.ws.id]" class="shrink-0 font-mono text-[9px]">#{{ git.prByWs[row.ws.id]!.number }}</span>
-            </div>
-          </div>
-          <button
-            v-if="filteredSettled.length > settledChatsLimit"
-            class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
-            @click="settledChatsLimit += 25"
-          >
-            <PhPlus :size="10" />
-            Show {{ filteredSettled.length - settledChatsLimit }} more
-          </button>
-        </template>
-      </template>
 
       <!-- Archived: the current workspace's chats closed by the user — no open
            tab, process stopped, reversible by clicking to reopen. -->
@@ -237,6 +176,87 @@
 
     </div>
 
+    <!-- Docked shelf (t3code): Working, then Snoozed and Settled. Working is
+         open by default; collapsed it still shows the thread on screen. -->
+    <div v-if="shelfSections.length" class="flex max-h-[45%] shrink-0 flex-col overflow-y-auto border-t border-border px-2 pb-1.5 pt-0.5" @scroll="cancelHoverCard">
+      <div
+        v-for="sec in shelfSections"
+        :key="sec.key"
+        @pointerenter="sec.key === 'working' && onShelfHover($event, true)"
+        @pointerleave="sec.key === 'working' && onShelfHover($event, false)"
+      >
+        <button class="section-header !mx-0 !w-full" @click="toggleShelf(sec.key)">
+          {{ sec.label }}
+          <span class="opacity-60">{{ sec.count }}</span>
+          <PhCaretRight :size="9" weight="bold" class="shrink-0 transition-transform" :class="shelfOpen(sec.key) && 'rotate-90'" />
+          <span
+            v-if="sec.key === 'settled'"
+            role="button"
+            class="ml-auto rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground"
+            title="Delete all settled threads (pinned ones are kept)"
+            @click.stop="deleteAllSettled"
+          >
+            <PhTrash :size="10" />
+          </span>
+        </button>
+        <TransitionGroup tag="div" name="sb-move">
+          <div
+            v-for="row in sec.rows"
+            :key="rowKey(row)"
+            class="sb-row group cursor-pointer rounded-lg px-2.5 py-[5px]"
+            :class="[isActiveRow(row) && 'sb-row-active', sec.key !== 'working' && 'text-muted-foreground opacity-60 transition-opacity hover:opacity-100']"
+            @click="onRowClick(row)"
+            @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+            @pointerdown="startLongPress(row, $event)"
+            @pointermove="moveLongPress"
+            @pointerup="cancelLongPress"
+            @pointercancel="cancelLongPress"
+            @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
+            @mouseleave="cancelHoverCard"
+          >
+            <div class="flex items-center gap-1.5">
+              <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : row.tab.isChat ? PhChatCenteredText : PhTerminal" :size="10" class="shrink-0" />
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]" :class="sec.key === 'working' && 'text-foreground/90'">{{ row.tab.title }}</span>
+              <template v-if="sec.key === 'working'">
+                <span v-if="row.tab.status === 'running'" class="sb-spark shrink-0 text-[11px]">{{ spinnerFrame }}</span>
+                <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground">{{ ago(shelf.startedAt.get(rowKey(row)) ?? row.ts) }}</span>
+              </template>
+              <template v-else>
+                <span v-if="snoozedUntilOf(row.tab.chatId)" class="flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums" :title="`Snoozed until ${new Date(snoozedUntilOf(row.tab.chatId)).toLocaleString()}`">
+                  <PhAlarm :size="10" />{{ formatWakeTime(snoozedUntilOf(row.tab.chatId), Date.now()) }}
+                </span>
+                <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
+                <span class="grid shrink-0 justify-items-end">
+                  <span v-if="sec.key === 'settled'" class="sb-ago [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
+                  <button
+                    class="sb-unsettle invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
+                    :title="sec.key === 'snoozed' ? 'Unsnooze' : 'Move back to active'"
+                    @click.stop="sec.key === 'snoozed' ? chats.snooze(row.tab.chatId!, 0) : toggleSettled(row.tab, row.ws.id)"
+                  >
+                    <PhArrowCounterClockwise :size="11" weight="bold" />
+                  </button>
+                </span>
+              </template>
+            </div>
+            <div class="mt-[2px] flex items-center gap-1.5 pl-[15px]">
+              <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-2.5 w-2.5 shrink-0 rounded-[2px] object-cover" />
+              <PhFolder v-else :size="9" weight="fill" class="shrink-0 text-accent/80" />
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] opacity-70" :title="row.ws.name">{{ repoName(row.ws) }}</span>
+              <span v-if="git.prByWs[row.ws.id]" class="shrink-0 text-[9px] tabular-nums">#{{ git.prByWs[row.ws.id]!.number }}</span>
+            </div>
+          </div>
+        </TransitionGroup>
+        <button
+          v-if="sec.key === 'settled' && shelfOpen('settled') && filteredSettled.length > settledChatsLimit"
+          class="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
+          @click="settledChatsLimit += 25"
+        >
+          <PhPlus :size="10" />
+          Show {{ filteredSettled.length - settledChatsLimit }} more
+        </button>
+      </div>
+    </div>
+
     <!-- App + provider update banners, docked above the toasts (Ghostex keeps
          its notices in the sidebar, not floating over the work). -->
     <div class="flex shrink-0 flex-col gap-1 px-2 pb-1.5 empty:hidden">
@@ -262,6 +282,7 @@
           <span class="block truncate text-[12.5px] text-foreground">{{ t.title }}</span>
           <span v-if="t.body" class="block truncate text-[11px] text-muted-foreground">{{ t.body }}</span>
         </span>
+        <button v-if="t.action" class="shrink-0 rounded px-1.5 text-[12px] font-semibold text-accent hover:bg-hover" @click.stop="notif.runAction(t.id)">{{ t.action.label }}</button>
         <button v-if="t.type !== 'pending'" class="sb-notice-x" title="Dismiss" @click.stop="notif.dismiss(t.id)"><PhX :size="11" /></button>
       </div>
     </TransitionGroup>
@@ -399,8 +420,27 @@
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
           {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
         </button>
-        <button class="menu-item" @click="withMenu((ws, tab) => termTabs.close(ws.id, tab!.id))">Close tab</button>
-        <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws, tab) => deleteThread(ws.id, tab!))">Delete thread…</button>
+        <template v-if="rowMenu.tab.isChat && rowMenu.tab.chatId != null">
+          <button v-if="snoozedUntilOf(rowMenu.tab.chatId)" class="menu-item" @click="withMenu((_ws, tab) => chats.snooze(tab!.chatId!, 0))">
+            <PhAlarm :size="15" class="mr-1.5 shrink-0" />Unsnooze
+          </button>
+          <button class="menu-item" @click="snoozeMenuOpen = !snoozeMenuOpen">
+            <PhAlarm :size="15" class="mr-1.5 shrink-0" />Snooze
+            <PhCaretDown :size="9" weight="bold" class="ml-auto shrink-0 transition-transform" :class="!snoozeMenuOpen && '-rotate-90'" />
+          </button>
+          <template v-if="snoozeMenuOpen">
+            <button
+              v-for="preset in snoozePresets(Date.now())"
+              :key="preset.label"
+              class="menu-item !pl-7"
+              @click="withMenu((_ws, tab) => chats.snooze(tab!.chatId!, preset.until))"
+            >
+              {{ preset.label }}
+            </button>
+          </template>
+        </template>
+        <button class="menu-item" @click="withMenu((ws, tab) => closeTab(ws.id, tab!))">Close tab</button>
+        <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws, tab) => deleteThread(ws.id, tab!))">{{ rowMenu.tab.isChat ? "Delete thread" : "Delete thread…" }}</button>
         <div class="menu-sep" />
       </template>
       <button class="menu-item" @click="withMenu(newChatSession)">New chat</button>
@@ -517,17 +557,33 @@
           ref="wtBranchEl"
         />
         <label class="-mb-1.5 text-[11px] font-semibold text-secondary-foreground">Base branch <span class="font-normal text-muted-foreground">(only for a new branch)</span></label>
-        <input
-          v-model="wtBase"
-          class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
-          placeholder="defaults to current HEAD"
-          list="wt-base-branches"
-          spellcheck="false"
-          @keydown.enter="confirmWorktree"
-          @keydown.esc="closeWtDialog"
-        />
+        <div class="relative">
+          <input
+            v-model="wtBase"
+            class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
+            placeholder="Search branches — empty = current HEAD"
+            spellcheck="false"
+            @focus="wtBaseOpen = true"
+            @blur="wtBaseOpen = false"
+            @input="wtBaseOpen = true"
+            @keydown.enter="confirmWorktree"
+            @keydown.esc.stop="wtBaseOpen ? (wtBaseOpen = false) : closeWtDialog()"
+          />
+          <div
+            v-if="wtBaseOpen && wtBaseMatches.length"
+            class="absolute left-0 right-0 top-full z-10 mt-1 max-h-[200px] overflow-y-auto rounded-md border border-border bg-[var(--bg-dropdown)] py-1"
+          >
+            <button
+              v-for="b in wtBaseMatches"
+              :key="b"
+              class="block w-full truncate px-2.5 py-1 text-left text-[12px] hover:bg-hover"
+              :class="b === wtBase ? 'text-accent' : 'text-foreground'"
+              @mousedown.prevent="wtBase = b; wtBaseOpen = false"
+            >{{ b }}</button>
+          </div>
+        </div>
         <datalist id="wt-base-branches">
-          <option v-for="b in wtBaseList" :key="b" :value="b" />
+          <option v-for="b in wtLocalBranches" :key="b" :value="b" />
         </datalist>
         <p class="overflow-hidden text-ellipsis whitespace-nowrap rounded border border-border bg-base px-2 py-1.5 font-mono text-[11px] text-secondary-foreground">{{ wtTargetPath }}</p>
         <p v-if="wtError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ wtError }}</p>
@@ -558,7 +614,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
+import { ref, reactive, computed, shallowRef, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
 import {
   PhFolder,
   PhFolderPlus,
@@ -587,9 +643,12 @@ import {
   PhAsterisk,
   PhMoon,
   PhDotsThree,
+  PhAlarm,
+  PhCaretRight,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
 import UpdateBanner from "./UpdateBanner.vue";
+import StageBackdrop from "./StageBackdrop.vue";
 import ProviderUpdateBanner from "./ProviderUpdateBanner.vue";
 import PlanUsageIndicator from "./PlanUsageIndicator.vue";
 import { pickDir } from "@/lib/pickPath";
@@ -610,10 +669,21 @@ import { useGitStore, type PrInfo } from "@/stores/git";
 import { useNotificationsStore } from "@/stores/notifications";
 import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
 import { isChatPinned, toggleChatPin, unpinChat } from "@/lib/pinnedChats";
+import { createPendingDeletes } from "@/lib/pendingDeletes";
 import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
-import { buildActivityRows, groupByRepo, parseShortstat, type ActivityRow } from "@/lib/sidebarGroups";
+import {
+  buildActivityRows,
+  groupByRepo,
+  parseShortstat,
+  splitSections,
+  stepWorkingShelf,
+  routeRowOnly,
+  EMPTY_WORKING_SHELF,
+  type ActivityRow,
+} from "@/lib/sidebarGroups";
 import { childrenOf } from "@/stores/chatTree";
 import { toggleTabSettled } from "@/lib/settledTabs";
+import { formatWakeTime, snoozePresets } from "@/lib/snoozePresets";
 import { getProjectSettings } from "@/lib/projectSettings";
 
 
@@ -623,6 +693,8 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const chats = useClaudeChatsStore();
+const snoozedUntilOf = (chatId: number | null | undefined) =>
+  (chatId != null && chats.sessions.find((s) => s.id === chatId)?.snoozedUntil) || 0;
 const chatIsAsleep = (chatId: number | null | undefined) => chatId != null && chatAsleep(chats.sessions.find((s) => s.id === chatId));
 const chatRecapOf = (chatId: number | null | undefined) => (chatId != null && ui.chatRecaps ? chats.sessions.find((s) => s.id === chatId)?.recap : undefined);
 const ui = useUIStore();
@@ -672,10 +744,19 @@ const filterRepos = computed(() =>
   [...store.topLevel].sort((a, b) => Number(isArchived(a.id)) - Number(isArchived(b.id))),
 );
 
+// Chats deleted inside their undo window are hidden here, not gone yet.
+const pendingDeletes = createPendingDeletes();
+const visibleTabsByWs = computed(() => {
+  if (!pendingDeletes.hidden.size) return termTabs.tabsByWs;
+  const out: Record<number, TabSummary[]> = {};
+  for (const [ws, tabs] of Object.entries(termTabs.tabsByWs)) out[Number(ws)] = tabs.filter((t) => !pendingDeletes.isHidden(t.chatId));
+  return out;
+});
+
 const feed = computed(() =>
   buildActivityRows({
     openedWorkspaces: store.opened,
-    tabsByWs: termTabs.tabsByWs,
+    tabsByWs: visibleTabsByWs.value,
     // A chat's recency is the DB-backed `last_activity_at` on its row, not the
     // localStorage stamp: the stamps are pruned for any key a setTabs list
     // doesn't mention, so a restart (chat tabs restore after the pty ones) wiped
@@ -690,13 +771,69 @@ const feed = computed(() =>
   }),
 );
 
-// Search lives in Spotlight now (⌘P, the sidebar's magnifier opens it).
-const filteredLive = computed(() => feed.value.live);
-const filteredSettled = computed(() => feed.value.settledChats);
+// ── sections (t3code-style): Pinned + Active scroll on top; Working, Snoozed
+// and Settled are docked at the bottom. Search lives in Spotlight (⌘P).
+const allRows = computed(() => [...feed.value.live, ...feed.value.settledChats]);
+
+// The Working shelf's own state: when each turn started, and the exit grace
+// that keeps a row that just stopped in place for a beat (stepWorkingShelf).
+const shelf = shallowRef(EMPTY_WORKING_SHELF);
+const workingHover = ref(false);
+let shelfTimer: number | undefined;
+const runningKeys = computed(() =>
+  allRows.value.filter((r) => r.tab.status === "running").map(rowKey).sort().join(","),
+);
+function stepShelf() {
+  window.clearTimeout(shelfTimer);
+  const { state, wakeAt } = stepWorkingShelf(shelf.value, new Set(runningKeys.value.split(",").filter(Boolean)), Date.now(), workingHover.value);
+  shelf.value = state;
+  if (wakeAt != null) shelfTimer = window.setTimeout(stepShelf, Math.max(0, wakeAt - Date.now()));
+}
+watch([runningKeys, workingHover], stepShelf, { immediate: true });
+// Touch has no hover: a finger lifting would otherwise "leave" and drop rows mid-read.
+function onShelfHover(e: PointerEvent, inside: boolean) {
+  if (e.pointerType === "mouse") workingHover.value = inside;
+}
+
+const sections = computed(() =>
+  splitSections(allRows.value, {
+    isPinned: (r) => isChatPinned(r.tab.chatId),
+    isSnoozed: (r) => snoozedUntilOf(r.tab.chatId) > 0,
+    inWorking: (r) => shelf.value.shown.has(rowKey(r)),
+    unseen: (r) => termTabs.isCompletionUnseen(r.ws.id, r.tab.id),
+    startedAt: (r) => shelf.value.startedAt.get(rowKey(r)) ?? r.ts,
+  }),
+);
+const filteredSettled = computed(() => sections.value.settled);
+
+const WORKING_EXPANDED_KEY = "burrow.sidebar.workingExpanded";
+const workingExpanded = ref(localStorage.getItem(WORKING_EXPANDED_KEY) !== "0");
+function shelfOpen(key: "working" | "snoozed" | "settled"): boolean {
+  return key === "working" ? workingExpanded.value : !collapsed.value.includes(key);
+}
+function toggleShelf(key: "working" | "snoozed" | "settled") {
+  if (key !== "working") return toggleSection(key);
+  workingExpanded.value = !workingExpanded.value;
+  try { localStorage.setItem(WORKING_EXPANDED_KEY, workingExpanded.value ? "1" : "0"); } catch { /* private mode */ }
+}
+const shelfSections = computed(() => {
+  const s = sections.value;
+  return [
+    // Collapsed Working still shows the thread on screen (t3code's routeThreadOnly).
+    { key: "working" as const, label: "Working", count: s.working.length, rows: workingExpanded.value ? s.working : routeRowOnly(s.working, isActiveRow) },
+    { key: "snoozed" as const, label: "Snoozed", count: s.snoozed.length, rows: shelfOpen("snoozed") ? s.snoozed : [] },
+    { key: "settled" as const, label: "Settled", count: s.settled.length, rows: shelfOpen("settled") ? settledChatsVisible.value : [] },
+  ].filter((sec) => sec.count);
+});
 
 // ── project groups (Ghostex-style feed) ─────────────────────────────────────
 const liveGroups = computed(() =>
-  groupByRepo(filteredLive.value, activeRepo.value ? [activeRepo.value.id] : []),
+  groupByRepo(sections.value.active, activeRepo.value ? [activeRepo.value.id] : []),
+);
+/** Pinned rows sit above every repo group, as one pseudo-group under this id. */
+const PINNED = -1;
+const topGroups = computed(() =>
+  sections.value.pinned.length ? [{ repoId: PINNED, rows: sections.value.pinned }, ...liveGroups.value] : liveGroups.value,
 );
 
 const COLLAPSED_KEY = "burrow.sidebar.collapsedRepos";
@@ -753,7 +890,7 @@ const settledChatsLimit = ref(12);
 const settledChatsVisible = computed(() => filteredSettled.value.slice(0, settledChatsLimit.value));
 const archivedChats = computed(() => {
   const all = active.value ? chats.archivedSessionsForWs(active.value.id) : [];
-  return all;
+  return all.filter((s) => !pendingDeletes.isHidden(s.id));
 });
 
 function unarchiveAndOpen(chatId: number) {
@@ -768,43 +905,74 @@ function runConfirm() {
   confirmDialog.value?.onConfirm();
   confirmDialog.value = null;
 }
+// Deleting a chat asks nothing: its rows hide at once and an Undo toast holds
+// the real delete for 8 s (t3code's undo notice). A plain terminal tab keeps
+// its confirm — closing it kills the process, which no undo can bring back.
+function deleteChatsWithUndo(items: { wsId: number; tabId?: number; chatId: number }[], title: string) {
+  // The thread on screen is about to vanish from the list — send the view
+  // home, same as settling it does.
+  if (items.some((i) => i.tabId != null && store.active?.id === i.wsId && termTabs.activeByWs[i.wsId] === i.tabId)) ui.openWelcome();
+  const undo = pendingDeletes.schedule(items.map((i) => i.chatId), async () => {
+    for (const i of items) {
+      // close() is a single request slot — let Terminal take each one. Sequential
+      // remove(): it stops each chat's process before deleting its row.
+      if (i.tabId != null) { termTabs.close(i.wsId, i.tabId); await nextTick(); }
+      unpinChat(i.chatId);
+      await chats.remove(i.chatId);
+    }
+  });
+  notif.push({ type: "info", title, duration: 8000, action: { label: "Undo", run: undo } });
+}
 function deletePermanently(chatId: number) {
-  confirmDialog.value = {
-    message: "Delete this chat permanently? This cannot be undone.",
-    onConfirm: () => {
-      unpinChat(chatId);
-      chats.remove(chatId);
-    },
-  };
+  const title = chats.sessions.find((s) => s.id === chatId)?.title ?? "chat";
+  deleteChatsWithUndo([{ wsId: active.value?.id ?? 0, chatId }], `Deleted “${title}”`);
 }
 function deleteAllSettled() {
   const rows = filteredSettled.value.filter((r) => !(r.tab.isChat && isChatPinned(r.tab.chatId)));
-  if (!rows.length) return;
+  const chatRows = rows.filter((r) => r.tab.isChat && r.tab.chatId != null);
+  const ptyRows = rows.filter((r) => !chatRows.includes(r));
+  const run = () => {
+    for (const r of ptyRows) termTabs.close(r.ws.id, r.tab.id);
+    if (chatRows.length) {
+      deleteChatsWithUndo(
+        chatRows.map((r) => ({ wsId: r.ws.id, tabId: r.tab.id, chatId: r.tab.chatId! })),
+        chatRows.length === 1 ? `Deleted “${chatRows[0].tab.title}”` : `Deleted ${chatRows.length} threads`,
+      );
+    }
+  };
+  if (!ptyRows.length) return run();
   confirmDialog.value = {
-    message: `Delete ${rows.length} settled thread${rows.length === 1 ? "" : "s"} permanently? Pinned ones are kept. This cannot be undone.`,
-    onConfirm: async () => {
-      // Sequential: remove() stops each chat's process before deleting its row.
-      for (const r of rows) {
-        termTabs.close(r.ws.id, r.tab.id);
-        if (r.tab.isChat && r.tab.chatId != null) await chats.remove(r.tab.chatId);
-      }
-    },
+    message: `Close ${ptyRows.length} settled terminal tab${ptyRows.length === 1 ? "" : "s"} and kill their processes? Pinned threads are kept; deleted chats can be undone.`,
+    onConfirm: run,
   };
 }
 // Last step of a thread's life: settled → archived → gone. A chat row is a
 // stored session, so it needs the store's hard delete; a plain terminal tab
 // only exists as long as its PTY, so closing it *is* the delete.
 function deleteThread(wsId: number, tab: TabSummary) {
+  if (tab.isChat && tab.chatId != null) {
+    deleteChatsWithUndo([{ wsId, tabId: tab.id, chatId: tab.chatId }], `Deleted “${tab.title}”`);
+    return;
+  }
   confirmDialog.value = {
     message: `Delete “${tab.title}” permanently? This cannot be undone.`,
-    onConfirm: () => {
-      termTabs.close(wsId, tab.id);
-      if (tab.isChat && tab.chatId != null) {
-        unpinChat(tab.chatId);
-        chats.remove(tab.chatId);
-      }
-    },
+    onConfirm: () => termTabs.close(wsId, tab.id),
   };
+}
+// Closing a chat tab archives it (Terminal's stopChatSession); reopening the
+// chat is the existing unarchive path, so that is the Undo.
+// ponytail: an Undo landing before archive()'s process stop resolves gets
+// re-archived by it; 8 s window vs a stop of a few ms, not worth a lock.
+function closeTab(wsId: number, tab: TabSummary) {
+  termTabs.close(wsId, tab.id);
+  if (!tab.isChat || tab.chatId == null) return;
+  const chatId = tab.chatId;
+  notif.push({
+    type: "info",
+    title: `Archived “${tab.title}”`,
+    duration: 8000,
+    action: { label: "Undo", run: () => termTabs.openChat(wsId, chatId) },
+  });
 }
 function toggleSettled(tab: TabSummary, wsId: number) {
   // Settling the tab the user is currently looking at leaves nothing to show
@@ -822,8 +990,8 @@ function toggleSettled(tab: TabSummary, wsId: number) {
   if (!wasSettled && wasFocused) ui.openWelcome();
 }
 
-type SectionKey = "settled" | "archived";
-const collapsed = ref<SectionKey[]>(["settled", "archived"]);
+type SectionKey = "snoozed" | "settled" | "archived";
+const collapsed = ref<SectionKey[]>(["snoozed", "settled", "archived"]);
 function toggleSection(key: SectionKey) {
   collapsed.value = collapsed.value.includes(key)
     ? collapsed.value.filter((k) => k !== key)
@@ -1049,8 +1217,10 @@ const rowMenuStyle = computed(() =>
       }
     : {},
 );
+const snoozeMenuOpen = ref(false);
 function openRowMenu(ws: Workspace, tab: TabSummary | null, e: { clientX: number; clientY: number }) {
   rowMenu.value = { ws, tab, x: e.clientX, y: e.clientY };
+  snoozeMenuOpen.value = false;
 }
 
 // Long press = right click on touch (iOS Safari never fires `contextmenu` for it).
@@ -1265,6 +1435,7 @@ onUnmounted(() => {
   if (prTimer) clearInterval(prTimer);
   if (clock) clearInterval(clock);
   if (hoverTimer) clearTimeout(hoverTimer);
+  window.clearTimeout(shelfTimer);
   document.removeEventListener("click", onDocClick);
   document.removeEventListener("keydown", onKeydown);
 });
@@ -1277,22 +1448,21 @@ watch(() => active.value?.id, mountSections);
 // ── branch helpers (worktree dialog) ─────────────────────────────────────────
 interface GitOutput { stdout: string; stderr: string; code: number; }
 
-async function listBranches(path: string): Promise<string[]> {
-  if (git.cwd === path && git.branches.length > 0) return git.branches;
-  try {
-    const out = await invoke<GitOutput>("run_git", { cwd: path, args: ["branch", "--list"] });
-    if (out.code === 0) {
-      return out.stdout.split("\n").map((l) => l.replace(/^\*?\s+/, "").trim()).filter(Boolean);
-    }
-  } catch {}
-  return [];
-}
-
 // ── new worktree dialog ──────────────────────────────────────────────────────
 const wtParent = ref<Workspace | null>(null);
 const wtBranch = ref("");
 const wtBase = ref("");
 const wtBaseList = ref<string[]>([]);
+const wtBaseOpen = ref(false);
+// The Branch field suggests existing local branches to check out; the base
+// picker lists remote-tracking ones too (origin/x).
+const wtLocalBranches = ref<string[]>([]);
+const wtBaseMatches = computed(() => {
+  const q = wtBase.value.trim().toLowerCase();
+  // The prefilled default must not hide the rest of the list.
+  if (!q || wtBaseList.value.includes(wtBase.value)) return wtBaseList.value;
+  return wtBaseList.value.filter((b) => b.toLowerCase().includes(q));
+});
 const wtBusy = ref(false);
 const wtError = ref("");
 const wtBranchEl = ref<HTMLInputElement>();
@@ -1310,9 +1480,30 @@ async function openWtDialog(parent: Workspace) {
   wtBase.value = "";
   wtError.value = "";
   wtBaseList.value = [];
+  wtLocalBranches.value = [];
   await nextTick();
   wtBranchEl.value?.focus();
-  wtBaseList.value = await listBranches(parent.path);
+  const [refs, def] = await Promise.all([
+    gitLines(parent.path, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]),
+    gitLines(parent.path, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]),
+  ]);
+  if (wtParent.value !== parent) return;
+  wtLocalBranches.value = refs.filter((r) => r.startsWith("refs/heads/")).map((r) => r.slice("refs/heads/".length));
+  const remote = refs
+    .filter((r) => r.startsWith("refs/remotes/") && !r.endsWith("/HEAD"))
+    .map((r) => r.slice("refs/remotes/".length));
+  wtBaseList.value = [...wtLocalBranches.value, ...remote];
+  // Default to the repo's default branch (origin/HEAD, else main/master), else leave HEAD.
+  const defBranch = def[0]?.replace(/^origin\//, "") ?? ["main", "master"].find((b) => wtLocalBranches.value.includes(b));
+  if (!wtBase.value && defBranch && wtBaseList.value.includes(defBranch)) wtBase.value = defBranch;
+}
+
+async function gitLines(cwd: string, args: string[]): Promise<string[]> {
+  try {
+    const out = await invoke<GitOutput>("run_git", { cwd, args });
+    if (out.code === 0) return out.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  } catch {}
+  return [];
 }
 
 function closeWtDialog() {
@@ -1446,4 +1637,11 @@ async function confirmCreate() {
 .sb-row-act { display: flex; padding: 3px; border-radius: 5px; color: var(--text-muted); }
 .sb-row-act:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
 .sb-spark { color: #E0876A; font-size: 12px; }
+/* A row changing section fades in where it lands; rows around it slide (FLIP). */
+.sb-move-move { transition: transform .22s ease; }
+.sb-move-enter-active, .sb-move-leave-active { transition: opacity .18s ease; }
+.sb-move-enter-from, .sb-move-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .sb-move-move, .sb-move-enter-active, .sb-move-leave-active { transition: none; }
+}
 </style>

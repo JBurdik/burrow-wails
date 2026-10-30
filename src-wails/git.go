@@ -62,16 +62,23 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 	if err := a.db.QueryRow(`SELECT id FROM workspaces WHERE path = ?`, repoPath).Scan(&parentID); err != nil {
 		return Workspace{}, err
 	}
-	if baseRef == "" {
-		baseRef = "HEAD"
-	}
-	args := []string{"worktree", "add", path, "-b", branch, baseRef}
-	if out := runCmd("git", repoPath, args); !out.Success {
-		// Branch may already exist — retry without -b.
-		args = []string{"worktree", "add", path, branch}
-		if out2 := runCmd("git", repoPath, args); !out2.Success {
-			return Workspace{}, gitErr(out2)
+	// The fetch runs outside the lock: it touches the parent repo, not the new tree.
+	baseRef, warning := resolveWorktreeBase(repoPath, baseRef, a.worktreeFromOrigin())
+	var addErr error
+	withWorkspaceLock(path, func() {
+		// --no-track: an origin/B start point would otherwise make the new branch
+		// track (and push to) B. A no-op for a local base.
+		args := []string{"worktree", "add", "--no-track", path, "-b", branch, baseRef}
+		if out := runCmd("git", repoPath, args); !out.Success {
+			// Branch may already exist — retry without -b.
+			args = []string{"worktree", "add", path, branch}
+			if out2 := runCmd("git", repoPath, args); !out2.Success {
+				addErr = gitErr(out2)
+			}
 		}
+	})
+	if addErr != nil {
+		return Workspace{}, addErr
 	}
 	// CreateWorkspace already emits workspaces-changed once the row exists,
 	// but AT THAT POINT the row isn't nested yet (parent_id/worktree_branch/
@@ -96,6 +103,7 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 	ws.IsGit = true
 	if err == nil {
 		emitWorkspacesChanged()
+		a.startWorktreeSetup(ws.ID, repoPath, path, warning)
 	}
 	return ws, err
 }
@@ -128,14 +136,27 @@ func (a *App) RemoveWorktree(id int64, force bool) error {
 	if err != nil {
 		return err
 	}
-	args := []string{"worktree", "remove", path}
+	if err := removeWorktree(parentPath, path, force); err != nil {
+		return err
+	}
+	return a.DeleteWorkspace(id)
+}
+
+// removeWorktree runs `git worktree remove` under the tree's lock. Git refuses
+// a non-forced remove of a tree with untracked files, but that check honours
+// a user's status.showUntrackedFiles=no and would delete them — so force the
+// setting back to normal for this one call.
+func removeWorktree(parentPath, path string, force bool) (err error) {
+	args := []string{"-c", "status.showUntrackedFiles=normal", "worktree", "remove", path}
 	if force {
 		args = append(args, "--force")
 	}
-	if out := runCmd("git", parentPath, args); !out.Success {
-		return gitErr(out)
-	}
-	return a.DeleteWorkspace(id)
+	withWorkspaceLock(path, func() {
+		if out := runCmd("git", parentPath, args); !out.Success {
+			err = gitErr(out)
+		}
+	})
+	return err
 }
 
 // --- branch diff (against the repo's default/upstream branch) ---

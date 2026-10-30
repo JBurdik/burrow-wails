@@ -1029,7 +1029,10 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
     }
     if (isProjectedEvent(event.type)) {
       if (!(s.view?.usesRpcRuntime() ?? false)) markActive(s);
+      const before = s.messages.value.length;
       if (applyChatEvent(projectionOf(s), event)) s.view?.scrollToBottom();
+      // Arrival time for the visit watermark — the same stamp Go's fold puts on its copy.
+      for (const m of s.messages.value.slice(before)) m.at ??= Date.now();
       if (event.type === "tool.started" && event.toolCallId && (event.name === "Task" || event.name === "Agent")) {
         host.subagentStarted(s.chatId, event.toolCallId, event.input);
       }

@@ -32,9 +32,11 @@ Every command below comes from this running Burrow binary. It has two doors: cal
 		fmt.Fprint(&out, `
 ## Chat and terminal tabs are equal targets
 
-Choose deliberately for every delegation workflow. spawn --target chat creates a structured chat: use chat_send, wait_result --chat-id, and its transcript. spawn --target tab creates a visible terminal: use send_to_tab, tab_output, and its result token. agent_status and list_agents cover both target kinds; collect_results collects terminal results and, from a chat parent, completed chat children. Never address a chat with a PTY id or a terminal with a chat id.
+Choose deliberately for every delegation workflow. spawn --target chat creates a structured chat: use chat_send, wait_result --chat-id, and its transcript. spawn --target tab creates a visible terminal: use send_to_tab, tab_output, and its result token. agent_status and list_agents cover both target kinds; collect_results collects terminal results and, from a chat parent, completed chat children not yet delivered to you. Never address a chat with a PTY id or a terminal with a chat id.
 
 You only get that choice from a terminal tab. A spawn made FROM a chat thread is always a chat sub-agent belonging to that thread — target tab is ignored, and so is its result token, because the sub-agent lives in the Right Panel under its parent rather than as a tab of its own. Pass --detach to open a standalone top-level chat (--target chat) or terminal tab (--target tab) instead, e.g. when the user asks for a new chat of its own. Follow it up with chat_send, wait_result --chat-id and collect_results.
+
+A chat sub-agent's result now arrives by itself: when it finishes a turn, Burrow sends its final message into your chat as a new prompt ("Sub-agent <title> (#id) finished: ...") once your own turn has ended, and marks it collected. When it blocks on a question or permission you get one "Sub-agent <title> (#id) is blocked: ..." prompt — answer it with chat_send --chat-id <id> or ask the user. So after spawning, end your turn instead of polling; reach for wait_result / collect_results only for a truncated answer, a terminal-tab worker, or when the user turned this off (Settings → General).
 
 ### Both doors for each delegation verb
 

@@ -206,7 +206,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.endpointProviders = []EndpointProvider{
 		newLoopbackProvider(httpServerPort),
-		newTailscaleProvider(a.GetTailscaleStatus),
+		newTailscaleProvider(a.GetTailscaleStatus, httpServerPort),
 	}
 	db, err := openDB(dataDir)
 	if err != nil {

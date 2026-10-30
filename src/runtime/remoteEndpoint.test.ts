@@ -5,6 +5,8 @@ import {
   clearRemoteCredentials,
   loadRemoteCredentials,
   pairDevice,
+  pairingUrl,
+  parsePairFragment,
   remoteEndpointSource,
   saveRemoteCredentials,
   wsUrlFor,
@@ -129,5 +131,25 @@ describe("remoteEndpointSource", () => {
     clearRemoteCredentials();
     const src = remoteEndpointSource(() => loadRemoteCredentials());
     await expect(src()).rejects.toThrow(/not paired/);
+  });
+});
+
+describe("pairing QR fragment", () => {
+  it("round-trips a code through pairingUrl", () => {
+    const url = pairingUrl("https://mac.tail1234.ts.net/burrow/", "042137");
+    expect(url).toBe("https://mac.tail1234.ts.net/burrow/#pair=042137");
+    expect(parsePairFragment(new URL(url).hash)).toBe("042137");
+  });
+
+  it("accepts the hash with or without its leading #", () => {
+    expect(parsePairFragment("#pair=123456")).toBe("123456");
+    expect(parsePairFragment("pair=123456")).toBe("123456");
+    expect(parsePairFragment("#foo=1&pair=123456")).toBe("123456");
+  });
+
+  it("ignores anything that is not exactly six digits", () => {
+    for (const h of ["", "#", "#/ws/3", "#pair=", "#pair=12345", "#pair=1234567", "#pair=12a456", "#pair=%20123456", "#code=123456"]) {
+      expect(parsePairFragment(h)).toBeNull();
+    }
   });
 });

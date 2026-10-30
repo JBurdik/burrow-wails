@@ -115,6 +115,11 @@ A settled, seen, **collected** (`collected_at`, read-only on `Chat`) sub-agent i
 30 min by `chatAttention`'s desktop sweep (`subagentArchivable` in `chatTree.ts`) — client-side because
 `seenAt` is per-device. No Archived shelf for sub-agents: it just leaves the RP list.
 
+**Snooze** (`chatsnooze.go`): `chats.snoozed_until` (unix ms, 0 = none, read-only on the wire) keeps a chat
+in Settled until then (`settledFor`); `ChatSnooze` / `chat_snooze` sets or clears it, and `chatScheduleLoop`'s
+sweep wakes it — clears the column and the settle pin, bumps `last_activity_at`, emits `chat-snooze-woke`
+(`chatAttention` drops the receipt and notifies). Presets: `src/lib/snoozePresets.ts`.
+
 **Launch settings** (`effort`, `permission_mode`, `profile_id`, `append_system_prompt`, + `model`) are
 columns too, **read-only on the wire** (SaveChats never writes them, like `collected_at`); backfilled once
 from the per-device `config.json` keys (`chat_migrations` marker). `resolveClaudeLaunch` (`chatlaunch.go`)
@@ -169,6 +174,13 @@ while the window has focus, which is how "never sleep a watched chat" reaches Go
 it — opening a chat does not wake it. A **manual** settle (`settle()` in `claudeChats.ts` → `chat_sleep`) sleeps the chat immediately through the same `sleepChat` (same phase/open-turn guards, no idle window; unsettle does not wake it). It replaced `agentproc.ReapIdle`, which reaped on stdout silence
 and so killed a CLI blocked on a permission prompt. PTY agent tabs are **not** slept: killing one loses the
 TUI, and restoring it means relaunching `claude --resume <id>` into the same tab (not built).
+
+**Sub-agent notices** (`chatsubagentnotice.go`): a sub-agent (`parent_chat_id`, not `kind='side'`) whose
+turn ends (done/failed) or that enters `waiting_*` gets a row in `subagent_notices`, keyed per (child, turn /
+blocked episode) — recorded in `emitChatLine` on the phase transition, delivered by the 15 s schedule sweep
+(ahead of `chat_schedules`) into the **parent** via `ChatSend` only once the parent `chatSettled`. A completion
+marks the child collected unless cut at 4000 chars. The user's queued follow-ups are client-side, so a drained one
+can run first. Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
 
 **Self-management verbs** (`internal/control/verbs_self.go`, local-only, default to the caller's chat):
 `schedule` / `schedule_list` / `schedule_cancel` (`chatschedule.go`) — SQLite `chat_schedules`, a 15 s sweep

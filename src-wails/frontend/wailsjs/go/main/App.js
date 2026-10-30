@@ -106,6 +106,10 @@ export function ChatSleep(arg1) {
   return window['go']['main']['App']['ChatSleep'](arg1);
 }
 
+export function ChatSnooze(arg1, arg2) {
+  return window['go']['main']['App']['ChatSnooze'](arg1, arg2);
+}
+
 export function ChatSteer(arg1, arg2, arg3) {
   return window['go']['main']['App']['ChatSteer'](arg1, arg2, arg3);
 }
@@ -506,6 +510,10 @@ export function PlanUsage() {
   return window['go']['main']['App']['PlanUsage']();
 }
 
+export function PortListening(arg1) {
+  return window['go']['main']['App']['PortListening'](arg1);
+}
+
 export function ProbeProvider(arg1, arg2) {
   return window['go']['main']['App']['ProbeProvider'](arg1, arg2);
 }
@@ -580,6 +588,10 @@ export function RemoteListChats() {
 
 export function RemotePairStatus() {
   return window['go']['main']['App']['RemotePairStatus']();
+}
+
+export function RemotePairingEndpoint() {
+  return window['go']['main']['App']['RemotePairingEndpoint']();
 }
 
 export function RemoteRegeneratePairCode() {

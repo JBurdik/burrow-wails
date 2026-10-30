@@ -87,6 +87,9 @@ type Chat struct {
 	// (chatside.go) — a fork of its parent_chat_id for a quick question, never
 	// listed or collected as a sub-agent.
 	Kind string `json:"kind"`
+	// Read-only on the wire: unix ms the user snoozed this chat until
+	// (ChatSnooze, chatsnooze.go); 0 = not snoozed. Settled while in the future.
+	SnoozedUntil int64 `json:"snoozed_until"`
 }
 
 func chatsSchema() []string {
@@ -115,7 +118,8 @@ func chatsSchema() []string {
 			resume_at         TEXT    NOT NULL DEFAULT '',
 			slept_at          INTEGER NOT NULL DEFAULT 0,
 			recap             TEXT    NOT NULL DEFAULT '',
-			kind              TEXT    NOT NULL DEFAULT ''
+			kind              TEXT    NOT NULL DEFAULT '',
+			snoozed_until     INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS chat_migrations (
 			name    TEXT PRIMARY KEY,
@@ -146,14 +150,14 @@ func chatsPostAlterSchema() []string {
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, agent_kind, transport, model, branch,
 	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
-	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind`
+	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind, snoozed_until`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
 		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
-		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind)
+		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind, &c.SnoozedUntil)
 	return c, err
 }
 

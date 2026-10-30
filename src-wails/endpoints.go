@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"net/netip"
+)
 
 // AdvertisedEndpoint is a server-authored candidate route to this environment.
 // It is a HINT, not proof: only a successful connection from the client's own
@@ -88,6 +91,41 @@ func selectEndpoint(eps []AdvertisedEndpoint, preferredKind string, sameMachine 
 	return pick(func(AdvertisedEndpoint) bool { return true })
 }
 
+// Address rules ported from t3code (DirectEndpoints.ts isAdvertisableAddress,
+// hostClassification.ts isTailnetHost). Pairing credentials travel over these
+// URLs, so a public address is never advertised, and a hostname is never
+// trusted (it can resolve differently for the phone).
+var (
+	tailnetV4 = netip.MustParsePrefix("100.64.0.0/10") // CGNAT range Tailscale assigns from
+	tailnetV6 = netip.MustParsePrefix("fd7a:115c:a1e0::/48")
+)
+
+// isTailnetAddr reports whether s is a Tailscale node address. 100.64/10 is
+// shared address space (carrier NAT, WARP use it too), so a caller that must
+// be sure also needs Tailscale itself to report the address.
+func isTailnetAddr(s string) bool {
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	return tailnetV4.Contains(a) || tailnetV6.Contains(a)
+}
+
+// isAdvertisableAddr is t3code's rule: an IPv4 literal that is private (RFC
+// 1918 or the tailnet range), never loopback, link-local or public.
+func isAdvertisableAddr(s string) bool {
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	if !a.Is4() || a.IsLoopback() || a.IsLinkLocalUnicast() {
+		return false
+	}
+	return a.IsPrivate() || tailnetV4.Contains(a)
+}
+
 // collectEndpoints asks every provider in order. A provider that returns
 // nothing is normal, not an error.
 func collectEndpoints(providers []EndpointProvider) []AdvertisedEndpoint {
@@ -103,4 +141,12 @@ func collectEndpoints(providers []EndpointProvider) []AdvertisedEndpoint {
 // before they are connected. Settings renders it; pairing (phase 5) uses it.
 func (a *App) RemoteEndpoints() []AdvertisedEndpoint {
 	return collectEndpoints(a.endpointProviders)
+}
+
+// RemotePairingEndpoint is the address a phone should pair with: the
+// endpoint list run through selectEndpoint as seen from ANOTHER machine, so
+// loopback never wins. nil when there is no usable route yet (Tailscale off,
+// not serving) — Settings then shows the code without a QR.
+func (a *App) RemotePairingEndpoint() *AdvertisedEndpoint {
+	return selectEndpoint(a.RemoteEndpoints(), "", false)
 }

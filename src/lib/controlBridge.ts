@@ -27,6 +27,8 @@ import { readTermOutput } from "@/lib/termRegistry";
 import { panelTerminals } from "@/lib/rpTerminals";
 import { childrenOf } from "@/stores/chatTree";
 import { setLaunchSettings } from "@/lib/chatRuntime";
+import { useScriptsStore } from "@/stores/scripts";
+import { useNotificationsStore } from "@/stores/notifications";
 
 type ControlAction = { id: string; action: string; args: Record<string, unknown> };
 
@@ -58,6 +60,8 @@ export async function perform(action: string, args: Record<string, unknown>): Pr
       return newTab(num(args.workspaceId), str(args.cmd));
     case "serve":
       return serve(args);
+    case "worktree_setup":
+      return worktreeSetup(args);
     case "tab_rename":
       return renameTab(num(args.ptyId), str(args.title));
     case "tab_close":
@@ -168,6 +172,44 @@ async function serve(args: Record<string, unknown>) {
   if (!target) throw new Error(`no workspace with id ${workspaceId}`);
   useWorkspaceStore().ensureOpen(target);
   return panel.serve({ workspaceId, cmd: str(args.cmd), cwd: str(args.cwd) || target.path, name: str(args.name) });
+}
+
+// Printed by the setup line itself, so the panel can tell how it ended. The
+// typed command echoes these inside quotes, so only the output matches a
+// whole line.
+const SETUP_OK = "Burrow: worktree setup done";
+const SETUP_FAILED = "Burrow: worktree setup failed";
+
+/** A worktree was just created (Go's CreateWorktree, any door): run the
+ *  repo's "Run when a worktree is created" scripts, in order, in one Right
+ *  Panel terminal in the new worktree. A failure is a toast — the worktree
+ *  stays. Acks once the terminal is started, not when the scripts finish. */
+async function worktreeSetup(args: Record<string, unknown>) {
+  const toast = (type: "error" | "info", body: string) =>
+    useNotificationsStore().push({ type, title: "Worktree", body, workspaceId: num(args.workspaceId), source: "system" });
+  if (str(args.warning)) toast("info", str(args.warning));
+  const scripts = useScriptsStore();
+  const flagged = (await scripts.loadForPath(str(args.repoPath))).filter((s) => s.runOnWorktreeCreate);
+  const lines = flagged.map((s) => scripts.commandLine(s)).filter(Boolean);
+  if (!lines.length) return { ran: 0 };
+  const cmd = `(${lines.join(") && (")}) && echo "${SETUP_OK}" || echo "${SETUP_FAILED}"`;
+  const name = `Setup: ${flagged.map((s) => s.name).join(", ")}`;
+  const { pty_id } = (await serve({ workspaceId: args.workspaceId, cmd, cwd: args.path, name })) as { pty_id: number };
+  void watchSetup(pty_id, name, toast);
+  return { ran: lines.length, pty_id };
+}
+
+// ponytail: polls the terminal's text every 2 s for the marker line; capped
+// at 30 min, after which a still-running setup just ends unreported.
+async function watchSetup(ptyId: number, name: string, toast: (type: "error" | "info", body: string) => void) {
+  for (let i = 0; i < 900; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const out = readTermOutput(ptyId, 200);
+    if (out === undefined) continue; // not mounted yet, or closed
+    const ended = out.split("\n").map((l) => l.trim());
+    if (ended.includes(SETUP_FAILED)) return toast("error", `${name} failed — see its terminal in the Right Panel`);
+    if (ended.includes(SETUP_OK)) return;
+  }
 }
 
 async function createWorkspace(path: string, name: string) {
