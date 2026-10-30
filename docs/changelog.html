@@ -107,6 +107,7 @@
       <li><strong>⌘F v chatu</strong> — hledání v textu, výstupech nástrojů i plánech; sbalené bloky s nálezem se rozbalí.</li>
       <li><strong>Fronta zpráv v Go</strong> — zprávy napsané během turnu drží SQLite (<code>chat_queue</code>) a odejdou i se zavřeným desktopem nebo uspaným telefonem. Pořadí doručení: výsledky sub-agentů → tvoje fronta → naplánované zprávy.</li>
       <li><strong>Pokračování po usage limitu</strong> — turn zastavený limitem ukáže banner „resets at HH:MM“; Resume automatically pošle po resetu „Continue where you left off.“ Claude turn zastavený limitem se teď ukazuje jako failed.</li>
+      <li><strong>Opakované naplánované úlohy</strong> — <code>burrow schedule</code> umí <code>--every 1h</code> (min. 15 min) a <code>--weekly "mon,wed 09:00"</code>, s <code>--new-chat</code> založí pro každý běh nový chat ve workspace se zvoleným agentem. Nová stránka Nastavení → Scheduled (vytvořit, upravit, pozastavit, spustit hned, smazat); karta Thread details ukazuje opakování. Běh zmeškaný při zavřené aplikaci proběhne po startu jednou, ne za každý vynechaný slot.</li>
     </ul>
   </div>
 
