@@ -108,7 +108,7 @@
       <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="New thread" @click="ui.openWelcome()"><PhCircle :size="12" weight="bold" /></button>
       <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Forward" @click="router.forward()"><PhCaretRight :size="14" /></button>
       <span class="ml-2 min-w-0 truncate text-[13.5px] font-medium text-foreground" data-tauri-drag-region>{{ screenTitle }}</span>
-      <span v-if="isDev || isBeta" class="tb-wide shrink-0 rounded-[5px] border border-border px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" data-tauri-drag-region>{{ isDev ? "dev" : "beta" }}</span>
+      <span v-if="releaseChannel && ui.channelMarker !== 'off'" class="tb-wide shrink-0 rounded-[5px] border border-border px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" data-tauri-drag-region>{{ releaseChannel }}</span>
       <div class="min-w-4 flex-1" data-tauri-drag-region />
       <CommitPushMenu v-if="branch" class="tb-wide [-webkit-app-region:no-drag]" />
     </div>
@@ -223,6 +223,7 @@ import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import CommitPushMenu from "./CommitPushMenu.vue";
 import { useUIStore } from "@/stores/ui";
+import { releaseChannel } from "@/lib/releaseChannel";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { router } from "@/router";
 
@@ -500,8 +501,6 @@ onBeforeUnmount(() => {
   clearTimeout(bellPulseTimer);
 });
 
-const isDev = import.meta.env.DEV;
-const isBeta = import.meta.env.VITE_APP_CHANNEL === "beta";
 </script>
 
 <style scoped>

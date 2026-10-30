@@ -783,6 +783,14 @@
             </div>
           </div>
 
+          <div v-if="releaseChannel" class="flex items-center gap-4 s-row">
+            <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+              <span class="text-[13px] font-medium text-foreground">Release channel marker</span>
+              <span class="text-[11px] text-muted-foreground">How this {{ releaseChannel }} build marks itself: artwork behind the sidebar header plus the title bar label, the label only, or nothing.</span>
+            </div>
+            <Segmented v-model="ui.channelMarker" :options="CHANNEL_MARKER_OPTIONS" />
+          </div>
+
           <div class="h-px bg-border" />
 
           <!-- Typography -->
@@ -1206,6 +1214,7 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { perform } from "@/lib/controlBridge";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEXT_GENERATION_POLICIES, type NtfyEvent } from "@/stores/ui";
+import { releaseChannel } from "@/lib/releaseChannel";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import SubagentProfilesPanel from "@/components/agents/SubagentProfilesPanel.vue";
@@ -1290,6 +1299,11 @@ const chatAutoSleep = computed({
   get: () => String(ui.chatAutoSleepMinutes),
   set: (value: string) => { ui.chatAutoSleepMinutes = Number(value); },
 });
+const CHANNEL_MARKER_OPTIONS = [
+  { value: "art", label: "Artwork" },
+  { value: "label", label: "Label only" },
+  { value: "off", label: "Off" },
+] as const;
 const SPAWN_MODE_OPTIONS = [
   { value: "terminal", label: "Terminal tab" },
   { value: "chat", label: "Chat" },
