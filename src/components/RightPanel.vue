@@ -293,7 +293,7 @@
           </div>
 
           <!-- Diff (hidden when panel is too narrow — use cq.is.md = ≥320px) -->
-          <div v-if="git.diffFile && cq.is.md" class="flex max-h-[220px] shrink-0 flex-col border-t border-border">
+          <div v-if="git.diffFile && (cq.is.md || compact)" class="rp-diff flex max-h-[220px] shrink-0 flex-col border-t border-border">
             <div class="flex shrink-0 items-center gap-1.5 bg-[color-mix(in_srgb,var(--border)_20%,var(--bg-panel))] px-2 py-1">
               <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground">{{ git.diffFile }}</span>
               <span class="shrink-0 text-[10px] text-muted-foreground">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
@@ -752,6 +752,7 @@ import MarkdownDocSurface from "./MarkdownDocSurface.vue";
 import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
+import { compact } from "@/lib/viewport";
 import { useUIStore } from "@/stores/ui";
 import SubagentProfilePicker from "@/components/agents/SubagentProfilePicker.vue";
 import DiffTab from "./DiffTab.vue";

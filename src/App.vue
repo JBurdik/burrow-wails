@@ -1241,6 +1241,13 @@ body {
 .is-compact .chat-message .bubble-user { max-width: 88%; }
 .is-compact .minimap-rail { display: none; }
 .is-compact .catchup-btn { display: none; }
+/* Phone: a tapped file's diff opens full screen instead of a 220px strip
+   below the commit box, i.e. off screen. */
+.is-compact .rp-diff { position: fixed; inset: 0; z-index: 60; max-height: none; background: var(--bg-base); padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
+.is-compact .rp-diff > div:first-child { min-height: 48px; padding: 0 8px 0 14px; }
+.is-compact .rp-diff > div:first-child span:first-child { font-size: 13px; }
+.is-compact .rp-diff > div:first-child button { padding: 10px; }
+.is-compact .rp-diff > div:first-child button svg { width: 18px; height: 18px; }
 
 .panels-swapped .panel-sidebar { order: 5; }
 .panels-swapped .panel-resize-left { order: 4; }

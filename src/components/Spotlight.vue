@@ -1,9 +1,9 @@
 <template>
   <Teleport to="body">
     <Transition name="spotlight">
-      <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/50 pt-[140px]" @mousedown.self="close">
+      <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/50 pt-[140px]" :class="{ 's-phone': compact }" @mousedown.self="close">
         <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-2xl border border-border bg-[var(--bg-dropdown)] shadow-[0_24px_64px_rgba(0,0,0,0.45)] [backdrop-filter:var(--blur-overlay,none)]">
-          <div class="flex h-[60px] shrink-0 items-center gap-3 border-b border-border px-5">
+          <div class="s-head flex h-[60px] shrink-0 items-center gap-3 border-b border-border px-5">
             <PhMagnifyingGlass :size="18" class="shrink-0 text-muted-foreground" />
             <input
               ref="inputRef"
@@ -18,7 +18,8 @@
               @keydown.down.prevent="move(1)"
               @keydown.tab.prevent="cycleFilter($event.shiftKey ? -1 : 1)"
             />
-            <div v-if="!projectOnly" class="flex shrink-0 items-center gap-0.5">
+            <button v-if="compact" type="button" class="s-cancel shrink-0 font-sans text-[15px] text-accent" @click="close">Cancel</button>
+            <div v-if="!projectOnly" class="s-filters flex shrink-0 items-center gap-0.5">
               <button
                 v-for="f in FILTERS"
                 :key="f.key"
@@ -50,7 +51,7 @@
                 v-for="item in section.items"
                 :key="item.id"
                 :data-id="item.id"
-                class="flex h-[38px] cursor-pointer items-center gap-3 rounded-lg px-3 transition-colors duration-75"
+                class="s-item flex h-[38px] cursor-pointer items-center gap-3 rounded-lg px-3 transition-colors duration-75"
                 :class="selectedId === item.id ? 'bg-selected' : 'hover:bg-hover'"
                 @mouseenter="selectedId = item.id"
                 @click="item.action()"
@@ -64,7 +65,7 @@
                 <span v-if="item.desc" class="truncate font-sans text-[12px] text-muted-foreground/80" :class="item.segments ? 'max-w-[35%] shrink-0' : 'min-w-0 flex-1'">{{ item.desc }}</span>
                 <div v-else-if="!item.segments" class="flex-1" />
                 <span v-if="item.badge" class="shrink-0 rounded-md bg-hover px-1.5 py-0.5 font-sans text-[10.5px] text-muted-foreground">{{ item.badge }}</span>
-                <kbd v-if="item.shortcut" class="s-key shrink-0">{{ item.shortcut }}</kbd>
+                <kbd v-if="item.shortcut && !compact" class="s-key shrink-0">{{ item.shortcut }}</kbd>
               </div>
             </template>
             <div v-if="!sections.length" class="px-4 py-6 text-center font-sans text-[12px] text-muted-foreground/70">
@@ -72,7 +73,7 @@
             </div>
           </div>
 
-          <div class="flex h-9 shrink-0 items-center gap-3 border-t border-border px-5 font-sans text-[11px] text-muted-foreground/80">
+          <div v-if="!compact" class="flex h-9 shrink-0 items-center gap-3 border-t border-border px-5 font-sans text-[11px] text-muted-foreground/80">
             <span><kbd class="s-key">↑↓</kbd> navigate</span>
             <span class="opacity-50">·</span>
             <span><kbd class="s-key">↵</kbd> {{ selectedItem?.alt ? (selectedItem.resumable ? "resume" : "copy prompt") : "open" }}</span>
@@ -107,6 +108,7 @@ import { useProvidersStore } from "@/stores/providers";
 import { useScriptsStore } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
+import { compact } from "@/lib/viewport";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -598,6 +600,17 @@ defineExpose({ show, close, newProject });
 .s-results::-webkit-scrollbar-track { background: transparent; }
 .s-results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+/* Phone: a full-screen search sheet. Filters get their own scrolling row,
+   keyboard hints go (no keyboard to hint at), rows reach touch height. */
+.s-phone { padding-top: 0; }
+.s-phone .s-modal { width: 100%; max-height: none; height: 100dvh; border-radius: 0; border: 0; padding-top: env(safe-area-inset-top, 0px); }
+.s-phone .s-head { flex-wrap: wrap; height: auto; row-gap: 6px; padding: 10px 16px 8px; }
+.s-phone .s-head input { height: 36px; }
+.s-phone .s-filters { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; }
+.s-phone .s-filters button { height: 32px; font-size: 13px; flex-shrink: 0; }
+.s-phone .s-results { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+.s-phone .s-item { height: 48px; }
+.s-phone .s-item span { font-size: 14px; }
 .spotlight-enter-active,
 .spotlight-leave-active {
   transition: opacity 0.12s ease;

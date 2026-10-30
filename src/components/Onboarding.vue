@@ -53,7 +53,7 @@ function finish() {
         <p class="onboarding-copy">Run AI coding agents in real terminals, keep their work separated, and always know what needs your attention.</p>
         <div class="onboarding-facts">
           <span><PhRobot :size="16" /> Manage agents in parallel</span>
-          <span><PhCommand :size="16" /> Keep keyboard flow</span>
+          <span class="onboarding-desktop-only"><PhCommand :size="16" /> Keep keyboard flow</span>
         </div>
       </section>
 
@@ -96,7 +96,8 @@ function finish() {
       </section>
 
       <footer class="onboarding-footer">
-        <button class="onboarding-back" type="button" :disabled="step === 0" @click="back"><PhArrowLeft :size="15" /> Back</button>
+        <button v-if="step === 0" class="onboarding-back onboarding-phone-skip" type="button" @click="emit('skip')">Skip</button>
+        <button v-else class="onboarding-back" type="button" @click="back"><PhArrowLeft :size="15" /> Back</button>
         <button class="onboarding-next" type="button" @click="next">{{ step === steps.length - 1 ? "Start using Burrow" : "Continue" }} <PhArrowRight :size="15" /></button>
       </footer>
     </main>
@@ -112,12 +113,25 @@ function finish() {
 .onboarding-steps span { display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid var(--border); border-radius: 50%; font-size: 10px; }
 .onboarding-steps .active { background: var(--bg-hover); color: var(--text-primary); font-weight: 600; }.onboarding-steps .active span, .onboarding-steps .done span { border-color: var(--accent); color: var(--accent); }.onboarding-steps .done { color: var(--text-secondary); }
 .onboarding-skip { margin-top: auto; border: 0; background: none; color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; text-align: left; padding: 8px; }.onboarding-skip:hover { color: var(--text-primary); }
-.onboarding-main { display: grid; grid-template-rows: 1fr auto; min-width: 0; }.onboarding-page { width: min(620px, calc(100% - 64px)); align-self: center; margin: auto; }.onboarding-welcome { width: min(680px, calc(100% - 64px)); }
+.onboarding-main { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }.onboarding-page { width: min(620px, calc(100% - 64px)); align-self: center; margin: auto; }.onboarding-welcome { width: min(680px, calc(100% - 64px)); }
 .onboarding-mark, .onboarding-icon { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 28px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); color: var(--accent); }.onboarding-icon.success { color: var(--green); }
 .onboarding-kicker { margin: 0 0 9px; color: var(--accent); font-size: 12px; font-weight: 600; }.onboarding-page h1 { margin: 0; font-size: 30px; letter-spacing: -0.04em; }.onboarding-copy { max-width: 58ch; margin: 14px 0 0; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
 .onboarding-facts { display: flex; gap: 30px; margin-top: 34px; color: var(--text-secondary); font-size: 12px; }.onboarding-facts span { display: flex; align-items: center; gap: 8px; }
 .onboarding-options { display: grid; gap: 8px; margin-top: 28px; }.onboarding-option { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text-primary); cursor: pointer; padding: 10px 12px; text-align: left; }.onboarding-option:hover { background: var(--bg-hover); }.onboarding-option.selected { border-color: var(--accent); }.option-dot { display: grid; width: 31px; height: 31px; place-items: center; border-radius: 6px; background: var(--bg-hover); color: var(--accent); }.onboarding-option strong, .onboarding-option small { display: block; }.onboarding-option strong { font-size: 13px; }.onboarding-option small { margin-top: 2px; color: var(--text-muted); font-size: 11px; }.option-check { margin-left: auto; color: var(--accent); }.onboarding-empty { color: var(--text-muted); font-size: 13px; }
 .theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 28px; }.theme-option { display: grid; gap: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text-secondary); cursor: pointer; padding: 10px; font: inherit; font-size: 12px; text-align: left; }.theme-option:hover { background: var(--bg-hover); }.theme-option.selected { border-color: var(--accent); color: var(--text-primary); }.theme-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }.theme-swatch { position: relative; display: block; height: 38px; border: 1px solid; border-radius: 4px; }.theme-swatch i { position: absolute; right: 7px; bottom: 7px; width: 10px; height: 10px; border-radius: 50%; }
-.onboarding-footer { display: flex; justify-content: space-between; border-top: 1px solid var(--border); padding: 18px 28px; }.onboarding-footer button { display: inline-flex; align-items: center; gap: 7px; border-radius: 6px; padding: 8px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }.onboarding-back { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); }.onboarding-back:disabled { opacity: 0; pointer-events: none; }.onboarding-next { border: 1px solid var(--accent); background: var(--accent); color: var(--bg-solid, var(--bg-base)); }.onboarding-next:hover { filter: brightness(1.08); }
-@media (max-width: 680px) { .onboarding { grid-template-columns: 1fr; }.onboarding-rail { display: none; }.theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.onboarding-footer { display: flex; justify-content: space-between; border-top: 1px solid var(--border); padding: 18px 28px; }.onboarding-footer button { display: inline-flex; align-items: center; gap: 7px; border-radius: 6px; padding: 8px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }.onboarding-back { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); }.onboarding-back:disabled { opacity: 0; pointer-events: none; }.onboarding-next { margin-left: auto; border: 1px solid var(--accent); background: var(--accent); color: var(--bg-solid, var(--bg-base)); }.onboarding-next:hover { filter: brightness(1.08); }
+.onboarding-phone-skip { display: none !important; }
+/* Phone: the rail (and its Skip) is gone, so the footer carries Skip on the
+   first step; the page scrolls under a footer that never leaves the screen. */
+@media (max-width: 680px) {
+  .onboarding { grid-template-columns: 1fr; padding-top: env(safe-area-inset-top, 0px); }
+  .onboarding-rail, .onboarding-desktop-only { display: none; }
+  .onboarding-page { align-self: stretch; width: auto; margin: 0; padding: 32px 20px 24px; overflow-y: auto; }
+  .onboarding-page h1 { font-size: 26px; }
+  .onboarding-mark, .onboarding-icon { margin-bottom: 20px; }
+  .theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 20px; }
+  .onboarding-footer { padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .onboarding-footer button { min-height: 44px; padding: 0 16px; font-size: 14px; }
+  .onboarding-phone-skip { display: inline-flex !important; }
+}
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="settings-root fixed inset-0 z-[1000] flex overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]">
+  <div class="settings-root fixed inset-0 z-[1000] flex overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]" :class="{ 'settings-phone': compact, 'phone-detail': compact && phoneDetail }">
     <AnimatedBackdrop
       v-if="ui.activeTheme.animated && !ui.bgImageUrl"
       :key="ui.theme"
@@ -20,7 +20,7 @@
             v-else
             class="flex h-8 shrink-0 items-center gap-2.5 rounded-lg border px-2.5 text-left text-[13px] transition-colors duration-75"
             :class="active === item.id ? 'border-border bg-selected text-foreground [&_.nav-icon]:text-foreground' : 'border-transparent text-secondary-foreground hover:bg-hover hover:text-foreground'"
-            @click="active = item.id!"
+            @click="active = item.id!; phoneDetail = true"
           >
             <component :is="item.icon" :size="15" class="nav-icon shrink-0 text-muted-foreground" />
             <span class="truncate">{{ item.label }}</span>
@@ -34,6 +34,7 @@
 
       <!-- Content -->
       <div class="settings-content flex-1 overflow-y-auto bg-base px-12 pb-10 pt-12">
+        <button v-if="compact" class="phone-settings-back" @click="phoneDetail = false"><PhCaretLeft :size="20" /> Settings</button>
         <!-- Providers -->
         <section v-if="active === 'providers'" class="s-wide flex flex-col gap-3.5">
           <ProvidersPanel :focus-id="focusId" />
@@ -1253,7 +1254,7 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch, type Component } from "vue";
 import {
-  PhGearSix, PhX, PhPlus, PhTrash, PhArrowCounterClockwise,
+  PhGearSix, PhCaretLeft, PhX, PhPlus, PhTrash, PhArrowCounterClockwise,
   PhSlidersHorizontal, PhFolderOpen, PhRobot, PhPalette, PhKeyboard,
   PhPuzzlePiece, PhInfo, PhSparkle, PhClock,
   PhFolder, PhPencilSimple, PhCheck, PhBell, PhPlay,
@@ -1273,6 +1274,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { perform } from "@/lib/controlBridge";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEXT_GENERATION_POLICIES, type NtfyEvent } from "@/stores/ui";
 import { releaseChannel } from "@/lib/releaseChannel";
+import { compact } from "@/lib/viewport";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import SubagentProfilesPanel from "@/components/agents/SubagentProfilesPanel.vue";
@@ -1728,6 +1730,10 @@ const blurControls = [
 
 // Deep-link target set by the caller (⌘P → "Keyboard Shortcuts" etc.).
 const active = ref(ui.settingsSection || "general");
+// Phone: the section list and a section are two screens (list → detail).
+// settingsSection is sticky (never reset), so only a focused row is a real
+// deep link that skips the list.
+const phoneDetail = ref(!!ui.settingsFocusId);
 
 // One compact read-model for the Settings number. The backend replays any
 // context.usage rows not folded into its durable projection before returning.
@@ -2331,6 +2337,24 @@ async function copyToClipboard(text: string, label: string) {
    into one card split by hairlines. Unlayered on purpose — it has to beat the
    Tailwind utilities the pages already carry (see App.vue's @layer note). */
 .settings-root { --radius-card: 14px; }
+.phone-settings-back { display: none; }
+/* Phone: section list and section are separate screens, full width. Rows wrap
+   so a control drops under its label instead of crushing it. */
+.settings-phone { padding-top: env(safe-area-inset-top, 0px); }
+.settings-phone > nav { width: 100%; padding-top: 52px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); border-right: 0; }
+.settings-phone > nav > button { height: 46px; font-size: 15px; }
+.settings-phone .settings-content { display: none; padding: 8px 16px calc(32px + env(safe-area-inset-bottom, 0px)); }
+.settings-phone.phone-detail > nav { display: none; }
+.settings-phone.phone-detail .settings-content { display: block; }
+.settings-phone .phone-settings-back { display: flex; align-items: center; gap: 2px; height: 40px; margin: 0 0 8px -6px; color: var(--accent); font-size: 15px; }
+.settings-phone .settings-content .s-row { flex-wrap: wrap; padding: 12px 14px; }
+.settings-phone .settings-content .s-row > .flex-1 { flex-basis: 12rem; }
+.settings-phone .settings-content h2 { font-size: 24px; }
+.settings-phone > nav > button.bg-selected { background: transparent; border-color: transparent; }
+.settings-phone .settings-content .flex.items-baseline:has(> h2) { flex-direction: column; gap: 2px; }
+.settings-phone .settings-content .flex.items-center:has(> .items-baseline > h2) { flex-wrap: wrap; row-gap: 8px; }
+.settings-phone .prov-split { flex-direction: column; min-height: 0; }
+.settings-phone .prov-rail { width: 100%; }
 .settings-content > section:not(.s-wide) { max-width: 760px; margin: 0 auto; }
 .settings-content > section.s-wide { max-width: 1100px; margin: 0 auto; }
 .settings-content h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }

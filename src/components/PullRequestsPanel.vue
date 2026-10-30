@@ -100,7 +100,7 @@ async function setProvider(provider: string) {
           <span>Přihlas se přes <code>{{ pr.forge.value.authCmd }}</code>.</span>
         </template>
         <template v-else>
-          <span>Žádné pull requesty.</span>
+          <span>No pull requests.</span>
         </template>
       </div>
       <button

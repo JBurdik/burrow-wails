@@ -82,9 +82,9 @@
       </div>
     </div>
 
-    <div class="flex min-h-[420px] gap-3.5">
+    <div class="prov-split flex min-h-[420px] gap-3.5">
       <!-- Instance rail -->
-      <aside class="flex w-[260px] shrink-0 flex-col gap-px overflow-hidden rounded-lg border border-border bg-panel/40">
+      <aside class="prov-rail flex w-[260px] shrink-0 flex-col gap-px overflow-hidden rounded-lg border border-border bg-panel/40">
         <button
           v-for="a in store.instances"
           :key="a.id"

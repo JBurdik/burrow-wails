@@ -51,7 +51,9 @@ function render() {
 }
 
 onMounted(render);
-watch(() => props.diff, render);
+// post: an empty → non-empty diff swaps the v-if branch, so the container
+// only exists after the DOM update.
+watch(() => props.diff, render, { flush: "post" });
 // Re-render with the new syntax theme when the app theme changes.
 watch(() => ui.activeTheme.shiki, render);
 onBeforeUnmount(cleanUp);

@@ -65,7 +65,7 @@
             </div>
           </div>
 
-          <div class="flex h-9 shrink-0 items-center gap-4 border-t border-border bg-base px-4 text-[11px] text-muted-foreground/70">
+          <div class="flex h-9 shrink-0 items-center gap-4 max-md:hidden border-t border-border bg-base px-4 text-[11px] text-muted-foreground/70">
             <span><kbd class="pp-key">↑↓</kbd> navigate</span>
             <span><kbd class="pp-key">⇥</kbd> enter dir</span>
             <span><kbd class="pp-key">↵</kbd> choose</span>
