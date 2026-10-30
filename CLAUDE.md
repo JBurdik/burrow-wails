@@ -175,6 +175,17 @@ it — opening a chat does not wake it. A **manual** settle (`settle()` in `clau
 and so killed a CLI blocked on a permission prompt. PTY agent tabs are **not** slept: killing one loses the
 TUI, and restoring it means relaunching `claude --resume <id>` into the same tab (not built).
 
+**Worktree cleanup** (`worktreecleanup.go`): an hourly ticker removes worktrees by opt-in rules read fresh from
+`uiPrefs` (Settings → General): `worktreeCleanupMerged` (pushed branch is an ancestor of `origin/<default>` after a
+fetch, or the forge's PR for it merged and every commit is on a remote — also `git branch -D`s it) and
+`worktreeCleanupInactive` + `worktreeCleanupInactiveDays` (default 14; no unarchived chats, no tab rows, no activity).
+`worktreeProtected` beats every rule: dirty (incl. untracked) trees, a live chat process, a tab with a live PTY, the
+active workspace (`burrow.open_workspaces.activeId`), a pinned chat (`sidebarPinnedChats`), < 1 h old; an unreadable
+config skips the run. Pure verdict `worktreeCleanupVerdict` is table-tested. Removal = `removeWorktree` (non-forced,
+workspace lock) + `DeleteWorkspace`; branch kept unless merged; `worktrees-cleaned` → summary toast. Settings'
+**Preview** (`worktree_cleanup_preview`) evaluates both rules even while off; "Remove N" (`worktree_cleanup_now(ids)`)
+re-checks each id before removing.
+
 **Sub-agent notices** (`chatsubagentnotice.go`): a sub-agent (`parent_chat_id`, not `kind='side'`) whose
 turn ends (done/failed) or that enters `waiting_*` gets a row in `subagent_notices`, keyed per (child, turn /
 blocked episode) — recorded in `emitChatLine` on the phase transition, delivered by the 15 s schedule sweep

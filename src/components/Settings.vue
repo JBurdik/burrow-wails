@@ -115,6 +115,37 @@
             </div>
             <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Remove merged worktrees</span>
+                <span class="text-[11px] text-muted-foreground">Every hour, remove a worktree whose branch landed in the default branch (or whose pull request was merged), together with its local branch.</span>
+              </div>
+              <Switch :checked="ui.worktreeCleanupMerged" @update:checked="(v: boolean) => ui.worktreeCleanupMerged = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Remove inactive worktrees</span>
+                <span class="text-[11px] text-muted-foreground">Every hour, remove a worktree with no chats and no tabs once nothing happened in it for this long. The branch is kept.</span>
+              </div>
+              <Select v-model="worktreeInactive" class="min-w-[200px]" :options="WORKTREE_INACTIVE_OPTIONS" />
+            </div>
+            <div class="flex items-start gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Worktree cleanup</span>
+                <span class="text-[11px] text-muted-foreground">Never removes a worktree with modified or untracked files, a running chat, an open terminal, a pinned chat, the active one, or one created in the last hour. Preview lists what both rules would remove, even while they are off.</span>
+                <span v-if="cleanupError" class="text-[11px] text-destructive">{{ cleanupError }}</span>
+                <template v-else-if="cleanupPreview">
+                  <span v-if="!cleanupPreview.length" class="text-[11px] text-secondary-foreground">Nothing to clean up.</span>
+                  <ul v-else class="mt-1 flex flex-col gap-0.5">
+                    <li v-for="w in cleanupPreview" :key="w.id" class="text-[11px] text-secondary-foreground"><span class="text-foreground">{{ w.name }}</span> · {{ w.reason }}</li>
+                  </ul>
+                </template>
+              </div>
+              <div class="flex shrink-0 gap-2">
+                <Button variant="outline" size="sm" type="button" :disabled="cleanupBusy" @click="onCleanupPreview">Preview</Button>
+                <Button v-if="cleanupPreview?.length" variant="outline" size="sm" type="button" class="text-destructive hover:bg-destructive/10 hover:text-destructive" :disabled="cleanupBusy" @click="onCleanupNow">Remove {{ cleanupPreview.length }}</Button>
+              </div>
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Deliver sub-agent results to the parent automatically</span>
                 <span class="text-[11px] text-muted-foreground">When a sub-agent finishes or gets blocked on a question, send that into the thread that spawned it once its turn has ended, so it carries on without polling.</span>
               </div>
@@ -1317,6 +1348,52 @@ const chatAutoSleep = computed({
   get: () => String(ui.chatAutoSleepMinutes),
   set: (value: string) => { ui.chatAutoSleepMinutes = Number(value); },
 });
+const WORKTREE_INACTIVE_OPTIONS = [
+  { value: "0", label: "Off" },
+  { value: "7", label: "After 7 days" },
+  { value: "14", label: "After 14 days" },
+  { value: "30", label: "After 30 days" },
+  { value: "90", label: "After 90 days" },
+];
+// One control for two prefs: "Off" keeps the chosen days for Preview.
+const worktreeInactive = computed({
+  get: () => (ui.worktreeCleanupInactive ? String(ui.worktreeCleanupInactiveDays) : "0"),
+  set: (value: string) => {
+    ui.worktreeCleanupInactive = value !== "0";
+    if (value !== "0") ui.worktreeCleanupInactiveDays = Number(value);
+  },
+});
+type WorktreeCleanupItem = { id: number; name: string; reason: string };
+const cleanupPreview = ref<WorktreeCleanupItem[] | null>(null);
+const cleanupBusy = ref(false);
+const cleanupError = ref("");
+async function onCleanupPreview() {
+  cleanupBusy.value = true;
+  cleanupError.value = "";
+  try {
+    cleanupPreview.value = await invoke<WorktreeCleanupItem[]>("worktree_cleanup_preview");
+  } catch (e) {
+    cleanupError.value = String(e);
+  } finally {
+    cleanupBusy.value = false;
+  }
+}
+// The previewed list is the confirmation; Go re-checks each one before removing.
+async function onCleanupNow() {
+  const ids = cleanupPreview.value?.map((w) => w.id) ?? [];
+  cleanupBusy.value = true;
+  cleanupError.value = "";
+  try {
+    const removed = await invoke<WorktreeCleanupItem[]>("worktree_cleanup_now", { ids });
+    const kept = ids.length - removed.length;
+    cleanupPreview.value = null;
+    if (kept > 0) cleanupError.value = `${kept} worktree${kept === 1 ? " was" : "s were"} kept: something changed since the preview.`;
+  } catch (e) {
+    cleanupError.value = String(e);
+  } finally {
+    cleanupBusy.value = false;
+  }
+}
 const CHANNEL_MARKER_OPTIONS = [
   { value: "art", label: "Artwork" },
   { value: "label", label: "Label only" },

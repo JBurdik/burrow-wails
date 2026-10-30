@@ -211,6 +211,7 @@ import ImageLightbox from "@/components/ImageLightbox.vue";
 import { useDiagram } from "@/composables/useDiagram";
 import { useImageLightbox } from "@/composables/useImageLightbox";
 import { configReady, getConfig, setConfig } from "@/lib/config";
+import { useNotificationsStore } from "@/stores/notifications";
 
 let resizing: 'left' | 'right' | null = null;
 let resizeStartX = 0;
@@ -687,6 +688,7 @@ let unlistenMenuOnboarding: UnlistenFn | null = null;
 let unlistenMenuShortcuts: UnlistenFn | null = null;
 let unlistenControl: (() => void) | undefined;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
+let unlistenWorktreesCleaned: UnlistenFn | null = null;
 
 // Short warm synth arpeggio on app startup — no asset, no user gesture needed in
 // the app webview; fails silently if the AudioContext is blocked.
@@ -747,6 +749,19 @@ onMounted(async () => {
   unlistenWorkspacesChanged = await listen("workspaces-changed", () => {
     ws.load();
   });
+  // The hourly worktree cleanup (src-wails/worktreecleanup.go) or Settings'
+  // "Clean up now" removed some worktrees: drop them and say so once.
+  unlistenWorktreesCleaned = await listen<{ removed: { id: number; name: string }[] }>("worktrees-cleaned", (e) => {
+    const removed = e.payload?.removed ?? [];
+    if (!removed.length) return;
+    removed.forEach((w) => ws.forgetWorktree(w.id));
+    useNotificationsStore().push({
+      type: "info",
+      title: `Cleaned up ${removed.length} worktree${removed.length === 1 ? "" : "s"}`,
+      body: removed.map((w) => w.name).join(", "),
+      source: "system",
+    });
+  });
 
   // The control API's UI half: one app-wide listener performing the actions
   // agents ask for, and acking each with its result.
@@ -767,6 +782,7 @@ onBeforeUnmount(() => {
   unlistenMenuOnboarding?.();
   unlistenMenuShortcuts?.();
   unlistenWorkspacesChanged?.();
+  unlistenWorktreesCleaned?.();
   unlistenControl?.();
 });
 
