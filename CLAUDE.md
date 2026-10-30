@@ -175,6 +175,13 @@ it — opening a chat does not wake it. A **manual** settle (`settle()` in `clau
 and so killed a CLI blocked on a permission prompt. PTY agent tabs are **not** slept: killing one loses the
 TUI, and restoring it means relaunching `claude --resume <id>` into the same tab (not built).
 
+**Sub-agent notices** (`chatsubagentnotice.go`): a sub-agent (`parent_chat_id`, not `kind='side'`) whose
+turn ends (done/failed) or that enters `waiting_*` gets a row in `subagent_notices`, keyed per (child, turn /
+blocked episode) — recorded in `emitChatLine` on the phase transition, delivered by the 15 s schedule sweep
+(ahead of `chat_schedules`) into the **parent** via `ChatSend` only once the parent `chatSettled`. A completion
+marks the child collected unless cut at 4000 chars. The user's queued follow-ups are client-side, so a drained one
+can run first. Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
+
 **Self-management verbs** (`internal/control/verbs_self.go`, local-only, default to the caller's chat):
 `schedule` / `schedule_list` / `schedule_cancel` (`chatschedule.go`) — SQLite `chat_schedules`, a 15 s sweep
 delivers due items via `ChatSend` **only once the chat has settled** (`chatSettled`: phase not in flight, no
