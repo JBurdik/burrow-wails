@@ -174,5 +174,6 @@ func (a *App) chatScheduleLoop() {
 	send := func(chatID int64, text string) error { return a.ChatSend(chatID, text, nil) }
 	for range time.Tick(chatScheduleSweepInterval) {
 		a.fireDueSchedules(time.Now(), send)
+		a.wakeSnoozedChats(time.Now())
 	}
 }

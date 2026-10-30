@@ -328,6 +328,7 @@ export namespace main {
 	    slept_at: number;
 	    recap: string;
 	    kind: string;
+	    snoozed_until: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chat(source);
@@ -357,6 +358,7 @@ export namespace main {
 	        this.slept_at = source["slept_at"];
 	        this.recap = source["recap"];
 	        this.kind = source["kind"];
+	        this.snoozed_until = source["snoozed_until"];
 	    }
 	}
 	export class ProviderRuntimeEvent {

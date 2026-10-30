@@ -8,7 +8,7 @@ import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { subagentArchivable } from "@/stores/chatTree";
 import { liveChatSessionIds } from "@/lib/chatSession";
-import { appChatHost } from "@/lib/chatHost";
+import { appChatHost, notifyWoke } from "@/lib/chatHost";
 
 // Shared with Terminal.vue's PTY receipts: one key, one receipt per subject.
 // PTY leaves use their bare numeric id, chats `chat:<id>` — Terminal.vue's
@@ -200,6 +200,18 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     },
     { immediate: true },
   );
+
+  // A snooze ran out (src-wails/chatsnooze.go — Go already cleared the settle
+  // pin and bumped last_activity_at, so the row floats up). Dropping this
+  // device's receipt brings back the review dot on a finished turn.
+  void listen<{ chat_id: number }>("chat-snooze-woke", (event) => {
+    const chatId = event.payload?.chat_id;
+    if (!chatId || !isLive(chatId)) return;
+    seenAt.delete(chatId);
+    persistSeenAt(seenAt, chatId);
+    refresh(chatId);
+    notifyWoke(chatId);
+  });
 
   // Sub-agent auto-archive. Lives here, not in Go, because "seen" is this
   // device's receipt (localStorage) — Go has the phase and collected_at but
