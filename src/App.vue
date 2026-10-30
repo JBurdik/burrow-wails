@@ -12,8 +12,8 @@
       :folder-path="displayWs?.path"
       :right-panel-visible="ui.rightPanelVisible"
       :sidebar-visible="!compact && ui.sidebarVisible"
-      :details-open="detailsOpen"
-      @toggle-details="detailsOpen = !detailsOpen"
+      :details-open="!!details"
+      @toggle-details="toggleDetails"
       @toggle-bottom="toggleBottomTerminal"
       @toggle-sidebar="ui.toggleSidebar()"
       @back="ws.close()"
@@ -51,7 +51,7 @@
            component itself silently did nothing and the sidebar never hid. -->
       <div v-show="compact ? phone === 'threads' : ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
       <div v-show="!compact && ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
-      <div v-show="!compact || phone === 'thread'" ref="mainEl" class="ide-main" :class="{ 'details-reserve': details?.kind === 'chat' }" :style="{ '--details-inset': (detailsInset ?? 0) + 'px' }">
+      <div v-show="!compact || phone === 'thread'" ref="mainEl" class="ide-main" :class="{ 'details-reserve': details?.kind === 'chat' && !details.overlay }" :style="{ '--details-inset': (detailsInset ?? 0) + 'px' }">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
              them on a mode switch ran XTerm.onBeforeUnmount → detach_pty + dispose;
              returning replayed the daemon ring-buffer into a fresh fit → scrambled
@@ -83,10 +83,11 @@
         <Transition name="details-card">
         <ThreadDetailsCard
           v-if="details"
+          :class="{ 'details-overlay': details.overlay }"
           :workspace="details.workspace"
           :kind="details.kind"
           :chat-id="details.chatId"
-          @close="detailsOpen = false"
+          @close="closeDetails"
           @open-config="showProjectConfig = true"
           @open-pr="(n, url) => { ui.rightPanelVisible = true; rightPanelRef?.openPullRequest(n, url, details!.workspace.id); }"
         />
@@ -393,27 +394,53 @@ const mainObserver = new ResizeObserver(([e]) => { if (e) mainWidth.value = e.co
 watch(mainEl, (el, old) => { if (old) mainObserver.unobserve(old); if (el) mainObserver.observe(el); });
 onBeforeUnmount(() => mainObserver.disconnect());
 const rawInset = computed(() => (Number.isFinite(mainWidth.value) ? detailsLaneInset(mainWidth.value) : 0));
-// Hiding is debounced: opening the RP can report one narrow transient width,
-// and hiding+reshowing the card on it read as a blink. Showing stays instant;
-// while a hide is pending the lane keeps its last inset.
+// Docked = the card has a column of its own beside the chat lane. With the RP
+// closed the lane may step left for it; with the RP open it docks only on a
+// screen wide enough that the lane needn't move at all (inset 0) — the RP
+// already took the room. Hiding is debounced: opening the RP can report one
+// narrow transient width, and hide+reshow read as a blink.
+const fitsNow = computed(() => rawInset.value !== null && (!ui.rightPanelVisible || rawInset.value === 0));
+const detailsFits = ref(fitsNow.value);
 const detailsInset = ref<number | null>(rawInset.value);
 let hideTimer: ReturnType<typeof setTimeout> | undefined;
-watch(rawInset, (v) => {
+watch([fitsNow, rawInset], ([fits, inset]) => {
   clearTimeout(hideTimer);
-  if (v !== null) detailsInset.value = v;
-  else hideTimer = setTimeout(() => { if (rawInset.value === null) detailsInset.value = null; }, 250);
+  if (inset !== null) detailsInset.value = inset;
+  if (fits) detailsFits.value = true;
+  else hideTimer = setTimeout(() => { if (!fitsNow.value) detailsFits.value = false; }, 250);
 });
+// Not docked (no room, or the user closed it): the (i) button still opens the
+// card, as a popover over the chat — the details are never out of reach.
+const detailsPeek = ref(false);
 const details = computed(() => {
   const w = ws.active;
-  if (!detailsOpen.value || compact.value || showWelcome.value || ui.mode !== "terminal" || !w) return null;
-  // The RP takes the card's place: while it is open the card is simply gone, so
-  // the chat has the whole main area instead of squeezing between the two.
-  if (ui.rightPanelVisible) return null;
-  if (detailsInset.value === null) return null;
+  if (compact.value || showWelcome.value || ui.mode !== "terminal" || !w) return null;
+  const docked = detailsOpen.value && detailsFits.value;
+  if (!docked && !detailsPeek.value) return null;
   const tab = ui.viewingTabs ? tabsStore.tabsByWs[w.id]?.find((t) => t.id === tabsStore.activeByWs[w.id]) : undefined;
   const kind: "chat" | "tab" | "workspace" = !tab ? "workspace" : tab.chatId != null ? "chat" : "tab";
-  return { workspace: w, kind, chatId: tab?.chatId };
+  return { workspace: w, kind, chatId: tab?.chatId, overlay: !docked };
 });
+function toggleDetails() {
+  if (details.value) {
+    if (details.value.overlay) detailsPeek.value = false;
+    else detailsOpen.value = false;
+  } else if (detailsFits.value) detailsOpen.value = true;
+  else detailsPeek.value = true;
+}
+function closeDetails() {
+  if (details.value?.overlay) detailsPeek.value = false;
+  else detailsOpen.value = false;
+}
+// The popover closes on a click outside it (the toggle handles its own click).
+function onPeekPointer(e: PointerEvent) {
+  const t = e.target as Element | null;
+  if (detailsPeek.value && !t?.closest(".details-card, [data-details-toggle]")) detailsPeek.value = false;
+}
+window.addEventListener("pointerdown", onPeekPointer, true);
+onBeforeUnmount(() => window.removeEventListener("pointerdown", onPeekPointer, true));
+// Room came back: the popover becomes the docked card again.
+watch(detailsFits, (fits) => { if (fits && detailsPeek.value) { detailsPeek.value = false; detailsOpen.value = true; } });
 
 function toggleBottomTerminal() {
   if (showWelcome.value) toggleWelcomeBottom();
@@ -1139,6 +1166,8 @@ body {
    ponytail: every mounted chat in a split gets it, not only the pane under the card. */
 .ide-main.details-reserve .chat-main { padding-right: var(--details-inset); }
 .details-card-enter-active { transition: opacity 0.15s ease; }
+/* Popover form (no room to dock): floats over the chat, so it needs to read as raised. */
+.ide-main .details-card.details-overlay { box-shadow: 0 12px 32px rgb(0 0 0 / 0.35); }
 .details-card-enter-from { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .details-card-enter-active { transition: none; } }
 

@@ -171,6 +171,7 @@
         :class="detailsOpen && 'text-accent'"
         :disabled="!folderPath"
         :title="detailsOpen ? 'Hide thread details' : 'Show thread details'"
+        data-details-toggle
         @click="$emit('toggle-details')"
       >
         <PhInfo :size="14" />
