@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildActivityRows, groupByRepo, parseShortstat, type ActivityRow } from "./sidebarGroups";
+import {
+  buildActivityRows, groupByRepo, parseShortstat, resolveSidebarSection, splitSections, stepWorkingShelf,
+  routeRowOnly, EMPTY_WORKING_SHELF, WORKING_EXIT_GRACE_MS, type ActivityRow, type SectionInput,
+} from "./sidebarGroups";
 import type { Workspace } from "@/stores/workspace";
 import type { TabSummary } from "@/stores/terminalTabs";
 
@@ -106,5 +109,104 @@ describe("parseShortstat", () => {
     expect(parseShortstat(" 3 files changed, 142 insertions(+), 37 deletions(-)\n")).toEqual({ added: 142, removed: 37 });
     expect(parseShortstat(" 1 file changed, 1 insertion(+)")).toEqual({ added: 1, removed: 0 });
     expect(parseShortstat("")).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe("resolveSidebarSection", () => {
+  const f = { snoozed: false, settled: false, pinned: false, working: false };
+  it("applies snoozed > settled > pinned > working > active", () => {
+    expect(resolveSidebarSection({ snoozed: true, settled: true, pinned: true, working: true })).toBe("snoozed");
+    expect(resolveSidebarSection({ ...f, settled: true, pinned: true, working: true })).toBe("settled");
+    expect(resolveSidebarSection({ ...f, pinned: true, working: true })).toBe("pinned");
+    expect(resolveSidebarSection({ ...f, working: true })).toBe("working");
+    expect(resolveSidebarSection(f)).toBe("active");
+  });
+});
+
+describe("splitSections", () => {
+  const row = (id: number, ts: number, extra?: Partial<TabSummary>): ActivityRow => ({ ws: repoA, tab: mkTab(id, `t${id}`, extra), ts });
+  const base: SectionInput = {
+    isPinned: () => false, isSnoozed: () => false, unseen: () => false,
+    inWorking: (r) => r.tab.status === "running", startedAt: () => 0,
+  };
+
+  it("puts a running PTY tab and a running chat into Working, newest turn first", () => {
+    const pty = row(1, 10, { isAgent: true, status: "running" });
+    const chat = row(2, 20, { isChat: true, chatId: 7, status: "running" });
+    const started: Record<number, number> = { 1: 500, 2: 100 };
+    const s = splitSections([chat, pty], { ...base, startedAt: (r) => started[r.tab.id] });
+    expect(s.working.map((r) => r.tab.id)).toEqual([1, 2]);
+    expect(s.active).toEqual([]);
+  });
+
+  it("keeps a pinned running row in Pinned and a snoozed one in Snoozed", () => {
+    const pinned = row(1, 10, { isChat: true, chatId: 1, status: "running" });
+    const snoozed = row(2, 20, { isChat: true, chatId: 2, settled: true });
+    const s = splitSections([pinned, snoozed], { ...base, isPinned: (r) => r.tab.id === 1, isSnoozed: (r) => r.tab.id === 2 });
+    expect(s.pinned.map((r) => r.tab.id)).toEqual([1]);
+    expect(s.snoozed.map((r) => r.tab.id)).toEqual([2]);
+    expect(s.working).toEqual([]);
+    expect(s.settled).toEqual([]);
+  });
+
+  it("orders Active by attention, then recency", () => {
+    const rows = [
+      row(1, 90),
+      row(2, 80, { status: "review" }),
+      row(3, 70, { status: "waiting" }),
+      row(4, 60, { status: "permission" }),
+      row(5, 50, { status: "done" }),
+      row(6, 40),
+    ];
+    const s = splitSections(rows, { ...base, unseen: (r) => r.tab.id === 5 });
+    expect(s.active.map((r) => r.tab.id)).toEqual([4, 3, 2, 5, 1, 6]);
+  });
+});
+
+describe("stepWorkingShelf", () => {
+  const set = (...k: string[]) => new Set(k);
+
+  it("stamps the turn start once and keeps it while running", () => {
+    let { state } = stepWorkingShelf(EMPTY_WORKING_SHELF, set("a"), 1000, false);
+    ({ state } = stepWorkingShelf(state, set("a"), 5000, false));
+    expect(state.startedAt.get("a")).toBe(1000);
+  });
+
+  it("holds a stopped row for the grace, then drops it", () => {
+    let { state } = stepWorkingShelf(EMPTY_WORKING_SHELF, set("a"), 0, false);
+    let wakeAt: number | null;
+    ({ state, wakeAt } = stepWorkingShelf(state, set(), 1000, false));
+    expect(state.shown.has("a")).toBe(true);
+    expect(wakeAt).toBe(1000 + WORKING_EXIT_GRACE_MS);
+    ({ state } = stepWorkingShelf(state, set(), 1000 + WORKING_EXIT_GRACE_MS - 1, false));
+    expect(state.shown.has("a")).toBe(true);
+    ({ state, wakeAt } = stepWorkingShelf(state, set(), 1000 + WORKING_EXIT_GRACE_MS, false));
+    expect(state.shown.has("a")).toBe(false);
+    expect(wakeAt).toBeNull();
+  });
+
+  it("keeps it past the grace while hovered, drops it on leave", () => {
+    let { state } = stepWorkingShelf(EMPTY_WORKING_SHELF, set("a"), 0, false);
+    ({ state } = stepWorkingShelf(state, set(), 1000, true));
+    ({ state } = stepWorkingShelf(state, set(), 60_000, true));
+    expect(state.shown.has("a")).toBe(true);
+    ({ state } = stepWorkingShelf(state, set(), 60_001, false));
+    expect(state.shown.has("a")).toBe(false);
+  });
+
+  it("restamps the start when a lingering row runs again", () => {
+    let { state } = stepWorkingShelf(EMPTY_WORKING_SHELF, set("a"), 0, false);
+    ({ state } = stepWorkingShelf(state, set(), 1000, false));
+    ({ state } = stepWorkingShelf(state, set("a"), 2000, false));
+    expect(state.startedAt.get("a")).toBe(2000);
+    expect(state.stoppedAt.has("a")).toBe(false);
+  });
+});
+
+describe("routeRowOnly", () => {
+  it("keeps only the open row", () => {
+    const rows = [1, 2, 3].map((id) => ({ ws: repoA, tab: mkTab(id, "t"), ts: 0 }));
+    expect(routeRowOnly(rows, (r) => r.tab.id === 2).map((r) => r.tab.id)).toEqual([2]);
+    expect(routeRowOnly(rows, () => false)).toEqual([]);
   });
 });
