@@ -44,7 +44,7 @@
            component itself silently did nothing and the sidebar never hid. -->
       <div v-show="compact ? phone === 'threads' : ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
       <div v-show="!compact && ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
-      <div v-show="!compact || phone === 'thread'" class="ide-main">
+      <div v-show="!compact || phone === 'thread'" ref="mainEl" class="ide-main" :class="{ 'details-reserve': details?.kind === 'chat' }">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
              them on a mode switch ran XTerm.onBeforeUnmount → detach_pty + dispose;
              returning replayed the daemon ring-buffer into a fresh fit → scrambled
@@ -370,9 +370,20 @@ function closeWelcomeBottomTerminal(id: number) {
 const DETAILS_KEY = "burrow.threadDetailsOpen";
 const detailsOpen = ref(localStorage.getItem(DETAILS_KEY) === "1");
 watch(detailsOpen, (on) => localStorage.setItem(DETAILS_KEY, on ? "1" : "0"));
+// t3code's rule (threadDetailsCardLayout.ts): the card never covers the chat. A
+// chat's lane moves left by DETAILS_RESERVE (.details-reserve below); when that
+// would leave the lane under MIN_CHAT_WIDTH, the card hides instead of overlapping.
+const DETAILS_RESERVE = 328; // card 288 + right 8 + clearance 32 — keep in sync with the CSS
+const MIN_CHAT_WIDTH = 560;
+const mainEl = ref<HTMLElement | null>(null);
+const mainWidth = ref(Infinity);
+const mainObserver = new ResizeObserver(([e]) => { if (e) mainWidth.value = e.contentRect.width; });
+watch(mainEl, (el, old) => { if (old) mainObserver.unobserve(old); if (el) mainObserver.observe(el); });
+onBeforeUnmount(() => mainObserver.disconnect());
 const details = computed(() => {
   const w = ws.active;
   if (!detailsOpen.value || compact.value || showWelcome.value || ui.mode !== "terminal" || !w) return null;
+  if (mainWidth.value - DETAILS_RESERVE < MIN_CHAT_WIDTH) return null;
   const tab = ui.viewingTabs ? tabsStore.tabsByWs[w.id]?.find((t) => t.id === tabsStore.activeByWs[w.id]) : undefined;
   const kind: "chat" | "tab" | "workspace" = !tab ? "workspace" : tab.chatId != null ? "chat" : "tab";
   return { workspace: w, kind, chatId: tab?.chatId };
@@ -1087,6 +1098,12 @@ body {
   display: flex;
   flex-direction: column;
 }
+/* Thread details card open: the chat lane (transcript + composer) steps left of it
+   instead of running underneath. 328px = DETAILS_RESERVE in the script.
+   ponytail: every mounted chat in a split gets it, not only the pane under the card. */
+.ide-main .chat-main { transition: padding-right 0.18s ease; }
+.ide-main.details-reserve .chat-main { padding-right: 328px; }
+@media (prefers-reduced-motion: reduce) { .ide-main .chat-main { transition: none; } }
 
 .terminal-host {
   flex: 1;
