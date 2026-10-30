@@ -1329,6 +1329,7 @@ export namespace main {
 	    serving: boolean;
 	    serve_url?: string;
 	    ip?: string;
+	    https_enabled?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TailscaleStatus(source);
@@ -1342,6 +1343,7 @@ export namespace main {
 	        this.serving = source["serving"];
 	        this.serve_url = source["serve_url"];
 	        this.ip = source["ip"];
+	        this.https_enabled = source["https_enabled"];
 	    }
 	}
 	export class TerminalTab {

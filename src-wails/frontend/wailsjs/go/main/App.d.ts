@@ -297,6 +297,8 @@ export function RemoteListChats():Promise<Array<Record<string, any>>>;
 
 export function RemotePairStatus():Promise<main.PairStatus>;
 
+export function RemotePairingEndpoint():Promise<main.AdvertisedEndpoint>;
+
 export function RemoteRegeneratePairCode():Promise<main.PairStatus>;
 
 export function RemoteSetChatTitle(arg1:number,arg2:string,arg3:string):Promise<void>;

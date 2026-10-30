@@ -169,12 +169,14 @@
             <span class="s-label">Burrow Remote</span>
             <div class="flex items-center gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
             <div v-if="httpError" class="rounded-[var(--radius-card)] border border-destructive/40 bg-destructive/10 px-4 py-3 text-[11px] text-destructive">{{ httpError }}</div>
-            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="pairStatus?.locked" class="text-[11px] text-destructive">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else-if="!pairStatus?.code" class="text-[11px] text-muted-foreground">The code has expired. Generate a new one when you are ready to pair.</span><span v-else class="text-[11px] text-muted-foreground">Type this into Burrow Remote on your phone. Single use, and it expires in 3 minutes — the device gets its own token, so this code is never a lasting credential.</span><template v-if="pairStatus?.code && !pairStatus.locked">
+            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="pairStatus?.locked" class="text-[11px] text-destructive">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else-if="!pairStatus?.code" class="text-[11px] text-muted-foreground">The code has expired. Generate a new one when you are ready to pair.</span><span v-else class="text-[11px] text-muted-foreground">{{ pairingQr ? "Scan the QR code with your phone's camera, or type this into Burrow Remote." : "Type this into Burrow Remote on your phone." }} Single use, and it expires in 3 minutes — the device gets its own token, so this code is never a lasting credential.</span><template v-if="pairStatus?.code && !pairStatus.locked">
                 <div class="mt-3 flex gap-2">
                   <span v-for="(digit, i) in pairStatus.code.split('')" :key="i" class="flex h-12 w-10 items-center justify-center rounded-[10px] border border-border bg-base font-mono text-[22px] font-medium text-foreground">{{ digit }}</span>
                 </div>
                 <div class="mt-3 h-[3px] w-[290px] overflow-hidden rounded-full bg-hover"><div class="h-full rounded-full bg-accent transition-[width] duration-1000 ease-linear" :style="{ width: `${pairRemaining * 100}%` }" /></div>
                 <span class="mt-1 text-[11px] text-muted-foreground">Expires in {{ pairRemainingLabel }}</span>
+                <img v-if="pairingQr" :src="pairingQr" alt="Pairing QR code" class="mt-3 size-[156px] rounded-[10px] bg-white p-2 [image-rendering:pixelated]" />
+                <span v-else-if="tailscaleStatus?.logged_in" class="mt-2 text-[11px] text-muted-foreground">Turn on the Tailscale tunnel below to get a QR code your phone can scan.</span>
               </template></div><Button variant="outline" size="sm" type="button" @click="onRegeneratePairCode">New code</Button></div>
             <div v-if="httpStatus?.enabled" class="flex flex-col gap-2 s-row">
               <div class="flex items-center gap-4"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Paired devices</span><span class="text-[11px] text-muted-foreground">Each device has its own token, so revoking one leaves the others paired. A paired device can drive your terminals — treat it as trusted with this machine.</span></div></div>
@@ -190,8 +192,8 @@
             </div>
             <div v-else class="flex items-center gap-4 rounded-[var(--radius-card)] border border-dashed border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Not enabled</span><span class="text-[11px] text-muted-foreground">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
             <span class="mt-3 s-label">Private tunnel</span>
-            <div class="flex items-center gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
-            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="flex items-start gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ tailscaleStatus.serve_url }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then type the pairing code above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
+            <div class="flex items-center gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else-if="tailscaleStatus.https_enabled === false"><span class="text-destructive">HTTPS certificates are off for this tailnet.</span> Turn them on in the Tailscale admin console (DNS → HTTPS Certificates), then come back.</template><template v-else><span v-if="tailscaleError" class="text-destructive">{{ tailscaleError }} </span>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in || (!tailscaleStatus.serving && tailscaleStatus.https_enabled === false)" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
+            <div v-if="pairingBaseUrl" class="flex items-start gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ pairingBaseUrl }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then type the pairing code above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(pairingBaseUrl, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
 
             <span class="mt-3 s-label">Connect to another Burrow</span>
             <p class="m-0 text-[11px] leading-relaxed text-muted-foreground">This window is a client, not just a host — pair it to a Burrow running elsewhere (a VPS, another machine) and drive that one instead. Get its address and a pairing code from <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow pair-status</code> on that machine, or its own Settings above.</p>
@@ -1242,12 +1244,14 @@ import { soundsForKind, playSound, type SoundKind } from "@/lib/sounds";
 import { eventToShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
+import qrcode from "qrcode-generator";
 import { effortLabel, effortsFor, ensureModels, visibleModelsFor, parseTextGenerationValue, textGenerationValue } from "@/lib/chatModels";
 import {
   clearRemoteCredentials,
   desktopUsesRemote,
   loadRemoteCredentials,
   pairDevice,
+  pairingUrl,
   setDesktopUsesRemote,
   type RemoteCredentials,
 } from "@/runtime/remoteEndpoint";
@@ -2058,8 +2062,29 @@ async function refreshPairing() {
   try {
     pairStatus.value = await invoke<PairStatus>("remote_pair_status");
     remoteDevices.value = await invoke<RemoteDevice[]>("remote_devices");
+    pairingEndpoint.value = await invoke<PairingEndpoint | null>("remote_pairing_endpoint");
   } catch { /* browser-only dev */ }
 }
+
+// The address a phone should use, chosen in Go (selectEndpoint: Tailscale
+// Serve's HTTPS MagicDNS name first). null = no route a phone can reach yet.
+interface PairingEndpoint {
+  kind: string;
+  http_base: string;
+}
+const pairingEndpoint = ref<PairingEndpoint | null>(null);
+// Trailing slash: the bundle loads its assets relatively (tailscale.go).
+const pairingBaseUrl = computed(() => (pairingEndpoint.value ? `${pairingEndpoint.value.http_base}/` : ""));
+// The QR opens the PWA with the code in the fragment (never sent to the
+// server); ConnectView pairs on load and strips it from the URL.
+const pairingQr = computed(() => {
+  const code = pairStatus.value?.code;
+  if (!pairingEndpoint.value || !code || pairStatus.value?.locked) return "";
+  const qr = qrcode(0, "M");
+  qr.addData(pairingUrl(pairingEndpoint.value.http_base, code));
+  qr.make();
+  return qr.createDataURL(4, 0);
+});
 // Expiry bar for the pairing code: a 1 s clock, and one refresh when the code
 // runs out so the card flips to "expired" without a manual reload.
 const PAIR_TTL_MS = 3 * 60 * 1000; // pairCodeTTL in remoteauth.go
@@ -2144,7 +2169,10 @@ interface TailscaleStatus {
   dns_name: string | null;
   serving: boolean;
   serve_url: string | null;
+  // null = older CLI with no capability map: unknown, serve is still tried.
+  https_enabled: boolean | null;
 }
+const tailscaleError = ref<string | null>(null);
 const tailscaleStatus = ref<TailscaleStatus | null>(null);
 async function refreshTailscaleStatus() {
   try {
@@ -2152,13 +2180,18 @@ async function refreshTailscaleStatus() {
   } catch { /* browser-only dev */ }
 }
 async function onToggleTailscale(checked: boolean) {
+  tailscaleError.value = null;
   try {
     tailscaleStatus.value = await invoke<TailscaleStatus>("set_tailscale_serve", {
       enabled: checked,
       port: httpStatus.value?.port ?? 8420,
     });
-  } catch { /* leaves tailscaleStatus as-is; toggle snaps back via v-model binding to server state */ }
+  } catch (e) {
+    // Toggle snaps back via the server state; say why it did.
+    tailscaleError.value = e instanceof Error ? e.message : String(e);
+  }
   await refreshTailscaleStatus();
+  await refreshPairing();
 }
 refreshTailscaleStatus();
 
