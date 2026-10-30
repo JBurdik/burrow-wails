@@ -217,6 +217,7 @@
             <div class="flex items-center gap-1.5">
               <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : row.tab.isChat ? PhChatCenteredText : PhTerminal" :size="10" class="shrink-0" />
               <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]" :class="sec.key === 'working' && 'text-foreground/90'">{{ row.tab.title }}</span>
+              <component :is="prGlyphOf(row.tab.chatId)!.icon" v-if="prGlyphOf(row.tab.chatId)" :size="10" class="shrink-0" :class="prGlyphOf(row.tab.chatId)!.cls" :title="prGlyphOf(row.tab.chatId)!.title" />
               <template v-if="sec.key === 'working'">
                 <span v-if="row.tab.status === 'running'" class="sb-spark shrink-0 text-[11px]">{{ spinnerFrame }}</span>
                 <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground">{{ ago(shelf.startedAt.get(rowKey(row)) ?? row.ts) }}</span>
@@ -625,6 +626,8 @@ import {
   PhRobot,
   PhPlus,
   PhGitBranch,
+  PhGitPullRequest,
+  PhGitMerge,
   PhChatCenteredText,
   PhGear,
   PhCircleNotch,
@@ -695,6 +698,17 @@ const termTabs = useTerminalTabsStore();
 const chats = useClaudeChatsStore();
 const snoozedUntilOf = (chatId: number | null | undefined) =>
   (chatId != null && chats.sessions.find((s) => s.id === chatId)?.snoozedUntil) || 0;
+// Linked PR glyph (chatpr.go): state as last refreshed, no polling.
+const PR_GLYPH = {
+  open: { icon: PhGitPullRequest, cls: "text-success" },
+  draft: { icon: PhGitPullRequest, cls: "text-muted-foreground" },
+  merged: { icon: PhGitMerge, cls: "text-accent" },
+  closed: { icon: PhGitPullRequest, cls: "text-destructive" },
+} as const;
+const prGlyphOf = (chatId: number | null | undefined) => {
+  const s = chatId != null ? chats.sessions.find((c) => c.id === chatId) : undefined;
+  return s?.prNumber && s.prState ? { ...PR_GLYPH[s.prState], title: `PR #${s.prNumber} ${s.prState}` } : null;
+};
 const chatIsAsleep = (chatId: number | null | undefined) => chatId != null && chatAsleep(chats.sessions.find((s) => s.id === chatId));
 const chatRecapOf = (chatId: number | null | undefined) => (chatId != null && ui.chatRecaps ? chats.sessions.find((s) => s.id === chatId)?.recap : undefined);
 const ui = useUIStore();

@@ -21,6 +21,8 @@ type ForgeStatus struct {
 	InstallCmd string `json:"installCmd,omitempty"`
 	AuthCmd    string `json:"authCmd,omitempty"`
 	DocsURL    string `json:"docsUrl,omitempty"`
+	// CanCheckout: the adapter implements forge.HeadFetcher ("Open in worktree").
+	CanCheckout bool `json:"canCheckout,omitempty"`
 }
 
 // forgeRun adapts the app's runCmd to the package's Runner, resolving the CLI
@@ -98,6 +100,7 @@ func (a *App) ForgeInfo(cwd string) ForgeStatus {
 		AuthCmd:    cli.AuthCmd,
 		DocsURL:    cli.DocsURL,
 	}
+	_, st.CanCheckout = f.(forge.HeadFetcher)
 	st.Installed = resolveAgentBin(cli.Bin, cwd) != ""
 	if st.Installed && len(cli.AuthArgs) > 0 {
 		_, _, code := forgeRun(cli.Bin, cwd, cli.AuthArgs)
@@ -131,11 +134,46 @@ func (a *App) ForgePrView(cwd string, number int) (forge.PullRequest, error) {
 }
 
 func (a *App) ForgePrCreate(cwd, title, body, base, head string) (forge.PullRequest, error) {
+	return a.forgePrCreate(cwd, title, body, base, head, 0)
+}
+
+// forgePrCreate links the created PR to callerChat, or (0) to the chats on
+// that workspace + branch (chatpr.go).
+func (a *App) forgePrCreate(cwd, title, body, base, head string, callerChat int64) (forge.PullRequest, error) {
 	f, err := a.resolveForge(cwd)
 	if err != nil {
 		return forge.PullRequest{}, err
 	}
-	return f.Create(cwd, forge.CreateOpts{Title: title, Body: body, Base: base, Head: head})
+	pr, err := f.Create(cwd, forge.CreateOpts{Title: title, Body: body, Base: base, Head: head})
+	if err == nil {
+		a.autoLinkPr(cwd, callerChat, pr)
+	}
+	return pr, err
+}
+
+// ForgePrCheckout fetches PR number's head from origin and creates a worktree
+// of repoPath on branch at path from it (CreateWorktree: nesting + setup
+// scripts). The client picks branch and path — it already read the PR and owns
+// the worktrees-dir setting. A branch that already exists locally is attached
+// as-is (CreateWorktree's fallback) rather than reset to the PR head.
+func (a *App) ForgePrCheckout(repoPath string, number int, branch, path string) (Workspace, error) {
+	f, err := a.resolveForge(repoPath)
+	if err != nil {
+		return Workspace{}, err
+	}
+	hf, ok := f.(forge.HeadFetcher)
+	if !ok {
+		return Workspace{}, fmt.Errorf("%s pull requests cannot be checked out from Burrow", f.Provider())
+	}
+	// FETCH_HEAD, read right after: no ref of ours is left behind in the repo.
+	if out := runCmd("git", repoPath, []string{"fetch", "--quiet", "origin", hf.FetchRef(number)}); !out.Success {
+		return Workspace{}, gitErr(out)
+	}
+	sha := runCmd("git", repoPath, []string{"rev-parse", "FETCH_HEAD"})
+	if !sha.Success {
+		return Workspace{}, gitErr(sha)
+	}
+	return a.CreateWorktree(repoPath, branch, path, branch, strings.TrimSpace(sha.Stdout))
 }
 
 func (a *App) ForgePrMerge(cwd string, number int, squash bool) error {

@@ -18,6 +18,8 @@ export interface DetailsContext {
   /** Current branch of the workspace; "" outside a git repo. */
   branch: string;
   hasPr: boolean;
+  /** Chat only: a PR linked to the thread (chatpr.go), shown with or without a branch. */
+  hasLinkedPr?: boolean;
   added: number;
   removed: number;
   servers: number;
@@ -35,7 +37,8 @@ export function visibleRows(c: DetailsContext): DetailsRow[] {
     // Always there: its "Add script" is the way to the first one.
     scripts: true,
     branch: !!c.branch,
-    pr: !!c.branch && c.hasPr,
+    // A chat always gets the row: its menu is how a PR is linked.
+    pr: !!c.hasLinkedPr || (!!c.branch && (c.hasPr || chat)),
     commit: !!c.branch,
     changes: c.added + c.removed > 0,
     servers: c.servers > 0,

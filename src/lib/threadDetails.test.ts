@@ -5,7 +5,12 @@ const base: DetailsContext = { kind: "chat", desktop: true, branch: "main", hasP
 
 describe("visibleRows", () => {
   it("shows the always-on rows and hides the empty ones", () => {
-    expect(visibleRows(base)).toEqual(["workspace", "openIn", "scripts", "branch", "commit"]);
+    expect(visibleRows(base)).toEqual(["workspace", "openIn", "scripts", "branch", "pr", "commit"]);
+    expect(visibleRows({ ...base, kind: "tab" })).toEqual(["workspace", "openIn", "scripts", "branch", "commit"]);
+  });
+
+  it("keeps a chat's linked PR even without a branch", () => {
+    expect(visibleRows({ ...base, branch: "", hasLinkedPr: true })).toContain("pr");
   });
 
   it("drops every git row outside a repo and Open in on the web", () => {

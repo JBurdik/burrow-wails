@@ -156,7 +156,9 @@ import { isStashShortcut } from "@/lib/promptStash";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
-import { getProjectSettings } from "@/lib/projectSettings";
+import { getProjectSettings, worktreePath as projectWorktreePath } from "@/lib/projectSettings";
+import { parsePrRef } from "@/lib/prLinkInput";
+import { openPrInWorktree } from "@/lib/prCheckout";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 
 const emit = defineEmits<{ (e: "open-folder"): void }>();
@@ -448,9 +450,7 @@ async function createBranch(name: string) {
 }
 
 function worktreePath(workspace: Workspace, branch: string): string {
-  const repo = workspace.path.split("/").filter(Boolean).pop() || "repo";
-  const root = getProjectSettings(workspace.parent_id ?? workspace.id).worktreesDir || ui.worktreesDir;
-  return `${root}/${repo}/${branch.replaceAll("/", "-")}`;
+  return projectWorktreePath(workspace, branch, ui.worktreesDir);
 }
 
 // git.branches (what the branch-switch dropdown lists) is otherwise only
@@ -559,6 +559,13 @@ async function submit() {
   const prompt = stripPasteMarkers(rawPrompt);
   let t = target.value;
   if (!prompt || !t) return;
+  // The whole prompt is a PR URL or "#123": check it out into a worktree + chat
+  // (a draft prompt waits there) instead of sending it to an agent.
+  const prRef = parsePrRef(prompt, false);
+  if (prRef) {
+    text.value = "";
+    return void openPrInWorktree(t, prRef.number, prRef.url);
+  }
   if (worktreeMode.value === "new") {
     const branch = worktreeBranch.value.trim();
     if (!branch) return;

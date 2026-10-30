@@ -49,8 +49,8 @@ func (f forgeClient) List(cwd, scope, state string) (any, error) {
 func (f forgeClient) View(cwd string, number int) (any, error) {
 	return f.app.ForgePrView(cwd, number)
 }
-func (f forgeClient) Create(cwd, title, body, base, head string) (any, error) {
-	return f.app.ForgePrCreate(cwd, title, body, base, head)
+func (f forgeClient) Create(cwd, title, body, base, head string, chatID int64) (any, error) {
+	return f.app.forgePrCreate(cwd, title, body, base, head, chatID)
 }
 func (f forgeClient) Merge(cwd string, number int, squash bool) error {
 	return f.app.ForgePrMerge(cwd, number, squash)

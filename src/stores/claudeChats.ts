@@ -71,6 +71,11 @@ export interface ClaudeSession {
   // Server-owned like collectedAt — write via chat_limit_arm / _dismiss.
   limitResetAt?: number;
   limitResumeAt?: number;
+  // Linked pull request (src-wails/chatpr.go): number, URL and the glyph's
+  // last known state. Server-owned like collectedAt — write via chat_link_pr.
+  prNumber?: number;
+  prUrl?: string;
+  prState?: "open" | "draft" | "merged" | "closed";
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -141,6 +146,9 @@ interface ChatRow {
   snoozed_until?: number;
   limit_reset_at?: number;
   limit_resume_at?: number;
+  pr_number?: number;
+  pr_url?: string;
+  pr_state?: string;
 }
 
 /**
@@ -181,6 +189,9 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     snoozedUntil: r.snoozed_until || undefined,
     limitResetAt: r.limit_reset_at || undefined,
     limitResumeAt: r.limit_resume_at || undefined,
+    prNumber: r.pr_number || undefined,
+    prUrl: r.pr_url || undefined,
+    prState: (r.pr_state || undefined) as ClaudeSession["prState"],
     busy: false,
   };
 }

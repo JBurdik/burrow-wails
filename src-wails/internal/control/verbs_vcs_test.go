@@ -18,7 +18,7 @@ func (f *fakeForge) List(cwd, scope, state string) (any, error) {
 func (f *fakeForge) View(cwd string, number int) (any, error) {
 	return map[string]any{"number": number}, nil
 }
-func (f *fakeForge) Create(cwd, title, body, base, head string) (any, error) {
+func (f *fakeForge) Create(cwd, title, body, base, head string, chatID int64) (any, error) {
 	return map[string]any{"title": title, "baseRefName": base, "headRefName": head}, nil
 }
 func (f *fakeForge) Merge(cwd string, number int, squash bool) error {

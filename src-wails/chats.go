@@ -95,6 +95,12 @@ type Chat struct {
 	// resume for (0 = not armed).
 	LimitResetAt  int64 `json:"limit_reset_at"`
 	LimitResumeAt int64 `json:"limit_resume_at"`
+	// Read-only on the wire: the pull request linked to this thread (chatpr.go).
+	// The forge is the workspace's. pr_state is the glyph's last known state
+	// (open | draft | merged | closed), refreshed on push and when the card opens.
+	PrNumber int64  `json:"pr_number"`
+	PrURL    string `json:"pr_url"`
+	PrState  string `json:"pr_state"`
 }
 
 func chatsSchema() []string {
@@ -128,7 +134,16 @@ func chatsSchema() []string {
 			limit_reset_at    INTEGER NOT NULL DEFAULT 0,
 			limit_resume_at   INTEGER NOT NULL DEFAULT 0,
 			limit_failed_at   INTEGER NOT NULL DEFAULT 0,
-			limit_resumed_key TEXT    NOT NULL DEFAULT ''
+			limit_resumed_key TEXT    NOT NULL DEFAULT '',
+			pr_number         INTEGER NOT NULL DEFAULT 0,
+			pr_url            TEXT    NOT NULL DEFAULT '',
+			pr_state          TEXT    NOT NULL DEFAULT ''
+		)`,
+		// A PR the user unlinked from a chat: auto-linking never re-adds it.
+		`CREATE TABLE IF NOT EXISTS chat_pr_dismissed (
+			chat_id   INTEGER NOT NULL,
+			pr_number INTEGER NOT NULL,
+			PRIMARY KEY (chat_id, pr_number)
 		)`,
 		`CREATE TABLE IF NOT EXISTS chat_migrations (
 			name    TEXT PRIMARY KEY,
@@ -160,7 +175,8 @@ const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, agent_kind, transport, model, branch,
 	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
 	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind, snoozed_until,
-	limit_reset_at, limit_resume_at`
+	limit_reset_at, limit_resume_at,
+	pr_number, pr_url, pr_state`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
@@ -168,7 +184,8 @@ func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
 		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind, &c.SnoozedUntil,
-		&c.LimitResetAt, &c.LimitResumeAt)
+		&c.LimitResetAt, &c.LimitResumeAt,
+		&c.PrNumber, &c.PrURL, &c.PrState)
 	return c, err
 }
 
@@ -304,6 +321,7 @@ func (a *App) DeleteChat(id int64) error {
 		if err := a.DeleteChatMessages(int(c)); err != nil {
 			return err
 		}
+		_, _ = a.db.Exec(`DELETE FROM chat_pr_dismissed WHERE chat_id = ?`, c)
 		if _, err := a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, c); err != nil {
 			return err
 		}

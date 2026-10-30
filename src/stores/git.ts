@@ -294,6 +294,8 @@ export const useGitStore = defineStore("git", () => {
       const args = upstream ? ["push"] : ["push", "-u", "origin", branchName];
       await runGit(dir, args);
       await refresh();
+      // The push may have moved a linked PR's checks/state (chatpr.go).
+      void invoke("chat_prs_refresh", { cwd: dir }).catch(() => {});
       notif.resolve(toastId, { type: "done", title: "Pushed", source: "git" });
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : "git push failed";
