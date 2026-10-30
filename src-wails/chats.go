@@ -285,7 +285,9 @@ func (a *App) SaveChats(chats []Chat) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	busEmit("chats-changed", nil)
+	// Marked so a client can skip the echo of its OWN save without also
+	// skipping a create/delete that lands while that save is in flight.
+	busEmit("chats-changed", map[string]any{"save": true})
 	return nil
 }
 

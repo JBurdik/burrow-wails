@@ -8,6 +8,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import { listen } from "@tauri-apps/api/event";
+import { appTransport } from "@/lib/wailsCompat/core";
 import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
 import { childrenOf as childrenOfSessions, allChildrenOf as allChildrenOfSessions } from "@/stores/chatTree";
@@ -261,13 +262,18 @@ export function isActivitySync(
    * dropped, because that is what a delete on the other client looks like
    * from here.
    */
+  let reloadGen = 0;
   async function reload() {
+    // Calls run concurrently server-side, so replies can arrive out of order:
+    // an older list landing last would drop a chat a newer one already showed.
+    const gen = ++reloadGen;
     let rows: ChatRow[];
     try {
       rows = await invoke<ChatRow[]>("list_chats");
     } catch {
       return; // no backend (browser-only dev) — leave whatever is loaded
     }
+    if (gen !== reloadGen) return;
     const next: ClaudeSession[] = [];
     for (const row of rows) {
       const existing = sessions.value.find((s) => s.id === row.id);
@@ -294,10 +300,22 @@ export function isActivitySync(
   // Both clients follow this, so a chat created anywhere appears everywhere
   // without a reload — which is the whole reason the list moved out of a file
   // each client rewrote wholesale.
-  void listen("chats-changed", () => {
-    if (selfWrites > 0) return;
+  // Only a SAVE can be our echo: a create/delete from another client landing
+  // while one of our saves is in flight must still reload, and one always is
+  // while a turn streams.
+  // ponytail: another client's save inside our save window is still skipped;
+  // tag saves with a client id if that ever matters.
+  void listen<{ save?: boolean } | null>("chats-changed", (e) => {
+    if (selfWrites > 0 && e.payload?.save) return;
     void reload();
   });
+  // A resync means events were lost (phone asleep, ring overrun) — any
+  // chats-changed among them included.
+  try {
+    appTransport().onResync(() => void reload());
+  } catch {
+    // not paired / no backend (tests, browser-only dev)
+  }
 
   configReady.then(() => {
     migrateFromLocalStorage(ACTIVE_LEGACY_KEY, ACTIVE_KEY);
