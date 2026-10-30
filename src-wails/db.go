@@ -217,6 +217,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE chats ADD COLUMN pr_url TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE chats ADD COLUMN pr_state TEXT NOT NULL DEFAULT ''`,
 	}
+	alters = append(alters, chatSchedulesAlters()...)
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
 			return fmt.Errorf("%s: %w", s, err)

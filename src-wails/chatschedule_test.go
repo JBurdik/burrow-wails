@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"burrow/internal/agentphase"
+	"burrow/internal/control"
 )
 
 // A due item goes out only once its chat has settled (a send into a running
@@ -29,11 +31,11 @@ func TestFireDueSchedules(t *testing.T) {
 	a.phases.Apply(chatKey(busy.ID), agentphase.Event{Kind: agentphase.HookRunning})
 
 	now := time.Now()
-	first, _ := sched.Add(idle.ID, "first", now.Add(-2*time.Minute))
-	second, _ := sched.Add(idle.ID, "second", now.Add(-time.Minute))
-	later, _ := sched.Add(idle.ID, "later", now.Add(time.Hour))
-	wait, _ := sched.Add(busy.ID, "wait", now.Add(-time.Minute))
-	if _, err := sched.Add(gone.ID, "orphan", now.Add(-time.Minute)); err != nil {
+	first, _ := sched.addAt(idle.ID, "first", now.Add(-2*time.Minute))
+	second, _ := sched.addAt(idle.ID, "second", now.Add(-time.Minute))
+	later, _ := sched.addAt(idle.ID, "later", now.Add(time.Hour))
+	wait, _ := sched.addAt(busy.ID, "wait", now.Add(-time.Minute))
+	if _, err := sched.addAt(gone.ID, "orphan", now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	// Deleting a chat cascades; a row inserted behind its back is swept too.
@@ -71,7 +73,7 @@ func TestFireDueSchedulesRetriesThenDrops(t *testing.T) {
 	a, _, wsID, _ := runtimeApp(t)
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
 	now := time.Now()
-	item, _ := scheduleAdapter{a}.Add(c.ID, "hi", now)
+	item, _ := scheduleAdapter{a}.addAt(c.ID, "hi", now)
 	fail := func(int64, string) error { return errors.New("no binary") }
 
 	for i := 1; i < chatScheduleMaxAttempts; i++ {
@@ -85,6 +87,80 @@ func TestFireDueSchedulesRetriesThenDrops(t *testing.T) {
 	a.fireDueSchedules(now, fail)
 	if list, _ := (scheduleAdapter{a}).List(0); len(list) != 0 {
 		t.Fatalf("item %d not dropped after %d attempts: %+v", item.ID, chatScheduleMaxAttempts, list)
+	}
+}
+
+func (s scheduleAdapter) addAt(chatID int64, text string, due time.Time) (control.ScheduledPrompt, error) {
+	return s.Add(control.ScheduledPrompt{ChatID: chatID, Text: text, DueAt: due})
+}
+
+// A recurring item is rescheduled from the moment it runs, not deleted: one
+// that slept through a week of hourly slots runs once and is next due an
+// hour later. Paused items wait; resuming skips the slots missed meanwhile.
+func TestRecurringScheduleRunsOnceAfterSleep(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
+	sched := scheduleAdapter{a}
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
+	now := time.Now()
+	item, err := sched.Add(control.ScheduledPrompt{ChatID: c.ID, Text: "standup", DueAt: now.Add(-7 * 24 * time.Hour),
+		Rule: control.Recurrence{Kind: "interval", EveryMin: 60}})
+	if err != nil || item.Name != "standup" || item.Recurs != "every 1h" {
+		t.Fatalf("add: %+v %v", item, err)
+	}
+	var sent int
+	send := func(int64, string) error { sent++; return nil }
+	a.fireDueSchedules(now, send)
+	a.fireDueSchedules(now, send)
+	got, _ := sched.get(item.ID)
+	if sent != 1 || !got.DueAt.Equal(time.UnixMilli(now.Add(time.Hour).UnixMilli())) || got.LastRunAt == nil {
+		t.Fatalf("sent %d, next %v (want %v), last %v", sent, got.DueAt, now.Add(time.Hour), got.LastRunAt)
+	}
+
+	if _, err := sched.SetPaused(item.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sched.RunNow(item.ID); err == nil {
+		t.Fatal("run-now on a paused item")
+	}
+	later := now.Add(5 * time.Hour)
+	a.fireDueSchedules(later, send)
+	if sent != 1 {
+		t.Fatal("paused item ran")
+	}
+	if p, _ := sched.SetPaused(item.ID, false); !p.DueAt.After(time.Now()) || p.Paused {
+		t.Fatalf("resumed into the past: %+v", p)
+	}
+	if p, _ := sched.RunNow(item.ID); p.DueAt.After(time.Now()) {
+		t.Fatalf("run-now not due: %+v", p)
+	}
+	a.fireDueSchedules(time.Now(), send)
+	if sent != 2 {
+		t.Fatalf("run-now: sent %d", sent)
+	}
+}
+
+// A new-chat target starts a fresh chat per run in its workspace, titled after
+// the task and the day, without waiting on any other chat's turn.
+func TestNewChatScheduleStartsAChatPerRun(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
+	writeConfig(t, map[string]any{"providers": []any{claudeAt("claude", "")}})
+	sched := scheduleAdapter{a}
+	caller, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
+	item, err := sched.Add(control.ScheduledPrompt{ChatID: caller.ID, Name: "Triage", Text: "triage issues", NewChat: true,
+		Rule: control.Recurrence{Kind: "weekly", TimeOfDay: "09:00"}})
+	if err != nil || item.ChatID != 0 || item.WorkspaceID != wsID || !item.DueAt.After(time.Now()) {
+		t.Fatalf("add: %+v %v", item, err)
+	}
+	var into []int64
+	send := func(id int64, _ string) error { into = append(into, id); return nil }
+	a.fireDueSchedules(item.DueAt, send)
+	a.fireDueSchedules(item.DueAt.Add(24*time.Hour), send)
+	if len(into) != 2 || into[0] == caller.ID || into[0] == into[1] {
+		t.Fatalf("sent into %v", into)
+	}
+	row, _ := a.chatByID(into[0])
+	if row.WorkspaceID != wsID || !strings.HasPrefix(row.Title, "Triage · ") || row.AgentKind != "claude" {
+		t.Fatalf("new chat row: %+v", row)
 	}
 }
 
