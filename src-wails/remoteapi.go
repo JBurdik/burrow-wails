@@ -198,6 +198,12 @@ var remoteAllowed = map[string]remoteCmd{
 	// terminal, so this takes the orchestration scope instead. A paired device
 	// holds both, so the choice is about naming, not reach.
 	"stop_chat": {Method: "StopChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// Thread details card (chatdetails.go): the self-management verbs, aimed at
+	// a chat the desktop names.
+	"chat_schedule_list":    {Method: "ChatScheduleList", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_schedule_cancel":  {Method: "ChatScheduleCancel", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"chat_move_to_worktree": {Method: "ChatMoveToWorktree", Args: []string{"chatId", "branch"}, Scope: scopeOrchOperate},
+	"chat_leave_worktree":   {Method: "ChatLeaveWorktree", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 
 	// Diff review notes (diffcomments.go) — DiffTab.vue's batch review flow.
 	"list_diff_comments":        {Method: "ListDiffComments", Args: []string{"wsId"}, Scope: scopeOrchRead},

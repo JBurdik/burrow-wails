@@ -1926,7 +1926,7 @@ async function sendReviewNotes(markdown: string): Promise<boolean> {
   } catch { return false; }
 }
 
-defineExpose({ reviewSubject, sendReviewNotes, addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
+defineExpose({ toggleBottomPanel, reviewSubject, sendReviewNotes, addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
 </script>
 
 <style scoped>
