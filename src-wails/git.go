@@ -62,10 +62,10 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 	if err := a.db.QueryRow(`SELECT id FROM workspaces WHERE path = ?`, repoPath).Scan(&parentID); err != nil {
 		return Workspace{}, err
 	}
-	if baseRef == "" {
-		baseRef = "HEAD"
-	}
-	args := []string{"worktree", "add", path, "-b", branch, baseRef}
+	baseRef, warning := resolveWorktreeBase(repoPath, baseRef, a.worktreeFromOrigin())
+	// --no-track: an origin/B start point would otherwise make the new branch
+	// track (and push to) B. A no-op for a local base.
+	args := []string{"worktree", "add", "--no-track", path, "-b", branch, baseRef}
 	if out := runCmd("git", repoPath, args); !out.Success {
 		// Branch may already exist — retry without -b.
 		args = []string{"worktree", "add", path, branch}
@@ -96,6 +96,7 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 	ws.IsGit = true
 	if err == nil {
 		emitWorkspacesChanged()
+		a.startWorktreeSetup(ws.ID, repoPath, path, warning)
 	}
 	return ws, err
 }

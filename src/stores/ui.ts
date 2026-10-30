@@ -116,6 +116,7 @@ interface Prefs {
   defaultChatAgent: string; // default agent for new chat sessions (chatAgents store id)
   chatAutoSleepMinutes: number; // stop an idle chat's process after N minutes, 0 = off (read by Go, src-wails/chatsleep.go)
   chatRecaps: boolean; // one-line recap under each chat title (read by Go, src-wails/chatrecap.go)
+  worktreeFromOrigin: boolean; // fetch origin/<base> and branch new worktrees from it (read by Go, src-wails/worktreebase.go)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
   channelMarker: "art" | "label" | "off"; // dev/beta builds: sidebar artwork + titlebar badge, badge only, or nothing
   // Background text generation (commit messages, PR content, branch names,
@@ -223,6 +224,7 @@ const DEFAULT_PREFS: Prefs = {
   channelMarker: "art",
   chatAutoSleepMinutes: 60,
   chatRecaps: true,
+  worktreeFromOrigin: true,
   textGenerationModel: DEFAULT_TEXT_GENERATION_MODEL,
   textGenerationPolicy: "default",
   textGenerationRules: "",
@@ -368,6 +370,7 @@ export const useUIStore = defineStore("ui", () => {
   const channelMarker = ref<"art" | "label" | "off">(loaded.channelMarker ?? "art");
   const chatAutoSleepMinutes = ref<number>(loaded.chatAutoSleepMinutes ?? 60);
   const chatRecaps = ref<boolean>(loaded.chatRecaps ?? true);
+  const worktreeFromOrigin = ref<boolean>(loaded.worktreeFromOrigin ?? true);
   const textGenerationModel = ref<string>(loaded.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL);
   const textGenerationPolicy = ref<TextGenerationPolicy>(loaded.textGenerationPolicy ?? "default");
   const textGenerationRules = ref<string>(loaded.textGenerationRules ?? "");
@@ -434,6 +437,7 @@ export const useUIStore = defineStore("ui", () => {
     channelMarker.value = p.channelMarker ?? "art";
     chatAutoSleepMinutes.value = p.chatAutoSleepMinutes ?? 60;
     chatRecaps.value = p.chatRecaps ?? true;
+    worktreeFromOrigin.value = p.worktreeFromOrigin ?? true;
     textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
     textGenerationPolicy.value = p.textGenerationPolicy ?? "default";
     textGenerationRules.value = p.textGenerationRules ?? "";
@@ -620,6 +624,7 @@ export const useUIStore = defineStore("ui", () => {
         channelMarker: channelMarker.value,
         chatAutoSleepMinutes: chatAutoSleepMinutes.value,
         chatRecaps: chatRecaps.value,
+        worktreeFromOrigin: worktreeFromOrigin.value,
         textGenerationModel: textGenerationModel.value,
         textGenerationPolicy: textGenerationPolicy.value,
         textGenerationRules: textGenerationRules.value,
@@ -639,7 +644,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -946,6 +951,7 @@ export const useUIStore = defineStore("ui", () => {
     channelMarker,
     chatAutoSleepMinutes,
     chatRecaps,
+    worktreeFromOrigin,
     textGenerationModel,
     textGenerationPolicy,
     textGenerationRules,
