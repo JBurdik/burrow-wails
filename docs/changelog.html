@@ -139,6 +139,8 @@
     <div class="section-label">Opravy</div>
     <ul>
       <li><strong>Smazání worktree mohlo smazat untracked soubory</strong> — při <code>status.showUntrackedFiles=no</code> git ochranu přeskočil; teď ji vynucujeme.</li>
+      <li><strong>Fetch na pozadí se nezasekne na hesle</strong> — fetch hlavy PR („Open in worktree“) a fetch základní větve nové worktree běží s <code>GIT_TERMINAL_PROMPT=0</code> a <code>GCM_INTERACTIVE=never</code>; bez přihlášení selžou, místo aby čekaly na výzvu, kterou nikdo nevidí.</li>
+      <li><strong>Checkpoint mohl přehlédnout úpravu</strong> — změna souboru na stejnou délku ve stejné sekundě se do snímku nedostala (kopie indexu dostala nový čas a git ji pak považoval za čistou); kopie teď drží čas původního indexu.</li>
       <li><strong>Souběžné git operace na jednom stromu</strong> — checkpointy, vytváření/mazání worktree a přesun chatu se na stejné cestě už nepřekrývají.</li>
     </ul>
   </div>

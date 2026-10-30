@@ -166,7 +166,7 @@ func (a *App) ForgePrCheckout(repoPath string, number int, branch, path string) 
 		return Workspace{}, fmt.Errorf("%s pull requests cannot be checked out from Burrow", f.Provider())
 	}
 	// FETCH_HEAD, read right after: no ref of ours is left behind in the repo.
-	if out := runCmd("git", repoPath, []string{"fetch", "--quiet", "origin", hf.FetchRef(number)}); !out.Success {
+	if out := runGitEnv(repoPath, gitNoPromptEnv, "fetch", "--quiet", "origin", hf.FetchRef(number)); !out.Success {
 		return Workspace{}, gitErr(out)
 	}
 	sha := runCmd("git", repoPath, []string{"rev-parse", "FETCH_HEAD"})
