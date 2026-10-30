@@ -54,6 +54,12 @@ type ChatMessage struct {
 	// (chatrewind.go). Empty for other transports and older transcripts.
 	UUID string `json:"uuid,omitempty"`
 
+	// At is when the row first arrived live (epoch ms), stamped by
+	// foldChatLine — never by foldEvents, which stays pure. Compared against
+	// the client's read receipt for the transcript's "New" divider. Zero on
+	// catch-up folds and older transcripts.
+	At int64 `json:"at,omitempty"`
+
 	SubagentChatID int64  `json:"subagentChatId,omitempty"`
 	SubagentAgent  string `json:"subagentAgent,omitempty"`
 	Surface        string `json:"surface,omitempty"`
