@@ -265,6 +265,7 @@
           <span class="block truncate text-[12.5px] text-foreground">{{ t.title }}</span>
           <span v-if="t.body" class="block truncate text-[11px] text-muted-foreground">{{ t.body }}</span>
         </span>
+        <button v-if="t.action" class="shrink-0 rounded px-1.5 text-[12px] font-semibold text-accent hover:bg-hover" @click.stop="notif.runAction(t.id)">{{ t.action.label }}</button>
         <button v-if="t.type !== 'pending'" class="sb-notice-x" title="Dismiss" @click.stop="notif.dismiss(t.id)"><PhX :size="11" /></button>
       </div>
     </TransitionGroup>
@@ -421,8 +422,8 @@
             </button>
           </template>
         </template>
-        <button class="menu-item" @click="withMenu((ws, tab) => termTabs.close(ws.id, tab!.id))">Close tab</button>
-        <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws, tab) => deleteThread(ws.id, tab!))">Delete thread…</button>
+        <button class="menu-item" @click="withMenu((ws, tab) => closeTab(ws.id, tab!))">Close tab</button>
+        <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws, tab) => deleteThread(ws.id, tab!))">{{ rowMenu.tab.isChat ? "Delete thread" : "Delete thread…" }}</button>
         <div class="menu-sep" />
       </template>
       <button class="menu-item" @click="withMenu(newChatSession)">New chat</button>
@@ -633,6 +634,7 @@ import { useGitStore, type PrInfo } from "@/stores/git";
 import { useNotificationsStore } from "@/stores/notifications";
 import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
 import { isChatPinned, toggleChatPin, unpinChat } from "@/lib/pinnedChats";
+import { createPendingDeletes } from "@/lib/pendingDeletes";
 import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
 import { buildActivityRows, groupByRepo, parseShortstat, type ActivityRow } from "@/lib/sidebarGroups";
 import { childrenOf } from "@/stores/chatTree";
@@ -698,10 +700,19 @@ const filterRepos = computed(() =>
   [...store.topLevel].sort((a, b) => Number(isArchived(a.id)) - Number(isArchived(b.id))),
 );
 
+// Chats deleted inside their undo window are hidden here, not gone yet.
+const pendingDeletes = createPendingDeletes();
+const visibleTabsByWs = computed(() => {
+  if (!pendingDeletes.hidden.size) return termTabs.tabsByWs;
+  const out: Record<number, TabSummary[]> = {};
+  for (const [ws, tabs] of Object.entries(termTabs.tabsByWs)) out[Number(ws)] = tabs.filter((t) => !pendingDeletes.isHidden(t.chatId));
+  return out;
+});
+
 const feed = computed(() =>
   buildActivityRows({
     openedWorkspaces: store.opened,
-    tabsByWs: termTabs.tabsByWs,
+    tabsByWs: visibleTabsByWs.value,
     // A chat's recency is the DB-backed `last_activity_at` on its row, not the
     // localStorage stamp: the stamps are pruned for any key a setTabs list
     // doesn't mention, so a restart (chat tabs restore after the pty ones) wiped
@@ -779,7 +790,7 @@ const settledChatsLimit = ref(12);
 const settledChatsVisible = computed(() => filteredSettled.value.slice(0, settledChatsLimit.value));
 const archivedChats = computed(() => {
   const all = active.value ? chats.archivedSessionsForWs(active.value.id) : [];
-  return all;
+  return all.filter((s) => !pendingDeletes.isHidden(s.id));
 });
 
 function unarchiveAndOpen(chatId: number) {
@@ -794,43 +805,74 @@ function runConfirm() {
   confirmDialog.value?.onConfirm();
   confirmDialog.value = null;
 }
+// Deleting a chat asks nothing: its rows hide at once and an Undo toast holds
+// the real delete for 8 s (t3code's undo notice). A plain terminal tab keeps
+// its confirm — closing it kills the process, which no undo can bring back.
+function deleteChatsWithUndo(items: { wsId: number; tabId?: number; chatId: number }[], title: string) {
+  // The thread on screen is about to vanish from the list — send the view
+  // home, same as settling it does.
+  if (items.some((i) => i.tabId != null && store.active?.id === i.wsId && termTabs.activeByWs[i.wsId] === i.tabId)) ui.openWelcome();
+  const undo = pendingDeletes.schedule(items.map((i) => i.chatId), async () => {
+    for (const i of items) {
+      // close() is a single request slot — let Terminal take each one. Sequential
+      // remove(): it stops each chat's process before deleting its row.
+      if (i.tabId != null) { termTabs.close(i.wsId, i.tabId); await nextTick(); }
+      unpinChat(i.chatId);
+      await chats.remove(i.chatId);
+    }
+  });
+  notif.push({ type: "info", title, duration: 8000, action: { label: "Undo", run: undo } });
+}
 function deletePermanently(chatId: number) {
-  confirmDialog.value = {
-    message: "Delete this chat permanently? This cannot be undone.",
-    onConfirm: () => {
-      unpinChat(chatId);
-      chats.remove(chatId);
-    },
-  };
+  const title = chats.sessions.find((s) => s.id === chatId)?.title ?? "chat";
+  deleteChatsWithUndo([{ wsId: active.value?.id ?? 0, chatId }], `Deleted “${title}”`);
 }
 function deleteAllSettled() {
   const rows = filteredSettled.value.filter((r) => !(r.tab.isChat && isChatPinned(r.tab.chatId)));
-  if (!rows.length) return;
+  const chatRows = rows.filter((r) => r.tab.isChat && r.tab.chatId != null);
+  const ptyRows = rows.filter((r) => !chatRows.includes(r));
+  const run = () => {
+    for (const r of ptyRows) termTabs.close(r.ws.id, r.tab.id);
+    if (chatRows.length) {
+      deleteChatsWithUndo(
+        chatRows.map((r) => ({ wsId: r.ws.id, tabId: r.tab.id, chatId: r.tab.chatId! })),
+        chatRows.length === 1 ? `Deleted “${chatRows[0].tab.title}”` : `Deleted ${chatRows.length} threads`,
+      );
+    }
+  };
+  if (!ptyRows.length) return run();
   confirmDialog.value = {
-    message: `Delete ${rows.length} settled thread${rows.length === 1 ? "" : "s"} permanently? Pinned ones are kept. This cannot be undone.`,
-    onConfirm: async () => {
-      // Sequential: remove() stops each chat's process before deleting its row.
-      for (const r of rows) {
-        termTabs.close(r.ws.id, r.tab.id);
-        if (r.tab.isChat && r.tab.chatId != null) await chats.remove(r.tab.chatId);
-      }
-    },
+    message: `Close ${ptyRows.length} settled terminal tab${ptyRows.length === 1 ? "" : "s"} and kill their processes? Pinned threads are kept; deleted chats can be undone.`,
+    onConfirm: run,
   };
 }
 // Last step of a thread's life: settled → archived → gone. A chat row is a
 // stored session, so it needs the store's hard delete; a plain terminal tab
 // only exists as long as its PTY, so closing it *is* the delete.
 function deleteThread(wsId: number, tab: TabSummary) {
+  if (tab.isChat && tab.chatId != null) {
+    deleteChatsWithUndo([{ wsId, tabId: tab.id, chatId: tab.chatId }], `Deleted “${tab.title}”`);
+    return;
+  }
   confirmDialog.value = {
     message: `Delete “${tab.title}” permanently? This cannot be undone.`,
-    onConfirm: () => {
-      termTabs.close(wsId, tab.id);
-      if (tab.isChat && tab.chatId != null) {
-        unpinChat(tab.chatId);
-        chats.remove(tab.chatId);
-      }
-    },
+    onConfirm: () => termTabs.close(wsId, tab.id),
   };
+}
+// Closing a chat tab archives it (Terminal's stopChatSession); reopening the
+// chat is the existing unarchive path, so that is the Undo.
+// ponytail: an Undo landing before archive()'s process stop resolves gets
+// re-archived by it; 8 s window vs a stop of a few ms, not worth a lock.
+function closeTab(wsId: number, tab: TabSummary) {
+  termTabs.close(wsId, tab.id);
+  if (!tab.isChat || tab.chatId == null) return;
+  const chatId = tab.chatId;
+  notif.push({
+    type: "info",
+    title: `Archived “${tab.title}”`,
+    duration: 8000,
+    action: { label: "Undo", run: () => termTabs.openChat(wsId, chatId) },
+  });
 }
 function toggleSettled(tab: TabSummary, wsId: number) {
   // Settling the tab the user is currently looking at leaves nothing to show
