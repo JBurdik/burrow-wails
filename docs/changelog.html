@@ -95,7 +95,6 @@
       <li><strong>Snooze</strong> — vlákno se schová do zvoleného času (1 h, dnes 18:00, zítra 9:00, pondělí 9:00), pak samo vyskočí nahoru s notifikací. Sloupec <code>chats.snoozed_until</code>, budí ho Go sweep, funguje i z telefonu.</li>
       <li><strong>Undo místo potvrzování</strong> — smazání chatu, hromadné smazání settled vláken a archivace ukážou toast s Undo na 8 s; skutečné smazání proběhne až potom. Smazání terminálového tabu dál potvrzuje dialog.</li>
       <li><strong>Karta Thread details</strong> — plovoucí karta vpravo nahoře: workspace/worktree (Move/Leave worktree), Open in, skripty, větev + PR, Commit/Push, Changes +/−, servery, naplánované zprávy a rodokmen vlákna. Open in, větev a Commit/Push se do ní přesunuly z titlebaru, kde zůstala drobečková navigace <code>projekt / vlákno</code>.</li>
-      <li><strong>Push notifikace na telefon</strong> — spárovaná PWA (More → Notifications) dostane Web Push, když chat nebo Claude v terminálovém tabu čeká na povolení nebo na tebe, když chatu doběhne turn a když skončí snooze. Rozhoduje Go, takže to chodí i se zavřeným desktopem; bez relay serveru, šifrování RFC 8291 bez nové závislosti. Nepípá, když chat právě sleduješ na desktopu, max 1× za 30 s na vlákno. Na iPhonu jen z PWA přidané na plochu. Paired devices v Nastavení ukazují zvonek.</li>
       <li><strong>Označení kanálu</strong> — beta má za hlavičkou sidebaru noční oblohu, dev blueprint mřížku. Nastavení → Appearance: Artwork / Label only / Off.</li>
     </ul>
   </div>
@@ -133,6 +132,7 @@
   <div class="section feat">
     <div class="section-label">Telefon</div>
     <ul>
+      <li><strong>Push notifikace na telefon</strong> — spárovaná PWA (More → Notifications) dostane Web Push, když chat nebo Claude v terminálovém tabu čeká na povolení nebo na tebe, když chatu doběhne turn a když skončí snooze. Rozhoduje Go, takže to chodí i se zavřeným desktopem; bez relay serveru, šifrování RFC 8291 bez nové závislosti. Nepípá, když chat právě sleduješ na desktopu, max 1× za 30 s na vlákno. Na iPhonu jen z PWA přidané na plochu. Paired devices v Nastavení ukazují zvonek.</li>
       <li><strong>Víc strojů v jednom klientovi</strong> — telefon (More → Connection) i desktop (Nastavení → Remote access) si pamatují všechny spárované Macy, aktivní je vždy jeden: přepnutí, Add machine, přejmenování, zapomenutí. QR kód stroj přidá, nepřepíše; odvolání smaže jen ten jeden a vrátí na výběr strojů. Starý jediný slot se převede sám.</li>
       <li><strong>QR párování</strong> — Nastavení ukáže QR kód, telefon po naskenování spáruje sám; kód jede ve fragmentu URL, takže se nedostane do logů. Nastavení ukazuje správnou adresu (Tailscale HTTPS) a srozumitelný důvod, když HTTPS na tailnetu chybí.</li>
     </ul>
