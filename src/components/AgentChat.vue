@@ -141,7 +141,7 @@
     <div class="relative flex min-h-0 flex-1">
     <ThreadFindBar :messages="messages" :container="scrollEl" @reveal="revealForFind" />
     <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
-      <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
+      <div data-chat-lane class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <!-- A remount starts with no messages until the transcript is read back, which on
            a slow link (remote client) takes long enough to read as an empty conversation. -->
       <div v-if="messages.length === 0 && transcriptLoading" class="flex flex-col gap-6 px-4 py-4" aria-busy="true" aria-label="Loading conversation">
@@ -466,7 +466,7 @@
 
     <!-- New-style input bar -->
     <div class="flex-shrink-0 px-[18px] pb-2 pt-2.5">
-      <div class="mx-auto w-full max-w-[760px]">
+      <div data-chat-lane class="mx-auto w-full max-w-[760px]">
       <!-- Branch-changed banner: session.branch (created-on snapshot) vs. current workspace branch -->
       <div v-if="branchChanged && !branchBannerDismissed" class="mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
         <PhGitBranch :size="13" weight="bold" class="flex-shrink-0" />

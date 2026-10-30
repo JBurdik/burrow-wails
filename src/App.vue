@@ -390,25 +390,33 @@ const details = computed(() => {
   const kind: "chat" | "tab" | "workspace" = !tab ? "workspace" : tab.chatId != null ? "chat" : "tab";
   return { workspace: w, kind, chatId: tab?.chatId };
 });
-// The lane's move when the user opens/closes the card is FLIP-animated: the inset
-// lands in one layout, then each chat slides from where it was via transform.
-// Easing padding-right instead re-laid the whole transcript every frame (choppy),
-// and panel resizes don't animate at all — the RP opens in one frame.
-const laneInset = () => (details.value?.kind === "chat" ? detailsInset.value ?? 0 : 0);
-let renderedInset = 0; // the inset currently on screen; updated after each render
-watch(laneInset, (v) => { renderedInset = v; }, { flush: "post", immediate: true });
-watch(detailsOpen, () => {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const before = renderedInset;
+// Opening/closing the RP or the details card re-lays the main area in one frame.
+// FLIP it instead of easing widths (which re-laid the transcript every frame and
+// stuttered): remember where each chat lane and the card were, let the layout
+// land once — including the card inset, which follows mainWidth — then slide
+// them from the old spot with transform. The RP slides in from the right edge.
+const FLIP = { duration: 240, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" };
+function flipMainArea(rpOpening = false) {
+  const root = mainEl.value;
+  if (!root || compact.value || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const targets = () => [...root.querySelectorAll<HTMLElement>("[data-chat-lane], .details-card")]
+    .filter((el) => el.offsetParent !== null);
+  const before = new Map(targets().map((el) => [el, el.getBoundingClientRect().left]));
   nextTick(() => {
-    const dx = (laneInset() - before) / 2; // the mx-auto lane's centre moves by half the inset
-    if (!dx || !mainEl.value) return;
-    for (const el of mainEl.value.querySelectorAll<HTMLElement>(".chat-main")) {
-      el.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }],
-        { duration: 260, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
-    }
+    mainWidth.value = root.clientWidth; // don't wait for the ResizeObserver: the inset must land in this frame
+    nextTick(() => {
+      for (const el of targets()) {
+        const was = before.get(el);
+        const dx = was === undefined ? 0 : was - el.getBoundingClientRect().left;
+        if (Math.abs(dx) > 0.5) el.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], FLIP);
+      }
+      const rp = rpOpening ? document.querySelector<HTMLElement>(".panel-right") : null;
+      if (rp) rp.animate([{ transform: `translateX(${rp.offsetWidth}px)`, opacity: 0.6 }, { transform: "none", opacity: 1 }], FLIP);
+    });
   });
-}, { flush: "pre" });
+}
+watch(detailsOpen, () => flipMainArea(), { flush: "pre" });
+watch(() => ui.rightPanelVisible, (open) => flipMainArea(open), { flush: "pre" });
 
 function toggleBottomTerminal() {
   if (showWelcome.value) toggleWelcomeBottom();
