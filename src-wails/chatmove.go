@@ -66,20 +66,26 @@ func (a *App) moveChat(chatID, workspaceID int64) error {
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
 
-	if chatIsClaude(c) && c.ClaudeSessionID != "" {
-		src := a.claudeLaunchFor(c, oldCwd).ConfigDir
-		dst := a.claudeLaunchFor(c, path).ConfigDir
-		if err := linkClaudeSession(src, oldCwd, dst, path, c.ClaudeSessionID); err != nil {
-			return fmt.Errorf("carry the Claude session over: %w", err)
+	// Destination tree's lock (taken inside the chat lock, the order every
+	// caller uses): no move into a worktree mid-create/remove.
+	withWorkspaceLock(path, func() {
+		if chatIsClaude(c) && c.ClaudeSessionID != "" {
+			src := a.claudeLaunchFor(c, oldCwd).ConfigDir
+			dst := a.claudeLaunchFor(c, path).ConfigDir
+			if err = linkClaudeSession(src, oldCwd, dst, path, c.ClaudeSessionID); err != nil {
+				err = fmt.Errorf("carry the Claude session over: %w", err)
+				return
+			}
 		}
-	}
-	branch := wtBranch.String
-	if !wtBranch.Valid || branch == "" {
-		if out := runCmd("git", path, []string{"rev-parse", "--abbrev-ref", "HEAD"}); out.Success {
-			branch = strings.TrimSpace(out.Stdout)
+		branch := wtBranch.String
+		if !wtBranch.Valid || branch == "" {
+			if out := runCmd("git", path, []string{"rev-parse", "--abbrev-ref", "HEAD"}); out.Success {
+				branch = strings.TrimSpace(out.Stdout)
+			}
 		}
-	}
-	if _, err := a.db.Exec(`UPDATE chats SET workspace_id = ?, branch = ? WHERE id = ?`, workspaceID, branch, chatID); err != nil {
+		_, err = a.db.Exec(`UPDATE chats SET workspace_id = ?, branch = ? WHERE id = ?`, workspaceID, branch, chatID)
+	})
+	if err != nil {
 		return err
 	}
 	a.chatRT.moved.Store(id, struct{}{})
