@@ -133,6 +133,8 @@ GitHub/Gitea `pull/N/head`, GitLab `merge-requests/N/head`; Azure has none, `For
 `resolveWorktreeBase` leaves a full sha alone); the client names the branch after the PR head, creates the chat, links
 it (`#N`) and stores `Review / continue PR #N: <title>` as the composer draft — never sent. Doors: PullRequestsPanel
 detail header, Spotlight and the welcome composer on a pasted PR URL / `#123` (`parsePrRef` in `prLinkInput.ts`).
+Both unattended fetches (this PR head, `resolveWorktreeBase`'s `git fetch origin B`) run with `gitNoPromptEnv`
+(`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`): nobody sees a credential prompt, so it must fail, not hang.
 
 **Launch settings** (`effort`, `permission_mode`, `profile_id`, `append_system_prompt`, + `model`) are
 columns too, **read-only on the wire** (SaveChats never writes them, like `collected_at`); backfilled once

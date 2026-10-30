@@ -36,6 +36,11 @@ func (a *App) worktreeFromOrigin() bool {
 	return cfg.UI.FromOrigin == nil || *cfg.UI.FromOrigin
 }
 
+// gitNoPromptEnv goes on every network git call the app makes on its own
+// (worktree base fetch, PR head fetch): nobody can see a credential prompt, so
+// git and Git Credential Manager must fail instead of waiting on one.
+var gitNoPromptEnv = []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"}
+
 // resolveWorktreeBase turns base B into the ref a new worktree branches from:
 // origin/B after a successful `git fetch origin B`, else B itself. warning is
 // non-empty when the fetch was tried and failed — the worktree is still made,
@@ -59,8 +64,7 @@ func resolveWorktreeBase(repoPath, base string, fromOrigin bool) (ref, warning s
 	defer cancel()
 	c := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", branch)
 	c.Dir = repoPath
-	// Never block on a credential prompt nobody can see.
-	c.Env = append(c.Environ(), "GIT_TERMINAL_PROMPT=0")
+	c.Env = append(c.Environ(), gitNoPromptEnv...)
 	if out, err := c.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if ctx.Err() != nil {
