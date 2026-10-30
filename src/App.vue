@@ -305,6 +305,11 @@ watch(
       const chatId = tabsStore.tabsByWs[wsId]?.find((t) => t.id === tabId)?.chatId;
       tabsStore.activate(wsId, tabId, chatId);
     }
+    // ?chat=<id> is a push notification's deep link (src-wails/pushtrigger.go):
+    // chat tab ids are client-side, so Go can only name the chat. Opening it
+    // routes on to its tab, which drops the query.
+    const pushedChat = routeId(route.query.chat);
+    if (pushedChat !== null) tabsStore.openChat(wsId, pushedChat);
   },
   { immediate: true },
 );
