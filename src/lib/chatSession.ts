@@ -1,4 +1,4 @@
-import { computed, effectScope, nextTick, ref, watch, type ComputedRef, type EffectScope, type Ref } from "vue";
+import { computed, effectScope, ref, watch, type ComputedRef, type EffectScope, type Ref } from "vue";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type {
@@ -36,7 +36,7 @@ import { appChatHost, type ChatHost } from "@/lib/chatHost";
 /**
  * What the session asks of a view. The LAST attached view's hooks stay
  * installed after it unmounts — a turn finishing behind a closed view still
- * restores ACP selections and drains its queue through them — so a hook must
+ * restores ACP selections through them — so a hook must
  * be safe to call on an unmounted instance (scrolling a detached element is).
  */
 export interface ChatViewHooks {
@@ -51,8 +51,6 @@ export interface ChatViewHooks {
   restoreAcpSelections(): void;
   /** True for ACP / Codex, false for the native Claude transport. */
   usesRpcRuntime(): boolean;
-  /** Send a follow-up as its own turn (the queue drain). */
-  send(text: string, images?: string[]): Promise<void>;
 }
 
 /** The session's outside world. Injected so tests can run it with no Tauri, no Pinia. */
@@ -208,22 +206,21 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   readonly messages: Readonly<Ref<readonly ChatMessage[]>>;
 
   /**
-   * FIFO of follow-ups, DERIVED from the transcript's own `queued` entries.
-   * There is deliberately no second array: the queue and its placeholder
-   * bubbles used to be two structures synchronised by hand in five methods,
-   * and `moveQueuedMessageNext` (now `moveQueuedMessage`) only ever updated one of them — "Send Next"
-   * reordered what was sent while the transcript kept showing the old order.
-   * Deriving it also makes the queue survive a relaunch for free, since the
-   * placeholders are persisted with the transcript.
+   * FIFO of follow-ups, mirrored from Go's `chat_queue` (chatqueue.go) via
+   * `chat-queue-changed`. Go drains it once the chat settles — with no view
+   * mounted, the desktop closed or the phone asleep — so there is no drain
+   * here. The intents below write through the `chat_queue_*` commands and
+   * update the mirror optimistically; the next event is the truth.
    */
   messageQueue: ComputedRef<QueuedChatMessage[]>;
-  enqueueMessage(text: string, images?: string[]): QueuedChatMessage;
+  /** Append to Go's queue. Null when Go refused (already reported in the transcript). */
+  enqueueMessage(text: string, images?: string[]): Promise<QueuedChatMessage | null>;
   removeQueuedMessage(id: number): void;
   /** Rewrite a queued follow-up's text in place (position kept); an empty text is ignored. Never touches the running turn. */
   editQueuedMessage(id: number, text: string): void;
   clearQueuedMessages(): void;
   /** Move a queued follow-up to position `toIndex` of the queue (0 = next). */
-  moveQueuedMessage(id: number, toIndex: number): void;
+  moveQueuedMessage(id: number, toIndex: number): Promise<void>;
 
   /** Every request the agent is blocked on, whatever the transport. */
   pendingRequests: ComputedRef<PendingRequest[]>;
@@ -304,8 +301,6 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   save(): void;
   /** Mirror busy / message count into the chat list and the remote mirror. */
   sync(): void;
-  /** Send the next queued follow-up if the chat is idle. */
-  drain(): void;
   /** Attach the domain-event listener (idempotent). Both transports use it. */
   listenEvents(): Promise<void>;
   /** Attach the native Claude stream listener (idempotent). */
@@ -357,7 +352,9 @@ interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionS
   acpControlIds: Set<number>;
   /** Ids of OUR OWN selector restore pushes — their replies must not restore again. */
   acpRestorePushIds: Set<number>;
-  takeNextQueuedMessage(): QueuedChatMessage | undefined;
+  /** Go's queue as last seen (`chat-queue-changed` / `chat_queue_list`). */
+  queue: Ref<QueuedChatMessage[]>;
+  queueUL: UnlistenFn | null;
   /** A prompt this client is about to send — drop its echo when Go publishes it. */
   expectEcho(text: string): void;
   /** Settle partial rows and stuck tool spinners (a turn ended somehow). */
@@ -393,10 +390,11 @@ export function canSteer(transport: string | undefined): boolean {
   return !transport || transport === "claude-cli" || transport === "codex-app-server";
 }
 
-/** A transcript entry read back as a queue entry; [] for anything else. */
-function queuedEntry(message: ChatMessage): QueuedChatMessage[] {
-  if (message.role !== "queued") return [];
-  return [{ id: message.id, text: message.text, ...(message.images?.length ? { images: message.images } : {}) }];
+/** A `chat_queue` row as Go sends it (chatqueue.go). */
+interface GoQueueItem { id: number; chatId: number; text: string; attachments: string[] }
+
+function fromGo(item: GoQueueItem): QueuedChatMessage {
+  return { id: item.id, text: item.text, ...(item.attachments?.length ? { images: item.attachments } : {}) };
 }
 
 const sessions = new Map<number, InternalSession>();
@@ -449,9 +447,9 @@ export async function replayChatStream(chatId: number): Promise<void> {
 /** Delay before an unwatched, settled session is dropped. */
 const EVICT_DELAY_MS = 2_000;
 
-/** Nobody is looking, nothing is in flight, nothing is waiting to be sent. */
+/** Nobody is looking and nothing is in flight. A queue does not pin it: Go drains it. */
 function evictable(s: InternalSession): boolean {
-  return s.refCount === 0 && isIdle(s) && s.messageQueue.value.length === 0;
+  return s.refCount === 0 && isIdle(s);
 }
 
 function isIdle(s: InternalSession): boolean {
@@ -476,7 +474,9 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     busy: ref(false),
     lastActivityAt: ref(Date.now()),
     turnStartedAt: ref(0),
-    messageQueue: computed(() => s.messages.value.flatMap(queuedEntry)),
+    queue: ref<QueuedChatMessage[]>([]),
+    queueUL: null,
+    messageQueue: computed(() => s.queue.value),
     suppressNextDone: ref(false),
     sessionId: ref(""),
     turnStats: ref<TurnStats | null>(null),
@@ -558,9 +558,17 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       }
     },
     async steer(queuedId) {
-      const index = s.messages.value.findIndex((m) => m.id === queuedId && m.role === "queued");
+      const index = s.queue.value.findIndex((q) => q.id === queuedId);
       if (index < 0 || !s.busy.value || !canSteer(s.deps.host.chat(chatId)?.transport)) return false;
-      const [entry] = s.messages.value.splice(index, 1);
+      const entry = s.queue.value[index];
+      // Take it out of Go's queue first: once removed, the drain can't also
+      // send it. A failed remove means Go already sent (or someone removed) it.
+      try {
+        await s.deps.invoke("chat_queue_remove", { id: queuedId });
+      } catch {
+        return false;
+      }
+      s.queue.value = s.queue.value.filter((q) => q.id !== queuedId);
       const prompt = { text: entry.text, images: entry.images };
       const id = s.postUserMessage(prompt);
       s.save();
@@ -571,15 +579,17 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         return true;
       } catch (e) {
         // Nothing was sent or recorded: un-claim the echo and put the entry
-        // back where it was. The turn may have ended meanwhile (its drain ran
-        // without this entry), so drain again — a no-op while still busy.
+        // back where it was (Go drains it once the turn settles).
         s.pendingSends.delete(prompt.text);
-        const rest = s.messages.value.filter((m) => !(m.id === id && m.role === "user"));
-        rest.splice(Math.min(index, rest.length), 0, entry);
-        s.messages.value = rest;
+        s.messages.value = s.messages.value.filter((m) => !(m.id === id && m.role === "user"));
         s.save();
-        if (!s.busy.value) s.drain();
-        else console.warn("[chat] steer refused, left queued:", e);
+        console.warn("[chat] steer refused, left queued:", e);
+        const back = await s.enqueueMessage(entry.text, entry.images);
+        if (back) {
+          const ids = s.queue.value.map((q) => q.id).filter((q) => q !== back.id);
+          ids.splice(Math.min(index, ids.length), 0, back.id);
+          await s.deps.invoke("chat_queue_reorder", { chatId, ids }).catch(() => {});
+        }
         return false;
       }
     },
@@ -601,8 +611,8 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       const index = before.findIndex((m) => m.id === message.id && m.role === message.role);
       if (index < 0) return false;
       // Cut first: a save racing the call must write the truncated transcript,
-      // not put the dropped turns back. Queued follow-ups stay queued.
-      s.messages.value = [...before.slice(0, index), ...before.slice(index).filter((m) => m.role === "queued")];
+      // not put the dropped turns back. Queued follow-ups (Go's) stay queued.
+      s.messages.value = before.slice(0, index);
       try {
         await s.deps.invoke("chat_rewind", { chatId, index: index + s.hiddenBefore.value, text: message.text });
         return true;
@@ -684,6 +694,16 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     },
     hydrate({ messages, hiddenBefore, sessionId }) {
       if (messages && s.messages.value.length === 0) {
+        // Follow-ups queued by an older build sit in the transcript as
+        // `queued` rows: hand them to Go's queue, in order, once.
+        const legacy = messages.filter((m) => m.role === "queued");
+        if (legacy.length) {
+          messages = messages.filter((m) => m.role !== "queued");
+          void (async () => {
+            for (const m of legacy) await s.enqueueMessage(m.text, m.images);
+            s.save();
+          })();
+        }
         s.messages.value = messages;
         s.hiddenBefore.value = hiddenBefore ?? 0;
         // Ids must continue past the loaded history, or new messages collide
@@ -699,38 +719,41 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       return lastUser.text;
     },
 
-    enqueueMessage(text, images) {
-      const entry: QueuedChatMessage = { id: s.nextMsgId++, text, ...(images?.length ? { images } : {}) };
-      s.messages.value.push({ id: entry.id, role: "queued", text, ...(entry.images ? { images: entry.images } : {}) });
-      return entry;
+    async enqueueMessage(text, images) {
+      try {
+        const item = await s.deps.invoke<GoQueueItem>("chat_queue_add", { chatId, text, images: images ?? [] });
+        const entry = fromGo(item);
+        if (!s.queue.value.some((q) => q.id === entry.id)) s.queue.value = [...s.queue.value, entry];
+        return entry;
+      } catch (e) {
+        s.notice(`Could not queue the message: ${e}`);
+        return null;
+      }
     },
     removeQueuedMessage(id) {
-      s.messages.value = s.messages.value.filter((message) => message.id !== id || message.role !== "queued");
+      s.queue.value = s.queue.value.filter((q) => q.id !== id);
+      void s.deps.invoke("chat_queue_remove", { id }).catch(() => {});
     },
     editQueuedMessage(id, text) {
       const next = text.trim();
       if (!next) return;
-      s.messages.value = s.messages.value.map((m) => (m.id === id && m.role === "queued" ? { ...m, text: next } : m));
+      s.queue.value = s.queue.value.map((q) => (q.id === id ? { ...q, text: next } : q));
+      void s.deps.invoke("chat_queue_update", { id, text: next }).catch(() => {});
     },
     clearQueuedMessages() {
-      s.messages.value = s.messages.value.filter((message) => message.role !== "queued");
+      const ids = s.queue.value.map((q) => q.id);
+      s.queue.value = [];
+      for (const id of ids) void s.deps.invoke("chat_queue_remove", { id }).catch(() => {});
     },
-    moveQueuedMessage(id, toIndex) {
-      const messages = s.messages.value;
-      const queue = messages.filter((m) => m.role === "queued");
-      const from = queue.findIndex((m) => m.id === id);
+    async moveQueuedMessage(id, toIndex) {
+      const queue = [...s.queue.value];
+      const from = queue.findIndex((q) => q.id === id);
       const to = Math.min(Math.max(toIndex, 0), queue.length - 1);
       if (from < 0 || from === to) return;
-      // Land right before (moving up) or after (moving down) the entry now at `to`.
-      const target = queue[to];
-      const [entry] = messages.splice(messages.indexOf(queue[from]), 1);
-      messages.splice(messages.indexOf(target) + (to > from ? 1 : 0), 0, entry);
-    },
-    takeNextQueuedMessage() {
-      const index = s.messages.value.findIndex((m) => m.role === "queued");
-      if (index < 0) return undefined;
-      const [message] = s.messages.value.splice(index, 1);
-      return queuedEntry(message)[0];
+      const [entry] = queue.splice(from, 1);
+      queue.splice(to, 0, entry);
+      s.queue.value = queue;
+      await s.deps.invoke("chat_queue_reorder", { chatId, ids: queue.map((q) => q.id) }).catch(() => {});
     },
 
     scope,
@@ -818,26 +841,22 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.settleControlRequest(requestId);
       s.sync();
     },
-    drain() {
-      if (s.busy.value || !s.view) return;
-      // Let the finishing turn settle its transcript, status and provider
-      // correlation first, then re-check: Claude can resume the same session
-      // on its own in that gap (markActive), and taking the message before the
-      // gap meant the re-queue on the far side put it back at the TAIL.
-      nextTick(() => {
-        if (s.busy.value || !s.view) return;
-        const next = s.takeNextQueuedMessage();
-        if (!next) return;
-        s.save();
-        void s.view.send(next.text, next.images);
-      });
-    },
     async listenEvents() {
       if (!s.eventsUL) {
         s.eventsUL = await s.deps.listen<ChatEventBatch>(`chat-event-${chatId}`, (e) => {
           if (e.payload.ord > s.lastOrd) s.lastOrd = e.payload.ord;
           onEvents(s, e.payload);
         });
+      }
+      if (!s.queueUL) {
+        s.queueUL = await s.deps.listen<{ chatId: number; items: GoQueueItem[] }>("chat-queue-changed", (e) => {
+          if (e.payload.chatId === chatId) s.queue.value = e.payload.items.map(fromGo);
+        });
+        try {
+          s.queue.value = ((await s.deps.invoke<GoQueueItem[]>("chat_queue_list", { chatId })) ?? []).map(fromGo);
+        } catch {
+          // Best effort: the next chat-queue-changed brings it.
+        }
       }
     },
     async recoverPendingRequests() {
@@ -868,6 +887,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     detach() {
       if (s.evictTimer) { clearTimeout(s.evictTimer); s.evictTimer = null; }
       s.eventsUL?.(); s.eventsUL = null;
+      s.queueUL?.(); s.queueUL = null;
       s.claudeUL?.(); s.claudeUL = null;
       s.acpDataUL?.(); s.acpDataUL = null;
       s.acpReqUL?.(); s.acpReqUL = null;
@@ -879,10 +899,9 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
 
     maybeEvict() {
       if (s.evictTimer) clearTimeout(s.evictTimer);
-      // Deferred, and re-checked when it fires: a turn boundary is immediately
-      // followed by the queued-message flush (a nextTick away), and evicting
-      // between the two would hand that send a detached session while the next
-      // mount built a fresh one.
+      // Deferred, and re-checked when it fires: a turn boundary is often
+      // followed by another turn (Go's queue drain a moment later), and
+      // evicting in between would drop listeners the next mount rebuilds.
       s.evictTimer = setTimeout(() => {
         s.evictTimer = null;
         if (!evictable(s)) return;
@@ -902,13 +921,6 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       // session, and the next mount finds the result already here.
     },
   };
-  // A turn ending is the ONLY thing that releases the queue, so watch the flag
-  // rather than calling the drain from each place that clears it: `session.exited`
-  // (the CLI died mid-turn) and the send-failure branches also clear `busy`.
-  // Owned here, not by a watcher in the view: a chat leaf unmounts the moment
-  // the user looks at another tab, and a component watcher died with it — the
-  // queue then sat parked behind a send button the queue itself disables.
-  scope.run(() => watch(s.busy, (running) => { if (!running) s.drain(); }));
   // Turn clock: stamped onto the user message that opened the turn when it
   // settles, so it persists with the history and the fold row can say
   // "Worked for 26s" after a reload.

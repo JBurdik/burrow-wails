@@ -992,10 +992,8 @@ function askToStartServer(port: number) {
   if (!id) return;
   const text = `Start the dev server on port ${port} so I can preview it at http://localhost:${port}.`;
   const session = chatSession(id);
-  if (session.busy.value) {
-    session.enqueueMessage(text);
-    session.save();
-  } else void session.send({ text });
+  if (session.busy.value) void session.enqueueMessage(text);
+  else void session.send({ text });
 }
 /** Open a surface (Background, Progress, Outputs, …) in a workspace's panel
  *  from outside it — a transcript row that names one. The caller shows the panel. */

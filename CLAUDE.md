@@ -179,8 +179,32 @@ TUI, and restoring it means relaunching `claude --resume <id>` into the same tab
 turn ends (done/failed) or that enters `waiting_*` gets a row in `subagent_notices`, keyed per (child, turn /
 blocked episode) — recorded in `emitChatLine` on the phase transition, delivered by the 15 s schedule sweep
 (ahead of `chat_schedules`) into the **parent** via `ChatSend` only once the parent `chatSettled`. A completion
-marks the child collected unless cut at 4000 chars. The user's queued follow-ups are client-side, so a drained one
-can run first. Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
+marks the child collected unless cut at 4000 chars. A notice goes ahead of the user's queued follow-ups
+(`deliveryOrder`, below). Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
+
+**Queued follow-ups are Go's** (`chatqueue.go`, `chatdelivery.go`): a message typed while a turn runs goes to
+SQLite `chat_queue` via `chat_queue_add` (`_list` / `_update` / `_remove` / `_reorder`; event
+`chat-queue-changed` = the chat's whole queue). `chatSession` only mirrors it — **no client drain**, so it
+drains with the desktop closed or the phone asleep; legacy `queued` transcript rows are migrated through
+`chat_queue_add` on hydrate. Every Go-initiated send (notices, queue, schedules) goes through one pass,
+`deliverPending`: pure `deliveryOrder` (notice → queue head → schedule), one item per settled chat per pass,
+run by the 15 s sweep **and** kicked 300 ms after a turn settles (`emitChatLine`) or an item is queued into a
+settled chat. Production send is `chatSendSettled` — re-checks `chatSettled` **under the chat lock**, so a
+drain racing the user's own mid-start `ChatSend` returns `errChatBusy` instead of steering. An item is claimed
+by being **deleted in the read's transaction**; a failed send re-inserts it at the head under its old id
+(5 failures park the head until edited). Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
+
+**Usage-limit resume** (`chatlimit.go`): the normalizer marks a turn that failed on a usage / rate limit
+(`turn.failed{usageLimit}` — Claude's `is_error` result with the limit text or a 429, which used to read as
+`turn.completed`; Codex's "usage limit" turn error) and Claude's rejected `rate_limit_event` as a `usage.limit`
+hint. `emitChatLine` parses the reset **live** (`usageLimitReset`: `|<epoch>`, "resets 3pm (tz)", "try again
+at …", "reset after 1h 2m"; else the hint; else the exhausted `plan_usage` window, async) into
+`chats.limit_reset_at` — never one already past at failure time (would loop). AgentChat's banner: [Resume
+automatically] → `chat_limit_arm` (`limit_resume_at`), [Dismiss] → `chat_limit_dismiss`; both columns read-only
+on the wire, cleared by any running turn. The delivery pass sends "Continue where you left off." once due and
+settled (`deliverLimitResume`, after notices, before the queue), claiming the row and stamping
+`limit_resumed_key` = chat:failedAt:resetAt so an episode resumes once; a still-limited chat gets **no**
+deliveries at all (each would fail on the limit).
 
 **Self-management verbs** (`internal/control/verbs_self.go`, local-only, default to the caller's chat):
 `schedule` / `schedule_list` / `schedule_cancel` (`chatschedule.go`) — SQLite `chat_schedules`, a 15 s sweep

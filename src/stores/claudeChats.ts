@@ -66,6 +66,11 @@ export interface ClaudeSession {
   // Snoozed until this unix ms (src-wails/chatsnooze.go): settled until then,
   // Go wakes it. Server-owned like collectedAt — write via snooze().
   snoozedUntil?: number;
+  // A usage limit failed the last turn; it resets at this unix ms, and Go
+  // resumes the chat then when limitResumeAt is set (src-wails/chatlimit.go).
+  // Server-owned like collectedAt — write via chat_limit_arm / _dismiss.
+  limitResetAt?: number;
+  limitResumeAt?: number;
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -134,6 +139,8 @@ interface ChatRow {
   recap?: string;
   kind?: string;
   snoozed_until?: number;
+  limit_reset_at?: number;
+  limit_resume_at?: number;
 }
 
 /**
@@ -172,6 +179,8 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     recap: r.recap || undefined,
     kind: r.kind === "side" ? "side" : undefined,
     snoozedUntil: r.snoozed_until || undefined,
+    limitResetAt: r.limit_reset_at || undefined,
+    limitResumeAt: r.limit_resume_at || undefined,
     busy: false,
   };
 }

@@ -8,7 +8,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"burrow/internal/agentphase"
@@ -28,10 +27,8 @@ import (
 // idempotency record: INSERT OR IGNORE on enqueue, delivered_at claimed before
 // the send, so a retried sweep never sends one twice.
 //
-// Ordering vs. the user's queued follow-ups: that queue is client-side (the
-// transcript's `queued` entries, drained by chatSession on turn end), so Go
-// can't put a notice ahead of it. A follow-up the client drains first runs
-// first; the notice then waits for that turn to settle.
+// Ordering vs. the user's queued follow-ups (chatqueue.go): a notice goes
+// first — deliveryOrder in chatdelivery.go.
 //
 // Off with uiPrefs.subagentAutoDeliver = false (Settings → General), read
 // fresh at enqueue; side chats and detached chats (no parent) never notify.
@@ -145,100 +142,108 @@ func truncateRunes(s string, n int, tail string) string {
 	return s
 }
 
-// subagentNoticeMu: the sweep is the only deliverer today, but the claim →
-// send → mark sequence must never run twice concurrently for one row.
-var subagentNoticeMu sync.Mutex
-
 // deliverSubagentNotices sends every pending notice whose parent has settled,
-// one per parent per sweep (the first one's turn makes the next wait), and
-// returns the delivered children's ids in order. send is ChatSend in production.
+// one per parent per pass (the first one's turn makes the next wait), and
+// returns the delivered children's ids in order — one source of the delivery
+// sweep (chatdelivery.go), run alone. send is ChatSend in production.
 func (a *App) deliverSubagentNotices(now time.Time, send func(chatID int64, text string) error) []int64 {
 	if a.db == nil {
 		return nil
 	}
-	subagentNoticeMu.Lock()
-	defer subagentNoticeMu.Unlock()
+	var delivered []int64
+	a.runDeliveries(a.noticeDeliveries(now, func(c int64, t string, _ []string) error { return send(c, t) }, &delivered))
+	return delivered
+}
+
+// noticeDeliveries offers every pending notice to its parent.
+func (a *App) noticeDeliveries(now time.Time, send chatSender, delivered *[]int64) []pendingDelivery {
 	_, _ = a.db.Exec(`DELETE FROM subagent_notices WHERE delivered_at != 0 AND delivered_at < ?`, now.Add(-subagentNoticeKeep).UnixMilli())
 
 	type notice struct {
 		childID, parentID int64
 		key, kind, sum    string
 		attempts          int
+		created           int64
 	}
-	rows, err := a.db.Query(`SELECT child_id, key, parent_id, kind, summary, attempts FROM subagent_notices WHERE delivered_at = 0 ORDER BY created_at, child_id`)
+	rows, err := a.db.Query(`SELECT child_id, key, parent_id, kind, summary, attempts, created_at FROM subagent_notices WHERE delivered_at = 0 ORDER BY created_at, child_id`)
 	if err != nil {
 		return nil
 	}
 	var pending []notice
 	for rows.Next() {
 		var n notice
-		if rows.Scan(&n.childID, &n.key, &n.parentID, &n.kind, &n.sum, &n.attempts) == nil {
+		if rows.Scan(&n.childID, &n.key, &n.parentID, &n.kind, &n.sum, &n.attempts, &n.created) == nil {
 			pending = append(pending, n)
 		}
 	}
 	rows.Close()
 
-	var delivered []int64
-	sent := map[int64]bool{}
-	for _, n := range pending {
-		drop := func() {
-			_, _ = a.db.Exec(`DELETE FROM subagent_notices WHERE child_id = ? AND key = ?`, n.childID, n.key)
-		}
-		if sent[n.parentID] {
-			continue
-		}
-		parent, err := a.chatByID(n.parentID)
-		if errors.Is(err, sql.ErrNoRows) || (err == nil && parent.ArchivedAt != 0) {
-			drop()
-			continue
-		}
-		child, err := a.chatByID(n.childID)
-		if errors.Is(err, sql.ErrNoRows) {
-			drop()
-			continue
-		}
-		if err != nil || !a.chatSettled(strconv.FormatInt(n.parentID, 10)) {
-			continue // a parent turn is open: wait for it to settle
-		}
-		var text string
-		markCollected := false
-		switch n.kind {
-		case "done":
-			if child.CollectedAt != 0 {
-				drop() // collect_results / wait_result already took it
-				continue
+	var out []pendingDelivery
+	for i, n := range pending {
+		n := n
+		out = append(out, pendingDelivery{ChatID: n.parentID, Source: deliverNotice, Pos: int64(i), CreatedAt: n.created, deliver: func() bool {
+			drop := func() {
+				_, _ = a.db.Exec(`DELETE FROM subagent_notices WHERE child_id = ? AND key = ?`, n.childID, n.key)
 			}
-			text, markCollected = a.subagentDoneText(child, n.sum)
-		case "blocked":
-			if a.phases != nil && !isBlocked(a.phases.Get("chat:"+strconv.FormatInt(child.ID, 10)).State) {
-				drop() // answered before the parent got to it
-				continue
-			}
-			text = fmt.Sprintf("Sub-agent %s (#%d) is blocked: %s. Answer with `burrow chat-send --chat-id %d --text \"...\"` or tell the user.",
-				subagentName(child), child.ID, n.sum, child.ID)
-		}
-		// Claim before sending: a crash or a failed mark after a successful
-		// send must not hand the same notice to the next sweep.
-		if _, err := a.db.Exec(`UPDATE subagent_notices SET delivered_at = ? WHERE child_id = ? AND key = ? AND delivered_at = 0`,
-			now.UnixMilli(), n.childID, n.key); err != nil {
-			continue
-		}
-		sent[n.parentID] = true
-		if err := send(n.parentID, text); err != nil {
-			if n.attempts+1 >= subagentNoticeMaxAttempts {
-				log.Printf("sub-agent notice %d/%s: dropped after %d attempts: %v", n.childID, n.key, n.attempts+1, err)
+			parent, err := a.chatByID(n.parentID)
+			if errors.Is(err, sql.ErrNoRows) || (err == nil && parent.ArchivedAt != 0) {
 				drop()
-				continue
+				return false
 			}
-			_, _ = a.db.Exec(`UPDATE subagent_notices SET delivered_at = 0, attempts = attempts + 1 WHERE child_id = ? AND key = ?`, n.childID, n.key)
-			continue
-		}
-		if markCollected {
-			_ = a.MarkCollected(child.ID)
-		}
-		delivered = append(delivered, n.childID)
+			child, err := a.chatByID(n.childID)
+			if errors.Is(err, sql.ErrNoRows) {
+				drop()
+				return false
+			}
+			if err != nil || !a.chatSettled(strconv.FormatInt(n.parentID, 10)) {
+				return false // a parent turn is open: wait for it to settle
+			}
+			var text string
+			markCollected := false
+			switch n.kind {
+			case "done":
+				if child.CollectedAt != 0 {
+					drop() // collect_results / wait_result already took it
+					return false
+				}
+				text, markCollected = a.subagentDoneText(child, n.sum)
+			case "blocked":
+				if a.phases != nil && !isBlocked(a.phases.Get("chat:"+strconv.FormatInt(child.ID, 10)).State) {
+					drop() // answered before the parent got to it
+					return false
+				}
+				text = fmt.Sprintf("Sub-agent %s (#%d) is blocked: %s. Answer with `burrow chat-send --chat-id %d --text \"...\"` or tell the user.",
+					subagentName(child), child.ID, n.sum, child.ID)
+			}
+			// Claim before sending: a crash or a failed mark after a successful
+			// send must not hand the same notice to the next sweep.
+			if _, err := a.db.Exec(`UPDATE subagent_notices SET delivered_at = ? WHERE child_id = ? AND key = ? AND delivered_at = 0`,
+				now.UnixMilli(), n.childID, n.key); err != nil {
+				return false
+			}
+			if err := send(n.parentID, text, nil); err != nil {
+				if errors.Is(err, errChatBusy) {
+					_, _ = a.db.Exec(`UPDATE subagent_notices SET delivered_at = 0 WHERE child_id = ? AND key = ?`, n.childID, n.key)
+					return false
+				}
+				if n.attempts+1 >= subagentNoticeMaxAttempts {
+					log.Printf("sub-agent notice %d/%s: dropped after %d attempts: %v", n.childID, n.key, n.attempts+1, err)
+					drop()
+					return true
+				}
+				_, _ = a.db.Exec(`UPDATE subagent_notices SET delivered_at = 0, attempts = attempts + 1 WHERE child_id = ? AND key = ?`, n.childID, n.key)
+				return true
+			}
+			if markCollected {
+				_ = a.MarkCollected(child.ID)
+			}
+			if delivered != nil {
+				*delivered = append(*delivered, n.childID)
+			}
+			return true
+		}})
 	}
-	return delivered
+	return out
 }
 
 func subagentName(c Chat) string {

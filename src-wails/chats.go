@@ -90,6 +90,11 @@ type Chat struct {
 	// Read-only on the wire: unix ms the user snoozed this chat until
 	// (ChatSnooze, chatsnooze.go); 0 = not snoozed. Settled while in the future.
 	SnoozedUntil int64 `json:"snoozed_until"`
+	// Read-only on the wire (chatlimit.go): unix ms a usage limit that failed
+	// the last turn resets at (0 = none), and when the user armed an automatic
+	// resume for (0 = not armed).
+	LimitResetAt  int64 `json:"limit_reset_at"`
+	LimitResumeAt int64 `json:"limit_resume_at"`
 }
 
 func chatsSchema() []string {
@@ -119,7 +124,11 @@ func chatsSchema() []string {
 			slept_at          INTEGER NOT NULL DEFAULT 0,
 			recap             TEXT    NOT NULL DEFAULT '',
 			kind              TEXT    NOT NULL DEFAULT '',
-			snoozed_until     INTEGER NOT NULL DEFAULT 0
+			snoozed_until     INTEGER NOT NULL DEFAULT 0,
+			limit_reset_at    INTEGER NOT NULL DEFAULT 0,
+			limit_resume_at   INTEGER NOT NULL DEFAULT 0,
+			limit_failed_at   INTEGER NOT NULL DEFAULT 0,
+			limit_resumed_key TEXT    NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS chat_migrations (
 			name    TEXT PRIMARY KEY,
@@ -150,14 +159,16 @@ func chatsPostAlterSchema() []string {
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, agent_kind, transport, model, branch,
 	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
-	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind, snoozed_until`
+	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind, snoozed_until,
+	limit_reset_at, limit_resume_at`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
 		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
-		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind, &c.SnoozedUntil)
+		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind, &c.SnoozedUntil,
+		&c.LimitResetAt, &c.LimitResumeAt)
 	return c, err
 }
 
@@ -294,6 +305,9 @@ func (a *App) DeleteChat(id int64) error {
 			return err
 		}
 		if _, err := a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, c); err != nil {
+			return err
+		}
+		if _, err := a.db.Exec(`DELETE FROM chat_queue WHERE chat_id = ?`, c); err != nil {
 			return err
 		}
 	}

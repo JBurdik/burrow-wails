@@ -420,6 +420,16 @@
         <span class="text-[13px] text-secondary-foreground">{{ workingVerb }}…</span>
         <span class="text-[12px] tabular-nums text-muted-foreground">{{ workingElapsed }}</span>
       </div>
+
+      <!-- Usage limit (src-wails/chatlimit.go): the last turn failed on it. -->
+      <div v-if="usageLimit && !busy" class="mx-4 my-2 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
+        <PhWarningCircle :size="13" weight="bold" class="flex-shrink-0" />
+        <span class="flex-1 truncate">
+          Usage limit reached — resets at <span class="text-foreground">{{ usageLimit.label }}</span><template v-if="usageLimit.armed"> · resuming automatically</template>
+        </span>
+        <button v-if="!usageLimit.armed" class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_arm')">Resume automatically</button>
+        <button class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_dismiss')">{{ usageLimit.armed ? 'Cancel' : 'Dismiss' }}</button>
+      </div>
       </div>
     </div>
     <!-- Minimap (after Ghostex): one dash per prompt you sent, longer for
@@ -1125,6 +1135,24 @@ const branchChanged = computed(() => {
   return !!created && created !== chatBranch.value;
 });
 const branchBannerDismissed = ref(false);
+// Usage-limit banner: Go records the reset (limit_reset_at); arming makes it
+// send "Continue where you left off." then (chat_limit_arm / _dismiss).
+const usageLimit = computed(() => {
+  const at = activeSession.value?.limitResetAt;
+  if (!at) return null;
+  const d = new Date(at);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const label = d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  return { label, armed: !!activeSession.value?.limitResumeAt };
+});
+async function limitAction(cmd: "chat_limit_arm" | "chat_limit_dismiss") {
+  try {
+    await invoke(cmd, { chatId: props.chatId });
+  } catch (e) {
+    S.notice(`Could not update the usage-limit resume: ${e}`);
+  }
+  await chats.reload();
+}
 const restoringBranch = ref(false);
 const restoreBranchError = ref("");
 // Purely informational per product decision — dismiss on close or on send,
@@ -2087,15 +2115,13 @@ function watchingNow(): boolean {
 // Queued follow-ups
 function removeQueued(id: number) {
   removeQueuedMessage(id);
-  S.save();
 }
 const draggingQueuedId = ref<number | null>(null);
 const dropQueuedIndex = ref<number | null>(null);
 function dropQueued(toIndex: number) {
-  if (draggingQueuedId.value != null) moveQueuedMessage(draggingQueuedId.value, toIndex);
+  if (draggingQueuedId.value != null) void moveQueuedMessage(draggingQueuedId.value, toIndex);
   draggingQueuedId.value = null;
   dropQueuedIndex.value = null;
-  S.save();
 }
 const editingQueuedId = ref<number | null>(null);
 const editingQueuedText = ref("");
@@ -2109,23 +2135,19 @@ function commitQueuedEdit() {
   if (id == null) return;
   editingQueuedId.value = null;
   editQueuedMessage(id, editingQueuedText.value);
-  S.save();
 }
 function moveQueuedBy(id: number, index: number, delta: number) {
-  moveQueuedMessage(id, index + delta);
-  S.save();
+  void moveQueuedMessage(id, index + delta);
 }
 function clearQueued() {
   if (!window.confirm(`Clear ${messageQueue.value.length} queued messages?`)) return;
   clearQueuedMessages();
-  S.save();
 }
-function sendQueuedNow(id: number) {
+async function sendQueuedNow(id: number) {
   // Interrupt, don't steer: a follow-up has to remain its own turn for every
-  // provider (Codex, generic ACP). The abort clears `busy`, and the session's
-  // drain then sends the queue head — which this message just became.
-  moveQueuedMessage(id, 0);
-  S.save();
+  // provider (Codex, generic ACP). The turn settles, and Go's queue drain then
+  // sends the queue head — which this message just became.
+  await moveQueuedMessage(id, 0);
   void abortTurn();
 }
 
@@ -2612,11 +2634,11 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
   // as steering, and generic adapters have no negotiated queue capability.
   if (busy.value) {
-    const queued = enqueueMessage(text, images);
+    const queued = await enqueueMessage(text, images);
+    if (!queued) return null;
     acceptFeedback();
     pendingImages.value = [];
     inputText.value = "";
-    S.save();
     await nextTick();
     scrollToBottom(true);
     return { id: queued.id, text };
@@ -2972,7 +2994,6 @@ onMounted(async () => {
     onAcpSession: () => learnModels(agentKind.value, liveModels.value),
     restoreAcpSelections,
     usesRpcRuntime: () => usesRpcRuntime.value,
-    send: async (text, images) => { await sendMessage(text, images); },
   });
   // The transcript arrives on this channel for BOTH transports, so it is
   // attached unconditionally — unlike the raw ones, which are per-runtime.
@@ -3014,9 +3035,6 @@ onMounted(async () => {
   // do it: the active id is already this chat before the fresh instance mounts,
   // so it never fires and the view opened scrolled to the top of the history.
   scrollToBottom(true);
-  // A queue parked by an older build (or by a relaunch — the placeholders are
-  // persisted with the transcript) has no busy transition left to release it.
-  S.drain();
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
   selectedEffort.value = loadEffort();
