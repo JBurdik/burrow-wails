@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sumNumstat, visibleRows, type DetailsContext } from "./threadDetails";
+import { DETAILS_CARD_GAP, DETAILS_CARD_WIDTH, detailsLaneInset, sumNumstat, visibleRows, type DetailsContext } from "./threadDetails";
 
 const base: DetailsContext = { kind: "chat", desktop: true, branch: "main", hasPr: false, added: 0, removed: 0, servers: 0, scheduled: 0, lineage: 0 };
 
@@ -35,5 +35,31 @@ describe("sumNumstat", () => {
   it("totals lines and skips binary files", () => {
     expect(sumNumstat("3\t1\ta.ts\n-\t-\timg.png\n10\t0\tb.ts\n")).toEqual({ added: 13, removed: 1 });
     expect(sumNumstat("")).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe("detailsLaneInset", () => {
+  it("keeps a wide canvas's chat centred (no inset)", () => {
+    // 1800 wide: a centred 760 lane ends at 1280, far left of the card (1472).
+    expect(detailsLaneInset(1800)).toBe(0);
+  });
+  it("shifts the lane left, never under the card, when it would crowd it", () => {
+    const w = 1200;
+    const inset = detailsLaneInset(w)!;
+    expect(inset).toBeGreaterThan(0);
+    const laneWidth = Math.min(760, w - 48);
+    const left = (w - inset - laneWidth) / 2;
+    expect(left + laneWidth).toBeLessThanOrEqual(w - DETAILS_CARD_GAP - DETAILS_CARD_WIDTH - 32 + 0.001);
+  });
+  it("hides the card when the lane would get too narrow", () => {
+    expect(detailsLaneInset(900)).toBeNull();
+  });
+  it("never jumps: the inset grows continuously as the canvas narrows", () => {
+    let prev = detailsLaneInset(1600)!;
+    for (let w = 1590; w >= 960; w -= 10) {
+      const cur = detailsLaneInset(w)!;
+      expect(Math.abs(cur - prev)).toBeLessThan(40);
+      prev = cur;
+    }
   });
 });

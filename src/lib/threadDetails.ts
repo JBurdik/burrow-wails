@@ -59,3 +59,30 @@ export function sumNumstat(out: string): { added: number; removed: number } {
   }
   return { added, removed };
 }
+
+// Where the chat lane sits beside the card — t3code's resolveChatCanvasLayout
+// (chatCanvasLayout.ts) without the preview player. The lane stays centred on
+// the whole canvas while it clears the card; only when it would crowd the card
+// does it shift left, easing in so a resize never makes it jump, and it shrinks
+// only once shifting is not enough. Returns the right inset to give the chat
+// (its lane is `mx-auto`, so centring it in `width - inset` puts it at `left`),
+// or null when the lane would fall under minChatWidth — then the card hides.
+export const DETAILS_CARD_WIDTH = 288;
+export const DETAILS_CARD_GAP = 8;
+const DETAILS_CARD_CLEARANCE = 32;
+
+export function detailsLaneInset(
+  width: number,
+  { padding = 24, maxChatWidth = 760, minChatWidth = 560 } = {},
+): number | null {
+  const cardLeft = width - DETAILS_CARD_GAP - DETAILS_CARD_WIDTH;
+  const laneRight = cardLeft - DETAILS_CARD_CLEARANCE;
+  if (laneRight - padding < minChatWidth) return null;
+  const centered = Math.max(0, Math.min(maxChatWidth, width - padding * 2));
+  const laneWidth = Math.max(0, Math.min(centered, laneRight - padding));
+  const centerLeft = (width - laneWidth) / 2;
+  const half = (width - cardLeft) / 2;
+  const shift = Math.min(half, Math.max(0, half - (laneRight - centerLeft - laneWidth)));
+  const left = Math.max(padding, Math.min(centerLeft - shift, laneRight - laneWidth));
+  return Math.max(0, width - left * 2 - laneWidth);
+}
