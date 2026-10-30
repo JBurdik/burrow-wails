@@ -117,6 +117,9 @@ interface Prefs {
   chatAutoSleepMinutes: number; // stop an idle chat's process after N minutes, 0 = off (read by Go, src-wails/chatsleep.go)
   chatRecaps: boolean; // one-line recap under each chat title (read by Go, src-wails/chatrecap.go)
   worktreeFromOrigin: boolean; // fetch origin/<base> and branch new worktrees from it (read by Go, src-wails/worktreebase.go)
+  worktreeCleanupMerged: boolean; // remove worktrees whose branch merged (read by Go, src-wails/worktreecleanup.go)
+  worktreeCleanupInactive: boolean; // remove idle worktrees with no chats/tabs (same)
+  worktreeCleanupInactiveDays: number; // idle threshold for the rule above, 0 = off
   subagentAutoDeliver: boolean; // send a finished/blocked sub-agent's result into its parent chat (read by Go, src-wails/chatsubagentnotice.go)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
   channelMarker: "art" | "label" | "off"; // dev/beta builds: sidebar artwork + titlebar badge, badge only, or nothing
@@ -227,6 +230,9 @@ const DEFAULT_PREFS: Prefs = {
   chatRecaps: true,
   worktreeFromOrigin: true,
   subagentAutoDeliver: true,
+  worktreeCleanupMerged: false,
+  worktreeCleanupInactive: false,
+  worktreeCleanupInactiveDays: 14,
   textGenerationModel: DEFAULT_TEXT_GENERATION_MODEL,
   textGenerationPolicy: "default",
   textGenerationRules: "",
@@ -374,6 +380,9 @@ export const useUIStore = defineStore("ui", () => {
   const chatRecaps = ref<boolean>(loaded.chatRecaps ?? true);
   const worktreeFromOrigin = ref<boolean>(loaded.worktreeFromOrigin ?? true);
   const subagentAutoDeliver = ref<boolean>(loaded.subagentAutoDeliver ?? true);
+  const worktreeCleanupMerged = ref<boolean>(loaded.worktreeCleanupMerged ?? false);
+  const worktreeCleanupInactive = ref<boolean>(loaded.worktreeCleanupInactive ?? false);
+  const worktreeCleanupInactiveDays = ref<number>(loaded.worktreeCleanupInactiveDays ?? 14);
   const textGenerationModel = ref<string>(loaded.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL);
   const textGenerationPolicy = ref<TextGenerationPolicy>(loaded.textGenerationPolicy ?? "default");
   const textGenerationRules = ref<string>(loaded.textGenerationRules ?? "");
@@ -442,6 +451,9 @@ export const useUIStore = defineStore("ui", () => {
     chatRecaps.value = p.chatRecaps ?? true;
     worktreeFromOrigin.value = p.worktreeFromOrigin ?? true;
     subagentAutoDeliver.value = p.subagentAutoDeliver ?? true;
+    worktreeCleanupMerged.value = p.worktreeCleanupMerged ?? false;
+    worktreeCleanupInactive.value = p.worktreeCleanupInactive ?? false;
+    worktreeCleanupInactiveDays.value = p.worktreeCleanupInactiveDays ?? 14;
     textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
     textGenerationPolicy.value = p.textGenerationPolicy ?? "default";
     textGenerationRules.value = p.textGenerationRules ?? "";
@@ -630,6 +642,9 @@ export const useUIStore = defineStore("ui", () => {
         chatRecaps: chatRecaps.value,
         worktreeFromOrigin: worktreeFromOrigin.value,
         subagentAutoDeliver: subagentAutoDeliver.value,
+        worktreeCleanupMerged: worktreeCleanupMerged.value,
+        worktreeCleanupInactive: worktreeCleanupInactive.value,
+        worktreeCleanupInactiveDays: worktreeCleanupInactiveDays.value,
         textGenerationModel: textGenerationModel.value,
         textGenerationPolicy: textGenerationPolicy.value,
         textGenerationRules: textGenerationRules.value,
@@ -649,7 +664,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -958,6 +973,9 @@ export const useUIStore = defineStore("ui", () => {
     chatRecaps,
     worktreeFromOrigin,
     subagentAutoDeliver,
+    worktreeCleanupMerged,
+    worktreeCleanupInactive,
+    worktreeCleanupInactiveDays,
     textGenerationModel,
     textGenerationPolicy,
     textGenerationRules,

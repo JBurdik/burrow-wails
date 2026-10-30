@@ -234,9 +234,11 @@ var remoteAllowed = map[string]remoteCmd{
 	"save_terminal_tabs":  {Method: "SaveTerminalTabs", Args: []string{"workspaceId", "tabs"}, Scope: scopeOrchOperate},
 
 	// Worktrees
-	"create_worktree":        {Method: "CreateWorktree", Args: []string{"repoPath", "name", "path", "branch", "baseRef"}, Scope: scopeOrchOperate},
-	"rename_worktree_branch": {Method: "RenameWorktreeBranch", Args: []string{"id", "oldBranch", "newBranch"}, Scope: scopeOrchOperate},
-	"remove_worktree":        {Method: "RemoveWorktree", Args: []string{"id", "force"}, Scope: scopeOrchOperate},
+	"create_worktree":          {Method: "CreateWorktree", Args: []string{"repoPath", "name", "path", "branch", "baseRef"}, Scope: scopeOrchOperate},
+	"rename_worktree_branch":   {Method: "RenameWorktreeBranch", Args: []string{"id", "oldBranch", "newBranch"}, Scope: scopeOrchOperate},
+	"remove_worktree":          {Method: "RemoveWorktree", Args: []string{"id", "force"}, Scope: scopeOrchOperate},
+	"worktree_cleanup_preview": {Method: "WorktreeCleanupPreview", Args: nil, Scope: scopeOrchRead},
+	"worktree_cleanup_now":     {Method: "WorktreeCleanupNow", Args: []string{"ids"}, Scope: scopeOrchOperate},
 
 	// Git / forge / text generation. RunGit is a generic passthrough (it can
 	// run a write command like `commit` or `push`), so it gets the mutating

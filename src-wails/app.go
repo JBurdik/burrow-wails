@@ -263,6 +263,7 @@ func (a *App) startup(ctx context.Context) {
 
 	go a.chatSleepLoop()
 	go a.chatScheduleLoop()
+	go a.worktreeCleanupLoop()
 	a.startPromptIndex()
 
 	a.initControl(dataDir)
