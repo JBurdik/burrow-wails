@@ -131,11 +131,21 @@ func (a *App) ForgePrView(cwd string, number int) (forge.PullRequest, error) {
 }
 
 func (a *App) ForgePrCreate(cwd, title, body, base, head string) (forge.PullRequest, error) {
+	return a.forgePrCreate(cwd, title, body, base, head, 0)
+}
+
+// forgePrCreate links the created PR to callerChat, or (0) to the chats on
+// that workspace + branch (chatpr.go).
+func (a *App) forgePrCreate(cwd, title, body, base, head string, callerChat int64) (forge.PullRequest, error) {
 	f, err := a.resolveForge(cwd)
 	if err != nil {
 		return forge.PullRequest{}, err
 	}
-	return f.Create(cwd, forge.CreateOpts{Title: title, Body: body, Base: base, Head: head})
+	pr, err := f.Create(cwd, forge.CreateOpts{Title: title, Body: body, Base: base, Head: head})
+	if err == nil {
+		a.autoLinkPr(cwd, callerChat, pr)
+	}
+	return pr, err
 }
 
 func (a *App) ForgePrMerge(cwd string, number int, squash bool) error {

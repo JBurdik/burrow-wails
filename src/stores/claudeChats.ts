@@ -66,6 +66,11 @@ export interface ClaudeSession {
   // Snoozed until this unix ms (src-wails/chatsnooze.go): settled until then,
   // Go wakes it. Server-owned like collectedAt — write via snooze().
   snoozedUntil?: number;
+  // Linked pull request (src-wails/chatpr.go): number, URL and the glyph's
+  // last known state. Server-owned like collectedAt — write via chat_link_pr.
+  prNumber?: number;
+  prUrl?: string;
+  prState?: "open" | "draft" | "merged" | "closed";
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -134,6 +139,9 @@ interface ChatRow {
   recap?: string;
   kind?: string;
   snoozed_until?: number;
+  pr_number?: number;
+  pr_url?: string;
+  pr_state?: string;
 }
 
 /**
@@ -172,6 +180,9 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     recap: r.recap || undefined,
     kind: r.kind === "side" ? "side" : undefined,
     snoozedUntil: r.snoozed_until || undefined,
+    prNumber: r.pr_number || undefined,
+    prUrl: r.pr_url || undefined,
+    prState: (r.pr_state || undefined) as ClaudeSession["prState"],
     busy: false,
   };
 }

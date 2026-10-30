@@ -66,12 +66,29 @@
         </div>
       </div>
 
-      <!-- Pull request -->
-      <button v-else-if="row === 'pr' && pr" class="dc-row dc-click" :title="pr.url" @click="$emit('open-pr', pr.number, pr.url)">
-        <PhGitPullRequest :size="14" class="dc-icon" :class="pr.state === 'MERGED' ? 'text-accent' : pr.state === 'OPEN' ? 'text-success' : ''" />
-        <span class="flex-1 truncate text-left text-foreground">#{{ pr.number }} <span class="text-muted-foreground">{{ pr.isDraft ? "draft" : pr.state.toLowerCase() }}</span></span>
-        <span v-if="pr.checks !== 'none'" :class="CHECK_CLASS[pr.checks]">{{ CHECK_LABEL[pr.checks] }}</span>
-      </button>
+      <!-- Pull request: the chat's linked one (chatpr.go) wins over the branch's -->
+      <div v-else-if="row === 'pr'" class="dc-row" :class="pr && 'dc-click'">
+        <button v-if="pr" class="flex min-w-0 flex-1 items-center gap-1.5" :title="pr.url" @click="$emit('open-pr', pr.number, pr.url)">
+          <PhGitPullRequest :size="14" class="dc-icon" :class="pr.state.toUpperCase() === 'MERGED' ? 'text-accent' : pr.state.toUpperCase() === 'OPEN' ? 'text-success' : ''" />
+          <span class="flex-1 truncate text-left text-foreground">#{{ pr.number }} <span class="text-muted-foreground">{{ pr.isDraft ? "draft" : pr.state.toLowerCase() }}</span></span>
+          <span v-if="pr.checks !== 'none'" :class="CHECK_CLASS[pr.checks]">{{ CHECK_LABEL[pr.checks] }}</span>
+        </button>
+        <template v-else>
+          <PhGitPullRequest :size="14" class="dc-icon" />
+          <span class="flex-1 text-muted-foreground">No pull request</span>
+        </template>
+        <div v-if="chat" class="relative">
+          <button class="dc-btn" title="Link pull request" @click.stop="toggle('pr')"><PhCaretDown :size="10" /></button>
+          <div v-if="menu === 'pr'" class="dc-menu" @click.stop>
+            <form class="flex flex-col gap-1 p-1" @submit.prevent="linkPr">
+              <span class="px-1 text-[11px] text-muted-foreground">Link PR…</span>
+              <input v-model="prInput" class="dc-input" placeholder="#123 or URL" autofocus />
+            </form>
+            <button v-if="chat.prNumber" class="dc-menu-item" :disabled="busy" @click="unlinkPr"><PhLinkBreak :size="13" />Unlink #{{ chat.prNumber }}</button>
+            <div v-if="prError" class="px-2 pb-1 text-[11px] text-destructive">{{ prError }}</div>
+          </div>
+        </div>
+      </div>
 
       <!-- Commit / push ▾ (was in the TitleBar) -->
       <div v-else-if="row === 'commit'" class="dc-row">
@@ -124,11 +141,12 @@ import { ref, computed, watch, inject, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   PhFolder, PhFolderOpen, PhFolderNotchOpen, PhGitFork, PhCaretDown, PhAppWindow, PhCopy, PhPlay, PhPlus, PhGitBranch,
-  PhGitPullRequest, PhGitCommit, PhFileCode, PhPlugsConnected, PhClock, PhX, PhArrowBendLeftUp, PhChatsCircle, PhRobot, PhArrowUUpLeft,
+  PhGitPullRequest, PhGitCommit, PhFileCode, PhPlugsConnected, PhClock, PhX, PhArrowBendLeftUp, PhChatsCircle, PhRobot, PhArrowUUpLeft, PhLinkBreak,
 } from "@phosphor-icons/vue";
 import CommitPushMenu from "./CommitPushMenu.vue";
 import type { Workspace } from "@/stores/workspace";
-import { useGitStore, type PrChecks } from "@/stores/git";
+import { useGitStore, rollupChecks, type PrChecks, type PrInfo } from "@/stores/git";
+import { parsePrRef } from "@/lib/prLinkInput";
 import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
@@ -152,7 +170,7 @@ const openRightPanelSubagent = inject<(chatId: number, wsId: number) => void>("o
 const activeTerm = inject<() => { openClaudeChat(id: number): void } | undefined>("activeTerm")!;
 
 const rootEl = ref<HTMLElement | null>(null);
-const menu = ref<null | "ws" | "open" | "branch">(null);
+const menu = ref<null | "ws" | "open" | "branch" | "pr">(null);
 const busy = ref(false);
 function toggle(m: NonNullable<typeof menu.value>) {
   menu.value = menu.value === m ? null : m;
@@ -163,8 +181,22 @@ function toggle(m: NonNullable<typeof menu.value>) {
 const path = computed(() => props.workspace.path);
 // The git store follows the active workspace; anything else would be a stale read.
 const branch = computed(() => (props.workspace.is_git !== false && git.cwd === path.value ? git.branch : ""));
-const pr = computed(() => git.prByWs[props.workspace.id] ?? null);
 const chat = computed(() => (props.kind === "chat" ? chats.sessions.find((c) => c.id === props.chatId) : undefined));
+// The linked PR, re-read (state + checks) whenever the card opens on it.
+const linkedPr = ref<PrInfo | null>(null);
+const pr = computed<PrInfo | null>(() => {
+  const c = chat.value;
+  if (!c?.prNumber) return git.prByWs[props.workspace.id] ?? null;
+  if (linkedPr.value?.number === c.prNumber) return linkedPr.value;
+  return { number: c.prNumber, state: c.prState === "draft" ? "open" : c.prState ?? "open", isDraft: c.prState === "draft", checks: "none", url: c.prUrl ?? "" };
+});
+type ForgePr = { number: number; state: string; isDraft: boolean; url: string; checks?: Array<{ conclusion?: string; status?: string }> };
+const toPrInfo = (p: ForgePr): PrInfo => ({ number: p.number, state: p.state, isDraft: p.isDraft, checks: rollupChecks(p.checks), url: p.url });
+watch(() => chat.value?.prNumber, async (n) => {
+  if (!n || !chat.value) return;
+  const p = await invoke<ForgePr>("chat_pr_refresh", { chatId: chat.value.id }).catch(() => null);
+  if (p && p.number === chat.value?.prNumber) linkedPr.value = toPrInfo(p);
+}, { immediate: true });
 
 // ── Open in ▾ — targets are the installed apps Go finds (ListOpenTargets in fs.go).
 type OpenTarget = { id: string; name: string; icon: string };
@@ -227,6 +259,31 @@ function moveToWorktree() {
 }
 function leaveWorktree() {
   if (chat.value) void runMove(invoke("chat_leave_worktree", { chatId: chat.value.id }));
+}
+
+// ── Link / unlink a PR (chat_link_pr / chat_unlink_pr, chatpr.go)
+const prInput = ref("");
+const prError = ref("");
+async function linkPr() {
+  if (!chat.value) return;
+  if (!parsePrRef(prInput.value)) return void (prError.value = "Enter #123 or a pull request URL");
+  busy.value = true;
+  prError.value = "";
+  try {
+    linkedPr.value = toPrInfo(await invoke<ForgePr>("chat_link_pr", { chatId: chat.value.id, ref: prInput.value.trim() }));
+    prInput.value = "";
+    menu.value = null;
+  } catch (e) {
+    prError.value = String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function unlinkPr() {
+  if (!chat.value) return;
+  await invoke("chat_unlink_pr", { chatId: chat.value.id }).catch((e) => (prError.value = String(e)));
+  linkedPr.value = null;
+  menu.value = null;
 }
 
 // ── Branch
@@ -326,6 +383,7 @@ const rows = computed(() => visibleRows({
   desktop: !isWeb,
   branch: branch.value,
   hasPr: !!pr.value,
+  hasLinkedPr: !!chat.value?.prNumber,
   added: changes.value.added,
   removed: changes.value.removed,
   servers: servers.value.length,

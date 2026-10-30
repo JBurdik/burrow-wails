@@ -118,7 +118,8 @@ type CmdRunner interface {
 type ForgeClient interface {
 	List(cwd, scope, state string) (any, error)
 	View(cwd string, number int) (any, error)
-	Create(cwd, title, body, base, head string) (any, error)
+	// chatID is the calling chat (0 = unknown); the created PR is linked to it.
+	Create(cwd, title, body, base, head string, chatID int64) (any, error)
 	Merge(cwd string, number int, squash bool) error
 }
 

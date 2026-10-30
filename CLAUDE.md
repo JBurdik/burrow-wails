@@ -120,6 +120,13 @@ in Settled until then (`settledFor`); `ChatSnooze` / `chat_snooze` sets or clear
 sweep wakes it — clears the column and the settle pin, bumps `last_activity_at`, emits `chat-snooze-woke`
 (`chatAttention` drops the receipt and notifies). Presets: `src/lib/snoozePresets.ts`.
 
+**Linked PR** (`chatpr.go`): `chats.pr_number` / `pr_url` / `pr_state` (open|draft|merged|closed, read-only on the
+wire; the forge is the workspace's). `forgePrCreate` auto-links a created PR to the calling chat (`pr_create` verb →
+`callerChat`) else to every unarchived chat on that workspace whose `branch` is the head or empty; `chat_link_pr`
+(`#N` / URL, refused if the URL is another repo's) / `chat_unlink_pr` from ThreadDetailsCard's PR row. Unlink writes a
+`chat_pr_dismissed` tombstone that auto-link respects and a manual link clears. No polling: `chat_pr_refresh` when the
+card opens, `chat_prs_refresh(cwd)` after a push from `git.push`; Sidebar rows show the state glyph.
+
 **Launch settings** (`effort`, `permission_mode`, `profile_id`, `append_system_prompt`, + `model`) are
 columns too, **read-only on the wire** (SaveChats never writes them, like `collected_at`); backfilled once
 from the per-device `config.json` keys (`chat_migrations` marker). `resolveClaudeLaunch` (`chatlaunch.go`)

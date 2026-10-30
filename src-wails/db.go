@@ -206,6 +206,10 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE chats ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
 		// Snooze wake time (chatsnooze.go), read-only on the wire.
 		`ALTER TABLE chats ADD COLUMN snoozed_until INTEGER NOT NULL DEFAULT 0`,
+		// Linked pull request (chatpr.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE chats ADD COLUMN pr_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN pr_state TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
