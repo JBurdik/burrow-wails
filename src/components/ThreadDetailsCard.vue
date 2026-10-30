@@ -119,7 +119,7 @@
         <div v-for="s in schedules" :key="s.id" class="dc-row">
           <PhClock :size="14" class="dc-icon" />
           <span class="min-w-0 flex-1 truncate text-foreground" :title="s.text">{{ s.text }}</span>
-          <span class="shrink-0 text-muted-foreground">{{ dueLabel(s.due_at) }}</span>
+          <span class="shrink-0 text-muted-foreground" :title="s.recurs">{{ s.paused ? "paused" : s.rule?.kind && s.rule.kind !== "once" ? `${s.recurs} · ${dueLabel(s.due_at)}` : dueLabel(s.due_at) }}</span>
           <button class="dc-btn" title="Cancel" @click="cancelSchedule(s.id)"><PhX :size="11" /></button>
         </div>
       </template>
@@ -319,7 +319,7 @@ function openSurface(id: string) {
 const changes = ref({ added: 0, removed: 0 });
 interface DevServer { pid: number; port: number; command: string }
 const servers = ref<DevServer[]>([]);
-interface Scheduled { id: number; text: string; due_at: string }
+interface Scheduled { id: number; text: string; due_at: string; recurs: string; paused: boolean; rule?: { kind: string } }
 const schedules = ref<Scheduled[]>([]);
 
 async function refreshChanges() {
