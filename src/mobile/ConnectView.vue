@@ -1,9 +1,25 @@
 <template>
   <div class="flex min-h-dvh flex-col items-center justify-center bg-base px-6 pb-[calc(env(safe-area-inset-bottom)+32px)] pt-8 text-foreground" style="font-family: Inter, -apple-system, system-ui, sans-serif">
+    <div v-if="machines.length" class="mb-8 flex w-full max-w-[340px] flex-col gap-2">
+      <h1 class="text-[17px] font-semibold">Your machines</h1>
+      <div class="overflow-hidden rounded-[10px] border border-border">
+        <button
+          v-for="m in machines"
+          :key="m.environment_id"
+          type="button"
+          class="flex w-full items-center gap-3 border-border bg-panel px-3 py-3 text-left [&+&]:border-t active:bg-hover"
+          @click="useMachine(m.environment_id)"
+        >
+          <span class="flex min-w-0 flex-1 flex-col"><span class="truncate text-[14px] text-foreground">{{ m.name }}</span><span class="truncate text-[12px] text-muted-foreground">{{ hostLabel(m.baseUrl) }}</span></span>
+          <PhCaretRight :size="15" class="text-muted-foreground" />
+        </button>
+      </div>
+    </div>
+
     <form class="flex w-full max-w-[340px] flex-col gap-5" @submit.prevent="tryPair">
       <div class="flex flex-col gap-1">
-        <h1 class="text-[17px] font-semibold">Connect to Burrow</h1>
-        <p class="truncate text-[12px] text-muted-foreground">{{ url }}</p>
+        <h1 class="text-[17px] font-semibold">{{ machines.length ? "Add a machine" : "Connect to Burrow" }}</h1>
+        <input v-model="url" type="url" autocapitalize="off" autocorrect="off" spellcheck="false" :disabled="busy" class="rounded-[8px] border border-border bg-panel px-2.5 py-2 text-[13px] text-foreground outline-none focus:border-accent" />
       </div>
 
       <div class="flex flex-col gap-2">
@@ -33,11 +49,21 @@
 import { onMounted, ref } from "vue";
 import { PinInputRoot, PinInputInput } from "reka-ui";
 import { Button } from "@/components/ui/button";
-import { pairDevice } from "@/runtime/remoteEndpoint";
+import { PhCaretRight } from "@phosphor-icons/vue";
+import { listEnvironments, pairDevice, setActiveEnvironment } from "@/runtime/remoteEndpoint";
 
-// Served from the paired Mac itself (directly or under Tailscale Serve's
-// /burrow prefix), so the page's own location is the address to pair with.
-const url = `${location.origin}${location.pathname.replace(/\/(?:mobile\.html)?$/, "")}`;
+// Served from a paired Mac itself (directly or under Tailscale Serve's
+// /burrow prefix), so the page's own location is the default address. Editable
+// to add another machine: /v2/pair and /v2/ws-ticket answer CORS, /v2/ws takes
+// any origin.
+const url = ref(`${location.origin}${location.pathname.replace(/\/(?:mobile\.html)?$/, "")}`);
+// Shown when no machine is active: after "Add machine", a revoke, or a QR scan.
+const machines = listEnvironments();
+const hostLabel = (u: string) => u.replace(/^https?:\/\//, "");
+function useMachine(id: string) {
+  setActiveEnvironment(id);
+  location.reload();
+}
 // Set when the page was opened from the Settings QR (main.ts strips it from the URL).
 const props = defineProps<{ code?: string }>();
 const digits = ref<number[]>(props.code ? props.code.split("").map(Number) : []);
@@ -61,13 +87,13 @@ async function tryPair() {
   busy.value = true;
   err.value = "";
   try {
-    await pairDevice(url, code, ...deviceInfo()); // stores the credentials
+    await pairDevice(url.value, code, ...deviceInfo()); // adds to the catalog, makes it active
     location.reload(); // main.ts boots the app now that they exist
   } catch (e: any) {
     // Told apart by type: a refused code and an unreachable host are fixed differently.
     err.value = e?.name === "PairingRefusedError"
       ? "Wrong or expired code. Generate a new one in Settings on your Mac."
-      : `Cannot reach ${url}: ${e?.message ?? e}`;
+      : e?.message ?? String(e);
     digits.value = [];
   } finally {
     busy.value = false;

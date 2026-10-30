@@ -22,7 +22,7 @@ function showBootError(e: unknown) {
   pre.textContent = msg;
   const row = document.createElement("div");
   row.style.cssText = "display:flex;gap:8px;margin-top:16px";
-  for (const [label, run] of [["Reload", () => location.reload()], ["Forget this device", () => { clearRemoteCredentials(); location.reload(); }]] as const) {
+  for (const [label, run] of [["Reload", () => location.reload()], ["Forget this machine", () => { clearRemoteCredentials(); location.reload(); }]] as const) {
     const b = document.createElement("button");
     b.textContent = label;
     b.style.cssText = "padding:10px 14px;border-radius:8px;border:1px solid #3D3137;background:#2C2127;color:#ECE6E9;font:inherit";
@@ -42,11 +42,13 @@ window.addEventListener("unhandledrejection", (ev) => showBootError(ev.reason));
 // transport — only the ticket source differs (src/lib/wailsCompat/core.ts
 // picks the paired credentials when there is no Wails runtime). A phone gets
 // the same UI in its compact layout (App.vue). What is left here is pairing.
-if (loadRemoteCredentials()) {
+// A scanned code always pairs, even with another machine active: a QR ADDS to
+// the catalog (remoteEndpoint.ts), it never has to replace anything.
+if (loadRemoteCredentials() && !scannedCode) {
   void import("@/main").then(async () => {
-    // A revoke is a 401 on the next ticket, which clears the credentials
-    // (remoteEndpoint.ts). Reload into the pairing screen instead of a UI
-    // that can no longer reach anything.
+    // A revoke is a 401 on the next ticket, which forgets that one machine
+    // (remoteEndpoint.ts). Reload into the switcher / pairing screen instead
+    // of a UI that can no longer reach anything.
     const { appTransport } = await import("@/lib/wailsCompat/core");
     appTransport().onState((up) => {
       if (!up && !loadRemoteCredentials()) location.reload();

@@ -229,21 +229,29 @@
 
             <span class="mt-3 s-label">Connect to another Burrow</span>
             <p class="m-0 text-[11px] leading-relaxed text-muted-foreground">This window is a client, not just a host — pair it to a Burrow running elsewhere (a VPS, another machine) and drive that one instead. Get its address and a pairing code from <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow pair-status</code> on that machine, or its own Settings above.</p>
-            <div v-if="!desktopRemoteCreds" class="flex flex-col gap-2 s-row">
+            <div v-if="remoteEnvs.length" class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Drive the selected machine</span>
+                <span class="text-[11px] text-muted-foreground">{{ desktopUsesRemoteNow && remoteActiveId ? "This window is driving that machine right now." : "This window is driving this Mac." }}</span>
+              </div>
+              <Switch :checked="desktopUsesRemoteNow" :disabled="!remoteActiveId && !desktopUsesRemoteNow" @update:checked="onToggleDesktopRemote" />
+            </div>
+            <div v-if="remoteEnvs.length" class="overflow-hidden rounded-[10px] border border-border">
+              <div v-for="e in remoteEnvs" :key="e.environment_id" class="flex items-center gap-3 border-border px-3 py-2.5 [&+&]:border-t">
+                <span class="h-2 w-2 shrink-0 rounded-full" :class="e.environment_id === remoteActiveId ? 'bg-success' : 'bg-border'" />
+                <div class="flex flex-1 min-w-0 flex-col"><span class="truncate text-[13px] text-foreground">{{ e.name }}</span><span class="truncate text-[11px] text-muted-foreground">{{ e.baseUrl }}<template v-if="e.lastConnectedAt"> · last connected {{ relativeSeen(e.lastConnectedAt) }}</template></span></div>
+                <Button v-if="e.environment_id !== remoteActiveId" variant="outline" size="sm" type="button" @click="onUseRemoteEnv(e.environment_id)">Select</Button>
+                <Button variant="ghost" size="sm" type="button" @click="onRenameRemoteEnv(e.environment_id, e.name)">Rename</Button>
+                <Button variant="ghost" size="sm" type="button" class="text-destructive hover:bg-destructive/10 hover:text-destructive" @click="onForgetRemoteEnv(e.environment_id)">Forget</Button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2 s-row">
               <div class="flex items-center gap-2">
                 <input v-model="remoteConnectUrl" type="text" placeholder="https://host.tailnet.ts.net/burrow" class="min-w-0 flex-1 rounded-[var(--radius-chip)] border border-border bg-base px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50" />
                 <input v-model="remoteConnectCode" type="text" inputmode="numeric" maxlength="6" placeholder="123456" class="w-[100px] rounded-[var(--radius-chip)] border border-border bg-base px-2.5 py-1.5 text-center font-mono text-[13px] tracking-[0.15em] text-foreground outline-none placeholder:text-muted-foreground/50" />
-                <Button variant="outline" size="sm" type="button" :disabled="remoteConnecting || !remoteConnectUrl.trim() || remoteConnectCode.trim().length !== 6" @click="onConnectRemote">{{ remoteConnecting ? "Connecting…" : "Connect" }}</Button>
+                <Button variant="outline" size="sm" type="button" :disabled="remoteConnecting || !remoteConnectUrl.trim() || remoteConnectCode.trim().length !== 6" @click="onConnectRemote">{{ remoteConnecting ? "Connecting…" : (remoteEnvs.length ? "Add machine" : "Connect") }}</Button>
               </div>
               <span v-if="remoteConnectError" class="text-[11px] text-destructive">{{ remoteConnectError }}</span>
-            </div>
-            <div v-else class="flex items-center gap-4 s-row">
-              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="truncate text-[13px] font-medium text-foreground">{{ desktopRemoteCreds.baseUrl }}</span>
-                <span class="text-[11px] text-muted-foreground">{{ desktopUsesRemoteNow ? "This window is driving that machine right now." : "Paired, but this window is still driving this Mac." }}</span>
-              </div>
-              <Switch :checked="desktopUsesRemoteNow" @update:checked="onToggleDesktopRemote" />
-              <Button variant="outline" size="sm" type="button" @click="onForgetRemote">Forget</Button>
             </div>
           </div>
         </section>
@@ -1282,13 +1290,15 @@ import { FIXED_SHORTCUTS } from "@/lib/keymap";
 import qrcode from "qrcode-generator";
 import { effortLabel, effortsFor, ensureModels, visibleModelsFor, parseTextGenerationValue, textGenerationValue } from "@/lib/chatModels";
 import {
-  clearRemoteCredentials,
+  activeEnvironmentId,
   desktopUsesRemote,
-  loadRemoteCredentials,
+  listEnvironments,
   pairDevice,
   pairingUrl,
+  removeEnvironment,
+  renameEnvironment,
+  setActiveEnvironment,
   setDesktopUsesRemote,
-  type RemoteCredentials,
 } from "@/runtime/remoteEndpoint";
 
 const emit = defineEmits<{ close: [] }>();
@@ -2210,17 +2220,25 @@ const remoteConnectUrl = ref("");
 const remoteConnectCode = ref("");
 const remoteConnectError = ref<string | null>(null);
 const remoteConnecting = ref(false);
-const desktopRemoteCreds = ref<RemoteCredentials | null>(loadRemoteCredentials());
+// The same catalog the phone uses (remoteEndpoint.ts): every paired machine,
+// one active. The switch below decides whether this window drives it at all.
+const remoteEnvs = ref(listEnvironments());
+const remoteActiveId = ref(activeEnvironmentId());
 const desktopUsesRemoteNow = ref(desktopUsesRemote());
+const refreshRemoteEnvs = () => {
+  remoteEnvs.value = listEnvironments();
+  remoteActiveId.value = activeEnvironmentId();
+};
 
 async function onConnectRemote() {
   remoteConnectError.value = null;
   remoteConnecting.value = true;
   try {
-    const creds = await pairDevice(remoteConnectUrl.value, remoteConnectCode.value, "Desktop", "desktop");
-    desktopRemoteCreds.value = creds;
+    await pairDevice(remoteConnectUrl.value, remoteConnectCode.value, "Desktop", "desktop"); // adds + activates
     remoteConnectUrl.value = "";
     remoteConnectCode.value = "";
+    if (desktopUsesRemoteNow.value) window.location.reload();
+    refreshRemoteEnvs();
   } catch (e) {
     remoteConnectError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -2228,11 +2246,29 @@ async function onConnectRemote() {
   }
 }
 
-function onForgetRemote() {
-  clearRemoteCredentials();
-  setDesktopUsesRemote(false);
-  desktopRemoteCreds.value = null;
-  desktopUsesRemoteNow.value = false;
+// Same "restart to apply" contract as the toggle below: only reload when the
+// change affects which backend this window is talking to right now.
+function onUseRemoteEnv(id: string) {
+  setActiveEnvironment(id);
+  if (desktopUsesRemoteNow.value) window.location.reload();
+  refreshRemoteEnvs();
+}
+
+function onRenameRemoteEnv(id: string, current: string) {
+  const name = window.prompt("Machine name", current);
+  if (name === null) return;
+  renameEnvironment(id, name);
+  refreshRemoteEnvs();
+}
+
+function onForgetRemoteEnv(id: string) {
+  const wasDriving = desktopUsesRemoteNow.value && id === remoteActiveId.value;
+  removeEnvironment(id);
+  if (wasDriving) {
+    setDesktopUsesRemote(false);
+    window.location.reload();
+  }
+  refreshRemoteEnvs();
 }
 
 // Switching which backend this window talks to needs a fresh load: core.ts's
