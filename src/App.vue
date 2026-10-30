@@ -392,14 +392,15 @@ const details = computed(() => {
 });
 // Opening/closing the RP or the details card re-lays the main area in one frame.
 // FLIP it instead of easing widths (which re-laid the transcript every frame and
-// stuttered): remember where each chat lane and the card were, let the layout
-// land once — including the card inset, which follows mainWidth — then slide
-// them from the old spot with transform. The RP slides in from the right edge.
+// stuttered): remember where each chat lane was, let the layout land once —
+// including the card inset, which follows mainWidth — then slide the lanes from
+// the old spot with transform. The card just fades in at its new spot; the RP
+// slides in from the right edge.
 const FLIP = { duration: 240, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" };
-function flipMainArea(rpOpening = false) {
+function flipMainArea(rpOpening = false, fadeCard = false) {
   const root = mainEl.value;
   if (!root || compact.value || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const targets = () => [...root.querySelectorAll<HTMLElement>("[data-chat-lane], .details-card")]
+  const targets = () => [...root.querySelectorAll<HTMLElement>("[data-chat-lane]")]
     .filter((el) => el.offsetParent !== null);
   const before = new Map(targets().map((el) => [el, el.getBoundingClientRect().left]));
   nextTick(() => {
@@ -410,6 +411,9 @@ function flipMainArea(rpOpening = false) {
         const dx = was === undefined ? 0 : was - el.getBoundingClientRect().left;
         if (Math.abs(dx) > 0.5) el.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], FLIP);
       }
+      // The card is absolutely placed: it doesn't travel, it fades in where it lands.
+      const card = root.querySelector<HTMLElement>(".details-card");
+      if (card && fadeCard) card.animate([{ opacity: 0 }, { opacity: 1 }], FLIP);
       const rp = rpOpening ? document.querySelector<HTMLElement>(".panel-right") : null;
       if (rp) rp.animate([{ transform: `translateX(${rp.offsetWidth}px)`, opacity: 0.6 }, { transform: "none", opacity: 1 }], FLIP);
     });
@@ -426,7 +430,7 @@ watch(() => ui.rightPanelVisible, (open) => {
   rpClosing.value = false;
   const rp = document.querySelector<HTMLElement>(".panel-right");
   const animate = !open && !compact.value && !!rp && !matchMedia("(prefers-reduced-motion: reduce)").matches;
-  flipMainArea(open);
+  flipMainArea(open, true);
   if (!animate) return;
   const w = rp.offsetWidth;
   rpClosing.value = true;
@@ -1154,8 +1158,8 @@ body {
    FLIP-animated in the script (transform), never by easing padding.
    ponytail: every mounted chat in a split gets it, not only the pane under the card. */
 .ide-main.details-reserve .chat-main { padding-right: var(--details-inset); }
-.details-card-enter-active, .details-card-leave-active { transition: opacity 0.2s ease, transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.details-card-enter-from, .details-card-leave-to { opacity: 0; transform: translateX(12px); }
+.details-card-enter-active, .details-card-leave-active { transition: opacity 0.2s ease; }
+.details-card-enter-from, .details-card-leave-to { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .details-card-enter-active, .details-card-leave-active { transition: none; }
 }
