@@ -368,7 +368,7 @@ function closeWelcomeBottomTerminal(id: number) {
 // Thread details card: pinned open or closed per device. Desktop only — the
 // phone shell has its own thread header — and only for something in a workspace.
 const DETAILS_KEY = "burrow.threadDetailsOpen";
-const detailsOpen = ref(localStorage.getItem(DETAILS_KEY) === "1");
+const detailsOpen = ref(localStorage.getItem(DETAILS_KEY) !== "0"); // open unless closed once
 watch(detailsOpen, (on) => localStorage.setItem(DETAILS_KEY, on ? "1" : "0"));
 // t3code's rule (threadDetailsCardLayout.ts): the card never covers the chat. A
 // chat's lane moves left by DETAILS_RESERVE (.details-reserve below); when that
