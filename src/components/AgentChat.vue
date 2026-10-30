@@ -719,6 +719,7 @@
           <span v-if="phone && !phoneSettingsOpen" class="flex-1" />
           <!-- Right: cost badge + abort/send -->
           <div class="composer-sendgroup">
+            <ComposerStash ref="stashEl" v-model:text="inputText" v-model:images="pendingImages" />
             <HoverCardRoot v-if="contextUsageRatio > 0" v-model:open="ctxCardOpen" :open-delay="120" :close-delay="120">
               <HoverCardTrigger as-child>
                 <div class="ctx-ring" :class="contextUsageClass">
@@ -839,6 +840,8 @@ import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/co
 import PasteChip from "@/components/composer/PasteChip.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
+import ComposerStash from "@/components/composer/ComposerStash.vue";
+import { isStashShortcut } from "@/lib/promptStash";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
@@ -1919,6 +1922,7 @@ let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 // Set before an INTENTIONAL claude restart (mode switch / abort) so the `exit`
 // event that teardown emits doesn't fire a spurious "Claude finished" toast.
 const pendingImages = ref<string[]>([]); // data URIs
+const stashEl = ref<InstanceType<typeof ComposerStash> | null>(null);
 const scrollEl = ref<HTMLElement | null>(null);
 const inputEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
 
@@ -2732,6 +2736,7 @@ function onKeydown(e: KeyboardEvent) {
   if (pendingPlan.value && e.key === "Escape") { e.preventDefault(); respondPlan(false); return; }
   if (busy.value && e.key === "Escape" && !pendingPermission.value && !pendingDiff.value) { e.preventDefault(); abortTurn(); nextTick(() => inputEl.value?.focus()); return; }
   if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); clearChat(); return; }
+  if (isStashShortcut(e)) { e.preventDefault(); stashEl.value?.stash(); return; }
   if (e.key === "ArrowUp" && inputText.value === "" && !busy.value) {
     const recalled = S.recallLastUserMessage();
     if (recalled !== null) {

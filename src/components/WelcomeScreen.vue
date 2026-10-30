@@ -92,6 +92,7 @@
               </template>
             </div>
             <div class="composer-sendgroup">
+              <ComposerStash ref="stashEl" v-model:text="text" v-model:images="pendingImages" />
               <ComposerPill
                 v-if="selectedAgent.providerId !== 'openai-compatible'"
                 :icon="launchMode === 'chat' ? PhChatCenteredText : PhTerminal"
@@ -150,6 +151,8 @@ import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { stripPasteMarkers } from "@/lib/composerDom";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
+import ComposerStash from "@/components/composer/ComposerStash.vue";
+import { isStashShortcut } from "@/lib/promptStash";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
@@ -208,6 +211,7 @@ const { suggestions, activeIndex } = completion;
 function onComposerKeydown(e: KeyboardEvent) {
   // Completion first: Enter picks the highlighted suggestion instead of sending.
   if (completion.handleKeydown(e)) return;
+  if (isStashShortcut(e)) { e.preventDefault(); stashEl.value?.stash(); return; }
   if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
     e.preventDefault();
     submit();
@@ -215,6 +219,7 @@ function onComposerKeydown(e: KeyboardEvent) {
 }
 
 const pendingImages = ref<string[]>([]);
+const stashEl = ref<InstanceType<typeof ComposerStash>>();
 useFileDrop(() => inputEl.value?.element?.closest(".welcome"), {
   image: (uri) => pendingImages.value.push(uri),
   ref: (r) => { text.value = appendRef(text.value, r); nextTick(() => inputEl.value?.focus()); },
