@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { nextTick } from "vue";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -38,7 +37,7 @@ function fakeDeps() {
 function fakeView(over: Partial<ChatViewHooks> = {}): ChatViewHooks {
   return {
     scrollToBottom: vi.fn(), onQuestionOpened: vi.fn(), onPlanOpened: vi.fn(), onAcpSession: vi.fn(),
-    restoreAcpSelections: vi.fn(), usesRpcRuntime: () => false, send: vi.fn(async () => {}),
+    restoreAcpSelections: vi.fn(), usesRpcRuntime: () => false,
     ...over,
   };
 }
@@ -237,28 +236,6 @@ describe("eviction after a turn ends behind a closed view", () => {
     vi.useRealTimers();
   });
 
-  it("does not evict while a queued message is still waiting to be sent", async () => {
-    // finishTurn flushes the queue a nextTick later; evicting in between would
-    // hand that send a detached session while the next mount built a fresh one.
-    vi.useFakeTimers();
-    const f = fakeDeps();
-    const s = chatSession(31, f.deps);
-    s.retain();
-    s.release();
-    // release() already dropped it (idle, unwatched) — take a fresh one.
-    const s2 = chatSession(31, f.deps);
-    s2.retain();
-    s2.startTurn();
-    s2.release();
-    await endTurn(s2, f);
-    s2.enqueueMessage("next one");
-    s2.maybeEvict();
-    vi.runAllTimers();
-    expect(liveChatSessionIds()).toContain(31);
-    vi.useRealTimers();
-    dropChatSession(31);
-  });
-
   it("keeps a session someone is still watching", () => {
     vi.useFakeTimers();
     const s = chatSession(32);
@@ -271,115 +248,126 @@ describe("eviction after a turn ends behind a closed view", () => {
   });
 });
 
-describe("queued follow-ups", () => {
-  it("keeps duplicate prompts distinct and preserves their images", () => {
-    const s = chatSession(40);
-    const first = s.enqueueMessage("run tests", ["data:image/png;base64,first"]);
-    const second = s.enqueueMessage("run tests", ["data:image/png;base64,second"]);
+/** Go's chat_queue (chatqueue.go) as an in-memory fake behind f.invoke. */
+function fakeQueue(f: Fake, over: (cmd: string, args: Record<string, unknown>) => unknown = () => undefined) {
+  let items: { id: number; chatId: number; text: string; attachments: string[] }[] = [];
+  let nextId = 100;
+  const changed = (chatId: number) =>
+    f.emit("chat-queue-changed", { chatId, items: items.filter((i) => i.chatId === chatId) });
+  f.invoke.mockImplementation(async (cmd: string, raw?: unknown) => {
+    const a = (raw ?? {}) as Record<string, unknown>;
+    const res = over(cmd, a);
+    if (res !== undefined) return res;
+    switch (cmd) {
+      case "chat_queue_add": {
+        const item = { id: nextId++, chatId: a.chatId as number, text: a.text as string, attachments: (a.images as string[]) ?? [] };
+        items.push(item);
+        changed(item.chatId);
+        return item;
+      }
+      case "chat_queue_list": return items.filter((i) => i.chatId === a.chatId);
+      case "chat_queue_remove": {
+        const it = items.find((i) => i.id === a.id);
+        if (!it) throw new Error("not in the queue");
+        items = items.filter((i) => i !== it);
+        changed(it.chatId);
+        return undefined;
+      }
+      case "chat_queue_update": items = items.map((i) => (i.id === a.id ? { ...i, text: a.text as string } : i)); return undefined;
+      case "chat_queue_reorder": {
+        const ids = a.ids as number[];
+        items = [...items].sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id));
+        changed(a.chatId as number);
+        return undefined;
+      }
+    }
+    return undefined;
+  });
+  return { items: () => items };
+}
 
+describe("queued follow-ups (Go's chat_queue)", () => {
+  it("adds through chat_queue_add, keeps duplicates distinct with their images, and mirrors chat-queue-changed", async () => {
+    const f = fakeDeps();
+    const q = fakeQueue(f);
+    const s = chatSession(40, f.deps);
+    await s.listenEvents();
+    const first = (await s.enqueueMessage("run tests", ["data:image/png;base64,first"]))!;
+    const second = (await s.enqueueMessage("run tests", ["data:image/png;base64,second"]))!;
     s.removeQueuedMessage(first.id);
     expect(s.messageQueue.value).toEqual([second]);
-    expect(s.messages.value).toEqual([{ id: second.id, role: "queued", text: "run tests", images: second.images }]);
+    expect(q.items().map((i) => i.id)).toEqual([second.id]);
+    // The queue is not in the transcript any more.
+    expect(s.messages.value).toEqual([]);
+    // Go drained it (no view involved): the event is the truth.
+    f.emit("chat-queue-changed", { chatId: 40, items: [] });
+    expect(s.messageQueue.value).toEqual([]);
     dropChatSession(40);
   });
 
-  it("reads persisted queue markers back in FIFO order with no restore step", () => {
-    const s = chatSession(41);
+  it("migrates queued rows of an older build into Go's queue once, in order", async () => {
+    const f = fakeDeps();
+    const q = fakeQueue(f);
+    const s = chatSession(41, f.deps);
     s.hydrate({ messages: [
       { id: 4, role: "queued", text: "first" },
       { id: 5, role: "assistant", text: "working" },
       { id: 6, role: "queued", text: "second", images: ["data:image/png;base64,x"] },
     ] });
-
-    expect(s.messageQueue.value).toEqual([
-      { id: 4, text: "first" },
-      { id: 6, text: "second", images: ["data:image/png;base64,x"] },
-    ]);
-    // New rows continue past the loaded ids instead of colliding on `:key`.
-    expect(s.enqueueMessage("third").id).toBe(7);
+    await vi.waitFor(() => expect(q.items().length).toBe(2));
+    expect(q.items().map((i) => [i.text, i.attachments])).toEqual([["first", []], ["second", ["data:image/png;base64,x"]]]);
+    expect(s.messages.value.map((m) => m.role)).toEqual(["assistant"]);
+    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).toContain("save_chat_messages");
     dropChatSession(41);
   });
 
-  it("sends the next follow-up when a turn ends, even with nobody watching", async () => {
-    // The chat leaf is unmounted while the user looks at another tab, so the
-    // drain cannot live in a component watcher — the turn that releases the
-    // queue usually finishes right there.
+  it("never sends a follow-up itself when a turn ends — Go drains", async () => {
     const f = fakeDeps();
+    fakeQueue(f);
     const s = chatSession(43, f.deps);
-    const view = fakeView();
-    s.attachView(view);
-    s.retain();
+    s.attachView(fakeView());
+    await s.listenEvents();
     s.startTurn();
-    await nextTick(); // let the flag settle, as a real turn's start does
-    s.enqueueMessage("after this one");
-    s.release(); // view unmounted mid-turn
+    await s.enqueueMessage("after this one");
     await endTurn(s, f);
-    await nextTick();
-    await nextTick();
-    expect(view.send).toHaveBeenCalledWith("after this one", undefined);
-    expect(s.messageQueue.value).toEqual([]);
+    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_send");
+    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["after this one"]);
     dropChatSession(43);
   });
 
-  it("moves a message to the head of the queue in the transcript too", () => {
-    const s = chatSession(42, fakeDeps().deps);
-    const first = s.enqueueMessage("first");
-    s.notice("working");
-    const working = s.messages.value[s.messages.value.length - 1].id;
-    const second = s.enqueueMessage("second");
-
-    s.moveQueuedMessage(second.id, 0);
-    expect(s.messageQueue.value.map((e) => e.id)).toEqual([second.id, first.id]);
-    expect(s.messages.value.map((m) => m.id)).toEqual([second.id, first.id, working]);
-    expect(s.messageQueue.value[0]).toEqual({ id: second.id, text: "second" });
-    dropChatSession(42);
-  });
-
-  it("moves a queued message down (drag reorder)", () => {
-    const s = chatSession(42, fakeDeps().deps);
-    const [a, b, c] = ["a", "b", "c"].map((t) => s.enqueueMessage(t));
-    s.moveQueuedMessage(a.id, 2);
-    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["b", "c", "a"]);
-    s.moveQueuedMessage(a.id, 1);
-    expect(s.messageQueue.value.map((e) => e.id)).toEqual([b.id, a.id, c.id]);
-    dropChatSession(42);
-  });
-
-  it("drains in displayed order after a reorder, and never interrupts to manage the queue", async () => {
+  it("reorders, edits (blank ignored) and clears through Go, never interrupting", async () => {
     const f = fakeDeps();
+    const q = fakeQueue(f);
     const s = chatSession(44, f.deps);
-    const view = fakeView();
-    s.attachView(view);
-    s.retain();
+    await s.listenEvents();
     s.startTurn();
-    await nextTick();
-    const [a, b, c] = ["a", "b", "c"].map((t) => s.enqueueMessage(t));
-    s.moveQueuedMessage(c.id, 0);
-    s.removeQueuedMessage(b.id);
-    s.editQueuedMessage(a.id, "  a edited ");
-    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["c", "a edited"]);
-    expect(s.busy.value).toBe(true);
+    const [a, b, c] = await Promise.all(["a", "b", "c"].map((t) => s.enqueueMessage(t)));
+    await s.moveQueuedMessage(c!.id, 0);
+    expect(q.items().map((i) => i.text)).toEqual(["c", "a", "b"]);
+    await s.moveQueuedMessage(c!.id, 2);
+    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["a", "b", "c"]);
+    s.removeQueuedMessage(b!.id);
+    s.editQueuedMessage(a!.id, "  a edited ");
+    s.editQueuedMessage(c!.id, "   ");
+    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["a edited", "c"]);
+    expect(f.invoke).toHaveBeenCalledWith("chat_queue_update", { id: a!.id, text: "a edited" });
     expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_interrupt");
-    s.release();
-    await endTurn(s, f);
-    await nextTick();
-    await nextTick();
-    expect(view.send).toHaveBeenCalledWith("c", undefined);
+    s.clearQueuedMessages();
+    expect(s.messageQueue.value).toEqual([]);
+    await vi.waitFor(() => expect(q.items()).toEqual([]));
     dropChatSession(44);
   });
 
-  it("edits in place (blank ignored) and clears every queued message but keeps the transcript", () => {
-    const s = chatSession(45, fakeDeps().deps);
-    s.notice("working");
-    const [a, b] = ["a", "b"].map((t) => s.enqueueMessage(t));
-    s.editQueuedMessage(b.id, "b2");
-    s.editQueuedMessage(a.id, "   ");
-    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["a", "b2"]);
-    s.clearQueuedMessages();
-    expect(s.messageQueue.value).toEqual([]);
-    expect(s.messages.value.map((m) => m.role)).not.toContain("queued");
-    expect(s.messages.value.length).toBe(1);
-    dropChatSession(45);
+  it("evicts an unwatched idle session even with a queue — Go owns it", () => {
+    vi.useFakeTimers();
+    const f = fakeDeps();
+    const s = chatSession(45, f.deps);
+    s.retain();
+    s.maybeEvict();
+    s.release();
+    vi.runAllTimers();
+    expect(liveChatSessionIds()).not.toContain(45);
+    vi.useRealTimers();
   });
 });
 
@@ -599,7 +587,7 @@ describe("process intents", () => {
     await s.clear();
     s.startTurn();
     await s.interrupt();
-    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).toEqual(["chat_restart", "chat_clear", "chat_interrupt"]);
+    expect(f.invoke.mock.calls.map(([cmd]) => cmd).filter((c) => c !== "chat_queue_list")).toEqual(["chat_restart", "chat_clear", "chat_interrupt"]);
     f.emit("chat-event-82", { ord: 1, events: [{ type: "turn.completed" }] });
     expect(f.host.notifyDone).not.toHaveBeenCalled();
     dropChatSession(82);
@@ -788,13 +776,15 @@ describe("steer", () => {
   it("turns the queued entry into a user bubble in the same turn and claims its echo", async () => {
     const f = fakeDeps();
     f.host.chat.mockReturnValue({ transport: "codex-app-server" } as never);
+    fakeQueue(f);
     const s = chatSession(71, f.deps);
     s.attachView(fakeView());
     await s.listenEvents();
     s.startTurn();
-    const a = s.enqueueMessage("first");
-    const b = s.enqueueMessage("steer me", ["data:image/png;base64,AA=="]);
+    const a = (await s.enqueueMessage("first"))!;
+    const b = (await s.enqueueMessage("steer me", ["data:image/png;base64,AA=="]))!;
     expect(await s.steer(b.id)).toBe(true);
+    expect(f.invoke).toHaveBeenCalledWith("chat_queue_remove", { id: b.id });
     expect(f.invoke).toHaveBeenCalledWith("chat_steer", { chatId: 71, text: "steer me", images: ["data:image/png;base64,AA=="] });
     expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_send");
     expect(s.messageQueue.value.map((e) => e.id)).toEqual([a.id]);
@@ -809,21 +799,23 @@ describe("steer", () => {
   it("puts the entry back where it was when Go refuses, and never steers a generic-ACP chat", async () => {
     const f = fakeDeps();
     f.host.chat.mockReturnValue({ transport: "claude-cli" } as never);
-    f.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "chat_steer") throw new Error("no running turn to steer");
-      return undefined;
-    });
+    fakeQueue(f, (cmd) => { if (cmd === "chat_steer") throw new Error("no running turn to steer"); });
     const s = chatSession(72, f.deps);
     s.attachView(fakeView());
+    await s.listenEvents();
     s.startTurn();
-    const [a, b, c] = ["a", "b", "c"].map((t) => s.enqueueMessage(t));
+    const [a, , c] = await Promise.all(["a", "b", "c"].map((t) => s.enqueueMessage(t)));
+    const b = s.messageQueue.value[1];
     expect(await s.steer(b.id)).toBe(false);
-    expect(s.messageQueue.value.map((e) => e.id)).toEqual([a.id, b.id, c.id]);
+    // Back in Go's queue at its old position (under a new id).
+    expect(s.messageQueue.value.map((e) => e.text)).toEqual(["a", "b", "c"]);
+    expect(s.messageQueue.value.map((e) => e.id)).toContain(a!.id);
+    expect(s.messageQueue.value.map((e) => e.id)).toContain(c!.id);
     expect(s.messages.value.map((m) => m.role)).not.toContain("user");
 
     f.host.chat.mockReturnValue({ transport: "acp" } as never);
     f.invoke.mockClear();
-    expect(await s.steer(a.id)).toBe(false);
+    expect(await s.steer(a!.id)).toBe(false);
     expect(f.invoke).not.toHaveBeenCalledWith("chat_steer", expect.anything());
     dropChatSession(72);
   });

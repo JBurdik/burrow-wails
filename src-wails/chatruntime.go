@@ -162,6 +162,12 @@ func (a *App) ChatSend(chatID int64, text string, images []string) error {
 	}
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
+	return a.chatSendLocked(c, id, text, images)
+}
+
+// chatSendLocked is ChatSend's body; the caller holds the chat lock.
+func (a *App) chatSendLocked(c Chat, id, text string, images []string) error {
+	chatID := c.ID
 	a.chatRT.touchChat(id, time.Now())
 	if t := chatTransport(c); t != "claude-cli" {
 		if err := a.ensureRPC(c, t); err != nil {

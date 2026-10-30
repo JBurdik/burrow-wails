@@ -179,8 +179,20 @@ TUI, and restoring it means relaunching `claude --resume <id>` into the same tab
 turn ends (done/failed) or that enters `waiting_*` gets a row in `subagent_notices`, keyed per (child, turn /
 blocked episode) — recorded in `emitChatLine` on the phase transition, delivered by the 15 s schedule sweep
 (ahead of `chat_schedules`) into the **parent** via `ChatSend` only once the parent `chatSettled`. A completion
-marks the child collected unless cut at 4000 chars. The user's queued follow-ups are client-side, so a drained one
-can run first. Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
+marks the child collected unless cut at 4000 chars. A notice goes ahead of the user's queued follow-ups
+(`deliveryOrder`, below). Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
+
+**Queued follow-ups are Go's** (`chatqueue.go`, `chatdelivery.go`): a message typed while a turn runs goes to
+SQLite `chat_queue` via `chat_queue_add` (`_list` / `_update` / `_remove` / `_reorder`; event
+`chat-queue-changed` = the chat's whole queue). `chatSession` only mirrors it — **no client drain**, so it
+drains with the desktop closed or the phone asleep; legacy `queued` transcript rows are migrated through
+`chat_queue_add` on hydrate. Every Go-initiated send (notices, queue, schedules) goes through one pass,
+`deliverPending`: pure `deliveryOrder` (notice → queue head → schedule), one item per settled chat per pass,
+run by the 15 s sweep **and** kicked 300 ms after a turn settles (`emitChatLine`) or an item is queued into a
+settled chat. Production send is `chatSendSettled` — re-checks `chatSettled` **under the chat lock**, so a
+drain racing the user's own mid-start `ChatSend` returns `errChatBusy` instead of steering. An item is claimed
+by being **deleted in the read's transaction**; a failed send re-inserts it at the head under its old id
+(5 failures park the head until edited). Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
 
 **Self-management verbs** (`internal/control/verbs_self.go`, local-only, default to the caller's chat):
 `schedule` / `schedule_list` / `schedule_cancel` (`chatschedule.go`) — SQLite `chat_schedules`, a 15 s sweep

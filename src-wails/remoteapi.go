@@ -203,6 +203,12 @@ var remoteAllowed = map[string]remoteCmd{
 	// a chat the desktop names.
 	"chat_schedule_list":    {Method: "ChatScheduleList", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"chat_schedule_cancel":  {Method: "ChatScheduleCancel", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// The user's queued follow-ups (chatqueue.go), drained by Go.
+	"chat_queue_list":       {Method: "ChatQueueList", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_queue_add":        {Method: "ChatQueueAdd", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_queue_update":     {Method: "ChatQueueUpdate", Args: []string{"id", "text"}, Scope: scopeOrchOperate},
+	"chat_queue_remove":     {Method: "ChatQueueRemove", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"chat_queue_reorder":    {Method: "ChatQueueReorder", Args: []string{"chatId", "ids"}, Scope: scopeOrchOperate},
 	"chat_move_to_worktree": {Method: "ChatMoveToWorktree", Args: []string{"chatId", "branch"}, Scope: scopeOrchOperate},
 	"chat_leave_worktree":   {Method: "ChatLeaveWorktree", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 

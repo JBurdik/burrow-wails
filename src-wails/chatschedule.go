@@ -117,64 +117,74 @@ func (a *App) chatSettled(id string) bool {
 }
 
 // fireDueSchedules delivers every item due at `now` whose chat has settled and
-// returns the delivered ids. send is ChatSend in production.
+// returns the delivered ids — one source of the delivery sweep, run alone.
 func (a *App) fireDueSchedules(now time.Time, send func(chatID int64, text string) error) []int64 {
 	if a.db == nil {
 		return nil
 	}
+	var fired []int64
+	a.runDeliveries(a.scheduleDeliveries(now, func(c int64, t string, _ []string) error { return send(c, t) }, &fired))
+	return fired
+}
+
+// scheduleDeliveries offers every item due at `now`.
+func (a *App) scheduleDeliveries(now time.Time, send chatSender, fired *[]int64) []pendingDelivery {
 	type item struct {
 		id, chatID int64
 		text       string
 		attempts   int
+		due        int64
 	}
-	rows, err := a.db.Query(`SELECT id, chat_id, text, attempts FROM chat_schedules WHERE due_at <= ? ORDER BY due_at, id`, now.UnixMilli())
+	rows, err := a.db.Query(`SELECT id, chat_id, text, attempts, due_at FROM chat_schedules WHERE due_at <= ? ORDER BY due_at, id`, now.UnixMilli())
 	if err != nil {
 		return nil
 	}
 	var due []item
 	for rows.Next() {
 		var it item
-		if rows.Scan(&it.id, &it.chatID, &it.text, &it.attempts) == nil {
+		if rows.Scan(&it.id, &it.chatID, &it.text, &it.attempts, &it.due) == nil {
 			due = append(due, it)
 		}
 	}
 	rows.Close()
 
-	var fired []int64
-	sent := map[int64]bool{}
+	var out []pendingDelivery
 	for _, it := range due {
-		if sent[it.chatID] {
-			continue
-		}
-		if _, err := a.chatByID(it.chatID); errors.Is(err, sql.ErrNoRows) {
-			_, _ = a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, it.chatID) // chat deleted
-			continue
-		}
-		if !a.chatSettled(strconv.FormatInt(it.chatID, 10)) {
-			continue // a turn is open: wait for it to settle
-		}
-		sent[it.chatID] = true
-		if err := send(it.chatID, it.text); err != nil {
-			if it.attempts+1 >= chatScheduleMaxAttempts {
-				log.Printf("schedule %d: dropped after %d attempts: %v", it.id, it.attempts+1, err)
-				_, _ = a.db.Exec(`DELETE FROM chat_schedules WHERE id = ?`, it.id)
-				continue
+		it := it
+		out = append(out, pendingDelivery{ChatID: it.chatID, Source: deliverSchedule, Pos: it.due, CreatedAt: it.id, deliver: func() bool {
+			if _, err := a.chatByID(it.chatID); errors.Is(err, sql.ErrNoRows) {
+				_, _ = a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, it.chatID) // chat deleted
+				return false
 			}
-			_, _ = a.db.Exec(`UPDATE chat_schedules SET attempts = attempts + 1, last_error = ?, due_at = ? WHERE id = ?`,
-				err.Error(), now.Add(chatScheduleRetryDelay).UnixMilli(), it.id)
-			continue
-		}
-		_, _ = a.db.Exec(`DELETE FROM chat_schedules WHERE id = ?`, it.id)
-		fired = append(fired, it.id)
+			if !a.chatSettled(strconv.FormatInt(it.chatID, 10)) {
+				return false // a turn is open: wait for it to settle
+			}
+			if err := send(it.chatID, it.text, nil); err != nil {
+				if errors.Is(err, errChatBusy) {
+					return false
+				}
+				if it.attempts+1 >= chatScheduleMaxAttempts {
+					log.Printf("schedule %d: dropped after %d attempts: %v", it.id, it.attempts+1, err)
+					_, _ = a.db.Exec(`DELETE FROM chat_schedules WHERE id = ?`, it.id)
+					return true
+				}
+				_, _ = a.db.Exec(`UPDATE chat_schedules SET attempts = attempts + 1, last_error = ?, due_at = ? WHERE id = ?`,
+					err.Error(), now.Add(chatScheduleRetryDelay).UnixMilli(), it.id)
+				return true
+			}
+			_, _ = a.db.Exec(`DELETE FROM chat_schedules WHERE id = ?`, it.id)
+			if fired != nil {
+				*fired = append(*fired, it.id)
+			}
+			return true
+		}})
 	}
-	return fired
+	return out
 }
 
 func (a *App) chatScheduleLoop() {
-	send := func(chatID int64, text string) error { return a.ChatSend(chatID, text, nil) }
 	for range time.Tick(chatScheduleSweepInterval) {
-		a.deliverSubagentNotices(time.Now(), send) // ahead of scheduled prompts
-		a.fireDueSchedules(time.Now(), send)
+		a.deliverPending(time.Now(), a.chatSendSettled) // notices, queue, schedules (chatdelivery.go)
 		a.wakeSnoozedChats(time.Now())
 	}
 }

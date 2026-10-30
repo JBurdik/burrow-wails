@@ -296,6 +296,9 @@ func (a *App) DeleteChat(id int64) error {
 		if _, err := a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, c); err != nil {
 			return err
 		}
+		if _, err := a.db.Exec(`DELETE FROM chat_queue WHERE chat_id = ?`, c); err != nil {
+			return err
+		}
 	}
 	if _, err := a.db.Exec(`DELETE FROM chats WHERE parent_chat_id = ?`, id); err != nil {
 		return err

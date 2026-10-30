@@ -2087,15 +2087,13 @@ function watchingNow(): boolean {
 // Queued follow-ups
 function removeQueued(id: number) {
   removeQueuedMessage(id);
-  S.save();
 }
 const draggingQueuedId = ref<number | null>(null);
 const dropQueuedIndex = ref<number | null>(null);
 function dropQueued(toIndex: number) {
-  if (draggingQueuedId.value != null) moveQueuedMessage(draggingQueuedId.value, toIndex);
+  if (draggingQueuedId.value != null) void moveQueuedMessage(draggingQueuedId.value, toIndex);
   draggingQueuedId.value = null;
   dropQueuedIndex.value = null;
-  S.save();
 }
 const editingQueuedId = ref<number | null>(null);
 const editingQueuedText = ref("");
@@ -2109,23 +2107,19 @@ function commitQueuedEdit() {
   if (id == null) return;
   editingQueuedId.value = null;
   editQueuedMessage(id, editingQueuedText.value);
-  S.save();
 }
 function moveQueuedBy(id: number, index: number, delta: number) {
-  moveQueuedMessage(id, index + delta);
-  S.save();
+  void moveQueuedMessage(id, index + delta);
 }
 function clearQueued() {
   if (!window.confirm(`Clear ${messageQueue.value.length} queued messages?`)) return;
   clearQueuedMessages();
-  S.save();
 }
-function sendQueuedNow(id: number) {
+async function sendQueuedNow(id: number) {
   // Interrupt, don't steer: a follow-up has to remain its own turn for every
-  // provider (Codex, generic ACP). The abort clears `busy`, and the session's
-  // drain then sends the queue head — which this message just became.
-  moveQueuedMessage(id, 0);
-  S.save();
+  // provider (Codex, generic ACP). The turn settles, and Go's queue drain then
+  // sends the queue head — which this message just became.
+  await moveQueuedMessage(id, 0);
   void abortTurn();
 }
 
@@ -2612,11 +2606,11 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
   // as steering, and generic adapters have no negotiated queue capability.
   if (busy.value) {
-    const queued = enqueueMessage(text, images);
+    const queued = await enqueueMessage(text, images);
+    if (!queued) return null;
     acceptFeedback();
     pendingImages.value = [];
     inputText.value = "";
-    S.save();
     await nextTick();
     scrollToBottom(true);
     return { id: queued.id, text };
@@ -2972,7 +2966,6 @@ onMounted(async () => {
     onAcpSession: () => learnModels(agentKind.value, liveModels.value),
     restoreAcpSelections,
     usesRpcRuntime: () => usesRpcRuntime.value,
-    send: async (text, images) => { await sendMessage(text, images); },
   });
   // The transcript arrives on this channel for BOTH transports, so it is
   // attached unconditionally — unlike the raw ones, which are per-runtime.
@@ -3014,9 +3007,6 @@ onMounted(async () => {
   // do it: the active id is already this chat before the fresh instance mounts,
   // so it never fires and the view opened scrolled to the top of the history.
   scrollToBottom(true);
-  // A queue parked by an older build (or by a relaunch — the placeholders are
-  // persisted with the transcript) has no busy transition left to release it.
-  S.drain();
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
   selectedEffort.value = loadEffort();
