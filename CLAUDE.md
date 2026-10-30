@@ -350,8 +350,8 @@ trailing turn end on an idle chat is dropped), a generic ACP turn settles on its
 response. `src/stores/chatAttention.ts` (instantiated in `App.vue`) is the **only writer of
 `session.status`**: `displayStatus(phase-chat, seenAt, watching)`, receipts in `burrow.seenAt` as
 `chat:<id>`, watching = a count held by the mounted `AgentChat` / RP sub-agent detail while the window
-has focus. There is no chat state machine any more. The phone does the same with its own receipt
-(`burrow.chatSeenAt.mobile`). A permission request fires a toast + (unfocused) a native notification
+has focus. There is no chat state machine any more. A paired phone runs this same store with its
+own `localStorage` receipts. A permission request fires a toast + (unfocused) a native notification
 via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
 list, distinguished only by icon.
 
@@ -484,26 +484,22 @@ role would need.
 
 ### The phone (`src/mobile/` + `src/runtime/remoteEndpoint.ts`)
 
-**The PWA is a client of the same socket, command table and event names as the desktop.** Only the
-ticket source differs; `core.ts`'s `activeTransport()` picks Wails runtime → desktop, stored
-credentials → remote, neither → a `no endpoint` throw. Adding the phone added **no** second data path,
-so `commandSurface.test.ts` covers `src/mobile` too.
+**The phone runs the desktop app.** A paired browser (phone, iPad) boots the same `App.vue`, Pinia stores,
+socket, command table and event names as the desktop; only the ticket source differs (`core.ts`'s
+`activeTransport()`: Wails runtime → desktop, stored credentials → remote, neither → a `no endpoint` throw).
+There is no second data path and no mobile store. `src/mobile/` is only `main.ts` (credentials → import the
+desktop app, else `ConnectView.vue`, the pairing screen; also a boot-error screen, since a phone has no
+devtools) and `ConnectView.vue`.
+
+Phone width (`compact` in `src/lib/viewport.ts`, ≤ 767 px) switches `App.vue` to the phone shell
+(`src/components/phone/`: bottom nav, Inbox / Project / More screens, sidebar as the Threads screen); an iPad
+gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the browser's own
+`localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's; read receipts (`burrow.seenAt`)
+are per device the same way.
 
 Credentials live in `localStorage`, not `@/lib/config` — config reads through `invoke`, which needs the
 transport, which needs the credentials (a cycle that deadlocks on first load). A **401 from
-`/v2/ws-ticket` clears them** and throws `RevokedError`; a 500 does not.
-
-Gone from `src/mobile/store.ts` because the shared runtime does it: its own websocket client and
-reconnect loop; its own status derivation (dots now come from `phase-pty:{id}` through `displayStatus`,
-with a per-**device** receipt under `burrow.seenAt.mobile`); an N+1 first paint (one `shell_snapshot`
-replaced `list_workspaces` + one `list_terminal_tabs` per workspace). `transport.onState` is what the
-dashboard reads.
-
-Still mobile-specific: the view stack, the `WorkspaceGroup` shape, and the **chat permission channel**
-(still raw — the control/permission protocol is deliberately not in the neutral vocabulary). `store.ts`
-was **not** deleted and mobile was **not** moved onto the desktop's Pinia stores: no gain in capability,
-different shape and lifetime. `DiffView.vue` completes the PWA v1 surface, read-only (untracked files
-diff against `/dev/null`).
+`/v2/ws-ticket` clears them** and throws `RevokedError` (`main.ts` then reloads into pairing); a 500 does not.
 
 **The v1 surface is gone**: `/ws`, `/rpc/`, `/pair`, `Broadcast`, `installWSSink`, and the shared
 `http.token` — **deleted from disk at startup** rather than migrated (a token with no scopes, identity
@@ -578,7 +574,7 @@ One file per subsystem:
 | `bus.go` | `busEmit` is the single door for **every** client-visible event; numbers it into the ring unless `notRingable`; exactly **one** subscriber (`/v2/ws`'s per-connection subscription) |
 | `phasestore.go`, `phasepoll.go`, `internal/agentphase` | agent phase (above) |
 | `environment.go` | `environmentID()` — random id in `<app-data>/environment.json`; client records key off this, not IP/hostname |
-| `endpoints.go`, `endpoints_tailscale.go` | `EndpointProvider` registry, `selectEndpoint()`, `remote_endpoints`. **Nothing consumes this yet** |
+| `endpoints.go`, `endpoints_tailscale.go` | `EndpointProvider` registry, `selectEndpoint()`, `remote_endpoints`; `RemotePairingEndpoint` (`remote_pairing_endpoint`) runs the list through `selectEndpoint` as seen from another machine — the address Settings' pairing QR uses |
 | `remoteapi.go`, `remoteproto.go`, `remotews.go`, `shellstream.go`, `shellsnapshot.go` | the `/v2/ws` surface (above) |
 | `remoteauth.go`, `remotedevices.go`, `remoteguard.go` | pairing, devices, startup guards (above) |
 
