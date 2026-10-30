@@ -1,5 +1,6 @@
 <template>
-  <aside class="surface-glow [--glow-base:var(--sidebar-bg)] flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-[var(--sidebar-bg)] [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
+  <aside class="surface-glow relative isolate [--glow-base:var(--sidebar-bg)] flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-[var(--sidebar-bg)] [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
+    <StageBackdrop />
     <!-- Top row: new thread + quiet icon actions. The project picker is a
          menu now: the feed below is already grouped by project. -->
     <div class="flex shrink-0 items-center gap-1 px-2 pb-1 pt-2" ref="filterEl">
@@ -614,6 +615,7 @@ import {
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
 import UpdateBanner from "./UpdateBanner.vue";
+import StageBackdrop from "./StageBackdrop.vue";
 import ProviderUpdateBanner from "./ProviderUpdateBanner.vue";
 import PlanUsageIndicator from "./PlanUsageIndicator.vue";
 import { pickDir } from "@/lib/pickPath";
