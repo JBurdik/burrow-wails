@@ -406,6 +406,9 @@ watch(rawInset, (v) => {
 const details = computed(() => {
   const w = ws.active;
   if (!detailsOpen.value || compact.value || showWelcome.value || ui.mode !== "terminal" || !w) return null;
+  // The RP takes the card's place: while it is open the card is simply gone, so
+  // the chat has the whole main area instead of squeezing between the two.
+  if (ui.rightPanelVisible) return null;
   if (detailsInset.value === null) return null;
   const tab = ui.viewingTabs ? tabsStore.tabsByWs[w.id]?.find((t) => t.id === tabsStore.activeByWs[w.id]) : undefined;
   const kind: "chat" | "tab" | "workspace" = !tab ? "workspace" : tab.chatId != null ? "chat" : "tab";
@@ -1130,9 +1133,9 @@ body {
    panels and the lane don't animate at all; only the card itself fades in/out.
    ponytail: every mounted chat in a split gets it, not only the pane under the card. */
 .ide-main.details-reserve .chat-main { padding-right: var(--details-inset); }
-.details-card-enter-active, .details-card-leave-active { transition: opacity 0.15s ease; }
-.details-card-enter-from, .details-card-leave-to { opacity: 0; }
-@media (prefers-reduced-motion: reduce) { .details-card-enter-active, .details-card-leave-active { transition: none; } }
+.details-card-enter-active { transition: opacity 0.15s ease; }
+.details-card-enter-from { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .details-card-enter-active { transition: none; } }
 
 .terminal-host {
   flex: 1;
