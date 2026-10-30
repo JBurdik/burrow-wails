@@ -22,6 +22,7 @@
             <div class="truncate text-xs font-semibold text-foreground">{{ toast.title }}</div>
             <div v-if="toast.body" class="truncate text-[11px] text-muted-foreground">{{ toast.body }}</div>
           </div>
+          <button v-if="toast.action" class="ml-auto shrink-0 text-xs font-semibold text-accent hover:underline" @click.stop="store.runAction(toast.id)">{{ toast.action.label }}</button>
         </div>
       </TransitionGroup>
     </div>

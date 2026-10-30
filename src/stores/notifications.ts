@@ -11,6 +11,10 @@ export interface Toast {
   workspaceId?: number;
   tabId?: number;
   source?: NotifSource;
+  // An inline button (e.g. Undo). Toast-only: history never keeps it.
+  action?: { label: string; run: () => void };
+  // Auto-dismiss after this many ms (default 5000).
+  duration?: number;
 }
 
 export interface HistoryItem extends Toast {
@@ -79,8 +83,8 @@ export const useNotificationsStore = defineStore("notifications", () => {
     return null;
   });
 
-  function arm(id: number) {
-    timers.set(id, setTimeout(() => dismiss(id), 5000));
+  function arm(id: number, ms = 5000) {
+    timers.set(id, setTimeout(() => dismiss(id), ms));
   }
 
   // Repeated identical notifications (same type/title/source within 60s)
@@ -101,7 +105,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
       newest.ts = now;
       newest.read = false;
     } else {
-      history.value.unshift({ ...entry, source, ts: now });
+      history.value.unshift({ ...entry, action: undefined, source, ts: now });
       if (history.value.length > 50) history.value.pop();
     }
     persist();
@@ -111,7 +115,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     const id = ++nextId;
     toasts.value.push({ ...toast, id });
     if (toast.type === "pending") return id;
-    arm(id);
+    arm(id, toast.duration);
     insertHistory({ ...toast, id });
     return id;
   }
@@ -124,6 +128,12 @@ export const useNotificationsStore = defineStore("notifications", () => {
     Object.assign(t, patch);
     insertHistory(t);
     arm(id);
+  }
+
+  function runAction(id: number) {
+    const t = toasts.value.find((t) => t.id === id);
+    dismiss(id);
+    t?.action?.run();
   }
 
   function dismiss(id: number) {
@@ -169,6 +179,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     push,
     resolve,
     dismiss,
+    runAction,
     markAllRead,
     setRead,
     remove,
