@@ -54,6 +54,7 @@
     letter-spacing: 0.04em;
   }
   .tag-latest { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+  .tag-beta { background: rgba(167,139,250,0.15); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.3); }
   .section { margin-bottom: 14px; }
   .section-label {
     font-size: 11px;
@@ -78,6 +79,72 @@
 
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
+
+  <!-- beta (next) -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">Beta</span>
+    <span class="tag tag-beta">beta</span>
+    <span class="date">říjen 2026 · zatím jen ve větvi <code>beta</code>, ručně neověřeno</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Sidebar a vlákna (inspirováno t3code)</div>
+    <ul>
+      <li><strong>Sekce sidebaru</strong> — nahoře Pinned a Active seřazené podle toho, co od tebe chce (permission &gt; waiting &gt; error &gt; neviděné hotové). Dole ukotvené <strong>Working</strong> (běžící chaty i Claude v terminálových tabech), <strong>Snoozed</strong> a <strong>Settled</strong>. Doběhnuté vlákno se z Working přesune nahoru po 3 s, ne pod kurzorem.</li>
+      <li><strong>Snooze</strong> — vlákno se schová do zvoleného času (1 h, dnes 18:00, zítra 9:00, pondělí 9:00), pak samo vyskočí nahoru s notifikací. Sloupec <code>chats.snoozed_until</code>, budí ho Go sweep, funguje i z telefonu.</li>
+      <li><strong>Undo místo potvrzování</strong> — smazání chatu, hromadné smazání settled vláken a archivace ukážou toast s Undo na 8 s; skutečné smazání proběhne až potom. Smazání terminálového tabu dál potvrzuje dialog.</li>
+      <li><strong>Karta Thread details</strong> — plovoucí karta vpravo nahoře: workspace/worktree (Move/Leave worktree), Open in, skripty, větev + PR, Commit/Push, Changes +/−, servery, naplánované zprávy a rodokmen vlákna. Open in, větev a Commit/Push se do ní přesunuly z titlebaru, kde zůstala drobečková navigace <code>projekt / vlákno</code>.</li>
+      <li><strong>Označení kanálu</strong> — beta má za hlavičkou sidebaru noční oblohu, dev blueprint mřížku. Nastavení → Appearance: Artwork / Label only / Off.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Chat</div>
+    <ul>
+      <li><strong>Prompt stash</strong> — ⌘⇧S odloží rozepsaný prompt i s obrázky a vyprázdní composer; vytažení ze seznamu (max 20) nahradí obsah a ten původní se odloží sám.</li>
+      <li><strong>Oddělovač „New“</strong> — po návratu do chatu čára nad první nepřečtenou zprávou, když přišly aspoň dvě nové odpovědi.</li>
+      <li><strong>⌘F v chatu</strong> — hledání v textu, výstupech nástrojů i plánech; sbalené bloky s nálezem se rozbalí.</li>
+      <li><strong>Fronta zpráv v Go</strong> — zprávy napsané během turnu drží SQLite (<code>chat_queue</code>) a odejdou i se zavřeným desktopem nebo uspaným telefonem. Pořadí doručení: výsledky sub-agentů → tvoje fronta → naplánované zprávy.</li>
+      <li><strong>Pokračování po usage limitu</strong> — turn zastavený limitem ukáže banner „resets at HH:MM“; Resume automatically pošle po resetu „Continue where you left off.“ Claude turn zastavený limitem se teď ukazuje jako failed.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Sub-agenti</div>
+    <ul>
+      <li><strong>Výsledky chodí samy</strong> — dokončený sub-agent pošle výsledek do rodičovského vlákna, jakmile to dokončí turn (jednou, nad 4000 znaků zkráceně s odkazem na <code>collect_results</code>). Zaseknutý sub-agent rodiče upozorní, na co čeká. Vypínač v Nastavení → General.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Worktree a PR</div>
+    <ul>
+      <li><strong>Setup skript po vytvoření worktree</strong> — skript workspace s volbou „Run when a worktree is created“ se spustí v novém worktree, výstup je vidět v Right Panelu.</li>
+      <li><strong>Worktree z <code>origin</code></strong> — nová worktree se větví z čerstvě fetchnutého <code>origin/&lt;base&gt;</code> (při chybě z lokální větve); základní větev se vybírá ze seznamu.</li>
+      <li><strong>PR u vlákna</strong> — PR vytvořený z chatu se k němu připojí, jde připojit i ručně (<code>#N</code> nebo URL) a odpojit; stav PR je vidět v kartě i v sidebaru.</li>
+      <li><strong>PR do worktree a chatu</strong> — „Open in worktree“ v panelu PR, nebo vložená URL / <code>#123</code> ve Spotlightu či welcome composeru: fetch hlavy PR, worktree, nový chat a připravený (neodeslaný) prompt.</li>
+      <li><strong>Úklid worktree</strong> — volitelná pravidla (mergnuté větve, nepoužívané N dní) s náhledem a tlačítkem „Remove N“. Dirty, živá a méně než hodinu stará worktree se nikdy nesmažou. Ve výchozím stavu vypnuto.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Telefon</div>
+    <ul>
+      <li><strong>QR párování</strong> — Nastavení ukáže QR kód, telefon po naskenování spáruje sám; kód jede ve fragmentu URL, takže se nedostane do logů. Nastavení ukazuje správnou adresu (Tailscale HTTPS) a srozumitelný důvod, když HTTPS na tailnetu chybí.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Smazání worktree mohlo smazat untracked soubory</strong> — při <code>status.showUntrackedFiles=no</code> git ochranu přeskočil; teď ji vynucujeme.</li>
+      <li><strong>Souběžné git operace na jednom stromu</strong> — checkpointy, vytváření/mazání worktree a přesun chatu se na stejné cestě už nepřekrývají.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
 
   <!-- v0.7.0 -->
 <div class="release">
