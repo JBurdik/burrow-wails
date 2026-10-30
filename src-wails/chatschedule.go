@@ -173,6 +173,7 @@ func (a *App) fireDueSchedules(now time.Time, send func(chatID int64, text strin
 func (a *App) chatScheduleLoop() {
 	send := func(chatID int64, text string) error { return a.ChatSend(chatID, text, nil) }
 	for range time.Tick(chatScheduleSweepInterval) {
+		a.deliverSubagentNotices(time.Now(), send) // ahead of scheduled prompts
 		a.fireDueSchedules(time.Now(), send)
 		a.wakeSnoozedChats(time.Now())
 	}

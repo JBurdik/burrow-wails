@@ -145,6 +145,7 @@ func migrate(db *sql.DB) error {
 	stmts = append(stmts, orchSchema()...)
 	stmts = append(stmts, turnAuditSchema()...)
 	stmts = append(stmts, chatSchedulesSchema()...)
+	stmts = append(stmts, subagentNoticesSchema()...)
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return err

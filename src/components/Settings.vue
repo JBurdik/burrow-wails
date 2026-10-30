@@ -115,6 +115,13 @@
             </div>
             <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Deliver sub-agent results to the parent automatically</span>
+                <span class="text-[11px] text-muted-foreground">When a sub-agent finishes or gets blocked on a question, send that into the thread that spawned it once its turn has ended, so it carries on without polling.</span>
+              </div>
+              <Switch :checked="ui.subagentAutoDeliver" @update:checked="(v: boolean) => ui.subagentAutoDeliver = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>
                 <span class="text-[11px] text-muted-foreground">Default model for generated text — chat titles, commit messages, pull request content and branch names. Kept cheap by default.</span>
               </div>
