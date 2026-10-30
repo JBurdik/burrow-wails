@@ -93,8 +93,8 @@
       <RightPanel
         ref="rightPanelRef"
         class="panel-right"
-        :class="{ 'phone-hidden': compact && phone !== 'project-surface' }"
-        :open="compact ? phone === 'project-surface' : ui.rightPanelVisible"
+        :class="{ 'phone-hidden': compact && phone !== 'project-surface', 'rp-closing': rpClosing }"
+        :open="compact ? phone === 'project-surface' : ui.rightPanelVisible || rpClosing"
         :force-surface="compact && phone === 'project-surface' ? String(route.params.surface) : undefined"
         :cwd="displayWs?.path ?? ''"
         :workspace-id="displayWs?.id"
@@ -416,7 +416,25 @@ function flipMainArea(rpOpening = false) {
   });
 }
 watch(detailsOpen, () => flipMainArea(), { flush: "pre" });
-watch(() => ui.rightPanelVisible, (open) => flipMainArea(open), { flush: "pre" });
+// Closing: the RP stays rendered but out of flow (.rp-closing) for the slide, so
+// the main area widens — and FLIPs — at once while the panel leaves over it.
+const rpClosing = ref(false);
+let rpLeave: Animation | null = null;
+watch(() => ui.rightPanelVisible, (open) => {
+  rpLeave?.cancel();
+  rpLeave = null;
+  rpClosing.value = false;
+  const rp = document.querySelector<HTMLElement>(".panel-right");
+  const animate = !open && !compact.value && !!rp && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  flipMainArea(open);
+  if (!animate) return;
+  const w = rp.offsetWidth;
+  rpClosing.value = true;
+  nextTick(() => {
+    rpLeave = rp.animate([{ transform: "none" }, { transform: `translateX(${ui.swapPanels ? -w : w}px)`, opacity: 0.6 }], FLIP);
+    rpLeave.onfinish = () => { rpLeave = null; rpClosing.value = false; };
+  });
+}, { flush: "pre" });
 
 function toggleBottomTerminal() {
   if (showWelcome.value) toggleWelcomeBottom();
@@ -1115,10 +1133,14 @@ body {
 }
 
 .ide-body {
+  position: relative;
   display: flex;
   flex: 1;
   overflow: hidden;
 }
+/* The RP sliding away after a close: out of flow so the main area already has the room. */
+.panel-right.rp-closing { position: absolute; top: 0; bottom: 0; right: 0; z-index: 5; pointer-events: none; background: var(--bg-base); }
+.panels-swapped .panel-right.rp-closing { right: auto; left: 0; }
 
 .ide-main {
   position: relative;
