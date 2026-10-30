@@ -378,6 +378,8 @@
         <!-- Notifications -->
         <section v-else-if="active === 'subagent-profiles'" class="flex flex-col gap-3.5"><SubagentProfilesPanel /></section>
 
+        <section v-else-if="active === 'scheduled'" class="flex flex-col gap-3.5"><ScheduledTasksPanel /></section>
+
         <section v-else-if="active === 'notifications'" class="flex flex-col gap-3.5">
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
@@ -1244,7 +1246,7 @@ import { ref, computed, onUnmounted, watch, type Component } from "vue";
 import {
   PhGearSix, PhX, PhPlus, PhTrash, PhArrowCounterClockwise,
   PhSlidersHorizontal, PhFolderOpen, PhRobot, PhPalette, PhKeyboard,
-  PhPuzzlePiece, PhInfo, PhSparkle,
+  PhPuzzlePiece, PhInfo, PhSparkle, PhClock,
   PhFolder, PhPencilSimple, PhCheck, PhBell, PhPlay,
   PhArrowClockwise, PhDownloadSimple, PhTerminalWindow,
   PhPlugsConnected, PhToggleLeft, PhToggleRight, PhArrowSquareOut, PhImage,
@@ -1265,6 +1267,7 @@ import { releaseChannel } from "@/lib/releaseChannel";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import SubagentProfilesPanel from "@/components/agents/SubagentProfilesPanel.vue";
+import ScheduledTasksPanel from "@/components/ScheduledTasksPanel.vue";
 import ProvidersPanel from "@/components/ProvidersPanel.vue";
 import Segmented from "@/components/ui/segmented/Segmented.vue";
 import { testNtfy } from "@/lib/ntfy";
@@ -2047,6 +2050,7 @@ const navItems: NavItem[] = [
   { id: "workspaces", label: "Workspaces", icon: PhFolderOpen },
   { id: "providers", label: "Providers", icon: PhRobot },
   { id: "subagent-profiles", label: "Sub-agent profiles", icon: PhRobot },
+  { id: "scheduled", label: "Scheduled", icon: PhClock },
   { id: "scripts", label: "Scripts", icon: PhPlayCircle },
   { id: "skills", label: "Skills", icon: PhSparkle },
   { id: "mcp", label: "MCP Servers", icon: PhPlugsConnected },

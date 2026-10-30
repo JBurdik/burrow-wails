@@ -251,6 +251,17 @@ symlinked into `<config>/projects/<new-cwd-slug>/` (2.1.311 resumes by id from a
 original; older CLIs / another `CLAUDE_CONFIG_DIR` look only there). Codex resumes with the new cwd; generic
 ACP refuses.
 
+**Recurring schedules** (`internal/control/recurrence.go`, `chatschedule.go`): a `chat_schedules` row may carry a
+rule — `kind` once | interval (`every_min` ≥ 15) | weekly (`weekdays` + local `time_of_day`) — plus `paused`,
+`last_run_at` and a **new-chat target** (`new_chat` + `workspace_id` + `agent`: each run creates a chat titled
+`<name> · <date>` and sends into it, held back by no turn). A run moves `due_at` to the one pure
+`control.NextDue(rule, now, loc)` (table-tested: DST, weekday wrap) — computed from the run, **not** the missed slot,
+so an app closed through N slots fires once on launch; a one-shot is deleted as before; 5 failed attempts skip to the
+next slot. Resume skips slots missed while paused; run-now = `due_at = now` + a delivery kick (refused while paused).
+Verbs: `schedule --every / --weekly / --new-chat`, `schedule_pause` / `_resume` / `_run_now`; wire:
+`schedule_list_all` / `schedule_save` / `schedule_set_paused` / `schedule_run_now` (Settings → Scheduled,
+`ScheduledTasksPanel.vue`).
+
 **`spawn` of a thread's sub-agent runs in Go** (`spawnSubagent`, `control.Deps.ChatRuntime`): profile
 (defaults duplicated from `subagentProfiles.ts`, test-guarded) → agent (arg / profile / parent's / default
 chat agent / first enabled) → row with launch settings (arg / profile / the parent's **when it runs on the

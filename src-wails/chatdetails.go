@@ -31,6 +31,25 @@ func (a *App) ChatScheduleCancel(id int64) (bool, error) {
 	return scheduleAdapter{a}.Cancel(id)
 }
 
+// Settings → Scheduled: every chat's items, create / edit (id 0 = new),
+// pause / resume, run now. Delete is ChatScheduleCancel.
+
+func (a *App) ScheduleListAll() ([]control.ScheduledPrompt, error) {
+	return scheduleAdapter{a}.List(0)
+}
+
+func (a *App) ScheduleSave(p control.ScheduledPrompt) (control.ScheduledPrompt, error) {
+	return scheduleAdapter{a}.save(p)
+}
+
+func (a *App) ScheduleSetPaused(id int64, paused bool) (control.ScheduledPrompt, error) {
+	return scheduleAdapter{a}.SetPaused(id, paused)
+}
+
+func (a *App) ScheduleRunNow(id int64) (control.ScheduledPrompt, error) {
+	return scheduleAdapter{a}.RunNow(id)
+}
+
 func (a *App) ChatMoveToWorktree(chatID int64, branch string) (any, error) {
 	return a.selfVerb("move_to_worktree", control.Params{"chat_id": chatID, "branch": branch})
 }

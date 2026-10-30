@@ -54,7 +54,7 @@ A chat sub-agent's result now arrives by itself: when it finishes a turn, Burrow
 
 From a chat, these act on the calling chat unless you pass --chat-id.
 
-- schedule sends a prompt to the chat later: --in 30m / 2h / 1d, or --at 15:04 / RFC3339. Use it as a wake-up — nothing else wakes a chat whose turn has ended — e.g. burrow schedule "Wake-up: check whether CI on #42 passed" --in 20m. It survives an app restart and is held until a running turn finishes. schedule_list and schedule_cancel manage pending ones.
+- schedule sends a prompt to the chat later: --in 30m / 2h / 1d, or --at 15:04 / RFC3339. Use it as a wake-up — nothing else wakes a chat whose turn has ended — e.g. burrow schedule "Wake-up: check whether CI on #42 passed" --in 20m. It survives an app restart and is held until a running turn finishes. To recur, pass --every 1h (minimum 15m) or --weekly "mon,wed 09:00" ("daily 09:00", "weekdays 09:00") instead of --in/--at; a run missed while the app was closed fires once on the next launch, not once per missed slot. --new-chat starts a fresh chat for every run (in this chat's workspace, or --workspace-id; --agent picks the agent) instead of posting here. schedule_list shows each one's recurrence and next run; schedule_pause, schedule_resume, schedule_run_now and schedule_cancel manage them.
 - move_to_worktree moves the chat into a worktree of its repo (reused if one exists on that branch, else created). It takes effect from the next turn: finish this turn working under the returned path (absolute paths), and the next prompt starts there with the conversation intact. leave_worktree moves it back to the parent repo and keeps the worktree. Claude and Codex chats only.
 
 ## Long-running processes

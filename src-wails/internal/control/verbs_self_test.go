@@ -12,14 +12,20 @@ type fakeSchedules struct {
 	chatID int64
 	text   string
 	due    time.Time
+	last   ScheduledPrompt
 }
 
-func (f *fakeSchedules) Add(chatID int64, text string, due time.Time) (ScheduledPrompt, error) {
-	f.chatID, f.text, f.due = chatID, text, due
-	return ScheduledPrompt{ID: 1, ChatID: chatID, Text: text, DueAt: due}, nil
+func (f *fakeSchedules) Add(p ScheduledPrompt) (ScheduledPrompt, error) {
+	f.chatID, f.text, f.due, f.last = p.ChatID, p.Text, p.DueAt, p
+	p.ID = 1
+	return p, nil
 }
 func (f *fakeSchedules) List(int64) ([]ScheduledPrompt, error) { return nil, nil }
 func (f *fakeSchedules) Cancel(int64) (bool, error)            { return true, nil }
+func (f *fakeSchedules) SetPaused(int64, bool) (ScheduledPrompt, error) {
+	return ScheduledPrompt{}, nil
+}
+func (f *fakeSchedules) RunNow(int64) (ScheduledPrompt, error) { return ScheduledPrompt{}, nil }
 
 func TestScheduleDefaultsToCallerChatAndParsesTimes(t *testing.T) {
 	now := time.Date(2026, 10, 29, 17, 0, 0, 0, time.Local)
@@ -52,9 +58,26 @@ func TestScheduleDefaultsToCallerChatAndParsesTimes(t *testing.T) {
 		t.Fatalf("at RFC3339: %v %v", f.due, err)
 	}
 
+	// Recurring: the first run is the rule's next slot unless in/at says.
+	if err := call(Params{"text": "x", "every": "1h", "parent_chat_id": "7"}); err != nil ||
+		f.last.Rule.Kind != "interval" || f.last.Rule.EveryMin != 60 || !f.due.Equal(now.Add(time.Hour)) {
+		t.Fatalf("every 1h: %+v %v", f.last, err)
+	}
+	if err := call(Params{"text": "x", "weekly": "mon,wed 09:00", "new_chat": "true", "agent": "codex", "parent_chat_id": "7"}); err != nil ||
+		f.last.Rule.Kind != "weekly" || !f.last.NewChat || f.last.Agent != "codex" ||
+		!f.due.Equal(time.Date(2026, 11, 2, 9, 0, 0, 0, time.Local)) {
+		t.Fatalf("weekly new chat: %+v %v", f.last, err)
+	}
+	if err := call(Params{"text": "x", "every": "1d", "in": "5m", "parent_chat_id": "7"}); err != nil || !f.due.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("every + in: %v %v", f.due, err)
+	}
+
 	for _, bad := range []Params{
-		{"text": "x", "in": "30m"},                                       // no chat
-		{"text": "x", "parent_chat_id": "7"},                             // neither in nor at
+		{"text": "x", "in": "30m"},                           // no chat
+		{"text": "x", "parent_chat_id": "7"},                 // neither in nor at
+		{"text": "x", "every": "10m", "parent_chat_id": "7"}, // below the minimum
+		{"text": "x", "every": "1h", "weekly": "mon 09:00", "parent_chat_id": "7"},
+		{"text": "x", "weekly": "someday 09:00", "parent_chat_id": "7"},
 		{"text": "x", "in": "30m", "at": "09:00", "parent_chat_id": "7"}, // both
 		{"text": "x", "in": "-5m", "parent_chat_id": "7"},
 		{"text": "x", "at": "tomorrowish", "parent_chat_id": "7"},

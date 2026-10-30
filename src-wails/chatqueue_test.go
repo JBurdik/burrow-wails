@@ -126,7 +126,7 @@ func TestDeliveryNoticeThenQueueThenSchedule(t *testing.T) {
 	child, _ := a.CreateChat(Chat{WorkspaceID: ws, Transport: "claude-cli", Title: "kid", ParentChatID: parent.ID})
 	assistantSays(t, a, child.ID, "done")
 
-	scheduleAdapter{a}.Add(parent.ID, "scheduled", time.Now().Add(-time.Minute))
+	scheduleAdapter{a}.addAt(parent.ID, "scheduled", time.Now().Add(-time.Minute))
 	a.ChatQueueAdd(parent.ID, "queued", nil)
 	step(a, child.ID, ProviderRuntimeEvent{Type: EvtTextDelta})
 	step(a, child.ID, ProviderRuntimeEvent{Type: EvtTurnCompleted})

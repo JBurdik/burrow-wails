@@ -19,13 +19,25 @@ import (
 // agent somewhere else — both drive an agent that holds tool permissions, which
 // is exactly what ScopeRemote verbs are kept away from.
 
-// ScheduledPrompt is one pending scheduled message.
+// ScheduledPrompt is one pending scheduled message — a one-shot, or a
+// recurring task that stays until cancelled.
 type ScheduledPrompt struct {
-	ID        int64     `json:"id"`
-	ChatID    int64     `json:"chat_id"`
-	Text      string    `json:"text"`
-	DueAt     time.Time `json:"due_at"`
-	CreatedAt time.Time `json:"created_at"`
+	ID     int64  `json:"id"`
+	ChatID int64  `json:"chat_id"` // 0 with NewChat
+	Name   string `json:"name"`
+	Text   string `json:"text"`
+	// DueAt is the next run.
+	DueAt     time.Time  `json:"due_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	Rule      Recurrence `json:"rule"`
+	Recurs    string     `json:"recurs"` // Rule in words, read-only
+	// NewChat: each run starts a new chat in WorkspaceID with Agent (empty =
+	// the default chat agent) instead of posting into ChatID.
+	NewChat     bool       `json:"new_chat"`
+	WorkspaceID int64      `json:"workspace_id,omitempty"`
+	Agent       string     `json:"agent,omitempty"`
+	Paused      bool       `json:"paused"`
+	LastRunAt   *time.Time `json:"last_run_at,omitempty"`
 	// Attempts/LastError: a delivery that failed (the agent would not start)
 	// stays queued and is retried by the sweep, a few times.
 	Attempts  int    `json:"attempts,omitempty"`
@@ -35,10 +47,15 @@ type ScheduledPrompt struct {
 // Schedules persists scheduled prompts; the host's sweep delivers them through
 // the same door as chat_send once due and the chat's turn has settled.
 type Schedules interface {
-	Add(chatID int64, text string, due time.Time) (ScheduledPrompt, error)
+	// Add stores a new item. A recurring one with a zero DueAt gets
+	// NextDue(now); NewChat with no WorkspaceID takes ChatID's workspace.
+	Add(p ScheduledPrompt) (ScheduledPrompt, error)
 	// List returns pending items, soonest first; chatID 0 = every chat.
 	List(chatID int64) ([]ScheduledPrompt, error)
 	Cancel(id int64) (bool, error)
+	SetPaused(id int64, paused bool) (ScheduledPrompt, error)
+	// RunNow makes an item due now; a settled chat gets it within a moment.
+	RunNow(id int64) (ScheduledPrompt, error)
 }
 
 // ChatMover re-homes a chat in another workspace: its next turn starts there,
@@ -55,18 +72,24 @@ func selfVerbs(c *Core) []Verb {
 	chatArg := Arg{Name: "chat_id", Type: "integer", Desc: "Chat to act on; defaults to the calling chat (BURROW_CHAT_ID)"}
 	return []Verb{{
 		Name:    "schedule",
-		Summary: "Schedule a prompt to be sent to a chat later — a reminder or wake-up for yourself. Survives restarts; waits for a running turn to finish",
+		Summary: "Schedule a prompt to be sent to a chat later — a reminder or wake-up for yourself — once or on a recurring rule. Survives restarts; waits for a running turn to finish",
 		Args: []Arg{
 			{Name: "text", Type: "string", Desc: "The prompt to send when due, e.g. \"Wake-up: check whether CI on #42 passed\"", Required: true},
-			{Name: "in", Type: "string", Desc: "Delay from now: 90s, 30m, 2h, 1h30m, 1d (pass in or at)"},
+			{Name: "in", Type: "string", Desc: "Delay from now: 90s, 30m, 2h, 1h30m, 1d (a one-shot needs in or at; with every/weekly it is the first run)"},
 			{Name: "at", Type: "string", Desc: "Absolute time: RFC3339, \"2006-01-02 15:04\" or \"15:04\" local (next occurrence)"},
+			{Name: "every", Type: "string", Desc: "Recur on an interval: 15m (minimum), 1h, 1d"},
+			{Name: "weekly", Type: "string", Desc: "Recur at a local time on weekdays: \"mon,wed 09:00\", \"weekdays 09:00\", \"daily 18:30\""},
+			{Name: "new_chat", Type: "boolean", Desc: "Start a new chat for every run (titled \"<name> · <date>\") instead of posting into this one"},
+			{Name: "workspace_id", Type: "integer", Desc: "With new_chat: the workspace to start it in (default: this chat's)"},
+			{Name: "agent", Type: "string", Desc: "With new_chat: agent id or name (default: the default chat agent)"},
+			{Name: "name", Type: "string", Desc: "Task name (default: the start of text)"},
 			chatArg,
 		},
 		Scope: ScopeLocal,
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.schedule(p) },
 	}, {
 		Name:    "schedule_list",
-		Summary: "Pending scheduled prompts, soonest first",
+		Summary: "Pending scheduled prompts, soonest first, with their recurrence (recurs) and next run (due_at)",
 		Args: []Arg{
 			{Name: "chat_id", Type: "integer", Desc: "Only this chat's; defaults to the calling chat"},
 			{Name: "all", Type: "boolean", Desc: "Every chat's, ignoring chat_id"},
@@ -99,6 +122,29 @@ func selfVerbs(c *Core) []Verb {
 				return nil, fmt.Errorf("schedule_cancel: no pending schedule %d", p.Int("id"))
 			}
 			return map[string]any{"cancelled": p.Int("id")}, nil
+		},
+	}, {
+		Name:    "schedule_pause",
+		Summary: "Pause a scheduled prompt; it keeps its rule but does not run until schedule_resume",
+		Args:    []Arg{{Name: "id", Type: "integer", Desc: "Schedule id", Required: true}},
+		Scope:   ScopeLocal,
+		Fn:      func(ctx context.Context, p Params) (any, error) { return c.scheduleOp("schedule_pause", p, true) },
+	}, {
+		Name:    "schedule_resume",
+		Summary: "Resume a paused scheduled prompt (a recurring one continues from its next slot, skipping the ones missed while paused)",
+		Args:    []Arg{{Name: "id", Type: "integer", Desc: "Schedule id", Required: true}},
+		Scope:   ScopeLocal,
+		Fn:      func(ctx context.Context, p Params) (any, error) { return c.scheduleOp("schedule_resume", p, false) },
+	}, {
+		Name:    "schedule_run_now",
+		Summary: "Run a scheduled prompt now (still waits for a running turn to finish); a recurring one then continues from now",
+		Args:    []Arg{{Name: "id", Type: "integer", Desc: "Schedule id", Required: true}},
+		Scope:   ScopeLocal,
+		Fn: func(ctx context.Context, p Params) (any, error) {
+			if c.deps.Schedules == nil {
+				return nil, fmt.Errorf("schedule_run_now: no scheduler")
+			}
+			return c.deps.Schedules.RunNow(p.Int("id"))
 		},
 	}, {
 		Name:    "move_to_worktree",
@@ -140,25 +186,57 @@ func (c *Core) schedule(p Params) (any, error) {
 	if text == "" {
 		return nil, fmt.Errorf("schedule needs text")
 	}
-	in, at := p.Str("in"), p.Str("at")
-	if (in == "") == (at == "") {
-		return nil, fmt.Errorf("schedule: pass exactly one of in or at")
+	in, at, every, weekly := p.Str("in"), p.Str("at"), p.Str("every"), p.Str("weekly")
+	if in != "" && at != "" {
+		return nil, fmt.Errorf("schedule: pass at most one of in or at")
+	}
+	rule := Recurrence{Kind: "once"}
+	switch {
+	case every != "" && weekly != "":
+		return nil, fmt.Errorf("schedule: pass at most one of every or weekly")
+	case every != "":
+		d, err := parseDelay(every)
+		if err != nil {
+			return nil, fmt.Errorf("schedule: %w", err)
+		}
+		rule = Recurrence{Kind: "interval", EveryMin: int(d / time.Minute)}
+	case weekly != "":
+		var err error
+		if rule, err = ParseWeekly(weekly); err != nil {
+			return nil, fmt.Errorf("schedule: %w", err)
+		}
+	case in == "" && at == "":
+		return nil, fmt.Errorf("schedule: pass in or at (or every / weekly to recur)")
+	}
+	if err := rule.Validate(); err != nil {
+		return nil, fmt.Errorf("schedule: %w", err)
 	}
 	now := nowFunc()
 	var due time.Time
 	var err error
-	if in != "" {
+	switch {
+	case in == "" && at == "":
+		due, _ = NextDue(rule, now, now.Location())
+	case in != "":
 		var d time.Duration
 		if d, err = parseDelay(in); err == nil {
 			due = now.Add(d)
 		}
-	} else {
+	default:
 		due, err = parseAt(at, now)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("schedule: %w", err)
 	}
-	return c.deps.Schedules.Add(chatID, text, due)
+	return c.deps.Schedules.Add(ScheduledPrompt{ChatID: chatID, Name: p.Str("name"), Text: text, DueAt: due, Rule: rule,
+		NewChat: p.Bool("new_chat"), WorkspaceID: p.Int("workspace_id"), Agent: p.Str("agent")})
+}
+
+func (c *Core) scheduleOp(verb string, p Params, pause bool) (any, error) {
+	if c.deps.Schedules == nil {
+		return nil, fmt.Errorf("%s: no scheduler", verb)
+	}
+	return c.deps.Schedules.SetPaused(p.Int("id"), pause)
 }
 
 // parseDelay is time.ParseDuration plus whole days ("1d", "2d").
