@@ -219,7 +219,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import DiagramModal from "@/components/DiagramModal.vue";
 import ImageLightbox from "@/components/ImageLightbox.vue";
 import HtmlPageModal from "@/components/HtmlPageModal.vue";
-import { pendingReleaseNotes } from "@/lib/whatsNew";
+import { pendingReleaseNotes, allReleaseNotes } from "@/lib/whatsNew";
 import { hideSplash } from "@/lib/splash";
 import { useDiagram } from "@/composables/useDiagram";
 import { useImageLightbox } from "@/composables/useImageLightbox";
@@ -727,6 +727,7 @@ let updateTimer: number | undefined;
 let unlistenMenuUpdate: UnlistenFn | null = null;
 let unlistenMenuDocs: UnlistenFn | null = null;
 let unlistenMenuOnboarding: UnlistenFn | null = null;
+let unlistenMenuWhatsNew: UnlistenFn | null = null;
 let unlistenMenuShortcuts: UnlistenFn | null = null;
 let unlistenControl: (() => void) | undefined;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
@@ -787,6 +788,9 @@ onMounted(async () => {
     update.check({ silent: false });
   });
   unlistenMenuDocs = await listen("menu-open-docs", () => { docsOpen.value = true; });
+  unlistenMenuWhatsNew = await listen("menu-whats-new", () => {
+    void allReleaseNotes().then((n) => { whatsNew.value = n; });
+  });
   unlistenMenuOnboarding = await listen("menu-show-onboarding", () => { onboardingOpen.value = true; });
   unlistenMenuShortcuts = await listen("menu-show-shortcuts", () => { cheatsheetOpen.value = true; });
 
@@ -824,6 +828,7 @@ onBeforeUnmount(() => {
   unlistenMenuUpdate?.();
   unlistenMenuDocs?.();
   unlistenMenuOnboarding?.();
+  unlistenMenuWhatsNew?.();
   unlistenMenuShortcuts?.();
   unlistenWorkspacesChanged?.();
   unlistenWorktreesCleaned?.();

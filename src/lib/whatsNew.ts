@@ -38,3 +38,10 @@ export async function pendingReleaseNotes(): Promise<{ version: string; html: st
   const html = releaseNotesSince(changelog, current, seen);
   return html ? { version: current, html } : null;
 }
+
+// Help → What's New: this version and every older one (the whole changelog
+// when this build has no entry of its own, e.g. a dev build).
+export async function allReleaseNotes(): Promise<{ version: string; html: string }> {
+  const version = await invoke<string>("get_app_version");
+  return { version, html: releaseNotesSince(changelog, version, "") || changelog };
+}

@@ -67,7 +67,7 @@
           </span>
           <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!, false)"><PhPlus :size="13" /></button>
         </div>
-        <TransitionGroup v-if="!collapsedGroups.has(group.repoId)" tag="div" name="sb-move">
+        <div v-if="!collapsedGroups.has(group.repoId)">
           <div v-for="row in group.rows" :key="rowKey(row)">
             <div
               class="sb-row group relative mt-px flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[7px]"
@@ -128,7 +128,7 @@
               </button>
             </div>
           </div>
-        </TransitionGroup>
+        </div>
       </div>
 
       <div v-if="!allRows.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
@@ -199,7 +199,7 @@
             <PhTrash :size="10" />
           </span>
         </button>
-        <TransitionGroup tag="div" name="sb-move">
+        <div>
           <div
             v-for="row in sec.rows"
             :key="rowKey(row)"
@@ -246,7 +246,7 @@
               <span v-if="git.prByWs[row.ws.id]" class="shrink-0 text-[9px] tabular-nums">#{{ git.prByWs[row.ws.id]!.number }}</span>
             </div>
           </div>
-        </TransitionGroup>
+        </div>
         <button
           v-if="sec.key === 'settled' && shelfOpen('settled') && filteredSettled.length > settledChatsLimit"
           class="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
@@ -1651,11 +1651,4 @@ async function confirmCreate() {
 .sb-row-act { display: flex; padding: 3px; border-radius: 5px; color: var(--text-muted); }
 .sb-row-act:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
 .sb-spark { color: #E0876A; font-size: 12px; }
-/* A row changing section fades in where it lands; rows around it slide (FLIP). */
-.sb-move-move { transition: transform .22s ease; }
-.sb-move-enter-active, .sb-move-leave-active { transition: opacity .18s ease; }
-.sb-move-enter-from, .sb-move-leave-to { opacity: 0; }
-@media (prefers-reduced-motion: reduce) {
-  .sb-move-move, .sb-move-enter-active, .sb-move-leave-active { transition: none; }
-}
 </style>
