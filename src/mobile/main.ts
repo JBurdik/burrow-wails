@@ -66,6 +66,11 @@ if (loadRemoteCredentials()) {
 if ("serviceWorker" in navigator) {
   // Relative to the document, so it also works under Tailscale Serve's /burrow/ prefix.
   navigator.serviceWorker.register("./sw.js").catch(() => {});
+  // A tapped push notification, when the worker could not navigate this
+  // window itself (public/sw.js).
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.type === "burrow-open" && typeof e.data.url === "string") location.href = e.data.url;
+  });
 }
 
 // The transport reconnects on its own, silently; without this a sleeping Mac

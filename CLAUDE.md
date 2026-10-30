@@ -516,6 +516,16 @@ transport, which needs the credentials (a cycle that deadlocks on first load). A
 `http.token` — **deleted from disk at startup** rather than migrated (a token with no scopes, identity
 or revocation can't be translated honestly). `TestV1SurfaceIsGone` requires a **404**, not a 401.
 
+**Web Push** (`webpush.go`, `push.go`, `pushtrigger.go`, `public/sw.js`): straight to the browser's push
+service, no relay; stdlib RFC 8291 aes128gcm + VAPID ES256 (RFC vector in `webpush_test.go`), key in
+`<app-data>/vapid.pem` (0600, never rotated — rotating orphans every subscription). `push_subscribe` /
+`push_unsubscribe` act as the **calling** device: `remotews.go` overwrites the `_device` arg (`deviceArg`) with
+the ticket's device id, so a client can't name another; revoke deletes a device's rows, a 404/410 deletes that
+row. Decided in Go on `PhaseStore.onChange` (now `prev, next`): chats + PTY tabs entering
+`waiting_approval`/`waiting_input`, a chat's `done` (not sub-agents, not archived), snooze wake. `pushGate`:
+none while `chat_mark_active` < 90 s ago, ≤ 1 per key per 30 s; tag/Topic per chat/tab. Chat deep link is
+`#/ws/<ws>?chat=<id>` (chat tab ids are client-side). Phone toggle: More screen. PTY tabs have no watch signal.
+
 **No manual GUI verification of any of this has been done.** Try first: pair a phone; kill the socket
 mid-turn; revoke a device; heavy terminal output; ESC mid-turn.
 

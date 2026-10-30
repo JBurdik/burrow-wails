@@ -27,6 +27,7 @@ type App struct {
 	perms   *permRegistry
 	poller  *phasePoller
 	prompts *promptIndexer // nil until startup; refresh is nil-safe
+	push    *webPusher     // nil until startup (push.go)
 
 	streamOnce sync.Once
 	streamW    *chatStreamWriter
@@ -214,12 +215,16 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.db = db
+	a.push = newWebPusher(filepath.Join(dataDir, "vapid.pem"))
 	if ps, err := NewPhaseStore(db); err != nil {
 		log.Printf("phase store: %v", err)
 	} else {
 		a.phases = ps
 		a.perms = newPermRegistry(ps)
-		ps.onChange = a.perms.phaseChanged
+		ps.onChange = func(id string, prev, next agentphase.Phase) {
+			a.perms.phaseChanged(id, next)
+			a.pushPhaseChanged(id, prev, next)
+		}
 	}
 
 	// Chat transcripts used to live in config.json; move them into SQLite before

@@ -42,7 +42,7 @@ type PhaseStore struct {
 
 	// onChange runs after every published change, under emitMu: it must not
 	// call back into Apply/Forget. Set once at startup, before any producer.
-	onChange func(id string, p agentphase.Phase)
+	onChange func(id string, prev, next agentphase.Phase)
 }
 
 func NewPhaseStore(db *sql.DB) (*PhaseStore, error) {
@@ -102,7 +102,7 @@ func (s *PhaseStore) Apply(id string, ev agentphase.Event) {
 	s.persist(id, next, n)
 	busEmit("phase-"+id, next)
 	if s.onChange != nil {
-		s.onChange(id, next)
+		s.onChange(id, cur, next)
 	}
 
 	// Mirror for `burrow list-tabs` / MCP list_tabs, which read the DB with no

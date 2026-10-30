@@ -51,6 +51,10 @@ const (
 // This table is therefore the only place that knows an argument's name — which
 // is fine, because it is also the only place that decides what is reachable at
 // all.
+// deviceArg is the argument name the WS handler fills with the calling
+// connection's device id, overwriting anything the client sent.
+const deviceArg = "_device"
+
 type remoteCmd struct {
 	Method string
 	Args   []string
@@ -176,6 +180,13 @@ var remoteAllowed = map[string]remoteCmd{
 	// knowing what else is paired is not part of driving an agent.
 	"remote_devices":       {Method: "RemoteDevices", Args: nil, Scope: scopeAccessRead},
 	"revoke_remote_device": {Method: "RevokeRemoteDevice", Args: []string{"id"}, Scope: scopeAccessWrite},
+
+	// Web Push (push.go). Subscribe/unsubscribe act as the CALLING device:
+	// `_device` is injected by the WS handler, so a phone cannot add or drop
+	// another device's subscription. The public key is public by definition.
+	"push_vapid_public_key": {Method: "PushVapidPublicKey", Args: nil, Scope: scopeOrchRead},
+	"push_subscribe":        {Method: "PushSubscribe", Args: []string{deviceArg, "subscription"}, Scope: scopeOrchOperate},
+	"push_unsubscribe":      {Method: "PushUnsubscribe", Args: []string{deviceArg, "endpoint"}, Scope: scopeOrchOperate},
 
 	// Pairing, desktop side. Both at access:write, including the read: the
 	// pairing code IS the credential, so handing it out is handing out the

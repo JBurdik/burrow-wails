@@ -217,6 +217,7 @@
                 <div v-for="d in remoteDevices" :key="d.id" class="flex items-center gap-3 border-border px-3 py-2.5 [&+&]:border-t">
                   <PhDeviceMobile :size="16" class="shrink-0 text-muted-foreground" />
                   <div class="flex flex-1 min-w-0 flex-col"><span class="truncate text-[13px] text-foreground">{{ d.name }}</span><span class="text-[11px] text-muted-foreground">{{ d.kind }} · last seen {{ relativeSeen(d.last_seen) }}</span></div>
+                  <PhBell v-if="d.push" :size="15" class="shrink-0 text-muted-foreground" title="Push notifications on" />
                   <Button variant="ghost" size="sm" type="button" class="text-destructive hover:bg-destructive/10 hover:text-destructive" @click="onRevokeDevice(d.id)">Revoke</Button>
                 </div>
               </div>
@@ -2133,6 +2134,7 @@ interface RemoteDevice {
   scopes: string[];
   added_at: number;
   last_seen: number;
+  push: boolean;
 }
 const pairStatus = ref<PairStatus | null>(null);
 // null means "not loaded yet or failed"; [] means "nothing paired". Those are

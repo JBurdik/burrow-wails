@@ -40,6 +40,8 @@ type RemoteDevice struct {
 	Scopes   []remoteScope `json:"scopes"`
 	AddedAt  int64         `json:"added_at"`
 	LastSeen int64         `json:"last_seen"`
+	// Push: the device has at least one Web Push subscription (push.go).
+	Push bool `json:"push"`
 }
 
 func remoteDevicesSchema() []string {
@@ -162,7 +164,9 @@ func (a *App) RemoteDevices() ([]RemoteDevice, error) {
 		return out, nil
 	}
 	rows, err := a.db.Query(
-		`SELECT id, name, kind, scopes, added_at, last_seen FROM remote_devices ORDER BY added_at DESC`)
+		`SELECT id, name, kind, scopes, added_at, last_seen,
+			EXISTS(SELECT 1 FROM push_subscriptions p WHERE p.device_id = remote_devices.id)
+		 FROM remote_devices ORDER BY added_at DESC`)
 	if err != nil {
 		return out, err
 	}
@@ -170,7 +174,7 @@ func (a *App) RemoteDevices() ([]RemoteDevice, error) {
 	for rows.Next() {
 		var dev RemoteDevice
 		var scopes string
-		if err := rows.Scan(&dev.ID, &dev.Name, &dev.Kind, &scopes, &dev.AddedAt, &dev.LastSeen); err != nil {
+		if err := rows.Scan(&dev.ID, &dev.Name, &dev.Kind, &scopes, &dev.AddedAt, &dev.LastSeen, &dev.Push); err != nil {
 			return out, err
 		}
 		dev.Scopes = splitScopes(scopes)
@@ -194,6 +198,8 @@ func (a *App) RevokeRemoteDevice(id string) error {
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		notFound = true
 	}
+	// A revoked phone must stop getting notifications too.
+	_, _ = a.db.Exec(`DELETE FROM push_subscriptions WHERE device_id = ?`, id)
 	// After the row is gone, so a connection racing this cannot re-authorize
 	// itself against a row that still exists. Both run even when the row was
 	// already gone (notFound): a ticket minted for this device before an
