@@ -73,17 +73,6 @@
             :ref="(el) => setTermRef(w.id, el)"
           />
         </div>
-        <Transition name="details-card">
-        <ThreadDetailsCard
-          v-if="details"
-          :workspace="details.workspace"
-          :kind="details.kind"
-          :chat-id="details.chatId"
-          @close="detailsOpen = false"
-          @open-config="showProjectConfig = true"
-          @open-pr="(n, url) => { ui.rightPanelVisible = true; rightPanelRef?.openPullRequest(n, url, details!.workspace.id); }"
-        />
-        </Transition>
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
       </div>
       <InboxScreen v-if="compact && phone === 'inbox'" />
@@ -103,6 +92,21 @@
         @close-panel="ui.rightPanelVisible = false"
         @open-project-config="showProjectConfig = true"
       />
+      <!-- The details card lives on .ide-body, not inside .ide-main: .ide-main clips
+           (overflow hidden), and the card has to stay visible at its old spot while it
+           fades out when the RP opens. It sits beside the RP via .beside-rp. -->
+      <Transition name="details-card">
+      <ThreadDetailsCard
+        v-if="details"
+        :class="{ 'beside-rp': ui.rightPanelVisible && !ui.swapPanels }"
+        :workspace="details.workspace"
+        :kind="details.kind"
+        :chat-id="details.chatId"
+        @close="detailsOpen = false"
+        @open-config="showProjectConfig = true"
+        @open-pr="(n, url) => { ui.rightPanelVisible = true; rightPanelRef?.openPullRequest(n, url, details!.workspace.id); }"
+      />
+      </Transition>
     </div>
     <WorkspaceConfig
       v-if="showProjectConfig && ws.active"
@@ -403,6 +407,8 @@ function flipMainArea(rpOpening = false, fadeCard = false) {
   const targets = () => [...root.querySelectorAll<HTMLElement>("[data-chat-lane]")]
     .filter((el) => el.offsetParent !== null);
   const before = new Map(targets().map((el) => [el, el.getBoundingClientRect().left]));
+  const cardEl = fadeCard ? document.querySelector<HTMLElement>(".ide-body > .details-card") : null;
+  const cardLeft = cardEl?.getBoundingClientRect().left;
   nextTick(() => {
     mainWidth.value = root.clientWidth; // don't wait for the ResizeObserver: the inset must land in this frame
     nextTick(() => {
@@ -411,9 +417,18 @@ function flipMainArea(rpOpening = false, fadeCard = false) {
         const dx = was === undefined ? 0 : was - el.getBoundingClientRect().left;
         if (Math.abs(dx) > 0.5) el.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], FLIP);
       }
-      // The card is absolutely placed: it doesn't travel, it fades in where it lands.
-      const card = root.querySelector<HTMLElement>(".details-card");
-      if (card && fadeCard) card.animate([{ opacity: 0 }, { opacity: 1 }], FLIP);
+      // The card is absolutely placed: it doesn't travel. It fades out where it was
+      // (held there by transform), then fades in where it landed.
+      if (cardEl && cardLeft !== undefined && cardEl.isConnected) {
+        const dx = cardLeft - cardEl.getBoundingClientRect().left;
+        const at = (x: number) => (x ? `translateX(${x}px)` : "none");
+        cardEl.animate([
+          { transform: at(dx), opacity: 1, offset: 0 },
+          { transform: at(dx), opacity: 0, offset: 0.45 },
+          { transform: "none", opacity: 0, offset: 0.55 },
+          { transform: "none", opacity: 1, offset: 1 },
+        ], { duration: 320, easing: "ease-in-out" });
+      }
       const rp = rpOpening ? document.querySelector<HTMLElement>(".panel-right") : null;
       if (rp) rp.animate([{ transform: `translateX(${rp.offsetWidth}px)`, opacity: 0.6 }, { transform: "none", opacity: 1 }], FLIP);
     });
@@ -1142,6 +1157,8 @@ body {
   flex: 1;
   overflow: hidden;
 }
+/* Details card on .ide-body: right of the main area, left of an open RP (+4px handle). */
+.ide-body > .details-card.beside-rp { right: calc(var(--right-panel-width, 300px) + 12px); }
 /* The RP sliding away after a close: out of flow so the main area already has the room. */
 .panel-right.rp-closing { position: absolute; top: 0; bottom: 0; right: 0; z-index: 5; pointer-events: none; background: var(--bg-base); }
 .panels-swapped .panel-right.rp-closing { right: auto; left: 0; }
