@@ -8,13 +8,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"burrow/internal/agentphase"
 	"burrow/internal/agentproc"
 	"burrow/internal/control"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App is the Wails-bound struct exposing methods to the frontend, replacing
@@ -74,7 +73,21 @@ type App struct {
 	burrowMcpMaxDepth int
 }
 
-const httpServerPort = 37892
+// httpServerPort: stable keeps 37892 (Tailscale Serve configs point at it); beta and
+// dev get their own so they can run remote access next to an installed Burrow.
+// BURROW_HTTP_PORT overrides all three.
+func httpServerPort() int {
+	if p, err := strconv.Atoi(os.Getenv("BURROW_HTTP_PORT")); err == nil && p > 0 {
+		return p
+	}
+	switch buildChannel {
+	case "beta":
+		return 37893
+	case "dev":
+		return 37894
+	}
+	return 37892
+}
 
 // httpEnabledPrefPath is the marker file that survives a restart. Its
 // presence is the whole pref — the Rust backend used the same
@@ -114,7 +127,7 @@ func (a *App) setHttpEnabled(enabled bool) error {
 		return nil
 	}
 	if enabled {
-		addr := fmt.Sprintf("127.0.0.1:%d", httpServerPort)
+		addr := fmt.Sprintf("127.0.0.1:%d", httpServerPort())
 		// Both guards fail CLOSED, before the listener exists (spec §4
 		// invariants 1 and 2). A warning in a log nobody reads is not a
 		// guard: funnel would publish this exact handler — same host, same
@@ -169,7 +182,7 @@ type HttpServerStatus struct {
 }
 
 func (a *App) GetHttpServerStatus() HttpServerStatus {
-	return HttpServerStatus{Enabled: a.httpSrvRunning, Port: httpServerPort}
+	return HttpServerStatus{Enabled: a.httpSrvRunning, Port: httpServerPort()}
 }
 
 func NewApp() *App {
@@ -178,9 +191,7 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	wailsruntime.OnFileDrop(ctx, func(x, y int, paths []string) {
-		busEmit("file-drop", map[string]any{"x": x, "y": y, "paths": paths})
-	})
+	watchFileDrop(ctx)
 	// The bus has exactly ONE sink now: remotews.handle's per-connection
 	// subscription. It is still the single door for every event a client may
 	// care about — what went away is the second delivery path, not the door.
@@ -206,8 +217,8 @@ func (a *App) startup(ctx context.Context) {
 		a.environmentID = id
 	}
 	a.endpointProviders = []EndpointProvider{
-		newLoopbackProvider(httpServerPort),
-		newTailscaleProvider(a.GetTailscaleStatus, httpServerPort),
+		newLoopbackProvider(httpServerPort()),
+		newTailscaleProvider(a.GetTailscaleStatus, httpServerPort()),
 	}
 	db, err := openDB(dataDir)
 	if err != nil {

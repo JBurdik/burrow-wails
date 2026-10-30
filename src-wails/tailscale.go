@@ -169,7 +169,7 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 				} `json:"Handlers"`
 			} `json:"Web"`
 		}
-		want := fmt.Sprintf("http://127.0.0.1:%d", httpServerPort)
+		want := fmt.Sprintf("http://127.0.0.1:%d", httpServerPort())
 		if json.Unmarshal(serveOut, &serveStatus) == nil {
 			for _, host := range serveStatus.Web {
 				if h, ok := host.Handlers[tailscaleServePath]; ok && h.Proxy == want {

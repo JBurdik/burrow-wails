@@ -77,3 +77,11 @@ func main() {
 		println("Error:", err.Error())
 	}
 }
+
+// watchFileDrop forwards Wails' native file drop to the bus. Headless has no
+// window and no Wails context to register on (main_headless.go).
+func watchFileDrop(ctx context.Context) {
+	runtime.OnFileDrop(ctx, func(x, y int, paths []string) {
+		busEmit("file-drop", map[string]any{"x": x, "y": y, "paths": paths})
+	})
+}

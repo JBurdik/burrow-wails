@@ -508,6 +508,13 @@ gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the
 `localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's; read receipts (`burrow.seenAt`)
 are per device the same way.
 
+**Release channel is decided by the serving binary, not the bundle** (`src-wails/channel.go`): `buildChannel` is
+`dev` under `wails dev` (`channel_dev.go`, the `dev` build tag) and `beta` via `just build-beta`'s
+`-ldflags -X main.buildChannel=beta`. `handleAssets` rewrites `mobile.html` (`data-channel`, title, icons) and the
+manifest (name, `id`, icons → `public/icons/<channel>/`), so a beta/dev PWA installs as its own app with its own
+icon; `releaseChannel.ts` reads `data-channel` for the phone header badge. Each channel gets its own HTTP port
+(stable 37892, beta 37893, dev 37894; `BURROW_HTTP_PORT` overrides) so they can serve side by side.
+
 Credentials live in `localStorage`, not `@/lib/config` — config reads through `invoke`, which needs the
 transport, which needs the credentials (a cycle that deadlocks on first load). A **401 from
 `/v2/ws-ticket` clears them** and throws `RevokedError` (`main.ts` then reloads into pairing); a 500 does not.
