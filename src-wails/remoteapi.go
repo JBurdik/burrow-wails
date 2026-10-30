@@ -241,6 +241,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"forge_info":              {Method: "ForgeInfo", Args: []string{"cwd"}, Scope: scopeOrchRead},
 	"forge_pr_list":           {Method: "ForgePrList", Args: []string{"cwd", "scope", "state"}, Scope: scopeOrchRead},
 	"forge_pr_view":           {Method: "ForgePrView", Args: []string{"cwd", "number"}, Scope: scopeOrchRead},
+	"forge_pr_checkout":       {Method: "ForgePrCheckout", Args: []string{"repoPath", "number", "branch", "path"}, Scope: scopeOrchOperate},
 	"forge_pr_create":         {Method: "ForgePrCreate", Args: []string{"cwd", "title", "body", "base", "head"}, Scope: scopeOrchOperate},
 	"forge_pr_merge":          {Method: "ForgePrMerge", Args: []string{"cwd", "number", "squash"}, Scope: scopeOrchOperate},
 	"set_forge_provider":      {Method: "SetForgeProvider", Args: []string{"wsId", "provider"}, Scope: scopeOrchOperate},

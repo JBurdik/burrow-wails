@@ -4,6 +4,8 @@ import "encoding/json"
 
 type giteaForge struct{ run Runner }
 
+func (g *giteaForge) FetchRef(number int) string { return "pull/" + itoa(number) + "/head" }
+
 func (g *giteaForge) Provider() Provider { return Gitea }
 
 func (g *giteaForge) CLI() CLIInfo {

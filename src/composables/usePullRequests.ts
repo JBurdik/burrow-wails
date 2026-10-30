@@ -27,6 +27,8 @@ export interface PullRequest {
 export interface ForgeStatus {
   provider: string; installed: boolean; authed: boolean;
   bin?: string; installCmd?: string; authCmd?: string; docsUrl?: string;
+  /** The adapter can fetch a PR's head (forge_pr_checkout). */
+  canCheckout?: boolean;
 }
 
 function msg(e: unknown, fallback: string) {

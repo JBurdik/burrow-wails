@@ -2,10 +2,11 @@
 import { computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
-import { PhArrowClockwise, PhArrowSquareOut, PhCheck, PhGitPullRequest, PhGitMerge, PhMagnifyingGlass, PhPlus, PhSealWarning, PhX } from "@phosphor-icons/vue";
+import { PhArrowClockwise, PhArrowSquareOut, PhCheck, PhGitFork, PhGitPullRequest, PhGitMerge, PhMagnifyingGlass, PhPlus, PhSealWarning, PhX } from "@phosphor-icons/vue";
 import { usePullRequests, type PrScope } from "@/composables/usePullRequests";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { cn } from "@/lib/utils";
+import { openPrInWorktree } from "@/lib/prCheckout";
 
 const props = defineProps<{
   cwd: string;
@@ -27,6 +28,11 @@ watch(() => props.openRequest, (req) => {
   void pr.select({ number: req.number, title: `#${req.number}`, url: req.url, state: "open", isDraft: false, headRefName: "", baseRefName: "" });
   emit("opened");
 }, { immediate: true });
+
+function openInWorktree(number: number) {
+  const ws = useWorkspaceStore().workspaces.find((w) => w.path === props.cwd);
+  if (ws) void openPrInWorktree(ws, number);
+}
 
 async function setProvider(provider: string) {
   if (!provider) return;
@@ -116,7 +122,10 @@ async function setProvider(provider: string) {
     <template v-else>
       <header class="flex items-center justify-between border-b border-border p-2">
         <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" @click="pr.selected.value = null">← Pull requests</button>
-        <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open in browser" @click="shellOpen(pr.selected.value.url)"><PhArrowSquareOut :size="13" /></button>
+        <span class="flex items-center gap-1.5">
+          <button v-if="pr.forge.value?.canCheckout" class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open in worktree" @click="openInWorktree(pr.selected.value.number)"><PhGitFork :size="13" /></button>
+          <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open in browser" @click="shellOpen(pr.selected.value.url)"><PhArrowSquareOut :size="13" /></button>
+        </span>
       </header>
       <div class="border-b border-border p-2.5">
         <div class="flex justify-between">

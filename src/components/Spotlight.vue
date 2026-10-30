@@ -100,7 +100,7 @@ import { ref, computed, watch, nextTick } from "vue";
 import {
   PhTerminal, PhSparkle, PhCode, PhGitBranch, PhRobot,
   PhFolderOpen, PhGear, PhPlus, PhColumns, PhPalette, PhKeyboard, PhGlobe, PhPlayCircle,
-  PhFileText, PhMagnifyingGlass, PhArrowsClockwise, PhMoonStars, PhChatCircleText,
+  PhFileText, PhMagnifyingGlass, PhArrowsClockwise, PhMoonStars, PhChatCircleText, PhGitPullRequest,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useProvidersStore } from "@/stores/providers";
@@ -116,6 +116,8 @@ import OpenAIIcon from "@/components/icons/OpenAIIcon.vue";
 import router from "@/router";
 import { pickDir } from "@/lib/pickPath";
 import type { Component } from "vue";
+import { parsePrRef } from "@/lib/prLinkInput";
+import { openPrInWorktree } from "@/lib/prCheckout";
 
 const emit = defineEmits<{
   launch: [cmd: string];
@@ -428,6 +430,21 @@ async function copyPrompt(text: string) {
   }
 }
 
+// A pasted PR URL or "#123": check it out into a worktree + chat of the active project.
+const prItems = computed<SpotlightItem[]>(() => {
+  const ref = parsePrRef(query.value, false);
+  const ws = wsStore.active;
+  if (!ref || !ws) return [];
+  return [{
+    id: `pr-${ref.number}`,
+    title: `Open PR #${ref.number} in a worktree`,
+    desc: ref.url ?? ws.name,
+    icon: PhGitPullRequest as Component,
+    color: "#34d399",
+    action: () => { close(); void openPrInWorktree(ws, ref.number, ref.url); },
+  }];
+});
+
 // Empty query = context + commands (your projects, then everything runnable).
 // Agents, scripts and file hits only appear once you type — running a raw
 // agent isn't a default action, and search results are meaningless empty.
@@ -448,6 +465,7 @@ const sections = computed(() => {
   }
   const all = hasQuery.value
     ? [
+        { key: "pr", label: "PULL REQUEST", items: prItems.value },
         { key: "agents", label: "AGENTS", items: agentItems.value },
         { key: "projects", label: "PROJECTS", items: projectItems.value },
         { key: "scripts", label: "SCRIPTS", items: scriptItems.value },

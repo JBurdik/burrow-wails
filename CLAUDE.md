@@ -127,6 +127,13 @@ wire; the forge is the workspace's). `forgePrCreate` auto-links a created PR to 
 `chat_pr_dismissed` tombstone that auto-link respects and a manual link clears. No polling: `chat_pr_refresh` when the
 card opens, `chat_prs_refresh(cwd)` after a push from `git.push`; Sidebar rows show the state glyph.
 
+**PR → worktree + chat** (`ForgePrCheckout`, `src/lib/prCheckout.ts`): optional `forge.HeadFetcher` (`FetchRef(n)` —
+GitHub/Gitea `pull/N/head`, GitLab `merge-requests/N/head`; Azure has none, `ForgeStatus.canCheckout` hides the action).
+`forge_pr_checkout` fetches it from origin and passes the `FETCH_HEAD` sha to `CreateWorktree` (setup scripts run;
+`resolveWorktreeBase` leaves a full sha alone); the client names the branch after the PR head, creates the chat, links
+it (`#N`) and stores `Review / continue PR #N: <title>` as the composer draft — never sent. Doors: PullRequestsPanel
+detail header, Spotlight and the welcome composer on a pasted PR URL / `#123` (`parsePrRef` in `prLinkInput.ts`).
+
 **Launch settings** (`effort`, `permission_mode`, `profile_id`, `append_system_prompt`, + `model`) are
 columns too, **read-only on the wire** (SaveChats never writes them, like `collected_at`); backfilled once
 from the per-device `config.json` keys (`chat_migrations` marker). `resolveClaudeLaunch` (`chatlaunch.go`)

@@ -33,3 +33,10 @@ export function setProjectSettings(wsId: number, patch: ProjectSettings) {
   else delete all[String(wsId)];
   setConfig(KEY, all);
 }
+
+/** Where a new worktree of `workspace` on `branch` goes: the project's worktrees dir, else `defaultDir`. */
+export function worktreePath(workspace: { id: number; parent_id?: number | null; path: string }, branch: string, defaultDir: string): string {
+  const repo = workspace.path.split("/").filter(Boolean).pop() || "repo";
+  const root = getProjectSettings(workspace.parent_id ?? workspace.id).worktreesDir || defaultDir;
+  return `${root}/${repo}/${branch.replaceAll("/", "-")}`;
+}

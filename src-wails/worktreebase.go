@@ -47,7 +47,8 @@ func resolveWorktreeBase(repoPath, base string, fromOrigin bool) (ref, warning s
 	if base == "" {
 		base = "HEAD"
 	}
-	if !fromOrigin || base == "HEAD" {
+	// A full commit id (ForgePrCheckout's fetched PR head) is already exact.
+	if !fromOrigin || base == "HEAD" || isFullSHA(base) {
 		return base, ""
 	}
 	if !runCmd("git", repoPath, []string{"remote", "get-url", "origin"}).Success {
@@ -96,4 +97,16 @@ func (a *App) startWorktreeSetup(workspaceID int64, repoPath, path, warning stri
 			log.Printf("[worktree] setup for %s: %v", path, err)
 		}
 	}()
+}
+
+func isFullSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return false
+		}
+	}
+	return true
 }
