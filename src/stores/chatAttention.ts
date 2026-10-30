@@ -89,6 +89,11 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     return phases.get(chatId);
   }
 
+  /** The chat's read receipt (epoch ms, 0 = never seen). */
+  function seenAtFor(chatId: number): number {
+    return seenAt.get(chatId) ?? 0;
+  }
+
   function refresh(chatId: number): void {
     const status = statusFor(chatId);
     const session = chats.sessions.find((candidate) => candidate.id === chatId);
@@ -228,5 +233,5 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     }
   }, 60_000);
 
-  return { statusFor, phaseFor, markSeen, setWatching };
+  return { statusFor, phaseFor, seenAtFor, markSeen, setWatching };
 });

@@ -180,6 +180,9 @@
         class="chat-message"
         :class="[`role-${msg.role}`, { partial: msg.partial }]"
       >
+        <div v-if="msg.id === watermarkRowId" class="flex items-center gap-2 px-4 pt-1 pb-2 text-[11px] font-medium text-primary" role="separator" aria-label="New messages">
+          <span class="h-px flex-1 bg-primary/40" />New<span class="h-px flex-1 bg-primary/40" />
+        </div>
         <!-- Collapsed tool-call group pill ("Ran N commands" / "Used N tools") -->
         <template v-if="msg.role === 'tool-group-header'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
@@ -826,6 +829,7 @@ import { canSideChat } from "@/stores/chatTree";
 import { newSideChat } from "@/lib/sideChat";
 import { PhChatsCircle } from "@phosphor-icons/vue";
 import { useChatAttentionStore } from "@/stores/chatAttention";
+import { visitWatermark } from "@/lib/visitWatermark";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useImageLightbox } from "@/composables/useImageLightbox";
 import { useGitStore } from "@/stores/git";
@@ -1088,9 +1092,13 @@ const chatAttention = useChatAttentionStore();
 // Whether this instance holds one of chatAttention's watch counts. Tracked so
 // mount/unmount and isWatching flips stay balanced.
 let attentionHeld = false;
+// The receipt as it was when this visit began; null once the user sends.
+const visitSeenAt = ref<number | null>(null);
 function holdAttention(value: boolean) {
   if (value === attentionHeld) return;
   attentionHeld = value;
+  // Freeze the receipt for the "New" divider before watching marks it seen.
+  if (value) visitSeenAt.value = chatAttention.seenAtFor(props.chatId);
   chatAttention.setWatching(props.chatId, value);
 }
 const workspaces = useWorkspaceStore();
@@ -1761,6 +1769,18 @@ type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow;
 
 const WORK_ROLES = new Set(["thinking", "tool", "tool-group-header"]);
 const foldedTurns = reactive<Record<number, boolean>>({});
+
+// The display row the "New" divider sits above: the first one holding a
+// message at or after the watermark. ponytail: a watermark inside a folded
+// turn lands on the next visible row; unfold-to-it if that ever matters.
+const watermarkRowId = computed(() => {
+  const target = visitWatermark(messages.value, visitSeenAt.value);
+  if (target === null) return null;
+  const pos = new Map(messages.value.map((m, i) => [m.id, i]));
+  const from = pos.get(target) ?? Infinity;
+  const row = displayItems.value.find((r) => (pos.get(r.role === "tool-group-header" ? (r as ToolGroupHeader).items[(r as ToolGroupHeader).items.length - 1].id : (r as ChatMessage).id) ?? -1) >= from);
+  return row?.id ?? null;
+});
 
 const displayItems = computed<DisplayRow[]>(() => {
   const src = grouping.value.display;
@@ -2615,6 +2635,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   syncStore();
   const sentId = await S.send({ text, images: msgImages, displayText });
   if (sentId === null) return null;
+  visitSeenAt.value = null;
   acceptFeedback();
   return { id: sentId, text };
 }
