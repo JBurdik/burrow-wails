@@ -485,6 +485,19 @@ Credentials live in `localStorage`, not `@/lib/config` — config reads through 
 transport, which needs the credentials (a cycle that deadlocks on first load). A **401 from
 `/v2/ws-ticket` clears them** and throws `RevokedError`; a 500 does not.
 
+**Several machines, one active** (`remoteEndpoint.ts`): `burrow.remote.environments` is a catalog
+`[{environment_id, name, baseUrl, deviceToken, addedAt, lastConnectedAt}]` keyed by `/v2/pair`'s
+`environment_id` (re-pairing the same Mac refreshes its row), `burrow.remote.activeEnvironment` picks one;
+the old single `burrow.remote.credentials` slot is migrated on first read and deleted. `loadRemoteCredentials`
+= the active entry, so every caller stayed as it was. No simultaneous connections: `switchEnvironment(id|null)`
+(`core.ts`) closes the remote transport, sets the active id and **reloads** — stores, listeners and the shell
+snapshot all assume one backend. A 401 forgets **only that** machine and clears the active pointer, so the
+phone reloads into `ConnectView`, which lists saved machines above the pair form (editable URL — `/v2/pair` and
+`/v2/ws-ticket` answer CORS, `/v2/ws` takes any origin). A scanned `#pair=` QR always pairs, i.e. **adds**.
+Phone UI: More → Connection; desktop: Settings → Remote access → Connect to another Burrow (the drive-remote
+switch applies to the selected machine). The catalog is per **origin** (localStorage): a PWA opened from
+another Mac's URL has its own.
+
 Gone from `src/mobile/store.ts` because the shared runtime does it: its own websocket client and
 reconnect loop; its own status derivation (dots now come from `phase-pty:{id}` through `displayStatus`,
 with a per-**device** receipt under `burrow.seenAt.mobile`); an N+1 first paint (one `shell_snapshot`
