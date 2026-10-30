@@ -27,6 +27,13 @@
       @onboarding="openOnboarding"
       @shortcuts="openShortcutsFromDocs"
     />
+    <HtmlPageModal
+      v-if="whatsNew"
+      :title="`What's new in v${whatsNew.version}`"
+      path=""
+      :html="whatsNew.html"
+      @close="whatsNew = null"
+    />
     <!-- Phone shell (src/components/phone/, docs/superpowers/specs/2026-10-22-phone-shell-design.md):
          the same panels, one per screen, chosen by the route; headers sit here. -->
     <template v-if="compact">
@@ -211,6 +218,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import DiagramModal from "@/components/DiagramModal.vue";
 import ImageLightbox from "@/components/ImageLightbox.vue";
+import HtmlPageModal from "@/components/HtmlPageModal.vue";
+import { pendingReleaseNotes } from "@/lib/whatsNew";
+import { hideSplash } from "@/lib/splash";
 import { useDiagram } from "@/composables/useDiagram";
 import { useImageLightbox } from "@/composables/useImageLightbox";
 import { configReady, getConfig, setConfig } from "@/lib/config";
@@ -236,6 +246,7 @@ const tabsStore = useTerminalTabsStore();
 useChatAttentionStore();
 const onboardingOpen = ref(false);
 const docsOpen = ref(false);
+const whatsNew = ref<{ version: string; html: string } | null>(null);
 const ONBOARDING_CONFIG_KEY = "onboardingComplete";
 
 configReady.then(() => {
@@ -381,7 +392,17 @@ const mainWidth = ref(Infinity);
 const mainObserver = new ResizeObserver(([e]) => { if (e) mainWidth.value = e.contentRect.width; });
 watch(mainEl, (el, old) => { if (old) mainObserver.unobserve(old); if (el) mainObserver.observe(el); });
 onBeforeUnmount(() => mainObserver.disconnect());
-const detailsInset = computed(() => (Number.isFinite(mainWidth.value) ? detailsLaneInset(mainWidth.value) : 0));
+const rawInset = computed(() => (Number.isFinite(mainWidth.value) ? detailsLaneInset(mainWidth.value) : 0));
+// Hiding is debounced: opening the RP can report one narrow transient width,
+// and hiding+reshowing the card on it read as a blink. Showing stays instant;
+// while a hide is pending the lane keeps its last inset.
+const detailsInset = ref<number | null>(rawInset.value);
+let hideTimer: ReturnType<typeof setTimeout> | undefined;
+watch(rawInset, (v) => {
+  clearTimeout(hideTimer);
+  if (v !== null) detailsInset.value = v;
+  else hideTimer = setTimeout(() => { if (rawInset.value === null) detailsInset.value = null; }, 250);
+});
 const details = computed(() => {
   const w = ws.active;
   if (!detailsOpen.value || compact.value || showWelcome.value || ui.mode !== "terminal" || !w) return null;
@@ -743,6 +764,8 @@ function playStartupChime() {
 
 onMounted(async () => {
   await ws.load();
+  hideSplash();
+  void pendingReleaseNotes().then((n) => { whatsNew.value = n; }).catch(() => {});
   // Startup lands on the composer ("/"), never on the last session's thread —
   // reopening the app is a fresh start, and restoring a thread also left it
   // focused in the sidebar with nothing the user asked for behind it.
