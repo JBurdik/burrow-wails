@@ -139,6 +139,7 @@
     />
 
     <div class="relative flex min-h-0 flex-1">
+    <ThreadFindBar :messages="messages" :container="scrollEl" @reveal="revealForFind" />
     <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <!-- A remount starts with no messages until the transcript is read back, which on
@@ -842,6 +843,7 @@ import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
+import ThreadFindBar from "@/components/ThreadFindBar.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
 import ComposerStash from "@/components/composer/ComposerStash.vue";
@@ -1854,6 +1856,20 @@ function isGroupExpanded(groupId: string | undefined): boolean {
 }
 function toggleGroup(groupId: string) {
   toolGroupExpanded[groupId] = !isGroupExpanded(groupId);
+}
+// ⌘F landed on a message: open every fold hiding it (its turn, its tool
+// group, the tool/thinking row itself).
+function revealForFind(id: number) {
+  const i = messages.value.findIndex((m) => m.id === id);
+  const msg = messages.value[i];
+  if (msg?.role !== "tool" && msg?.role !== "thinking") return;
+  for (let u = i - 1; u >= 0; u--) {
+    if (messages.value[u].role === "user") { foldedTurns[messages.value[u].id] = false; break; }
+  }
+  const group = groupIdOf(id);
+  if (group) toolGroupExpanded[group] = true;
+  if (msg.role === "tool") msg.toolExpanded = true;
+  else thinkingExpanded[id] = true;
 }
 
 // Built-in claude slash commands
