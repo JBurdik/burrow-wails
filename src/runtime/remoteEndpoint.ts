@@ -31,7 +31,112 @@ export interface RemoteCredentials {
   environmentId: string;
 }
 
-const STORAGE_KEY = "burrow.remote.credentials";
+/**
+ * One paired machine. The catalog holds every machine this client was ever
+ * paired to; exactly one is ACTIVE at a time — switching closes the socket and
+ * reloads, there are no simultaneous connections (shell state, stores and
+ * listeners all assume one backend).
+ */
+export interface RemoteEnvironment {
+  /** From /v2/pair; the dedupe key. Falls back to baseUrl for a server that
+   *  sends none, so an old build still gets exactly one row. */
+  environment_id: string;
+  name: string;
+  baseUrl: string;
+  deviceToken: string;
+  addedAt: number;
+  lastConnectedAt: number | null;
+}
+
+const ENVIRONMENTS_KEY = "burrow.remote.environments";
+const ACTIVE_KEY = "burrow.remote.activeEnvironment";
+/** The pre-catalog single slot. Read once, folded into the catalog, deleted. */
+const LEGACY_KEY = "burrow.remote.credentials";
+
+const envKey = (c: { environmentId?: string; environment_id?: string; baseUrl: string }) =>
+  (c.environmentId ?? c.environment_id) || c.baseUrl;
+
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).hostname.split(".")[0] || baseUrl;
+  } catch {
+    return baseUrl;
+  }
+}
+
+function writeEnvironments(list: RemoteEnvironment[]): void {
+  localStorage.setItem(ENVIRONMENTS_KEY, JSON.stringify(list));
+}
+
+/** Every paired machine, oldest first. Migrates the legacy slot on first read. */
+export function listEnvironments(): RemoteEnvironment[] {
+  if (typeof localStorage === "undefined") return [];
+  const legacy = localStorage.getItem(LEGACY_KEY);
+  if (legacy !== null) {
+    localStorage.removeItem(LEGACY_KEY);
+    try {
+      const c = JSON.parse(legacy) as Partial<RemoteCredentials>;
+      if (c.baseUrl && c.deviceToken) {
+        upsertEnvironment({ baseUrl: c.baseUrl, deviceToken: c.deviceToken, environmentId: c.environmentId ?? "" });
+      }
+    } catch { /* unreadable slot: nothing to migrate */ }
+  }
+  try {
+    const list = JSON.parse(localStorage.getItem(ENVIRONMENTS_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((e) => e?.baseUrl && e?.deviceToken) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function activeEnvironmentId(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  listEnvironments(); // migration may set it
+  return localStorage.getItem(ACTIVE_KEY);
+}
+
+/** null = none active: the phone boots into the switcher / pairing screen. */
+export function setActiveEnvironment(id: string | null): void {
+  if (typeof localStorage === "undefined") return;
+  if (id) localStorage.setItem(ACTIVE_KEY, id);
+  else localStorage.removeItem(ACTIVE_KEY);
+}
+
+/** Adds a machine, or refreshes its token if this environment_id is already
+ *  in the catalog (re-pairing the same Mac must not make a second row). Makes
+ *  it active and returns its id. */
+export function upsertEnvironment(c: RemoteCredentials): string {
+  const id = envKey(c);
+  const list = listEnvironments();
+  const hit = list.find((e) => e.environment_id === id);
+  if (hit) Object.assign(hit, { baseUrl: c.baseUrl, deviceToken: c.deviceToken });
+  else list.push({ environment_id: id, name: hostOf(c.baseUrl), baseUrl: c.baseUrl, deviceToken: c.deviceToken, addedAt: Date.now(), lastConnectedAt: null });
+  writeEnvironments(list);
+  setActiveEnvironment(id);
+  return id;
+}
+
+export function renameEnvironment(id: string, name: string): void {
+  const list = listEnvironments();
+  const hit = list.find((e) => e.environment_id === id);
+  if (!hit || !name.trim()) return;
+  hit.name = name.trim();
+  writeEnvironments(list);
+}
+
+/** Forgets one machine's credentials; clears the active pointer if it was it. */
+export function removeEnvironment(id: string): void {
+  writeEnvironments(listEnvironments().filter((e) => e.environment_id !== id));
+  if (localStorage.getItem(ACTIVE_KEY) === id) setActiveEnvironment(null);
+}
+
+function markConnected(id: string): void {
+  const list = listEnvironments();
+  const hit = list.find((e) => e.environment_id === id);
+  if (!hit) return;
+  hit.lastConnectedAt = Date.now();
+  writeEnvironments(list);
+}
 
 /** Thrown when the stored token is no longer accepted. Distinct from a
  *  network failure because the fix is different: re-pair, do not retry. */
@@ -51,27 +156,22 @@ export class PairingRefusedError extends Error {
   }
 }
 
+/** The ACTIVE machine's credentials, or null when none is active. */
 export function loadRemoteCredentials(): RemoteCredentials | null {
-  if (typeof localStorage === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const c = JSON.parse(raw) as Partial<RemoteCredentials>;
-    if (!c.baseUrl || !c.deviceToken) return null;
-    return { baseUrl: c.baseUrl, deviceToken: c.deviceToken, environmentId: c.environmentId ?? "" };
-  } catch {
-    return null;
-  }
+  const id = activeEnvironmentId();
+  const e = id ? listEnvironments().find((x) => x.environment_id === id) : undefined;
+  return e ? { baseUrl: e.baseUrl, deviceToken: e.deviceToken, environmentId: e.environment_id } : null;
 }
 
 export function saveRemoteCredentials(c: RemoteCredentials): void {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(c));
+  upsertEnvironment(c);
 }
 
+/** Forgets the ACTIVE machine only; the rest of the catalog stays. */
 export function clearRemoteCredentials(): void {
-  if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(STORAGE_KEY);
+  const id = activeEnvironmentId();
+  if (id) removeEnvironment(id);
 }
 
 // Desktop-only: whether THIS window should drive a paired remote environment
@@ -177,7 +277,7 @@ export async function pairDevice(
  * the URL; only the ticket does, which is safe there precisely because it dies
  * on first use and after 30 s (spec §4 invariant 3).
  *
- * A 401 clears the stored credentials and throws RevokedError. Without that a
+ * A 401 forgets that one environment and throws RevokedError. Without that a
  * revoked phone retries a dead token behind a "connecting…" spinner with no
  * way back to the pairing screen.
  */
@@ -195,13 +295,15 @@ export function remoteEndpointSource(
       signal: AbortSignal.timeout(10_000),
     });
     if (res.status === 401) {
-      clearRemoteCredentials();
+      // Only THIS machine is dead; the others in the catalog are untouched.
+      removeEnvironment(envKey(creds));
       throw new RevokedError();
     }
     if (!res.ok) throw new Error(`could not get a ws ticket (${res.status})`);
 
     const body = (await res.json()) as { ticket?: string };
     if (!body.ticket) throw new Error("the server did not return a ticket");
+    markConnected(envKey(creds));
     return { wsUrl: wsUrlFor(creds.baseUrl), ticket: body.ticket };
   };
 }

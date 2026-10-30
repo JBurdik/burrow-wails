@@ -16,7 +16,7 @@ import {
   SendFloatSnapshot,
 } from "../../../src-wails/frontend/wailsjs/go/main/App";
 import { createTransport, type Transport } from "@/runtime/transport";
-import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource } from "@/runtime/remoteEndpoint";
+import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource, setActiveEnvironment } from "@/runtime/remoteEndpoint";
 
 type Args = Record<string, any>;
 
@@ -78,6 +78,20 @@ export function desktopTransport(): Transport {
 export function remoteTransport(): Transport {
   if (!remote) remote = createTransport(remoteEndpointSource(loadRemoteCredentials));
   return remote;
+}
+
+/**
+ * Makes another paired machine (or none: `null` → the switcher / pairing
+ * screen) the active one. Closes the socket and reloads rather than swapping
+ * transports in place: event.ts listeners, the shell snapshot and every store
+ * were built against the old backend, and a reload is the one reset that
+ * cannot miss one.
+ */
+export function switchEnvironment(id: string | null, reload: () => void = () => location.reload()): void {
+  setActiveEnvironment(id);
+  remote?.close();
+  remote = null;
+  reload();
 }
 
 /** Which transport this context can use, or null before pairing. */
