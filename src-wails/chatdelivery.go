@@ -18,9 +18,10 @@ import (
 type deliverySource int
 
 const (
-	deliverNotice   deliverySource = iota // a sub-agent finished / blocked: the thread acts on it first
-	deliverQueue                          // the user's queued follow-ups, head first
-	deliverSchedule                       // scheduled prompts / wake-ups, by due time
+	deliverNotice      deliverySource = iota // a sub-agent finished / blocked: the thread acts on it first
+	deliverLimitResume                       // "Continue where you left off." after a usage limit (chatlimit.go)
+	deliverQueue                             // the user's queued follow-ups, head first
+	deliverSchedule                          // scheduled prompts / wake-ups, by due time
 )
 
 // chatSender is ChatSend's shape; production wires chatSendSettled.
@@ -37,8 +38,9 @@ type pendingDelivery struct {
 }
 
 // deliveryOrder is the order a settled chat receives pending items in (t3code's
-// queuedRunsInDeliveryOrder): automatic completions first, then the user's
-// queue by position, then schedules; ties by creation.
+// queuedRunsInDeliveryOrder): automatic completions first, then an armed
+// usage-limit resume, then the user's queue by position, then schedules; ties
+// by creation.
 func deliveryOrder(items []pendingDelivery) []pendingDelivery {
 	out := slices.Clone(items)
 	slices.SortStableFunc(out, func(x, y pendingDelivery) int {
@@ -72,8 +74,12 @@ func (a *App) deliverPending(now time.Time, send chatSender) {
 	}
 	var items []pendingDelivery
 	items = append(items, a.noticeDeliveries(now, send, nil)...)
+	items = append(items, a.limitResumeDeliveries(now, send, nil)...)
 	items = append(items, a.queueDeliveries(send, nil)...)
 	items = append(items, a.scheduleDeliveries(now, send, nil)...)
+	// A chat still on a usage limit gets nothing: each send would fail on it.
+	limited := a.limitedChats(now)
+	items = slices.DeleteFunc(items, func(d pendingDelivery) bool { return limited[d.ChatID] })
 	a.runDeliveries(items)
 }
 

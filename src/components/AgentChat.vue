@@ -420,6 +420,16 @@
         <span class="text-[13px] text-secondary-foreground">{{ workingVerb }}…</span>
         <span class="text-[12px] tabular-nums text-muted-foreground">{{ workingElapsed }}</span>
       </div>
+
+      <!-- Usage limit (src-wails/chatlimit.go): the last turn failed on it. -->
+      <div v-if="usageLimit && !busy" class="mx-4 my-2 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
+        <PhWarningCircle :size="13" weight="bold" class="flex-shrink-0" />
+        <span class="flex-1 truncate">
+          Usage limit reached — resets at <span class="text-foreground">{{ usageLimit.label }}</span><template v-if="usageLimit.armed"> · resuming automatically</template>
+        </span>
+        <button v-if="!usageLimit.armed" class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_arm')">Resume automatically</button>
+        <button class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_dismiss')">{{ usageLimit.armed ? 'Cancel' : 'Dismiss' }}</button>
+      </div>
       </div>
     </div>
     <!-- Minimap (after Ghostex): one dash per prompt you sent, longer for
@@ -1125,6 +1135,24 @@ const branchChanged = computed(() => {
   return !!created && created !== chatBranch.value;
 });
 const branchBannerDismissed = ref(false);
+// Usage-limit banner: Go records the reset (limit_reset_at); arming makes it
+// send "Continue where you left off." then (chat_limit_arm / _dismiss).
+const usageLimit = computed(() => {
+  const at = activeSession.value?.limitResetAt;
+  if (!at) return null;
+  const d = new Date(at);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const label = d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  return { label, armed: !!activeSession.value?.limitResumeAt };
+});
+async function limitAction(cmd: "chat_limit_arm" | "chat_limit_dismiss") {
+  try {
+    await invoke(cmd, { chatId: props.chatId });
+  } catch (e) {
+    S.notice(`Could not update the usage-limit resume: ${e}`);
+  }
+  await chats.reload();
+}
 const restoringBranch = ref(false);
 const restoreBranchError = ref("");
 // Purely informational per product decision — dismiss on close or on send,

@@ -332,6 +332,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 
 		if a.phases != nil {
 			for _, e := range events {
+				a.noteUsageLimitEvent(chatID, e, time.Now())
 				if pev, ok := chatPhaseEvent(e); ok {
 					before := a.phases.Get("chat:" + chatID)
 					a.applyChatPhase(chatID, pev) // also settles the turn audit
@@ -345,6 +346,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 			if a.phases.Get("chat:"+chatID).State == agentphase.Running {
 				a.clearSettledOverrideOnRunning(chatID)
 				a.clearCollectedOnRunning(chatID)
+				a.clearUsageLimitOnRunning(chatID)
 			}
 		}
 

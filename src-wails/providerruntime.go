@@ -63,9 +63,14 @@ type ProviderRuntimeEvent struct {
 	CostUSD             float64 `json:"costUsd,omitempty"`
 
 	// turn.failed / session.title / session.id
-	Message   string `json:"message,omitempty"`
-	Title     string `json:"title,omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
+	Message string `json:"message,omitempty"`
+	// turn.failed on a provider usage / rate limit; usage.limit. LimitResetAt
+	// (usage.limit only) is unix ms; a turn.failed's reset is parsed live from
+	// Message by chatlimit.go, since "resets 3pm" is relative to now.
+	UsageLimit   bool   `json:"usageLimit,omitempty"`
+	LimitResetAt int64  `json:"limitResetAt,omitempty"`
+	Title        string `json:"title,omitempty"`
+	SessionID    string `json:"sessionId,omitempty"`
 
 	// message.note / message.patch_user — see normalizeChatNote. Additive
 	// fields only: this struct is on the wire and every existing consumer
@@ -103,6 +108,9 @@ const (
 	// How full the model's context window was on the last request of the turn.
 	EvtContextUsage = "context.usage"
 	EvtTurnFailed   = "turn.failed"
+	// usage.limit: Claude's rate_limit_event said "rejected" — a hint for the
+	// reset time of the turn failure that follows (chatlimit.go).
+	EvtUsageLimit   = "usage.limit"
 	EvtSessionTitle = "session.title"
 	EvtSessionID    = "session.id"
 	// The runtime process is gone; the next send has to spawn a replacement
@@ -188,6 +196,16 @@ func normalizeClaudeEvent(event map[string]any) []ProviderRuntimeEvent {
 		return claudeToolResults(event)
 	case "result":
 		return claudeResult(event)
+	case "rate_limit_event":
+		info := mapField(event["rate_limit_info"])
+		if strField(info["status"]) != "rejected" {
+			return nil
+		}
+		reset := int64(0)
+		if sec, ok := info["resetsAt"].(float64); ok && sec > 0 {
+			reset = int64(sec) * 1000
+		}
+		return []ProviderRuntimeEvent{{Type: EvtUsageLimit, LimitResetAt: reset}}
 	case "exit":
 		// The CLI is gone (idle-reaped by the sweeper, or it crashed). For the
 		// native transport this is also a turn boundary — the frontend has
@@ -384,6 +402,15 @@ func joinLines(parts []string) string {
 }
 
 func claudeResult(event map[string]any) []ProviderRuntimeEvent {
+	// A usage / rate limit comes back as an is_error "success" result (the
+	// CLI's "Claude AI usage limit reached|<epoch>" / "You've hit your limit ·
+	// resets 3pm"), or a 429: a failed turn, not a finished one.
+	if isErr, _ := event["is_error"].(bool); isErr {
+		msg := strField(event["result"])
+		if intOf(event["api_error_status"]) == 429 || isUsageLimitText(msg) {
+			return []ProviderRuntimeEvent{{Type: EvtTurnFailed, Message: firstNonEmpty(msg, "usage limit reached"), UsageLimit: true}}
+		}
+	}
 	if subtype := strField(event["subtype"]); subtype == "error_during_execution" || subtype == "error_max_turns" {
 		msg := strField(event["result"])
 		if msg == "" {
@@ -447,7 +474,7 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 		// The runtime's turn boundary (acpTurnEnd): the response to our own
 		// session/prompt, or Codex's terminal turn notification.
 		if e := strField(msg["error"]); e != "" {
-			return []ProviderRuntimeEvent{{Type: EvtTurnFailed, Message: e}}
+			return []ProviderRuntimeEvent{{Type: EvtTurnFailed, Message: e, UsageLimit: isUsageLimitText(e)}}
 		}
 		return []ProviderRuntimeEvent{{Type: EvtTurnCompleted}}
 	case "exit":
