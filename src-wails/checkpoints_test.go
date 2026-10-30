@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A checkpoint has to survive the two things that actually happen during an
@@ -224,5 +225,59 @@ func TestSnapshotTreeIgnoresStagingState(t *testing.T) {
 	}
 	if after := git("diff", "--cached", "--name-status"); after != stagedBefore {
 		t.Fatalf("real index changed:\n%s\nwant\n%s", after, stagedBefore)
+	}
+}
+
+// Racy git: an edit with the same size inside the same second as the indexed
+// version is stat-identical to it. Git only rechecks such an entry because the
+// file is not older than the index — so the snapshot's index copy must keep
+// the real index's mtime. Pin every timestamp to one instant so this fails
+// deterministically when it doesn't (it used to flake TestCheckpointRoundTrip).
+func TestSnapshotTreeSeesSameSizeSameSecondEdit(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out := runGitEnv(repo, nil, args...)
+		if !out.Success {
+			t.Fatalf("git %v: %s", args, out.Stderr)
+		}
+		return strings.TrimSpace(out.Stdout)
+	}
+	file := filepath.Join(repo, "tracked.txt")
+	git("init", "-q")
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
+	git("config", "core.trustctime", "false") // ctime can't be pinned
+	if err := os.WriteFile(file, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-qm", "init")
+
+	// Stamp the index entry for v1 with a pinned mtime, then overwrite with v2
+	// (same size) and pin file and index to that same instant: v2 is now
+	// stat-identical to the entry, exactly like a real same-second write.
+	when := time.Now().Add(-time.Hour).Truncate(time.Second)
+	pin := func(paths ...string) {
+		t.Helper()
+		for _, p := range paths {
+			if err := os.Chtimes(p, when, when); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	pin(file)
+	git("update-index", "--refresh")
+	if err := os.WriteFile(file, []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pin(file, filepath.Join(repo, ".git", "index"))
+
+	tree, err := snapshotTree(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := git("cat-file", "-p", tree+":tracked.txt"); got != "v2" {
+		t.Fatalf("snapshot kept the stale content: %q", got)
 	}
 }

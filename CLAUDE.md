@@ -200,6 +200,12 @@ workspace lock) + `DeleteWorkspace`; branch kept unless merged; `worktrees-clean
 **Preview** (`worktree_cleanup_preview`) evaluates both rules even while off; "Remove N" (`worktree_cleanup_now(ids)`)
 re-checks each id before removing.
 
+**Checkpoints** (`checkpoints.go`): a snapshot is `add -A` + `write-tree` into a throwaway `GIT_INDEX_FILE` seeded
+from a **copy of the real index** (its stat cache is what keeps it fast). The copy **keeps the real index's mtime** —
+git's racy-clean check only distrusts a stat-clean entry that is not older than the index file, so a fresh mtime made
+a same-size, same-second edit look unchanged and the snapshot kept the old content
+(`TestSnapshotTreeSeesSameSizeSameSecondEdit`).
+
 **Sub-agent notices** (`chatsubagentnotice.go`): a sub-agent (`parent_chat_id`, not `kind='side'`) whose
 turn ends (done/failed) or that enters `waiting_*` gets a row in `subagent_notices`, keyed per (child, turn /
 blocked episode) — recorded in `emitChatLine` on the phase transition, delivered by the 15 s schedule sweep

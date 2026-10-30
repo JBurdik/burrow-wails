@@ -73,6 +73,7 @@ func snapshotTree(cwd string) (string, error) {
 	// only changed files (`read-tree HEAD` has none, so every file was rehashed
 	// — seconds per send in a repo with big tracked files). `add -A` then makes
 	// the copy match the worktree, so staged-vs-unstaged state doesn't matter.
+	// The copy keeps the real index's mtime (copyFile) or racy-git breaks.
 	// No index (fresh repo) → seed from HEAD, harmless failure with no commits.
 	if real, ok := gitLine(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index"); !ok || copyFile(real, idx) != nil {
 		runGitEnv(cwd, env, "read-tree", "HEAD")
@@ -107,12 +108,23 @@ func snapshotCommit(cwd, tree, msg string) (string, string, error) {
 	return commit, tree, nil
 }
 
+// copyFile copies src to dst and keeps src's mtime. Load-bearing for the index
+// copy: git's racy-clean check distrusts a stat-clean entry only when the file
+// is not older than the index file itself. A fresh mtime on the copy made a
+// same-size, same-second edit (v1 → v2) look clean, so the snapshot kept v1.
 func copyFile(src, dst string) error {
 	b, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, b, 0o600)
+	fi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, b, 0o600); err != nil {
+		return err
+	}
+	return os.Chtimes(dst, fi.ModTime(), fi.ModTime())
 }
 
 func isGitRepo(cwd string) bool {
