@@ -44,7 +44,7 @@
            component itself silently did nothing and the sidebar never hid. -->
       <div v-show="compact ? phone === 'threads' : ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
       <div v-show="!compact && ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
-      <div v-show="!compact || phone === 'thread'" ref="mainEl" class="ide-main" :class="{ 'details-reserve': details?.kind === 'chat', 'details-animating': detailsAnimating }" :style="{ '--details-inset': (detailsInset ?? 0) + 'px' }">
+      <div v-show="!compact || phone === 'thread'" ref="mainEl" class="ide-main" :class="{ 'details-reserve': details?.kind === 'chat' }" :style="{ '--details-inset': (detailsInset ?? 0) + 'px' }">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
              them on a mode switch ran XTerm.onBeforeUnmount → detach_pty + dispose;
              returning replayed the daemon ring-buffer into a fresh fit → scrambled
@@ -372,16 +372,7 @@ function closeWelcomeBottomTerminal(id: number) {
 // phone shell has its own thread header — and only for something in a workspace.
 const DETAILS_KEY = "burrow.threadDetailsOpen";
 const detailsOpen = ref(localStorage.getItem(DETAILS_KEY) !== "0"); // open unless closed once
-// Only the user's own open/close animates the lane. A panel opening resizes the
-// main area in one frame, and an eased inset then visibly lagged behind it.
-const detailsAnimating = ref(false);
-let detailsAnimTimer: ReturnType<typeof setTimeout> | undefined;
-watch(detailsOpen, (on) => {
-  localStorage.setItem(DETAILS_KEY, on ? "1" : "0");
-  detailsAnimating.value = true;
-  clearTimeout(detailsAnimTimer);
-  detailsAnimTimer = setTimeout(() => (detailsAnimating.value = false), 300);
-});
+watch(detailsOpen, (on) => localStorage.setItem(DETAILS_KEY, on ? "1" : "0"));
 // t3code's rule (chatCanvasLayout.ts): the card never covers the chat. The chat
 // lane stays centred while it clears the card and steps left only as far as it
 // must (detailsLaneInset); too narrow for that and the card hides instead.
@@ -399,6 +390,25 @@ const details = computed(() => {
   const kind: "chat" | "tab" | "workspace" = !tab ? "workspace" : tab.chatId != null ? "chat" : "tab";
   return { workspace: w, kind, chatId: tab?.chatId };
 });
+// The lane's move when the user opens/closes the card is FLIP-animated: the inset
+// lands in one layout, then each chat slides from where it was via transform.
+// Easing padding-right instead re-laid the whole transcript every frame (choppy),
+// and panel resizes don't animate at all — the RP opens in one frame.
+const laneInset = () => (details.value?.kind === "chat" ? detailsInset.value ?? 0 : 0);
+let renderedInset = 0; // the inset currently on screen; updated after each render
+watch(laneInset, (v) => { renderedInset = v; }, { flush: "post", immediate: true });
+watch(detailsOpen, () => {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const before = renderedInset;
+  nextTick(() => {
+    const dx = (laneInset() - before) / 2; // the mx-auto lane's centre moves by half the inset
+    if (!dx || !mainEl.value) return;
+    for (const el of mainEl.value.querySelectorAll<HTMLElement>(".chat-main")) {
+      el.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }],
+        { duration: 260, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+    }
+  });
+}, { flush: "pre" });
 
 function toggleBottomTerminal() {
   if (showWelcome.value) toggleWelcomeBottom();
@@ -1110,15 +1120,14 @@ body {
   flex-direction: column;
 }
 /* Thread details card open: the chat lane (transcript + composer) steps left of it
-   instead of running underneath — --details-inset from detailsLaneInset(). It eases only
-   while the card itself opens/closes (.details-animating); on panel resizes it follows at once.
+   instead of running underneath — --details-inset from detailsLaneInset(). The move is
+   FLIP-animated in the script (transform), never by easing padding.
    ponytail: every mounted chat in a split gets it, not only the pane under the card. */
 .ide-main.details-reserve .chat-main { padding-right: var(--details-inset); }
-.ide-main.details-animating .chat-main { transition: padding-right 0.26s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .details-card-enter-active, .details-card-leave-active { transition: opacity 0.2s ease, transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .details-card-enter-from, .details-card-leave-to { opacity: 0; transform: translateX(12px); }
 @media (prefers-reduced-motion: reduce) {
-  .ide-main.details-animating .chat-main, .details-card-enter-active, .details-card-leave-active { transition: none; }
+  .details-card-enter-active, .details-card-leave-active { transition: none; }
 }
 
 .terminal-host {
