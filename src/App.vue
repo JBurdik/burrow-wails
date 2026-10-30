@@ -9,10 +9,12 @@
     <TitleBar
       v-if="!compact"
       :workspace-name="displayWs?.name"
-      :branch="git.cwd === displayWs?.path ? git.branch : ''"
       :folder-path="displayWs?.path"
       :right-panel-visible="ui.rightPanelVisible"
       :sidebar-visible="!compact && ui.sidebarVisible"
+      :details-open="detailsOpen"
+      @toggle-details="detailsOpen = !detailsOpen"
+      @toggle-bottom="toggleBottomTerminal"
       @toggle-sidebar="ui.toggleSidebar()"
       @back="ws.close()"
       @toggle-rightpanel="ui.toggleRightPanel()"
@@ -71,6 +73,15 @@
             :ref="(el) => setTermRef(w.id, el)"
           />
         </div>
+        <ThreadDetailsCard
+          v-if="details"
+          :workspace="details.workspace"
+          :kind="details.kind"
+          :chat-id="details.chatId"
+          @close="detailsOpen = false"
+          @open-config="showProjectConfig = true"
+          @open-pr="(n, url) => { ui.rightPanelVisible = true; rightPanelRef?.openPullRequest(n, url, details!.workspace.id); }"
+        />
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
       </div>
       <InboxScreen v-if="compact && phone === 'inbox'" />
@@ -174,12 +185,12 @@ import PetOverlay from "@/components/PetOverlay.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
 import BottomTerminalPanel from "@/components/BottomTerminalPanel.vue";
+import ThreadDetailsCard from "@/components/ThreadDetailsCard.vue";
 import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import Onboarding from "@/components/Onboarding.vue";
 import DocsScreen from "@/components/DocsScreen.vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
-import { useGitStore } from "@/stores/git";
 import { useProvidersStore } from "@/stores/providers";
 import { useUpdateStore } from "@/stores/update";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -210,7 +221,6 @@ const rightPanelRef = useTemplateRef<InstanceType<typeof RightPanel>>("rightPane
 
 const ws = useWorkspaceStore();
 const ui = useUIStore();
-const git = useGitStore();
 const { diagramContent } = useDiagram();
 const { lightboxSrc } = useImageLightbox();
 const providers = useProvidersStore();
@@ -349,6 +359,24 @@ function closeWelcomeBottomTerminal(id: number) {
   if (welcomeBottom.activeId === id) welcomeBottom.activeId = welcomeBottom.ptyIds[welcomeBottom.ptyIds.length - 1] ?? null;
   if (!welcomeBottom.ptyIds.length) welcomeBottom.open = false;
 }
+// Thread details card: pinned open or closed per device. Desktop only — the
+// phone shell has its own thread header — and only for something in a workspace.
+const DETAILS_KEY = "burrow.threadDetailsOpen";
+const detailsOpen = ref(localStorage.getItem(DETAILS_KEY) === "1");
+watch(detailsOpen, (on) => localStorage.setItem(DETAILS_KEY, on ? "1" : "0"));
+const details = computed(() => {
+  const w = ws.active;
+  if (!detailsOpen.value || compact.value || showWelcome.value || ui.mode !== "terminal" || !w) return null;
+  const tab = ui.viewingTabs ? tabsStore.tabsByWs[w.id]?.find((t) => t.id === tabsStore.activeByWs[w.id]) : undefined;
+  const kind: "chat" | "tab" | "workspace" = !tab ? "workspace" : tab.chatId != null ? "chat" : "tab";
+  return { workspace: w, kind, chatId: tab?.chatId };
+});
+
+function toggleBottomTerminal() {
+  if (showWelcome.value) toggleWelcomeBottom();
+  else activeTerm()?.toggleBottomPanel();
+}
+
 function toggleWelcomeBottom() {
   welcomeBottom.open = !welcomeBottom.open;
   if (!welcomeBottom.open || welcomeBottom.ptyIds.length) return;
@@ -1032,6 +1060,7 @@ body {
 }
 
 .ide-main {
+  position: relative;
   flex: 1;
   overflow: hidden;
   display: flex;
