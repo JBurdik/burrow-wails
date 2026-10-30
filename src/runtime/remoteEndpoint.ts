@@ -105,6 +105,22 @@ export function wsUrlFor(baseUrl: string): string {
 }
 
 /**
+ * What the Settings QR encodes: `<baseUrl>/#pair=<code>`. The code rides in the
+ * fragment, which a browser never sends to the server, so it cannot land in a
+ * request or proxy log. The slash before `#` matters: the bundle loads its
+ * assets relatively, and from `.../burrow` they would resolve against `/`.
+ */
+export function pairingUrl(baseUrl: string, code: string): string {
+  return `${normalizeBaseUrl(baseUrl)}/#pair=${encodeURIComponent(code)}`;
+}
+
+/** The code in a `#pair=` fragment, or null. Exactly six digits or nothing. */
+export function parsePairFragment(hash: string): string | null {
+  const code = new URLSearchParams(hash.replace(/^#/, "")).get("pair");
+  return code && /^\d{6}$/.test(code) ? code : null;
+}
+
+/**
  * Trades a six-digit pairing code for this device's own token.
  *
  * `name` and `kind` are what desktop Settings renders in its device list, so a

@@ -1,5 +1,10 @@
 import { createApp } from "vue";
-import { clearRemoteCredentials, loadRemoteCredentials } from "@/runtime/remoteEndpoint";
+import { clearRemoteCredentials, loadRemoteCredentials, parsePairFragment } from "@/runtime/remoteEndpoint";
+
+// A scanned pairing QR (Settings → Remote access) opens `…/#pair=<code>`. Take
+// the code, then drop the fragment so it never sits in history or a bookmark.
+const scannedCode = parsePairFragment(location.hash);
+if (scannedCode) history.replaceState(null, "", location.pathname + location.search);
 
 // A phone has no devtools. Without this a boot failure is a blank screen the
 // user can only report as "blank"; with it they read (and can send) the cause.
@@ -52,7 +57,7 @@ if (loadRemoteCredentials()) {
   // App.vue carries the global stylesheet (tokens, Tailwind theme); importing
   // the module applies it without mounting the app.
   void Promise.all([import("./ConnectView.vue"), import("@/App.vue")]).then(([m]) =>
-    createApp(m.default).mount("#app"),
+    createApp(m.default, { code: scannedCode ?? undefined }).mount("#app"),
   ).catch(showBootError);
 }
 

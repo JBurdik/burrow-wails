@@ -30,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { PinInputRoot, PinInputInput } from "reka-ui";
 import { Button } from "@/components/ui/button";
 import { pairDevice } from "@/runtime/remoteEndpoint";
@@ -38,7 +38,9 @@ import { pairDevice } from "@/runtime/remoteEndpoint";
 // Served from the paired Mac itself (directly or under Tailscale Serve's
 // /burrow prefix), so the page's own location is the address to pair with.
 const url = `${location.origin}${location.pathname.replace(/\/(?:mobile\.html)?$/, "")}`;
-const digits = ref<number[]>([]);
+// Set when the page was opened from the Settings QR (main.ts strips it from the URL).
+const props = defineProps<{ code?: string }>();
+const digits = ref<number[]>(props.code ? props.code.split("").map(Number) : []);
 const busy = ref(false);
 const err = ref("");
 
@@ -50,6 +52,8 @@ function deviceInfo(): [name: string, kind: string] {
   if (/Android/.test(ua)) return ["Android phone", "phone"];
   return ["Browser", "browser"];
 }
+
+onMounted(() => { if (props.code) void tryPair(); });
 
 async function tryPair() {
   const code = digits.value.join("");

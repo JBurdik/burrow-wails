@@ -590,6 +590,10 @@ export function RemotePairStatus() {
   return window['go']['main']['App']['RemotePairStatus']();
 }
 
+export function RemotePairingEndpoint() {
+  return window['go']['main']['App']['RemotePairingEndpoint']();
+}
+
 export function RemoteRegeneratePairCode() {
   return window['go']['main']['App']['RemoteRegeneratePairCode']();
 }

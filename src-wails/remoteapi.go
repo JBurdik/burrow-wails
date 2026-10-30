@@ -164,8 +164,9 @@ var remoteAllowed = map[string]remoteCmd{
 	// because it is safe on a bare &App{} — most commands are not.
 	"environment_id": {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
 	// Subscription usage limits (planusage.go). Never carries a token.
-	"plan_usage":       {Method: "PlanUsage", Args: nil, Scope: scopeOrchRead},
-	"remote_endpoints": {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
+	"plan_usage":              {Method: "PlanUsage", Args: nil, Scope: scopeOrchRead},
+	"remote_endpoints":        {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
+	"remote_pairing_endpoint": {Method: "RemotePairingEndpoint", Args: nil, Scope: scopeAccessRead},
 
 	// Paired devices. Both sit on access:* and are therefore desktop-only,
 	// since a paired device is never granted access:write (remotedevices.go)
