@@ -27,6 +27,90 @@ export namespace agentphase {
 
 }
 
+export namespace control {
+	
+	export class Recurrence {
+	    kind: string;
+	    every_min?: number;
+	    weekdays?: number[];
+	    time_of_day?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Recurrence(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.every_min = source["every_min"];
+	        this.weekdays = source["weekdays"];
+	        this.time_of_day = source["time_of_day"];
+	    }
+	}
+	export class ScheduledPrompt {
+	    id: number;
+	    chat_id: number;
+	    name: string;
+	    text: string;
+	    // Go type: time
+	    due_at: any;
+	    // Go type: time
+	    created_at: any;
+	    rule: Recurrence;
+	    recurs: string;
+	    new_chat: boolean;
+	    workspace_id?: number;
+	    agent?: string;
+	    paused: boolean;
+	    // Go type: time
+	    last_run_at?: any;
+	    attempts?: number;
+	    last_error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScheduledPrompt(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.chat_id = source["chat_id"];
+	        this.name = source["name"];
+	        this.text = source["text"];
+	        this.due_at = this.convertValues(source["due_at"], null);
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.rule = this.convertValues(source["rule"], Recurrence);
+	        this.recurs = source["recurs"];
+	        this.new_chat = source["new_chat"];
+	        this.workspace_id = source["workspace_id"];
+	        this.agent = source["agent"];
+	        this.paused = source["paused"];
+	        this.last_run_at = this.convertValues(source["last_run_at"], null);
+	        this.attempts = source["attempts"];
+	        this.last_error = source["last_error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace forge {
 	
 	export class Check {
@@ -329,6 +413,11 @@ export namespace main {
 	    recap: string;
 	    kind: string;
 	    snoozed_until: number;
+	    limit_reset_at: number;
+	    limit_resume_at: number;
+	    pr_number: number;
+	    pr_url: string;
+	    pr_state: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chat(source);
@@ -359,6 +448,11 @@ export namespace main {
 	        this.recap = source["recap"];
 	        this.kind = source["kind"];
 	        this.snoozed_until = source["snoozed_until"];
+	        this.limit_reset_at = source["limit_reset_at"];
+	        this.limit_resume_at = source["limit_resume_at"];
+	        this.pr_number = source["pr_number"];
+	        this.pr_url = source["pr_url"];
+	        this.pr_state = source["pr_state"];
 	    }
 	}
 	export class ProviderRuntimeEvent {
@@ -379,6 +473,8 @@ export namespace main {
 	    cacheCreationTokens?: number;
 	    costUsd?: number;
 	    message?: string;
+	    usageLimit?: boolean;
+	    limitResetAt?: number;
 	    title?: string;
 	    sessionId?: string;
 	    role?: string;
@@ -414,6 +510,8 @@ export namespace main {
 	        this.cacheCreationTokens = source["cacheCreationTokens"];
 	        this.costUsd = source["costUsd"];
 	        this.message = source["message"];
+	        this.usageLimit = source["usageLimit"];
+	        this.limitResetAt = source["limitResetAt"];
 	        this.title = source["title"];
 	        this.sessionId = source["sessionId"];
 	        this.role = source["role"];
@@ -473,6 +571,30 @@ export namespace main {
 	        this.messages = source["messages"];
 	        this.start = source["start"];
 	        this.total = source["total"];
+	    }
+	}
+	export class ChatQueueItem {
+	    id: number;
+	    chatId: number;
+	    ord: number;
+	    text: string;
+	    attachments: string[];
+	    createdAt: number;
+	    attempts: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatQueueItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.chatId = source["chatId"];
+	        this.ord = source["ord"];
+	        this.text = source["text"];
+	        this.attachments = source["attachments"];
+	        this.createdAt = source["createdAt"];
+	        this.attempts = source["attempts"];
 	    }
 	}
 	export class ChatSearchHit {
@@ -884,6 +1006,7 @@ export namespace main {
 	    installCmd?: string;
 	    authCmd?: string;
 	    docsUrl?: string;
+	    canCheckout?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ForgeStatus(source);
@@ -898,6 +1021,7 @@ export namespace main {
 	        this.installCmd = source["installCmd"];
 	        this.authCmd = source["authCmd"];
 	        this.docsUrl = source["docsUrl"];
+	        this.canCheckout = source["canCheckout"];
 	    }
 	}
 	export class GitOutput {
@@ -1183,6 +1307,7 @@ export namespace main {
 	    scopes: string[];
 	    added_at: number;
 	    last_seen: number;
+	    push: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new RemoteDevice(source);
@@ -1196,6 +1321,7 @@ export namespace main {
 	        this.scopes = source["scopes"];
 	        this.added_at = source["added_at"];
 	        this.last_seen = source["last_seen"];
+	        this.push = source["push"];
 	    }
 	}
 	export class SearchHit {
@@ -1429,6 +1555,28 @@ export namespace main {
 	    }
 	}
 	
+	export class WorktreeCleanupItem {
+	    id: number;
+	    name: string;
+	    path: string;
+	    branch: string;
+	    rule: string;
+	    reason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WorktreeCleanupItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.branch = source["branch"];
+	        this.rule = source["rule"];
+	        this.reason = source["reason"];
+	    }
+	}
 	export class permRequest {
 	    id: string;
 	    pty_id: string;
@@ -1462,6 +1610,39 @@ export namespace main {
 	        this.off = source["off"];
 	        this.data = source["data"];
 	    }
+	}
+	export class pushSubscription {
+	    endpoint: string;
+	    // Go type: struct { P256dh string "json:\"p256dh\""; Auth string "json:\"auth\"" }
+	    keys: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new pushSubscription(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.endpoint = source["endpoint"];
+	        this.keys = this.convertValues(source["keys"], Object);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

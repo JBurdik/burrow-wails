@@ -1662,7 +1662,7 @@ export const THEMES: Theme[] = [
       yellow: "#E6FF4D",
       red: "#FF4D6A",
     },
-    animated: { kind: "matrix", color: "rgba(0, 255, 102, 0.75)" },
+    animated: { kind: "matrix", color: "rgba(0, 255, 102, 0.28)" },
     xterm: {
       background: "#020A04",
       foreground: "#D7FFE0",

@@ -74,6 +74,22 @@ export function ChatInterrupt(arg1) {
   return window['go']['main']['App']['ChatInterrupt'](arg1);
 }
 
+export function ChatLeaveWorktree(arg1) {
+  return window['go']['main']['App']['ChatLeaveWorktree'](arg1);
+}
+
+export function ChatLimitArm(arg1) {
+  return window['go']['main']['App']['ChatLimitArm'](arg1);
+}
+
+export function ChatLimitDismiss(arg1) {
+  return window['go']['main']['App']['ChatLimitDismiss'](arg1);
+}
+
+export function ChatLinkPr(arg1, arg2) {
+  return window['go']['main']['App']['ChatLinkPr'](arg1, arg2);
+}
+
 export function ChatListBgTerminals(arg1) {
   return window['go']['main']['App']['ChatListBgTerminals'](arg1);
 }
@@ -82,12 +98,52 @@ export function ChatMarkActive(arg1) {
   return window['go']['main']['App']['ChatMarkActive'](arg1);
 }
 
+export function ChatMoveToWorktree(arg1, arg2) {
+  return window['go']['main']['App']['ChatMoveToWorktree'](arg1, arg2);
+}
+
+export function ChatPrRefresh(arg1) {
+  return window['go']['main']['App']['ChatPrRefresh'](arg1);
+}
+
+export function ChatPrsRefresh(arg1) {
+  return window['go']['main']['App']['ChatPrsRefresh'](arg1);
+}
+
+export function ChatQueueAdd(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatQueueAdd'](arg1, arg2, arg3);
+}
+
+export function ChatQueueList(arg1) {
+  return window['go']['main']['App']['ChatQueueList'](arg1);
+}
+
+export function ChatQueueRemove(arg1) {
+  return window['go']['main']['App']['ChatQueueRemove'](arg1);
+}
+
+export function ChatQueueReorder(arg1, arg2) {
+  return window['go']['main']['App']['ChatQueueReorder'](arg1, arg2);
+}
+
+export function ChatQueueUpdate(arg1, arg2) {
+  return window['go']['main']['App']['ChatQueueUpdate'](arg1, arg2);
+}
+
 export function ChatRestart(arg1) {
   return window['go']['main']['App']['ChatRestart'](arg1);
 }
 
 export function ChatRewind(arg1, arg2, arg3) {
   return window['go']['main']['App']['ChatRewind'](arg1, arg2, arg3);
+}
+
+export function ChatScheduleCancel(arg1) {
+  return window['go']['main']['App']['ChatScheduleCancel'](arg1);
+}
+
+export function ChatScheduleList(arg1) {
+  return window['go']['main']['App']['ChatScheduleList'](arg1);
 }
 
 export function ChatSend(arg1, arg2, arg3) {
@@ -116,6 +172,10 @@ export function ChatSteer(arg1, arg2, arg3) {
 
 export function ChatStopTask(arg1, arg2) {
   return window['go']['main']['App']['ChatStopTask'](arg1, arg2);
+}
+
+export function ChatUnlinkPr(arg1) {
+  return window['go']['main']['App']['ChatUnlinkPr'](arg1);
 }
 
 export function CheckUpdate() {
@@ -252,6 +312,10 @@ export function ForgeInfo(arg1) {
 
 export function ForgeInstallCLI(arg1) {
   return window['go']['main']['App']['ForgeInstallCLI'](arg1);
+}
+
+export function ForgePrCheckout(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ForgePrCheckout'](arg1, arg2, arg3, arg4);
 }
 
 export function ForgePrCreate(arg1, arg2, arg3, arg4, arg5) {
@@ -526,6 +590,18 @@ export function PublishChatNote(arg1, arg2) {
   return window['go']['main']['App']['PublishChatNote'](arg1, arg2);
 }
 
+export function PushSubscribe(arg1, arg2) {
+  return window['go']['main']['App']['PushSubscribe'](arg1, arg2);
+}
+
+export function PushUnsubscribe(arg1, arg2) {
+  return window['go']['main']['App']['PushUnsubscribe'](arg1, arg2);
+}
+
+export function PushVapidPublicKey() {
+  return window['go']['main']['App']['PushVapidPublicKey']();
+}
+
 export function ReadClaudeActivity(arg1, arg2) {
   return window['go']['main']['App']['ReadClaudeActivity'](arg1, arg2);
 }
@@ -682,6 +758,22 @@ export function SaveTerminalTabs(arg1, arg2) {
   return window['go']['main']['App']['SaveTerminalTabs'](arg1, arg2);
 }
 
+export function ScheduleListAll() {
+  return window['go']['main']['App']['ScheduleListAll']();
+}
+
+export function ScheduleRunNow(arg1) {
+  return window['go']['main']['App']['ScheduleRunNow'](arg1);
+}
+
+export function ScheduleSave(arg1) {
+  return window['go']['main']['App']['ScheduleSave'](arg1);
+}
+
+export function ScheduleSetPaused(arg1, arg2) {
+  return window['go']['main']['App']['ScheduleSetPaused'](arg1, arg2);
+}
+
 export function SearchChats(arg1, arg2) {
   return window['go']['main']['App']['SearchChats'](arg1, arg2);
 }
@@ -788,6 +880,14 @@ export function UpdateProvider(arg1, arg2, arg3, arg4) {
 
 export function WorkingTreeDiff(arg1) {
   return window['go']['main']['App']['WorkingTreeDiff'](arg1);
+}
+
+export function WorktreeCleanupNow(arg1) {
+  return window['go']['main']['App']['WorktreeCleanupNow'](arg1);
+}
+
+export function WorktreeCleanupPreview() {
+  return window['go']['main']['App']['WorktreeCleanupPreview']();
 }
 
 export function WriteConfig(arg1) {

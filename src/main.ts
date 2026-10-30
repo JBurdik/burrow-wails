@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
+import { hideSplash } from "./lib/splash";
 
 const pinia = createPinia();
 
@@ -39,6 +40,7 @@ async function boot() {
     const app = createApp(GitPanel);
     app.use(pinia);
     app.mount("#app");
+    hideSplash();
   } else {
     const { default: App } = await import("./App.vue");
     const { router } = await import("./router");
@@ -52,3 +54,5 @@ async function boot() {
 }
 
 boot();
+// ponytail: safety net so a failed ws.load() never leaves the splash up for good.
+setTimeout(hideSplash, 8000);

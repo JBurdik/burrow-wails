@@ -37,22 +37,23 @@ function withAlpha(hex: string, a: number): string {
 // Falling katakana columns; the trail is a translucent floor-colored fill.
 function matrixKind(): Kind {
   const GLYPHS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789Z:.=*+-<>";
-  const SIZE = 16;
+  const SIZE = 14;
+  const GAP = 3; // one column every GAP glyph widths — sparse rain, less noise
   let drops: number[] = [];
   return {
-    fps: 20,
+    fps: 10,
     init() {
       const rows = h / SIZE;
-      drops = Array.from({ length: Math.ceil(w / SIZE) }, (_, i) => drops[i] ?? Math.random() * rows);
+      drops = Array.from({ length: Math.ceil(w / (SIZE * GAP)) }, (_, i) => drops[i] ?? -Math.random() * rows);
     },
     step(c) {
-      c.fillStyle = withAlpha(props.floor, 0.08);
+      c.fillStyle = withAlpha(props.floor, 0.12);
       c.fillRect(0, 0, w, h);
       c.fillStyle = props.color;
       c.font = `${SIZE}px ui-monospace, Menlo, monospace`;
       for (let i = 0; i < drops.length; i++) {
-        c.fillText(GLYPHS[(Math.random() * GLYPHS.length) | 0], i * SIZE, drops[i] * SIZE);
-        if (drops[i] > h / SIZE && Math.random() > 0.975) drops[i] = 0;
+        if (drops[i] >= 0) c.fillText(GLYPHS[(Math.random() * GLYPHS.length) | 0], i * SIZE * GAP, drops[i] * SIZE);
+        if (drops[i] > h / SIZE && Math.random() > 0.99) drops[i] = -Math.random() * 20;
         drops[i]++;
       }
     },
