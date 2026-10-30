@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from "vue";
-import { PhCaretRight, PhGear, PhMagnifyingGlass, PhPlugs } from "@phosphor-icons/vue";
+import { PhCaretRight, PhGear, PhMagnifyingGlass, PhPencilSimple, PhPlugs, PhPlus, PhTrash } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useUIStore } from "@/stores/ui";
-import { appTransport } from "@/lib/wailsCompat/core";
-import { clearRemoteCredentials } from "@/runtime/remoteEndpoint";
+import { appTransport, switchEnvironment } from "@/lib/wailsCompat/core";
+import { activeEnvironmentId, listEnvironments, removeEnvironment, renameEnvironment } from "@/runtime/remoteEndpoint";
 import PhoneHeader from "./PhoneHeader.vue";
 
 const ui = useUIStore();
@@ -14,10 +14,27 @@ const off = appTransport().onState((v) => { up.value = v; });
 onBeforeUnmount(off);
 invoke<string>("get_app_version").then((v) => { version.value = v; }).catch(() => {});
 
-function disconnect() {
-  if (!confirm("Disconnect this device? You will need a new pairing code to connect again.")) return;
-  clearRemoteCredentials();
-  location.reload();
+// One machine is connected at a time; tapping another one switches (reload).
+const machines = ref(listEnvironments());
+const activeId = activeEnvironmentId();
+const hostLabel = (u: string) => u.replace(/^https?:\/\//, "");
+
+function pick(id: string) {
+  if (id !== activeId) switchEnvironment(id);
+}
+
+function rename(id: string, current: string) {
+  const name = prompt("Machine name", current);
+  if (name === null) return;
+  renameEnvironment(id, name);
+  machines.value = listEnvironments();
+}
+
+function forget(id: string, name: string) {
+  if (!confirm(`Forget ${name}? You will need a new pairing code to connect to it again.`)) return;
+  removeEnvironment(id);
+  if (id === activeId) switchEnvironment(null);
+  else machines.value = listEnvironments();
 }
 </script>
 
@@ -32,14 +49,23 @@ function disconnect() {
         <PhMagnifyingGlass :size="20" class="text-secondary-foreground" /><span class="flex-1">Search</span><PhCaretRight :size="15" class="text-muted-foreground" />
       </button>
       <h2 class="px-4 pb-1 pt-5 text-[12px] font-semibold text-muted-foreground">Connection</h2>
-      <div class="more-row">
-        <PhPlugs :size="20" class="text-secondary-foreground" />
-        <span class="flex-1">Desktop</span>
-        <span class="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-          <span class="h-2 w-2 rounded-full" :class="up ? 'bg-success' : 'bg-destructive'" />{{ up ? "Connected" : "Reconnecting…" }}
-        </span>
+      <div v-for="m in machines" :key="m.environment_id" class="more-row">
+        <button class="flex min-w-0 flex-1 items-center gap-3 self-stretch text-left" @click="pick(m.environment_id)">
+          <PhPlugs :size="20" class="shrink-0 text-secondary-foreground" />
+          <span class="flex min-w-0 flex-1 flex-col">
+            <span class="truncate">{{ m.name }}</span>
+            <span class="truncate text-[12px] text-muted-foreground">{{ hostLabel(m.baseUrl) }}</span>
+          </span>
+          <span v-if="m.environment_id === activeId" class="flex shrink-0 items-center gap-1.5 text-[13px] text-muted-foreground">
+            <span class="h-2 w-2 rounded-full" :class="up ? 'bg-success' : 'bg-destructive'" />{{ up ? "Connected" : "Reconnecting…" }}
+          </span>
+        </button>
+        <button class="p-1.5 text-muted-foreground" :aria-label="`Rename ${m.name}`" @click="rename(m.environment_id, m.name)"><PhPencilSimple :size="17" /></button>
+        <button class="p-1.5 text-destructive" :aria-label="`Forget ${m.name}`" @click="forget(m.environment_id, m.name)"><PhTrash :size="17" /></button>
       </div>
-      <button class="more-row !text-destructive" @click="disconnect"><span class="flex-1">Disconnect this device</span></button>
+      <button class="more-row" @click="switchEnvironment(null)">
+        <PhPlus :size="20" class="text-secondary-foreground" /><span class="flex-1">Add machine</span><PhCaretRight :size="15" class="text-muted-foreground" />
+      </button>
       <p v-if="version" class="px-4 py-6 text-center text-[12px] text-muted-foreground">Burrow {{ version }}</p>
     </div>
   </div>
