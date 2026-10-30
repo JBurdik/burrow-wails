@@ -73,6 +73,17 @@
             :ref="(el) => setTermRef(w.id, el)"
           />
         </div>
+        <Transition name="details-card">
+        <ThreadDetailsCard
+          v-if="details"
+          :workspace="details.workspace"
+          :kind="details.kind"
+          :chat-id="details.chatId"
+          @close="detailsOpen = false"
+          @open-config="showProjectConfig = true"
+          @open-pr="(n, url) => { ui.rightPanelVisible = true; rightPanelRef?.openPullRequest(n, url, details!.workspace.id); }"
+        />
+        </Transition>
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
       </div>
       <InboxScreen v-if="compact && phone === 'inbox'" />
@@ -82,8 +93,8 @@
       <RightPanel
         ref="rightPanelRef"
         class="panel-right"
-        :class="{ 'phone-hidden': compact && phone !== 'project-surface', 'rp-closing': rpClosing }"
-        :open="compact ? phone === 'project-surface' : ui.rightPanelVisible || rpClosing"
+        :class="{ 'phone-hidden': compact && phone !== 'project-surface' }"
+        :open="compact ? phone === 'project-surface' : ui.rightPanelVisible"
         :force-surface="compact && phone === 'project-surface' ? String(route.params.surface) : undefined"
         :cwd="displayWs?.path ?? ''"
         :workspace-id="displayWs?.id"
@@ -92,21 +103,6 @@
         @close-panel="ui.rightPanelVisible = false"
         @open-project-config="showProjectConfig = true"
       />
-      <!-- The details card lives on .ide-body, not inside .ide-main: .ide-main clips
-           (overflow hidden), and the card has to stay visible at its old spot while it
-           fades out when the RP opens. It sits beside the RP via .beside-rp. -->
-      <Transition name="details-card">
-      <ThreadDetailsCard
-        v-if="details"
-        :class="{ 'beside-rp': ui.rightPanelVisible && !ui.swapPanels }"
-        :workspace="details.workspace"
-        :kind="details.kind"
-        :chat-id="details.chatId"
-        @close="detailsOpen = false"
-        @open-config="showProjectConfig = true"
-        @open-pr="(n, url) => { ui.rightPanelVisible = true; rightPanelRef?.openPullRequest(n, url, details!.workspace.id); }"
-      />
-      </Transition>
     </div>
     <WorkspaceConfig
       v-if="showProjectConfig && ws.active"
@@ -394,66 +390,6 @@ const details = computed(() => {
   const kind: "chat" | "tab" | "workspace" = !tab ? "workspace" : tab.chatId != null ? "chat" : "tab";
   return { workspace: w, kind, chatId: tab?.chatId };
 });
-// Opening/closing the RP or the details card re-lays the main area in one frame.
-// FLIP it instead of easing widths (which re-laid the transcript every frame and
-// stuttered): remember where each chat lane was, let the layout land once —
-// including the card inset, which follows mainWidth — then slide the lanes from
-// the old spot with transform. The card just fades in at its new spot; the RP
-// slides in from the right edge.
-const FLIP = { duration: 240, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" };
-function flipMainArea(rpOpening = false, fadeCard = false) {
-  const root = mainEl.value;
-  if (!root || compact.value || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const targets = () => [...root.querySelectorAll<HTMLElement>("[data-chat-lane]")]
-    .filter((el) => el.offsetParent !== null);
-  const before = new Map(targets().map((el) => [el, el.getBoundingClientRect().left]));
-  const cardEl = fadeCard ? document.querySelector<HTMLElement>(".ide-body > .details-card") : null;
-  const cardLeft = cardEl?.getBoundingClientRect().left;
-  nextTick(() => {
-    mainWidth.value = root.clientWidth; // don't wait for the ResizeObserver: the inset must land in this frame
-    nextTick(() => {
-      for (const el of targets()) {
-        const was = before.get(el);
-        const dx = was === undefined ? 0 : was - el.getBoundingClientRect().left;
-        if (Math.abs(dx) > 0.5) el.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], FLIP);
-      }
-      // The card is absolutely placed: it doesn't travel. It fades out where it was
-      // (held there by transform), then fades in where it landed.
-      if (cardEl && cardLeft !== undefined && cardEl.isConnected) {
-        const dx = cardLeft - cardEl.getBoundingClientRect().left;
-        const at = (x: number) => (x ? `translateX(${x}px)` : "none");
-        cardEl.animate([
-          { transform: at(dx), opacity: 1, offset: 0 },
-          { transform: at(dx), opacity: 0, offset: 0.45 },
-          { transform: "none", opacity: 0, offset: 0.55 },
-          { transform: "none", opacity: 1, offset: 1 },
-        ], { duration: 320, easing: "ease-in-out" });
-      }
-      const rp = rpOpening ? document.querySelector<HTMLElement>(".panel-right") : null;
-      if (rp) rp.animate([{ transform: `translateX(${rp.offsetWidth}px)`, opacity: 0.6 }, { transform: "none", opacity: 1 }], FLIP);
-    });
-  });
-}
-watch(detailsOpen, () => flipMainArea(), { flush: "pre" });
-// Closing: the RP stays rendered but out of flow (.rp-closing) for the slide, so
-// the main area widens — and FLIPs — at once while the panel leaves over it.
-const rpClosing = ref(false);
-let rpLeave: Animation | null = null;
-watch(() => ui.rightPanelVisible, (open) => {
-  rpLeave?.cancel();
-  rpLeave = null;
-  rpClosing.value = false;
-  const rp = document.querySelector<HTMLElement>(".panel-right");
-  const animate = !open && !compact.value && !!rp && !matchMedia("(prefers-reduced-motion: reduce)").matches;
-  flipMainArea(open, true);
-  if (!animate) return;
-  const w = rp.offsetWidth;
-  rpClosing.value = true;
-  nextTick(() => {
-    rpLeave = rp.animate([{ transform: "none" }, { transform: `translateX(${ui.swapPanels ? -w : w}px)`, opacity: 0.6 }], FLIP);
-    rpLeave.onfinish = () => { rpLeave = null; rpClosing.value = false; };
-  });
-}, { flush: "pre" });
 
 function toggleBottomTerminal() {
   if (showWelcome.value) toggleWelcomeBottom();
@@ -1152,16 +1088,10 @@ body {
 }
 
 .ide-body {
-  position: relative;
   display: flex;
   flex: 1;
   overflow: hidden;
 }
-/* Details card on .ide-body: right of the main area, left of an open RP (+4px handle). */
-.ide-body > .details-card.beside-rp { right: calc(var(--right-panel-width, 300px) + 12px); }
-/* The RP sliding away after a close: out of flow so the main area already has the room. */
-.panel-right.rp-closing { position: absolute; top: 0; bottom: 0; right: 0; z-index: 5; pointer-events: none; background: var(--bg-base); }
-.panels-swapped .panel-right.rp-closing { right: auto; left: 0; }
 
 .ide-main {
   position: relative;
@@ -1171,15 +1101,15 @@ body {
   flex-direction: column;
 }
 /* Thread details card open: the chat lane (transcript + composer) steps left of it
-   instead of running underneath — --details-inset from detailsLaneInset(). The move is
-   FLIP-animated in the script (transform), never by easing padding.
+   instead of running underneath — --details-inset from detailsLaneInset(). No transition:
+   the inset follows panel resizes, and easing it made the lane lag behind the RP.
+   Like t3code (panelAnimationDurationMs defaults to 0: "avoids per-frame layout work"),
+   panels and the lane don't animate at all; only the card itself fades in/out.
    ponytail: every mounted chat in a split gets it, not only the pane under the card. */
 .ide-main.details-reserve .chat-main { padding-right: var(--details-inset); }
-.details-card-enter-active, .details-card-leave-active { transition: opacity 0.2s ease; }
+.details-card-enter-active, .details-card-leave-active { transition: opacity 0.15s ease; }
 .details-card-enter-from, .details-card-leave-to { opacity: 0; }
-@media (prefers-reduced-motion: reduce) {
-  .details-card-enter-active, .details-card-leave-active { transition: none; }
-}
+@media (prefers-reduced-motion: reduce) { .details-card-enter-active, .details-card-leave-active { transition: none; } }
 
 .terminal-host {
   flex: 1;
