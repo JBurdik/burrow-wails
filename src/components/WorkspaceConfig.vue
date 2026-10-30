@@ -144,6 +144,15 @@
               />
               <span>Continue on error</span>
             </label>
+            <label class="flex cursor-pointer select-none items-center gap-1.5 text-[11px] text-muted-foreground">
+              <input
+                type="checkbox"
+                class="cursor-pointer accent-accent"
+                :checked="!!s.runOnWorktreeCreate"
+                @change="patch(s.id, { runOnWorktreeCreate: ($event.target as HTMLInputElement).checked })"
+              />
+              <span>Run when a worktree is created</span>
+            </label>
           </div>
         </div>
         <button

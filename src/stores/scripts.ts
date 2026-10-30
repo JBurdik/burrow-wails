@@ -16,6 +16,8 @@ export interface Script {
   name: string;
   steps: string[];
   continueOnError: boolean;
+  /** Run in every new worktree of this repo, right after it is created. */
+  runOnWorktreeCreate?: boolean;
   icon?: string;
   color?: string;
 }
@@ -26,6 +28,7 @@ function normalize(s: Record<string, unknown>): Script {
     name: String(s?.name ?? "Script"),
     steps: Array.isArray(s?.steps) ? (s.steps as unknown[]).map((x) => String(x)) : [],
     continueOnError: !!s?.continueOnError,
+    runOnWorktreeCreate: !!s?.runOnWorktreeCreate,
     icon: s?.icon != null ? String(s.icon) : undefined,
     color: s?.color != null ? String(s.color) : undefined,
   };
@@ -113,6 +116,7 @@ function serializeScriptsToml(scripts: Script[]): string {
     block += `name = "${escapeToml(s.name)}"\n`;
     block += `steps = ${stepsArr}\n`;
     block += `continueOnError = ${s.continueOnError}\n`;
+    if (s.runOnWorktreeCreate) block += `runOnWorktreeCreate = true\n`;
     if (s.color) block += `color = "${escapeToml(s.color)}"\n`;
     if (s.icon) block += `icon = "${escapeToml(s.icon)}"\n`;
     return block;

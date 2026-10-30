@@ -108,6 +108,13 @@
             </div>
             <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Start new worktrees from origin</span>
+                <span class="text-[11px] text-muted-foreground">Fetch the base branch from origin first and branch from the remote copy, so a new worktree starts from the latest commit. Falls back to the local branch when the fetch fails.</span>
+              </div>
+              <Switch :checked="ui.worktreeFromOrigin" @update:checked="(v: boolean) => ui.worktreeFromOrigin = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>
                 <span class="text-[11px] text-muted-foreground">Default model for generated text — chat titles, commit messages, pull request content and branch names. Kept cheap by default.</span>
               </div>

@@ -557,17 +557,33 @@
           ref="wtBranchEl"
         />
         <label class="-mb-1.5 text-[11px] font-semibold text-secondary-foreground">Base branch <span class="font-normal text-muted-foreground">(only for a new branch)</span></label>
-        <input
-          v-model="wtBase"
-          class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
-          placeholder="defaults to current HEAD"
-          list="wt-base-branches"
-          spellcheck="false"
-          @keydown.enter="confirmWorktree"
-          @keydown.esc="closeWtDialog"
-        />
+        <div class="relative">
+          <input
+            v-model="wtBase"
+            class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
+            placeholder="Search branches — empty = current HEAD"
+            spellcheck="false"
+            @focus="wtBaseOpen = true"
+            @blur="wtBaseOpen = false"
+            @input="wtBaseOpen = true"
+            @keydown.enter="confirmWorktree"
+            @keydown.esc.stop="wtBaseOpen ? (wtBaseOpen = false) : closeWtDialog()"
+          />
+          <div
+            v-if="wtBaseOpen && wtBaseMatches.length"
+            class="absolute left-0 right-0 top-full z-10 mt-1 max-h-[200px] overflow-y-auto rounded-md border border-border bg-[var(--bg-dropdown)] py-1"
+          >
+            <button
+              v-for="b in wtBaseMatches"
+              :key="b"
+              class="block w-full truncate px-2.5 py-1 text-left text-[12px] hover:bg-hover"
+              :class="b === wtBase ? 'text-accent' : 'text-foreground'"
+              @mousedown.prevent="wtBase = b; wtBaseOpen = false"
+            >{{ b }}</button>
+          </div>
+        </div>
         <datalist id="wt-base-branches">
-          <option v-for="b in wtBaseList" :key="b" :value="b" />
+          <option v-for="b in wtLocalBranches" :key="b" :value="b" />
         </datalist>
         <p class="overflow-hidden text-ellipsis whitespace-nowrap rounded border border-border bg-base px-2 py-1.5 font-mono text-[11px] text-secondary-foreground">{{ wtTargetPath }}</p>
         <p v-if="wtError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ wtError }}</p>
@@ -1432,22 +1448,21 @@ watch(() => active.value?.id, mountSections);
 // ── branch helpers (worktree dialog) ─────────────────────────────────────────
 interface GitOutput { stdout: string; stderr: string; code: number; }
 
-async function listBranches(path: string): Promise<string[]> {
-  if (git.cwd === path && git.branches.length > 0) return git.branches;
-  try {
-    const out = await invoke<GitOutput>("run_git", { cwd: path, args: ["branch", "--list"] });
-    if (out.code === 0) {
-      return out.stdout.split("\n").map((l) => l.replace(/^\*?\s+/, "").trim()).filter(Boolean);
-    }
-  } catch {}
-  return [];
-}
-
 // ── new worktree dialog ──────────────────────────────────────────────────────
 const wtParent = ref<Workspace | null>(null);
 const wtBranch = ref("");
 const wtBase = ref("");
 const wtBaseList = ref<string[]>([]);
+const wtBaseOpen = ref(false);
+// The Branch field suggests existing local branches to check out; the base
+// picker lists remote-tracking ones too (origin/x).
+const wtLocalBranches = ref<string[]>([]);
+const wtBaseMatches = computed(() => {
+  const q = wtBase.value.trim().toLowerCase();
+  // The prefilled default must not hide the rest of the list.
+  if (!q || wtBaseList.value.includes(wtBase.value)) return wtBaseList.value;
+  return wtBaseList.value.filter((b) => b.toLowerCase().includes(q));
+});
 const wtBusy = ref(false);
 const wtError = ref("");
 const wtBranchEl = ref<HTMLInputElement>();
@@ -1465,9 +1480,30 @@ async function openWtDialog(parent: Workspace) {
   wtBase.value = "";
   wtError.value = "";
   wtBaseList.value = [];
+  wtLocalBranches.value = [];
   await nextTick();
   wtBranchEl.value?.focus();
-  wtBaseList.value = await listBranches(parent.path);
+  const [refs, def] = await Promise.all([
+    gitLines(parent.path, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]),
+    gitLines(parent.path, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]),
+  ]);
+  if (wtParent.value !== parent) return;
+  wtLocalBranches.value = refs.filter((r) => r.startsWith("refs/heads/")).map((r) => r.slice("refs/heads/".length));
+  const remote = refs
+    .filter((r) => r.startsWith("refs/remotes/") && !r.endsWith("/HEAD"))
+    .map((r) => r.slice("refs/remotes/".length));
+  wtBaseList.value = [...wtLocalBranches.value, ...remote];
+  // Default to the repo's default branch (origin/HEAD, else main/master), else leave HEAD.
+  const defBranch = def[0]?.replace(/^origin\//, "") ?? ["main", "master"].find((b) => wtLocalBranches.value.includes(b));
+  if (!wtBase.value && defBranch && wtBaseList.value.includes(defBranch)) wtBase.value = defBranch;
+}
+
+async function gitLines(cwd: string, args: string[]): Promise<string[]> {
+  try {
+    const out = await invoke<GitOutput>("run_git", { cwd, args });
+    if (out.code === 0) return out.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  } catch {}
+  return [];
 }
 
 function closeWtDialog() {
