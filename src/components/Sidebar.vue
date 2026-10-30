@@ -168,6 +168,9 @@
               <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : PhChatCenteredText" :size="10" class="shrink-0" />
               <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="10" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" aria-label="Pinned" />
               <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
+              <span v-if="snoozedUntilOf(row.tab.chatId)" class="flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums" :title="`Snoozed until ${new Date(snoozedUntilOf(row.tab.chatId)).toLocaleString()}`">
+                <PhAlarm :size="10" />{{ formatWakeTime(snoozedUntilOf(row.tab.chatId), Date.now()) }}
+              </span>
               <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
               <span class="grid shrink-0 justify-items-end">
                 <span class="sb-ago [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
@@ -399,6 +402,25 @@
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
           {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
         </button>
+        <template v-if="rowMenu.tab.isChat && rowMenu.tab.chatId != null">
+          <button v-if="snoozedUntilOf(rowMenu.tab.chatId)" class="menu-item" @click="withMenu((_ws, tab) => chats.snooze(tab!.chatId!, 0))">
+            <PhAlarm :size="15" class="mr-1.5 shrink-0" />Unsnooze
+          </button>
+          <button class="menu-item" @click="snoozeMenuOpen = !snoozeMenuOpen">
+            <PhAlarm :size="15" class="mr-1.5 shrink-0" />Snooze
+            <PhCaretDown :size="9" weight="bold" class="ml-auto shrink-0 transition-transform" :class="!snoozeMenuOpen && '-rotate-90'" />
+          </button>
+          <template v-if="snoozeMenuOpen">
+            <button
+              v-for="preset in snoozePresets(Date.now())"
+              :key="preset.label"
+              class="menu-item !pl-7"
+              @click="withMenu((_ws, tab) => chats.snooze(tab!.chatId!, preset.until))"
+            >
+              {{ preset.label }}
+            </button>
+          </template>
+        </template>
         <button class="menu-item" @click="withMenu((ws, tab) => termTabs.close(ws.id, tab!.id))">Close tab</button>
         <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws, tab) => deleteThread(ws.id, tab!))">Delete thread…</button>
         <div class="menu-sep" />
@@ -587,6 +609,7 @@ import {
   PhAsterisk,
   PhMoon,
   PhDotsThree,
+  PhAlarm,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
 import UpdateBanner from "./UpdateBanner.vue";
@@ -614,6 +637,7 @@ import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorksp
 import { buildActivityRows, groupByRepo, parseShortstat, type ActivityRow } from "@/lib/sidebarGroups";
 import { childrenOf } from "@/stores/chatTree";
 import { toggleTabSettled } from "@/lib/settledTabs";
+import { formatWakeTime, snoozePresets } from "@/lib/snoozePresets";
 import { getProjectSettings } from "@/lib/projectSettings";
 
 
@@ -623,6 +647,8 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const chats = useClaudeChatsStore();
+const snoozedUntilOf = (chatId: number | null | undefined) =>
+  (chatId != null && chats.sessions.find((s) => s.id === chatId)?.snoozedUntil) || 0;
 const chatIsAsleep = (chatId: number | null | undefined) => chatId != null && chatAsleep(chats.sessions.find((s) => s.id === chatId));
 const chatRecapOf = (chatId: number | null | undefined) => (chatId != null && ui.chatRecaps ? chats.sessions.find((s) => s.id === chatId)?.recap : undefined);
 const ui = useUIStore();
@@ -1049,8 +1075,10 @@ const rowMenuStyle = computed(() =>
       }
     : {},
 );
+const snoozeMenuOpen = ref(false);
 function openRowMenu(ws: Workspace, tab: TabSummary | null, e: { clientX: number; clientY: number }) {
   rowMenu.value = { ws, tab, x: e.clientX, y: e.clientY };
+  snoozeMenuOpen.value = false;
 }
 
 // Long press = right click on touch (iOS Safari never fires `contextmenu` for it).

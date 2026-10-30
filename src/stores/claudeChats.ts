@@ -63,6 +63,9 @@ export interface ClaudeSession {
   // "side" = a side chat of parentChatId (src-wails/chatside.go), not a
   // sub-agent. Server-owned like collectedAt.
   kind?: "side";
+  // Snoozed until this unix ms (src-wails/chatsnooze.go): settled until then,
+  // Go wakes it. Server-owned like collectedAt — write via snooze().
+  snoozedUntil?: number;
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -84,6 +87,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export function settledFor(s: ClaudeSession | undefined, now: number): boolean {
   if (!s) return false;
   if (s.busy || s.status === "running" || s.status === "waiting" || s.status === "permission") return false;
+  if ((s.snoozedUntil ?? 0) > now) return true;
   if (s.settledOverride === "settled") return true;
   if (s.settledOverride === "active") return false;
   return now - (s.lastActivityAt ?? 0) >= AUTO_SETTLE_AFTER_DAYS * DAY_MS;
@@ -129,6 +133,7 @@ interface ChatRow {
   slept_at?: number;
   recap?: string;
   kind?: string;
+  snoozed_until?: number;
 }
 
 /**
@@ -166,6 +171,7 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     sleptAt: r.slept_at || undefined,
     recap: r.recap || undefined,
     kind: r.kind === "side" ? "side" : undefined,
+    snoozedUntil: r.snoozed_until || undefined,
     busy: false,
   };
 }
@@ -532,6 +538,15 @@ export function isActivitySync(
     if (!s) return;
     s.settledOverride = "active";
     persist();
+    if (s.snoozedUntil) snooze(id, 0); // "Move back to active" wins over a snooze
+  }
+
+  // until 0 = unsnooze. Optimistic; Go's chats-changed re-reads the row.
+  function snooze(id: number, until: number) {
+    const s = sessions.value.find((x) => x.id === id);
+    if (!s) return;
+    s.snoozedUntil = until || undefined;
+    void invoke("chat_snooze", { chatId: id, untilMs: until }).catch(() => {});
   }
 
   function isSettled(s: ClaudeSession | undefined): boolean {
@@ -617,6 +632,7 @@ export function isActivitySync(
     unarchive,
     settle,
     unsettle,
+    snooze,
     isSettled,
     sync,
     setModel,

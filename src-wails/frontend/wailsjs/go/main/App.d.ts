@@ -55,6 +55,8 @@ export function ChatSideCreate(arg1:number):Promise<main.Chat>;
 
 export function ChatSleep(arg1:number):Promise<boolean>;
 
+export function ChatSnooze(arg1:number,arg2:number):Promise<void>;
+
 export function ChatSteer(arg1:number,arg2:string,arg3:Array<string>):Promise<void>;
 
 export function ChatStopTask(arg1:number,arg2:string):Promise<void>;
@@ -254,6 +256,8 @@ export function PickFile(arg1:string,arg2:Array<string>):Promise<string>;
 export function PickFiles(arg1:string,arg2:Array<string>):Promise<Array<string>>;
 
 export function PlanUsage():Promise<main.PlanUsage>;
+
+export function PortListening(arg1:number):Promise<boolean>;
 
 export function ProbeProvider(arg1:string,arg2:string):Promise<main.ProviderProbe>;
 

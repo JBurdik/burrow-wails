@@ -203,6 +203,8 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE chats ADD COLUMN recap TEXT NOT NULL DEFAULT ''`,
 		// "side" marks a side chat (chatside.go), read-only on the wire.
 		`ALTER TABLE chats ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
+		// Snooze wake time (chatsnooze.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN snoozed_until INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
