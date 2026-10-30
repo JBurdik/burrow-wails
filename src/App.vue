@@ -1099,11 +1099,10 @@ body {
   flex-direction: column;
 }
 /* Thread details card open: the chat lane (transcript + composer) steps left of it
-   instead of running underneath — --details-inset from detailsLaneInset().
+   instead of running underneath — --details-inset from detailsLaneInset(). No transition:
+   the inset follows panel resizes, and easing it made the lane lag behind the RP.
    ponytail: every mounted chat in a split gets it, not only the pane under the card. */
-.ide-main .chat-main { transition: padding-right 0.18s ease; }
 .ide-main.details-reserve .chat-main { padding-right: var(--details-inset); }
-@media (prefers-reduced-motion: reduce) { .ide-main .chat-main { transition: none; } }
 
 .terminal-host {
   flex: 1;
