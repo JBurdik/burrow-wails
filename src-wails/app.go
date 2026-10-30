@@ -27,6 +27,7 @@ type App struct {
 	perms   *permRegistry
 	poller  *phasePoller
 	prompts *promptIndexer // nil until startup; refresh is nil-safe
+	push    *webPusher     // nil until startup (push.go)
 
 	streamOnce sync.Once
 	streamW    *chatStreamWriter
@@ -214,6 +215,7 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.db = db
+	a.push = newWebPusher(filepath.Join(dataDir, "vapid.pem"))
 	if ps, err := NewPhaseStore(db); err != nil {
 		log.Printf("phase store: %v", err)
 	} else {
