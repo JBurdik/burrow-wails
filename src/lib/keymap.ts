@@ -35,6 +35,7 @@ export const KEY_COMMANDS: KeyCommand[] = [
   { id: "closePane", label: "Close pane", group: "Tabs & panes", def: "⌘W", scope: "terminal" },
   { id: "splitH", label: "Split pane horizontally", group: "Tabs & panes", def: "⌘D", scope: "terminal" },
   { id: "splitV", label: "Split pane vertically", group: "Tabs & panes", def: "⌘⇧D", scope: "terminal" },
+  { id: "popOut", label: "Open pane in a separate window", group: "Tabs & panes", def: "⌘⌥O", scope: "terminal" },
   { id: "bottomPanel", label: "Toggle bottom terminal panel", group: "Tabs & panes", def: "⌘J", scope: "terminal" },
   { id: "repaint", label: "Repaint terminals (un-scramble)", group: "Tabs & panes", def: "⌘⇧R", scope: "app" },
 ];

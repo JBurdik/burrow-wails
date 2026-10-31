@@ -35,6 +35,15 @@ async function boot() {
   const label: string = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? "";
   const isGitPanel = label === "gitpanel";
 
+  // A secondary native window (src/lib/windows.ts): its own small root, never
+  // App.vue — that one runs app-wide side effects exactly one window may own.
+  if (location.hash.startsWith("#/window/")) {
+    document.getElementById("app")!.style.height = "100vh";
+    const { default: WindowApp } = await import("./WindowApp.vue");
+    createApp(WindowApp).use(pinia).mount("#app");
+    return;
+  }
+
   if (isGitPanel) {
     document.getElementById("app")!.style.height = "100vh";
     const { default: GitPanel } = await import("./components/GitPanel.vue");

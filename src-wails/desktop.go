@@ -14,6 +14,7 @@ import (
 	"burrow/internal/agentphase"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // The native window side of the app. Everything here needs a Wails window and
@@ -81,6 +82,69 @@ func (s *DesktopService) SendFloatSnapshot(ptyID, data string, cols, rows int) e
 }
 func (s *DesktopService) NotifyFloatGrid(ptyID string, cols, rows int) error {
 	return s.a.NotifyFloatGrid(ptyID, cols, rows)
+}
+
+// --- Secondary windows (Settings, popped-out tabs, the git panel) ---
+//
+// Each is the same frontend loaded at a "/window/..." hash route, which
+// main.ts boots into WindowApp.vue instead of App.vue. key makes a window
+// single-instance: opening it again only brings it forward. Closing one
+// emits window-closed <key> so the main window can take a popped tab back.
+
+var (
+	extraWins = map[string]*application.WebviewWindow{}
+	onTop     = map[string]bool{}
+	extraMu   sync.Mutex
+)
+
+func (s *DesktopService) OpenWindow(key, route, title string, width, height int) {
+	extraMu.Lock()
+	defer extraMu.Unlock()
+	if w, ok := extraWins[key]; ok {
+		w.Show()
+		w.Focus()
+		return
+	}
+	w := wapp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             key,
+		Title:            title,
+		Width:            width,
+		Height:           height,
+		URL:              "/#" + route,
+		BackgroundColour: application.NewRGB(27, 38, 54),
+		Mac:              application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
+	})
+	extraWins[key] = w
+	w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
+		extraMu.Lock()
+		delete(extraWins, key)
+		delete(onTop, key)
+		extraMu.Unlock()
+		desktopEmit("window-closed", key)
+	})
+}
+
+// CloseWindow closes a secondary window from the main one ("bring back").
+func (s *DesktopService) CloseWindow(key string) {
+	extraMu.Lock()
+	w := extraWins[key]
+	extraMu.Unlock()
+	if w != nil {
+		w.Close()
+	}
+}
+
+// toggleKeepOnTop backs Window → Keep on Top for whichever window is focused.
+func toggleKeepOnTop() {
+	w, ok := wapp.Window.Current().(*application.WebviewWindow)
+	if !ok || w == nil {
+		return
+	}
+	extraMu.Lock()
+	on := !onTop[w.Name()]
+	onTop[w.Name()] = on
+	extraMu.Unlock()
+	w.SetAlwaysOnTop(on)
 }
 
 // Window geometry: restored once the app has started, saved on close and ⌘Q.

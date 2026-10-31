@@ -116,7 +116,7 @@
             :chat-id="pane.leaf.chatId!"
             :workspace-id="workspaceId"
             :cwd="pane.leaf.cwd ?? cwd"
-            :is-watching="isWatching(tab)"
+            :is-watching="isWatching(tab) && !popouts.isPopped(pane.leaf.id)"
             :initial-prompt="pane.leaf.initialPrompt"
             :initial-images="pane.leaf.initialImages"
             :default-model="pane.leaf.initialModel"
@@ -134,11 +134,24 @@
             :initial-cmd="pane.leaf.initialCmd"
             :result-token="pane.leaf.resultToken"
             :initially-titled="!isDefaultTitle(pane.leaf.title)"
+            :frozen="popouts.isPopped(pane.leaf.id)"
             :ref="(el) => registerLeaf(pane.leaf.id, el)"
             @title="(t) => onLeafTitle(pane.leaf.id, t)"
             @spawn="(req) => addTab(req.cmd, { cwd: req.cwd || undefined, resultToken: req.token || undefined })"
             @cwd="(p) => onLeafCwd(pane.leaf.id, p)"
           />
+          <!-- Popped out into its own window: the view above stays mounted
+               (frozen, not resizing the PTY) so bringing it back re-attaches nothing. -->
+          <div
+            v-if="popouts.isPopped(pane.leaf.id)"
+            class="absolute inset-0 z-[4] flex flex-col items-center justify-center gap-3 bg-[var(--terminal-bg)] text-sm text-muted-foreground"
+          >
+            <PhAppWindow :size="32" weight="thin" />
+            <span>Open in a separate window</span>
+            <button class="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-hover" @click="popouts.bringBack(pane.leaf.id)">
+              Bring back
+            </button>
+          </div>
         </div>
         <div
           v-for="(div, i) in paneDividers(tab)"
@@ -195,7 +208,7 @@
 import { SHELL_RE } from "@/lib/termRegistry";
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { displayStatus, shouldMarkSeen, DONE_AUTOCLEAR_MS, type Phase } from "@/runtime/displayStatus";
-import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe } from "@phosphor-icons/vue";
+import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe, PhAppWindow } from "@phosphor-icons/vue";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useProvidersStore } from "@/stores/providers";
 import { providerIdForCommand } from "@/lib/providers";
@@ -234,6 +247,8 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
+import { usePopoutsStore } from "@/stores/popouts";
+import { canOpenWindows } from "@/lib/windows";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useGitStore } from "@/stores/git";
 import { useFileViewerStore } from "@/stores/fileViewer";
@@ -246,6 +261,17 @@ const uiStore = useUIStore();
 const chatsStore = useClaudeChatsStore();
 const providersStore = useProvidersStore();
 const tabsStore = useTerminalTabsStore();
+const popouts = usePopoutsStore();
+
+// Window → "Open in window" (⌘⌥O, Sidebar menu): a terminal or chat leaf only.
+function popOutLeaf(leafId: number = focusedLeafId.value) {
+  if (!canOpenWindows()) return;
+  const leaf = allLeaves().find((l) => l.id === leafId);
+  if (!leaf) return;
+  const kind = leaf.leafType === "chat" ? "chat" : !leaf.leafType || leaf.leafType === "terminal" ? "terminal" : null;
+  if (!kind || (kind === "chat" && leaf.chatId == null)) return;
+  popouts.popOut({ leafId, wsId: props.workspaceId, kind, chatId: leaf.chatId, cwd: leaf.cwd ?? props.cwd, title: leaf.title });
+}
 const keys = useKeybindingsStore();
 const notifStore = useNotificationsStore();
 const gitStore = useGitStore();
@@ -1472,6 +1498,7 @@ function onKeydown(e: KeyboardEvent) {
       ? closeActiveEditor()
       : closePane(focusedLeafId.value),
     splitH: () => splitFocused("terminal", "h"),
+    popOut: () => popOutLeaf(),
     splitV: () => splitFocused("terminal", "v"),
     // On the welcome screen this workspace is hidden; App.vue owns that panel.
     bottomPanel: () => { if (!uiStore.welcomeVisible) toggleBottomPanel(); },
@@ -1744,6 +1771,12 @@ function applyTabRequest(req: typeof tabsStore.request) {
     reorderTabs(req.fromIdx, req.toIdx);
   }
   else if (req.action === "openGit") openGitTab();
+  else if (req.action === "popout" && req.tabId != null) {
+    const tab = tabs.value.find((t) => t.id === req.tabId);
+    const leaves = tab ? getAllLeaves(tab.root) : [];
+    const leaf = leaves.find((l) => l.id === focusedLeafId.value) ?? leaves[0];
+    if (leaf) popOutLeaf(leaf.id);
+  }
   else if (req.action === "openChat") openClaudeChat(req.chatId, req.agentId, undefined, req.initialPrompt, req.initialImages, req.model);
   else if (req.action === "rename" && req.tabId != null && req.title != null) {
     const tab = tabs.value.find((t) => t.id === req.tabId);

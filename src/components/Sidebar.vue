@@ -413,6 +413,7 @@
     >
       <template v-if="rowMenu.tab">
         <button class="menu-item" @click="withMenu((ws, tab) => startTabRename(ws.id, tab!))">Rename tab…</button>
+        <button v-if="canOpenWindows()" class="menu-item" @click="withMenu((ws, tab) => termTabs.popOut(ws.id, tab!.id))">Open in window</button>
         <button v-if="rowMenu.tab.isChat" class="menu-item" @click="withMenu((ws, tab) => regenerateTitle(ws, tab!))">Regenerate title</button>
         <button v-if="rowMenu.tab.chatId != null" class="menu-item" @click="withMenu((_ws, tab) => toggleChatPin(tab!.chatId!))">
           <PhPushPin :size="15" class="mr-1.5 shrink-0" :weight="isChatPinned(rowMenu.tab.chatId) ? 'fill' : 'regular'" />
@@ -615,6 +616,7 @@
 </template>
 
 <script setup lang="ts">
+import { canOpenWindows as canOpenWindowsFn } from "@/lib/windows";
 import { ref, reactive, computed, shallowRef, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
 import {
   PhFolder,
@@ -695,6 +697,7 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
+const canOpenWindows = canOpenWindowsFn;
 const chats = useClaudeChatsStore();
 const snoozedUntilOf = (chatId: number | null | undefined) =>
   (chatId != null && chats.sessions.find((s) => s.id === chatId)?.snoozedUntil) || 0;

@@ -95,7 +95,11 @@ func appMenu() *application.Menu {
 	am.AddSeparator()
 	am.AddRole(application.Quit)
 	m.AddRole(application.EditMenu)
-	m.AddRole(application.WindowMenu)
+	wm := m.AddSubmenu("Window")
+	wm.AddRole(application.Minimise)
+	wm.AddRole(application.Zoom)
+	wm.AddSeparator()
+	wm.Add("Keep on Top").SetAccelerator("CmdOrCtrl+Alt+T").OnClick(func(*application.Context) { toggleKeepOnTop() })
 	help := m.AddSubmenu("Help")
 	for _, it := range []struct{ label, event string }{
 		{"Documentation", "menu-open-docs"},

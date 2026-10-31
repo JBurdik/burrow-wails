@@ -33,7 +33,7 @@ export interface TabSummary {
 
 type TabRequest = {
   wsId: number;
-  action: "activate" | "add" | "close" | "reorder" | "openChat" | "openGit" | "rename";
+  action: "activate" | "add" | "close" | "reorder" | "openChat" | "openGit" | "rename" | "popout";
   tabId?: number;
   chatId?: number;
   agentId?: string;
@@ -233,6 +233,9 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   function rename(wsId: number, tabId: number, title: string) {
     request.value = { wsId, action: "rename", tabId, title, nonce: ++nonce };
   }
+  function popOut(wsId: number, tabId: number) {
+    request.value = { wsId, action: "popout", tabId, nonce: ++nonce };
+  }
 
-  return { tabsByWs, activeByWs, activityByWs, request, setTabs, setActive, clear, activityAt, isCompletionUnseen, activate, add, fulfillAdd, close, reorder, openChat, openGit, rename };
+  return { tabsByWs, activeByWs, activityByWs, request, setTabs, setActive, clear, activityAt, isCompletionUnseen, activate, add, fulfillAdd, close, reorder, openChat, openGit, rename, popOut };
 });

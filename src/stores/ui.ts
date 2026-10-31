@@ -11,6 +11,7 @@ import {
   familyOf,
   variantFor,
 } from "@/themes";
+import { canOpenWindows, isSecondaryWindow, openWindow } from "@/lib/windows";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage, onConfigChanged } from "@/lib/config";
 import { compact, isWeb } from "@/lib/viewport";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -710,12 +711,20 @@ export const useUIStore = defineStore("ui", () => {
   function openSettings(section?: string, focusId?: string) {
     if (section) settingsSection.value = section;
     settingsFocusId.value = focusId ?? "";
+    // Desktop: its own window (single instance — a second ⌘, brings it
+    // forward). A paired browser / the phone keeps the in-page overlay.
+    if (canOpenWindows() && !isSecondaryWindow()) {
+      const q = new URLSearchParams({ section: settingsSection.value, focus: settingsFocusId.value });
+      void openWindow("settings", `/window/settings?${q}`, "Settings", 1000, 720);
+      return;
+    }
     settingsOpen.value = true;
   }
   function closeSettings() {
     settingsOpen.value = false;
   }
   function toggleSettings() {
+    if (canOpenWindows() && !isSecondaryWindow()) return openSettings();
     settingsOpen.value = !settingsOpen.value;
   }
   function toggleRightPanel() {

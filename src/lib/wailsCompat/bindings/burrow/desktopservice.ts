@@ -22,6 +22,13 @@ export function CheckUpdate(): $CancellablePromise<$models.UpdateInfo> {
     return $Call.ByID(3715642294);
 }
 
+/**
+ * CloseWindow closes a secondary window from the main one ("bring back").
+ */
+export function CloseWindow(key: string): $CancellablePromise<void> {
+    return $Call.ByID(2033037563, key);
+}
+
 export function GetAppVersion(): $CancellablePromise<string> {
     return $Call.ByID(3801962238);
 }
@@ -44,6 +51,10 @@ export function NotifyFloatGrid(ptyID: string, cols: number, rows: number): $Can
 
 export function OpenGitPanelWindow(): $CancellablePromise<void> {
     return $Call.ByID(2778084751);
+}
+
+export function OpenWindow(key: string, route: string, title: string, width: number, height: number): $CancellablePromise<void> {
+    return $Call.ByID(1239964761, key, route, title, width, height);
 }
 
 export function PickDirectory(): $CancellablePromise<string> {

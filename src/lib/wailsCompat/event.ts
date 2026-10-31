@@ -22,6 +22,7 @@ export type UnlistenFn = () => void;
  *                   send_float_snapshot/notify_float_grid calls on the Wails
  *                   bindings for the same reason)
  *   extension-task: extension_bridge.go
+ *   window-closed   desktop.go, a secondary window closed (popouts store)
  *   update:*        updater.go's progress (updater.ts subscribes with its own
  *                   Events.On today; listed so routing it through listen()
  *                   later cannot silently go quiet)
@@ -29,7 +30,7 @@ export type UnlistenFn = () => void;
  * If one of these ever becomes something a remote client needs, the fix is to
  * move its emitter to busEmit — not to add a second delivery path here.
  */
-const DESKTOP_ONLY_EVENT_PREFIXES = ["menu-", "lsp-msg-", "float-", "extension-task:", "update:"];
+const DESKTOP_ONLY_EVENT_PREFIXES = ["menu-", "lsp-msg-", "float-", "extension-task:", "update:", "window-closed"];
 
 function isDesktopOnly(event: string): boolean {
   return DESKTOP_ONLY_EVENT_PREFIXES.some((prefix) => event.startsWith(prefix));

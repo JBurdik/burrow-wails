@@ -33,7 +33,10 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-const props = defineProps<{ ptyId: number; cwd: string; initialCmd?: string; resultToken?: string; initiallyTitled?: boolean }>();
+// `frozen`: the leaf is popped out into its own window, which owns the PTY's
+// size now. This view keeps streaming (so bringing it back needs no re-attach)
+// but must not resize_pty — two views fighting over one grid garble the TUI.
+const props = defineProps<{ ptyId: number; cwd: string; initialCmd?: string; resultToken?: string; initiallyTitled?: boolean; frozen?: boolean }>();
 // No status emits: the agent's phase is derived in Go and reaches Terminal.vue
 // on `phase-pty:{id}`. What is left here is what only the view can know — the
 // title, an OSC 7 cwd, and a spawn request.
@@ -261,7 +264,7 @@ function safeFit(): boolean {
   if (changed) {
     lastPtyCols = term.cols;
     lastPtyRows = term.rows;
-    invoke("resize_pty", { id: props.ptyId, cols: term.cols, rows: term.rows });
+    if (!props.frozen) invoke("resize_pty", { id: props.ptyId, cols: term.cols, rows: term.rows });
   }
   notifyFloatGrid();
   return changed;
@@ -773,10 +776,22 @@ watch(
     fitAddon?.fit();
     lastPtyCols = term.cols;
     lastPtyRows = term.rows;
-    invoke("resize_pty", { id: props.ptyId, cols: term.cols, rows: term.rows });
+    if (!props.frozen) invoke("resize_pty", { id: props.ptyId, cols: term.cols, rows: term.rows });
     // Font/scale change resizes glyphs → the atlas still holds old-size glyphs.
     // Clear + full redraw so the new metrics render cleanly (no doubled rows).
     forceRepaint();
+  },
+);
+
+// Back from a popped-out window: this view owns the size again. Forget the
+// last sent grid so the next fit always sends resize_pty (the TUI redraws).
+watch(
+  () => props.frozen,
+  (frozen) => {
+    if (frozen || !term) return;
+    lastPtyCols = -1;
+    lastPtyRows = -1;
+    safeFit();
   },
 );
 
