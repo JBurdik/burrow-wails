@@ -29,6 +29,13 @@ The desktop's data path already runs over `/v2/ws` (`remoteapi.go` reflects on
 Untouched: everything behind `/v2/ws`, `remoteAllowed`, phase store, chat runtime,
 headless build (`main_headless.go` — no Wails import), daemon, MCP sidecar.
 
+## Status
+
+- 1:1 migration: done (`chore(wails): migrate from Wails v2 to v3`). Signing/notarization stayed in the
+  justfile (inner binaries must be signed with entitlements before the bundle; `wails3 tool sign` is `--deep`).
+- Hide-on-close + tray: done (text label, no icon yet).
+- Manual smoke: pending.
+
 ## Decisions (grilled 2026-10-31)
 
 1. **Why**: stay off maintenance-only v2; multi-window (floats, git panel) is the payoff — **separate PR** after this one.

@@ -26,9 +26,10 @@ func main() {
 		Name:     "Burrow",
 		Services: []application.Service{application.NewService(&DesktopService{a: app})},
 		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(dist)},
-		Mac:      application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
+		Mac:      application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		// ⌘Q never fires WindowClosing, so the geometry is saved here too.
 		ShouldQuit: func() bool {
+			quitting.Store(true)
 			app.saveWindowState(mainWin)
 			return true
 		},
@@ -55,14 +56,23 @@ func main() {
 		}
 		busEmit("file-drop", map[string]any{"x": x, "y": y, "paths": e.Context().DroppedFiles()})
 	})
-	mainWin.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) {
+	// Close = hide; the backend keeps running for the phone and schedules.
+	mainWin.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		app.saveWindowState(mainWin)
+		if !quitting.Load() {
+			e.Cancel()
+			mainWin.Hide()
+		}
+	})
+	wapp.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
+		showMainWindow()
 	})
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		app.restoreWindowState(mainWin)
 	})
 
 	app.startup(context.Background())
+	setupTray(app)
 
 	if err := wapp.Run(); err != nil {
 		log.Fatal(err)

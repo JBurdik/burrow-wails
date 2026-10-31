@@ -234,6 +234,7 @@ func (a *App) startup(ctx context.Context) {
 		ps.onChange = func(id string, prev, next agentphase.Phase) {
 			a.perms.phaseChanged(id, next)
 			a.pushPhaseChanged(id, prev, next)
+			desktopPhaseChanged(a)
 		}
 	}
 

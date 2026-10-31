@@ -3,8 +3,8 @@
 package main
 
 import (
-	"errors"
 	"context"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -57,7 +57,8 @@ func main() {
 // No window: desktop-only events have no consumer, and nothing can open a
 // native dialog or quit a window loop.
 func desktopEmit(string, ...any) {}
-func desktopQuit()             {}
+func desktopQuit()               {}
+func desktopPhaseChanged(*App)   {}
 func pickPaths(bool, bool, string, []string) ([]string, error) {
 	return nil, errors.New("no native dialogs in headless mode")
 }

@@ -620,6 +620,10 @@ One file per subsystem:
 | `remoteapi.go`, `remoteproto.go`, `remotews.go`, `shellstream.go`, `shellsnapshot.go` | the `/v2/ws` surface (above) |
 | `remoteauth.go`, `remotedevices.go`, `remoteguard.go` | pairing, devices, startup guards (above) |
 
+**Closing the window hides it** (`desktop.go`, `main.go`): the backend keeps serving the phone, schedules and
+running chats; ⌘Q or the tray's Quit really quits (`quitting` flag, `ShouldQuit`), the Dock icon reopens it. The
+system tray label counts phases in `waiting_*` (`trayLabel`, recounted from `PhaseStore.All` on every change).
+
 There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own
 `/v2/ws` connection like any client. The only names still on the Wails event channel (`menu-*`,
 `lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `desktopEmit` (`desktop.go`) directly,

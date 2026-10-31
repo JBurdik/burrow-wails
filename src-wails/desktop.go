@@ -4,9 +4,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
+
+	"burrow/internal/agentphase"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -131,3 +136,66 @@ func (a *App) saveWindowState(w *application.WebviewWindow) {
 		log.Printf("window state: %v", err)
 	}
 }
+
+// --- Hide on close + system tray ---
+//
+// Closing the window only hides it: the backend keeps serving the phone,
+// schedules and running chats. ⌘Q / the tray's Quit really quit. The tray
+// shows how many chats and tabs are waiting on the user.
+
+var (
+	quitting atomic.Bool
+	tray     *application.SystemTray
+	trayMu   sync.Mutex
+)
+
+func showMainWindow() {
+	if mainWin != nil {
+		mainWin.Show()
+		mainWin.Focus()
+	}
+}
+
+func quitApp(a *App) {
+	quitting.Store(true)
+	a.saveWindowState(mainWin)
+	wapp.Quit()
+}
+
+func setupTray(a *App) {
+	tray = wapp.SystemTray.New()
+	m := application.NewMenu()
+	m.Add("Open Burrow").OnClick(func(*application.Context) { showMainWindow() })
+	m.AddSeparator()
+	m.Add("Quit Burrow").OnClick(func(*application.Context) { quitApp(a) })
+	tray.SetMenu(m)
+	refreshTray(a)
+}
+
+// refreshTray recounts from PhaseStore.All rather than tracking deltas, so a
+// Forget()ed phase (reused PTY id) can't leave a stale count behind. Called
+// on its own goroutine from onChange: All takes the store's lock.
+func refreshTray(a *App) {
+	if tray == nil || a.phases == nil {
+		return
+	}
+	trayMu.Lock()
+	defer trayMu.Unlock()
+	tray.SetLabel(trayLabel(a.phases.All()))
+}
+
+// ponytail: text label, no icon — a template icon can come with the Dock badge.
+func trayLabel(phases map[string]agentphase.Phase) string {
+	n := 0
+	for _, p := range phases {
+		if p.State == agentphase.WaitingInput || p.State == agentphase.WaitingApproval {
+			n++
+		}
+	}
+	if n == 0 {
+		return "◆"
+	}
+	return fmt.Sprintf("◆ %d", n)
+}
+
+func desktopPhaseChanged(a *App) { go refreshTray(a) }
