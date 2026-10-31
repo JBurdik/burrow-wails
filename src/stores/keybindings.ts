@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
-import { configReady, getConfig, setConfig } from "../lib/config";
+import { configReady, getConfig, setConfig, onConfigChanged } from "../lib/config";
 import { KEY_COMMANDS, type KeyCommand, type KeyScope } from "../lib/keymap";
 import { matchesShortcut } from "../lib/shortcuts";
 
@@ -13,8 +13,11 @@ const CONFIG_KEY = "keybindings";
 export const useKeybindingsStore = defineStore("keybindings", () => {
   const overrides = ref<Record<string, string>>({});
 
+  const load = () => { overrides.value = { ...getConfig<Record<string, string>>(CONFIG_KEY, {}) }; };
   configReady.then(() => {
-    overrides.value = { ...getConfig<Record<string, string>>(CONFIG_KEY, {}) };
+    load();
+    // Another window (Settings) or device changed them.
+    onConfigChanged((key) => { if (key === CONFIG_KEY || key === "*") load(); });
   });
 
   watch(overrides, (v) => setConfig(CONFIG_KEY, v), { deep: true });

@@ -11,7 +11,7 @@ import {
   familyOf,
   variantFor,
 } from "@/themes";
-import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage, onConfigChanged } from "@/lib/config";
 import { compact, isWeb } from "@/lib/viewport";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { router, tabsOrWelcome, workspaceRoute } from "@/router";
@@ -389,8 +389,9 @@ export const useUIStore = defineStore("ui", () => {
   // In-memory blob URL for the current wallpaper (not persisted).
   const bgImageUrl = ref<string>("");
 
-  configReady.then(() => {
-    migrateFromLocalStorage(PREFS_KEY, CONFIG_KEY);
+  // Re-run on config-changed: another window (the Settings window) or a
+  // paired device saved uiPrefs.
+  function applyPrefs() {
     const p = normalize({ ...getConfig<object>(CONFIG_KEY, DEFAULT_PREFS), ...webLayout() });
     uiFont.value = p.uiFont;
     uiFontSize.value = p.uiFontSize;
@@ -457,6 +458,11 @@ export const useUIStore = defineStore("ui", () => {
     textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
     textGenerationPolicy.value = p.textGenerationPolicy ?? "default";
     textGenerationRules.value = p.textGenerationRules ?? "";
+  }
+  configReady.then(() => {
+    migrateFromLocalStorage(PREFS_KEY, CONFIG_KEY);
+    applyPrefs();
+    onConfigChanged((key) => { if (key === CONFIG_KEY || key === "*") applyPrefs(); });
   });
 
   // Publish the soft sub-agent cap to a file the `burrow` CLI can read (it can't

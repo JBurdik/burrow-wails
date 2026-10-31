@@ -1,9 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { appTransport } from "@/lib/wailsCompat/core";
 
 let cache: Record<string, unknown> = {};
 let loaded = false;
+// JSON of each key as last written or received. setConfig skips a write that
+// would not change it — otherwise two windows applying each other's
+// config-changed (new array/object refs fire the store watchers that save)
+// would echo the same value back and forth forever. A snapshot, not the cache
+// value itself, because callers mutate cached objects in place.
+const lastJSON: Record<string, string> = {};
 
-export const configReady: Promise<void> = (async () => {
+type ConfigListener = (key: string) => void;
+const listeners = new Set<ConfigListener>();
+
+async function readAll(): Promise<void> {
   try {
     const raw = await invoke<string>("read_config");
     cache = JSON.parse(raw) || {};
@@ -11,13 +22,48 @@ export const configReady: Promise<void> = (async () => {
     cache = {};
   }
   loaded = true;
-})();
+}
+
+export const configReady: Promise<void> = readAll();
+
+// Every window (and paired phone) holds its own copy of config.json. Writes go
+// out one key at a time (config_set) and come back to everyone as
+// config-changed, so another window's Settings change lands here instead of
+// being overwritten by this copy's next save. config-changed is not in the
+// resume ring, so a resync re-reads the whole file.
+void configReady.then(() => {
+  try {
+    void listen<{ key: string; value: unknown }>("config-changed", ({ payload }) => {
+      cache[payload.key] = payload.value;
+      lastJSON[payload.key] = JSON.stringify(payload.value ?? null);
+      for (const fn of listeners) fn(payload.key);
+    }).catch(() => {});
+    appTransport().onResync(() => {
+      void readAll().then(() => {
+        for (const fn of listeners) fn("*");
+      });
+    });
+  } catch {
+    // No endpoint (an unpaired phone, unit tests): nothing to stay in sync with.
+  }
+});
+
+/** Called with the changed key ("*" after a full re-read) when config.json
+ *  changes underneath this client — another window or device saved it. */
+export function onConfigChanged(fn: ConfigListener): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
 
 let pending: Promise<unknown> = Promise.resolve();
 
-function persist() {
-  pending = invoke("write_config", { content: JSON.stringify(cache) }).catch(() => {
-    // best-effort; next setConfig call will retry with the latest cache
+function persistKey(key: string) {
+  const json = JSON.stringify(cache[key] ?? null);
+  if (lastJSON[key] === json) return;
+  lastJSON[key] = json;
+  pending = invoke("config_set", { key, value: cache[key] ?? null }).catch(() => {
+    // best-effort; forget the snapshot so the next setConfig of this key retries
+    if (lastJSON[key] === json) delete lastJSON[key];
   });
 }
 
@@ -34,7 +80,7 @@ export function getConfig<T>(key: string, fallback: T): T {
 
 export function setConfig(key: string, value: unknown): void {
   cache[key] = value;
-  persist();
+  persistKey(key);
 }
 
 // One-time migration: pull a legacy localStorage value into config.json, then
@@ -50,5 +96,5 @@ export function migrateFromLocalStorage(lsKey: string, configKey: string): void 
     cache[configKey] = raw;
   }
   localStorage.removeItem(lsKey);
-  persist();
+  persistKey(configKey);
 }

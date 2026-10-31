@@ -513,6 +513,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// App config file
 	"read_config":  {Method: "ReadConfig", Args: nil, Scope: scopeOrchRead},
 	"write_config": {Method: "WriteConfig", Args: []string{"content"}, Scope: scopeOrchOperate},
+	"config_set":   {Method: "ConfigSet", Args: []string{"key", "value"}, Scope: scopeOrchOperate},
 
 	// Claude account/usage (stubbed — "unavailable" until reverse-engineered)
 	"claude_get_account": {Method: "ClaudeGetAccount", Args: []string{"cwd"}, Scope: scopeOrchRead},

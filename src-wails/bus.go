@@ -136,6 +136,9 @@ var notRingable = []string{
 	// A one-shot UI gesture: replaying a stale drop on resume would insert the
 	// files into the composer a second time.
 	"file-drop",
+	// Carries whole config values (some run to hundreds of KB); a client that
+	// resyncs re-reads config.json instead (src/lib/config.ts).
+	"config-changed",
 }
 
 // isRingable reports whether an event belongs in the replay ring.

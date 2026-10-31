@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { configReady, getConfig, setConfig } from "../lib/config";
+import { configReady, getConfig, setConfig, onConfigChanged } from "../lib/config";
 import {
   PROVIDER_CATALOG,
   providerFor,
@@ -96,6 +96,17 @@ export const useProvidersStore = defineStore("providers", () => {
     status.value = getConfig<Record<string, ProviderStatus>>(STATUS_KEY, {});
     latest.value = getConfig<Record<string, ProviderLatestVersion>>(LATEST_KEY, {});
     ready.value = true;
+    // Another window (Settings) or device changed them.
+    onConfigChanged((key) => {
+      const all = key === "*";
+      if (all || key === CONFIG_KEY) {
+        const next = normalize(getConfig<unknown>(CONFIG_KEY, null));
+        if (next) instances.value = next;
+      }
+      if (all || key === ALIAS_KEY) aliases.value = getConfig<Record<string, string>>(ALIAS_KEY, {});
+      if (all || key === STATUS_KEY) status.value = getConfig<Record<string, ProviderStatus>>(STATUS_KEY, {});
+      if (all || key === LATEST_KEY) latest.value = getConfig<Record<string, ProviderLatestVersion>>(LATEST_KEY, {});
+    });
   });
 
   watch(instances, (v) => ready.value && setConfig(CONFIG_KEY, v), { deep: true });
