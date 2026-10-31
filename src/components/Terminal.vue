@@ -1379,6 +1379,10 @@ async function closeTab(tabId: number) {
     if (!ok) return;
   }
 
+  // A leaf shown in its own window goes with the tab — the window would
+  // otherwise keep showing a dead terminal or a stopped chat.
+  leaves.forEach((l) => { if (popouts.isPopped(l.id)) popouts.bringBack(l.id); });
+
   // Explicitly kill PTYs so the daemon drops them (not a detach — user closed the
   // tab). Editor/diff leaves have no PTY — skip them. AWAIT each kill: fire-and-forget
   // raced app-quit — if the user closed a tab then quit before the daemon processed
@@ -1450,6 +1454,7 @@ async function closePane(leafId: number) {
     const ok = await confirmClose(leaf.title, "unsaved");
     if (!ok) return;
   }
+  if (popouts.isPopped(leafId)) popouts.bringBack(leafId);
   if (leaf?.leafType === "chat") {
     stopChatSession(leaf);
   } else if (leaf && leaf.leafType !== "editor" && leaf.leafType !== "diff") {

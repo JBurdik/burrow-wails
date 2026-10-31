@@ -1,7 +1,7 @@
-// Stub for "@tauri-apps/api/webviewWindow" — multi-window control
-// (float bubble -> focus main window) has no Wails port yet; Wails v2 is
-// single-window by default (float bubbles need a redesign, see plan
-// phase 7). Returns null so callers' `if (main)` guards no-op safely.
+// Stub for "@tauri-apps/api/webviewWindow" — the Tauri float-bubble API
+// (focus main window from a bubble). Real secondary windows are
+// src/lib/windows.ts (Wails v3 OpenWindow); this shim stays a no-op for the
+// leftover callers. Returns null so their `if (main)` guards no-op safely.
 interface StubWindow {
   show(): Promise<void>;
   setFocus(): Promise<void>;

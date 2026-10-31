@@ -406,7 +406,7 @@ The desktop's **entire** data path — PTY bytes, chat events, every SQLite-back
 `ws://127.0.0.1:<hookPort>/v2/ws` on the hook server's always-on loopback mux. A phone connects to the
 same surface at a different URL, so remote access can't drift from a separate desktop API.
 `src/lib/wailsCompat/core.ts` is now a pass-through; what's left there is `CLIENT_SIDE_COMMANDS`
-(`detach_pty`, `send_float_snapshot`, `notify_float_grid`, `open_git_panel_window`) plus a few cases
+(`detach_pty`, `send_float_snapshot`, `notify_float_grid`) plus a few cases
 that reshape args.
 
 - **`remoteapi.go`'s `remoteAllowed`** is the security boundary: wire name → `App` method + positional
@@ -433,6 +433,44 @@ that reshape args.
   the `EndpointSource`; `boundary.test.ts` keeps `src/runtime` from importing components/stores/xterm).
   It queues pre-open calls, keeps its listener map across reconnects, asks for a fresh ticket on every attempt,
   and **rejects queued calls rather than replaying them** on a real drop.
+
+### Native windows + the desktop shell (`src-wails/desktop.go`, `src/WindowApp.vue`, `src/lib/windows.ts`)
+
+**All Wails code is in `desktop.go`** (+ `main.go`'s bootstrap); `main_headless.go` has no-op twins
+(`desktopEmit`, `desktopQuit`, `pickPaths`, `desktopPhaseChanged`) so the headless/Linux build never links
+Wails. The binding surface is **`DesktopService`** (~13 methods: `LocalEndpoint`, dialogs, updater, float
+relay, `OpenWindow`/`CloseWindow`) — not `App`. After changing it: `wails3 generate bindings -ts -i -clean -d
+../src/lib/wailsCompat/bindings` (committed). `just dev-mcp` compiles in Wails' MCP server
+(`127.0.0.1:9099/mcp`) so an agent can drive the running app.
+
+**Secondary windows** (`OpenWindow(key, route, title, w, h, floating)`): the same frontend at a
+`#/window/<kind>/…` hash, which `main.ts` boots into **`WindowApp.vue`, never `App.vue`** — App.vue owns
+app-wide side effects one window may run (control-bridge acks, `chatAttention`, notifications). Single
+instance per `key`; closing emits `window-closed <key>` (desktop-only event). Kinds: `settings` (⌘,; a
+paired browser / phone keeps the overlay; `windowed` prop = own drag strip, no ✕), `terminal`/`chat`
+(**Open in window**: Sidebar tab menu, ⌘⌥O), `git` (GitPanel's pop-out). `floating` disables the zoom
+button so tiling WMs (AeroSpace's `isDialogHeuristic`) float it — Settings only. ⌘W / Esc are handled in
+WindowApp, **not** as native accelerators (that would eat ⌘W = close pane in the main window).
+
+**A popped-out leaf stays owned by the main window** (`usePopoutsStore`): its Sidebar row stays, the pane
+shows a Bring-back placeholder, and its `XTerm` stays mounted with **`frozen`** — no `resize_pty`, since two
+views fighting over one PTY grid garble a TUI. Unfreezing forces one resize (the TUI redraws); nothing is
+re-attached. Closing the tab/pane closes its window. Known gap: a popped chat's completion can leave a
+review dot in the main Sidebar (receipts are per window).
+
+**Close = hide**: the backend keeps serving the phone, schedules and running chats; ⌘Q / tray Quit really
+quit (`quitting` flag, `ShouldQuit`), the Dock icon reopens. The tray label counts phases in `waiting_*`
+(`trayLabel`, recounted from `PhaseStore.All` on every change). Window → Keep on Top (⌘⌥T).
+
+### `config.json` is written one key at a time (`src-wails/config.go`, `src/lib/config.ts`)
+
+Every window and paired phone holds its own copy of config.json. `setConfig` sends only its key
+(`config_set` → `ConfigSet`: merge under `configMu`, refuse to overwrite an unreadable file) and Go emits
+`config-changed {key, value}` to everyone — the old whole-file `write_config` let one client's stale copy
+revert another's change. Not ringed (values run to hundreds of KB); a resync re-reads the file. `setConfig`
+skips a write whose JSON equals the last written/received value, or two windows re-applying each other's
+change echo forever. `onConfigChanged(key)` re-applies: uiPrefs, keybindings, provider instances — other
+stores still read config only at startup.
 
 ### The shell stream: `seq`, the ring, resume (`src-wails/shellstream.go` + `shellsnapshot.go`)
 
@@ -620,13 +658,9 @@ One file per subsystem:
 | `remoteapi.go`, `remoteproto.go`, `remotews.go`, `shellstream.go`, `shellsnapshot.go` | the `/v2/ws` surface (above) |
 | `remoteauth.go`, `remotedevices.go`, `remoteguard.go` | pairing, devices, startup guards (above) |
 
-**Closing the window hides it** (`desktop.go`, `main.go`): the backend keeps serving the phone, schedules and
-running chats; ⌘Q or the tray's Quit really quits (`quitting` flag, `ShouldQuit`), the Dock icon reopens it. The
-system tray label counts phases in `waiting_*` (`trayLabel`, recounted from `PhaseStore.All` on every change).
-
 There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own
 `/v2/ws` connection like any client. The only names still on the Wails event channel (`menu-*`,
-`lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `desktopEmit` (`desktop.go`) directly,
+`lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`, `window-closed`) are emitted with `desktopEmit` (`desktop.go`) directly,
 and `src/lib/wailsCompat/event.ts` routes exactly those prefixes. `events_test.go` greps every non-test
 `.go` file for a direct `desktopEmit(` / `.Event.Emit(` against an explicit allowlist, so a new event can't quietly skip
 remote clients.

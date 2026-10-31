@@ -6,9 +6,9 @@ package main
 // on load — call sites already treat empty/absent data as "unavailable",
 // matching Tauri behavior when e.g. not logged in.
 //
-// Float/bubble *windows* were removed outright per user decision (Wails v2
-// has no multi-window support; not worth a v3 migration or an overlay
-// redesign right now) — see popOutTab/FloatBubble.vue removal. The
+// Float/bubble *windows* were removed back on Wails v2 (single window). v3
+// windows are desktop.go's OpenWindow (Settings, Open in window, Git); a
+// float bubble would be one more WindowApp kind, not this protocol. The
 // snapshot *protocol* below is NOT float-window-specific despite the name:
 // TaskLiveTerm.vue's read-only task live-view reuses the same request/
 // send/grid events, so these three stay real (relayed via Wails events),

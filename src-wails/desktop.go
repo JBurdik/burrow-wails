@@ -173,8 +173,8 @@ func (a *App) restoreWindowState(w *application.WebviewWindow) {
 		return
 	}
 	b, err := os.ReadFile(path)
-	if err != nil {
-		return // first launch (or unreadable) — keep the defaults from main.go
+	if err != nil || len(b) == 0 {
+		return // first launch (or unreadable/empty) — keep the defaults from main.go
 	}
 	var st windowState
 	if err := json.Unmarshal(b, &st); err != nil {

@@ -516,6 +516,32 @@ single-use), and **rejects every queued call rather than replaying it** once a c
 actually drops — a queued call replayed against the next connection could arrive for an id
 whose promise was already rejected, with nowhere for the eventual reply to go.
 
+### Native windows (`src-wails/desktop.go`, `src/WindowApp.vue`)
+
+Wails v3 (migrated from v2, `docs/plans/007-wails-v3.md`) allows more than one window. The rules that
+make that safe:
+
+- **A second window never boots `App.vue`.** It loads the same bundle at `#/window/<kind>/…`, and
+  `main.ts` mounts `WindowApp.vue` instead. App.vue starts things exactly one window may run: the
+  control-bridge listener that acks `control:action` (two acks race), `chatAttention` (the only writer of
+  `session.status`), toasts and native notifications (would fire twice).
+- **A popped-out leaf is not moved, it is mirrored.** The main window keeps the tab, its Sidebar row and
+  a mounted `XTerm` in `frozen` mode; the new window attaches a second view to the same PTY (the stream
+  already supports several clients — the phone is one). Only the popped window may `resize_pty`: one PTY
+  has one grid, and two views resizing it alternately leave an alt-screen TUI garbled. Bringing it back
+  unfreezes and sends one resize; the TUI redraws. Moving the view instead would mean unmounting and
+  re-attaching the PTY, which replays the ring into a re-fitted xterm and corrupts the scrollback — the
+  reason the terminal host never unmounts in the first place.
+- **Settings in its own window forced config sync.** config.json was written whole from each client's
+  in-memory copy; with a Settings window that is a guaranteed lost update (save a theme there, the main
+  window reverts it on its next unrelated save). `ConfigSet` writes one key under a lock and broadcasts
+  `config-changed`; `setConfig` skips writes equal to the last seen JSON so windows applying each other's
+  change don't ping-pong.
+- **Closing the main window hides it.** Burrow is a server for the phone and for schedules; quitting on
+  close killed both. ⌘Q and the tray's Quit set `quitting` so the WindowClosing hook lets the window go.
+- **Floating vs. tiling.** Tiling window managers float a window with no enabled fullscreen button
+  (AeroSpace `isDialogHeuristic`, like System Settings); `OpenWindow(…, floating)` uses that for Settings.
+
 ### The shell stream: `seq`, the ring, resume (`src-wails/shellstream.go` + `shellsnapshot.go`)
 
 A dropped connection used to be data loss. `busEmit` now **numbers** an event before it
