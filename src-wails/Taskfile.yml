@@ -21,12 +21,12 @@ env:
 
 tasks:
   build:
-    summary: Compile the app binary. DEV=true builds the dev-channel binary (`dev` tag, channel_dev.go).
+    summary: Compile the app binary. DEV=true builds the dev-channel binary (`dev` tag, channel_dev.go). WAILS_MCP=1 adds the `mcp` tag (via EXTRA_TAGS) — the app's built-in MCP server on 127.0.0.1:9099/mcp.
     cmds:
       - mkdir -p {{.BIN}}
       - >-
         go build
-        {{if eq .DEV "true"}}-tags dev -gcflags=all="-l"{{else}}-tags production -trimpath -ldflags="-w -s -X main.buildChannel={{.CHANNEL}}"{{end}}
+        {{if eq .DEV "true"}}-tags dev{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -gcflags=all="-l"{{else}}-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -ldflags="-w -s -X main.buildChannel={{.CHANNEL}}"{{end}}
         -buildvcs=false -o {{.BIN}}/Burrow .
 
   icons:

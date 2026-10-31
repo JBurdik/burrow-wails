@@ -20,6 +20,7 @@
 </template>
 
 <script setup lang="ts">
+import "@/styles/app.css";
 import { defineAsyncComponent, onMounted, ref } from "vue";
 import { Window } from "@wailsio/runtime";
 import { hideSplash } from "@/lib/splash";

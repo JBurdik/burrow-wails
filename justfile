@@ -53,6 +53,12 @@ where:
 dev:
     cd src-wails && BURROW_DATA_SUFFIX="${BURROW_DATA_SUFFIX:-dev}" wails3 task dev
 
+# Native dev window with Wails' built-in MCP server (127.0.0.1:9099/mcp) so an
+# agent can drive the running app: windows, DOM, JS eval, clicks, keys.
+# `claude mcp add --transport http burrow-app http://127.0.0.1:9099/mcp`
+dev-mcp:
+    WAILS_MCP=1 just dev
+
 # Frontend only, in the browser (no Wails backend)
 web:
     pnpm dev
