@@ -28,7 +28,11 @@
         </template>
       </nav>
 
-      <button class="absolute right-4 top-3 z-10 flex rounded-lg p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="$emit('close')">
+      <!-- Own native window (desktop): the titlebar strip drags it and the
+           window's own close button replaces ours. The overlay (paired
+           browser, phone PWA) keeps the ✕. -->
+      <div v-if="windowed" class="absolute inset-x-0 top-0 z-[5] h-10" style="--wails-draggable: drag" />
+      <button v-else class="absolute right-4 top-3 z-10 flex rounded-lg p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="$emit('close')">
         <PhX :size="15" />
       </button>
 
@@ -1304,6 +1308,7 @@ import {
 } from "@/runtime/remoteEndpoint";
 
 const emit = defineEmits<{ close: [] }>();
+defineProps<{ windowed?: boolean }>();
 
 // Deep-link into one provider instance (chat header → "configure this agent").
 const focusId = computed(() => ui.settingsFocusId);

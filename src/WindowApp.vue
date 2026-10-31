@@ -2,11 +2,11 @@
   <div class="window-app flex h-screen flex-col bg-[var(--terminal-bg)]">
     <!-- Hidden-inset titlebar: the traffic lights sit over this strip, which is
          also what drags the window. -->
-    <div class="window-titlebar flex h-[30px] shrink-0 items-center justify-center text-[12px] text-muted-foreground" style="--wails-draggable: drag">
+    <div v-if="kind !== 'settings'" class="window-titlebar flex h-[30px] shrink-0 items-center justify-center text-[12px] text-muted-foreground" style="--wails-draggable: drag">
       {{ title }}
     </div>
     <div class="relative min-h-0 flex-1">
-      <Settings v-if="kind === 'settings'" @close="closeSelf" />
+      <Settings v-if="kind === 'settings'" windowed @close="closeSelf" />
       <XTerm v-else-if="kind === 'terminal'" :pty-id="leafId" :cwd="cwd" :initially-titled="true" />
       <AgentChat
         v-else-if="kind === 'chat' && chatId != null && ready"
@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import "@/styles/app.css";
-import { defineAsyncComponent, onMounted, ref } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue";
 import { Window } from "@wailsio/runtime";
 import { hideSplash } from "@/lib/splash";
 import { useUIStore } from "@/stores/ui";
@@ -50,7 +50,20 @@ if (kind === "settings") {
   ui.settingsFocusId = params.get("focus") ?? "";
 }
 
+// ⌘W closes any secondary window, Esc closes Settings. Not a native menu
+// accelerator: that would also swallow ⌘W (close pane) in the main window.
+function onKeydown(e: KeyboardEvent) {
+  const cmdW = e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "w";
+  const esc = kind === "settings" && e.key === "Escape" && !e.defaultPrevented;
+  if (cmdW || esc) {
+    e.preventDefault();
+    closeSelf();
+  }
+}
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+
 onMounted(async () => {
+  window.addEventListener("keydown", onKeydown);
   document.title = title;
   await useWorkspaceStore().load().catch(() => {});
   ready.value = true;
