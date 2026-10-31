@@ -715,7 +715,7 @@ export const useUIStore = defineStore("ui", () => {
     // forward). A paired browser / the phone keeps the in-page overlay.
     if (canOpenWindows() && !isSecondaryWindow()) {
       const q = new URLSearchParams({ section: settingsSection.value, focus: settingsFocusId.value });
-      void openWindow("settings", `/window/settings?${q}`, "Settings", 1000, 720);
+      void openWindow("settings", `/window/settings?${q}`, "Settings", 1000, 720, true);
       return;
     }
     settingsOpen.value = true;

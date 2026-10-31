@@ -97,7 +97,11 @@ var (
 	extraMu   sync.Mutex
 )
 
-func (s *DesktopService) OpenWindow(key, route, title string, width, height int) {
+// floating disables the zoom/fullscreen button: tiling window managers
+// (AeroSpace's isDialogHeuristic) treat such a window as a dialog and float
+// it instead of tiling it, as System Settings is — right for Settings, while
+// a popped-out terminal is better tiled.
+func (s *DesktopService) OpenWindow(key, route, title string, width, height int, floating bool) {
 	extraMu.Lock()
 	defer extraMu.Unlock()
 	if w, ok := extraWins[key]; ok {
@@ -105,14 +109,20 @@ func (s *DesktopService) OpenWindow(key, route, title string, width, height int)
 		w.Focus()
 		return
 	}
+	zoom := application.ButtonEnabled
+	if floating {
+		zoom = application.ButtonDisabled
+	}
 	w := wapp.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:             key,
-		Title:            title,
-		Width:            width,
-		Height:           height,
-		URL:              "/#" + route,
-		BackgroundColour: application.NewRGB(27, 38, 54),
-		Mac:              application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
+		Name:                key,
+		MaximiseButtonState: zoom,
+		InitialPosition:     application.WindowCentered,
+		Title:               title,
+		Width:               width,
+		Height:              height,
+		URL:                 "/#" + route,
+		BackgroundColour:    application.NewRGB(27, 38, 54),
+		Mac:                 application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
 	})
 	extraWins[key] = w
 	w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {

@@ -53,8 +53,14 @@ export function OpenGitPanelWindow(): $CancellablePromise<void> {
     return $Call.ByID(2778084751);
 }
 
-export function OpenWindow(key: string, route: string, title: string, width: number, height: number): $CancellablePromise<void> {
-    return $Call.ByID(1239964761, key, route, title, width, height);
+/**
+ * floating disables the zoom/fullscreen button: tiling window managers
+ * (AeroSpace's isDialogHeuristic) treat such a window as a dialog and float
+ * it instead of tiling it, as System Settings is — right for Settings, while
+ * a popped-out terminal is better tiled.
+ */
+export function OpenWindow(key: string, route: string, title: string, width: number, height: number, floating: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1239964761, key, route, title, width, height, floating);
 }
 
 export function PickDirectory(): $CancellablePromise<string> {
