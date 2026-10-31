@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"sync"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // LSP subprocess management — matches lsp_start/lsp_send/lsp_stop in
@@ -79,7 +78,7 @@ func (a *App) LspStart(id, command string, args []string, cwd string) error {
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
-				runtime.EventsEmit(a.ctx, "lsp-msg-"+id, string(buf[:n]))
+				desktopEmit("lsp-msg-"+id, string(buf[:n]))
 			}
 			if err != nil {
 				break

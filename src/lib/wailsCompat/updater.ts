@@ -1,8 +1,8 @@
 // Shim for "@tauri-apps/plugin-updater"'s check(). Backed by Go's
 // CheckUpdate/InstallUpdate (src-wails/updater.go), which hit the same
 // GitHub Releases latest.json layout tauri-plugin-updater used.
-import * as App from "../../../src-wails/frontend/wailsjs/go/main/App";
-import { EventsOn, EventsOff } from "../../../src-wails/frontend/wailsjs/runtime/runtime";
+import * as App from "./bindings/burrow/desktopservice";
+import { Events } from "@wailsio/runtime";
 
 type DownloadEvent =
   | { event: "Started"; data: { contentLength?: number } }
@@ -29,7 +29,8 @@ export async function check(): Promise<UpdateHandle | null> {
       let started = false;
       let last = 0;
       if (cb) {
-        EventsOn("update:progress", (p: { received: number; total: number }) => {
+        Events.On("update:progress", (ev) => {
+          const p = ev.data as { received: number; total: number };
           if (!started) {
             started = true;
             cb({ event: "Started", data: { contentLength: p.total > 0 ? p.total : undefined } });
@@ -42,7 +43,7 @@ export async function check(): Promise<UpdateHandle | null> {
         await App.InstallUpdate(info.url, info.sha256);
         cb?.({ event: "Finished" });
       } finally {
-        EventsOff("update:progress");
+        Events.Off("update:progress");
       }
     },
   };

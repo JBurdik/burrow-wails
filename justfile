@@ -1,10 +1,10 @@
-# Burrow (Go + Wails v2) — task runner.  Install `just`:  brew install just
+# Burrow (Go + Wails v3) — task runner.  Install `just`:  brew install just
 # Run `just` with no args to list recipes.
 
 set shell := ["bash", "-uc"]
 
-# `wails` lives in GOBIN, which a non-login shell (an agent's Bash tool, a hook)
-# does not have on PATH — `just build` then dies with "wails: command not found"
+# `wails3` lives in GOBIN, which a non-login shell (an agent's Bash tool, a hook)
+# does not have on PATH — `just build` then dies with "wails3: command not found"
 # halfway through a release, after the version bump has already happened.
 export PATH := env_var('HOME') + "/go/bin:" + env_var('PATH')
 
@@ -25,9 +25,9 @@ sign_id := `security find-identity -v -p codesigning | grep "Developer ID Applic
 # Must match updateRepo in src-wails/updater.go.
 repo := "JBurdik/burrow-wails"
 
-# Current app version, read live from wails.json (single source of truth;
-# `just bump` rewrites package.json + src-wails/version.go to match).
-version := `node -p "require('./src-wails/wails.json').info.productVersion" 2>/dev/null || echo 0.0.0`
+# Current app version, read live from src-wails/build/config.yml (`info.version`,
+# single source of truth; `just bump` rewrites package.json + version.go to match).
+version := `sed -n 's/^  version: "\(.*\)".*/\1/p' src-wails/build/config.yml 2>/dev/null || echo 0.0.0`
 
 app     := "src-wails/build/bin/Burrow.app"
 tarball := "src-wails/build/bin/Burrow.app.tar.gz"
@@ -51,7 +51,7 @@ where:
 
 # Native dev window (hot-reload)
 dev:
-    cd src-wails && BURROW_DATA_SUFFIX="${BURROW_DATA_SUFFIX:-dev}" wails dev
+    cd src-wails && BURROW_DATA_SUFFIX="${BURROW_DATA_SUFFIX:-dev}" wails3 task dev
 
 # Frontend only, in the browser (no Wails backend)
 web:
@@ -84,9 +84,7 @@ build-beta:
     VITE_APP_CHANNEL=beta just build-web
     just build-mobile
     cd src-wails
-    wails build -platform darwin/arm64 -clean -s -ldflags "-X main.buildChannel=beta"
-    go build -o build/bin/Burrow.app/Contents/MacOS/burrow-daemon ./cmd/burrow-daemon
-    go build -o build/bin/Burrow.app/Contents/MacOS/burrow-mcp ./cmd/burrow-mcp
+    wails3 task package CHANNEL=beta
     rm -rf "build/bin/Burrow Beta.app"
     mv build/bin/Burrow.app "build/bin/Burrow Beta.app"
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.agenticide.wails.beta" "build/bin/Burrow Beta.app/Contents/Info.plist"
@@ -104,7 +102,9 @@ beta: build-beta
 
 # Frontend production build, copied into src-wails/frontend/dist for the embed.
 build-web:
-    bash src-wails/build-frontend.sh
+    pnpm build
+    rm -rf src-wails/frontend/dist
+    cp -R dist src-wails/frontend/dist
 
 # Mobile remote/PWA bundle -> src-wails/dist-mobile/app, //go:embed-ed by
 # httpserver.go and served at / when remote access is on.
@@ -120,17 +120,10 @@ build-server:
 # Full unsigned build: frontend + app bundle + the sidecar binaries inside it
 # (burrow-daemon holds the PTYs; burrow-mcp serves the control verbs to agent
 # clients that speak MCP).
-# `wails build -s` skips Wails' own frontend step — build-web already ran it,
-# and Wails runs frontend:build from a directory the script can't be found in.
+# Compile + bundle is src-wails/Taskfile.yml's `package` task.
 build: build-web build-mobile
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd src-wails
-    wails build -platform darwin/arm64 -clean -s
-    go build -o build/bin/Burrow.app/Contents/MacOS/burrow-daemon ./cmd/burrow-daemon
-    go build -ldflags "-X main.buildVersion={{version}}" \
-      -o build/bin/Burrow.app/Contents/MacOS/burrow-mcp ./cmd/burrow-mcp
-    echo "built: {{app}}"
+    cd src-wails && wails3 task package
+    @echo "built: {{app}}"
 
 # Codesign the bundle with the Developer ID identity + hardened runtime.
 # Inner binaries first, then the bundle (deep signing alone leaves the nested
@@ -150,7 +143,7 @@ sign:
     echo "signed: $ID"
 
 # Fail loudly unless every Mach-O in the bundle carries a Developer ID
-# signature with a hardened runtime. A running `wails dev` writes its own
+# signature with a hardened runtime. A running `wails3 dev` writes its own
 # adhoc-signed binary over build/bin, so a bundle that passed `just sign`
 # minutes ago can silently regress — Apple rejects it 5 minutes later with
 # "not signed with a valid Developer ID certificate".
@@ -160,7 +153,7 @@ assert-signed:
     for bin in Burrow burrow-daemon burrow-mcp; do
       out="$(codesign -dv "{{app}}/Contents/MacOS/$bin" 2>&1)"
       grep -q "TeamIdentifier={{APPLE_TEAM_ID}}" <<<"$out" \
-        || { echo "❌ $bin is not signed by team {{APPLE_TEAM_ID}} (is 'wails dev' running and overwriting build/bin?) — run 'just sign'"; exit 1; }
+        || { echo "❌ $bin is not signed by team {{APPLE_TEAM_ID}} (is 'wails3 dev' running and overwriting build/bin?) — run 'just sign'"; exit 1; }
       grep -q "flags=.*runtime" <<<"$out" \
         || { echo "❌ $bin has no hardened runtime — run 'just sign'"; exit 1; }
     done
@@ -234,7 +227,7 @@ pack notes="": assert-signed
 
 # ── release ───────────────────────────────────────────────────────────────────
 
-# Bump the version in lockstep across wails.json, package.json and
+# Bump the version in lockstep across build/config.yml, package.json and
 # src-wails/version.go.  Usage:  just bump [patch|minor|major]
 # Prints the new version on stdout (consumed by `release`).
 bump level="patch":
@@ -243,15 +236,15 @@ bump level="patch":
     node -e '
       const fs = require("fs");
       const lvl = process.argv[1] || "patch";
-      const confPath = "src-wails/wails.json";
-      const conf = JSON.parse(fs.readFileSync(confPath, "utf8"));
-      let [a, b, c] = conf.info.productVersion.split(".").map(Number);
+      const confPath = "src-wails/build/config.yml";
+      const conf = fs.readFileSync(confPath, "utf8");
+      const re = /^(  version: ")([^"]*)(")/m;
+      let [a, b, c] = conf.match(re)[2].split(".").map(Number);
       if (lvl === "major") { a++; b = 0; c = 0; }
       else if (lvl === "minor") { b++; c = 0; }
       else { c++; }
       const v = `${a}.${b}.${c}`;
-      conf.info.productVersion = v;
-      fs.writeFileSync(confPath, JSON.stringify(conf, null, 2) + "\n");
+      fs.writeFileSync(confPath, conf.replace(re, `$1${v}$3`));
       const pkgPath = "package.json";
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
       pkg.version = v;
@@ -293,7 +286,7 @@ release level="patch":
     DMG="src-wails/build/bin/Burrow_${NEW}_aarch64.dmg"
     [ -f "$DMG" ] || { echo "❌ dmg not found: $DMG"; exit 1; }
 
-    git add package.json src-wails/wails.json src-wails/version.go
+    git add package.json src-wails/build/config.yml src-wails/version.go
     git commit -m "release $TAG"
     git tag "$TAG"
     git push origin HEAD

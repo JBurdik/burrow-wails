@@ -522,7 +522,7 @@ function openSettingsAt(section: string) {
 
 // Same reinstall Settings' "Update skills" button runs (installAgentDocs in
 // Settings.vue), triggered straight from the palette instead of deep-linking
-// into the Skills tab first. Imports the wailsjs App module directly rather
+// into the Skills tab first. Imports the DesktopService binding directly rather
 // than going through wailsCompat/`/v2/ws` — it writes to local
 // ~/.claude/~/.codex/~/.copilot, which only the in-process desktop should do
 // (see remoteapi.go's LOAD-BEARING NOTE on UI-only, non-remote verbs).
@@ -530,7 +530,7 @@ async function updateSkills() {
   close();
   const loadingId = notifStore.push({ type: "info", title: "Updating skills…", source: "system" });
   try {
-    const App = await import("../../src-wails/frontend/wailsjs/go/main/App");
+    const App = await import("@/lib/wailsCompat/bindings/burrow/desktopservice");
     await App.InstallAgentDocs();
     notifStore.dismiss(loadingId);
     notifStore.push({ type: "done", title: "Skills updated", source: "system" });

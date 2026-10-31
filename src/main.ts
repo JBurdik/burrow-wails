@@ -1,4 +1,5 @@
 import { createApp } from "vue";
+import { isDesktop } from "./lib/wailsCompat/desktop";
 import { createPinia } from "pinia";
 import { hideSplash } from "./lib/splash";
 
@@ -11,7 +12,7 @@ const pinia = createPinia();
 const isExternal = (url: string) => {
   try {
     const u = new URL(url, location.href);
-    return /^https?:$/.test(u.protocol) && u.origin !== location.origin && !!(window as any).runtime;
+    return /^https?:$/.test(u.protocol) && u.origin !== location.origin && isDesktop();
   } catch { return false; }
 };
 const openExternal = (url: string) => void import("./lib/wailsCompat/shell").then((m) => m.open(url));

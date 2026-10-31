@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Self-update, replacing tauri-plugin-updater. Same shape as before: a
@@ -159,7 +158,7 @@ func (a *App) RelaunchApp() error {
 	if err := exec.Command("/usr/bin/open", "-n", bundle).Start(); err != nil {
 		return err
 	}
-	wruntime.Quit(a.ctx)
+	desktopQuit()
 	return nil
 }
 
@@ -193,7 +192,7 @@ func (a *App) downloadTo(url, path string) (string, error) {
 			}
 			hasher.Write(buf[:n])
 			received += int64(n)
-			wruntime.EventsEmit(a.ctx, "update:progress", map[string]int64{"received": received, "total": total})
+			desktopEmit("update:progress", map[string]int64{"received": received, "total": total})
 		}
 		if rerr == io.EOF {
 			break

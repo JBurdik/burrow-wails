@@ -166,6 +166,7 @@
 </template>
 
 <script setup lang="ts">
+import { isDesktop } from "@/lib/wailsCompat/desktop";
 import { ref, reactive, onMounted, onBeforeUnmount, computed, provide, watch, nextTick, useTemplateRef } from "vue";
 import { useRoute } from "vue-router";
 import { router, routeId } from "@/router";
@@ -703,7 +704,7 @@ function repoKeysFor(cwd: string): Promise<string[]> {
   return keys;
 }
 function openOutside(href: string) {
-  if ((window as any).runtime) void shellOpen(href);
+  if (isDesktop()) void shellOpen(href);
   else window.open(href, "_blank", "noopener");
 }
 function onChatLinkClick(e: MouseEvent) {

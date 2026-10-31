@@ -1,0 +1,47 @@
+# Wails v3 project config. `info.version` is the app version's single source
+# of truth: `just bump` rewrites it and syncs package.json + version.go, and
+# Taskfile.yml's package step stamps it into the bundle's Info.plist.
+version: '3'
+
+info:
+  companyName: "Burrow"
+  productName: "Burrow"
+  # Must stay com.agenticide.wails — the updater swaps the bundle in place,
+  # and a new id would land as a different app (prefs, keychain, TCC).
+  productIdentifier: "com.agenticide.wails"
+  description: "Multi-workspace IDE shell for AI coding agents"
+  copyright: "© 2026 Jiří Burdych"
+  comments: "Multi-workspace IDE shell for AI coding agents"
+  version: "0.8.0"
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend
+      - bin
+      - build
+      - dist-mobile
+    file:
+      - .DS_Store
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    - cmd: wails3 task build DEV=true
+      type: blocking
+    # The frontend lives at the repo root (one level up), not in ./frontend.
+    - cmd: pnpm --dir .. dev --port 9245 --strictPort
+      type: background
+      readiness:
+        http: "http://localhost:9245/"
+        timeout: "60s"
+        interval: "200ms"
+    - cmd: wails3 task run
+      type: primary
+      exit_policy: shutdown

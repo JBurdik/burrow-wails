@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // extensionBridge is a short-lived, loopback-only capability API. A new random
@@ -190,8 +189,8 @@ func (b *extensionBridge) reportTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "progress must be between 0 and 1", http.StatusBadRequest)
 		return
 	}
-	if b.app != nil && b.app.ctx != nil {
-		runtime.EventsEmit(b.app.ctx, "extension-task:"+b.manifest.ID, task)
+	if b.app != nil {
+		desktopEmit("extension-task:"+b.manifest.ID, task)
 	}
 	writeBridgeJSON(w, map[string]bool{"ok": true})
 }

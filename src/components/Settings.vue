@@ -1762,7 +1762,7 @@ async function installAgentDocs() {
   installingDocs.value = true;
   installDocsStatus.value = "";
   try {
-    const App = await import("../../src-wails/frontend/wailsjs/go/main/App");
+    const App = await import("@/lib/wailsCompat/bindings/burrow/desktopservice");
     await App.InstallAgentDocs();
     installDocsStatus.value = "Updated";
   } catch (e) {

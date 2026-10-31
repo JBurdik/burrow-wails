@@ -5,83 +5,95 @@ package main
 import (
 	"context"
 	"embed"
+	"io/fs"
+	"log"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/menu"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
-	// Create an instance of the app structure
 	app := NewApp()
-	appMenu := menu.NewMenu()
-	appMenu.Append(menu.AppMenu()) // standard macOS app menu (Quit bound to Cmd+Q)
-	appMenu.Append(menu.EditMenu())
-	appMenu.Append(menu.WindowMenu())
-	helpMenu := appMenu.AddSubmenu("Help")
-	helpMenu.AddText("Documentation", nil, func(_ *menu.CallbackData) {
-		runtime.EventsEmit(app.ctx, "menu-open-docs")
-	})
-	helpMenu.AddText("What's New", nil, func(_ *menu.CallbackData) {
-		runtime.EventsEmit(app.ctx, "menu-whats-new")
-	})
-	helpMenu.AddText("Show Onboarding Again", nil, func(_ *menu.CallbackData) {
-		runtime.EventsEmit(app.ctx, "menu-show-onboarding")
-	})
-	helpMenu.AddText("Keyboard Shortcuts", nil, func(_ *menu.CallbackData) {
-		runtime.EventsEmit(app.ctx, "menu-show-shortcuts")
-	})
-
-	// Create application with options
-	err := wails.Run(&options.App{
-		Title:  "burrow",
-		Width:  1024,
-		Height: 768,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		// Real paths for files dragged in from Finder; the webview's own drop
-		// is disabled so it can't navigate to the dropped file. The frontend
-		// hit-tests x/y against the chat composer (AgentChat.vue).
-		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true, DisableWebViewDrop: true},
-		OnStartup:   app.startup,
-		OnDomReady: func(ctx context.Context) {
-			app.restoreWindowState(ctx)
-			installAppMenuItems(func() { runtime.EventsEmit(app.ctx, "menu-check-update") })
-		},
-		OnBeforeClose: func(ctx context.Context) bool {
-			app.saveWindowState(ctx)
-			app.cleanupOnShutdown()
-			return false
-		},
-		Bind: []interface{}{
-			app,
-		},
-		Menu: appMenu,
-		// Custom titlebar chrome — closest Wails equivalent to Tauri's
-		// titleBarStyle:"Overlay" + hiddenTitle (tauri-plugin-decorum in the
-		// Rust app). No direct equivalent for its window-vibrancy blur yet.
-		Mac: &mac.Options{
-			TitleBar: mac.TitleBarHiddenInset(),
-		},
-	})
-
+	dist, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
-		println("Error:", err.Error())
+		log.Fatal(err)
+	}
+
+	wapp = application.New(application.Options{
+		Name:     "Burrow",
+		Services: []application.Service{application.NewService(&DesktopService{a: app})},
+		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(dist)},
+		Mac:      application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
+		// ⌘Q never fires WindowClosing, so the geometry is saved here too.
+		ShouldQuit: func() bool {
+			app.saveWindowState(mainWin)
+			return true
+		},
+		OnShutdown: app.cleanupOnShutdown,
+	})
+	wapp.Menu.SetApplicationMenu(appMenu())
+
+	mainWin = wapp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "burrow",
+		Width:            1024,
+		Height:           768,
+		BackgroundColour: application.NewRGB(27, 38, 54),
+		// Real paths for files dragged in from Finder. v3 only reports a drop
+		// that lands on a [data-file-drop-target] element — index.html puts
+		// it on #app, and the frontend hit-tests x/y against the chat
+		// composer itself (AgentChat.vue).
+		EnableFileDrop: true,
+		Mac:            application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
+	})
+	mainWin.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
+		x, y := 0, 0
+		if d := e.Context().DropTargetDetails(); d != nil {
+			x, y = d.X, d.Y
+		}
+		busEmit("file-drop", map[string]any{"x": x, "y": y, "paths": e.Context().DroppedFiles()})
+	})
+	mainWin.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) {
+		app.saveWindowState(mainWin)
+	})
+	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		app.restoreWindowState(mainWin)
+	})
+
+	app.startup(context.Background())
+
+	if err := wapp.Run(); err != nil {
+		log.Fatal(err)
 	}
 }
 
-// watchFileDrop forwards Wails' native file drop to the bus. Headless has no
-// window and no Wails context to register on (main_headless.go).
-func watchFileDrop(ctx context.Context) {
-	runtime.OnFileDrop(ctx, func(x, y int, paths []string) {
-		busEmit("file-drop", map[string]any{"x": x, "y": y, "paths": paths})
-	})
+func appMenu() *application.Menu {
+	m := application.NewMenu()
+	// The first submenu is the macOS app menu; built by hand (not the AppMenu
+	// role) so "Check for Updates…" can sit under About.
+	am := m.AddSubmenu("Burrow")
+	am.AddRole(application.About)
+	am.Add("Check for Updates…").OnClick(func(*application.Context) { desktopEmit("menu-check-update") })
+	am.AddSeparator()
+	am.AddRole(application.ServicesMenu)
+	am.AddSeparator()
+	am.AddRole(application.Hide)
+	am.AddRole(application.HideOthers)
+	am.AddRole(application.UnHide)
+	am.AddSeparator()
+	am.AddRole(application.Quit)
+	m.AddRole(application.EditMenu)
+	m.AddRole(application.WindowMenu)
+	help := m.AddSubmenu("Help")
+	for _, it := range []struct{ label, event string }{
+		{"Documentation", "menu-open-docs"},
+		{"What's New", "menu-whats-new"},
+		{"Show Onboarding Again", "menu-show-onboarding"},
+		{"Keyboard Shortcuts", "menu-show-shortcuts"},
+	} {
+		help.Add(it.label).OnClick(func(*application.Context) { desktopEmit(it.event) })
+	}
+	return m
 }

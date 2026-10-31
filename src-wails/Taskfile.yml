@@ -1,0 +1,63 @@
+# Wails v3 build for Burrow (macOS arm64). Owns compile + .app bundle; the
+# justfile at the repo root stays the entry point and owns frontend build,
+# signing, notarization and release.
+version: '3'
+
+vars:
+  BIN: build/bin
+  APP: '{{.BIN}}/Burrow.app'
+  VERSION:
+    sh: "sed -n 's/^  version: \"\\(.*\\)\".*/\\1/p' build/config.yml"
+  # Release channel baked into the binary (channel.go); "" = stable.
+  CHANNEL: '{{.CHANNEL | default ""}}'
+
+env:
+  CGO_ENABLED: 1
+  GOOS: darwin
+  GOARCH: arm64
+  MACOSX_DEPLOYMENT_TARGET: "12.0"
+  CGO_CFLAGS: "-mmacosx-version-min=12.0"
+  CGO_LDFLAGS: "-mmacosx-version-min=12.0"
+
+tasks:
+  build:
+    summary: Compile the app binary. DEV=true builds the dev-channel binary (`dev` tag, channel_dev.go).
+    cmds:
+      - mkdir -p {{.BIN}}
+      - >-
+        go build
+        {{if eq .DEV "true"}}-tags dev -gcflags=all="-l"{{else}}-tags production -trimpath -ldflags="-w -s -X main.buildChannel={{.CHANNEL}}"{{end}}
+        -buildvcs=false -o {{.BIN}}/Burrow .
+
+  icons:
+    summary: Regenerate icons.icns from build/appicon.png (build-beta swaps that png).
+    cmds:
+      - wails3 generate icons -input build/appicon.png -macfilename build/darwin/icons.icns -windowsfilename build/bin/icon.ico
+
+  package:
+    summary: Build build/bin/Burrow.app with the burrow-daemon and burrow-mcp sidecars inside.
+    deps: [build, icons]
+    cmds:
+      - rm -rf "{{.APP}}"
+      - mkdir -p "{{.APP}}/Contents/MacOS" "{{.APP}}/Contents/Resources"
+      - cp {{.BIN}}/Burrow "{{.APP}}/Contents/MacOS/"
+      - cp build/darwin/icons.icns "{{.APP}}/Contents/Resources/"
+      - cp build/darwin/Info.plist "{{.APP}}/Contents/"
+      - /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString {{.VERSION}}" -c "Set :CFBundleVersion {{.VERSION}}" "{{.APP}}/Contents/Info.plist"
+      - go build -o "{{.APP}}/Contents/MacOS/burrow-daemon" ./cmd/burrow-daemon
+      - go build -ldflags "-X main.buildVersion={{.VERSION}}" -o "{{.APP}}/Contents/MacOS/burrow-mcp" ./cmd/burrow-mcp
+
+  run:
+    summary: Run the dev binary inside an ad-hoc-signed .dev.app (used by `wails3 dev`).
+    cmds:
+      - rm -rf "{{.BIN}}/Burrow.dev.app"
+      - mkdir -p "{{.BIN}}/Burrow.dev.app/Contents/MacOS"
+      - cp {{.BIN}}/Burrow "{{.BIN}}/Burrow.dev.app/Contents/MacOS/"
+      - cp build/darwin/Info.dev.plist "{{.BIN}}/Burrow.dev.app/Contents/Info.plist"
+      - codesign --force --sign - "{{.BIN}}/Burrow.dev.app"
+      - '"{{.BIN}}/Burrow.dev.app/Contents/MacOS/Burrow"'
+
+  dev:
+    summary: Native dev window with hot reload.
+    cmds:
+      - wails3 dev -config ./build/config.yml -port 9245

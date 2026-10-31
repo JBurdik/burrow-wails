@@ -2,3 +2,4 @@
 node_modules
 frontend/dist
 /burrow
+build/darwin/icons.icns

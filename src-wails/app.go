@@ -191,7 +191,6 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	watchFileDrop(ctx)
 	// The bus has exactly ONE sink now: remotews.handle's per-connection
 	// subscription. It is still the single door for every event a client may
 	// care about — what went away is the second delivery path, not the door.

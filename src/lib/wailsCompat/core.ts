@@ -14,7 +14,8 @@ import {
   NotifyFloatGrid,
   OpenGitPanelWindow,
   SendFloatSnapshot,
-} from "../../../src-wails/frontend/wailsjs/go/main/App";
+} from "./bindings/burrow/desktopservice";
+import { isDesktop } from "./desktop";
 import { createTransport, type Transport } from "@/runtime/transport";
 import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource, setActiveEnvironment } from "@/runtime/remoteEndpoint";
 
@@ -50,7 +51,7 @@ let remote: Transport | null = null;
  * `configReady` never settles: the phone never restores its saved state.
  */
 function hasWailsRuntime(): boolean {
-  return typeof window !== "undefined" && (window as any).go !== undefined;
+  return isDesktop();
 }
 
 /** The desktop's authorization is that it is in-process: it asks the binding
@@ -178,7 +179,7 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
     // the socket's own bootstrap rather than an app action.
     //
     // These three are in remoteapi.go's `remoteDenied`, with a reason that is
-    // still true: they answer over runtime.EventsEmit (stubs.go), which only
+    // still true: they answer over desktopEmit (stubs.go), which only
     // the native window receives, so a client reaching them over the wire
     // could never see the reply. event.ts keeps the matching `float-*`
     // listeners on the Wails runtime for the same reason — the emitters and
@@ -208,11 +209,11 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
         args.data,
         args.cols,
         args.rows,
-      ) as Promise<T>;
+      ) as unknown as Promise<T>;
     case "notify_float_grid":
-      return NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows) as Promise<T>;
+      return NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows) as unknown as Promise<T>;
     case "open_git_panel_window":
-      return OpenGitPanelWindow() as Promise<T>;
+      return OpenGitPanelWindow() as unknown as Promise<T>;
   }
 
   return t.invoke<T>(cmd, args);

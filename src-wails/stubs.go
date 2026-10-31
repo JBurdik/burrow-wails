@@ -1,6 +1,5 @@
 package main
 
-import "github.com/wailsapp/wails/v2/pkg/runtime"
 
 // Deliberately-stubbed commands (see plan phase 7 notes): Claude account/
 // usage, remote-chat sync, and daemon admin telemetry aren't implemented
@@ -17,17 +16,17 @@ import "github.com/wailsapp/wails/v2/pkg/runtime"
 // not stubbed.
 
 func (a *App) RequestFloatSnapshot(ptyID string) error {
-	runtime.EventsEmit(a.ctx, "float-snap-req-"+ptyID)
+	desktopEmit("float-snap-req-"+ptyID)
 	return nil
 }
 
 func (a *App) SendFloatSnapshot(ptyID string, data string, cols, rows int) error {
-	runtime.EventsEmit(a.ctx, "float-snap-"+ptyID, map[string]any{"data": data, "cols": cols, "rows": rows})
+	desktopEmit("float-snap-"+ptyID, map[string]any{"data": data, "cols": cols, "rows": rows})
 	return nil
 }
 
 func (a *App) NotifyFloatGrid(ptyID string, cols, rows int) error {
-	runtime.EventsEmit(a.ctx, "float-grid-"+ptyID, map[string]any{"cols": cols, "rows": rows})
+	desktopEmit("float-grid-"+ptyID, map[string]any{"cols": cols, "rows": rows})
 	return nil
 }
 

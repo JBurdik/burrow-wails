@@ -14,7 +14,7 @@ Run these in parallel:
 git status
 git log --oneline $(git describe --tags --abbrev=0)..HEAD
 git diff HEAD  # see uncommitted changes
-node -p "require('./src-wails/wails.json').info.productVersion"
+just version
 ```
 
 `just release` aborts on a dirty tree, so anything uncommitted — regenerated
@@ -126,7 +126,7 @@ just release [level]
 
 This takes **10–20 minutes** (Wails build + two Apple notarization round trips). Warn the user and run it in the background — a foreground Bash call will hit its timeout. The command will:
 1. Preflight: `gh` present, `BURROW_NOTARY_PWD` in the Keychain, clean tree
-2. `just bump` — version in `src-wails/wails.json`, `package.json`, `src-wails/version.go`
+2. `just bump` — version in `src-wails/build/config.yml`, `package.json`, `src-wails/version.go`
 3. `just build` — frontend → `wails build -s` → daemon binary into the bundle
 4. `just sign` (Developer ID, hardened runtime) → `notarize-app` → `dmg` → `notarize-dmg`
 5. `just pack` — `Burrow.app.tar.gz` + `latest.json` with the sha256
@@ -154,12 +154,12 @@ After success, tell the user:
 | `wails: command not found` | GOBIN isn't on PATH. The `justfile` exports `$HOME/go/bin` itself, so this means `wails` isn't installed: `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
 | Notarization failure | Usually network — re-run `just release`, but **check the version first** (below) |
 
-**Any failure after `just bump`** leaves `package.json`, `src-wails/wails.json` and
+**Any failure after `just bump`** leaves `package.json`, `src-wails/build/config.yml` and
 `src-wails/version.go` bumped but uncommitted — a re-run would bump *again* and skip
 a version. Revert them before retrying:
 
 ```bash
-git checkout package.json src-wails/wails.json src-wails/version.go
+git checkout package.json src-wails/build/config.yml src-wails/version.go
 ```
 
 Nothing is pushed or tagged until the build, signing and both notarization steps

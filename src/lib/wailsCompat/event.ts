@@ -1,7 +1,8 @@
 // Shim for "@tauri-apps/api/event"'s listen(), backed by the /v2/ws
 // transport. Event names on the wire are identical to the bus names in Go, so
 // there is no translation table here to forget an entry in.
-import { EventsOn } from "../../../src-wails/frontend/wailsjs/runtime/runtime";
+import { Events } from "@wailsio/runtime";
+import { isDesktop } from "./desktop";
 import { appTransport } from "./core";
 
 export type UnlistenFn = () => void;
@@ -11,7 +12,7 @@ export type UnlistenFn = () => void;
  *
  * `busEmit` is the single door for every event a client may care about, and
  * the WS sink is fed from there — but a handful of emitters deliberately call
- * `runtime.EventsEmit` instead, because only the native window can consume
+ * `desktopEmit` instead, because only the native window can consume
  * them (src-wails/events_test.go's `wailsRuntimeAllowlist` is the list, with
  * a reason per file). Those keep arriving on the Wails runtime:
  *
@@ -22,7 +23,7 @@ export type UnlistenFn = () => void;
  *                   bindings for the same reason)
  *   extension-task: extension_bridge.go
  *   update:*        updater.go's progress (updater.ts subscribes with its own
- *                   EventsOn today; listed so routing it through listen()
+ *                   Events.On today; listed so routing it through listen()
  *                   later cannot silently go quiet)
  *
  * If one of these ever becomes something a remote client needs, the fix is to
@@ -42,17 +43,15 @@ export async function listen<T = unknown>(
   // runtime hand us the raw payload, so wrap it back into the shape
   // call-sites already expect.
   const deliver = (payload: T) => handler({ event, payload });
-  // EventsOn returns a cancel for THIS callback; the old shim used
-  // EventsOff(event), which tore down every listener on the name.
+  // Events.On returns a cancel for THIS callback; the old shim used
+  // Events.Off(event), which tore down every listener on the name.
   // A paired device has no Wails runtime, so a desktop-only name can only be
   // silence there. Returning a no-op unlisten rather than throwing: these are
   // subscriptions a shared component sets up unconditionally (the updater
   // banner, the LSP bridge), and a throw on the phone would take the whole
   // component down over an event that was never going to fire.
   if (isDesktopOnly(event)) {
-    return typeof EventsOn === "function" && typeof window !== "undefined" && (window as any).runtime
-      ? EventsOn(event, deliver)
-      : () => {};
+    return isDesktop() ? Events.On(event, (ev) => deliver(ev.data as T)) : () => {};
   }
   return appTransport().listen<T>(event, deliver);
 }

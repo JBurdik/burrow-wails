@@ -1,3 +1,4 @@
+import { isDesktop } from "@/lib/wailsCompat/desktop";
 // "What's new" after an update: the release blocks of docs/changelog.html
 // (bundled at build time) newer than the last version this device launched.
 import changelog from "../../docs/changelog.html?raw";
@@ -28,7 +29,7 @@ export function releaseNotesSince(html: string, current: string, seen: string): 
 // Desktop only: config.json is shared with paired phones, and a phone opening
 // first would mark the version seen and swallow the dialog.
 export async function pendingReleaseNotes(): Promise<{ version: string; html: string } | null> {
-  if (!(window as any).runtime) return null;
+  if (!isDesktop()) return null;
   await configReady;
   const current = await invoke<string>("get_app_version");
   const seen = getConfig<string>(SEEN_KEY, "");

@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **This branch (`rewrite/go-wails`) has replaced the Rust/Tauri backend with Go/Wails v2.**
+> **This branch (`rewrite/go-wails`) has replaced the Rust/Tauri backend with Go/Wails v3** (migrated from v2 — `docs/plans/007-wails-v3.md`).
 > Everything below describing `src-tauri/`, Tauri commands, and the Rust event/plugin
 > machinery documents the **old** backend (still accurate on `main`) — treat it as an
 > architectural reference for *what the Go backend needs to replicate*, not as current
@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Burrow** — a desktop app (macOS-first) that wraps real PTYs in a multi-workspace IDE shell, designed to run AI coding agents (Claude Code, Aider, Codex, etc.) side-by-side in terminal tabs. The product name is **Burrow**; the repo/package name is `agentic-ide`.
 
-Stack: Vue 3 + Pinia + xterm.js frontend, Go/Wails v2 backend (`src-wails/`), SQLite for persistence.
+Stack: Vue 3 + Pinia + xterm.js frontend, Go/Wails v3 backend (`src-wails/`), SQLite for persistence.
 
 ## Commands
 
@@ -29,11 +29,11 @@ Stack: Vue 3 + Pinia + xterm.js frontend, Go/Wails v2 backend (`src-wails/`), SQ
 pnpm dev
 
 # Full native dev (Wails window, hot-reload)
-just dev            # cd src-wails && wails dev
+just dev            # cd src-wails && wails3 task dev
 
 # Type-check + production build
 pnpm build          # vue-tsc + vite build
-just build          # full native bundle (frontend + wails build)
+just build          # full native bundle (frontend + `wails3 task package`)
 
 # Go only
 cd src-wails && go build ./...
@@ -424,7 +424,7 @@ that reshape args.
   client** rather than blocking (`busEmit` runs under `emitMu`); each call on its own goroutine behind
   a **64-slot semaphore** with `recover` (one slow call used to head-of-line-block keystrokes);
   read limit, deadlines, ping/pong.
-- **`App.LocalEndpoint()`** is the **one Wails binding left on the data path** — being in-process *is*
+- **`App.LocalEndpoint()`** (exposed through `DesktopService`, `desktop.go` — the whole Wails binding surface, ~12 methods; bindings generated into `src/lib/wailsCompat/bindings/` by `wails3 generate bindings -ts -i -clean -d ../src/lib/wailsCompat/bindings`, committed) is the **one Wails binding left on the data path** — being in-process *is*
   the desktop's authorization. Returns a fresh all-scope ticket (including `scopeUIAck`) on every
   reconnect, and is itself in `remoteDenied`.
 - **`ack_control_action` has its own scope `ui:ack`**, granted only by `LocalEndpoint` and kept off
@@ -509,7 +509,7 @@ gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the
 are per device the same way.
 
 **Release channel is decided by the serving binary, not the bundle** (`src-wails/channel.go`): `buildChannel` is
-`dev` under `wails dev` (`channel_dev.go`, the `dev` build tag) and `beta` via `just build-beta`'s
+`dev` under `wails3 dev` (`channel_dev.go`, the `dev` build tag — Taskfile `build DEV=true` passes it) and `beta` via `just build-beta`'s
 `-ldflags -X main.buildChannel=beta`. `handleAssets` rewrites `mobile.html` (`data-channel`, title, icons) and the
 manifest (name, `id`, icons → `public/icons/<channel>/`), so a beta/dev PWA installs as its own app with its own
 icon; `releaseChannel.ts` reads `data-channel` for the phone header badge. Each channel gets its own HTTP port
@@ -622,9 +622,9 @@ One file per subsystem:
 
 There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own
 `/v2/ws` connection like any client. The only names still on the Wails event channel (`menu-*`,
-`lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `runtime.EventsEmit` directly,
+`lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `desktopEmit` (`desktop.go`) directly,
 and `src/lib/wailsCompat/event.ts` routes exactly those prefixes. `events_test.go` greps every non-test
-`.go` file for a direct `EventsEmit(` against an explicit allowlist, so a new event can't quietly skip
+`.go` file for a direct `desktopEmit(` / `.Event.Emit(` against an explicit allowlist, so a new event can't quietly skip
 remote clients.
 
 ### Background text generation (`src-wails/textgen.go`)
@@ -673,7 +673,7 @@ Self-updater in Go (`src-wails/updater.go`). Manifest layout: a `latest.json` on
 
 **Frontend**: `src/stores/update.ts` + `UpdateBanner.vue` import `@tauri-apps/plugin-updater` / `-process` as their API surface, but Vite aliases both to shims in `src/lib/wailsCompat/` (`updater.ts` / `process.ts`) that call the Go bindings above and translate the `update:progress` event into the `Started`/`Progress`/`Finished` callback shape those imports expect — so the Vue components themselves never talk to Tauri, only to the compat shim.
 
-**Releasing (`just release [patch|minor|major]`, default patch):** `just bump` lifts the version in lockstep across `src-wails/wails.json` (`info.productVersion`, the single source of truth), `package.json` and `src-wails/version.go` (`appVersion`); then `build` (frontend → `wails build -s` → daemon binary into the bundle) → `sign` (Developer ID, hardened runtime, `src-wails/build/darwin/entitlements.plist`; inner binaries first, then the bundle) → `notarize-app` (zip → notarytool → staple) → `dmg` (hdiutil → notarize → staple) → `pack` (`Burrow.app.tar.gz` + `latest.json` with the sha256) → commit bump → tag `vX.Y.Z` → push → `gh release create` with dmg + tarball + `latest.json`. `just verify` runs the full codesign/Gatekeeper/staple audit. Keychain creds: `BURROW_NOTARY_PWD` + the `BURROW_NOTARY` notarytool profile (`just notary-creds '<app-specific-password>'`).
+**Releasing (`just release [patch|minor|major]`, default patch):** `just bump` lifts the version in lockstep across `src-wails/build/config.yml` (`info.version`, the single source of truth), `package.json` and `src-wails/version.go` (`appVersion`); then `build` (frontend → `wails3 task package` in `src-wails/Taskfile.yml`: binary + `.app` + daemon/mcp sidecars, version stamped into Info.plist) → `sign` (Developer ID, hardened runtime, `src-wails/build/darwin/entitlements.plist`; inner binaries first, then the bundle) → `notarize-app` (zip → notarytool → staple) → `dmg` (hdiutil → notarize → staple) → `pack` (`Burrow.app.tar.gz` + `latest.json` with the sha256) → commit bump → tag `vX.Y.Z` → push → `gh release create` with dmg + tarball + `latest.json`. `just verify` runs the full codesign/Gatekeeper/staple audit. Keychain creds: `BURROW_NOTARY_PWD` + the `BURROW_NOTARY` notarytool profile (`just notary-creds '<app-specific-password>'`).
 
 ## Documentation (`docs/`)
 
