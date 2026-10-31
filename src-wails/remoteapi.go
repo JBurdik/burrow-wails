@@ -607,11 +607,10 @@ var remoteDenied = map[string]string{
 	"LocalEndpoint": "issues the credential that authorizes a connection; reachable over a connection it would let any authenticated client mint itself a fresh ticket",
 
 	// Window / native chrome
-	"PickDirectory":      "opens a native OS file-picker dialog on the host; meaningless (and blocking) triggered from a remote client",
-	"PickFile":           "opens a native OS file-picker dialog on the host; meaningless (and blocking) triggered from a remote client",
-	"PickFiles":          "opens a native OS file-picker dialog on the host; meaningless (and blocking) triggered from a remote client",
-	"OpenGitPanelWindow": "opens a desktop window; the float/bubble-window feature it served was removed outright (Wails v2 has no multi-window support), so this is a no-op with no meaning for a remote client",
-	"RegisterTmuxWin":    "wires a desktop window id to a pty id for the same removed float-window protocol; a no-op with no meaning for a remote client",
+	"PickDirectory":   "opens a native OS file-picker dialog on the host; meaningless (and blocking) triggered from a remote client",
+	"PickFile":        "opens a native OS file-picker dialog on the host; meaningless (and blocking) triggered from a remote client",
+	"PickFiles":       "opens a native OS file-picker dialog on the host; meaningless (and blocking) triggered from a remote client",
+	"RegisterTmuxWin": "wires a desktop window id to a pty id for the same removed float-window protocol; a no-op with no meaning for a remote client",
 
 	// Updater — swaps the running .app bundle; must not be triggerable over
 	// the network. (CheckUpdate is read-only today, but it exists solely to

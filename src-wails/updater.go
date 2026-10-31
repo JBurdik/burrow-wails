@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
 )
 
 // Self-update, replacing tauri-plugin-updater. Same shape as before: a

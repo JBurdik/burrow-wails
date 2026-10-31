@@ -49,10 +49,6 @@ export function NotifyFloatGrid(ptyID: string, cols: number, rows: number): $Can
     return $Call.ByID(3882810694, ptyID, cols, rows);
 }
 
-export function OpenGitPanelWindow(): $CancellablePromise<void> {
-    return $Call.ByID(2778084751);
-}
-
 /**
  * floating disables the zoom/fullscreen button: tiling window managers
  * (AeroSpace's isDialogHeuristic) treat such a window as a dialog and float

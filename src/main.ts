@@ -31,10 +31,6 @@ window.open = (url?: string | URL, ...rest) => {
 };
 
 async function boot() {
-  // In Tauri, window label is synchronously accessible via internals
-  const label: string = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? "";
-  const isGitPanel = label === "gitpanel";
-
   // A secondary native window (src/lib/windows.ts): its own small root, never
   // App.vue — that one runs app-wide side effects exactly one window may own.
   if (location.hash.startsWith("#/window/")) {
@@ -44,23 +40,14 @@ async function boot() {
     return;
   }
 
-  if (isGitPanel) {
-    document.getElementById("app")!.style.height = "100vh";
-    const { default: GitPanel } = await import("./components/GitPanel.vue");
-    const app = createApp(GitPanel);
-    app.use(pinia);
-    app.mount("#app");
-    hideSplash();
-  } else {
-    const { default: App } = await import("./App.vue");
-    const { router } = await import("./router");
-    const app = createApp(App);
-    app.use(pinia);
-    // Only the main window is routed. The detached git panel is a different
-    // window with its own single-purpose root and no view state to address.
-    app.use(router);
-    app.mount("#app");
-  }
+  const { default: App } = await import("./App.vue");
+  const { router } = await import("./router");
+  const app = createApp(App);
+  app.use(pinia);
+  // Only the main window is routed; secondary windows address themselves by
+  // their "/window/..." hash and have no view state to route.
+  app.use(router);
+  app.mount("#app");
 }
 
 boot();

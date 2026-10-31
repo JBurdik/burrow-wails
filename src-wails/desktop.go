@@ -25,6 +25,15 @@ var (
 	mainWin *application.WebviewWindow
 )
 
+// macTitleBar is HiddenInset with the compact unified toolbar. Plain
+// HiddenInset gets the tall unified toolbar on recent macOS, which drops the
+// traffic lights below our titlebar icons; compact puts them back in line.
+var macTitleBar = func() application.MacTitleBar {
+	t := application.MacTitleBarHiddenInset
+	t.ToolbarStyle = application.MacToolbarStyleUnifiedCompact
+	return t
+}()
+
 // desktopEmit sends a desktop-only event straight to the native window. Only
 // the files on events_test.go's allowlist may call it — everything else goes
 // through busEmit so remote clients see it too.
@@ -76,7 +85,6 @@ func (s *DesktopService) CheckUpdate() (UpdateInfo, error)    { return s.a.Check
 func (s *DesktopService) InstallUpdate(url, sum string) error { return s.a.InstallUpdate(url, sum) }
 func (s *DesktopService) InstallAgentDocs()                   { s.a.InstallAgentDocs() }
 func (s *DesktopService) RelaunchApp() error                  { return s.a.RelaunchApp() }
-func (s *DesktopService) OpenGitPanelWindow() error           { return s.a.OpenGitPanelWindow() }
 func (s *DesktopService) SendFloatSnapshot(ptyID, data string, cols, rows int) error {
 	return s.a.SendFloatSnapshot(ptyID, data, cols, rows)
 }
@@ -122,7 +130,7 @@ func (s *DesktopService) OpenWindow(key, route, title string, width, height int,
 		Height:              height,
 		URL:                 "/#" + route,
 		BackgroundColour:    application.NewRGB(27, 38, 54),
-		Mac:                 application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
+		Mac:                 application.MacWindow{TitleBar: macTitleBar},
 	})
 	extraWins[key] = w
 	w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {

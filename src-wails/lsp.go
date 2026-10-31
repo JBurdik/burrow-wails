@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-
 )
 
 // LSP subprocess management — matches lsp_start/lsp_send/lsp_stop in

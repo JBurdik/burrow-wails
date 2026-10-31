@@ -47,6 +47,6 @@ describe("invoke() with no endpoint", () => {
       "burrow.remote.credentials",
       JSON.stringify({ baseUrl: "https://host", deviceToken: "t", environmentId: "e" }),
     );
-    await expect(invoke("open_git_panel_window")).rejects.toThrow(/desktop-only/);
+    await expect(invoke("notify_float_grid", { ptyId: 1, cols: 80, rows: 24 })).rejects.toThrow(/desktop-only/);
   });
 });

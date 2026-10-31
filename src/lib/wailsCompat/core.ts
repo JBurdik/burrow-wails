@@ -12,7 +12,6 @@
 import {
   LocalEndpoint,
   NotifyFloatGrid,
-  OpenGitPanelWindow,
   SendFloatSnapshot,
 } from "./bindings/burrow/desktopservice";
 import { isDesktop } from "./desktop";
@@ -35,7 +34,6 @@ export const CLIENT_SIDE_COMMANDS: ReadonlySet<string> = new Set([
   "detach_pty",
   "send_float_snapshot",
   "notify_float_grid",
-  "open_git_panel_window",
 ]);
 
 let transport: Transport | null = null;
@@ -195,7 +193,6 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
     // reaches one says what happened.
     case "send_float_snapshot":
     case "notify_float_grid":
-    case "open_git_panel_window":
       if (!hasWailsRuntime()) {
         throw new Error(`${cmd} is desktop-only: it answers on the Wails event channel`);
       }
@@ -212,8 +209,6 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
       ) as unknown as Promise<T>;
     case "notify_float_grid":
       return NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows) as unknown as Promise<T>;
-    case "open_git_panel_window":
-      return OpenGitPanelWindow() as unknown as Promise<T>;
   }
 
   return t.invoke<T>(cmd, args);

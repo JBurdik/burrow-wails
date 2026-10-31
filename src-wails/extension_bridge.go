@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
-
 )
 
 // extensionBridge is a short-lived, loopback-only capability API. A new random

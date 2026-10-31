@@ -8,6 +8,7 @@
     <div class="relative min-h-0 flex-1">
       <Settings v-if="kind === 'settings'" windowed @close="closeSelf" />
       <XTerm v-else-if="kind === 'terminal'" :pty-id="leafId" :cwd="cwd" :initially-titled="true" />
+      <GitPanel v-else-if="kind === 'git' && ready" size="lg" :initial-ws-id="wsId || undefined" class="h-full" />
       <AgentChat
         v-else-if="kind === 'chat' && chatId != null && ready"
         :chat-id="chatId"
@@ -31,6 +32,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 const Settings = defineAsyncComponent(() => import("@/components/Settings.vue"));
 const XTerm = defineAsyncComponent(() => import("@/components/XTerm.vue"));
 const AgentChat = defineAsyncComponent(() => import("@/components/AgentChat.vue"));
+const GitPanel = defineAsyncComponent(() => import("@/components/GitPanel.vue"));
 
 const [path, query = ""] = location.hash.slice(1).split("?");
 const parts = path.split("/").filter(Boolean); // ["window", kind, id?]
@@ -40,7 +42,7 @@ const params = new URLSearchParams(query);
 const wsId = Number(params.get("ws") ?? 0);
 const chatId = params.has("chat") ? Number(params.get("chat")) : null;
 const cwd = params.get("cwd") ?? "";
-const title = kind === "settings" ? "Settings" : (params.get("title") ?? "Burrow");
+const title = kind === "settings" ? "Settings" : kind === "git" ? "Git" : (params.get("title") ?? "Burrow");
 const ready = ref(false);
 
 const ui = useUIStore();

@@ -57,7 +57,7 @@
       <button class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-30" :disabled="git.loading" @click="git.refresh()" title="Refresh">
         <PhArrowClockwise :size="14" :class="git.loading && 'animate-spin'" />
       </button>
-      <button v-if="!isPopout" class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-30" @click="popout()" title="Pop out to window">
+      <button v-if="!isPopout && canOpenWindows()" class="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-30" @click="popout()" title="Pop out to window">
         <PhArrowSquareOut :size="14" />
       </button>
     </div>
@@ -322,21 +322,24 @@ import {
 } from "@phosphor-icons/vue";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { canOpenWindows, isSecondaryWindow, openWindow } from "@/lib/windows";
 import DiffView from "./DiffView.vue";
 import { Select } from "@/components/ui/select";
 
 // "lg" is the full-screen Git dialog; the default is the narrow right panel.
-const props = withDefaults(defineProps<{ size?: "sm" | "lg" }>(), { size: "sm" });
+// initialWsId: the workspace a popped-out Git window was opened for.
+const props = withDefaults(defineProps<{ size?: "sm" | "lg"; initialWsId?: number }>(), { size: "sm" });
 
 const git = useGitStore();
 const wsStore = useWorkspaceStore();
-const isPopout = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label === "gitpanel";
+const isPopout = isSecondaryWindow();
 const gitBusy = computed(() => git.generating || git.committing || git.pushing);
 
 async function popout() {
-  await invoke("open_git_panel_window");
+  const id = selectedWsId.value;
+  await openWindow("git", `/window/git${id != null ? `?ws=${id}` : ""}`, "Git", 1100, 780);
 }
-const selectedWsId = ref<number | null>(wsStore.active?.id ?? null);
+const selectedWsId = ref<number | null>(props.initialWsId ?? wsStore.active?.id ?? null);
 const selectedWsIdModel = computed<string | undefined>({ get: () => selectedWsId.value?.toString(), set: (id) => { selectedWsId.value = id ? Number(id) : null; } });
 // Worktrees belong in here too: they are separate checkouts with their own
 // status, and listing only topLevel meant that whenever the active workspace

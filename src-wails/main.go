@@ -47,7 +47,7 @@ func main() {
 		// it on #app, and the frontend hit-tests x/y against the chat
 		// composer itself (AgentChat.vue).
 		EnableFileDrop: true,
-		Mac:            application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
+		Mac:            application.MacWindow{TitleBar: macTitleBar},
 	})
 	mainWin.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
 		x, y := 0, 0

@@ -1,6 +1,5 @@
 package main
 
-
 // Deliberately-stubbed commands (see plan phase 7 notes): Claude account/
 // usage, remote-chat sync, and daemon admin telemetry aren't implemented
 // yet. These no-op instead of throwing so the frontend doesn't hard-fail
@@ -16,7 +15,7 @@ package main
 // not stubbed.
 
 func (a *App) RequestFloatSnapshot(ptyID string) error {
-	desktopEmit("float-snap-req-"+ptyID)
+	desktopEmit("float-snap-req-" + ptyID)
 	return nil
 }
 
@@ -29,8 +28,6 @@ func (a *App) NotifyFloatGrid(ptyID string, cols, rows int) error {
 	desktopEmit("float-grid-"+ptyID, map[string]any{"cols": cols, "rows": rows})
 	return nil
 }
-
-func (a *App) OpenGitPanelWindow() error { return nil }
 
 func (a *App) RegisterTmuxWin(_winID, _ptyID string) error { return nil }
 
