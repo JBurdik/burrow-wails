@@ -135,7 +135,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@wailsio/runtime";
 import { PhArrowBendUpLeft, PhArrowSquareOut, PhCaretLeft, PhChatCircle, PhPlus, PhPushPin, PhTerminalWindow } from "@phosphor-icons/vue";
 import { TrayOpen, TraySetPinned } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
-import { displayStatus } from "@/runtime/displayStatus";
+import { displayStatus, type Phase } from "@/runtime/displayStatus";
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { settledFor, useClaudeChatsStore } from "@/stores/claudeChats";
@@ -422,7 +422,12 @@ watch([rows, perms, view], fitWindow);
 
 async function togglePin() {
   pinned.value = !pinned.value;
-  if (pinned.value) return void TraySetPinned(true);
+  if (pinned.value) {
+    void TraySetPinned(true);
+    void rememberGeometry();
+    return;
+  }
+  saveGeometry({ pinned: false });
   // Unpin: back to the content size first (the user may have resized it),
   // then Go puts it back under the tray icon at that size.
   lastSize = "";
@@ -430,8 +435,42 @@ async function togglePin() {
   void TraySetPinned(false);
 }
 
-// ponytail: re-reads the snapshot every 2 s while shown; subscribe to phase-*
-// events if the list ever needs to be instant.
+// ── A pinned panel survives a restart: where it was, how big ───────────────
+// Per device (localStorage), like the read receipts.
+const GEOMETRY_KEY = "burrow.trayPanel";
+interface Geometry { pinned: boolean; x?: number; y?: number; w?: number; h?: number }
+function loadGeometry(): Geometry {
+  try {
+    return JSON.parse(localStorage.getItem(GEOMETRY_KEY) ?? "{}") as Geometry;
+  } catch {
+    return { pinned: false };
+  }
+}
+function saveGeometry(g: Geometry) {
+  localStorage.setItem(GEOMETRY_KEY, JSON.stringify(g));
+}
+// ponytail: polled every 2 s while pinned (local window calls, no backend);
+// a move/resize event would be exact if Wails' JS runtime ever exposes one.
+async function rememberGeometry() {
+  if (!pinned.value) return;
+  const [pos, size] = await Promise.all([Window.Position(), Window.Size()]).catch(() => [null, null] as const);
+  if (!pos || !size) return;
+  const g = { pinned: true, x: pos.x, y: pos.y, w: size.width, h: size.height };
+  if (JSON.stringify(g) !== localStorage.getItem(GEOMETRY_KEY)) saveGeometry(g);
+}
+async function restoreGeometry() {
+  const g = loadGeometry();
+  if (!g.pinned) return void TraySetPinned(false); // a reload must not leave Go thinking it is pinned
+  pinned.value = true;
+  await TraySetPinned(true);
+  if (g.w && g.h) await Window.SetSize(g.w, g.h).catch(() => {});
+  if (g.x != null && g.y != null) await Window.SetPosition(g.x, g.y).catch(() => {});
+}
+
+// ── Live state ──────────────────────────────────────────────────────────────
+// One shell_snapshot for the first paint, then the phase events of exactly the
+// chats and agent tabs on the list, plus pty-permissions. A slow re-read only
+// catches what has no event of its own here (a tab opened, a workspace renamed).
 async function load() {
   if (document.visibilityState === "hidden") return;
   now.value = Date.now();
@@ -442,31 +481,62 @@ async function load() {
   snap.value = s;
   perms.value = p ?? [];
 }
+
+const phaseKeys = computed(() => {
+  const keys = chats.sessions.filter((c) => !c.archivedAt && !c.parentChatId && c.kind !== "side").map((c) => `chat:${c.id}`);
+  for (const tabs of Object.values(snap.value?.tabs ?? {})) {
+    for (const t of tabs as { pty_id?: number | null }[]) if (t.pty_id) keys.push(`pty:${t.pty_id}`);
+  }
+  return keys;
+});
+const phaseListeners = new Map<string, Promise<() => void>>();
+watch(phaseKeys, (keys) => {
+  const want = new Set(keys);
+  for (const [key, off] of phaseListeners) {
+    if (!want.has(key)) { void off.then((f) => f()); phaseListeners.delete(key); }
+  }
+  for (const key of want) {
+    if (phaseListeners.has(key)) continue;
+    phaseListeners.set(key, listen<Phase>(`phase-${key}`, (e) => {
+      if (!snap.value || !e.payload) return;
+      now.value = Date.now();
+      snap.value = { ...snap.value, phases: { ...snap.value.phases, [key]: e.payload } };
+    }));
+  }
+}, { immediate: true });
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape" || e.defaultPrevented) return;
   if (view.value.kind !== "list") view.value = { kind: "list" };
   else if (!pinned.value) void Window.Hide();
 }
-let timer: number | undefined;
-let unlistenCompose: (() => void) | undefined;
+let resync: number | undefined;
+let geometryTimer: number | undefined;
+const unlisteners: (() => void)[] = [];
 onMounted(async () => {
   document.documentElement.style.background = "transparent";
   document.body.style.background = "transparent";
-  void TraySetPinned(false); // a reload must not leave Go thinking it is pinned
+  void restoreGeometry();
   void load();
-  timer = window.setInterval(load, 2000);
+  resync = window.setInterval(load, 15_000);
+  geometryTimer = window.setInterval(rememberGeometry, 2000);
   window.addEventListener("focus", load);
   window.addEventListener("keydown", onKeydown);
   // ⌥Space (trayhotkey_darwin.go): straight to a new thread.
-  unlistenCompose = await listen("menu-tray-compose", () => startCompose());
+  unlisteners.push(await listen("menu-tray-compose", () => startCompose()));
+  unlisteners.push(await listen("pty-permissions", () => {
+    void invoke<PermRequest[]>("list_pty_permissions").then((p) => { perms.value = p ?? []; }).catch(() => {});
+  }));
   await workspaces.load().catch(() => {});
   wsReady.value = true;
 });
 onBeforeUnmount(() => {
-  clearInterval(timer);
+  clearInterval(resync);
+  clearInterval(geometryTimer);
   window.removeEventListener("focus", load);
   window.removeEventListener("keydown", onKeydown);
-  unlistenCompose?.();
+  unlisteners.forEach((f) => f());
+  for (const off of phaseListeners.values()) void off.then((f) => f());
 });
 </script>
 

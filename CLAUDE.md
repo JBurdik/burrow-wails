@@ -470,11 +470,13 @@ loop it would deadlock). **Left click** on the tray opens the **tray panel** (`T
 tiling WMs only manage `AXStandardWindow`, so it is never tiled) `AttachWindow`ed to the tray, hidden on focus loss / Esc, sized to its
 content (× the UI-scale `zoom`): a pocket Sidebar — the threads the Sidebar lists as active (`claudeChats`, minus
 `settledFor`, sub-agents, side chats) + agent tabs, grouped Needs you / Working / Unread / Recent (5). Phases come
-from `shell_snapshot` every 2 s while shown (**not** `chatAttention` — a second instance would re-fire notifications and auto-archives); a tab row calls
+from one `shell_snapshot` + the `phase-chat:<id>` / `phase-pty:<id>` events of exactly the listed rows (+
+`pty-permissions`; a 15 s re-read only for what has no event here, e.g. a new tab) (**not** `chatAttention` — a second instance would re-fire notifications and auto-archives); a tab row calls
 `TrayOpen(route)` → hide + show main + `menu-navigate` (App.vue `router.push`); a **chat row opens the thread in
 the panel** (`AgentChat`, 440×640), a tab's PTY permission is answered inline (`list_pty_permissions` /
 `answer_pty_permission`), and **New thread** = `remote_create_chat` + `chat_send` (keeps the main window's
-`chatActiveByWs`; titled via `smartTitle` → `generate_chat_title`). **Pin** (`TraySetPinned`, not persisted): no
+`chatActiveByWs`; titled via `smartTitle` → `generate_chat_title`). **Pin** (`TraySetPinned`; pin + position + size persisted per device in localStorage `burrow.trayPanel`,
+restored on load, Go re-applies movability after its native prep so a restored pin stays draggable): no
 hide on focus loss, resizable, header drags it, a tray click toggles it in place; unpin = client shrinks it to
 content, Go re-anchors it under the icon. Only a pinned panel moves (`traypanel_darwin.go`: Wails makes every
 window movable by background; also `hidesOnDeactivate = NO`, or an NSPanel vanishes when Burrow deactivates).

@@ -379,6 +379,9 @@ func setupTray(a *App) {
 		started.Store(true)
 		go func() { // InvokeSync: never from the main thread
 			prepareTrayPanel(trayWin)
+			// The client may have restored a pin before this ran (TrayPanel's
+			// restoreGeometry): prepare's movable=NO must not undo it.
+			setTrayPanelMovable(trayWin, trayPinned.Load())
 			registerTrayHotkey(a)
 		}()
 		go refreshTray(a)
