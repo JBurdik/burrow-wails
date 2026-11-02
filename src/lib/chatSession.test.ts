@@ -472,7 +472,7 @@ describe("stream reducers", () => {
     emit("chat-event-65", { ord: 1, events: [{ type: "turn.completed" }] });
     emit("chat-event-65", { ord: 2, events: [{ type: "message.note", role: "system-info", text: "Changed 3 files", surface: "outputs" }] });
     expect(s.busy.value).toBe(false);
-    expect(s.messages.value.at(-1)?.text).toBe("Changed 3 files");
+    expect(s.messages.value[s.messages.value.length - 1]?.text).toBe("Changed 3 files");
     dropChatSession(65);
   });
 

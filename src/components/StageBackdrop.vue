@@ -1,10 +1,10 @@
 <template>
   <!-- Release-channel artwork behind the sidebar header, after t3code's
-       SidebarStageBackdrop: beta = night sky, dev = blueprint. Static SVG,
-       colors from the --stage-* vars below (light/dark), faded out downward
-       by a mask so the list stays readable. Renders nothing on stable. -->
+       SidebarStageBackdrop: beta = night sky, dev = blueprint, stable = dawn
+       hills with a burrow. Static SVG, colors from the --stage-* vars below
+       (light/dark), faded out downward by a mask so the list stays readable. -->
   <div
-    v-if="releaseChannel && ui.channelMarker === 'art'"
+    v-if="ui.channelMarker === 'art'"
     aria-hidden="true"
     class="stage-backdrop pointer-events-none absolute inset-x-0 top-0 -z-10 h-20 select-none overflow-hidden"
     :class="ui.activeTheme.isDark && 'is-dark'"
@@ -51,6 +51,37 @@
       <g filter="url(#stage-night-soft)">
         <path d="M150 96C151 84 161 75 173 75C176 64 186 57 198 57C210 57 220 64 223 75C231 75 238 80 241 87C250 87 257 91 260 96H150Z" fill="url(#stage-night-cloud)" fill-opacity="0.8" />
       </g>
+    </svg>
+
+    <svg v-else-if="!releaseChannel" class="h-full w-full" fill="none" preserveAspectRatio="xMinYMin slice" viewBox="0 0 8192 96" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="stage-dawn-sky" x1="0" y1="0" x2="0" y2="96" gradientUnits="userSpaceOnUse">
+          <stop style="stop-color: var(--stage-dawn-top)" />
+          <stop offset="0.55" style="stop-color: var(--stage-dawn-mid)" />
+          <stop offset="1" style="stop-color: var(--stage-dawn-bottom)" />
+        </linearGradient>
+        <radialGradient id="stage-dawn-glow" cx="0" cy="0" r="1" gradientTransform="translate(232 30) scale(150 70)" gradientUnits="userSpaceOnUse">
+          <stop style="stop-color: var(--stage-dawn-sun)" stop-opacity="0.55" />
+          <stop offset="1" style="stop-color: var(--stage-dawn-sun)" stop-opacity="0" />
+        </radialGradient>
+        <pattern id="stage-dawn-suns" width="640" height="96" patternUnits="userSpaceOnUse">
+          <rect width="640" height="96" fill="url(#stage-dawn-glow)" />
+          <circle cx="232" cy="34" r="8" style="fill: var(--stage-dawn-sun)" fill-opacity="0.85" />
+        </pattern>
+        <pattern id="stage-dawn-hills" width="384" height="96" patternUnits="userSpaceOnUse">
+          <path d="M0 50C48 38 96 38 144 46S240 58 288 44S360 40 384 50V96H0Z" style="fill: var(--stage-dawn-hill-far)" />
+          <path d="M0 64C40 56 80 52 128 58S208 72 256 62S336 52 384 64V96H0Z" style="fill: var(--stage-dawn-hill-near)" />
+          <!-- the burrow -->
+          <path d="M120 64Q130 55 140 62" style="stroke: var(--stage-dawn-hole)" stroke-opacity="0.35" stroke-width="1" stroke-linecap="round" />
+          <ellipse cx="130" cy="64" rx="6" ry="3.5" style="fill: var(--stage-dawn-hole)" />
+          <g style="stroke: var(--stage-dawn-hole)" stroke-linecap="round" stroke-opacity="0.4" stroke-width="0.7">
+            <path d="M40 58V55M42 58V54.5M44 58V55.5M300 60V57M302 60V56.5M304 60V57.5M196 66V63M198 66V62.5" />
+          </g>
+        </pattern>
+      </defs>
+      <rect width="100%" height="96" fill="url(#stage-dawn-sky)" />
+      <rect width="100%" height="96" fill="url(#stage-dawn-suns)" />
+      <rect width="100%" height="96" fill="url(#stage-dawn-hills)" />
     </svg>
 
     <svg v-else class="h-full w-full" fill="none" preserveAspectRatio="xMinYMin slice" viewBox="0 0 8192 96" xmlns="http://www.w3.org/2000/svg">
@@ -155,6 +186,13 @@ const SPARKLES = [{ x: 70, y: 28 }, { x: 160, y: 36 }, { x: 246, y: 26 }];
   --stage-art-secondary: #c9dcfb;
   --stage-art-line: #2f63c9;
   --stage-art-grid-line: #3a6fd6;
+  --stage-dawn-top: #fbe3cf;
+  --stage-dawn-mid: #fdeee0;
+  --stage-dawn-bottom: #fff7ee;
+  --stage-dawn-sun: #ffc27a;
+  --stage-dawn-hill-far: #d6e8cb;
+  --stage-dawn-hill-near: #bcd9ab;
+  --stage-dawn-hole: #5e4a36;
   opacity: 0.85;
   mask-image: linear-gradient(to bottom, black 0%, black 35%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 0%, black 35%, transparent 100%);
@@ -177,6 +215,13 @@ const SPARKLES = [{ x: 70, y: 28 }, { x: 160, y: 36 }, { x: 246, y: 26 }];
   --stage-art-secondary: oklch(0.794668 0.12136 235.46);
   --stage-art-line: oklch(0.959666 0.029238 218.179);
   --stage-art-grid-line: oklch(0.966822 0.01757 239.99);
+  --stage-dawn-top: oklch(0.34 0.08 40);
+  --stage-dawn-mid: oklch(0.27 0.06 30);
+  --stage-dawn-bottom: oklch(0.21 0.03 270);
+  --stage-dawn-sun: oklch(0.8 0.14 70);
+  --stage-dawn-hill-far: oklch(0.34 0.06 150);
+  --stage-dawn-hill-near: oklch(0.28 0.06 155);
+  --stage-dawn-hole: oklch(0.14 0.02 60);
   opacity: 0.6;
 }
 </style>
