@@ -300,7 +300,7 @@ release level="patch":
 
     gh release create "$TAG" \
         "$DMG" "{{tarball}}" src-wails/build/bin/latest.json \
-        --repo "{{repo}}" --title "$TAG" --notes "$NOTES"
+        --repo "{{repo}}" --title "$TAG" --notes "$NOTES" --latest
 
     echo "✅ released $TAG → https://github.com/{{repo}}/releases/tag/$TAG"
     echo "   in-app updater will pick it up on the next check."
