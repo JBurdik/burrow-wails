@@ -1,5 +1,5 @@
 <template>
-  <div class="settings-root fixed inset-0 z-[1000] flex overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]" :class="{ 'settings-phone': compact, 'phone-detail': compact && phoneDetail }">
+  <div class="settings-root fixed inset-0 z-[1000] flex overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]" :class="{ 'settings-phone': compact, 'phone-detail': compact && phoneDetail }" @touchstart.passive="onEdgeStart" @touchend="onEdgeEnd">
     <AnimatedBackdrop
       v-if="ui.activeTheme.animated && !ui.bgImageUrl"
       :key="ui.theme"
@@ -32,7 +32,7 @@
            window's own close button replaces ours. The overlay (paired
            browser, phone PWA) keeps the ✕. -->
       <div v-if="windowed" class="absolute inset-x-0 top-0 z-[5] h-10" style="--wails-draggable: drag" />
-      <button v-else class="absolute right-4 top-3 z-10 flex rounded-lg p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="$emit('close')">
+            <button v-else class="settings-close absolute right-4 top-3 z-10 flex rounded-lg p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" aria-label="Close settings" @click="$emit('close')">
         <PhX :size="15" />
       </button>
 
@@ -1739,6 +1739,21 @@ const active = ref(ui.settingsSection || "general");
 // settingsSection is sticky (never reset), so only a focused row is a real
 // deep link that skips the list.
 const phoneDetail = ref(!!ui.settingsFocusId);
+// iOS back-swipe is a history gesture and Settings is an overlay, not a route,
+// so mirror it by hand: a rightward swipe from the left edge goes section →
+// list → closed.
+let edge: { x: number; y: number } | null = null;
+function onEdgeStart(e: TouchEvent) {
+  const t = e.touches[0];
+  edge = compact.value && t.clientX < 32 ? { x: t.clientX, y: t.clientY } : null;
+}
+function onEdgeEnd(e: TouchEvent) {
+  const t = e.changedTouches[0];
+  if (!edge || t.clientX - edge.x < 70 || Math.abs(t.clientY - edge.y) > 60) return;
+  edge = null;
+  if (phoneDetail.value) phoneDetail.value = false;
+  else emit("close");
+}
 
 // One compact read-model for the Settings number. The backend replays any
 // context.usage rows not folded into its durable projection before returning.
@@ -2355,6 +2370,8 @@ async function copyToClipboard(text: string, label: string) {
 .settings-phone .settings-content .s-row { flex-wrap: wrap; padding: 12px 14px; }
 .settings-phone .settings-content .s-row > .flex-1 { flex-basis: 12rem; }
 .settings-phone .settings-content h2 { font-size: 24px; }
+.settings-phone .settings-close { top: calc(env(safe-area-inset-top, 0px) + 6px); right: 8px; padding: 10px; }
+.settings-phone .settings-close svg { width: 20px; height: 20px; }
 .settings-phone > nav > button.bg-selected { background: transparent; border-color: transparent; }
 .settings-phone .settings-content .flex.items-baseline:has(> h2) { flex-direction: column; gap: 2px; }
 .settings-phone .settings-content .flex.items-center:has(> .items-baseline > h2) { flex-wrap: wrap; row-gap: 8px; }
