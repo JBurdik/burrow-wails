@@ -29,5 +29,7 @@ export function matchesShortcut(e: KeyboardEvent, sc: string | undefined): boole
   if (e.ctrlKey !== sc.includes("⌃")) return false;
   if (e.shiftKey !== sc.includes("⇧")) return false;
   if (/^[0-9]$/.test(key)) return e.code === `Digit${key}`;
-  return e.key.toLowerCase() === key.toLowerCase();
+  if (e.key.toLowerCase() === key.toLowerCase()) return true;
+  // macOS: ⌥ turns e.key into a symbol (⌘⌥B → "∫"), so fall back to the physical key.
+  return e.altKey && /^[a-z]$/i.test(key) && e.code === `Key${key.toUpperCase()}`;
 }

@@ -872,12 +872,25 @@ const KEY_ACTIONS: Record<string, () => void> = {
   settings: () => ui.toggleSettings(),
   cheatsheet: () => { cheatsheetOpen.value = !cheatsheetOpen.value; },
   sidebar: () => ui.toggleSidebar(),
+  rightPanel: () => { ui.rightPanelVisible = !ui.rightPanelVisible; },
+  focusComposer,
   repaint: () => activeTerm()?.repaintAll(),
   newProject: () => openNewWorkspace(),
   pickProject: () => ui.pickProjectThenWelcome(),
   switchProvider: () => welcomeEl.value?.cycleProvider?.(),
   unread: jumpToUnread,
 };
+
+// ponytail: first visible composer in DOM order — the main pane's chat (or the
+// welcome composer) precedes the Right Panel's sub-agent detail. A focused-pane
+// registry would pick the right one in a split of two chats; add it if that bites.
+function focusComposer() {
+  const el = [...document.querySelectorAll<HTMLElement>(".composer-input")].find((c) => c.getClientRects().length);
+  if (!el) return;
+  el.focus();
+  const sel = window.getSelection();
+  if (el.isContentEditable && sel) { sel.selectAllChildren(el); sel.collapseToEnd(); }
+}
 
 // ⌘⇧U across ALL workspaces (Terminal.vue handles the in-workspace case first).
 function jumpToUnread() {
