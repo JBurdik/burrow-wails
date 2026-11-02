@@ -19,7 +19,8 @@ export function canOpenWindows(): boolean {
 }
 
 /** `floating`: no fullscreen button, so a tiling WM (AeroSpace) floats it
- *  like a dialog instead of tiling it — Settings, not a popped-out terminal. */
+ *  like a dialog instead of tiling it — Settings, and popped-out tabs when
+ *  `ui.floatPopouts` is on. */
 export function openWindow(key: string, route: string, title: string, width = 960, height = 680, floating = false): Promise<void> {
   return OpenWindow(key, route, title, width, height, floating);
 }

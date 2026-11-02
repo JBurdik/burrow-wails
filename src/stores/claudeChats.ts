@@ -6,7 +6,7 @@ import type { TermStatus } from "@/lib/terminalStatus";
 import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
-import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { configReady, getConfig, setConfig, migrateFromLocalStorage, onConfigChanged } from "@/lib/config";
 import { listen } from "@tauri-apps/api/event";
 import { appTransport } from "@/lib/wailsCompat/core";
 import { forgetChatSettings } from "@/lib/chatSettings";
@@ -326,6 +326,14 @@ export function isActivitySync(
 
     migrateFromLocalStorage(RULES_LEGACY_KEY, RULES_KEY);
     permissionRules.value = getConfig<string[]>(RULES_KEY, []);
+
+    // Rules (Settings can clear them) and the turn log are written back whole,
+    // so another window's change must land here before our next write.
+    // chatActiveByWs is not followed: it is this window's own selection.
+    onConfigChanged((key) => {
+      if (key === TURNS_KEY || key === "*") turns.value = getConfig<TurnEvent[]>(TURNS_KEY, []);
+      if (key === RULES_KEY || key === "*") permissionRules.value = getConfig<string[]>(RULES_KEY, []);
+    });
   });
 
   function addPermissionRule(key: string) {

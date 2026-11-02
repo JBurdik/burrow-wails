@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { reactive } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { closeWindow, openWindow } from "@/lib/windows";
+import { useUIStore } from "@/stores/ui";
 
 /** A terminal or chat leaf shown in its own window (Window → "Open in window"). */
 export interface Popout {
@@ -35,7 +36,7 @@ export const usePopoutsStore = defineStore("popouts", () => {
     popped.set(p.leafId, p);
     const q = new URLSearchParams({ ws: String(p.wsId), cwd: p.cwd, title: p.title });
     if (p.chatId != null) q.set("chat", String(p.chatId));
-    void openWindow(windowKey(p.leafId), `/window/${p.kind}/${p.leafId}?${q}`, p.title, 960, 680).catch(() => {
+    void openWindow(windowKey(p.leafId), `/window/${p.kind}/${p.leafId}?${q}`, p.title, 960, 680, useUIStore().floatPopouts).catch(() => {
       popped.delete(p.leafId);
     });
   }

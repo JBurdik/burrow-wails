@@ -449,14 +449,15 @@ app-wide side effects one window may run (control-bridge acks, `chatAttention`, 
 instance per `key`; closing emits `window-closed <key>` (desktop-only event). Kinds: `settings` (⌘,; a
 paired browser / phone keeps the overlay; `windowed` prop = own drag strip, no ✕), `terminal`/`chat`
 (**Open in window**: Sidebar tab menu, ⌘⌥O), `git` (GitPanel's pop-out). `floating` disables the zoom
-button so tiling WMs (AeroSpace's `isDialogHeuristic`) float it — Settings only. ⌘W / Esc are handled in
+button so tiling WMs (AeroSpace's `isDialogHeuristic`) float it — Settings always, popped-out tabs when `uiPrefs.floatPopouts` (Settings → General). ⌘W / Esc are handled in
 WindowApp, **not** as native accelerators (that would eat ⌘W = close pane in the main window).
 
 **A popped-out leaf stays owned by the main window** (`usePopoutsStore`): its Sidebar row stays, the pane
 shows a Bring-back placeholder, and its `XTerm` stays mounted with **`frozen`** — no `resize_pty`, since two
 views fighting over one PTY grid garble a TUI. Unfreezing forces one resize (the TUI redraws); nothing is
-re-attached. Closing the tab/pane closes its window. Known gap: a popped chat's completion can leave a
-review dot in the main Sidebar (receipts are per window).
+re-attached. Closing the tab/pane closes its window. A popped chat's window runs its own `chatAttention`;
+its receipt reaches the main window through the `storage` event on `burrow.seenAt` (each write touches only
+its own key, so no window puts stale receipts back). PTY receipts (`Terminal.vue`) are not synced that way.
 
 **Close = hide**: the backend keeps serving the phone, schedules and running chats; ⌘Q / tray Quit really
 quit (`quitting` flag, `ShouldQuit`), the Dock icon reopens. The tray is a template icon
@@ -473,8 +474,10 @@ Every window and paired phone holds its own copy of config.json. `setConfig` sen
 `config-changed {key, value}` to everyone — the old whole-file `write_config` let one client's stale copy
 revert another's change. Not ringed (values run to hundreds of KB); a resync re-reads the file. `setConfig`
 skips a write whose JSON equals the last written/received value, or two windows re-applying each other's
-change echo forever. `onConfigChanged(key)` re-applies: uiPrefs, keybindings, provider instances — other
-stores still read config only at startup.
+change echo forever. `onConfigChanged(key)` re-applies: uiPrefs, keybindings, provider instances,
+sub-agent profiles, chat permission rules + turn log, and (via `followConfig(keys, apply)`) the sidebar
+pins/archive/settled lists and the model catalog prefs. Not followed: `chatActiveByWs` (the window's own
+selection), welcome-composer seeds, dismiss/seen markers — call sites that `getConfig` at use time are live already.
 
 ### The shell stream: `seq`, the ring, resume (`src-wails/shellstream.go` + `shellsnapshot.go`)
 

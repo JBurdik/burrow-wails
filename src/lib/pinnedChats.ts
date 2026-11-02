@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { configReady, getConfig, setConfig } from "./config";
+import { followConfig, getConfig, setConfig } from "./config";
 
 // Chat threads the user pinned in the sidebar feed. Pinned rows float to the top
 // of whatever bucket they're already in (live / settled) — pinning is an ordering
@@ -12,7 +12,7 @@ const KEY = "sidebarPinnedChats";
 
 export const pinnedChatIds = ref<number[]>([]);
 
-configReady.then(() => {
+followConfig([KEY], () => {
   pinnedChatIds.value = getConfig<number[]>(KEY, []);
 });
 

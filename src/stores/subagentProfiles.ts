@@ -1,6 +1,6 @@
 import { shallowRef, readonly } from "vue";
 import { defineStore } from "pinia";
-import { configReady, getConfig, setConfig } from "@/lib/config";
+import { configReady, getConfig, setConfig, onConfigChanged } from "@/lib/config";
 import { defaultSubagentProfiles, normalizeSubagentProfiles, type SubagentProfile } from "@/lib/subagentProfiles";
 
 export const useSubagentProfilesStore = defineStore("subagentProfiles", () => {
@@ -9,6 +9,9 @@ export const useSubagentProfilesStore = defineStore("subagentProfiles", () => {
   const loaded = configReady.then(() => {
     profiles.value = normalizeSubagentProfiles(getConfig("subagentProfiles", null));
     ready.value = true;
+    onConfigChanged((key) => {
+      if (key === "subagentProfiles" || key === "*") profiles.value = normalizeSubagentProfiles(getConfig("subagentProfiles", null));
+    });
   });
   function save(profile: SubagentProfile) {
     if (!ready.value) return;

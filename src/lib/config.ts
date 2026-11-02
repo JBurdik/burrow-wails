@@ -55,6 +55,17 @@ export function onConfigChanged(fn: ConfigListener): () => void {
   return () => listeners.delete(fn);
 }
 
+/** Run `apply` once config is loaded and again whenever one of `keys` changes
+ *  in another window/device (or after a resync). For module refs that hold a
+ *  copy of a key and write it back whole: without the re-apply, this window's
+ *  stale copy would overwrite the other window's change on its next save. */
+export function followConfig(keys: string[], apply: () => void): void {
+  void configReady.then(() => {
+    apply();
+    onConfigChanged((key) => { if (key === "*" || keys.includes(key)) apply(); });
+  });
+}
+
 let pending: Promise<unknown> = Promise.resolve();
 
 function persistKey(key: string) {

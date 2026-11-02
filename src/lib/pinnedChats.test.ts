@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 const store: Record<string, unknown> = {};
 vi.mock("./config", () => ({
   configReady: Promise.resolve(),
+  followConfig: (_keys: string[], apply: () => void) => { void Promise.resolve().then(apply); },
   getConfig: <T>(key: string, fallback: T): T => (store[key] as T) ?? fallback,
   setConfig: (key: string, value: unknown) => {
     store[key] = value;

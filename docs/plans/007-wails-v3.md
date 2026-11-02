@@ -40,8 +40,9 @@ headless build (`main_headless.go` — no Wails import), daemon, MCP sidecar.
   writes (`ConfigSet` + `config-changed`). Verified through `just dev-mcp` (Wails' MCP server).
 - Manual smoke: partial (dev window, MCP). Pending: signed build + `just verify`, update from the v2
   build, a week on beta.
-- Later: popped-chat read receipts, floating option for popped tabs, live
-  reload for the remaining config-backed stores.
+- Popped-chat read receipts (`storage` event on `burrow.seenAt`), "Float popped-out windows"
+  (`uiPrefs.floatPopouts`), live reload for the config-backed stores that write a key back whole: done.
+- Later: PTY read receipts across windows.
 
 ## Decisions (grilled 2026-10-31)
 

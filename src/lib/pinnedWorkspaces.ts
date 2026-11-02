@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { configReady, getConfig, setConfig } from "./config";
+import { followConfig, getConfig, setConfig } from "./config";
 
 // Workspaces the user pinned into the sidebar. The sidebar renders a tab section
 // per pinned workspace (plus the active one, always), so 1–3 projects can be
@@ -10,7 +10,7 @@ const MAX = 3;
 
 export const pinnedIds = ref<number[]>([]);
 
-configReady.then(() => {
+followConfig([KEY], () => {
   pinnedIds.value = getConfig<number[]>(KEY, []);
 });
 

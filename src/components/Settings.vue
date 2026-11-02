@@ -156,6 +156,13 @@
               </div>
               <Switch :checked="ui.subagentAutoDeliver" @update:checked="(v: boolean) => ui.subagentAutoDeliver = v" />
             </div>
+            <div v-if="canOpenWindows()" class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Float popped-out windows</span>
+                <span class="text-[11px] text-muted-foreground">Terminals and chats opened with "Open in window" get no zoom button, so a tiling window manager floats them instead of tiling them.</span>
+              </div>
+              <Switch :checked="ui.floatPopouts" @update:checked="(v: boolean) => ui.floatPopouts = v" />
+            </div>
             <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>
@@ -1279,6 +1286,7 @@ import { perform } from "@/lib/controlBridge";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEXT_GENERATION_POLICIES, type NtfyEvent } from "@/stores/ui";
 import { releaseChannel } from "@/lib/releaseChannel";
 import { compact } from "@/lib/viewport";
+import { canOpenWindows } from "@/lib/windows";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import SubagentProfilesPanel from "@/components/agents/SubagentProfilesPanel.vue";

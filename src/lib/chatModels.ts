@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { configReady, getConfig, setConfig } from "./config";
+import { followConfig, getConfig, setConfig } from "./config";
 
 // Static per-agent model catalog. Only the native Claude CLI takes a --model
 // flag we know the ids for up front; every other runtime negotiates its model
@@ -63,7 +63,7 @@ const DEFAULT_ONLY: ModelEntry[] = [{ id: "", label: "Default" }];
 // cached so the welcome-screen picker can offer them before any session exists.
 const SEEN_KEY = "chatModelsSeen";
 const seen = ref<Record<string, ModelEntry[]>>({});
-configReady.then(() => { seen.value = getConfig<Record<string, ModelEntry[]>>(SEEN_KEY, {}); });
+followConfig([SEEN_KEY], () => { seen.value = getConfig<Record<string, ModelEntry[]>>(SEEN_KEY, {}); });
 
 export function learnModels(agentId: string, entries: ModelEntry[]): void {
   const usable = entries.filter((e) => e.id && e.label);
@@ -196,7 +196,7 @@ const ORDER_KEY = "chatModelOrder";
 const custom = ref<Record<string, ModelEntry[]>>({});
 const hidden = ref<string[]>([]);
 const order = ref<Record<string, string[]>>({});
-configReady.then(() => {
+followConfig([CUSTOM_KEY, HIDDEN_KEY, ORDER_KEY], () => {
   custom.value = getConfig<Record<string, ModelEntry[]>>(CUSTOM_KEY, {});
   hidden.value = getConfig<string[]>(HIDDEN_KEY, []);
   order.value = getConfig<Record<string, string[]>>(ORDER_KEY, {});
@@ -277,7 +277,7 @@ export function favKey(agentId: string, modelId: string): string {
 }
 
 export const favorites = ref<string[]>([]);
-configReady.then(() => {
+followConfig([FAV_KEY], () => {
   favorites.value = getConfig<string[]>(FAV_KEY, [favKey("claude", "claude-opus-5-5"), favKey("claude", "claude-sonnet-5")]);
 });
 

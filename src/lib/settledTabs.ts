@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { configReady, getConfig, setConfig } from "./config";
+import { followConfig, getConfig, setConfig } from "./config";
 
 // Manual "settled" flag for non-chat tabs (terminal/agent), keyed like
 // archivedWorkspaces.ts. Chat tabs keep their own settle logic in claudeChats.ts
@@ -13,7 +13,7 @@ function key(wsId: number, tabId: number): string {
 
 export const settledTabKeys = ref<string[]>([]);
 
-configReady.then(() => {
+followConfig([KEY], () => {
   settledTabKeys.value = getConfig<string[]>(KEY, []);
 });
 

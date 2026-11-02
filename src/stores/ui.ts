@@ -121,6 +121,7 @@ interface Prefs {
   worktreeCleanupMerged: boolean; // remove worktrees whose branch merged (read by Go, src-wails/worktreecleanup.go)
   worktreeCleanupInactive: boolean; // remove idle worktrees with no chats/tabs (same)
   worktreeCleanupInactiveDays: number; // idle threshold for the rule above, 0 = off
+  floatPopouts: boolean; // popped-out terminal/chat windows open floating (no zoom button, tiling WMs float them)
   subagentAutoDeliver: boolean; // send a finished/blocked sub-agent's result into its parent chat (read by Go, src-wails/chatsubagentnotice.go)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
   channelMarker: "art" | "label" | "off"; // dev/beta builds: sidebar artwork + titlebar badge, badge only, or nothing
@@ -231,6 +232,7 @@ const DEFAULT_PREFS: Prefs = {
   chatRecaps: true,
   worktreeFromOrigin: true,
   subagentAutoDeliver: true,
+  floatPopouts: false,
   worktreeCleanupMerged: false,
   worktreeCleanupInactive: false,
   worktreeCleanupInactiveDays: 14,
@@ -381,6 +383,7 @@ export const useUIStore = defineStore("ui", () => {
   const chatRecaps = ref<boolean>(loaded.chatRecaps ?? true);
   const worktreeFromOrigin = ref<boolean>(loaded.worktreeFromOrigin ?? true);
   const subagentAutoDeliver = ref<boolean>(loaded.subagentAutoDeliver ?? true);
+  const floatPopouts = ref<boolean>(loaded.floatPopouts ?? false);
   const worktreeCleanupMerged = ref<boolean>(loaded.worktreeCleanupMerged ?? false);
   const worktreeCleanupInactive = ref<boolean>(loaded.worktreeCleanupInactive ?? false);
   const worktreeCleanupInactiveDays = ref<number>(loaded.worktreeCleanupInactiveDays ?? 14);
@@ -453,6 +456,7 @@ export const useUIStore = defineStore("ui", () => {
     chatRecaps.value = p.chatRecaps ?? true;
     worktreeFromOrigin.value = p.worktreeFromOrigin ?? true;
     subagentAutoDeliver.value = p.subagentAutoDeliver ?? true;
+    floatPopouts.value = p.floatPopouts ?? false;
     worktreeCleanupMerged.value = p.worktreeCleanupMerged ?? false;
     worktreeCleanupInactive.value = p.worktreeCleanupInactive ?? false;
     worktreeCleanupInactiveDays.value = p.worktreeCleanupInactiveDays ?? 14;
@@ -649,6 +653,7 @@ export const useUIStore = defineStore("ui", () => {
         chatRecaps: chatRecaps.value,
         worktreeFromOrigin: worktreeFromOrigin.value,
         subagentAutoDeliver: subagentAutoDeliver.value,
+        floatPopouts: floatPopouts.value,
         worktreeCleanupMerged: worktreeCleanupMerged.value,
         worktreeCleanupInactive: worktreeCleanupInactive.value,
         worktreeCleanupInactiveDays: worktreeCleanupInactiveDays.value,
@@ -671,7 +676,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, floatPopouts, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -988,6 +993,7 @@ export const useUIStore = defineStore("ui", () => {
     chatRecaps,
     worktreeFromOrigin,
     subagentAutoDeliver,
+    floatPopouts,
     worktreeCleanupMerged,
     worktreeCleanupInactive,
     worktreeCleanupInactiveDays,

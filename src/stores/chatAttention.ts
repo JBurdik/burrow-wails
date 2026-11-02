@@ -32,7 +32,7 @@ function loadSeenAt(): Map<number, number> {
         const id = Number(key);
         if (Number.isFinite(id) && typeof value === "number" && !receipts.has(id)) receipts.set(id, value);
       }
-      persistSeenAt(receipts);
+      for (const [id, at] of receipts) persistSeenAt(id, at);
       localStorage.removeItem(LEGACY_SUBAGENT_KEY);
     }
   } catch {
@@ -41,11 +41,14 @@ function loadSeenAt(): Map<number, number> {
   return receipts;
 }
 
-function persistSeenAt(receipts: Map<number, number>, remove?: number): void {
+// One key per write: every window (a popped-out chat runs its own copy of this
+// store) shares this localStorage, and writing the whole in-memory map would
+// put this window's stale receipts back over another window's newer ones.
+function persistSeenAt(chatId: number, at: number | undefined): void {
   try {
     const stored = JSON.parse(localStorage.getItem(SEEN_AT_KEY) ?? "{}") as Record<string, number>;
-    for (const [id, at] of receipts) stored[chatKey(id)] = at;
-    if (remove !== undefined) delete stored[chatKey(remove)];
+    if (at === undefined) delete stored[chatKey(chatId)];
+    else stored[chatKey(chatId)] = at;
     localStorage.setItem(SEEN_AT_KEY, JSON.stringify(stored));
   } catch {
     // Read receipts are best effort; backend phase remains authoritative.
@@ -111,8 +114,9 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
   function markSeen(chatId: number): void {
     const phase = phases.get(chatId);
     if (phase && phase.turn_ended_at > (seenAt.get(chatId) ?? 0)) {
-      seenAt.set(chatId, Math.max(phase.turn_ended_at, Date.now()));
-      persistSeenAt(seenAt);
+      const at = Math.max(phase.turn_ended_at, Date.now());
+      seenAt.set(chatId, at);
+      persistSeenAt(chatId, at);
     }
     refresh(chatId);
   }
@@ -213,10 +217,28 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     const chatId = event.payload?.chat_id;
     if (!chatId || !isLive(chatId)) return;
     seenAt.delete(chatId);
-    persistSeenAt(seenAt, chatId);
+    persistSeenAt(chatId, undefined);
     refresh(chatId);
     notifyWoke(chatId);
   });
+
+  // Another window wrote a receipt — a chat popped out into its own window
+  // (WindowApp) marks itself seen there, and without this the main window's
+  // Sidebar kept the review dot. `storage` fires only in the OTHER windows of
+  // the origin, so this never echoes our own writes.
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (event) => {
+      if (event.key !== SEEN_AT_KEY) return;
+      const next = loadSeenAt();
+      for (const id of new Set([...seenAt.keys(), ...next.keys()])) {
+        const at = next.get(id);
+        if (at === seenAt.get(id)) continue;
+        if (at === undefined) seenAt.delete(id);
+        else seenAt.set(id, at);
+        refresh(id);
+      }
+    });
+  }
 
   // Sub-agent auto-archive. Lives here, not in Go, because "seen" is this
   // device's receipt (localStorage) — Go has the phase and collected_at but

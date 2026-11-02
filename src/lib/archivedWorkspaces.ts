@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { configReady, getConfig, setConfig } from "./config";
+import { followConfig, getConfig, setConfig } from "./config";
 
 // Workspaces the user archived. Purely a project-list view flag: archived repos
 // sink to the bottom of the sidebar's project picker. It deliberately does NOT
@@ -10,7 +10,7 @@ const KEY = "sidebarArchived";
 
 export const archivedIds = ref<number[]>([]);
 
-configReady.then(() => {
+followConfig([KEY], () => {
   archivedIds.value = getConfig<number[]>(KEY, []);
 });
 
