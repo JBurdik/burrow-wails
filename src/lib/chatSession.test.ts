@@ -476,6 +476,26 @@ describe("stream reducers", () => {
     dropChatSession(65);
   });
 
+  it("busy follows Go's phase, not the stream", async () => {
+    const { deps, emit } = fakeDeps();
+    const s = chatSession(66, deps);
+    await s.listenEvents();
+    // Agent output alone no longer arms busy — only the phase does.
+    emit("chat-event-66", { ord: 1, events: [{ type: "text.delta", messageId: "m", text: "hi" }] });
+    expect(s.busy.value).toBe(false);
+    emit("phase-chat:66", { state: "running" });
+    expect(s.busy.value).toBe(true);
+    // turn.completed lost (reconnect): the settled phase still ends it.
+    emit("phase-chat:66", { state: "done" });
+    expect(s.busy.value).toBe(false);
+    // Our own send before Go echoes it: the old "done" must not cancel it.
+    s.postUserMessage({ text: "next" });
+    s.startTurn();
+    emit("phase-chat:66", { state: "done" });
+    expect(s.busy.value).toBe(true);
+    dropChatSession(66);
+  });
+
   it("leaves an ACP turn to Go's boundary and applies any selector reply", async () => {
     const view = fakeView({ usesRpcRuntime: () => true });
     const { deps, emit } = fakeDeps();

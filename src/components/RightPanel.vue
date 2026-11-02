@@ -339,8 +339,6 @@
 
     <BackgroundTasksSurface v-else-if="act(pi) === 'background'" :chat-id="activeChatId" />
 
-    <OutputsSurface v-else-if="act(pi) === 'outputs'" :chat-id="activeChatId" :cwd="props.cwd" />
-
     <ProgressSurface v-else-if="act(pi) === 'progress'" :chat-id="activeChatId" />
 
     <SideChatSurface v-else-if="act(pi) === 'side-chat'" :chat-id="activeChatId" :cwd="props.cwd" />
@@ -395,6 +393,7 @@
           </optgroup>
         </select>
         <button class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="scopedDiffLoading" @click="loadScopedDiff(true)"><PhArrowClockwise :size="12" :class="scopedDiffLoading && 'animate-spin'" /></button>
+        <button v-if="scopeCheckpoint" class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Restore the working tree to before this turn" aria-label="Restore checkpoint" @click="restoreTarget = scopeCheckpoint"><PhArrowUUpLeft :size="12" /></button>
         <button class="flex shrink-0 items-center gap-1 rounded-[var(--radius-nav)] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50" :title="diffScope.kind === 'branch' ? 'Have an agent review the branch changes' : 'Have an agent review the uncommitted changes'" :disabled="reviewing || !props.workspaceId" @click="startReview"><PhSparkle :size="12" />Review</button>
       </div>
       <div v-if="scopedDiffError" role="alert" class="p-3 text-[11px] text-destructive">{{ scopedDiffError }}</div>
@@ -538,45 +537,6 @@
     </div>
 
     <!-- History tab: pre-turn worktree snapshots, newest first -->
-    <div v-else-if="act(pi) === 'history'" class="flex flex-1 flex-col overflow-y-auto">
-      <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
-        <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Checkpoints</span>
-        <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh" @click="loadCheckpoints">
-          <PhArrowClockwise :size="12" />
-        </button>
-      </div>
-
-      <div v-if="!checkpoints.length" class="m-2 rounded-[var(--radius-card)] border border-dashed border-border/60 px-4 py-6 text-center text-[11px] leading-[1.7] text-muted-foreground">
-        No checkpoints yet.<br />One is taken before every agent turn.
-      </div>
-
-      <div
-        v-for="cp in checkpoints"
-        :key="cp.id"
-        class="group/cp flex cursor-pointer items-center gap-1.5 border-b border-border/40 px-2 py-[6px] transition-colors hover:bg-hover"
-        @click="openCheckpointDiff(cp)"
-      >
-        <PhClockCounterClockwise :size="11" class="shrink-0 text-muted-foreground" />
-        <div class="flex min-w-0 flex-1 flex-col">
-          <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ cp.label || "Checkpoint" }}</span>
-          <span class="font-mono text-[9.5px] text-muted-foreground">{{ cpTime(cp.createdAt) }} · {{ cp.commit.slice(0, 7) }}</span>
-        </div>
-        <button
-          class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground group-hover/cp:opacity-100"
-          title="Open diff in panel"
-          @click.stop="openCheckpointDiffInPanel(cp)"
-        >
-          <PhGitCommit :size="12" />
-        </button>
-        <button
-          class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground group-hover/cp:opacity-100"
-          title="Restore the working tree to this checkpoint"
-          @click.stop="restoreTarget = cp"
-        >
-          <PhArrowUUpLeft :size="12" />
-        </button>
-      </div>
-    </div>
     <div v-if="act(pi) === 'terminal' && !terminalWsIds.includes(wsKey)" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
     <!-- Where this pane's kept-mounted Browser/Terminal get teleported to. -->
     <div :ref="(el) => { slotEls[pi] = el as HTMLElement | null }" v-show="act(pi) === 'browser' || act(pi) === 'terminal'" class="flex min-h-0 flex-1 flex-col" />
@@ -714,7 +674,7 @@ import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
-  PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
+  PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
   PhSpinner, PhWarningCircle, PhRows, PhSparkle, PhArrowsInSimple, PhPlay, PhFileText, PhFileCode, PhEye,
   PhListChecks,
 } from "@phosphor-icons/vue";
@@ -744,7 +704,6 @@ import PullRequestsPanel from "./PullRequestsPanel.vue";
 import DevServersSurface from "./DevServersSurface.vue";
 import BackgroundTasksSurface from "./BackgroundTasksSurface.vue";
 import { PhTerminalWindow } from "@phosphor-icons/vue";
-import OutputsSurface from "./OutputsSurface.vue";
 import ProgressSurface from "./ProgressSurface.vue";
 import SideChatSurface from "./SideChatSurface.vue";
 import { PhChatsCircle } from "@phosphor-icons/vue";
@@ -999,6 +958,11 @@ function askToStartServer(port: number) {
 /** Open a surface (Background, Progress, Outputs, …) in a workspace's panel
  *  from outside it — a transcript row that names one. The caller shows the panel. */
 function openPanelSurface(id: string, workspaceId: number) {
+  // ponytail: "outputs" surface was folded into Diff; Go still tags the changed-files note with it.
+  if (id === "outputs") {
+    wsUi(workspaceId).diffScope = { kind: "last-turn" };
+    id = "diff";
+  }
   openIn(layoutFor(workspaceId), id);
 }
 function wsUi(id: number): WsUiState {
@@ -1142,15 +1106,13 @@ const tabs = computed(() => {
     { id: "git", label: "Git", icon: PhGitBranch, description: "Inspect, stage and commit workspace changes." },
     { id: "pull-requests", label: "PRs", icon: PhGitBranch, description: "Check pull requests for this workspace." },
     { id: "explorer", label: "Files", icon: PhFiles, description: "Browse the current workspace." },
-    { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
-    { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
+    { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review changes by turn, branch or worktree; restore a checkpoint." },
     { id: "agents", label: "Agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
     { id: "progress", label: "Progress", icon: PhListChecks, description: "The active chat's live todo list." },
     { id: "side-chat", label: "Side chat", icon: PhChatsCircle, description: "Ask a quick question about the active chat without disturbing it." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "dev-servers", label: "Dev servers", icon: PhPlugsConnected, description: "See and kill dev servers running in this workspace." },
     { id: "background", label: "Background", icon: PhTerminalWindow, description: "Background shell tasks the active chat launched." },
-    { id: "outputs", label: "Outputs", icon: PhFileCode, description: "Files this chat created or edited." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
   // Only exists once something opened a document (chat link, ⌘-click…).
@@ -1395,29 +1357,8 @@ const restoreTarget = ref<Checkpoint | null>(null);
 const restoreError = ref("");
 const restoreBusy = ref(false);
 
-async function loadCheckpoints() {
-  const cwd = props.cwd;
-  if (!cwd) return (checkpoints.value = []);
-  const rows = await invoke<Checkpoint[]>("list_checkpoints", { cwd, limit: 50 });
-  if (props.cwd === cwd) checkpoints.value = rows;
-}
-
 function cpTime(ms: number): string {
   return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-// What has changed in the workspace since this checkpoint was taken.
-async function openCheckpointDiff(cp: Checkpoint) {
-  const diff = await invoke<string>("checkpoint_diff", { cwd: props.cwd, commit: cp.commit });
-  if (!diff.trim()) return;
-  activeTerm()?.openDiffInTab(`Since “${cp.label || cp.commit.slice(0, 7)}”`, false, diff);
-}
-
-// Same diff, but shown in the panel's own Diff tab (as "Turn N") instead of a
-// new terminal tab.
-function openCheckpointDiffInPanel(cp: Checkpoint) {
-  diffScope.value = { kind: "turn", checkpointId: cp.id };
-  openSurface("diff");
 }
 
 async function confirmRestore() {
@@ -1427,7 +1368,7 @@ async function confirmRestore() {
   try {
     await invoke("restore_checkpoint", { cwd: props.cwd, commit: restoreTarget.value.commit });
     restoreTarget.value = null;
-    await loadCheckpoints();
+    void loadScopedDiff(true);
     git.refresh(true);
   } catch (e) {
     restoreError.value = String(e);
@@ -1436,7 +1377,6 @@ async function confirmRestore() {
   }
 }
 
-watch([() => shown("history"), () => props.cwd], () => { if (shown("history")) loadCheckpoints(); });
 watch([() => shown("diff"), () => props.cwd, diffScopeKey, reviewSubject], () => {
   // Invalidate in-flight requests even when the diff surface is closed.
   diffRequest++;
@@ -1446,6 +1386,11 @@ watch([() => shown("diff"), () => props.cwd, diffScopeKey, reviewSubject], () =>
 
 // checkpoints are listed newest-first; turn numbers count up from the oldest,
 // so "Turn 1" is stable as new turns land instead of shifting every time.
+// The checkpoint behind a "Turn N" scope — what the Diff header's Restore resets to.
+const scopeCheckpoint = computed(() => {
+  const s = diffScope.value;
+  return s.kind === "turn" ? checkpoints.value.find((cp) => cp.id === s.checkpointId) ?? null : null;
+});
 const numberedCheckpoints = computed(() =>
   checkpoints.value.map((cp, i) => ({ cp, turn: checkpoints.value.length - i })));
 

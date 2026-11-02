@@ -195,7 +195,7 @@ unreadable config = off).
 
 **Clickable transcript notes (`publishSurfaceNote`, `chatturnnotes.go`, `chatbgnotes.go`).**
 Go writes `chat-note` rows carrying a `surface` into the chat's own `chat_stream`; clicking one
-opens that Right Panel surface (Progress / Outputs / Background). Turn notes ("Plan: 2/5 — …"
+opens that Right Panel surface (Progress / Background; the changed-files note opens Diff on the last turn). Turn notes ("Plan: 2/5 — …"
 on the turn's first plan, "Changed N files" at its end) hang off the tail of `emitChatLine`, so
 they are derived from neutral events for every provider; background-task notes come from the
 live Claude reader only (Codex background terminals have no stream signal, only a poll). Both

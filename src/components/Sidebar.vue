@@ -616,7 +616,7 @@
 </template>
 
 <script setup lang="ts">
-import { canOpenWindows as canOpenWindowsFn } from "@/lib/windows";
+import { canOpenWindows as canOpenWindowsFn, openWindow } from "@/lib/windows";
 import { ref, reactive, computed, shallowRef, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
 import {
   PhFolder,
@@ -1214,7 +1214,10 @@ const gitDialogOpen = ref(false);
 
 function openGitTab(ws: Workspace) {
   selectWs(ws);
-  gitDialogOpen.value = true;
+  // Desktop: its own native window (single instance per key). A paired
+  // browser / phone can't open windows, so it keeps the full-screen overlay.
+  if (canOpenWindows()) void openWindow("git", `/window/git?ws=${ws.id}`, "Git", 1100, 780);
+  else gitDialogOpen.value = true;
 }
 
 function newTerminalTab(ws: Workspace) {

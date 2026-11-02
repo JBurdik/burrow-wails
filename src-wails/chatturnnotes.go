@@ -191,8 +191,8 @@ func changedNoteText(changed map[string]bool) string {
 	return fmt.Sprintf("Changed %d files", len(changed))
 }
 
-// changedPaths: the files a tool call will have changed if it succeeds. Mirrors
-// src/lib/chatOutputs.ts (opsOf) — keep the two in step.
+// changedPaths: the files a tool call will have changed if it succeeds. The note
+// opens the Diff surface on the last turn (RightPanel maps "outputs" → diff).
 func changedPaths(kind string, ev ProviderRuntimeEvent) []string {
 	input := ev.Input
 	if input == nil {

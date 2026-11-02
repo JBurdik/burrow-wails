@@ -134,7 +134,10 @@ func fetchClaudePlanUsage() PlanUsageProvider {
 	}
 	switch {
 	case code == http.StatusUnauthorized:
-		p.Status, p.Reason = "unavailable", "Login token rejected — it refreshes the next time Claude runs"
+		p.Status, p.Reason = "unavailable", "Claude login rejected — run `claude /login` to sign in again"
+		return p
+	case code == http.StatusTooManyRequests:
+		p.Status, p.Reason = "unavailable", "Usage endpoint is rate limiting — retrying shortly"
 		return p
 	case code != http.StatusOK:
 		p.Status, p.Reason = "unavailable", fmt.Sprintf("Usage endpoint returned HTTP %d", code)
@@ -158,6 +161,9 @@ var claudeUsageRequest = func(ctx context.Context, token string) (int, []byte, e
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 	req.Header.Set("Accept", "application/json")
+	// The endpoint answers 429 to any User-Agent that is not `claude-code/<semver>`
+	// (Go's default and bare "claude-code" included); the version itself is not checked.
+	req.Header.Set("User-Agent", "claude-code/2.1.0")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, nil, err

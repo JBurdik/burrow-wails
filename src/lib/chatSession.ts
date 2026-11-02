@@ -376,6 +376,7 @@ interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionS
   refCount: number;
   evictTimer: ReturnType<typeof setTimeout> | null;
   eventsUL: UnlistenFn | null;
+  phaseUL: UnlistenFn | null;
   claudeUL: UnlistenFn | null;
   acpDataUL: UnlistenFn | null;
   acpReqUL: UnlistenFn | null;
@@ -760,6 +761,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     refCount: 0,
     evictTimer: null,
     eventsUL: null,
+    phaseUL: null,
     claudeUL: null,
     acpDataUL: null,
     acpReqUL: null,
@@ -848,6 +850,10 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
           onEvents(s, e.payload);
         });
       }
+      if (!s.phaseUL) {
+        s.phaseUL = await s.deps.listen<{ state?: string }>(`phase-chat:${chatId}`, (e) => applyPhase(s, e.payload?.state));
+        applyPhase(s, s.deps.host.phase?.(chatId));
+      }
       if (!s.queueUL) {
         s.queueUL = await s.deps.listen<{ chatId: number; items: GoQueueItem[] }>("chat-queue-changed", (e) => {
           if (e.payload.chatId === chatId) s.queue.value = e.payload.items.map(fromGo);
@@ -887,6 +893,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     detach() {
       if (s.evictTimer) { clearTimeout(s.evictTimer); s.evictTimer = null; }
       s.eventsUL?.(); s.eventsUL = null;
+      s.phaseUL?.(); s.phaseUL = null;
       s.queueUL?.(); s.queueUL = null;
       s.claudeUL?.(); s.claudeUL = null;
       s.acpDataUL?.(); s.acpDataUL = null;
@@ -990,12 +997,27 @@ function rememberContext(s: InternalSession) {
 }
 
 /**
- * A turn does not always start with a user send: Claude resumes the same
- * session on its own after a background task finishes or an interim Stop.
- * Assistant output while we think it's idle IS a turn.
- * ponytail: native transport only — ACP replays history through the same feed
- * on session/load with no turn-done, so marking active there sticks running.
+ * Busy follows Go's phase, not the stream: Go derives it for every transport
+ * from the same lines, with no view attached, and a guess from the client's
+ * side of the stream is how a "Changed N files" note after turn.completed — or
+ * a turn end lost in a reconnect — left a chat on "Pondering…" forever.
+ * In flight → busy (also covers Claude resuming on its own after a background
+ * task). Settled → not busy, unless our own send is still on its way: until Go
+ * echoes the prompt the phase still reads the previous turn's.
+ * The "finished" notification stays on turn.completed (finishTurn).
  */
+const PHASE_IN_FLIGHT = new Set(["running", "waiting_input", "waiting_approval"]);
+function applyPhase(s: InternalSession, state: string | undefined) {
+  if (!state) return;
+  if (PHASE_IN_FLIGHT.has(state)) { markActive(s); return; }
+  if (!s.busy.value || s.pendingSends.size > 0) return;
+  s.busy.value = false;
+  s.settleTranscript();
+  s.save();
+  s.sync();
+  s.maybeEvict();
+}
+
 function markActive(s: InternalSession) {
   if (s.busy.value) return;
   s.busy.value = true;
@@ -1040,9 +1062,6 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
       }
     }
     if (isProjectedEvent(event.type)) {
-      // A message.note is Burrow's own row, not agent output — "Changed N files"
-      // lands right after turn.completed and would restart a turn nothing ends.
-      if (event.type !== "message.note" && !(s.view?.usesRpcRuntime() ?? false)) markActive(s);
       const before = s.messages.value.length;
       if (applyChatEvent(projectionOf(s), event)) s.view?.scrollToBottom();
       // Arrival time for the visit watermark — the same stamp Go's fold puts on its copy.

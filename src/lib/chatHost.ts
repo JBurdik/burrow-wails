@@ -5,6 +5,7 @@ import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useSubagentsStore } from "@/stores/subagents";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useUIStore, type NtfyEvent } from "@/stores/ui";
+import { useChatAttentionStore } from "@/stores/chatAttention";
 import { playSound } from "@/lib/sounds";
 import { notifyNtfy } from "@/lib/ntfy";
 
@@ -29,6 +30,8 @@ export interface ChatHost {
   notifyDone(chatId: number, watching: boolean): void;
   /** The agent is blocked on a permission / question / plan decision. */
   notifyPermission(chatId: number, request: CanUseToolReq): void;
+  /** Go's current phase state for the chat (`running`, `done`, …), if known. */
+  phase?(chatId: number): string | undefined;
 }
 
 function maybeNtfy(event: NtfyEvent, message: string) {
@@ -64,6 +67,7 @@ export const appChatHost: ChatHost = {
   addPermissionRule: (key) => useClaudeChatsStore().addPermissionRule(key),
   subagentStarted: (chatId, id, input) => useSubagentsStore().started(chatId, id, input),
   subagentCompleted: (id, failed) => useSubagentsStore().completed(id, failed),
+  phase: (chatId) => useChatAttentionStore().phaseFor(chatId)?.state,
   notifyDone(chatId, watching) {
     if (secondaryWindow) return;
     const chat = appChatHost.chat(chatId);
