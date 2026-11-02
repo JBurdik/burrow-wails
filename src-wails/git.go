@@ -54,6 +54,33 @@ func (a *App) RunGit(cwd string, args []string) GitOutput {
 	return runCmd("git", cwd, args)
 }
 
+// RunGitInput is RunGit with stdin — hunk staging pipes a single-hunk patch
+// into `git apply -`. GIT_EDITOR=true because merge/rebase/cherry-pick
+// `--continue` would otherwise wait on an editor nobody can see. LC_ALL=C so
+// the client can read `git status` prose ("rebase in progress") whatever the
+// user's locale — REBASE_HEAD alone outlives a finished rebase.
+func (a *App) RunGitInput(cwd string, args []string, stdin string) GitOutput {
+	c := exec.Command("git", args...)
+	if cwd != "" {
+		c.Dir = cwd
+	}
+	c.Env = append(os.Environ(), "GIT_EDITOR=true", "LC_ALL=C")
+	c.Stdin = strings.NewReader(stdin)
+	var stdout, stderr strings.Builder
+	c.Stdout, c.Stderr = &stdout, &stderr
+	code := 0
+	if err := c.Run(); err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			code = ee.ExitCode()
+		} else {
+			code = -1
+			stderr.WriteString(err.Error())
+		}
+	}
+	return GitOutput{Stdout: stdout.String(), Stderr: stderr.String(), Code: code, Success: code == 0}
+}
+
 // --- worktrees ---
 
 func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef string) (Workspace, error) {
