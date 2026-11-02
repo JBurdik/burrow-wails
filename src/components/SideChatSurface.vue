@@ -8,7 +8,9 @@ import { newSideChat, sideChatSelection } from "@/lib/sideChat";
 
 // Side chats of the active chat: quick questions asked on a fork of its
 // current agent session (src-wails/chatside.go), so the chat itself — even a
-// running turn — is never disturbed. The view is a compact AgentChat; the
+// running turn — is never disturbed. The view is a thread's AgentChat (not
+// `compact`: same composer and pickers as a thread pane, and none of compact's
+// control-chat side effects, e.g. auto-allowing `burrow` Bash); the
 // side chat's process is the Go chat runtime's like any chat's.
 const props = defineProps<{ chatId: number | null; cwd: string }>();
 
@@ -49,8 +51,10 @@ async function archiveCurrent() {
 </script>
 
 <template>
-  <section class="flex min-h-0 flex-1 flex-col overflow-hidden text-[11px] text-secondary-foreground">
-    <header class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
+  <!-- No text size/colour on the section: AgentChat inherits it (.claude-chat sets
+       none), so the chat would render smaller and dimmer than a thread pane. -->
+  <section class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <header class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5 text-[11px] text-secondary-foreground">
       <PhChatsCircle :size="14" class="shrink-0 text-foreground" />
       <select
         v-if="list.length > 1"
@@ -78,14 +82,13 @@ async function archiveCurrent() {
       ><PhPlus :size="12" /></button>
     </header>
 
-    <div v-if="error" class="mx-2 mt-2 rounded-[var(--radius-card)] border border-destructive/40 px-3 py-2 text-destructive">{{ error }}</div>
+    <div v-if="error" class="mx-2 mt-2 text-[11px] rounded-[var(--radius-card)] border border-destructive/40 px-3 py-2 text-destructive">{{ error }}</div>
 
-    <div v-if="!parent" class="p-4 text-center leading-relaxed text-muted-foreground">Open a chat to ask a side question about it.</div>
-    <div v-else-if="!supported" class="p-4 text-center leading-relaxed text-muted-foreground">Side chats need a Claude or Codex chat.</div>
+    <div v-if="!parent" class="p-4 text-[11px] text-center leading-relaxed text-muted-foreground">Open a chat to ask a side question about it.</div>
+    <div v-else-if="!supported" class="p-4 text-[11px] text-center leading-relaxed text-muted-foreground">Side chats need a Claude or Codex chat.</div>
     <AgentChat
       v-else-if="current"
       :key="current.id"
-      compact
       class="min-h-0 flex-1"
       :chat-id="current.id"
       :workspace-id="current.workspaceId"
@@ -93,7 +96,7 @@ async function archiveCurrent() {
       :agent-kind="current.agentKind"
       is-watching
     />
-    <div v-else class="flex flex-col items-center gap-3 p-4 text-center leading-relaxed text-muted-foreground">
+    <div v-else class="flex flex-col items-center gap-3 p-4 text-[11px] text-center leading-relaxed text-muted-foreground">
       <span>Ask a quick question about this chat. The side chat starts from everything the chat knows right now and leaves the chat itself alone, even mid-turn.</span>
       <button
         class="rounded-[var(--radius-nav)] border border-border px-3 py-1.5 text-foreground hover:bg-hover disabled:opacity-50"
