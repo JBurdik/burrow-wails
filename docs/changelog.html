@@ -80,11 +80,46 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v1.0.1 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v1.0.1</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">listopad 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Right Panel</div>
+    <ul>
+      <li><strong>Celý Right Panel v samostatném okně</strong> — volitelně tlačítkem v hlavičce panelu; zavřením okna se vrátí. Okno sleduje projekt a aktivní chat hlavního okna, terminály se přesunou s ním (je to tentýž běžící shell) a <code>serve</code> od agentů do něj dál chodí.</li>
+      <li><strong>Terminály v panelu přežijí restart</strong> — seznam terminálů se ukládá a po startu se panel napojí na shelly, které démon pořád drží. Dřív v démonu osiřely.</li>
+      <li><strong><code>⌘J</code> otevírá terminál v panelu</strong> — ve spodní polovině Right Panelu s kurzorem v něm, další stisk ho schová. Funguje i na úvodní obrazovce. Spodní terminál pod chatem je pryč.</li>
+      <li><strong>Split přetažením</strong> — tab panelu jde přetáhnout do druhé poloviny (cílová polovina se orámuje „Move here“), a když je vidět jen horní, do jeho spodní části („Drop to split below“). Při najetí myší má tab i šipku pro přesun.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Ovládání z agentů</div>
+    <ul>
+      <li><strong>Nové projekty a vlákna v jiném projektu</strong> — <code>workspace_create --create</code> složku projektu rovnou založí (holé jméno jde do výchozí složky projektů, neprázdnou odmítne), <code>--git-init</code> v ní založí repozitář. <code>spawn --workspace-id</code> otevře vlákno v libovolném projektu.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Side chat jako vlákno</strong> — side chat už nemá navíc titulkový řádek ani automaticky povolené <code>Bash:burrow</code> a menší písmo obalu se nepropisuje do chatu.</li>
+      <li><strong>Artwork v Sidebaru u stabilní verze</strong> — pozadí s kopci se ztratilo při merge, takže stabilní build neměl v Sidebaru žádný obrázek a Settings skrývaly jeho přepínač. Vráceno z 0.9.0.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
   <!-- v1.0.0 -->
 <div class="release">
   <div class="release-header">
     <span class="version">v1.0.0</span>
-    <span class="tag tag-latest">nejnovější</span>
     <span class="date">listopad 2026</span>
   </div>
 
