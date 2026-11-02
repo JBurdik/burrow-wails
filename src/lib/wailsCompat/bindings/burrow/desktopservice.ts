@@ -22,9 +22,6 @@ export function CheckUpdate(): $CancellablePromise<$models.UpdateInfo> {
     return $Call.ByID(3715642294);
 }
 
-/**
- * CloseWindow closes a secondary window from the main one ("bring back").
- */
 export function CloseWindow(key: string): $CancellablePromise<void> {
     return $Call.ByID(2033037563, key);
 }
@@ -77,4 +74,22 @@ export function RelaunchApp(): $CancellablePromise<void> {
 
 export function SendFloatSnapshot(ptyID: string, data: string, cols: number, rows: number): $CancellablePromise<void> {
     return $Call.ByID(2139234571, ptyID, data, cols, rows);
+}
+
+/**
+ * CloseWindow closes a secondary window from the main one ("bring back").
+ * TrayOpen is the tray panel's click: hide the panel, bring the main window
+ * forward and route it (App.vue listens on menu-navigate).
+ */
+export function TrayOpen(route: string): $CancellablePromise<void> {
+    return $Call.ByID(734240401, route);
+}
+
+/**
+ * TraySetPinned turns the tray panel into a free-standing always-on-top panel:
+ * it stays up when it loses focus, resizes, and a tray click shows it where
+ * the user left it instead of snapping it back under the icon. Not persisted.
+ */
+export function TraySetPinned(pinned: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2423678597, pinned);
 }

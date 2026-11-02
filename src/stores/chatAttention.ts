@@ -246,7 +246,9 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
   // so the phone never archives. Same archive() as the Sidebar's button: one
   // archived_at column, process stopped.
   // ponytail: 1-minute poll; a per-chat timer only matters if 30 min ± 1 does.
-  setInterval(() => {
+  // The main window sweeps; a secondary one (popped chat, tray panel) would
+  // archive the same rows a second time.
+  if (typeof location === "undefined" || !location.hash.startsWith("#/window/")) setInterval(() => {
     const now = Date.now();
     for (const session of chats.sessions) {
       if (subagentArchivable(session, phases.get(session.id), seenAt.get(session.id) ?? 0, (watchers.get(session.id) ?? 0) > 0, now)) {

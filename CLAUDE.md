@@ -465,7 +465,26 @@ quit (`quitting` flag, `ShouldQuit`), the Dock icon reopens. The tray is a templ
 `waiting_*` beside it (none at 0), and the same count is the Dock badge (Wails' `services/dock`, removed at
 0) — `waitingCount`, recounted from `PhaseStore.All` on every change. The badge call `dispatch_sync`s onto the
 main queue, so it runs only on `refreshTray`'s goroutine and only after `ApplicationStarted` (before the run
-loop it would deadlock). Window → Keep on Top (⌘⌥T).
+loop it would deadlock). **Left click** on the tray opens the **tray panel** (`TrayPanel.vue`, WindowApp kind
+`tray`): a hidden frameless translucent **NSPanel** (`MacWindowClassPanel`, pop-up-menu level, all Spaces —
+tiling WMs only manage `AXStandardWindow`, so it is never tiled) `AttachWindow`ed to the tray, hidden on focus loss / Esc, sized to its
+content (× the UI-scale `zoom`): a pocket Sidebar — the threads the Sidebar lists as active (`claudeChats`, minus
+`settledFor`, sub-agents, side chats) + agent tabs, grouped Needs you / Working / Unread / Recent (5). Phases come
+from `shell_snapshot` every 2 s while shown (**not** `chatAttention` — a second instance would re-fire notifications and auto-archives); a tab row calls
+`TrayOpen(route)` → hide + show main + `menu-navigate` (App.vue `router.push`); a **chat row opens the thread in
+the panel** (`AgentChat`, 440×640), a tab's PTY permission is answered inline (`list_pty_permissions` /
+`answer_pty_permission`), and **New thread** = `remote_create_chat` + `chat_send` (keeps the main window's
+`chatActiveByWs`; titled via `smartTitle` → `generate_chat_title`). **Pin** (`TraySetPinned`, not persisted): no
+hide on focus loss, resizable, header drags it, a tray click toggles it in place; unpin = client shrinks it to
+content, Go re-anchors it under the icon. Only a pinned panel moves (`traypanel_darwin.go`: Wails makes every
+window movable by background; also `hidesOnDeactivate = NO`, or an NSPanel vanishes when Burrow deactivates).
+**AeroSpace (load-bearing):** it classifies a window once, on first sight — buttonless + untitled + *unfocused* ⇒
+popup, left alone on every workspace; seen focused ⇒ floating, bound to one workspace and hidden on a switch. So
+the panel is a **non-activating** NSPanel with an empty title, `showTrayPanel` orders it in without key status
+and focuses it 250 ms later (verified: `aerospace list-windows --all` no longer lists it). Secondary windows never notify
+(`appChatHost.notify*` / `notifyWoke` return early) nor run the sub-agent auto-archive — the main window is always
+alive and does both once. Right click = the menu.
+Window → Keep on Top (⌘⌥T).
 
 ### `config.json` is written one key at a time (`src-wails/config.go`, `src/lib/config.ts`)
 

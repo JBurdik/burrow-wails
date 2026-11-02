@@ -1,5 +1,6 @@
 <template>
-  <div class="window-app flex h-full flex-col bg-[var(--terminal-bg)]">
+  <TrayPanel v-if="kind === 'tray'" />
+  <div v-else class="window-app flex h-full flex-col bg-[var(--terminal-bg)]">
     <!-- Hidden-inset titlebar: the traffic lights sit over this strip, which is
          also what drags the window. -->
     <div v-if="kind !== 'settings'" class="window-titlebar flex h-[30px] shrink-0 items-center justify-center text-[12px] text-muted-foreground" style="--wails-draggable: drag">
@@ -33,6 +34,7 @@ const Settings = defineAsyncComponent(() => import("@/components/Settings.vue"))
 const XTerm = defineAsyncComponent(() => import("@/components/XTerm.vue"));
 const AgentChat = defineAsyncComponent(() => import("@/components/AgentChat.vue"));
 const GitWindow = defineAsyncComponent(() => import("@/components/git/GitWindow.vue"));
+const TrayPanel = defineAsyncComponent(() => import("@/components/TrayPanel.vue"));
 
 const [path, query = ""] = location.hash.slice(1).split("?");
 const parts = path.split("/").filter(Boolean); // ["window", kind, id?]

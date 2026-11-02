@@ -43,6 +43,11 @@ function maybeNtfy(event: NtfyEvent, message: string) {
   ).catch(() => {}); // best-effort: a failed push must never disrupt the UI
 }
 
+// Secondary windows (a popped chat, the tray panel) mount AgentChat too, but
+// the main window is always alive (close = hide) and notifies for everyone —
+// a second window doing it as well is a double toast, chime and OS banner.
+const secondaryWindow = typeof location !== "undefined" && location.hash.startsWith("#/window/");
+
 async function osNotify(title: string, body: string) {
   if (document.hasFocus()) return;
   let granted = await isPermissionGranted();
@@ -60,6 +65,7 @@ export const appChatHost: ChatHost = {
   subagentStarted: (chatId, id, input) => useSubagentsStore().started(chatId, id, input),
   subagentCompleted: (id, failed) => useSubagentsStore().completed(id, failed),
   notifyDone(chatId, watching) {
+    if (secondaryWindow) return;
     const chat = appChatHost.chat(chatId);
     const body = chat?.title || "Claude finished";
     useNotificationsStore().push({ type: "done", title: "Claude", body, workspaceId: chat?.workspaceId, source: "agent" });
@@ -69,6 +75,7 @@ export const appChatHost: ChatHost = {
     void osNotify("Burrow", `✓ ${body}`);
   },
   notifyPermission(chatId, cr) {
+    if (secondaryWindow) return;
     const target = (cr.input?.command ?? cr.input?.file_path ?? cr.input?.path ?? cr.description ?? "") as string;
     const body = target ? `${cr.toolName}: ${String(target).slice(0, 80)}` : cr.toolName;
     useNotificationsStore().push({ type: "info", title: "Povolení", body, workspaceId: appChatHost.chat(chatId)?.workspaceId, source: "agent" });
@@ -80,6 +87,7 @@ export const appChatHost: ChatHost = {
 
 /** A snoozed chat woke (src-wails/chatsnooze.go): toast + chime + OS notification. */
 export function notifyWoke(chatId: number): void {
+  if (secondaryWindow) return;
   const chat = appChatHost.chat(chatId);
   const body = chat?.title || "Chat";
   useNotificationsStore().push({ type: "info", title: "Snooze over", body, workspaceId: chat?.workspaceId, source: "agent" });

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"burrow/internal/agentphase"
 
@@ -145,6 +146,55 @@ func (s *DesktopService) OpenWindow(key, route, title string, width, height int,
 }
 
 // CloseWindow closes a secondary window from the main one ("bring back").
+// TrayOpen is the tray panel's click: hide the panel, bring the main window
+// forward and route it (App.vue listens on menu-navigate).
+func (s *DesktopService) TrayOpen(route string) {
+	if trayWin != nil && !trayPinned.Load() {
+		trayWin.Hide()
+	}
+	showMainWindow()
+	if route != "" {
+		desktopEmit("menu-navigate", route)
+	}
+}
+
+// TraySetPinned turns the tray panel into a free-standing always-on-top panel:
+// it stays up when it loses focus, resizes, and a tray click shows it where
+// the user left it instead of snapping it back under the icon. Not persisted.
+// Unpinning puts it back under the icon (the client resizes it first).
+func (s *DesktopService) TraySetPinned(pinned bool) {
+	trayPinned.Store(pinned)
+	if trayWin == nil {
+		return
+	}
+	trayWin.SetResizable(pinned)
+	setTrayPanelMovable(trayWin, pinned)
+	if !pinned && trayWin.IsVisible() {
+		_ = tray.PositionWindow(trayWin, trayOffset)
+	}
+}
+
+const trayOffset = 6
+
+// showTrayPanel orders the panel in WITHOUT key status, then focuses it a
+// beat later. AeroSpace classifies a new window once, when it first sees it:
+// a buttonless, untitled, unfocused non-standard window is a popup, which it
+// leaves alone on every workspace; the same window seen focused becomes a
+// floating window bound to one workspace and is hidden on the next switch.
+// The panel is non-activating, so Show() is orderFrontRegardless (no key).
+// ponytail: 250 ms is a guess at AeroSpace's reaction time, not a contract.
+func showTrayPanel(underIcon bool) {
+	if underIcon {
+		_ = tray.PositionWindow(trayWin, trayOffset)
+	}
+	trayWin.Show()
+	time.AfterFunc(250*time.Millisecond, func() {
+		if trayWin.IsVisible() {
+			trayWin.Focus()
+		}
+	})
+}
+
 func (s *DesktopService) CloseWindow(key string) {
 	extraMu.Lock()
 	w := extraWins[key]
@@ -234,6 +284,8 @@ var trayIcon []byte
 var (
 	quitting   atomic.Bool
 	tray       *application.SystemTray
+	trayWin    *application.WebviewWindow
+	trayPinned atomic.Bool
 	dockBadge  = dock.New()
 	trayMu     sync.Mutex
 	started    atomic.Bool // run loop up: the badge call dispatch_syncs onto the main queue
@@ -260,10 +312,63 @@ func setupTray(a *App) {
 	m.Add("Open Burrow").OnClick(func(*application.Context) { showMainWindow() })
 	m.AddSeparator()
 	m.Add("Quit Burrow").OnClick(func(*application.Context) { quitApp(a) })
-	tray.SetMenu(m)
+	tray.SetMenu(m) // right click; left click toggles the panel below
+	// The tray panel: a frameless, translucent window under the icon running
+	// WindowApp's "tray" kind. Hidden on focus loss, like a menu-bar popover.
+	trayWin = wapp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "tray",
+		Title:            "", // AeroSpace's popup heuristic wants an empty (or "Window") title
+		Width:            340,
+		Height:           440,
+		MinWidth:         300,
+		MinHeight:        120,
+		Hidden:           true,
+		Frameless:        true,
+		DisableResize:    true,
+		URL:              "/#/window/tray",
+		BackgroundType:   application.BackgroundTypeTranslucent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		// An NSPanel, not a window: tiling WMs (AeroSpace, yabai) only manage
+		// AXStandardWindow, so a panel is never tiled. Pop-up-menu level, on
+		// whichever Space (or fullscreen app) is current, out of ⌘` cycling.
+		Mac: application.MacWindow{
+			Backdrop:    application.MacBackdropTranslucent,
+			WindowClass: application.MacWindowClassPanel,
+			// NonActivating: showing it neither activates Burrow nor makes it
+			// key (see showTrayPanel); the composer still takes keys once focused.
+			PanelPreferences: application.MacPanelPreferences{FloatingPanel: true, NonActivating: true},
+			WindowLevel:      application.MacWindowLevelPopUpMenu,
+			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
+				application.MacWindowCollectionBehaviorTransient |
+				application.MacWindowCollectionBehaviorFullScreenAuxiliary |
+				application.MacWindowCollectionBehaviorIgnoresCycle,
+		},
+	})
+	trayWin.OnWindowEvent(events.Common.WindowLostFocus, func(*application.WindowEvent) {
+		if !trayPinned.Load() {
+			trayWin.Hide()
+		}
+	})
+	trayWin.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		if !quitting.Load() {
+			e.Cancel()
+			trayWin.Hide()
+		}
+	})
+	tray.AttachWindow(trayWin).WindowOffset(trayOffset)
+	// Unpinned: the stock toggle (re-positions under the icon). Pinned: toggle
+	// in place, so a panel the user dragged elsewhere stays there.
+	tray.OnClick(func() {
+		if trayWin.IsVisible() {
+			trayWin.Hide()
+			return
+		}
+		showTrayPanel(!trayPinned.Load())
+	})
 	refreshTray(a)
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		started.Store(true)
+		go prepareTrayPanel(trayWin) // InvokeSync: never from the main thread
 		go refreshTray(a)
 	})
 }
