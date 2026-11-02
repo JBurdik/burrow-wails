@@ -105,6 +105,15 @@ type Forge interface {
 	Merge(cwd string, number int, squash bool) error
 }
 
+// HeadFetcher is optional: an adapter whose host publishes every PR's head as
+// a ref on the base repository implements it, so "check out this PR" is one
+// `git fetch origin <FetchRef>` — forks included, no CLI state touched. An
+// adapter that cannot (Azure only exposes the merge ref) leaves it out and the
+// UI hides the action (ForgeStatus.CanCheckout).
+type HeadFetcher interface {
+	FetchRef(number int) string
+}
+
 // New is declared in github.go and grows one case per adapter as Tasks 2-5
 // land, so this package always compiles: a factory listing four types before
 // any of them exists would not.

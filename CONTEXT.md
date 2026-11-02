@@ -18,6 +18,14 @@ _Avoid_: child agent, worker
 The per-chat owner of a chat's live stream: transcript, turn, queued follow-ups and every pending request. It lives independently of whether the chat is on screen.
 _Avoid_: chat controller, chat store
 
+**Chat runtime**:
+The Go-side owner of a chat's agent process, keyed by chat id: ensure started, send, restart, clear, interrupt. Works with no client attached, so `spawn`, `chat_send` and the phone need no mounted view. The chat session renders and answers; it does not start processes.
+_Avoid_: chat process manager, runtime (alone)
+
+**Launch settings**:
+What a chat's process is started with — model, effort, permission mode, provider profile, appended system prompt. Stored on the chat row, shared across devices. Defaults for a *new* chat ("last used") stay per device.
+_Avoid_: chat config, chat options
+
 **Turn**:
 One prompt from the user and the agent's work up to its result, failure or interrupt.
 

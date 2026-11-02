@@ -48,6 +48,21 @@ type ChatMessage struct {
 	// Unexported would drop it from JSON entirely; chatTypes.ts's `_acpMsgId`
 	// is part of the persisted shape, so it has to round-trip too.
 	AcpMsgID string `json:"_acpMsgId,omitempty"`
+
+	// UUID is the latest Claude record uuid that touched this message — the
+	// resume point a rewind or fork hands `--resume-session-at`
+	// (chatrewind.go). Empty for other transports and older transcripts.
+	UUID string `json:"uuid,omitempty"`
+
+	// At is when the row first arrived live (epoch ms), stamped by
+	// foldChatLine — never by foldEvents, which stays pure. Compared against
+	// the client's read receipt for the transcript's "New" divider. Zero on
+	// catch-up folds and older transcripts.
+	At int64 `json:"at,omitempty"`
+
+	SubagentChatID int64  `json:"subagentChatId,omitempty"`
+	SubagentAgent  string `json:"subagentAgent,omitempty"`
+	Surface        string `json:"surface,omitempty"`
 }
 
 // foldState is the mutable accumulator threaded through folding one event
@@ -93,10 +108,13 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 		// Pushed verbatim, never partial — unlike a provider delta it arrives
 		// whole, with nothing more to append.
 		st.messages = append(st.messages, ChatMessage{
-			ID:     len(st.messages),
-			Role:   ev.Role,
-			Text:   ev.Text,
-			Images: ev.Images,
+			ID:             len(st.messages),
+			Role:           ev.Role,
+			Text:           ev.Text,
+			Images:         ev.Images,
+			SubagentChatID: ev.SubagentChatID,
+			SubagentAgent:  ev.SubagentAgent,
+			Surface:        ev.Surface,
 		})
 		return true
 
@@ -142,6 +160,7 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 			// only ever set by the native transport, which is what tells
 			// them apart.
 			ToolRawName: ev.Input != nil,
+			UUID:        ev.UUID,
 		})
 		return true
 
@@ -165,6 +184,9 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 		}
 		st.messages[idx].ToolOutput = ev.Output
 		st.messages[idx].ToolFailed = ev.Failed
+		if ev.UUID != "" {
+			st.messages[idx].UUID = ev.UUID
+		}
 		return true
 
 	default:
@@ -208,6 +230,9 @@ func appendChunk(st *foldState, role string, ev ProviderRuntimeEvent, partial bo
 		} else {
 			last.Text += text
 		}
+		if ev.UUID != "" {
+			last.UUID = ev.UUID
+		}
 		return true
 	}
 
@@ -222,6 +247,7 @@ func appendChunk(st *foldState, role string, ev ProviderRuntimeEvent, partial bo
 	if acpID != "" {
 		msg.AcpMsgID = acpID
 	}
+	msg.UUID = ev.UUID
 	st.messages = append(st.messages, msg)
 	return true
 }

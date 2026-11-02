@@ -69,3 +69,31 @@ func TestCollectedAtClearIsANoOpWhenAlreadyZero(t *testing.T) {
 		t.Fatalf("collected_at = %d, want 0", collectedAt)
 	}
 }
+
+// collected_at is on the wire (the desktop's sub-agent auto-archive sweep
+// reads it) but read-only: a client echoing its whole chat list through
+// SaveChats — with a stale or absent collected_at — must not reset it.
+func TestCollectedAtIsListedButNotWrittenBySaveChats(t *testing.T) {
+	a := newTestApp(t)
+	child, err := a.CreateChat(Chat{WorkspaceID: 1, Title: "sub-agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.MarkCollected(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	child.Title = "renamed"
+	child.CollectedAt = 0
+	if err := a.SaveChats([]Chat{child}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := a.ListChats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range list {
+		if c.ID == child.ID && c.CollectedAt == 0 {
+			t.Fatalf("collected_at lost after SaveChats: %+v", c)
+		}
+	}
+}

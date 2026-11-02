@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -452,9 +453,19 @@ func TestDeleteChatCascadesToChildren(t *testing.T) {
 	childA, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "a", ParentChatID: parent.ID})
 	childB, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "b", ParentChatID: parent.ID})
 	bystander, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "unrelated"})
+	for _, id := range []int64{parent.ID, childA.ID, bystander.ID} {
+		if _, err := a.db.Exec(`INSERT INTO chat_stream (chat_id, ord, kind, line) VALUES (?, 0, 'x', 'l')`, strconv.FormatInt(id, 10)); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	if err := a.DeleteChat(parent.ID); err != nil {
 		t.Fatal(err)
+	}
+	var streams int
+	a.db.QueryRow(`SELECT COUNT(*) FROM chat_stream`).Scan(&streams)
+	if streams != 1 {
+		t.Errorf("chat_stream rows left = %d, want only the bystander's", streams)
 	}
 
 	list, _ := a.ListChats()

@@ -4,6 +4,8 @@ import "encoding/json"
 
 type gitlabForge struct{ run Runner }
 
+func (g *gitlabForge) FetchRef(number int) string { return "merge-requests/" + itoa(number) + "/head" }
+
 func (g *gitlabForge) Provider() Provider { return GitLab }
 
 func (g *gitlabForge) CLI() CLIInfo {

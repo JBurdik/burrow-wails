@@ -160,3 +160,40 @@ func TestNumberFromURL(t *testing.T) {
 		}
 	}
 }
+
+// Checkout is View (for the head branch the worktree is named after) plus a
+// fetch of the ref the host publishes for every PR, forks included. Azure only
+// publishes the merge ref, so it must not claim the capability.
+func TestCheckoutFetchRefs(t *testing.T) {
+	cases := []struct {
+		p       Provider
+		fixture string
+		head    string // the branch the worktree is named after
+		ref     string
+	}{
+		{GitHub, ghViewJSON, "feat/forge", "pull/42/head"},
+		{GitLab, glViewJSON, "feat/forge", "merge-requests/42/head"},
+		{Gitea, strings.Trim(strings.TrimSpace(teaListJSON), "[]"), "feat/forge", "pull/42/head"},
+	}
+	for _, c := range cases {
+		f, _ := New(c.p, (&stubRunner{out: c.fixture}).run)
+		hf, ok := f.(HeadFetcher)
+		if !ok {
+			t.Fatalf("%s: no HeadFetcher", c.p)
+		}
+		if got := hf.FetchRef(42); got != c.ref {
+			t.Errorf("%s: FetchRef = %q, want %q", c.p, got, c.ref)
+		}
+		pr, err := f.View("/repo", 42)
+		if err != nil {
+			t.Fatalf("%s: %v", c.p, err)
+		}
+		if pr.HeadRef != c.head {
+			t.Errorf("%s: HeadRef = %q", c.p, pr.HeadRef)
+		}
+	}
+	az, _ := New(Azure, (&stubRunner{}).run)
+	if _, ok := az.(HeadFetcher); ok {
+		t.Error("azure claims HeadFetcher")
+	}
+}

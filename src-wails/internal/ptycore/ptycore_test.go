@@ -1,15 +1,18 @@
 package ptycore
 
 import (
+	"bytes"
+	"fmt"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 )
 
 type nopEvents struct{}
 
-func (nopEvents) OnData(string, []byte) {}
-func (nopEvents) OnExit(string)         {}
+func (nopEvents) OnData(string, uint64, []byte) {}
+func (nopEvents) OnExit(string)                 {}
 
 var shellRE = regexp.MustCompile(`^(zsh|bash|sh|fish|csh|tcsh|dash)$`)
 
@@ -76,5 +79,63 @@ func TestCreateOnLiveIdDoesNotLeakTheOldSession(t *testing.T) {
 	}
 	if second.cmd.Process.Pid != firstPID {
 		t.Fatalf("reattach spawned a new shell (pid %d -> %d), leaking the old one", firstPID, second.cmd.Process.Pid)
+	}
+}
+
+type recEvents struct {
+	mu  sync.Mutex
+	out []byte
+	bad string
+}
+
+func (r *recEvents) OnData(_ string, off uint64, data []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if off != uint64(len(r.out)) && r.bad == "" {
+		r.bad = fmt.Sprintf("chunk at off %d, want %d", off, len(r.out))
+	}
+	r.out = append(r.out, data...)
+}
+func (*recEvents) OnExit(string) {}
+
+// Every chunk's offset continues where the previous one ended, and Since hands
+// back exactly the bytes that were streamed — the contract a reconnecting
+// terminal view resumes on.
+func TestOffsetsAreContiguousAndSinceMatchesStream(t *testing.T) {
+	ev := &recEvents{}
+	m := NewManager(ev)
+	if err := m.Create("t1", t.TempDir(), 80, 24, nil); err != nil {
+		t.Skipf("cannot allocate a pty here: %v", err)
+	}
+	defer m.Kill("t1")
+	_ = m.Write("t1", []byte("echo burrow-since-marker\n"))
+
+	for i := 0; i < 200; i++ {
+		ev.mu.Lock()
+		done := bytes.Count(ev.out, []byte("burrow-since-marker")) >= 2
+		ev.mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	ev.mu.Lock()
+	defer ev.mu.Unlock()
+	if ev.bad != "" {
+		t.Fatal(ev.bad)
+	}
+	if len(ev.out) < 4 {
+		t.Fatalf("too little output to test with: %q", ev.out)
+	}
+	off, data, err := m.Since("t1", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The shell may have written more since the lock above; compare the prefix.
+	if off != 3 || !bytes.HasPrefix(data, ev.out[3:]) {
+		t.Fatalf("Since(3) = %d %q, streamed %q", off, data, ev.out)
+	}
+	if _, _, err := m.Since("nope", 0); err == nil {
+		t.Fatal("want an error for an unknown pty id")
 	}
 }

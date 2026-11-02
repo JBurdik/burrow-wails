@@ -147,3 +147,51 @@ func TestCollectSkillsMissingRoot(t *testing.T) {
 		t.Errorf("want nil, got %+v", got)
 	}
 }
+
+func TestCollectPluginSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	inst := filepath.Join(home, "p", "superpowers")
+	os.MkdirAll(filepath.Join(inst, "skills", "brainstorming"), 0o755)
+	os.MkdirAll(filepath.Join(inst, "commands"), 0o755)
+	os.WriteFile(filepath.Join(inst, "skills", "brainstorming", "SKILL.md"), []byte("---\nname: brainstorming\ndescription: think first\n---\n"), 0o644)
+	os.WriteFile(filepath.Join(inst, "commands", "commit.md"), []byte("---\ndescription: make commit\n---\n"), 0o644)
+	os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755)
+	reg := `{"plugins":{"superpowers@m":[{"installPath":"` + inst + `"},{"installPath":"` + inst + `"}]}}`
+	os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), []byte(reg), 0o644)
+	got := collectPluginSkills()
+	if len(got) != 2 || got[0].Name != "superpowers:brainstorming" || got[1].Name != "superpowers:commit" || got[1].Description != "make commit" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// Superset installs itself as a plugin inside ~/.claude/skills, and claude.ai
+// syncs org plugins into plugins/synced — neither is in installed_plugins.json.
+func TestCollectPluginSkillsOffRegistry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for dir, name := range map[string]string{
+		filepath.Join(home, ".claude", "skills", "superset"):              "superset",
+		filepath.Join(home, ".claude", "plugins", "synced", "b", "id"):    "obsidian-notes",
+		filepath.Join(home, ".claude", "plugins", "synced", "b", "id~g2"): "obsidian-notes",
+	} {
+		os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o755)
+		os.WriteFile(filepath.Join(dir, ".claude-plugin", "plugin.json"), []byte(`{"name":"`+name+`"}`), 0o644)
+		writeSkill(t, filepath.Join(dir, "skills", "s"), "---\nname: s\ndescription: d\n---\n")
+	}
+	var names []string
+	for _, s := range collectPluginSkills() {
+		names = append(names, s.Name)
+	}
+	if strings.Join(names, ",") != "superset:s,obsidian-notes:s" && strings.Join(names, ",") != "obsidian-notes:s,superset:s" {
+		t.Fatalf("got %v", names)
+	}
+}
+
+func TestSkillFrontmatterBlockScalar(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "SKILL.md")
+	os.WriteFile(p, []byte("---\nname: caveman\ndescription: >-\n  Talk short.\n  Keep facts.\nmetadata:\n  x: y\n---\n"), 0o644)
+	if name, desc := skillFrontmatter(p); name != "caveman" || desc != "Talk short. Keep facts." {
+		t.Fatalf("got %q %q", name, desc)
+	}
+}

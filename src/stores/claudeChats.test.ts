@@ -125,13 +125,15 @@ describe("chat tree", () => {
 
 describe("isActivitySync", () => {
   it("counts a turn starting and a new message, not restore bookkeeping", () => {
-    const prev = { status: "idle", messageCount: 3 } as const;
+    const prev = { status: "idle", messageCount: 3, busy: false } as const;
     expect(isActivitySync(prev, { status: "running" })).toBe(true);
-    expect(isActivitySync(prev, { messageCount: 4 })).toBe(true);
+    expect(isActivitySync(prev, { messageCount: 4, busy: true })).toBe(true);
+    // Opening an idle chat folds what it streamed unwatched — not activity.
+    expect(isActivitySync(prev, { messageCount: 9, busy: false })).toBe(false);
     // What a restart replays for every chat — must not restamp the thread.
     expect(isActivitySync(prev, { claudeSessionId: "abc" } as never)).toBe(false);
     expect(isActivitySync(prev, { title: "Renamed" } as never)).toBe(false);
     expect(isActivitySync(prev, { status: "idle", messageCount: 3 })).toBe(false);
-    expect(isActivitySync({ status: "running", messageCount: 3 }, { status: "running" })).toBe(false);
+    expect(isActivitySync({ status: "running", messageCount: 3, busy: true }, { status: "running" })).toBe(false);
   });
 });

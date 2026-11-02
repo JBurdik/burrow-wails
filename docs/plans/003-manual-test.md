@@ -398,6 +398,118 @@ Smazal jsem mu vlastní parser, takže je to celé nové.
 Spadne → `applyEvent` v `src/mobile/store.ts` nebo to, že `chat-event-*` neteče
 přes WS (`emitAll` → `wsBroadcaster`).
 
+## §11 — Remote access: párování, socket, revoke (spec §4)
+
+Nikdy neprošlo ručně. Každá položka má značku:
+
+- **[auto]** — kryté Go/vitest testem (jméno v závorce), ručně stačí jednou
+  potvrdit, že UI ukazuje to samé.
+- **[ručně]** — chce člověka s telefonem; headless to nejde (Tailscale, Safari
+  PWA, spánek telefonu, reálná síť).
+
+`go test ./...` v `src-wails/` a `pnpm test` musí být zelené **předtím**, než
+se na tohle sahá — jinak je ruční nález nejspíš už známý.
+
+### Příprava
+
+1. Mac i telefon na stejném tailnetu, `tailscale status` ukazuje oba.
+2. `tailscale funnel status` → **off** (jinak §11g).
+3. Burrow běží (`just dev` nebo build). Settings → **Remote access** → zapnout.
+   Listener je `127.0.0.1:37892`, z tailnetu přes `tailscale serve` na
+   `https://<mac>.<tailnet>.ts.net/burrow`.
+4. Terminál pro pozorování:
+   ```bash
+   DB=~/Library/Application\ Support/burrow/workspaces.db
+   sqlite3 "$DB" "select id,name,kind,datetime(added_at/1000,'unixepoch'),datetime(last_seen/1000,'unixepoch') from remote_devices;"
+   ```
+   Logy: stdout `wails dev` (`remote ws: …`, `http server: …`).
+5. Safari na telefonu: devtools přes Mac Safari → Develop → <telefon>, konzole
+   ukazuje stav transportu.
+
+### 11a — Párování
+
+| | předpoklad | krok | čekej | kde koukat | |
+|---|---|---|---|---|---|
+| 11a1 | remote access zapnutý | Otevři PWA URL na telefonu, napiš 6 číslic ze Settings | Telefon ukáže dashboard; v Settings → Paired devices přibude řádek | `remote_devices` +1 řádek, `token_hash` je hex, nikde plaintext token | [auto] `TestPairingWithTheRightCodeYieldsADeviceToken`, `TestTokenIsNotStoredInPlaintext` · [ručně] celý flow v Safari |
+| 11a2 | po 11a1 | Ta samá čísla zkus na druhém zařízení / v anonymním okně | `unauthorized`; Settings ukazuje **nový** kód | Settings: kód se změnil | [auto] `TestPairCodeIsSingleUse` |
+| 11a3 | čerstvý kód | Počkej 3 min 5 s, pak ho napiš | `unauthorized`; Settings: „The code has expired" a **žádné** číslice | Settings | [auto] `TestExpiredPairCodeIsRejected` · [ručně] jen copy v Settings |
+| 11a4 | čerstvý kód | 5× napiš `000000`, pak **správný** kód | Všech 6 pokusů `unauthorized`; Settings: „Too many wrong codes — pairing is locked" | Settings, `remote_devices` beze změny | [auto] `TestPairLocksOutAfterTheBudget` |
+| 11a5 | po 11a4 | Settings → **New code**, napiš ho | Spáruje se | Settings | [auto] `TestPairLocksOutAfterTheBudget` (poslední krok) |
+| 11a6 | spárovaný telefon | V Settings → Paired devices nic nemá tlačítko pro pairing/revoke z telefonu | Telefon nesmí volat `remote_regenerate_pair_code` ani `revoke_remote_device` | — | [auto] `TestPairedDeviceIsRefusedTheAccessWriteCommands`, `TestPairedDeviceGetsNeitherAccessWriteNorUiAck` |
+| 11a7 | spárovaný telefon | Devtools → Network: koukni na URL `/v2/ws?ticket=…` | V URL je jen **ticket** (64 hex), nikdy device token; `/v2/ws-ticket` nese token v `Authorization: Bearer` | Safari Network | [auto] `TestADeviceTokenInTheQueryStringIsNotAccepted`, `TestATicketIsGoodForExactlyOneHandshake`, vitest `remoteEndpoint.test.ts` |
+
+### 11b — Socket umře uprostřed turnu → resume / resync
+
+| | předpoklad | krok | čekej | kde koukat | |
+|---|---|---|---|---|---|
+| 11b1 | telefon na dashboardu, na desktopu běží Claude turn v tabu | Telefon: Airplane mode na 10 s, pak zpět | Indikátor spojení offline → online; dot tabu skončí na stavu, který má desktop (`done`/`review`), ne na `running` | Safari konzole: druhé spojení pošle `{t:"resume",since:N}`, dostane `shell` frame | [auto] `TestReconnectAfterADroppedSocketResumesTheGap`, `TestResumeInsideTheRingSendsTheGap` · [ručně] reálný výpadek sítě |
+| 11b2 | jako 11b1 | Telefon zamkni na > 60 s (keepalive `pongWait`) | Server spojení zahodí do ~60 s; po odemčení reconnect + resume | log `wails dev` bez panic | [ručně] |
+| 11b3 | telefon připojený | Restartuj appku na Macu | Telefon dostane `resync`, vezme nový `shell_snapshot`, seznam sedí | konzole: `resync` frame | [auto] `TestResumeAfterProcessRestartFails`, `TestResumeBeyondTheRingSendsResync` |
+| 11b4 | | Během výpadku z 11b1 sleduj terminál otevřený na telefonu | **Díra ve scrollbacku je očekávaná** — `pty-data-*` se nering-uje | — | [auto] `TestPtyDataIsNotInTheRing` (záměr, ne bug) |
+| 11b5 | | Odpoj telefon přesně ve chvíli, kdy se mění fáze tabu (start turnu) | Po reconnectu dot sedí | Pozor na známý bug **R2** níž | [ručně] |
+
+### 11c — Revoke zavře živé sockety
+
+| | předpoklad | krok | čekej | kde koukat | |
+|---|---|---|---|---|---|
+| 11c1 | telefon připojený a otevřený na terminálu | Settings → Paired devices → **Revoke** | Telefon do ~1 s spadne zpět na párovací obrazovku (RevokedError), ne do nekonečného spinneru | `remote_devices` bez řádku; Safari konzole: close, pak `/v2/ws-ticket` → 401 | [auto] `TestRevokingADeviceDropsItsLiveConnection`, `TestRevokedDeviceCannotGetATicket`, vitest „gives up and forgets the token when it has been revoked" |
+| 11c2 | dvě spárovaná zařízení | Revokni jedno | Druhé jede dál bez reconnectu | Settings | [auto] `TestRevokingOneDeviceLeavesAnotherConnected` |
+| 11c3 | | Revoke v okně mezi `/v2/ws-ticket` a `/v2/ws` | Handshake selže 401 | — | [auto] `TestRevokeInvalidatesAnAlreadyIssuedTicket` (ručně netrefitelné) |
+| 11c4 | po 11c1 | Localstorage telefonu | Credentials smazané (`loadRemoteCredentials() === null`); po 500 by zůstaly | Safari → Storage | [auto] vitest „does not forget the token over a server error" |
+
+### 11d — Heavy terminal output
+
+| | předpoklad | krok | čekej | kde koukat | |
+|---|---|---|---|---|---|
+| 11d1 | telefon otevřený na tabu | V tabu `yes \| head -c 200000000` nebo `cat` velkého logu | Desktop **nezamrzne** (fáze ostatních tabů se dál mění); telefon buď stíhá, nebo je odpojen a reconnectne | log `wails dev`; desktop xterm plynulý | [auto] `TestQueueFullDropsOnlyTheSlowClient`, `TestWSDropsClientWhenOutboundQueueFills` · [ručně] reálné 3G/LTE |
+| 11d2 | jako 11d1, telefon v pozadí (Safari zamrazí JS) | Pusť výstup, nech telefon 30 s v pozadí | Telefon je odpojen (fronta 256 plná), desktop jede; po návratu reconnect | — | [ručně] |
+| 11d3 | | Během 11d1 klikej na desktopu jinde (jiný tab, git panel) | Odezva normální — pomalé volání nebo plná fronta jednoho klienta neblokuje ostatní | — | [auto] `TestWSASlowCallDoesNotBlockTheNextOne`, `TestWSTooManyInFlightCallsIsAnErrorNotAStall` |
+
+### 11e — ESC / Ctrl-C uprostřed turnu
+
+| | předpoklad | krok | čekej | kde koukat | |
+|---|---|---|---|---|---|
+| 11e1 | Claude tab `running`, otevřený na telefonu | Na telefonu pošli ESC (klávesnice terminálu) | Claude turn přeruší; dot `running` → `idle` na obou | `sqlite3 "$DB" "select * from pty_phase where id='pty:<id>'"` | [auto] `TestPhoneEscMidTurnInterruptsThePhase` · [ručně] že mobilní klávesnice ESC posílá jako **jeden** bajt `0x1b` |
+| 11e2 | | Šipka nahoru na telefonu během turnu | Turn jede dál (`ESC [ A` = 3 bajty, není cancel) | jako 11e1 | [auto] `TestPhoneEscMidTurnInterruptsThePhase` (první půlka) |
+| 11e3 | tab `done` | ESC | Fáze se nezmění (Interrupt jen na in-flight turn) | jako 11e1 | [auto] `TestInterruptSettlesOnlyAnInFlightTurn` |
+
+### 11f — 401 z `/v2/ws-ticket` maže PWA credentials
+
+| | předpoklad | krok | čekej | kde koukat | |
+|---|---|---|---|---|---|
+| 11f1 | spárovaný telefon | Smaž řádek: `sqlite3 "$DB" "delete from remote_devices"`, pak na telefonu reload | Párovací obrazovka, ne spinner | Safari → Storage: credentials pryč | [auto] vitest `remoteEndpoint.test.ts` · [ručně] že `src/mobile/App.vue` opravdu přepne view |
+| 11f2 | spárovaný telefon | Zastav appku na Macu, reload telefonu | Spinner/offline, credentials **zůstanou** (není to 401) | Storage | [auto] vitest „does not forget the token over a server error" |
+
+### 11g — Funnel on → odmítnutí startu
+
+| | předpoklad | krok | čekej | kde koukat | |
+|---|---|---|---|---|---|
+| 11g1 | remote access vypnutý | `tailscale funnel --bg 8080` (cokoli), pak Settings → zapnout Remote access | Zapnutí selže s „remote access refused: `tailscale funnel` is on…"; `curl 127.0.0.1:37892/healthz` → connection refused | Settings toast, `lsof -i :37892` prázdné | [auto] `TestFunnelOnRefusesToStartTheServer`, `TestFunnelOnForAnotherPathStillCounts` |
+| 11g2 | | `tailscale funnel off`, zapni znovu | Projde | `lsof -i :37892` → `127.0.0.1` (nikdy `*`) | [auto] `TestFunnelOffInRealServeStatus`, `TestOnlyLoopbackMayBeBound` |
+| 11g3 | | `tailscale` binárka nedostupná / vrací garbage | Fail closed — odmítne | — | [auto] `TestUnreadableServeStatusFailsClosed` |
+| 11g4 | remote access **zapnutý**, pak funnel on | Kontrola jen při startu listeneru — běžící server funnel nezastaví | — | [ručně] **mezera, viz R3** |
+
+### Známé problémy nalezené při psaní §11
+
+- **R1 — opraveno:** souběžné `busEmit` mohly doručit seq 6 před seq 5;
+  klient (`transport.ts`) zahazuje vše ≤ high-water mark, takže seq 5 zmizel
+  navždy (workspace/chat/phase event od jiné goroutiny). `busEmit` teď
+  čísluje a rozesílá pod jedním `busOrderMu`. Test
+  `TestConcurrentEmitsArriveInSeqOrder`.
+- **R2 — neopraveno:** numbered event vyemitovaný mezi upgrade socketu a tím,
+  kdy server přečte klientův `resume`, odejde **živě dřív** než delty resume.
+  Klient si posune `lastSeq` na nový seq a celé delty (`since`, welcome seq]
+  pak zahodí jako „už viděné". Okno = 1 RTT (na mobilu ~100 ms). Repro:
+  klient A vidí seq L, odpojí se; app emituje L+1; klient B se připojí, server
+  (po subscribe, před čtením resume) emituje L+2; B dostane `[L+2]` a pak
+  `[L+1, L+2]` → L+1 zahozen. Oprava chce protokol: buď `since` v query
+  handshaku a resume+subscribe atomicky pod `busOrderMu`, nebo označit
+  resume-reply frame a na klientu bufferovat živé `shell` framy do jeho
+  příchodu.
+- **R3 — neopraveno, design:** funnel guard běží jen v `setHttpEnabled`.
+  Zapnutí funnelu, když remote access už běží, server nezastaví. Periodická
+  kontrola (nebo kontrola v `/v2/pair`) by to zavřela.
+
 ---
 
 ## Co určitě nefunguje (není bug, není hotové)

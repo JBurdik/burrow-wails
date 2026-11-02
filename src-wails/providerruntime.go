@@ -39,6 +39,10 @@ type ProviderRuntimeEvent struct {
 	// text.delta / thinking.delta
 	MessageID string `json:"messageId,omitempty"`
 	Text      string `json:"text,omitempty"`
+	// UUID is the Claude stream-json record's own uuid (text / thinking /
+	// tool.started / tool.completed). The folded message keeps the latest one,
+	// which is what `--resume-session-at` takes for a rewind or fork.
+	UUID string `json:"uuid,omitempty"`
 
 	// tool.started / tool.completed
 	ToolCallID string         `json:"toolCallId,omitempty"`
@@ -48,20 +52,25 @@ type ProviderRuntimeEvent struct {
 	Failed     bool           `json:"failed,omitempty"`
 
 	// turn.completed
-	InputTokens  int     `json:"inputTokens,omitempty"`
-	OutputTokens int     `json:"outputTokens,omitempty"`
+	InputTokens  int `json:"inputTokens,omitempty"`
+	OutputTokens int `json:"outputTokens,omitempty"`
 
 	// context.usage — the window total plus the split behind it
-	ContextTokens       int `json:"contextTokens,omitempty"`
-	ContextWindow       int `json:"contextWindow,omitempty"`
-	CacheReadTokens     int `json:"cacheReadTokens,omitempty"`
-	CacheCreationTokens int `json:"cacheCreationTokens,omitempty"`
-	CostUSD      float64 `json:"costUsd,omitempty"`
+	ContextTokens       int     `json:"contextTokens,omitempty"`
+	ContextWindow       int     `json:"contextWindow,omitempty"`
+	CacheReadTokens     int     `json:"cacheReadTokens,omitempty"`
+	CacheCreationTokens int     `json:"cacheCreationTokens,omitempty"`
+	CostUSD             float64 `json:"costUsd,omitempty"`
 
 	// turn.failed / session.title / session.id
-	Message   string `json:"message,omitempty"`
-	Title     string `json:"title,omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
+	Message string `json:"message,omitempty"`
+	// turn.failed on a provider usage / rate limit; usage.limit. LimitResetAt
+	// (usage.limit only) is unix ms; a turn.failed's reset is parsed live from
+	// Message by chatlimit.go, since "resets 3pm" is relative to now.
+	UsageLimit   bool   `json:"usageLimit,omitempty"`
+	LimitResetAt int64  `json:"limitResetAt,omitempty"`
+	Title        string `json:"title,omitempty"`
+	SessionID    string `json:"sessionId,omitempty"`
 
 	// message.note / message.patch_user — see normalizeChatNote. Additive
 	// fields only: this struct is on the wire and every existing consumer
@@ -70,12 +79,20 @@ type ProviderRuntimeEvent struct {
 	Role   string   `json:"role,omitempty"`   // message.note: the ChatMessage role to render
 	Images []string `json:"images,omitempty"` // message.note / message.patch_user
 	TurnMs int      `json:"turnMs,omitempty"` // message.patch_user
+	// message.note "spawned sub-agent" row: which child chat it opens.
+	SubagentChatID int64  `json:"subagentChatId,omitempty"`
+	SubagentAgent  string `json:"subagentAgent,omitempty"`
+	// message.note row that opens a Right Panel surface when clicked.
+	Surface string `json:"surface,omitempty"`
 
 	// request.opened / request.resolved. The request's own payload stays on the
 	// raw channel (the UI answers it there); these two only say THAT the turn
 	// is blocked and on what, which is all the phase needs.
 	RequestID   string `json:"requestId,omitempty"`
 	RequestKind string `json:"requestKind,omitempty"` // RequestApproval | RequestInput
+
+	// session.reset: the transcript was wiped too (ChatClear), not only the process.
+	Cleared bool `json:"cleared,omitempty"`
 }
 
 // Event type constants — the whole vocabulary, in one place.
@@ -90,13 +107,21 @@ const (
 	EvtTurnCompleted = "turn.completed"
 	// How full the model's context window was on the last request of the turn.
 	EvtContextUsage = "context.usage"
-	EvtTurnFailed    = "turn.failed"
-	EvtSessionTitle  = "session.title"
-	EvtSessionID     = "session.id"
+	EvtTurnFailed   = "turn.failed"
+	// usage.limit: Claude's rate_limit_event said "rejected" — a hint for the
+	// reset time of the turn failure that follows (chatlimit.go).
+	EvtUsageLimit   = "usage.limit"
+	EvtSessionTitle = "session.title"
+	EvtSessionID    = "session.id"
 	// The runtime process is gone; the next send has to spawn a replacement
 	// rather than write to a dead pipe. Distinct from turn.completed, which is
 	// only a turn boundary and leaves the process up.
 	EvtSessionExited = "session.exited"
+	// The chat runtime stopped the process on purpose (restart, interrupt,
+	// clear, a launch-settings change). Unlike session.exited it comes from
+	// Burrow, not the CLI: every pending request the old process held is dead,
+	// the turn is over, and with Cleared the transcript is gone too.
+	EvtSessionReset = "session.reset"
 	// message.note and message.patch_user are CLIENT-authored transcript rows
 	// that no provider produces — see normalizeChatNote / chatNoteKind. They
 	// carry no phase meaning (see chatPhaseEvent's fallthrough).
@@ -171,6 +196,16 @@ func normalizeClaudeEvent(event map[string]any) []ProviderRuntimeEvent {
 		return claudeToolResults(event)
 	case "result":
 		return claudeResult(event)
+	case "rate_limit_event":
+		info := mapField(event["rate_limit_info"])
+		if strField(info["status"]) != "rejected" {
+			return nil
+		}
+		reset := int64(0)
+		if sec, ok := info["resetsAt"].(float64); ok && sec > 0 {
+			reset = int64(sec) * 1000
+		}
+		return []ProviderRuntimeEvent{{Type: EvtUsageLimit, LimitResetAt: reset}}
 	case "exit":
 		// The CLI is gone (idle-reaped by the sweeper, or it crashed). For the
 		// native transport this is also a turn boundary — the frontend has
@@ -258,6 +293,7 @@ func claudeAssistant(event map[string]any) []ProviderRuntimeEvent {
 		messageID = "claude-turn"
 	}
 
+	uuid := strField(event["uuid"])
 	out := []ProviderRuntimeEvent{}
 	// Context occupancy, and the only honest source for it: one assistant
 	// message's usage is one API request's prompt, so input + both cache halves
@@ -286,14 +322,14 @@ func claudeAssistant(event map[string]any) []ProviderRuntimeEvent {
 		}
 	}
 	if thinking != "" {
-		out = append(out, ProviderRuntimeEvent{Type: EvtThinkingDelta, MessageID: messageID, Text: thinking})
+		out = append(out, ProviderRuntimeEvent{Type: EvtThinkingDelta, MessageID: messageID, Text: thinking, UUID: uuid})
 	}
 
 	for _, block := range blocksOf(msg["content"]) {
 		switch strField(block["type"]) {
 		case "text":
 			if text := strField(block["text"]); text != "" {
-				out = append(out, ProviderRuntimeEvent{Type: EvtTextDelta, MessageID: messageID, Text: text})
+				out = append(out, ProviderRuntimeEvent{Type: EvtTextDelta, MessageID: messageID, Text: text, UUID: uuid})
 			}
 		case "tool_use":
 			id := strField(block["id"])
@@ -308,7 +344,7 @@ func claudeAssistant(event map[string]any) []ProviderRuntimeEvent {
 			if input == nil {
 				input = map[string]any{}
 			}
-			out = append(out, ProviderRuntimeEvent{Type: EvtToolStarted, ToolCallID: id, Name: name, Input: input})
+			out = append(out, ProviderRuntimeEvent{Type: EvtToolStarted, ToolCallID: id, Name: name, Input: input, UUID: uuid})
 		}
 	}
 	return out
@@ -333,6 +369,7 @@ func claudeToolResults(event map[string]any) []ProviderRuntimeEvent {
 			ToolCallID: id,
 			Output:     clip(toolResultText(block["content"])),
 			Failed:     failed,
+			UUID:       strField(event["uuid"]),
 		})
 	}
 	return out
@@ -365,6 +402,15 @@ func joinLines(parts []string) string {
 }
 
 func claudeResult(event map[string]any) []ProviderRuntimeEvent {
+	// A usage / rate limit comes back as an is_error "success" result (the
+	// CLI's "Claude AI usage limit reached|<epoch>" / "You've hit your limit ·
+	// resets 3pm"), or a 429: a failed turn, not a finished one.
+	if isErr, _ := event["is_error"].(bool); isErr {
+		msg := strField(event["result"])
+		if intOf(event["api_error_status"]) == 429 || isUsageLimitText(msg) {
+			return []ProviderRuntimeEvent{{Type: EvtTurnFailed, Message: firstNonEmpty(msg, "usage limit reached"), UsageLimit: true}}
+		}
+	}
 	if subtype := strField(event["subtype"]); subtype == "error_during_execution" || subtype == "error_max_turns" {
 		msg := strField(event["result"])
 		if msg == "" {
@@ -416,11 +462,21 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 	// Burrow's own markers on the ACP channel, not the adapter's: the session
 	// handshake and the EOF. Both matter to any client.
 	switch strField(msg["_burrow"]) {
+	case "usage":
+		input, output := intOf(msg["inputTokens"]), intOf(msg["outputTokens"])
+		return []ProviderRuntimeEvent{{Type: EvtContextUsage, InputTokens: input, OutputTokens: output, ContextTokens: input + output, ContextWindow: intOf(msg["contextWindow"])}}
 	case "session":
 		if id := strField(msg["sessionId"]); id != "" {
 			return []ProviderRuntimeEvent{{Type: EvtSessionID, SessionID: id}}
 		}
 		return nil
+	case "turn":
+		// The runtime's turn boundary (acpTurnEnd): the response to our own
+		// session/prompt, or Codex's terminal turn notification.
+		if e := strField(msg["error"]); e != "" {
+			return []ProviderRuntimeEvent{{Type: EvtTurnFailed, Message: e, UsageLimit: isUsageLimitText(e)}}
+		}
+		return []ProviderRuntimeEvent{{Type: EvtTurnCompleted}}
 	case "exit":
 		// Deliberately NOT a turn boundary, unlike the native transport: an ACP
 		// turn is settled by the response to its own session/prompt, and the
@@ -434,10 +490,10 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 		return []ProviderRuntimeEvent{{Type: EvtRequestResolved, RequestID: rpcIDString(mapField(msg["params"])["requestId"])}}
 	}
 	if strField(msg["method"]) != "session/update" {
-		// A JSON-RPC response also settles a turn — but only the one answering
-		// the session/prompt that opened it, and that correlation lives with
-		// whoever sent it (acpPromptRpcId). Guessing "any response ends the
-		// turn" here would settle a turn on an unrelated reply.
+		// A JSON-RPC response settles a turn only when it answers the
+		// session/prompt that opened it; the runtime knows which one and emits
+		// `_burrow:"turn"` after it (settleAcpPrompt). Guessing "any response
+		// ends the turn" here would settle a turn on an unrelated reply.
 		return nil
 	}
 	update := mapField(mapField(msg["params"])["update"])
@@ -484,7 +540,13 @@ func NormalizeAcpLine(line string) []ProviderRuntimeEvent {
 		if name == "" {
 			name = "Tool"
 		}
-		return []ProviderRuntimeEvent{{Type: EvtToolStarted, ToolCallID: id, Name: name}}
+		input := mapField(update["rawInput"])
+		if input == nil {
+			input = mapField(update["input"])
+		}
+		return []ProviderRuntimeEvent{{Type: EvtToolStarted, ToolCallID: id, Name: name, Input: input}}
+	case "plan":
+		return acpPlanEvents(update)
 	case "tool_call_update":
 		status := strField(update["status"])
 		if status != "completed" && status != "failed" {
@@ -565,6 +627,8 @@ func NormalizeChatLine(kind, line string, ord int64) []ProviderRuntimeEvent {
 		return normalizeUserPrompt(line, ord)
 	case chatNoteKind:
 		return normalizeChatNote(line, ord)
+	case chatRuntimeKind:
+		return []ProviderRuntimeEvent{{Type: EvtSessionReset, Cleared: line == "clear"}}
 	case "acp-req":
 		// The request itself is a UI decision and keeps its raw channel; this
 		// only reports that the turn is now blocked on it.
@@ -642,6 +706,11 @@ type chatNoteEnvelope struct {
 	Text   string   `json:"text,omitempty"`
 	Images []string `json:"images,omitempty"`
 	TurnMs int      `json:"turnMs,omitempty"`
+	// A system-info row recording a spawned sub-agent (see publishSubagentRow).
+	SubagentChatID int64  `json:"subagentChatId,omitempty"`
+	SubagentAgent  string `json:"subagentAgent,omitempty"`
+	// A system-info row that opens this Right Panel surface (see publishSurfaceNote).
+	Surface string `json:"surface,omitempty"`
 }
 
 // chatNoteRoles are the ONLY ChatMessage roles (src/lib/chatTypes.ts) a "row"
@@ -681,10 +750,13 @@ func normalizeChatNote(line string, ord int64) []ProviderRuntimeEvent {
 			return nil
 		}
 		return []ProviderRuntimeEvent{{
-			Type:   EvtMessageNote,
-			Role:   env.Role,
-			Text:   env.Text,
-			Images: env.Images,
+			Type:           EvtMessageNote,
+			Role:           env.Role,
+			Text:           env.Text,
+			Images:         env.Images,
+			SubagentChatID: env.SubagentChatID,
+			SubagentAgent:  env.SubagentAgent,
+			Surface:        env.Surface,
 		}}
 	case "patch":
 		if env.TurnMs == 0 && len(env.Images) == 0 {
@@ -699,5 +771,37 @@ func normalizeChatNote(line string, ord int64) []ProviderRuntimeEvent {
 		}}
 	default:
 		return nil
+	}
+}
+
+// acpPlanEvents turns ACP's `plan` session update (generic ACP agents, and
+// Codex's turn/plan/updated re-emitted by pumpCodexLine) into the same finished
+// `TodoWrite` tool row a Claude plan is, so one reader (chatTodos.ts
+// latestTodos) serves every provider. A plan update replaces the whole list,
+// exactly like TodoWrite. The fixed call id is safe: the projection pushes a
+// row per tool.started and completes the LAST row with that id — the one just
+// pushed.
+func acpPlanEvents(update map[string]any) []ProviderRuntimeEvent {
+	todos := []any{}
+	entries, _ := update["entries"].([]any)
+	for _, raw := range entries {
+		entry := mapField(raw)
+		content := strField(entry["content"])
+		if content == "" {
+			continue
+		}
+		status := strField(entry["status"])
+		if status != "in_progress" && status != "completed" {
+			status = "pending"
+		}
+		todos = append(todos, map[string]any{"content": content, "status": status})
+	}
+	input := map[string]any{"todos": todos}
+	if explanation := strField(update["explanation"]); explanation != "" {
+		input["explanation"] = explanation
+	}
+	return []ProviderRuntimeEvent{
+		{Type: EvtToolStarted, ToolCallID: "acp-plan", Name: "TodoWrite", Input: input},
+		{Type: EvtToolCompleted, ToolCallID: "acp-plan", Output: ""},
 	}
 }

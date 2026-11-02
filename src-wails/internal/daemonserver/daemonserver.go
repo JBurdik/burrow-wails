@@ -56,8 +56,8 @@ func New(socketPath string) *Server {
 }
 
 // OnData / OnExit implement ptycore.Events, broadcasting to every client.
-func (s *Server) OnData(id string, data []byte) {
-	s.broadcast(daemonproto.Envelope{Type: "frame", Frame: &daemonproto.Frame{Event: "pty-data", ID: id, Data: daemonproto.BytesToInts(data)}})
+func (s *Server) OnData(id string, off uint64, data []byte) {
+	s.broadcast(daemonproto.Envelope{Type: "frame", Frame: &daemonproto.Frame{Event: "pty-data", ID: id, Data: daemonproto.BytesToInts(data), Off: &off}})
 }
 
 func (s *Server) OnExit(id string) {
@@ -138,7 +138,11 @@ func (s *Server) handle(req daemonproto.Request) *daemonproto.Response {
 	case "list":
 		resp.IDs = s.mgr.List()
 	case "foreground":
-		resp.Name, err = s.mgr.Foreground(req.ID)
+		resp.Name, resp.Pid, err = s.mgr.ForegroundInfo(req.ID)
+	case "since":
+		var data []byte
+		resp.Off, data, err = s.mgr.Since(req.ID, req.Since)
+		resp.Data = daemonproto.BytesToInts(data)
 	case "version":
 		resp.ExePath, _ = os.Executable()
 		resp.Pid = os.Getpid()

@@ -21,6 +21,8 @@ export interface ChatEvent {
   type: string;
   messageId?: string;
   text?: string;
+  /** Claude stream-json record uuid (text/thinking/tool events). */
+  uuid?: string;
   toolCallId?: string;
   name?: string;
   input?: Record<string, unknown>;
@@ -36,6 +38,14 @@ export interface ChatEvent {
   message?: string;
   title?: string;
   sessionId?: string;
+  /** session.reset: the transcript was wiped too (chat_clear). */
+  cleared?: boolean;
+  /** message.note: a row Burrow authored (e.g. "spawned a sub-agent"). */
+  role?: ChatMessage["role"];
+  images?: string[];
+  subagentChatId?: number;
+  subagentAgent?: string;
+  surface?: string;
 }
 
 export interface ChatEventBatch {
@@ -44,7 +54,7 @@ export interface ChatEventBatch {
 }
 
 /** Types this module renders. Everything else is for the view to act on. */
-const PROJECTED = new Set(["text.delta", "thinking.delta", "user.delta", "tool.started", "tool.completed"]);
+const PROJECTED = new Set(["text.delta", "thinking.delta", "user.delta", "tool.started", "tool.completed", "message.note"]);
 
 export function isProjectedEvent(type: string): boolean {
   return PROJECTED.has(type);
@@ -82,6 +92,7 @@ export function applyChatEvent(state: ChatProjectionState, event: ChatEvent): bo
         // human summary; an ACP title is already a sentence. `input` is only
         // ever set by the native transport, which is what tells them apart.
         toolRawName: Boolean(event.input),
+        ...(event.uuid ? { uuid: event.uuid } : {}),
       });
       return true;
     }
@@ -94,6 +105,22 @@ export function applyChatEvent(state: ChatProjectionState, event: ChatEvent): bo
       if (!tool) return false;
       tool.toolOutput = event.output ?? "";
       tool.toolFailed = event.failed === true;
+      if (event.uuid) tool.uuid = event.uuid;
+      return true;
+    }
+
+    case "message.note": {
+      // A whole row Burrow authored — Go only lets system-info / permission
+      // through (chatNoteRoles), and it never streams in pieces.
+      if (!event.role || !event.text) return false;
+      state.messages.push({
+        id: state.nextMsgId++,
+        role: event.role,
+        text: event.text,
+        ...(event.images?.length ? { images: event.images } : {}),
+        ...(event.subagentChatId ? { subagentChatId: event.subagentChatId, subagentAgent: event.subagentAgent } : {}),
+        ...(event.surface ? { surface: event.surface } : {}),
+      });
       return true;
     }
 
@@ -126,6 +153,7 @@ function appendChunk(
     } else {
       last.text += text;
     }
+    if (event.uuid) last.uuid = event.uuid;
     return true;
   }
   state.messages.push({
@@ -134,6 +162,7 @@ function appendChunk(
     text,
     ...(partial ? { partial: true } : {}),
     ...(acpId ? { _acpMsgId: acpId } : {}),
+    ...(event.uuid ? { uuid: event.uuid } : {}),
   });
   return true;
 }

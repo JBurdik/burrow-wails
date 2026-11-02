@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"reflect"
 	"testing"
 )
@@ -113,5 +114,24 @@ func TestIsBurrowCommand(t *testing.T) {
 				t.Errorf("isBurrowCommand(%q, %q) = %v, want %v", tt.command, tt.selfExeBase, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPortListening(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	a := &App{}
+	if !a.PortListening(port) {
+		t.Fatalf("port %d: want listening", port)
+	}
+	ln.Close()
+	if a.PortListening(port) {
+		t.Fatalf("port %d: want nothing listening after close", port)
+	}
+	if a.PortListening(0) || a.PortListening(70000) {
+		t.Fatal("out-of-range port must report false")
 	}
 }

@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-1 flex-col items-center justify-center gap-10 overflow-y-auto bg-base p-10">
+  <div class="surface-glow flex flex-1 flex-col items-center justify-center gap-10 overflow-y-auto bg-base p-10">
     <div class="flex flex-col items-center gap-2.5 text-center">
       <div class="flex items-center gap-2.5">
         <PhTerminalWindow :size="28" weight="duotone" class="text-accent" />
@@ -48,7 +48,7 @@
 
     <!-- Name dialog -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="pendingPath" @click.self="pendingPath = ''">
-      <div class="flex w-[420px] flex-col gap-3.5 rounded-[10px] border border-border bg-panel p-6">
+      <div class="flex w-[420px] flex-col gap-3.5 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-[15px] font-semibold text-foreground">Name this workspace</h3>
         <p class="truncate rounded border border-border bg-base px-2.5 py-2 font-mono text-[11px] text-secondary-foreground">{{ pendingPath }}</p>
         <input

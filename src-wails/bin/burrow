@@ -9,7 +9,7 @@
 # is generated from the app's verb registry, so it can never drift from reality).
 # Common ones:
 #
-#   burrow spawn "<task>" [--agent A] [--model M] [--cwd DIR] [--target tab|chat]
+#   burrow spawn "<task>" [--name TITLE] [--agent A] [--model M] [--cwd DIR] [--target tab|chat]
 #       Delegate a task to a sub-agent in a new tab (or chat). Prints the tab id
 #       and a result token.
 #   burrow wait <token> [--timeout S]       Block for that sub-agent's result.
@@ -23,7 +23,7 @@
 #
 # Sub-agents run INTERACTIVELY on your subscription (plain `claude`, never -p).
 #
-# The other subcommands (status, hook, notify, capture) are the agent-status
+# The other subcommands (status, hook, approve, notify, capture) are the agent-status
 # plumbing invoked by hooks, not by you. They keep their own transport: a bare
 # POST that works even before the control API is up.
 
@@ -68,13 +68,15 @@ _primary() {
   case "$1" in
     spawn)                       echo "task" ;;
     wait|wait_result)            echo "token" ;;
-    run)                         echo "cmd" ;;
+    run|serve)                   echo "cmd" ;;
     tab_output)                  echo "pty_id" ;;
     send_to_tab)                 echo "pty_id text" ;;
     tab_rename)                  echo "pty_id title" ;;
     tab_close|focus_tab)         echo "pty_id" ;;
     focus_workspace|list_tabs)   echo "workspace_id" ;;
-    create_worktree|worktree_remove) echo "branch" ;;
+    create_worktree|worktree_remove|move_to_worktree) echo "branch" ;;
+    schedule)                    echo "text" ;;
+    schedule_cancel)             echo "id" ;;
     workspace_create)            echo "path" ;;
     pr_view|pr_merge)            echo "number" ;;
     diagram)                     echo "content" ;;
@@ -283,6 +285,13 @@ case "$sub" in
     # via `burrow status`. No-op outside Burrow (BURROW_PTY_ID unset). Best-effort
     # string parse, no jq/node needed.
     [ -n "$BURROW_PTY_ID" ] || exit 0
+    json=$(cat)
+    ev=$(printf '%s' "$json" | sed -n 's/.*"hook_event_name"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
+    # The burrow Claude Code mod (agentdocs/mod/burrow) sets BURROW_MOD and
+    # reports tool phases in-process — skip the per-tool-call ps/curl here.
+    case "$BURROW_MOD:$ev" in
+      1:PreToolUse|1:PostToolUse) exit 0 ;;
+    esac
     # Durable agent pid for the liveness sweep. Claude/Codex run the hook as
     # `sh -c '<burrow hook>'`, so OUR $PPID is that throwaway wrapper shell (it exits
     # the instant the hook returns — using it would falsely clear a LIVE agent). The
@@ -292,8 +301,6 @@ case "$sub" in
     case "$agent_pid" in
       ''|*[!0-9]*) agent_pid="$PPID" ;;
     esac
-    json=$(cat)
-    ev=$(printf '%s' "$json" | sed -n 's/.*"hook_event_name"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
     tool=$(printf '%s' "$json" | sed -n 's/.*"tool_name"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
     case "$ev" in
       UserPromptSubmit)
@@ -412,6 +419,29 @@ except: pass
       SubagentStop|SessionEnd|*) exit 0 ;;
     esac
     burrow status "$state" --pid "$agent_pid"
+    exit 0
+    ;;
+
+  approve)
+    # burrow approve   (internal — second PermissionRequest hook, timeout 86400)
+    # Long-polls the app so a permission prompt can be answered from the Burrow
+    # UI. EVERY path that is not an explicit answer prints nothing and exits 0,
+    # which Claude reads as "no decision" — the TUI prompt stays in charge. It
+    # never prints an allow of its own. stdin is the PermissionRequest JSON.
+    [ -n "$BURROW_PTY_ID" ] || exit 0
+    json=$(cat)
+    tool=$(printf '%s' "$json" | sed -n 's/.*"tool_name"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
+    # Out of v1: a question / a plan is the TUI's to answer.
+    case "$tool" in ''|AskUserQuestion|ExitPlanMode) exit 0 ;; esac
+    port=$(_port); token=$(_token)
+    [ -n "$port" ] && [ -n "$token" ] || exit 0
+    # No --max-time: the wait is the point. -f turns any HTTP error into an empty
+    # body; the app answers 204 for "no decision".
+    out=$(printf '%s' "$json" | curl -sf -X POST \
+      "http://127.0.0.1:$port/v1/permission_request?pty_id=$BURROW_PTY_ID" \
+      -H 'Content-Type: application/json' -H "Authorization: Bearer $token" \
+      --data-binary @- 2>/dev/null) || exit 0
+    printf '%s' "$out"
     exit 0
     ;;
 

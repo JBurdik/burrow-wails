@@ -68,11 +68,15 @@
           :data-leaf-id="pane.leaf.id"
           @mousedown.capture="activateLeaf(pane.leaf.id)"
         >
-          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[26px] shrink-0 items-center gap-[5px] border-b border-border bg-[var(--surface)] px-2 text-[11px] text-secondary-foreground" @mousedown.stop>
-            <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="10" class="shrink-0 text-muted-foreground" />
-            <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="10" class="shrink-0 text-muted-foreground" />
-            <PhRobot v-else-if="pane.leaf.isAgent" :size="10" class="shrink-0 text-accent" />
-            <PhTerminal v-else :size="10" class="shrink-0 text-muted-foreground" />
+          <div v-if="isTabSplit(tab)" class="pane-titlebar group flex h-[30px] shrink-0 items-center gap-1.5 border-b border-border/60 px-1.5 text-[12px]" @mousedown.stop>
+            <div
+              class="flex h-[22px] min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 transition-colors duration-75"
+              :class="focusedLeafId === pane.leaf.id ? 'bg-selected text-foreground' : 'text-muted-foreground'"
+            >
+            <PhFileCode v-if="pane.leaf.leafType === 'editor'" :size="12" class="shrink-0 text-muted-foreground" />
+            <PhGlobe v-else-if="pane.leaf.leafType === 'browser'" :size="12" class="shrink-0 text-muted-foreground" />
+            <PhRobot v-else-if="pane.leaf.isAgent" :size="12" class="shrink-0 text-accent" />
+            <PhTerminal v-else :size="12" class="shrink-0 text-muted-foreground" />
             <span v-if="pane.leaf.leafType === 'editor' && pane.leaf.dirty" class="dirty-dot h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground" />
             <span
               v-else-if="pane.leaf.status !== 'idle'"
@@ -80,11 +84,13 @@
               :class="`status-${pane.leaf.status}`"
               :title="pane.leaf.status === 'error' ? pane.leaf.statusDetail : undefined"
             >{{ pane.leaf.status === 'running' ? spinnerFrame : '' }}</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px]">{{ pane.leaf.title }}</span>
-            <button class="flex shrink-0 items-center rounded-[3px] p-0.5 text-muted-foreground opacity-40 transition-opacity group-hover:opacity-80 hover:!opacity-100 hover:!text-destructive hover:!bg-destructive/[0.15]" @click.stop="closePane(pane.leaf.id)" title="Close pane">
-              <PhX :size="9" weight="bold" />
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{{ pane.leaf.title }}</span>
+            </div>
+            <button class="flex shrink-0 items-center rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-70 hover:!bg-hover hover:!opacity-100" @click.stop="closePane(pane.leaf.id)" title="Close pane">
+              <PhX :size="11" />
             </button>
           </div>
+          <PtyPermissionBanner v-if="!pane.leaf.leafType || pane.leaf.leafType === 'terminal'" :pty-id="pane.leaf.id" />
           <DiffTab
             v-if="pane.leaf.leafType === 'diff'"
             :diff-file="pane.leaf.diffFile!"
@@ -186,6 +192,7 @@
 </template>
 
 <script setup lang="ts">
+import { SHELL_RE } from "@/lib/termRegistry";
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { displayStatus, shouldMarkSeen, DONE_AUTOCLEAR_MS, type Phase } from "@/runtime/displayStatus";
 import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe } from "@phosphor-icons/vue";
@@ -195,6 +202,7 @@ import { providerIdForCommand } from "@/lib/providers";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import XTerm from "./XTerm.vue";
+import PtyPermissionBanner from "./PtyPermissionBanner.vue";
 import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
@@ -305,7 +313,6 @@ function addBottomTerminal(tabId: number) {
 // group. Ask first when something other than the shell is in the foreground —
 // the same read XTerm's auto-title poll uses. ponytail: one shell-out per pty
 // at close time, no watching.
-const SHELL_RE = /^(zsh|bash|sh|fish|csh|tcsh|dash)$/;
 async function runningIn(ptyIds: number[]): Promise<string> {
   for (const id of ptyIds) {
     const proc = await invoke<string>("get_pty_foreground", { id }).catch(() => "");
@@ -1077,6 +1084,11 @@ async function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, i
   const tab: Tab = { id: leaf.id, root: leaf };
   tabs.value.push(tab);
   activateTab(tab.id);
+  // From the welcome composer (WelcomeScreen.submit), which waits for this tab
+  // instead of revealing the workspace's previous one while the chat is created.
+  if (initialPrompt && uiStore.welcomeVisible && wsStore.active?.id === props.workspaceId) {
+    void router.push(`/ws/${props.workspaceId}/tab/${tab.id}`);
+  }
   // ClaudeChat sends this itself once its runtime is up (a chat leaf has no
   // xtermRefs entry, and its CLI/ACP session isn't ready on the next tick).
   if (initialPrompt) {
@@ -1461,7 +1473,8 @@ function onKeydown(e: KeyboardEvent) {
       : closePane(focusedLeafId.value),
     splitH: () => splitFocused("terminal", "h"),
     splitV: () => splitFocused("terminal", "v"),
-    bottomPanel: () => toggleBottomPanel(),
+    // On the welcome screen this workspace is hidden; App.vue owns that panel.
+    bottomPanel: () => { if (!uiStore.welcomeVisible) toggleBottomPanel(); },
   };
   for (const cmd of keys.inScope("terminal")) {
     if (actions[cmd.id] && keys.matches(e, cmd.id)) {
@@ -1913,7 +1926,7 @@ async function sendReviewNotes(markdown: string): Promise<boolean> {
   } catch { return false; }
 }
 
-defineExpose({ reviewSubject, sendReviewNotes, addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
+defineExpose({ toggleBottomPanel, reviewSubject, sendReviewNotes, addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
 </script>
 
 <style scoped>

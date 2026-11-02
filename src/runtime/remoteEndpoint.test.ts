@@ -2,9 +2,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   PairingRefusedError,
   RevokedError,
+  activeEnvironmentId,
   clearRemoteCredentials,
+  listEnvironments,
+  removeEnvironment,
+  renameEnvironment,
   loadRemoteCredentials,
   pairDevice,
+  pairingUrl,
+  parsePairFragment,
   remoteEndpointSource,
   saveRemoteCredentials,
   wsUrlFor,
@@ -129,5 +135,68 @@ describe("remoteEndpointSource", () => {
     clearRemoteCredentials();
     const src = remoteEndpointSource(() => loadRemoteCredentials());
     await expect(src()).rejects.toThrow(/not paired/);
+  });
+});
+
+describe("pairing QR fragment", () => {
+  it("round-trips a code through pairingUrl", () => {
+    const url = pairingUrl("https://mac.tail1234.ts.net/burrow/", "042137");
+    expect(url).toBe("https://mac.tail1234.ts.net/burrow/#pair=042137");
+    expect(parsePairFragment(new URL(url).hash)).toBe("042137");
+  });
+
+  it("accepts the hash with or without its leading #", () => {
+    expect(parsePairFragment("#pair=123456")).toBe("123456");
+    expect(parsePairFragment("pair=123456")).toBe("123456");
+    expect(parsePairFragment("#foo=1&pair=123456")).toBe("123456");
+  });
+
+  it("ignores anything that is not exactly six digits", () => {
+    for (const h of ["", "#", "#/ws/3", "#pair=", "#pair=12345", "#pair=1234567", "#pair=12a456", "#pair=%20123456", "#code=123456"]) {
+      expect(parsePairFragment(h)).toBeNull();
+    }
+  });
+});
+
+describe("environment catalog", () => {
+  const ticketOk = vi.fn(async () => json(200, { ticket: "t" }));
+
+  it("migrates the old single slot once and makes it active", () => {
+    store.set("burrow.remote.credentials", JSON.stringify({ baseUrl: "https://mac.tail.ts.net/burrow", deviceToken: "tok", environmentId: "env-a" }));
+    const list = listEnvironments();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ environment_id: "env-a", name: "mac", deviceToken: "tok", lastConnectedAt: null });
+    expect(store.has("burrow.remote.credentials")).toBe(false);
+    expect(activeEnvironmentId()).toBe("env-a");
+    expect(loadRemoteCredentials()).toEqual({ baseUrl: "https://mac.tail.ts.net/burrow", deviceToken: "tok", environmentId: "env-a" });
+    expect(listEnvironments()).toHaveLength(1);
+  });
+
+  it("adds a second machine instead of replacing, and dedupes re-pairing by environment_id", async () => {
+    await pairDevice("https://a", "111111", "iPhone", "phone", (async () => json(200, { device_token: "a1", environment_id: "A" })) as any);
+    await pairDevice("https://b", "222222", "iPhone", "phone", (async () => json(200, { device_token: "b1", environment_id: "B" })) as any);
+    await pairDevice("https://a2", "333333", "iPhone", "phone", (async () => json(200, { device_token: "a2", environment_id: "A" })) as any);
+    const list = listEnvironments();
+    expect(list.map((e) => [e.environment_id, e.baseUrl, e.deviceToken])).toEqual([["A", "https://a2", "a2"], ["B", "https://b", "b1"]]);
+    expect(activeEnvironmentId()).toBe("A");
+    renameEnvironment("B", "  VPS ");
+    expect(listEnvironments()[1].name).toBe("VPS");
+  });
+
+  it("a 401 forgets only the revoked machine", async () => {
+    saveRemoteCredentials({ baseUrl: "https://a", deviceToken: "a", environmentId: "A" });
+    saveRemoteCredentials({ baseUrl: "https://b", deviceToken: "b", environmentId: "B" });
+    await expect(remoteEndpointSource(loadRemoteCredentials, (async () => json(401, {})) as any)()).rejects.toBeInstanceOf(RevokedError);
+    expect(listEnvironments().map((e) => e.environment_id)).toEqual(["A"]);
+    expect(activeEnvironmentId()).toBeNull();
+    expect(loadRemoteCredentials()).toBeNull();
+  });
+
+  it("stamps lastConnectedAt on a granted ticket", async () => {
+    saveRemoteCredentials({ baseUrl: "https://a", deviceToken: "a", environmentId: "A" });
+    await remoteEndpointSource(loadRemoteCredentials, ticketOk as any)();
+    expect(listEnvironments()[0].lastConnectedAt).toBeTypeOf("number");
+    removeEnvironment("A");
+    expect(listEnvironments()).toEqual([]);
   });
 });

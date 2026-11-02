@@ -118,7 +118,8 @@ type CmdRunner interface {
 type ForgeClient interface {
 	List(cwd, scope, state string) (any, error)
 	View(cwd string, number int) (any, error)
-	Create(cwd, title, body, base, head string) (any, error)
+	// chatID is the calling chat (0 = unknown); the created PR is linked to it.
+	Create(cwd, title, body, base, head string, chatID int64) (any, error)
 	Merge(cwd string, number int, squash bool) error
 }
 
@@ -178,6 +179,30 @@ type ChatStopper interface {
 	StopChat(id int64) error
 }
 
+// ChatRuntime starts and drives chat sub-agents in the host, with no client
+// attached (docs/plans/006-chat-runtime.md, decision 10) — every transport.
+type ChatRuntime interface {
+	SpawnSubagent(req SpawnRequest) (SpawnedChat, error)
+	SendToChat(chatID int64, text string) error
+}
+
+// SpawnRequest is spawn's chat half, as the caller gave it.
+type SpawnRequest struct {
+	Task, Profile, Agent, Model, Cwd string
+	// PermissionMode empty = the profile's, else the parent's own.
+	PermissionMode string
+	// Name titles the sub-agent; empty = the task's first line.
+	Name         string
+	ParentChatID int64
+}
+
+// SpawnedChat is what SpawnSubagent created. Task is the prompt actually sent
+// (a profile wraps the caller's task); AgentName labels the parent's row.
+type SpawnedChat struct {
+	ChatID, WorkspaceID int64
+	Task, AgentName     string
+}
+
 // Deps is everything the verbs need from the host app.
 type Deps struct {
 	DB         *sql.DB
@@ -202,6 +227,12 @@ type Deps struct {
 	// been collected — the chat equivalent of the <token>.result/.done files.
 	Chats       ChatReader
 	ChatStopper ChatStopper
+	// ChatRuntime is optional: nil sends every chat spawn/send to the UI.
+	ChatRuntime ChatRuntime
+	// Schedules and ChatMover back the agent self-management verbs
+	// (verbs_self.go). nil = those verbs refuse.
+	Schedules Schedules
+	ChatMover ChatMover
 	// PTYs reports live PTY ids for orchestration dispatch liveness. Optional:
 	// nil means "no proof either way", so absence of the capability itself
 	// must never be read as absence of the process.
@@ -220,6 +251,7 @@ func New(deps Deps) *Core {
 	c.register(navigationVerbs(c)...)
 	c.register(vcsVerbs(c)...)
 	c.register(orchVerbs(c)...)
+	c.register(selfVerbs(c)...)
 	return c
 }
 

@@ -23,6 +23,8 @@ import (
 // events, "bash" not "command", so the state is baked into each command and
 // we own (and delete) the file wholesale.
 
+// claudeHookEvents must match the "hooks" keys in agentdocs/mod/burrow/hooks/hooks.json
+// (guarded by TestClaudeModHooksMatchEvents).
 var claudeHookEvents = []string{
 	"UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "PermissionRequest",
 	"SessionStart", "StopFailure", "Notification",
@@ -93,22 +95,33 @@ func expandTilde(p string) string {
 	return p
 }
 
-// installStatusHooks writes the hook entry into every known config dir.
-// Idempotent: mergeStatusHooks skips a dir that already has ours.
+// installStatusHooks writes the hook entry into every known Codex/Copilot
+// config dir. Idempotent: mergeStatusHooks skips a dir that already has ours.
+// Claude's hooks live in the burrow plugin's hooks/hooks.json (PTY-scoped via
+// CLAUDE_CODE_PLUGIN_DIRS), so for Claude this only removes the entries older
+// versions merged into the global settings.json.
+// ponytail: keep removeLegacyClaudeHooks for at least one release, until tabs
+// started before the upgrade (old env, no plugin) are gone.
 func installStatusHooks(dataDir string) {
 	burrow := filepath.Join(dataDir, "bin", "burrow")
 	// Single-quoted: the macOS app-data path contains "Application Support".
 	cmd := fmt.Sprintf(`[ -n "$BURROW_PTY_ID" ] && '%s' hook || true`, burrow)
 
 	claude, codex, copilot := hookDirs()
-	for _, d := range claude {
-		mergeStatusHooks(filepath.Join(d, "settings.json"), claudeHookEvents, cmd, true)
-	}
+	removeLegacyClaudeHooks(claude)
 	for _, d := range codex {
 		mergeStatusHooks(filepath.Join(d, "hooks.json"), codexHookEvents, cmd, false)
 	}
 	for _, d := range copilot {
 		writeCopilotHooks(filepath.Join(d, "hooks", "burrow.json"), burrow)
+	}
+}
+
+// removeLegacyClaudeHooks strips Burrow's previously merged entries from each
+// Claude config dir's settings.json; user hooks are untouched.
+func removeLegacyClaudeHooks(dirs []string) {
+	for _, d := range dirs {
+		unmergeStatusHooks(filepath.Join(d, "settings.json"))
 	}
 }
 

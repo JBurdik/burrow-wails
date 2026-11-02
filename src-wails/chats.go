@@ -65,6 +65,42 @@ type Chat struct {
 	// DeleteChat cascades on it. A column rather than a title tag, because all
 	// three of those would otherwise rest on a string.
 	ParentChatID int64 `json:"parent_chat_id"`
+	// Read-only on the wire: set by wait_result/collect_results (MarkCollected),
+	// cleared by a new turn. SaveChats never writes it. The desktop's sub-agent
+	// auto-archive sweep reads it so a result nobody has taken stays listed.
+	CollectedAt int64 `json:"collected_at"`
+	// Launch settings: how this chat's agent process is started. Read-only on
+	// the wire like collected_at — SaveChats never writes them, so a client
+	// that has never heard of them can't blank them. Written by CreateChat and
+	// the one-time backfill (backfillChatLaunchSettings); resolved for a start
+	// by resolveClaudeLaunch. "" = not set, fall back.
+	Effort             string `json:"effort"`
+	PermissionMode     string `json:"permission_mode"`
+	ProfileID          string `json:"profile_id"`
+	AppendSystemPrompt string `json:"append_system_prompt"`
+	// Read-only on the wire: when auto-sleep stopped this chat's idle process
+	// (chatsleep.go); 0 once a send starts it again.
+	SleptAt int64 `json:"slept_at"`
+	// Read-only on the wire: the one-line session recap (chatrecap.go).
+	Recap string `json:"recap"`
+	// Read-only on the wire: "" = a thread or sub-agent, "side" = a side chat
+	// (chatside.go) — a fork of its parent_chat_id for a quick question, never
+	// listed or collected as a sub-agent.
+	Kind string `json:"kind"`
+	// Read-only on the wire: unix ms the user snoozed this chat until
+	// (ChatSnooze, chatsnooze.go); 0 = not snoozed. Settled while in the future.
+	SnoozedUntil int64 `json:"snoozed_until"`
+	// Read-only on the wire (chatlimit.go): unix ms a usage limit that failed
+	// the last turn resets at (0 = none), and when the user armed an automatic
+	// resume for (0 = not armed).
+	LimitResetAt  int64 `json:"limit_reset_at"`
+	LimitResumeAt int64 `json:"limit_resume_at"`
+	// Read-only on the wire: the pull request linked to this thread (chatpr.go).
+	// The forge is the workspace's. pr_state is the glyph's last known state
+	// (open | draft | merged | closed), refreshed on push and when the card opens.
+	PrNumber int64  `json:"pr_number"`
+	PrURL    string `json:"pr_url"`
+	PrState  string `json:"pr_state"`
 }
 
 func chatsSchema() []string {
@@ -85,7 +121,33 @@ func chatsSchema() []string {
 			archived_at       INTEGER NOT NULL DEFAULT 0,
 			last_activity_at  INTEGER NOT NULL DEFAULT 0,
 			parent_chat_id    INTEGER NOT NULL DEFAULT 0,
-			collected_at      INTEGER NOT NULL DEFAULT 0
+			collected_at      INTEGER NOT NULL DEFAULT 0,
+			effort            TEXT    NOT NULL DEFAULT '',
+			permission_mode   TEXT    NOT NULL DEFAULT '',
+			profile_id        TEXT    NOT NULL DEFAULT '',
+			append_system_prompt TEXT NOT NULL DEFAULT '',
+			resume_at         TEXT    NOT NULL DEFAULT '',
+			slept_at          INTEGER NOT NULL DEFAULT 0,
+			recap             TEXT    NOT NULL DEFAULT '',
+			kind              TEXT    NOT NULL DEFAULT '',
+			snoozed_until     INTEGER NOT NULL DEFAULT 0,
+			limit_reset_at    INTEGER NOT NULL DEFAULT 0,
+			limit_resume_at   INTEGER NOT NULL DEFAULT 0,
+			limit_failed_at   INTEGER NOT NULL DEFAULT 0,
+			limit_resumed_key TEXT    NOT NULL DEFAULT '',
+			pr_number         INTEGER NOT NULL DEFAULT 0,
+			pr_url            TEXT    NOT NULL DEFAULT '',
+			pr_state          TEXT    NOT NULL DEFAULT ''
+		)`,
+		// A PR the user unlinked from a chat: auto-linking never re-adds it.
+		`CREATE TABLE IF NOT EXISTS chat_pr_dismissed (
+			chat_id   INTEGER NOT NULL,
+			pr_number INTEGER NOT NULL,
+			PRIMARY KEY (chat_id, pr_number)
+		)`,
+		`CREATE TABLE IF NOT EXISTS chat_migrations (
+			name    TEXT PRIMARY KEY,
+			done_at INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS chats_workspace ON chats(workspace_id)`,
 	}
@@ -111,13 +173,19 @@ func chatsPostAlterSchema() []string {
 // existing database.
 const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	message_count, agent_kind, transport, model, branch,
-	settled_override, archived_at, last_activity_at, parent_chat_id`
+	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
+	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind, snoozed_until,
+	limit_reset_at, limit_resume_at,
+	pr_number, pr_url, pr_state`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
 	err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Title, &c.PinnedTitle, &c.ClaudeSessionID,
 		&c.MessageCount, &c.AgentKind, &c.Transport, &c.Model, &c.Branch,
-		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID)
+		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
+		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind, &c.SnoozedUntil,
+		&c.LimitResetAt, &c.LimitResumeAt,
+		&c.PrNumber, &c.PrURL, &c.PrState)
 	return c, err
 }
 
@@ -155,11 +223,13 @@ func (a *App) CreateChat(c Chat) (Chat, error) {
 	res, err := a.db.Exec(
 		`INSERT INTO chats (workspace_id, title, pinned_title, claude_session_id,
 			message_count, agent_kind, transport, model, branch,
-			settled_override, archived_at, last_activity_at, parent_chat_id)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			settled_override, archived_at, last_activity_at, parent_chat_id,
+			effort, permission_mode, profile_id, append_system_prompt)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID, c.MessageCount,
 		c.AgentKind, c.Transport, c.Model, c.Branch,
 		c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID,
+		c.Effort, c.PermissionMode, c.ProfileID, c.AppendSystemPrompt,
 	)
 	if err != nil {
 		return Chat{}, err
@@ -190,9 +260,12 @@ func (a *App) SaveChats(chats []Chat) error {
 	}
 	defer tx.Rollback()
 
+	// workspace_id and branch are not written: set by CreateChat, changed only
+	// by moveChat (chatmove.go). A client saves on every streamed message, so a
+	// stale copy would otherwise move a chat straight back out of its worktree.
 	stmt, err := tx.Prepare(
-		`UPDATE chats SET workspace_id=?, title=?, pinned_title=?, claude_session_id=?,
-			message_count=?, agent_kind=?, transport=?, model=?, branch=?,
+		`UPDATE chats SET title=?, pinned_title=?, claude_session_id=?,
+			message_count=?, agent_kind=?, transport=?, model=?,
 			settled_override=?, archived_at=?, last_activity_at=?, parent_chat_id=? WHERE id=?`)
 	if err != nil {
 		return err
@@ -203,8 +276,8 @@ func (a *App) SaveChats(chats []Chat) error {
 		if c.ID <= 0 {
 			continue
 		}
-		if _, err := stmt.Exec(c.WorkspaceID, c.Title, c.PinnedTitle, c.ClaudeSessionID,
-			c.MessageCount, c.AgentKind, c.Transport, c.Model, c.Branch,
+		if _, err := stmt.Exec(c.Title, c.PinnedTitle, c.ClaudeSessionID,
+			c.MessageCount, c.AgentKind, c.Transport, c.Model,
 			c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID, c.ID); err != nil {
 			return err
 		}
@@ -212,7 +285,9 @@ func (a *App) SaveChats(chats []Chat) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	busEmit("chats-changed", nil)
+	// Marked so a client can skip the echo of its OWN save without also
+	// skipping a create/delete that lands while that save is in flight.
+	busEmit("chats-changed", map[string]any{"save": true})
 	return nil
 }
 
@@ -230,6 +305,31 @@ func (a *App) DeleteChat(id int64) error {
 	// stay the harmless ErrNoRows it was before the cascade existed.
 	if id <= 0 {
 		return sql.ErrNoRows
+	}
+	// The transcript AND the raw stream go with the row (children's too): its
+	// chat_fts entries are dropped by trigger, so a deleted chat stops turning
+	// up in search. The stream used to stay behind — 20k rows per deleted chat.
+	ids := []int64{id}
+	if rows, err := a.db.Query(`SELECT id FROM chats WHERE parent_chat_id = ?`, id); err == nil {
+		for rows.Next() {
+			var c int64
+			if rows.Scan(&c) == nil {
+				ids = append(ids, c)
+			}
+		}
+		rows.Close()
+	}
+	for _, c := range ids {
+		if err := a.DeleteChatMessages(int(c)); err != nil {
+			return err
+		}
+		_, _ = a.db.Exec(`DELETE FROM chat_pr_dismissed WHERE chat_id = ?`, c)
+		if _, err := a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, c); err != nil {
+			return err
+		}
+		if _, err := a.db.Exec(`DELETE FROM chat_queue WHERE chat_id = ?`, c); err != nil {
+			return err
+		}
 	}
 	if _, err := a.db.Exec(`DELETE FROM chats WHERE parent_chat_id = ?`, id); err != nil {
 		return err
@@ -276,7 +376,7 @@ func (a *App) StopChat(id int64) error {
 		var stopErr error
 		if transport == "codex-app-server" || agentKind == "codex" {
 			stopErr = a.AcpStop(sessionID)
-		} else if a.claudeAgents != nil && a.claudeAgents.Alive(sessionID) {
+		} else if a.claudeMgr().Alive(sessionID) {
 			stopErr = a.ClaudeStop(sessionID)
 		}
 		if stopErr != nil && !errors.Is(stopErr, os.ErrProcessDone) {
@@ -335,6 +435,26 @@ func (a *App) archiveLegacyManagerChats() {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		log.Printf("chats: archived %d legacy Manager thread(s)", n)
+	}
+}
+
+// pruneOrphanChatStreams drops chat_stream / chat_stream_state rows whose chat
+// row is gone. Older builds' DeleteChat removed the transcript but not the
+// stream, so every deleted chat kept up to chatStreamKeep raw lines forever.
+// Idempotent; cheap once there is nothing left to drop.
+func (a *App) pruneOrphanChatStreams() {
+	if a.db == nil {
+		return
+	}
+	for _, t := range []string{"chat_stream", "chat_stream_state"} {
+		res, err := a.db.Exec(`DELETE FROM ` + t + ` WHERE CAST(chat_id AS INTEGER) NOT IN (SELECT id FROM chats)`)
+		if err != nil {
+			log.Printf("chats: pruning orphan %s: %v", t, err)
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("chats: pruned %d orphan %s row(s)", n, t)
+		}
 	}
 }
 
@@ -578,7 +698,7 @@ func (a *App) UncollectedChildren(parentChatID int64) ([]int64, error) {
 	if a.db == nil {
 		return out, nil
 	}
-	rows, err := a.db.Query(`SELECT id FROM chats WHERE parent_chat_id = ? AND collected_at = 0 ORDER BY id`, parentChatID)
+	rows, err := a.db.Query(`SELECT id FROM chats WHERE parent_chat_id = ? AND collected_at = 0 AND kind != 'side' ORDER BY id`, parentChatID)
 	if err != nil {
 		return out, err
 	}
@@ -599,6 +719,9 @@ func (a *App) MarkCollected(chatID int64) error {
 	if a.db == nil {
 		return fmt.Errorf("no database")
 	}
-	_, err := a.db.Exec(`UPDATE chats SET collected_at = ? WHERE id = ?`, time.Now().UnixMilli(), chatID)
-	return err
+	if _, err := a.db.Exec(`UPDATE chats SET collected_at = ? WHERE id = ?`, time.Now().UnixMilli(), chatID); err != nil {
+		return err
+	}
+	busEmit("chats-changed", nil)
+	return nil
 }

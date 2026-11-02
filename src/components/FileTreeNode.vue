@@ -102,13 +102,15 @@ import { useFileTreeStore, type FileNode } from "@/stores/fileTree";
 const props = defineProps<{ node: FileNode; depth: number }>();
 const store = useFileTreeStore();
 const activeTerm = inject<() => any>("activeTerm", () => undefined);
+const openFileInPanel = inject<((path: string) => void) | undefined>("openFileInPanel", undefined);
 
 function handleClick() {
   if (props.node.type === "folder") {
     store.toggle(props.node.id);
   } else {
     store.select(props.node.id);
-    activeTerm()?.openFileInTab(props.node.id, props.node.name);
+    if (openFileInPanel) openFileInPanel(props.node.id);
+    else activeTerm()?.openFileInTab(props.node.id, props.node.name);
   }
 }
 

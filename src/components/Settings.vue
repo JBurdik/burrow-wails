@@ -1,42 +1,47 @@
 <template>
-  <div class="fixed inset-0 z-[1000] flex flex-col overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]">
-    <!-- Header -->
-    <div class="relative flex h-[52px] shrink-0 items-center justify-end border-b border-border bg-panel px-6">
-      <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-2.5">
-        <PhGearSix :size="15" class="text-muted-foreground" />
-        <span class="text-sm font-semibold text-foreground">Settings</span>
-      </div>
-      <button class="flex rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" @click="$emit('close')">
-        <PhX :size="15" />
-      </button>
-    </div>
-
-    <div class="flex flex-1 overflow-hidden">
-      <!-- Nav -->
-      <nav class="flex w-[220px] shrink-0 flex-col gap-px border-r border-border bg-panel py-2.5">
+  <div class="settings-root fixed inset-0 z-[1000] flex overflow-hidden bg-base [backdrop-filter:var(--blur-overlay,none)] [-webkit-backdrop-filter:var(--blur-overlay,none)]" :class="{ 'settings-phone': compact, 'phone-detail': compact && phoneDetail }" @touchstart.passive="onEdgeStart" @touchend="onEdgeEnd">
+    <AnimatedBackdrop
+      v-if="ui.activeTheme.animated && !ui.bgImageUrl"
+      :key="ui.theme"
+      v-bind="ui.activeTheme.animated"
+      :floor="ui.activeTheme.vars['bg-base']"
+      contained
+    />
+      <!-- Nav: the sidebar column's darker surface. Top padding clears the
+           macOS traffic lights. -->
+      <nav class="flex w-[232px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-[var(--sidebar-bg)] px-2.5 pb-3 pt-[52px]">
+        <div class="mb-2 flex items-center gap-2 px-2.5 text-[13px] font-semibold text-foreground">
+          <PhGearSix :size="15" class="text-muted-foreground" />
+          Settings
+        </div>
         <template v-for="item in navItems" :key="item.id">
-          <div v-if="item.divider" class="my-2 h-px bg-border" />
+          <div v-if="item.divider" class="mx-2.5 my-2 h-px bg-border" />
           <button
             v-else
-            class="flex h-[34px] items-center gap-2.5 border-l-2 border-transparent px-4 text-left text-[13px] text-secondary-foreground hover:bg-hover"
-            :class="active === item.id && 'border-l-accent bg-hover text-foreground [&_.nav-icon]:text-accent'"
-            @click="active = item.id!"
+            class="flex h-8 shrink-0 items-center gap-2.5 rounded-lg border px-2.5 text-left text-[13px] transition-colors duration-75"
+            :class="active === item.id ? 'border-border bg-selected text-foreground [&_.nav-icon]:text-foreground' : 'border-transparent text-secondary-foreground hover:bg-hover hover:text-foreground'"
+            @click="active = item.id!; phoneDetail = true"
           >
-            <component :is="item.icon" :size="14" class="nav-icon shrink-0 text-muted-foreground" />
-            <span>{{ item.label }}</span>
+            <component :is="item.icon" :size="15" class="nav-icon shrink-0 text-muted-foreground" />
+            <span class="truncate">{{ item.label }}</span>
           </button>
         </template>
       </nav>
 
+      <button class="settings-close absolute right-4 top-3 z-10 flex rounded-lg p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground" title="Close (Esc)" aria-label="Close settings" @click="$emit('close')">
+        <PhX :size="15" />
+      </button>
+
       <!-- Content -->
-      <div class="flex-1 overflow-y-auto bg-base px-10 py-8">
+      <div class="settings-content flex-1 overflow-y-auto bg-base px-12 pb-10 pt-12">
+        <button v-if="compact" class="phone-settings-back" @click="phoneDetail = false"><PhCaretLeft :size="20" /> Settings</button>
         <!-- Providers -->
-        <section v-if="active === 'providers'" class="flex flex-col gap-3.5">
+        <section v-if="active === 'providers'" class="s-wide flex flex-col gap-3.5">
           <ProvidersPanel :focus-id="focusId" />
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Sub-agent delegation</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Sub-agent delegation</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Max concurrent sub-agents</span>
                 <span class="text-[11px] text-muted-foreground">Soft per-workspace cap the <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> skill respects when it spawns agents (1–20)</span>
@@ -53,7 +58,7 @@
                 <span class="text-xs text-muted-foreground/70">agents</span>
               </div>
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">MCP recursion depth</span>
                 <span class="text-[11px] text-muted-foreground">How deep MCP-spawned sub-agents may spawn further sub-agents before the depth cap refuses (1–10)</span>
@@ -73,22 +78,81 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Chat</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Chat</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Default agent</span>
                 <span class="text-[11px] text-muted-foreground">Agent used when opening a new chat.</span>
               </div>
               <Select v-model="ui.defaultChatAgent" class="min-w-[200px]" :options="chatAgentOptions" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Spawn sub-agents as</span>
                 <span class="text-[11px] text-muted-foreground">How <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow spawn</code> sub-agents open. Chat prefills the task in a new chat's input; Terminal keeps <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow wait</code> result capture.</span>
               </div>
-              <Select v-model="ui.spawnMode" class="min-w-[200px]" :options="SPAWN_MODE_OPTIONS" />
+              <Segmented v-model="ui.spawnMode" :options="SPAWN_MODE_OPTIONS" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Auto-sleep idle chats</span>
+                <span class="text-[11px] text-muted-foreground">Stop a finished chat's agent process after this long without activity to free memory. Sending a message wakes it with its full context. Never sleeps a running turn, a pending question or a chat on screen.</span>
+              </div>
+              <Select v-model="chatAutoSleep" class="min-w-[200px]" :options="AUTO_SLEEP_OPTIONS" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Chat recaps</span>
+                <span class="text-[11px] text-muted-foreground">Show a one-line summary of where each chat stands under its title. Generated in the background after a turn finishes, using the text generation model below.</span>
+              </div>
+              <Switch :checked="ui.chatRecaps" @update:checked="(v: boolean) => ui.chatRecaps = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Start new worktrees from origin</span>
+                <span class="text-[11px] text-muted-foreground">Fetch the base branch from origin first and branch from the remote copy, so a new worktree starts from the latest commit. Falls back to the local branch when the fetch fails.</span>
+              </div>
+              <Switch :checked="ui.worktreeFromOrigin" @update:checked="(v: boolean) => ui.worktreeFromOrigin = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Remove merged worktrees</span>
+                <span class="text-[11px] text-muted-foreground">Every hour, remove a worktree whose branch landed in the default branch (or whose pull request was merged), together with its local branch.</span>
+              </div>
+              <Switch :checked="ui.worktreeCleanupMerged" @update:checked="(v: boolean) => ui.worktreeCleanupMerged = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Remove inactive worktrees</span>
+                <span class="text-[11px] text-muted-foreground">Every hour, remove a worktree with no chats and no tabs once nothing happened in it for this long. The branch is kept.</span>
+              </div>
+              <Select v-model="worktreeInactive" class="min-w-[200px]" :options="WORKTREE_INACTIVE_OPTIONS" />
+            </div>
+            <div class="flex items-start gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Worktree cleanup</span>
+                <span class="text-[11px] text-muted-foreground">Never removes a worktree with modified or untracked files, a running chat, an open terminal, a pinned chat, the active one, or one created in the last hour. Preview lists what both rules would remove, even while they are off.</span>
+                <span v-if="cleanupError" class="text-[11px] text-destructive">{{ cleanupError }}</span>
+                <template v-else-if="cleanupPreview">
+                  <span v-if="!cleanupPreview.length" class="text-[11px] text-secondary-foreground">Nothing to clean up.</span>
+                  <ul v-else class="mt-1 flex flex-col gap-0.5">
+                    <li v-for="w in cleanupPreview" :key="w.id" class="text-[11px] text-secondary-foreground"><span class="text-foreground">{{ w.name }}</span> · {{ w.reason }}</li>
+                  </ul>
+                </template>
+              </div>
+              <div class="flex shrink-0 gap-2">
+                <Button variant="outline" size="sm" type="button" :disabled="cleanupBusy" @click="onCleanupPreview">Preview</Button>
+                <Button v-if="cleanupPreview?.length" variant="outline" size="sm" type="button" class="text-destructive hover:bg-destructive/10 hover:text-destructive" :disabled="cleanupBusy" @click="onCleanupNow">Remove {{ cleanupPreview.length }}</Button>
+              </div>
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Deliver sub-agent results to the parent automatically</span>
+                <span class="text-[11px] text-muted-foreground">When a sub-agent finishes or gets blocked on a question, send that into the thread that spawned it once its turn has ended, so it carries on without polling.</span>
+              </div>
+              <Switch :checked="ui.subagentAutoDeliver" @update:checked="(v: boolean) => ui.subagentAutoDeliver = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>
                 <span class="text-[11px] text-muted-foreground">Default model for generated text — chat titles, commit messages, pull request content and branch names. Kept cheap by default.</span>
@@ -96,14 +160,14 @@
               <Select v-model="textGenModel" class="min-w-[200px]" :options="textGenModelOptions" />
               <Select v-if="textGenEffortOptions.length > 1" v-model="textGenEffort" class="min-w-[130px]" :options="textGenEffortOptions" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Generated text style</span>
                 <span class="text-[11px] text-muted-foreground">{{ textGenPolicyDescription }}</span>
               </div>
               <Select v-model="ui.textGenerationPolicy" class="min-w-[200px]" :options="textGenPolicyOptions" />
             </div>
-            <div class="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex flex-col gap-2 s-row">
               <div class="flex flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">House rule</span>
                 <span class="text-[11px] text-muted-foreground">A short rule folded into every generated commit message and pull request. Left empty, nothing is added.</span>
@@ -118,8 +182,8 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Floating windows</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Floating windows</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Snap corner</span>
                 <span class="text-[11px] text-muted-foreground">Which screen corner popped-out terminal bubbles snap to and stack at</span>
@@ -134,41 +198,61 @@
           <div class="flex items-center gap-2.5"><div class="flex items-baseline gap-2.5"><h2 class="text-[15px] font-semibold text-foreground">Remote access</h2><span class="text-xs text-muted-foreground">Reach Burrow securely from another device</span></div></div>
           <div class="h-px bg-border" />
           <div class="flex max-w-[880px] flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Burrow Remote</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
+            <span class="s-label">Burrow Remote</span>
+            <div class="flex items-center gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Enable HTTP/WebSocket server</span><span class="text-[11px] text-muted-foreground">Starts a loopback-only, token-protected connection for Burrow Remote. Restart Burrow once after changing this option.</span></div><Switch :checked="httpEnabled" @update:checked="onToggleHttp" /></div>
             <div v-if="httpError" class="rounded-[var(--radius-card)] border border-destructive/40 bg-destructive/10 px-4 py-3 text-[11px] text-destructive">{{ httpError }}</div>
-            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="pairStatus?.locked" class="text-[11px] text-destructive">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else-if="!pairStatus?.code" class="text-[11px] text-muted-foreground">The code has expired. Generate a new one when you are ready to pair.</span><span v-else class="text-[11px] text-muted-foreground">Type this into Burrow Remote on your phone. Single use, and it expires in 3 minutes — the device gets its own token, so this code is never a lasting credential.</span><code v-if="pairStatus?.code" class="mt-1.5 block font-mono text-[22px] tracking-[0.3em] text-secondary-foreground">{{ pairStatus.code }}</code></div><Button variant="outline" size="sm" type="button" @click="onRegeneratePairCode">New code</Button></div>
-            <div v-if="httpStatus?.enabled" class="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div v-if="httpStatus?.enabled" class="flex items-start gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Phone pairing code</span><span v-if="pairStatus?.locked" class="text-[11px] text-destructive">Too many wrong codes — pairing is locked. Generate a new code to unlock it.</span><span v-else-if="!pairStatus?.code" class="text-[11px] text-muted-foreground">The code has expired. Generate a new one when you are ready to pair.</span><span v-else class="text-[11px] text-muted-foreground">{{ pairingQr ? "Scan the QR code with your phone's camera, or type this into Burrow Remote." : "Type this into Burrow Remote on your phone." }} Single use, and it expires in 3 minutes — the device gets its own token, so this code is never a lasting credential.</span><template v-if="pairStatus?.code && !pairStatus.locked">
+                <div class="mt-3 flex gap-2">
+                  <span v-for="(digit, i) in pairStatus.code.split('')" :key="i" class="flex h-12 w-10 items-center justify-center rounded-[10px] border border-border bg-base font-mono text-[22px] font-medium text-foreground">{{ digit }}</span>
+                </div>
+                <div class="mt-3 h-[3px] w-[290px] overflow-hidden rounded-full bg-hover"><div class="h-full rounded-full bg-accent transition-[width] duration-1000 ease-linear" :style="{ width: `${pairRemaining * 100}%` }" /></div>
+                <span class="mt-1 text-[11px] text-muted-foreground">Expires in {{ pairRemainingLabel }}</span>
+                <img v-if="pairingQr" :src="pairingQr" alt="Pairing QR code" class="mt-3 size-[156px] rounded-[10px] bg-white p-2 [image-rendering:pixelated]" />
+                <span v-else-if="tailscaleStatus?.logged_in" class="mt-2 text-[11px] text-muted-foreground">Turn on the Tailscale tunnel below to get a QR code your phone can scan.</span>
+              </template></div><Button variant="outline" size="sm" type="button" @click="onRegeneratePairCode">New code</Button></div>
+            <div v-if="httpStatus?.enabled" class="flex flex-col gap-2 s-row">
               <div class="flex items-center gap-4"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Paired devices</span><span class="text-[11px] text-muted-foreground">Each device has its own token, so revoking one leaves the others paired. A paired device can drive your terminals — treat it as trusted with this machine.</span></div></div>
               <span v-if="remoteDevices === null" class="text-[11px] text-muted-foreground">Loading…</span>
               <span v-else-if="remoteDevices.length === 0" class="text-[11px] text-muted-foreground">No devices paired yet.</span>
-              <div v-for="d in remoteDevices ?? []" :key="d.id" class="flex items-center gap-3 rounded-[var(--radius-card)] border border-border/60 px-3 py-2">
-                <div class="flex flex-1 min-w-0 flex-col"><span class="truncate text-[12px] text-foreground">{{ d.name }}</span><span class="text-[11px] text-muted-foreground">{{ d.kind }} · last seen {{ relativeSeen(d.last_seen) }}</span></div>
-                <Button variant="outline" size="sm" type="button" @click="onRevokeDevice(d.id)">Revoke</Button>
+              <div v-if="remoteDevices?.length" class="mt-1 overflow-hidden rounded-[10px] border border-border">
+                <div v-for="d in remoteDevices" :key="d.id" class="flex items-center gap-3 border-border px-3 py-2.5 [&+&]:border-t">
+                  <PhDeviceMobile :size="16" class="shrink-0 text-muted-foreground" />
+                  <div class="flex flex-1 min-w-0 flex-col"><span class="truncate text-[13px] text-foreground">{{ d.name }}</span><span class="text-[11px] text-muted-foreground">{{ d.kind }} · last seen {{ relativeSeen(d.last_seen) }}</span></div>
+                  <PhBell v-if="d.push" :size="15" class="shrink-0 text-muted-foreground" title="Push notifications on" />
+                  <Button variant="ghost" size="sm" type="button" class="text-destructive hover:bg-destructive/10 hover:text-destructive" @click="onRevokeDevice(d.id)">Revoke</Button>
+                </div>
               </div>
             </div>
             <div v-else class="flex items-center gap-4 rounded-[var(--radius-card)] border border-dashed border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Not enabled</span><span class="text-[11px] text-muted-foreground">Turn on the server above, then restart Burrow to generate a token and start listening.</span></div></div>
-            <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Private tunnel</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
-            <div v-if="tailscaleStatus?.serving && tailscaleStatus.serve_url" class="flex items-start gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ tailscaleStatus.serve_url }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then type the pairing code above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(tailscaleStatus.serve_url, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
+            <span class="mt-3 s-label">Private tunnel</span>
+            <div class="flex items-center gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Tailscale tunnel</span><span class="text-[11px] text-muted-foreground"><template v-if="!tailscaleStatus?.installed">Install Tailscale to securely reach this Mac from your tailnet.</template><template v-else-if="!tailscaleStatus.logged_in">Log in to Tailscale to enable this tunnel.</template><template v-else-if="!httpEnabled">Enable the HTTP/WebSocket server first.</template><template v-else-if="tailscaleStatus.serving">Your private HTTPS address is ready below.</template><template v-else-if="tailscaleStatus.https_enabled === false"><span class="text-destructive">HTTPS certificates are off for this tailnet.</span> Turn them on in the Tailscale admin console (DNS → HTTPS Certificates), then come back.</template><template v-else><span v-if="tailscaleError" class="text-destructive">{{ tailscaleError }} </span>Publishes Burrow at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/burrow</code> through your tailnet, never to the public internet. Existing services at <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">/</code> stay untouched.</template></span></div><Switch :checked="tailscaleStatus?.serving ?? false" :disabled="!httpEnabled || !tailscaleStatus?.installed || !tailscaleStatus?.logged_in || (!tailscaleStatus.serving && tailscaleStatus.https_enabled === false)" :title="!httpEnabled ? 'Enable the HTTP/WebSocket server first' : (!tailscaleStatus?.installed ? 'Tailscale not installed' : (!tailscaleStatus?.logged_in ? 'Not logged in to Tailscale' : ''))" @update:checked="onToggleTailscale" /></div>
+            <div v-if="pairingBaseUrl" class="flex items-start gap-4 s-row"><div class="flex flex-1 min-w-0 flex-col gap-0.5"><span class="text-[13px] font-medium text-foreground">Open Burrow Remote</span><code class="block max-w-[620px] overflow-wrap-anywhere text-[11px] text-secondary-foreground">{{ pairingBaseUrl }}</code><span class="text-[11px] text-muted-foreground">Open this address on your phone, then type the pairing code above.</span></div><Button variant="outline" size="sm" type="button" @click="copyToClipboard(pairingBaseUrl, 'url')">{{ copiedLabel === 'url' ? 'Copied' : 'Copy URL' }}</Button></div>
 
-            <span class="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Connect to another Burrow</span>
+            <span class="mt-3 s-label">Connect to another Burrow</span>
             <p class="m-0 text-[11px] leading-relaxed text-muted-foreground">This window is a client, not just a host — pair it to a Burrow running elsewhere (a VPS, another machine) and drive that one instead. Get its address and a pairing code from <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">burrow pair-status</code> on that machine, or its own Settings above.</p>
-            <div v-if="!desktopRemoteCreds" class="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div v-if="remoteEnvs.length" class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Drive the selected machine</span>
+                <span class="text-[11px] text-muted-foreground">{{ desktopUsesRemoteNow && remoteActiveId ? "This window is driving that machine right now." : "This window is driving this Mac." }}</span>
+              </div>
+              <Switch :checked="desktopUsesRemoteNow" :disabled="!remoteActiveId && !desktopUsesRemoteNow" @update:checked="onToggleDesktopRemote" />
+            </div>
+            <div v-if="remoteEnvs.length" class="overflow-hidden rounded-[10px] border border-border">
+              <div v-for="e in remoteEnvs" :key="e.environment_id" class="flex items-center gap-3 border-border px-3 py-2.5 [&+&]:border-t">
+                <span class="h-2 w-2 shrink-0 rounded-full" :class="e.environment_id === remoteActiveId ? 'bg-success' : 'bg-border'" />
+                <div class="flex flex-1 min-w-0 flex-col"><span class="truncate text-[13px] text-foreground">{{ e.name }}</span><span class="truncate text-[11px] text-muted-foreground">{{ e.baseUrl }}<template v-if="e.lastConnectedAt"> · last connected {{ relativeSeen(e.lastConnectedAt) }}</template></span></div>
+                <Button v-if="e.environment_id !== remoteActiveId" variant="outline" size="sm" type="button" @click="onUseRemoteEnv(e.environment_id)">Select</Button>
+                <Button variant="ghost" size="sm" type="button" @click="onRenameRemoteEnv(e.environment_id, e.name)">Rename</Button>
+                <Button variant="ghost" size="sm" type="button" class="text-destructive hover:bg-destructive/10 hover:text-destructive" @click="onForgetRemoteEnv(e.environment_id)">Forget</Button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2 s-row">
               <div class="flex items-center gap-2">
                 <input v-model="remoteConnectUrl" type="text" placeholder="https://host.tailnet.ts.net/burrow" class="min-w-0 flex-1 rounded-[var(--radius-chip)] border border-border bg-base px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50" />
                 <input v-model="remoteConnectCode" type="text" inputmode="numeric" maxlength="6" placeholder="123456" class="w-[100px] rounded-[var(--radius-chip)] border border-border bg-base px-2.5 py-1.5 text-center font-mono text-[13px] tracking-[0.15em] text-foreground outline-none placeholder:text-muted-foreground/50" />
-                <Button variant="outline" size="sm" type="button" :disabled="remoteConnecting || !remoteConnectUrl.trim() || remoteConnectCode.trim().length !== 6" @click="onConnectRemote">{{ remoteConnecting ? "Connecting…" : "Connect" }}</Button>
+                <Button variant="outline" size="sm" type="button" :disabled="remoteConnecting || !remoteConnectUrl.trim() || remoteConnectCode.trim().length !== 6" @click="onConnectRemote">{{ remoteConnecting ? "Connecting…" : (remoteEnvs.length ? "Add machine" : "Connect") }}</Button>
               </div>
               <span v-if="remoteConnectError" class="text-[11px] text-destructive">{{ remoteConnectError }}</span>
-            </div>
-            <div v-else class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
-              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="truncate text-[13px] font-medium text-foreground">{{ desktopRemoteCreds.baseUrl }}</span>
-                <span class="text-[11px] text-muted-foreground">{{ desktopUsesRemoteNow ? "This window is driving that machine right now." : "Paired, but this window is still driving this Mac." }}</span>
-              </div>
-              <Switch :checked="desktopUsesRemoteNow" @update:checked="onToggleDesktopRemote" />
-              <Button variant="outline" size="sm" type="button" @click="onForgetRemote">Forget</Button>
             </div>
           </div>
         </section>
@@ -194,7 +278,7 @@
           <!-- Active repo scripts -->
           <div class="flex flex-col gap-2.5">
             <div class="mb-1.5 flex items-center gap-2.5">
-              <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+              <span class="s-label">
                 {{ activeWsId != null ? `This repo — ${activeWsName}` : "This repo" }}
               </span>
               <Button variant="outline" size="sm" class="ml-auto" :disabled="activeWsPath == null" @click="activeWsPath != null && scriptsStore.addScript(activeWsPath)">
@@ -250,8 +334,8 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Chat usage</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Chat usage</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Estimated cost</span>
                 <span class="text-[11px] text-muted-foreground">Recorded chat usage only; terminal transcript scanning is not included.</span>
@@ -261,8 +345,8 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Interface</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">UI scale</span>
                 <span class="text-[11px] text-muted-foreground">Zoom the entire interface</span>
@@ -272,8 +356,8 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Layout</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Layout</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Swap panel sides</span>
                 <span class="text-[11px] text-muted-foreground">Move primary panel to the right</span>
@@ -283,19 +367,28 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Developer</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Developer</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Terminal debug overlay</span>
                 <span class="text-[11px] text-muted-foreground">Show per-terminal diagnostics (size, bytes, buffer)</span>
               </div>
               <Switch :checked="ui.debugOverlay" @update:checked="(v: boolean) => ui.debugOverlay = v" />
             </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Show internal IDs</span>
+                <span class="text-[11px] text-muted-foreground">Show chat and tab ids in the sidebar hover card, for bug reports</span>
+              </div>
+              <Switch :checked="ui.debugIds" @update:checked="(v: boolean) => ui.debugIds = v" />
+            </div>
           </div>
         </section>
 
         <!-- Notifications -->
         <section v-else-if="active === 'subagent-profiles'" class="flex flex-col gap-3.5"><SubagentProfilesPanel /></section>
+
+        <section v-else-if="active === 'scheduled'" class="flex flex-col gap-3.5"><ScheduledTasksPanel /></section>
 
         <section v-else-if="active === 'notifications'" class="flex flex-col gap-3.5">
           <div class="flex items-center gap-2.5">
@@ -307,8 +400,8 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Toasts</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Toasts</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Position</span>
                 <span class="text-[11px] text-muted-foreground">Where on-screen toast notifications appear</span>
@@ -318,15 +411,15 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">General</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">General</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Enable sounds</span>
                 <span class="text-[11px] text-muted-foreground">Master switch for all notification sounds</span>
               </div>
               <Switch :checked="ui.soundEnabled" @update:checked="(v: boolean) => ui.soundEnabled = v" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Volume</span>
                 <span class="text-[11px] text-muted-foreground">Playback volume ({{ ui.soundVolume }}%)</span>
@@ -343,15 +436,15 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Agent finished</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Agent finished</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Play when an agent finishes while you're away</span>
                 <span class="text-[11px] text-muted-foreground">Fires on the "review" state (another tab/window)</span>
               </div>
               <Switch :checked="ui.soundDoneEnabled" @update:checked="(v: boolean) => ui.soundDoneEnabled = v" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Sound</span>
                 <span class="text-[11px] text-muted-foreground">Choose a built-in sound or a custom file</span>
@@ -361,7 +454,7 @@
                 <button class="flex items-center justify-center rounded-[var(--radius-nav)] border border-border bg-transparent p-1.5 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground" title="Test" @click="playSound('done', true)"><PhPlay :size="13" /></button>
               </div>
             </div>
-            <div v-if="ui.soundDoneId === 'custom'" class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div v-if="ui.soundDoneId === 'custom'" class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Custom file</span>
                 <span class="text-[11px] text-muted-foreground">{{ ui.soundDoneCustomPath ? soundFileName(ui.soundDoneCustomPath) : "No file selected" }}</span>
@@ -371,15 +464,15 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Needs input</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Needs input</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Play when an agent is waiting for your input</span>
                 <span class="text-[11px] text-muted-foreground">Fires on the "waiting" state</span>
               </div>
               <Switch :checked="ui.soundWaitingEnabled" @update:checked="(v: boolean) => ui.soundWaitingEnabled = v" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Sound</span>
                 <span class="text-[11px] text-muted-foreground">Choose a built-in sound or a custom file</span>
@@ -389,7 +482,7 @@
                 <button class="flex items-center justify-center rounded-[var(--radius-nav)] border border-border bg-transparent p-1.5 text-muted-foreground hover:border-muted-foreground hover:text-secondary-foreground" title="Test" @click="playSound('waiting', true)"><PhPlay :size="13" /></button>
               </div>
             </div>
-            <div v-if="ui.soundWaitingId === 'custom'" class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div v-if="ui.soundWaitingId === 'custom'" class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Custom file</span>
                 <span class="text-[11px] text-muted-foreground">{{ ui.soundWaitingCustomPath ? soundFileName(ui.soundWaitingCustomPath) : "No file selected" }}</span>
@@ -410,8 +503,8 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">ntfy.sh — push notifications</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">ntfy.sh — push notifications</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Enable ntfy</span>
                 <span class="text-[11px] text-muted-foreground">Push agent events to your phone/desktop via <a class="text-accent hover:underline" href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a></span>
@@ -420,21 +513,21 @@
             </div>
 
             <template v-if="ui.ntfyEnabled">
-              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 s-row">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Server</span>
                   <span class="text-[11px] text-muted-foreground">Base URL of your ntfy server</span>
                 </div>
                 <input v-model="ui.ntfyServer" class="h-8 min-w-[200px] rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="https://ntfy.sh" spellcheck="false" />
               </div>
-              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 s-row">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Topic</span>
                   <span class="text-[11px] text-muted-foreground">Subscribe to this topic in the ntfy app to receive pushes</span>
                 </div>
                 <input v-model="ui.ntfyTopic" class="h-8 min-w-[200px] rounded-[var(--radius-chip)] border border-border bg-hover px-2.5 text-xs text-foreground outline-none hover:border-muted-foreground focus:border-accent" placeholder="my-burrow-agents" spellcheck="false" />
               </div>
-              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 s-row">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Access token</span>
                   <span class="text-[11px] text-muted-foreground">Optional — only for protected topics (Bearer token)</span>
@@ -445,14 +538,14 @@
           </div>
 
           <div v-if="ui.ntfyEnabled" class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Notify on</span>
-            <div v-for="ev in NTFY_EVENTS" :key="ev.id" class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Notify on</span>
+            <div v-for="ev in NTFY_EVENTS" :key="ev.id" class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">{{ ev.label }}</span>
               </div>
               <Switch :checked="ui.ntfyEvents.includes(ev.id)" @update:checked="(v: boolean) => toggleNtfyEvent(ev.id, v)" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Only when away</span>
                 <span class="text-[11px] text-muted-foreground">Skip pushes while the Burrow window is focused</span>
@@ -468,11 +561,11 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Git hosting — pull requests</span>
+            <span class="s-label">Git hosting — pull requests</span>
             <div
               v-for="f in FORGE_CLIS"
               :key="f.provider"
-              class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3"
+              class="flex items-center gap-4 s-row"
             >
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">{{ f.label }}</span>
@@ -512,8 +605,8 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">🐾 Terminal Pets</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">🐾 Terminal Pets</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Enable pets</span>
                 <span class="text-[11px] text-muted-foreground">A mixed pixel zoo — cat, mole, slime, ghost, duck — roams the bottom of the window. One critter per active agent; it struts while the agent works, bounces when it needs input, hops when a turn finishes, and shakes red on error.</span>
@@ -522,14 +615,14 @@
             </div>
 
             <template v-if="ui.petsEnabled">
-              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 s-row">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Speech bubbles</span>
                   <span class="text-[11px] text-muted-foreground">Pets squeak tiny status quips — “working…”, “need input!”, “done!”</span>
                 </div>
                 <Switch :checked="ui.petsSpeech" @update:checked="(v: boolean) => ui.petsSpeech = v" />
               </div>
-              <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+              <div class="flex items-center gap-4 s-row">
                 <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                   <span class="text-[13px] font-medium text-foreground">Leveling &amp; crowns</span>
                   <span class="text-[11px] text-muted-foreground">Pets level up as their agent finishes turns and earn a ♛ crown once they hit veteran status.</span>
@@ -557,7 +650,7 @@
           <div class="h-px bg-border" />
 
           <div v-for="group in keys.groups" :key="group.label" class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{{ group.label }}</span>
+            <span class="s-label">{{ group.label }}</span>
             <div v-for="c in group.commands" :key="c.id" class="flex items-center justify-between gap-3 border-b border-border/40 py-1.5 last:border-b-0">
               <span class="text-xs text-muted-foreground">{{ c.label }}</span>
               <span class="flex shrink-0 items-center gap-2">
@@ -579,7 +672,7 @@
             </div>
           </div>
 
-          <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Fixed (not rebindable)</span>
+          <span class="s-label">Fixed (not rebindable)</span>
           <div v-for="s in FIXED_SHORTCUTS" :key="s.keys" class="flex items-center justify-between gap-3 border-b border-border/40 py-1.5 last:border-b-0">
             <span class="text-xs text-muted-foreground">{{ s.desc }}</span>
             <span class="flex shrink-0 items-center gap-[3px]">
@@ -599,8 +692,8 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Worktrees directory</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Worktrees directory</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Where new git worktrees are created</span>
                 <span class="text-[11px] text-muted-foreground">Worktrees land at &lt;dir&gt;/&lt;repo&gt;/&lt;branch&gt;</span>
@@ -618,8 +711,8 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Default project folder</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Default project folder</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Where "Add project" pickers start</span>
                 <span class="text-[11px] text-muted-foreground">Used by the folder picker when adding a new workspace</span>
@@ -674,7 +767,7 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Color scheme</span>
+            <span class="s-label">Color scheme</span>
             <div class="grid grid-cols-3 gap-3">
               <button
                 v-for="m in THEME_MODES"
@@ -693,7 +786,7 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Themes</span>
+            <span class="s-label">Themes</span>
             <span class="text-xs text-muted-foreground/70">
               Each theme comes as a light/dark pair. Click a preview to use that
               side for its scheme, or “Use for both” to keep one theme whichever
@@ -728,7 +821,7 @@
                     <!-- Badge marks the theme this scheme is currently set to. -->
                     <span
                       v-if="assignedFamily(side.scheme) === card.family.key"
-                      class="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-accent text-[var(--bg-base)]"
+                      class="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-accent text-[var(--bg-solid,var(--bg-base))]"
                     >
                       <component :is="side.scheme === 'dark' ? PhMoon : PhSun" :size="10" weight="fill" />
                     </span>
@@ -749,19 +842,27 @@
             </div>
           </div>
 
+          <div class="flex items-center gap-4 s-row">
+            <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+              <span class="text-[13px] font-medium text-foreground">{{ releaseChannel ? "Release channel marker" : "Sidebar artwork" }}</span>
+              <span class="text-[11px] text-muted-foreground">{{ releaseChannel ? `How this ${releaseChannel} build marks itself: artwork behind the sidebar header plus the title bar label, the label only, or nothing.` : "Artwork behind the sidebar header." }}</span>
+            </div>
+            <Segmented v-model="ui.channelMarker" :options="releaseChannel ? CHANNEL_MARKER_OPTIONS : CHANNEL_MARKER_OPTIONS.filter((o) => o.value !== 'label')" />
+          </div>
+
           <div class="h-px bg-border" />
 
           <!-- Typography -->
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Interface font</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Interface font</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">UI font</span>
                 <span class="text-[11px] text-muted-foreground">Font used across the app interface</span>
               </div>
               <Select v-model="ui.uiFont" :options="uiFontOptions" :trigger-style="{ fontFamily: ui.uiFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">UI font size</span>
                 <span class="text-[11px] text-muted-foreground">Base interface text size (10–20)</span>
@@ -781,15 +882,15 @@
           </div>
 
           <div class="flex flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Terminal font</span>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <span class="s-label">Terminal font</span>
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Terminal font</span>
                 <span class="text-[11px] text-muted-foreground">Monospace font for terminal panes</span>
               </div>
               <Select v-model="ui.terminalFont" :options="terminalFontOptions" :trigger-style="{ fontFamily: ui.terminalFont }" class="min-w-[200px] bg-hover text-xs hover:border-muted-foreground" />
             </div>
-            <div class="flex items-center gap-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3">
+            <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Terminal font size</span>
                 <span class="text-[11px] text-muted-foreground">Size in pixels (8–24)</span>
@@ -821,7 +922,7 @@
 
           <!-- Background image -->
           <div class="flex max-w-[560px] flex-col gap-2.5">
-            <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Background</span>
+            <span class="s-label">Background</span>
 
             <!-- Image picker card -->
             <div class="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-border bg-hover p-3">
@@ -912,7 +1013,7 @@
               </div>
             </div>
 
-            <div class="mt-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3.5">
+            <div class="mt-4 s-row.5">
               <div class="flex items-center justify-between gap-4">
                 <div class="flex min-w-0 flex-col gap-0.75">
                   <template v-if="update.installed">
@@ -965,7 +1066,7 @@
               </div>
             </div>
 
-            <div class="mt-4 rounded-[var(--radius-card)] border border-border bg-panel px-4 py-3.5">
+            <div class="mt-4 s-row.5">
               <div class="flex items-center justify-between gap-4">
                 <div class="flex min-w-0 flex-col gap-0.75">
                   <span class="text-[12.5px] font-semibold text-foreground">Agent status hooks</span>
@@ -1007,7 +1108,7 @@
           <div class="flex items-center gap-2.5">
             <div class="flex items-baseline gap-2.5">
               <h2 class="text-[15px] font-semibold text-foreground">Skills</h2>
-              <span class="text-xs text-muted-foreground">Agent skills installed in <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">~/.claude/skills</code></span>
+              <span class="text-xs text-muted-foreground">Agent skills installed in <code class="rounded bg-hover px-1 font-mono text-[10px] text-secondary-foreground">~/.claude/skills</code> and Claude plugins</span>
             </div>
             <Button variant="outline" size="sm" class="ml-auto" :disabled="skillsLoading" @click="loadSkills">
               <PhArrowClockwise :size="11" :class="{ 'animate-spin': skillsLoading }" /> Refresh
@@ -1016,13 +1117,14 @@
           <div class="h-px bg-border" />
 
           <div class="flex flex-col gap-2">
-            <div v-for="s in skills" :key="s.dir" class="flex items-start gap-3 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3" :class="{ 'opacity-55': !s.enabled }">
+            <div v-for="s in skills" :key="s.name" class="flex items-start gap-3 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3" :class="{ 'opacity-55': !s.enabled }">
               <div class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] bg-hover text-secondary-foreground"><PhSparkle :size="15" /></div>
               <div class="flex-1 min-w-0">
                 <div class="text-[13px] font-semibold text-foreground">{{ s.name }}</div>
                 <div class="mt-0.75 text-[11.5px] leading-snug text-secondary-foreground">{{ s.description || "No description" }}</div>
               </div>
-              <div class="flex shrink-0 items-center gap-1">
+              <span v-if="s.source === 'plugin'" class="shrink-0 text-[11px] text-muted-foreground">plugin</span>
+              <div v-else class="flex shrink-0 items-center gap-1">
                 <button
                   class="flex h-[26px] w-[26px] items-center justify-center rounded-[var(--radius-nav)] bg-transparent text-secondary-foreground hover:bg-hover hover:text-foreground"
                   :title="s.enabled ? 'Disable skill' : 'Enable skill'"
@@ -1061,7 +1163,7 @@
           <!-- Add / edit form -->
           <div v-if="mcpFormOpen" class="mb-3.5 flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-panel px-3.5 py-3">
             <div class="flex items-center">
-              <span class="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{{ mcpEditName ? "Edit" : "New" }} MCP server</span>
+              <span class="s-label">{{ mcpEditName ? "Edit" : "New" }} MCP server</span>
               <button class="ml-auto flex rounded-[var(--radius-nav)] p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground" @click="mcpFormOpen = false"><PhX :size="12" /></button>
             </div>
             <input
@@ -1146,21 +1248,20 @@
           <span>{{ activeLabel }} settings coming soon</span>
         </section>
       </div>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch, type Component } from "vue";
 import {
-  PhGearSix, PhX, PhPlus, PhTrash, PhArrowCounterClockwise,
+  PhGearSix, PhCaretLeft, PhX, PhPlus, PhTrash, PhArrowCounterClockwise,
   PhSlidersHorizontal, PhFolderOpen, PhRobot, PhPalette, PhKeyboard,
-  PhPuzzlePiece, PhInfo, PhSparkle,
+  PhPuzzlePiece, PhInfo, PhSparkle, PhClock,
   PhFolder, PhPencilSimple, PhCheck, PhBell, PhPlay,
   PhArrowClockwise, PhDownloadSimple, PhTerminalWindow,
   PhPlugsConnected, PhToggleLeft, PhToggleRight, PhArrowSquareOut, PhImage,
   PhPaperPlaneTilt, PhPawPrint, PhPlayCircle, PhArrowUp, PhArrowDown,
-  PhDesktop, PhSun, PhMoon,
+  PhDesktop, PhSun, PhMoon, PhDeviceMobile,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -1172,25 +1273,34 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { perform } from "@/lib/controlBridge";
 import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEXT_GENERATION_POLICIES, type NtfyEvent } from "@/stores/ui";
+import { releaseChannel } from "@/lib/releaseChannel";
+import { compact } from "@/lib/viewport";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import SubagentProfilesPanel from "@/components/agents/SubagentProfilesPanel.vue";
+import ScheduledTasksPanel from "@/components/ScheduledTasksPanel.vue";
 import ProvidersPanel from "@/components/ProvidersPanel.vue";
+import Segmented from "@/components/ui/segmented/Segmented.vue";
 import { testNtfy } from "@/lib/ntfy";
 import { useUpdateStore } from "@/stores/update";
 import { THEME_FAMILIES, findTheme } from "@/themes";
+import AnimatedBackdrop from "@/components/AnimatedBackdrop.vue";
 import { soundsForKind, playSound, type SoundKind } from "@/lib/sounds";
 import { eventToShortcut } from "@/lib/shortcuts";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
+import qrcode from "qrcode-generator";
 import { effortLabel, effortsFor, ensureModels, visibleModelsFor, parseTextGenerationValue, textGenerationValue } from "@/lib/chatModels";
 import {
-  clearRemoteCredentials,
+  activeEnvironmentId,
   desktopUsesRemote,
-  loadRemoteCredentials,
+  listEnvironments,
   pairDevice,
+  pairingUrl,
+  removeEnvironment,
+  renameEnvironment,
+  setActiveEnvironment,
   setDesktopUsesRemote,
-  type RemoteCredentials,
 } from "@/runtime/remoteEndpoint";
 
 const emit = defineEmits<{ close: [] }>();
@@ -1241,12 +1351,74 @@ const update = useUpdateStore();
 
 // ── Select option lists ──
 const chatAgentOptions = computed(() =>
-  providers.chatAgents.map((a) => ({ value: a.id, label: `${a.name} (${transportLabel(a.transport as Exclude<typeof a.transport, "none">)})` })),
+  providers.chatAgents.map((a) => ({ value: a.id, label: a.providerId === "openai-compatible" ? a.name : `${a.name} (${transportLabel(a.transport as Exclude<typeof a.transport, "none">)})` })),
 );
+const AUTO_SLEEP_OPTIONS = [
+  { value: "0", label: "Off" },
+  { value: "15", label: "After 15 min" },
+  { value: "30", label: "After 30 min" },
+  { value: "60", label: "After 1 hour" },
+  { value: "120", label: "After 2 hours" },
+];
+const chatAutoSleep = computed({
+  get: () => String(ui.chatAutoSleepMinutes),
+  set: (value: string) => { ui.chatAutoSleepMinutes = Number(value); },
+});
+const WORKTREE_INACTIVE_OPTIONS = [
+  { value: "0", label: "Off" },
+  { value: "7", label: "After 7 days" },
+  { value: "14", label: "After 14 days" },
+  { value: "30", label: "After 30 days" },
+  { value: "90", label: "After 90 days" },
+];
+// One control for two prefs: "Off" keeps the chosen days for Preview.
+const worktreeInactive = computed({
+  get: () => (ui.worktreeCleanupInactive ? String(ui.worktreeCleanupInactiveDays) : "0"),
+  set: (value: string) => {
+    ui.worktreeCleanupInactive = value !== "0";
+    if (value !== "0") ui.worktreeCleanupInactiveDays = Number(value);
+  },
+});
+type WorktreeCleanupItem = { id: number; name: string; reason: string };
+const cleanupPreview = ref<WorktreeCleanupItem[] | null>(null);
+const cleanupBusy = ref(false);
+const cleanupError = ref("");
+async function onCleanupPreview() {
+  cleanupBusy.value = true;
+  cleanupError.value = "";
+  try {
+    cleanupPreview.value = await invoke<WorktreeCleanupItem[]>("worktree_cleanup_preview");
+  } catch (e) {
+    cleanupError.value = String(e);
+  } finally {
+    cleanupBusy.value = false;
+  }
+}
+// The previewed list is the confirmation; Go re-checks each one before removing.
+async function onCleanupNow() {
+  const ids = cleanupPreview.value?.map((w) => w.id) ?? [];
+  cleanupBusy.value = true;
+  cleanupError.value = "";
+  try {
+    const removed = await invoke<WorktreeCleanupItem[]>("worktree_cleanup_now", { ids });
+    const kept = ids.length - removed.length;
+    cleanupPreview.value = null;
+    if (kept > 0) cleanupError.value = `${kept} worktree${kept === 1 ? " was" : "s were"} kept: something changed since the preview.`;
+  } catch (e) {
+    cleanupError.value = String(e);
+  } finally {
+    cleanupBusy.value = false;
+  }
+}
+const CHANNEL_MARKER_OPTIONS = [
+  { value: "art", label: "Artwork" },
+  { value: "label", label: "Label only" },
+  { value: "off", label: "Off" },
+] as const;
 const SPAWN_MODE_OPTIONS = [
   { value: "terminal", label: "Terminal tab" },
   { value: "chat", label: "Chat" },
-];
+] as const;
 // Show each enabled built-in provider with a native one-shot CLI contract.
 // Codex's catalog is loaded from the locally logged-in CLI instead of guessed;
 // providers without discovery still offer their own Default selection.
@@ -1558,6 +1730,25 @@ const blurControls = [
 
 // Deep-link target set by the caller (⌘P → "Keyboard Shortcuts" etc.).
 const active = ref(ui.settingsSection || "general");
+// Phone: the section list and a section are two screens (list → detail).
+// settingsSection is sticky (never reset), so only a focused row is a real
+// deep link that skips the list.
+const phoneDetail = ref(!!ui.settingsFocusId);
+// iOS back-swipe is a history gesture and Settings is an overlay, not a route,
+// so mirror it by hand: a rightward swipe from the left edge goes section →
+// list → closed.
+let edge: { x: number; y: number } | null = null;
+function onEdgeStart(e: TouchEvent) {
+  const t = e.touches[0];
+  edge = compact.value && t.clientX < 32 ? { x: t.clientX, y: t.clientY } : null;
+}
+function onEdgeEnd(e: TouchEvent) {
+  const t = e.changedTouches[0];
+  if (!edge || t.clientX - edge.x < 70 || Math.abs(t.clientY - edge.y) > 60) return;
+  edge = null;
+  if (phoneDetail.value) phoneDetail.value = false;
+  else emit("close");
+}
 
 // One compact read-model for the Settings number. The backend replays any
 // context.usage rows not folded into its durable projection before returning.
@@ -1599,7 +1790,7 @@ async function installAgentDocs() {
 }
 
 // ── Skills manager ────────────────────────────────────────────────────────────
-type SkillInfo = { name: string; description: string; dir: string; enabled: boolean };
+type SkillInfo = { name: string; description: string; dir: string; enabled: boolean; source: string };
 const skills = ref<SkillInfo[]>([]);
 const skillsLoading = ref(false);
 
@@ -1891,6 +2082,7 @@ const navItems: NavItem[] = [
   { id: "workspaces", label: "Workspaces", icon: PhFolderOpen },
   { id: "providers", label: "Providers", icon: PhRobot },
   { id: "subagent-profiles", label: "Sub-agent profiles", icon: PhRobot },
+  { id: "scheduled", label: "Scheduled", icon: PhClock },
   { id: "scripts", label: "Scripts", icon: PhPlayCircle },
   { id: "skills", label: "Skills", icon: PhSparkle },
   { id: "mcp", label: "MCP Servers", icon: PhPlugsConnected },
@@ -1973,6 +2165,7 @@ interface RemoteDevice {
   scopes: string[];
   added_at: number;
   last_seen: number;
+  push: boolean;
 }
 const pairStatus = ref<PairStatus | null>(null);
 // null means "not loaded yet or failed"; [] means "nothing paired". Those are
@@ -1983,8 +2176,44 @@ async function refreshPairing() {
   try {
     pairStatus.value = await invoke<PairStatus>("remote_pair_status");
     remoteDevices.value = await invoke<RemoteDevice[]>("remote_devices");
+    pairingEndpoint.value = await invoke<PairingEndpoint | null>("remote_pairing_endpoint");
   } catch { /* browser-only dev */ }
 }
+
+// The address a phone should use, chosen in Go (selectEndpoint: Tailscale
+// Serve's HTTPS MagicDNS name first). null = no route a phone can reach yet.
+interface PairingEndpoint {
+  kind: string;
+  http_base: string;
+}
+const pairingEndpoint = ref<PairingEndpoint | null>(null);
+// Trailing slash: the bundle loads its assets relatively (tailscale.go).
+const pairingBaseUrl = computed(() => (pairingEndpoint.value ? `${pairingEndpoint.value.http_base}/` : ""));
+// The QR opens the PWA with the code in the fragment (never sent to the
+// server); ConnectView pairs on load and strips it from the URL.
+const pairingQr = computed(() => {
+  const code = pairStatus.value?.code;
+  if (!pairingEndpoint.value || !code || pairStatus.value?.locked) return "";
+  const qr = qrcode(0, "M");
+  qr.addData(pairingUrl(pairingEndpoint.value.http_base, code));
+  qr.make();
+  return qr.createDataURL(4, 0);
+});
+// Expiry bar for the pairing code: a 1 s clock, and one refresh when the code
+// runs out so the card flips to "expired" without a manual reload.
+const PAIR_TTL_MS = 3 * 60 * 1000; // pairCodeTTL in remoteauth.go
+const pairNow = ref(Date.now());
+const pairTimer = window.setInterval(() => {
+  pairNow.value = Date.now();
+  if (pairStatus.value?.code && pairNow.value >= pairStatus.value.expires_at) void refreshPairing();
+}, 1000);
+onUnmounted(() => clearInterval(pairTimer));
+const pairRemainingMs = computed(() => Math.max(0, (pairStatus.value?.expires_at ?? 0) - pairNow.value));
+const pairRemaining = computed(() => Math.min(1, pairRemainingMs.value / PAIR_TTL_MS));
+const pairRemainingLabel = computed(() => {
+  const s = Math.ceil(pairRemainingMs.value / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+});
 async function onRevokeDevice(id: string) {
   try {
     await invoke("revoke_remote_device", { id });
@@ -2012,17 +2241,25 @@ const remoteConnectUrl = ref("");
 const remoteConnectCode = ref("");
 const remoteConnectError = ref<string | null>(null);
 const remoteConnecting = ref(false);
-const desktopRemoteCreds = ref<RemoteCredentials | null>(loadRemoteCredentials());
+// The same catalog the phone uses (remoteEndpoint.ts): every paired machine,
+// one active. The switch below decides whether this window drives it at all.
+const remoteEnvs = ref(listEnvironments());
+const remoteActiveId = ref(activeEnvironmentId());
 const desktopUsesRemoteNow = ref(desktopUsesRemote());
+const refreshRemoteEnvs = () => {
+  remoteEnvs.value = listEnvironments();
+  remoteActiveId.value = activeEnvironmentId();
+};
 
 async function onConnectRemote() {
   remoteConnectError.value = null;
   remoteConnecting.value = true;
   try {
-    const creds = await pairDevice(remoteConnectUrl.value, remoteConnectCode.value, "Desktop", "desktop");
-    desktopRemoteCreds.value = creds;
+    await pairDevice(remoteConnectUrl.value, remoteConnectCode.value, "Desktop", "desktop"); // adds + activates
     remoteConnectUrl.value = "";
     remoteConnectCode.value = "";
+    if (desktopUsesRemoteNow.value) window.location.reload();
+    refreshRemoteEnvs();
   } catch (e) {
     remoteConnectError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -2030,11 +2267,29 @@ async function onConnectRemote() {
   }
 }
 
-function onForgetRemote() {
-  clearRemoteCredentials();
-  setDesktopUsesRemote(false);
-  desktopRemoteCreds.value = null;
-  desktopUsesRemoteNow.value = false;
+// Same "restart to apply" contract as the toggle below: only reload when the
+// change affects which backend this window is talking to right now.
+function onUseRemoteEnv(id: string) {
+  setActiveEnvironment(id);
+  if (desktopUsesRemoteNow.value) window.location.reload();
+  refreshRemoteEnvs();
+}
+
+function onRenameRemoteEnv(id: string, current: string) {
+  const name = window.prompt("Machine name", current);
+  if (name === null) return;
+  renameEnvironment(id, name);
+  refreshRemoteEnvs();
+}
+
+function onForgetRemoteEnv(id: string) {
+  const wasDriving = desktopUsesRemoteNow.value && id === remoteActiveId.value;
+  removeEnvironment(id);
+  if (wasDriving) {
+    setDesktopUsesRemote(false);
+    window.location.reload();
+  }
+  refreshRemoteEnvs();
 }
 
 // Switching which backend this window talks to needs a fresh load: core.ts's
@@ -2054,7 +2309,10 @@ interface TailscaleStatus {
   dns_name: string | null;
   serving: boolean;
   serve_url: string | null;
+  // null = older CLI with no capability map: unknown, serve is still tried.
+  https_enabled: boolean | null;
 }
+const tailscaleError = ref<string | null>(null);
 const tailscaleStatus = ref<TailscaleStatus | null>(null);
 async function refreshTailscaleStatus() {
   try {
@@ -2062,13 +2320,18 @@ async function refreshTailscaleStatus() {
   } catch { /* browser-only dev */ }
 }
 async function onToggleTailscale(checked: boolean) {
+  tailscaleError.value = null;
   try {
     tailscaleStatus.value = await invoke<TailscaleStatus>("set_tailscale_serve", {
       enabled: checked,
       port: httpStatus.value?.port ?? 8420,
     });
-  } catch { /* leaves tailscaleStatus as-is; toggle snaps back via v-model binding to server state */ }
+  } catch (e) {
+    // Toggle snaps back via the server state; say why it did.
+    tailscaleError.value = e instanceof Error ? e.message : String(e);
+  }
   await refreshTailscaleStatus();
+  await refreshPairing();
 }
 refreshTailscaleStatus();
 
@@ -2082,3 +2345,61 @@ async function copyToClipboard(text: string, label: string) {
 }
 
 </script>
+
+<style>
+/* Ghostex settings language, applied here once instead of on every page:
+   big page title, no rule under it, grouped cards whose consecutive rows join
+   into one card split by hairlines. Unlayered on purpose — it has to beat the
+   Tailwind utilities the pages already carry (see App.vue's @layer note). */
+.settings-root { --radius-card: 14px; }
+.phone-settings-back { display: none; }
+/* Phone: section list and section are separate screens, full width. Rows wrap
+   so a control drops under its label instead of crushing it. */
+.settings-phone { padding-top: env(safe-area-inset-top, 0px); }
+.settings-phone > nav { width: 100%; padding-top: 52px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); border-right: 0; }
+.settings-phone > nav > button { height: 46px; font-size: 15px; }
+.settings-phone .settings-content { display: none; padding: 8px 16px calc(32px + env(safe-area-inset-bottom, 0px)); }
+.settings-phone.phone-detail > nav { display: none; }
+.settings-phone.phone-detail .settings-content { display: block; }
+.settings-phone .phone-settings-back { display: flex; align-items: center; gap: 2px; height: 40px; margin: 0 0 8px -6px; color: var(--accent); font-size: 15px; }
+.settings-phone .settings-content .s-row { flex-wrap: wrap; padding: 12px 14px; }
+.settings-phone .settings-content .s-row > .flex-1 { flex-basis: 12rem; }
+.settings-phone .settings-content h2 { font-size: 24px; }
+.settings-phone .settings-close { top: calc(env(safe-area-inset-top, 0px) + 6px); right: 8px; padding: 10px; }
+.settings-phone .settings-close svg { width: 20px; height: 20px; }
+.settings-phone > nav > button.bg-selected { background: transparent; border-color: transparent; }
+.settings-phone .settings-content .flex.items-baseline:has(> h2) { flex-direction: column; gap: 2px; }
+.settings-phone .settings-content .flex.items-center:has(> .items-baseline > h2) { flex-wrap: wrap; row-gap: 8px; }
+.settings-phone .prov-split { flex-direction: column; min-height: 0; }
+.settings-phone .prov-rail { width: 100%; }
+.settings-content > section:not(.s-wide) { max-width: 760px; margin: 0 auto; }
+.settings-content > section.s-wide { max-width: 1100px; margin: 0 auto; }
+.settings-content h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.settings-content section > .h-px.bg-border { display: none; }
+.settings-content .s-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding-left: 4px;
+}
+.settings-content .s-row {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  padding: 14px 18px;
+}
+.settings-content :has(> .s-row + .s-row) { row-gap: 0; }
+.settings-content :has(> .s-row + .s-row) > * + * { margin-top: 10px; }
+.settings-content :has(> .s-row + .s-row) > .s-label:not(:first-child) { margin-top: 22px; }
+.settings-content :has(> .s-row + .s-row) > .s-label + * { margin-top: 8px; }
+.settings-content .s-row + .s-row {
+  margin-top: 0;
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.settings-content .s-row:has(+ .s-row) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+</style>

@@ -370,11 +370,9 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 			// Dropping is now recoverable for everything numbered — the
 			// client reconnects, resumes from the seq it last saw, and the
 			// ring hands back the gap (or a resync, if the gap outran 512
-			// events). What is still lost is pty-data, which is not in the
-			// ring on purpose: that is a hole in a terminal's scrollback
-			// with no reattach to replay it, since pty-data-<id> is
-			// emit-once and the daemon's own ring is only replayed on a
-			// fresh attach. Phase dots, workspace and chat events survive.
+			// events). pty-data is not in the ring on purpose; each chunk
+			// carries its byte offset and the terminal view refills the hole
+			// from the daemon's per-pty ring with pty_since (ptyStream.ts).
 			shutdown()
 		}
 	})
@@ -453,7 +451,7 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 				sendFrame(out, done, errorFrame(f.ID, "call_failed", fmt.Sprint(e)))
 				shutdown()
 			}()
-			h.serve(f, granted, out, done)
+			h.serve(f, granted, tk.deviceID, out, done)
 		}(f)
 	}
 }
@@ -473,7 +471,7 @@ func sendFrame(out chan<- serverFrame, done <-chan struct{}, fr serverFrame) {
 // calls submitted in order may execute — and reply — in either. That is what
 // the client already assumes (transport.ts matches replies by id) and what
 // the Wails bindings did before this socket existed, one goroutine per call.
-func (h *remoteWS) serve(f clientFrame, granted map[remoteScope]bool, out chan<- serverFrame, done <-chan struct{}) {
+func (h *remoteWS) serve(f clientFrame, granted map[remoteScope]bool, deviceID string, out chan<- serverFrame, done <-chan struct{}) {
 	send := func(fr serverFrame) { sendFrame(out, done, fr) }
 
 	cmd, ok := remoteAllowed[f.Cmd]
@@ -487,6 +485,14 @@ func (h *remoteWS) serve(f clientFrame, granted map[remoteScope]bool, out chan<-
 		send(errorFrame(f.ID, "forbidden", string(cmd.Scope)+" required"))
 		return
 	}
+
+	// `_device` is the connection's paired device id ("" = the desktop),
+	// written by the server and never taken from the client — a command that
+	// names it in its Args (push_subscribe) acts as that device and no other.
+	if f.Args == nil {
+		f.Args = map[string]json.RawMessage{}
+	}
+	f.Args[deviceArg], _ = json.Marshal(deviceID)
 
 	result, err := h.call(cmd, f.Args)
 	if err != nil {

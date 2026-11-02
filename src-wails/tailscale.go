@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -96,6 +97,30 @@ type TailscaleStatus struct {
 	DNSName   *string `json:"dns_name"`
 	Serving   bool    `json:"serving"`
 	ServeURL  *string `json:"serve_url"`
+	// IP is this node's tailnet IPv4. Dev server previews link to it rather
+	// than the MagicDNS name: Vite's host check lets a bare IP through and
+	// blocks any hostname it wasn't told about.
+	IP *string `json:"ip"`
+	// HTTPSEnabled is whether the tailnet grants the `https` capability that
+	// `tailscale serve --https` needs (admin console → DNS → HTTPS
+	// Certificates). nil when the CLI reports no capability map (older CLI):
+	// unknown, so serve is still attempted.
+	HTTPSEnabled *bool `json:"https_enabled"`
+}
+
+// tailscaleHTTPSUnavailable is the readable version of what `tailscale serve`
+// would otherwise print to stderr when the tailnet has HTTPS turned off.
+const tailscaleHTTPSUnavailable = "HTTPS certificates are off for this tailnet. Turn them on in the Tailscale admin console (DNS → HTTPS Certificates), then try again."
+
+// httpsCapability reads Self.CapMap the way t3code's httpsServeEnabled does:
+// a map → whether it has "https"; anything else → unknown.
+func httpsCapability(capMap json.RawMessage) *bool {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(capMap, &m) != nil || m == nil {
+		return nil
+	}
+	_, ok := m["https"]
+	return &ok
 }
 
 func (a *App) GetTailscaleStatus() TailscaleStatus {
@@ -111,15 +136,24 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 	}
 	var ts struct {
 		Self struct {
-			DNSName string `json:"DNSName"`
+			DNSName      string          `json:"DNSName"`
+			TailscaleIPs []string        `json:"TailscaleIPs"`
+			CapMap       json.RawMessage `json:"CapMap"`
 		} `json:"Self"`
 		BackendState string `json:"BackendState"`
 	}
 	if json.Unmarshal(out, &ts) == nil {
 		status.LoggedIn = ts.BackendState == "Running"
+		status.HTTPSEnabled = httpsCapability(ts.Self.CapMap)
 		if ts.Self.DNSName != "" {
 			name := strings.TrimSuffix(ts.Self.DNSName, ".")
 			status.DNSName = &name
+		}
+		for _, ip := range ts.Self.TailscaleIPs {
+			if strings.Contains(ip, ".") {
+				status.IP = &ip
+				break
+			}
 		}
 	}
 
@@ -135,7 +169,7 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 				} `json:"Handlers"`
 			} `json:"Web"`
 		}
-		want := fmt.Sprintf("http://127.0.0.1:%d", httpServerPort)
+		want := fmt.Sprintf("http://127.0.0.1:%d", httpServerPort())
 		if json.Unmarshal(serveOut, &serveStatus) == nil {
 			for _, host := range serveStatus.Web {
 				if h, ok := host.Handlers[tailscaleServePath]; ok && h.Proxy == want {
@@ -156,6 +190,10 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 func (a *App) SetTailscaleServe(enabled bool, port int) (TailscaleStatus, error) {
 	var err error
 	if enabled {
+		// Checked first so Settings shows why instead of serve's raw stderr.
+		if st := a.GetTailscaleStatus(); st.HTTPSEnabled != nil && !*st.HTTPSEnabled {
+			return st, errors.New(tailscaleHTTPSUnavailable)
+		}
 		_, err = a.TailscaleServe(port)
 	} else {
 		err = a.TailscaleServeStop()

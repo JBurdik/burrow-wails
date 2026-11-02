@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,7 @@ func TestAssetsServeMobileShellAndManifest(t *testing.T) {
 		t.Skip("dist-mobile/app is empty — run `pnpm build:mobile`")
 	}
 	for path, want := range map[string]string{
-		"/":                     "<div id=\"mobile-app\">",
+		"/":                     "<div id=\"app\">",
 		"/manifest.webmanifest": "\"display\": \"standalone\"",
 	} {
 		rec := get(s, path)
@@ -117,5 +118,25 @@ func TestHealthAndV2SurviveTheCutover(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("/v2/pair GET: got %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestChannelizeAsset(t *testing.T) {
+	html := []byte(`<html lang="en"><meta name="apple-mobile-web-app-title" content="Burrow" /><link rel="icon" href="./icons/icon-192.png" /><title>Burrow Remote</title>`)
+	if got := channelizeAsset("mobile.html", html, ""); !bytes.Equal(got, html) {
+		t.Fatal("stable must pass through untouched")
+	}
+	got := string(channelizeAsset("mobile.html", html, "beta"))
+	for _, want := range []string{`data-channel="beta"`, `content="Burrow Beta"`, `./icons/beta/icon-192.png`, `<title>Burrow Remote Beta</title>`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("html missing %q: %s", want, got)
+		}
+	}
+	man := []byte(`{"name":"Burrow Remote","icons":[{"src":"./icons/icon-512.png"}]}`)
+	got = string(channelizeAsset("manifest.webmanifest", man, "dev"))
+	for _, want := range []string{`"Burrow Remote Dev"`, `"./?channel=dev"`, `"./icons/dev/icon-512.png"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("manifest missing %q: %s", want, got)
+		}
 	}
 }

@@ -235,6 +235,24 @@ func TestSpawnFromChatForcesChatTargetAndCarriesParent(t *testing.T) {
 	}
 }
 
+// detach lets a chat open a top-level chat/tab of its own instead of a child.
+func TestSpawnDetachedFromChatHonoursTargetAndDropsParent(t *testing.T) {
+	ui := &fakeUI{result: SpawnResult{ChatID: 9, Target: "chat"}}
+	c := newTestCore(t, Deps{UI: ui})
+
+	if _, err := c.Call(context.Background(), ScopeLocal, "spawn", Params{
+		"task":           "plan the next release",
+		"target":         "chat",
+		"detach":         true,
+		"parent_chat_id": float64(7),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ui.args["target"] != "chat" || ui.args["parent_chat_id"] != int64(0) {
+		t.Errorf("target = %v, parent_chat_id = %v, want chat, 0", ui.args["target"], ui.args["parent_chat_id"])
+	}
+}
+
 // Depth is capped at one level: recursive agent trees run away in cost and the
 // panel that shows them is a flat list.
 func TestSubAgentCannotSpawn(t *testing.T) {
@@ -648,5 +666,32 @@ func TestChatSendReachesTheUI(t *testing.T) {
 	}
 	if ui.args["chatId"] != int64(9) || ui.args["text"] != "stop and summarise" {
 		t.Fatalf("args = %v", ui.args)
+	}
+}
+
+// serve resolves the workspace from the caller's cwd by longest prefix, so an
+// agent in a nested worktree (or a subdirectory) lands in its own panel.
+func TestServeResolvesWorkspaceFromCwd(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.Exec(`INSERT INTO workspaces VALUES (3,'nested','/tmp/repo/.worktrees/x',1,'x',2)`); err != nil {
+		t.Fatal(err)
+	}
+	ui := &fakeUI{result: map[string]any{"pty_id": 42}}
+	c := newTestCore(t, Deps{UI: ui, DB: db})
+
+	cases := map[string]int64{"/tmp/repo/src": 1, "/tmp/repo/.worktrees/x/web": 3, "/tmp/repo": 1}
+	for cwd, want := range cases {
+		if _, err := c.Call(context.Background(), ScopeLocal, "serve", Params{"cmd": " pnpm dev ", "cwd": cwd}); err != nil {
+			t.Fatalf("%s: %v", cwd, err)
+		}
+		if ui.action != "serve" || ui.args["workspaceId"] != want || ui.args["cmd"] != "pnpm dev" {
+			t.Errorf("%s: action=%s args=%v, want workspace %d", cwd, ui.action, ui.args, want)
+		}
+	}
+	if _, err := c.Call(context.Background(), ScopeLocal, "serve", Params{"cmd": "pnpm dev", "cwd": "/tmp/repository"}); err == nil {
+		t.Error("a sibling path that merely shares a prefix must not match")
+	}
+	if _, err := c.Call(context.Background(), ScopeLocal, "serve", Params{"cwd": "/tmp/repo"}); err == nil {
+		t.Error("serve without cmd must fail")
 	}
 }

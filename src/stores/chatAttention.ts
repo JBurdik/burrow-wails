@@ -6,6 +6,9 @@ import { DONE_AUTOCLEAR_MS, displayStatus, shouldMarkSeen, type Phase } from "@/
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { subagentArchivable } from "@/stores/chatTree";
+import { liveChatSessionIds } from "@/lib/chatSession";
+import { appChatHost, notifyWoke } from "@/lib/chatHost";
 
 // Shared with Terminal.vue's PTY receipts: one key, one receipt per subject.
 // PTY leaves use their bare numeric id, chats `chat:<id>` — Terminal.vue's
@@ -86,6 +89,11 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     return phases.get(chatId);
   }
 
+  /** The chat's read receipt (epoch ms, 0 = never seen). */
+  function seenAtFor(chatId: number): number {
+    return seenAt.get(chatId) ?? 0;
+  }
+
   function refresh(chatId: number): void {
     const status = statusFor(chatId);
     const session = chats.sessions.find((candidate) => candidate.id === chatId);
@@ -109,18 +117,42 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     refresh(chatId);
   }
 
-  function applyPhase(chatId: number, phase: Phase): void {
+  function applyPhase(chatId: number, phase: Phase, live = false): void {
+    const before = phases.get(chatId)?.state;
     phases.set(chatId, phase);
     refresh(chatId);
+    if (live && phase.state !== before) notifyBlocked(chatId, phase);
+  }
+
+  // A chat with a session in the registry raises its own permission toast,
+  // with the request's detail (chatSession.ts). One with none — a sub-agent
+  // the Go runtime started that nobody has opened, a thread whose view is
+  // gone — would block silently, so the phase raises it here instead.
+  function notifyBlocked(chatId: number, phase: Phase): void {
+    if (phase.state !== "waiting_approval" && phase.state !== "waiting_input") return;
+    if (liveChatSessionIds().includes(chatId)) return;
+    appChatHost.notifyPermission(chatId, { requestId: "", toolName: phase.detail || "Agent", input: {}, suggestions: [] });
   }
 
   function setWatching(chatId: number, value: boolean): void {
     const count = Math.max(0, (watchers.get(chatId) ?? 0) + (value ? 1 : -1));
     if (count === 0) watchers.delete(chatId);
     else watchers.set(chatId, count);
-    if (value && windowFocused()) markSeen(chatId);
-    else refresh(chatId);
+    if (value && windowFocused()) {
+      markSeen(chatId);
+      markActive(chatId);
+    } else refresh(chatId);
   }
+
+  // Auto-sleep (src-wails/chatsleep.go) never stops a chat that is on screen
+  // while the window has focus — Go learns that from this heartbeat, which
+  // counts as activity. Well inside the shortest (15 min) sleep window.
+  function markActive(chatId: number): void {
+    void invoke("chat_mark_active", { chatId }).catch(() => {});
+  }
+  setInterval(() => {
+    for (const chatId of watchers.keys()) if (isWatching(chatId)) markActive(chatId);
+  }, 60_000);
 
   function forget(chatId: number): void {
     unlisteners.get(chatId)?.();
@@ -158,7 +190,7 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
         void listen<Phase>(`phase-chat:${id}`, (event) => {
           if (!event.payload) return;
           phaseFromEvent.add(id);
-          applyPhase(id, event.payload);
+          applyPhase(id, event.payload, true);
         }).then((unlisten) => {
           pendingListeners.delete(id);
           if (!isLive(id)) {
@@ -174,5 +206,32 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     { immediate: true },
   );
 
-  return { statusFor, phaseFor, markSeen, setWatching };
+  // A snooze ran out (src-wails/chatsnooze.go — Go already cleared the settle
+  // pin and bumped last_activity_at, so the row floats up). Dropping this
+  // device's receipt brings back the review dot on a finished turn.
+  void listen<{ chat_id: number }>("chat-snooze-woke", (event) => {
+    const chatId = event.payload?.chat_id;
+    if (!chatId || !isLive(chatId)) return;
+    seenAt.delete(chatId);
+    persistSeenAt(seenAt, chatId);
+    refresh(chatId);
+    notifyWoke(chatId);
+  });
+
+  // Sub-agent auto-archive. Lives here, not in Go, because "seen" is this
+  // device's receipt (localStorage) — Go has the phase and collected_at but
+  // no idea whether anyone looked. Only the desktop instantiates this store,
+  // so the phone never archives. Same archive() as the Sidebar's button: one
+  // archived_at column, process stopped.
+  // ponytail: 1-minute poll; a per-chat timer only matters if 30 min ± 1 does.
+  setInterval(() => {
+    const now = Date.now();
+    for (const session of chats.sessions) {
+      if (subagentArchivable(session, phases.get(session.id), seenAt.get(session.id) ?? 0, (watchers.get(session.id) ?? 0) > 0, now)) {
+        void chats.archive(session.id);
+      }
+    }
+  }, 60_000);
+
+  return { statusFor, phaseFor, seenAtFor, markSeen, setWatching };
 });

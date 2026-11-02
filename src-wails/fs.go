@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -193,24 +194,66 @@ func (a *App) GetAppVersion() string {
 	return appVersion
 }
 
-// SetSleepInhibit toggles macOS sleep prevention by starting/stopping a
-// background `caffeinate` process, replacing the Rust IOKit binding.
-var caffeinateCmd *exec.Cmd
+// Sleep prevention is one background `caffeinate`, replacing the Rust IOKit
+// binding, held for two independent reasons: an agent is busy (the frontend's
+// SetSleepInhibit) or remote access is on (setRemoteAwake), so a paired phone
+// can still reach the Mac. Remote adds -s, which macOS honours on AC power
+// only, so it never drains a battery; a closed lid still sleeps regardless.
+var (
+	sleepMu       sync.Mutex
+	sleepBusy     bool
+	sleepRemote   bool
+	caffeinateCmd *exec.Cmd
+	caffeinateArg string
+)
 
 func (a *App) SetSleepInhibit(active bool) error {
+	sleepMu.Lock()
+	defer sleepMu.Unlock()
+	sleepBusy = active
+	return applySleepInhibit()
+}
+
+func setRemoteAwake(on bool) {
+	sleepMu.Lock()
+	defer sleepMu.Unlock()
+	sleepRemote = on
+	_ = applySleepInhibit()
+}
+
+// caffeinateFlags is the flag set for the current reasons, "" = none.
+func caffeinateFlags(busy, remote bool) string {
+	switch {
+	case remote:
+		return "-is"
+	case busy:
+		return "-i"
+	}
+	return ""
+}
+
+// applySleepInhibit runs under sleepMu.
+func applySleepInhibit() error {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
-	if active {
-		if caffeinateCmd != nil {
-			return nil
-		}
-		caffeinateCmd = exec.Command("caffeinate", "-i")
-		return caffeinateCmd.Start()
+	want := caffeinateFlags(sleepBusy, sleepRemote)
+	if want == caffeinateArg {
+		return nil
 	}
 	if caffeinateCmd != nil && caffeinateCmd.Process != nil {
 		_ = caffeinateCmd.Process.Kill()
+		_ = caffeinateCmd.Wait()
 	}
-	caffeinateCmd = nil
+	caffeinateCmd, caffeinateArg = nil, ""
+	if want == "" {
+		return nil
+	}
+	// -w: caffeinate exits with us, so a crash can't leave the Mac awake.
+	cmd := exec.Command("caffeinate", want, "-w", strconv.Itoa(os.Getpid()))
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	caffeinateCmd, caffeinateArg = cmd, want
 	return nil
 }

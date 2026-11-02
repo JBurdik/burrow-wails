@@ -1,47 +1,77 @@
 <template>
   <aside
     ref="panelEl"
-    class="flex h-full shrink-0 grow-0 overflow-hidden bg-panel text-xs [backdrop-filter:var(--blur-panels,none)]"
+    class="surface-glow [--glow-base:var(--bg-panel)] flex h-full shrink-0 grow-0 overflow-hidden bg-panel text-xs [backdrop-filter:var(--blur-panels,none)]"
     :class="props.open ? 'w-[var(--right-panel-width,300px)] basis-[var(--right-panel-width,300px)] border-l border-border' : 'w-0 basis-0'"
   >
     <!-- v-show, not v-if: closing the panel must keep XTerm/BrowserPane mounted,
          or reopening respawns a fresh shell over the still-running old one. -->
-    <div v-show="props.open" class="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div class="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 hide-scrollbar">
-        <button
-          v-for="tab in openedTabs"
-          :key="tab.id"
-          class="group flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-nav)] px-2 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
-          :class="activeTab === tab.id && 'bg-accent/15 text-foreground'"
-          @click="activeTab = tab.id"
-        >
-          <span class="relative flex h-[13px] w-[13px] shrink-0 items-center justify-center">
-            <component :is="tab.icon" :size="13" class="group-hover:opacity-0" />
-            <span class="absolute inset-0 hidden items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground group-hover:flex" role="button" :aria-label="`Close ${tab.label}`" @click.stop="closeSurface(tab.id)"><PhX :size="12" /></span>
-          </span>
-          <span class="font-medium">{{ tab.label }}</span>
-        </button>
-        <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="showSurfacePicker"><PhPlus :size="15" /></button>
+    <div v-show="props.open" ref="panesEl" class="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <!-- Two stacked panes, each with its own surfaces (src/lib/rpLayout.ts).
+         Both <section>s always render (v-show) so their slot elements — the
+         Teleport targets for Browser/Terminal — never get replaced. -->
+    <template v-for="pi in PANES" :key="pi">
+    <div
+      v-if="pi === 1"
+      v-show="paneVisible(0) && paneVisible(1) && !props.forceSurface"
+      class="h-[5px] shrink-0 cursor-row-resize border-t border-border transition-colors hover:bg-accent/40"
+      title="Drag to resize"
+      @pointerdown.prevent="startSplitDrag"
+    />
+    <section
+      v-show="paneVisible(pi) && !(props.forceSurface && pi === 1)"
+      class="flex min-h-0 flex-col overflow-hidden"
+      :style="paneStyle(pi)"
+      @dragover="onSurfaceDragOver"
+      @drop="onSurfaceDrop(pi, $event)"
+    >
+      <div v-show="!props.forceSurface" class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
+        <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto hide-scrollbar">
+          <button
+            v-for="tab in paneTabs(pi)"
+            :key="tab.id"
+            class="group flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
+            :class="act(pi) === tab.id && 'bg-selected text-foreground hover:bg-selected hover:text-foreground'"
+            draggable="true"
+            :title="`${tab.label} — drag or right-click to move to the ${pi === 0 ? 'bottom' : 'top'} pane`"
+            @click="layout.panes[pi].active = tab.id"
+            @dragstart="onSurfaceDragStart(tab.id, $event)"
+            @contextmenu.prevent="moveSurface(tab.id, pi === 0 ? 1 : 0)"
+          >
+            <span class="relative flex h-[13px] w-[13px] shrink-0 items-center justify-center">
+              <component :is="tab.icon" :size="13" class="group-hover:opacity-0" />
+              <span class="absolute inset-0 hidden items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground group-hover:flex" role="button" :aria-label="`Close ${tab.label}`" @click.stop="closeSurface(tab.id)"><PhX :size="12" /></span>
+            </span>
+            <span class="font-medium">{{ tab.label }}</span>
+            <span v-if="surfaceCount(tab.id)" class="tabular-nums text-muted-foreground">{{ surfaceCount(tab.id) }}</span>
+          </button>
+          <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="layout.panes[pi].active = null"><PhPlus :size="15" /></button>
+        </div>
+        <button v-if="pi === 0 && !layout.bottomOpen" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Split the panel" aria-label="Split the panel" @click="openBottom(layout)"><PhRows :size="14" /></button>
+        <button v-if="layout.bottomOpen" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" :title="layout.maximized === pi ? 'Restore' : 'Maximize'" :aria-label="layout.maximized === pi ? 'Restore pane' : 'Maximize pane'" @click="toggleMaximize(layout, pi)"><component :is="layout.maximized === pi ? PhArrowsInSimple : PhArrowsOutSimple" :size="13" /></button>
+        <button v-if="pi === 1" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Close pane (its surfaces move to the top)" aria-label="Close pane" @click="closeBottom(layout)"><PhX :size="13" /></button>
       </div>
 
-    <div v-if="!activeTab" class="flex flex-1 items-center justify-center overflow-y-auto p-5">
-      <div class="w-full max-w-[420px]">
-        <div class="mb-5 text-center">
-          <h2 class="m-0 text-sm font-semibold text-foreground">Open a surface</h2>
-          <p class="mt-1 text-[11px] text-muted-foreground">Choose what to show in the right panel.</p>
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div v-if="!act(pi)" class="flex flex-1 items-center justify-center overflow-y-auto p-4">
+      <div class="w-full max-w-[440px]">
+        <div class="mb-4 px-0.5">
+          <h2 class="m-0 text-[15px] font-semibold text-foreground">Open a surface</h2>
+          <p class="mt-1 text-[11.5px] text-muted-foreground">Choose what to show in this panel.</p>
         </div>
-        <div class="grid gap-2" :class="cq.is.md ? 'grid-cols-2' : 'grid-cols-1'">
+        <div class="grid gap-2" :class="cq.width.value >= 280 ? 'grid-cols-2' : 'grid-cols-1'">
           <button
             v-for="tab in tabs"
             :key="tab.id"
-            class="group flex min-h-[66px] items-start gap-3 rounded-[var(--radius-card)] border border-border/70 bg-panel px-3 py-3 text-left transition-colors hover:border-accent/45 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            @click="openSurface(tab.id)"
+            class="group relative flex min-h-[84px] flex-col gap-1 rounded-xl border border-border/70 bg-transparent p-3 text-left transition-colors hover:border-border hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            @click="pickSurface(pi, tab.id)"
           >
-            <component :is="tab.icon" :size="16" class="mt-0.5 shrink-0 text-secondary-foreground group-hover:text-accent" />
-            <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span class="text-xs font-semibold text-foreground">{{ tab.label }}</span>
-              <span class="text-[10.5px] leading-relaxed text-muted-foreground">{{ tab.description }}</span>
+            <span class="flex items-start gap-2 pr-5">
+              <component :is="tab.icon" :size="15" class="mt-px shrink-0 text-secondary-foreground group-hover:text-foreground" />
+              <span class="min-w-0 break-words text-[12.5px] font-semibold leading-tight text-foreground">{{ tab.label }}</span>
             </span>
+            <span class="text-[11px] leading-snug text-muted-foreground">{{ tab.description }}</span>
+            <span v-if="surfaceCount(tab.id)" class="absolute right-3 top-3 text-[10.5px] tabular-nums text-muted-foreground/70">{{ surfaceCount(tab.id) }}</span>
           </button>
         </div>
       </div>
@@ -49,20 +79,20 @@
 
     <!-- Extension surfaces are host-rendered, never third-party Vue code. -->
     <WorkspacePulseSurface
-      v-if="activeExtensionSurface?.kind === 'workspace-pulse'"
+      v-if="extSurface(pi)?.kind === 'workspace-pulse'"
       :cwd="props.cwd"
-      :title="activeExtensionSurface.title"
-      :description="activeExtensionSurface.description"
+      :title="extSurface(pi)!.title"
+      :description="extSurface(pi)!.description"
     />
 
     <ExtensionNativeSurface
-      v-else-if="activeExtensionSurface?.kind === 'native' && activeExtensionSurface.ui"
-      :title="activeExtensionSurface.title"
-      :node="activeExtensionSurface.ui"
+      v-else-if="extSurface(pi)?.kind === 'native' && extSurface(pi)!.ui"
+      :title="extSurface(pi)!.title"
+      :node="extSurface(pi)!.ui!"
     />
 
     <!-- Explorer tab -->
-    <div v-else-if="activeTab === 'explorer'" class="flex flex-1 flex-col overflow-y-auto">
+    <div v-else-if="act(pi) === 'explorer'" class="flex flex-1 flex-col overflow-y-auto">
       <div v-if="!props.cwd" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
       <div v-else-if="fileTree.rootError" class="p-4 text-center text-[11px] text-destructive">{{ fileTree.rootError }}</div>
       <div v-else class="flex-1 py-1">
@@ -71,12 +101,12 @@
     </div>
 
     <!-- Git tab -->
-    <div v-else-if="activeTab === 'git'" class="flex flex-1 flex-col overflow-hidden overflow-y-auto">
+    <div v-else-if="act(pi) === 'git'" class="flex flex-1 flex-col overflow-hidden overflow-y-auto">
       <!-- Header -->
-      <div class="flex shrink-0 items-center justify-between border-b border-border px-2 py-[5px]">
-        <div class="flex items-center gap-1 font-mono text-[11px] text-secondary-foreground">
-          <PhGitBranch :size="12" class="shrink-0 text-warning" />
-          <span>{{ git.branch || "—" }}</span>
+      <div class="flex shrink-0 items-center justify-between gap-2 border-b border-border px-2.5 py-1.5">
+        <div class="flex min-w-0 items-center gap-1 text-[11.5px] text-secondary-foreground">
+          <PhGitBranch :size="12" class="shrink-0 text-muted-foreground" />
+          <span class="truncate" :title="git.branch">{{ git.branch || "—" }}</span>
           <span v-if="git.ahead > 0" class="text-[10px] text-success" title="Commits ahead of upstream">↑{{ git.ahead }}</span>
           <span v-if="git.behind > 0" class="text-[10px] text-warning" title="Commits behind upstream">↓{{ git.behind }}</span>
         </div>
@@ -166,11 +196,12 @@
           <div
             v-for="f in git.staged"
             :key="'s:' + f.path"
-            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
+            class="group mx-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-[3px] transition-colors hover:bg-hover"
             @click="git.showDiff(f.path, true)"
           >
-            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-success">{{ f.x }}</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span class="w-3 shrink-0 text-center font-mono text-[10.5px] font-semibold" :class="letterClass(f.x)">{{ f.x }}</span>
+            <span class="flex-1 truncate text-[11.5px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span v-if="fileStats['s:' + f.path]" class="shrink-0 font-mono text-[10.5px] tabular-nums group-hover:hidden"><span class="text-success">+{{ fileStats['s:' + f.path][0] }}</span> <span class="text-destructive">−{{ fileStats['s:' + f.path][1] }}</span></span>
             <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-foreground group-hover:block" @click.stop="git.unstageFile(f.path)" title="Unstage">−</button>
           </div>
 
@@ -199,48 +230,70 @@
           <div
             v-for="f in git.unstaged"
             :key="'u:' + f.path"
-            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
+            class="group mx-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-[3px] transition-colors hover:bg-hover"
             @click="git.showDiff(f.path, false)"
           >
-            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-warning">{{ f.y }}</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span class="w-3 shrink-0 text-center font-mono text-[10.5px] font-semibold" :class="letterClass(f.y)">{{ f.y }}</span>
+            <span class="flex-1 truncate text-[11.5px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span v-if="fileStats['u:' + f.path]" class="shrink-0 font-mono text-[10.5px] tabular-nums group-hover:hidden"><span class="text-success">+{{ fileStats['u:' + f.path][0] }}</span> <span class="text-destructive">−{{ fileStats['u:' + f.path][1] }}</span></span>
             <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-success group-hover:block" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
           </div>
           <div
             v-for="f in git.untracked"
             :key="'t:' + f.path"
-            class="group mx-[3px] flex cursor-pointer items-center gap-[5px] rounded px-2 py-0.5 transition-colors hover:bg-hover"
+            class="group mx-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-[3px] transition-colors hover:bg-hover"
           >
-            <span class="w-[11px] shrink-0 text-center font-mono text-[10px] font-bold text-muted-foreground">?</span>
-            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span class="w-3 shrink-0 text-center font-mono text-[10.5px] font-semibold text-success">A</span>
+            <span class="flex-1 truncate text-[11.5px] text-secondary-foreground transition-colors group-hover:text-foreground" :title="f.path">{{ f.path }}</span>
+            <span class="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">new</span>
             <button class="hidden shrink-0 border-0 bg-transparent p-0 px-0.5 text-[13px] leading-none text-muted-foreground hover:text-success group-hover:block" @click.stop="git.stageFile(f.path)" title="Stage">+</button>
           </div>
 
           <!-- Commit -->
-          <div class="mt-1.5 flex shrink-0 flex-col gap-[5px] border-t border-border p-2">
-            <textarea
-              v-model="git.commitMsg"
-              class="commit-input box-border w-full min-h-[52px] max-h-[100px] resize-none rounded-[var(--radius-chip)] border border-border bg-[color-mix(in_srgb,var(--border)_15%,var(--bg-panel))] px-2 py-1.5 font-sans text-[11px] leading-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:opacity-60 focus:border-accent/60"
-              placeholder="Commit message…"
-              rows="3"
-              @keydown.ctrl.enter="git.commit()"
-              @keydown.meta.enter="git.commit()"
-            />
-            <div class="flex gap-[5px]">
+          <div class="m-2 mt-2.5 flex shrink-0 flex-col gap-2">
+            <div class="rounded-xl border border-border/70 bg-[color-mix(in_srgb,var(--text-primary)_3%,transparent)] focus-within:border-border">
+              <div class="flex items-center gap-1.5 px-2.5 pt-2 text-[10.5px] text-muted-foreground">
+                <PhSparkle :size="11" />
+                <span class="flex-1">{{ git.generating ? "Generating…" : "Commit message" }}</span>
+                <button
+                  class="rounded-md px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
+                  :disabled="git.generating || !git.hasWorkingTreeChanges"
+                  title="Generate a commit message from the changes"
+                  @click="git.generateCommitMessage()"
+                >{{ git.commitMsg.trim() ? "Regenerate" : "Generate" }}</button>
+              </div>
+              <textarea
+                v-model="git.commitMsg"
+                class="commit-input box-border block w-full min-h-[52px] max-h-[120px] resize-none border-0 bg-transparent px-2.5 pb-2 pt-1 font-sans text-[11.5px] leading-normal text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
+                placeholder="Leave empty to generate on commit"
+                rows="3"
+                @keydown.ctrl.enter="git.commit()"
+                @keydown.meta.enter="git.commit()"
+              />
+            </div>
+            <div class="flex gap-1.5">
               <button
-                class="flex flex-1 items-center justify-center gap-[5px] rounded-[var(--radius-chip)] border-0 bg-accent px-2.5 py-[5px] font-sans text-[11px] font-semibold text-white transition-colors hover:bg-accent-dim disabled:cursor-default disabled:opacity-35"
-                :disabled="!git.commitMsg.trim() || git.staged.length === 0"
+                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border-0 bg-[var(--text-primary)] px-2.5 py-1.5 font-sans text-[11.5px] font-semibold text-[var(--bg-solid,var(--bg-base))] transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-35"
+                :disabled="!git.hasWorkingTreeChanges || git.committing || git.generating"
                 @click="git.commit()"
               >
                 <PhGitCommit :size="12" />
                 Commit
               </button>
-              <CommitPushMenu />
+              <button
+                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-transparent px-2.5 py-1.5 font-sans text-[11.5px] font-medium text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-35"
+                :disabled="!git.hasWorkingTreeChanges || git.committing || git.generating || git.pushing"
+                title="Stage all changes, commit, then push"
+                @click="commitAndPush"
+              >
+                <PhArrowUp :size="12" />
+                Commit + push
+              </button>
             </div>
           </div>
 
           <!-- Diff (hidden when panel is too narrow — use cq.is.md = ≥320px) -->
-          <div v-if="git.diffFile && cq.is.md" class="flex max-h-[220px] shrink-0 flex-col border-t border-border">
+          <div v-if="git.diffFile && (cq.is.md || compact)" class="rp-diff flex max-h-[220px] shrink-0 flex-col border-t border-border">
             <div class="flex shrink-0 items-center gap-1.5 bg-[color-mix(in_srgb,var(--border)_20%,var(--bg-panel))] px-2 py-1">
               <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-secondary-foreground">{{ git.diffFile }}</span>
               <span class="shrink-0 text-[10px] text-muted-foreground">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
@@ -280,11 +333,50 @@
       </div>
     </div>
 
-    <PullRequestsPanel v-else-if="activeTab === 'pull-requests'" :cwd="props.cwd" />
+    <PullRequestsPanel v-else-if="act(pi) === 'pull-requests'" :cwd="props.cwd" :open-request="prOpen[wsKey]" @opened="delete prOpen[wsKey]" />
 
-    <DevServersSurface v-else-if="activeTab === 'dev-servers'" :cwd="props.cwd" />
+    <DevServersSurface v-else-if="act(pi) === 'dev-servers'" :cwd="props.cwd" />
 
-    <div v-else-if="activeTab === 'diff'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <BackgroundTasksSurface v-else-if="act(pi) === 'background'" :chat-id="activeChatId" />
+
+    <OutputsSurface v-else-if="act(pi) === 'outputs'" :chat-id="activeChatId" :cwd="props.cwd" />
+
+    <ProgressSurface v-else-if="act(pi) === 'progress'" :chat-id="activeChatId" />
+
+    <SideChatSurface v-else-if="act(pi) === 'side-chat'" :chat-id="activeChatId" :cwd="props.cwd" />
+
+    <MarkdownDocSurface v-else-if="act(pi) === 'doc' && docPath" :path="docPath" :cwd="props.cwd" />
+
+    <MarkdownDocSurface
+      v-else-if="act(pi)?.startsWith(FILE_PREFIX) && isMarkdown(act(pi)!) && !mdEditing[act(pi)!]"
+      :path="act(pi)!.slice(FILE_PREFIX.length)"
+      :cwd="props.cwd"
+      inline-edit
+      @edit="mdEditing[act(pi)!] = true"
+    />
+
+    <div v-else-if="act(pi)?.startsWith(FILE_PREFIX)" class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      <button
+        v-if="isMarkdown(act(pi)!)"
+        class="absolute right-3 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-[var(--radius-nav)] bg-panel text-muted-foreground hover:bg-hover hover:text-foreground"
+        title="Preview"
+        aria-label="Preview"
+        @click="mdEditing[act(pi)!] = false"
+      >
+        <PhEye :size="13" />
+      </button>
+      <CodeEditor
+        :key="act(pi)!"
+        :leaf-id="0"
+        :path="act(pi)!.slice(FILE_PREFIX.length)"
+        :cwd="props.cwd"
+        :range="fileRange[act(pi)!]"
+        save-on-unmount
+        @saved="git.refresh(true)"
+      />
+    </div>
+
+    <div v-else-if="act(pi) === 'diff'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <PhGitCommit :size="13" class="shrink-0 text-secondary-foreground" />
         <select
@@ -303,6 +395,7 @@
           </optgroup>
         </select>
         <button class="shrink-0 rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh diff" :disabled="scopedDiffLoading" @click="loadScopedDiff(true)"><PhArrowClockwise :size="12" :class="scopedDiffLoading && 'animate-spin'" /></button>
+        <button class="flex shrink-0 items-center gap-1 rounded-[var(--radius-nav)] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50" :title="diffScope.kind === 'branch' ? 'Have an agent review the branch changes' : 'Have an agent review the uncommitted changes'" :disabled="reviewing || !props.workspaceId" @click="startReview"><PhSparkle :size="12" />Review</button>
       </div>
       <div v-if="scopedDiffError" role="alert" class="p-3 text-[11px] text-destructive">{{ scopedDiffError }}</div>
       <div v-if="scopedDiffLoading && !scopedDiff" class="p-4 text-center text-[11px] text-muted-foreground">Loading changes…</div>
@@ -330,20 +423,14 @@
     </div>
 
     <!-- Sub-agents tab: this thread's chat sub-agents + its Task-tool invocations -->
-    <div v-else-if="activeTab === 'agents'" class="flex min-h-0 flex-1 flex-col">
-      <!-- Detail: the open child's chat. It is NOT mounted here — SubAgentHost.vue
-           keeps one AgentChat alive per child for its whole life (a CLI process
-           starts on mount, and it must run whether or not this panel is open),
-           and teleports the open one into this slot. -->
+    <div v-else-if="act(pi) === 'agents'" class="flex min-h-0 flex-1 flex-col">
+      <!-- Detail: the open child's chat. Only a view: the child's process is
+           the Go chat runtime's and runs whether or not this panel is open. -->
       <template v-if="openChildId">
         <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
           <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" aria-label="Back to sub-agents" @click="closeChildDetail"><PhCaretLeft :size="12" /></button>
           <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold text-foreground">{{ chatTitle(openChildId) }}</span>
         </div>
-        <!-- The panel owns the open child's view; SubAgentHost keeps every
-             OTHER child alive so their CLIs keep running with the panel shut.
-             Exactly one of the two renders a given chat id, so their reducers
-             cannot overwrite each other in the chat-session registry. -->
         <AgentChat
           v-if="openChildSession"
           :key="openChildSession.id"
@@ -382,6 +469,7 @@
               :style="childProvider(child)?.color ? { color: childProvider(child)!.color } : undefined"
             />
             <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-secondary-foreground">{{ child.title }}</span>
+            <span v-if="child.model" class="max-w-[90px] shrink-0 truncate rounded-[var(--radius-nav)] bg-hover px-1 text-[9.5px] text-muted-foreground" :title="child.model">{{ modelLabel(child.agentKind ?? "", child.model) }}</span>
             <!-- The status slot is separate from the close control so rows do
                  not resize. Done+read intentionally renders nothing; blue is
                  reserved for an unread completion. -->
@@ -449,46 +537,8 @@
       </template>
     </div>
 
-    <!-- Manual sub-agent spawn dialog — same shape as Sidebar.vue's rename dialog -->
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="spawnDialogOpen" @click.self="spawnDialogOpen = false">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
-        <h3 class="text-sm font-semibold text-foreground">Spawn a sub-agent</h3>
-        <SubagentProfilePicker v-model="spawnProfile" @configure="configureSpawnProfiles" />
-        <textarea
-          v-model="spawnTask"
-          class="h-24 w-full resize-none rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
-          placeholder="What should the sub-agent do?"
-          autofocus
-          @keydown.esc="spawnDialogOpen = false"
-          @keydown.enter.meta.prevent="confirmSpawnDialog"
-        />
-        <p v-if="spawnError" role="alert" class="m-0 text-xs text-destructive">{{ spawnError }}</p>
-        <div class="flex justify-end gap-2">
-          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="spawnDialogOpen = false">Cancel</button>
-          <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmSpawnDialog" :disabled="!spawnTask.trim() || spawning">{{ spawning ? 'Spawning…' : 'Spawn' }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Closing a sub-agent deletes it: an archived child would be reachable
-         from nowhere (archivedSessionsForWs filters children out), so it asks
-         rather than hiding the work somewhere the user cannot get it back. -->
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="closeChildId !== null" @click.self="closeChildId = null">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
-        <h3 class="text-sm font-semibold text-foreground">Close this sub-agent?</h3>
-        <p class="m-0 text-[12px] leading-relaxed text-muted-foreground">
-          <span class="text-secondary-foreground">{{ chatTitle(closeChildId) }}</span> and its transcript are deleted, and its
-          agent is stopped if it is still working. What it already reported stays in this thread.
-        </p>
-        <div class="flex justify-end gap-2">
-          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="closeChildId = null">Cancel</button>
-          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" @click="confirmCloseChild">Close</button>
-        </div>
-      </div>
-    </div>
-
     <!-- History tab: pre-turn worktree snapshots, newest first -->
-    <div v-else-if="activeTab === 'history'" class="flex flex-1 flex-col overflow-y-auto">
+    <div v-else-if="act(pi) === 'history'" class="flex flex-1 flex-col overflow-y-auto">
       <div class="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <span class="flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Checkpoints</span>
         <button class="rounded-[var(--radius-nav)] p-1 text-muted-foreground hover:bg-hover hover:text-foreground" title="Refresh" @click="loadCheckpoints">
@@ -527,33 +577,113 @@
         </button>
       </div>
     </div>
-    <!-- Browser: one per workspace, outside the v-if chain and kept mounted, so
-         switching to Changes (or another project) and back doesn't reload the
-         page being previewed. -->
-    <BrowserPane
-      v-for="id in browserWsIds"
-      :key="id"
-      v-show="id === wsKey && activeTab === 'browser'"
-      class="min-h-0 flex-1"
-    />
+    <div v-if="act(pi) === 'terminal' && !terminalWsIds.includes(wsKey)" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
+    <!-- Where this pane's kept-mounted Browser/Terminal get teleported to. -->
+    <div :ref="(el) => { slotEls[pi] = el as HTMLElement | null }" v-show="act(pi) === 'browser' || act(pi) === 'terminal'" class="flex min-h-0 flex-1 flex-col" />
+    </div>
+    </section>
+    </template>
 
-    <!-- Terminal: same kept-mounted treatment, one per workspace, so an app running
-         in it keeps running when you switch projects and back. -->
-    <XTerm
-      v-for="id in terminalWsIds"
-      :key="id"
-      v-show="id === wsKey && activeTab === 'terminal'"
-      :pty-id="terminalPtyByWs[id]"
-      :cwd="terminalCwdByWs[id]"
-      class="min-h-0 flex-1"
-    />
-    <div v-if="activeTab === 'terminal' && !terminalWsIds.includes(wsKey)" class="p-4 text-center text-[11px] text-muted-foreground">No workspace open</div>
+    <!-- Browser + Terminal: one per workspace, kept mounted forever, so a page
+         being previewed doesn't reload and an app running in the shell keeps
+         running across project switches. They are NOT rendered inside a pane:
+         a Teleport moves the same instance into whichever pane hosts it, so
+         moving a surface between panes never remounts XTerm (a re-attach
+         replays the ring into a re-fitted xterm and corrupts scrollback).
+         Each one follows its OWN workspace's layout, so switching projects
+         moves nothing. Parked in this hidden holder when no pane hosts it.
+         (A moved <iframe> does reload — the browser page refreshes when it
+         changes pane, nowhere else.) -->
+    <div class="hidden">
+      <Teleport v-for="id in browserWsIds" :key="'b' + id" :to="hostSlot(id, 'browser')" :disabled="!hostSlot(id, 'browser')">
+        <BrowserPane
+          v-show="id === wsKey && isShown(layout, 'browser')"
+          class="min-h-0 flex-1"
+          :request="browserNav[id]"
+          :can-ask="id === wsKey && !!activeChatId"
+          :agent-name="activeChatAgentName"
+          @ask-start="askToStartServer"
+        />
+      </Teleport>
+      <!-- The wrapper is load-bearing: XTerm has a fragment root, so v-show on
+           it is ignored and the shell stayed painted over every other surface. -->
+      <Teleport v-for="id in terminalWsIds" :key="'t' + id" :to="hostSlot(id, 'terminal')" :disabled="!hostSlot(id, 'terminal')">
+        <div v-show="id === wsKey && isShown(layout, 'terminal')" class="flex min-h-0 flex-1 flex-col bg-[var(--terminal-bg)]">
+          <!-- One sub-tab per shell: scratch shells and agent-started servers (serve). -->
+          <div class="flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-1.5 hide-scrollbar">
+            <button
+              v-for="t in termsByWs[id].terms"
+              :key="t.id"
+              class="group flex h-6 max-w-[180px] shrink-0 items-center gap-1.5 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-secondary-foreground"
+              :class="termsByWs[id].active === t.id && 'bg-accent/15 text-foreground'"
+              :title="t.cmd ? `${t.cmd} — started by an agent` : t.cwd"
+              @click="termsByWs[id].active = t.id"
+            >
+              <component :is="t.cmd ? PhPlay : PhTerminal" :size="12" class="shrink-0" />
+              <span class="truncate">{{ t.label }}</span>
+              <span
+                class="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-black/10 hover:text-foreground group-hover:opacity-100"
+                role="button"
+                :aria-label="`Close ${t.label}`"
+                @click.stop="closeTerminal(id, t.id)"
+              ><PhX :size="10" /></span>
+            </button>
+            <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-hover hover:text-foreground" title="New terminal" aria-label="New terminal" @click="addTerminal(id, { cwd: props.cwd, label: 'Terminal' })">
+              <PhPlus :size="13" />
+            </button>
+          </div>
+          <!-- The wrapper is load-bearing: XTerm has a fragment root, so v-show
+               on it is ignored and the shell stayed painted over everything. -->
+          <div v-for="t in termsByWs[id].terms" :key="t.id" v-show="termsByWs[id].active === t.id" class="relative flex min-h-0 flex-1 flex-col">
+            <XTerm :pty-id="t.id" :cwd="t.cwd" :initial-cmd="t.cmd" />
+          </div>
+        </div>
+      </Teleport>
+    </div>
+
+    <!-- Manual sub-agent spawn dialog — same shape as Sidebar.vue's rename dialog -->
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="spawnDialogOpen" @click.self="spawnDialogOpen = false">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
+        <h3 class="text-sm font-semibold text-foreground">Spawn a sub-agent</h3>
+        <SubagentProfilePicker v-model="spawnProfile" @configure="configureSpawnProfiles" />
+        <textarea
+          v-model="spawnTask"
+          class="h-24 w-full resize-none rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
+          placeholder="What should the sub-agent do?"
+          autofocus
+          @keydown.esc="spawnDialogOpen = false"
+          @keydown.enter.meta.prevent="confirmSpawnDialog"
+        />
+        <p v-if="spawnError" role="alert" class="m-0 text-xs text-destructive">{{ spawnError }}</p>
+        <div class="flex justify-end gap-2">
+          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="spawnDialogOpen = false">Cancel</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" @click="confirmSpawnDialog" :disabled="!spawnTask.trim() || spawning">{{ spawning ? 'Spawning…' : 'Spawn' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Closing a sub-agent deletes it: an archived child would be reachable
+         from nowhere (archivedSessionsForWs filters children out), so it asks
+         rather than hiding the work somewhere the user cannot get it back. -->
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="closeChildId !== null" @click.self="closeChildId = null" @keydown.esc="closeChildId = null">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
+        <h3 class="text-sm font-semibold text-foreground">Close this sub-agent?</h3>
+        <p class="m-0 text-[12px] leading-relaxed text-muted-foreground">
+          <span class="text-secondary-foreground">{{ chatTitle(closeChildId) }}</span> and its transcript are deleted, and its
+          agent is stopped if it is still working. What it already reported stays in this thread.
+        </p>
+        <div class="flex justify-end gap-2">
+          <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="closeChildId = null">Cancel</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" v-focus @click="confirmCloseChild">Close</button>
+        </div>
+      </div>
+    </div>
 
 
     <!-- Restore confirm — overwrites files on disk, so it always asks first -->
     <Teleport to="body">
-      <div class="fixed inset-0 z-[100] flex items-center justify-center bg-base/60" v-if="restoreTarget" @click.self="restoreTarget = null">
-        <div class="flex w-[430px] flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-panel p-6">
+      <div class="fixed inset-0 z-[100] flex items-center justify-center bg-base/60" v-if="restoreTarget" @click.self="restoreTarget = null" @keydown.esc="restoreTarget = null">
+        <div class="flex w-[430px] flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-[var(--bg-dropdown)] p-6">
           <h3 class="text-sm font-semibold text-foreground">Restore checkpoint “{{ restoreTarget!.label || restoreTarget!.commit.slice(0, 7) }}”?</h3>
           <p class="text-[11.5px] leading-[1.7] text-secondary-foreground">
             Every file in this workspace goes back to how it looked at
@@ -566,7 +696,7 @@
           <p v-if="restoreError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ restoreError }}</p>
           <div class="flex justify-end gap-2">
             <button class="flex items-center gap-[5px] rounded-[var(--radius-chip)] border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-muted-foreground hover:text-foreground" @click="restoreTarget = null">Cancel</button>
-            <button class="flex items-center gap-[5px] rounded-[var(--radius-chip)] border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" :disabled="restoreBusy" @click="confirmRestore">
+            <button class="flex items-center gap-[5px] rounded-[var(--radius-chip)] border-0 bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-dim disabled:cursor-default disabled:opacity-50" :disabled="restoreBusy" v-focus @click="confirmRestore">
               {{ restoreBusy ? "Restoring…" : "Restore" }}
             </button>
           </div>
@@ -578,15 +708,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, inject, onMounted, onBeforeUnmount } from "vue";
+import { ref, reactive, computed, watch, inject, provide, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhClockCounterClockwise, PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
-  PhSpinner, PhWarningCircle,
+  PhSpinner, PhWarningCircle, PhRows, PhSparkle, PhArrowsInSimple, PhPlay, PhFileText, PhFileCode, PhEye,
+  PhListChecks,
 } from "@phosphor-icons/vue";
+import {
+  closeBottom, closeSurface as closeLayoutSurface, emptyLayout, isShown, loadLayouts, moveTo, openBottom, openIn,
+  paneOf, saveLayouts, toggleMaximize, clampSplit, type PaneIndex, type RpLayout,
+} from "@/lib/rpLayout";
 import { useGitStore, type GitCommit } from "@/stores/git";
 import { useFileTreeStore } from "@/stores/fileTree";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
@@ -594,10 +729,12 @@ import { useSubagentsStore } from "@/stores/subagents";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { useProvidersStore } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
+import { modelLabel } from "@/lib/chatModels";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { activeChatIdFor, childrenOf } from "@/stores/chatTree";
-import { subAgentViewTarget, nextSubAgentView } from "@/lib/subAgentView";
+import { nextSubAgentView } from "@/lib/subAgentView";
 import { perform } from "@/lib/controlBridge";
+import { chatSession } from "@/lib/chatSession";
 import { getAgentAttentionState, type AgentAttentionState } from "@/lib/terminalStatus";
 import FileTreeNode from "./FileTreeNode.vue";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
@@ -605,24 +742,35 @@ import { useContainerQuery } from "@/composables/useContainerQuery";
 import AutoRefreshButton from "./AutoRefreshButton.vue";
 import PullRequestsPanel from "./PullRequestsPanel.vue";
 import DevServersSurface from "./DevServersSurface.vue";
+import BackgroundTasksSurface from "./BackgroundTasksSurface.vue";
+import { PhTerminalWindow } from "@phosphor-icons/vue";
+import OutputsSurface from "./OutputsSurface.vue";
+import ProgressSurface from "./ProgressSurface.vue";
+import SideChatSurface from "./SideChatSurface.vue";
+import { PhChatsCircle } from "@phosphor-icons/vue";
+import MarkdownDocSurface from "./MarkdownDocSurface.vue";
+import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
 import DiffView from "./DiffView.vue";
+import { compact } from "@/lib/viewport";
 import { useUIStore } from "@/stores/ui";
 import SubagentProfilePicker from "@/components/agents/SubagentProfilePicker.vue";
 import DiffTab from "./DiffTab.vue";
 import { fetchReviewDiff, type ReviewDiffScope, type TurnReview } from "@/lib/reviewDiff";
 import { useTurnReviewRefresh } from "@/composables/useTurnReviewRefresh";
-import CommitPushMenu from "./CommitPushMenu.vue";
 import BrowserPane from "./BrowserPane.vue";
 import XTerm from "./XTerm.vue";
 import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
 import ExtensionNativeSurface from "./ExtensionNativeSurface.vue";
 import { initPtyCounter, nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
+import { addTerm, findServed, installPanelTerminals, onlyShell, removeTerm, type RpTerm, type RpTerms, type ServeRequest, type ServeResult } from "@/lib/rpTerminals";
 
-const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean }>(), { isGit: true, open: true });
+const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean; forceSurface?: string }>(), { isGit: true, open: true });
 const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: [] }>();
 const git = useGitStore();
+// Confirm dialogs focus their action: Enter confirms, Esc cancels.
+const vFocus = { mounted: (el: HTMLElement) => el.focus() };
 const fileTree = useFileTreeStore();
 const chats = useClaudeChatsStore();
 const subagents = useSubagentsStore();
@@ -636,9 +784,32 @@ const { surfaces: extensionSurfaces, load: loadExtensionSurfaces } = useExtensio
 // projects shows the other project's open tabs.
 const NO_WS = -1;
 type DiffScope = ReviewDiffScope;
-interface WsUiState { openedTabIds: string[]; activeTab: string | null; diffScope: DiffScope; openChildId: number | null }
+interface WsUiState { diffScope: DiffScope; openChildId: number | null; docPath: string; files: string[] }
 const wsUiStates = reactive<Record<number, WsUiState>>({});
 const wsKey = computed(() => props.workspaceId ?? NO_WS);
+// The open document survives a restart, like the layout that shows it.
+const DOC_KEY = "burrow.rpDoc";
+function storedDoc(id: number): string {
+  try { return JSON.parse(localStorage.getItem(DOC_KEY) ?? "{}")[id] ?? ""; } catch { return ""; }
+}
+const docPath = computed(() => wsUi(wsKey.value).docPath);
+// Files opened from the explorer: one surface per file, id `file:<path>`.
+const FILE_PREFIX = "file:";
+const FILES_KEY = "burrow.rpFiles";
+const isMarkdown = (id: string) => /\.(md|markdown|mdx)$/i.test(id);
+/** Markdown file tabs open rendered; true = switched to the editor. Per surface id, not persisted. */
+const mdEditing = reactive<Record<string, boolean>>({});
+/** Line range a chat link asked for, per file surface id; a fresh object per click re-triggers the editor's reveal. */
+const fileRange = reactive<Record<string, { from: number; to: number } | undefined>>({});
+function storedFiles(id: number): string[] {
+  try { const v = JSON.parse(localStorage.getItem(FILES_KEY) ?? "{}")[id]; return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function saveFiles(id: number) {
+  try {
+    const all = JSON.parse(localStorage.getItem(FILES_KEY) ?? "{}");
+    localStorage.setItem(FILES_KEY, JSON.stringify({ ...all, [id]: wsUi(id).files }));
+  } catch { /* per-device convenience only */ }
+}
 
 // Task-tool invocations, narrowed to the thread that's actually open (was:
 // every chat in the workspace) — both this and the Sub-agents list below
@@ -651,8 +822,7 @@ function chatTitle(chatId: number): string {
   return chats.sessions.find((s) => s.id === chatId)?.title ?? `Chat ${chatId}`;
 }
 // A Task-tool row names a chat this thread spawned through Claude's own Task
-// tool. Those are real chats but not chat-tree children, so they have no
-// SubAgentHost instance to teleport — opening one as a tab is still right.
+// tool. Those are real chats but not chat-tree children, so they open as a tab.
 function openSubagentChat(chatId: number) {
   if (!props.workspaceId) return;
   // A chat-tree child belongs to the panel; only a Task-tool chat becomes a tab.
@@ -692,14 +862,9 @@ const openChildId = computed<number | null>({
   set: (v) => { wsUi(wsKey.value).openChildId = v; },
 });
 
-// subAgentViewTarget tells SubAgentHost which child NOT to render, because
-// this panel is rendering it. `flush: "post"` so the host gives the child up
-// only once this panel's own AgentChat has been patched in — handing over in
-// the same tick would unmount the host's instance before the panel's exists.
 watch(openChildId, (current, previous) => {
   if (previous !== null) chatAttention.setWatching(previous, false);
   if (current !== null) chatAttention.setWatching(current, true);
-  subAgentViewTarget.value = current;
 }, { flush: "post" });
 /** The open child's session — the panel renders its AgentChat itself. */
 const openChildSession = computed(() =>
@@ -759,6 +924,23 @@ const spawnProfile = ref("worker");
 const spawning = ref(false);
 const spawnError = ref("");
 function configureSpawnProfiles() { spawnDialogOpen.value = false; useUIStore().openSettings("subagent-profiles"); }
+// One-click review: Go creates the chat (a sub-agent of the active thread, else
+// a top-level chat) and starts it; Codex runs its native review/start.
+const reviewing = ref(false);
+async function startReview() {
+  if (!props.workspaceId || reviewing.value) return;
+  reviewing.value = true;
+  scopedDiffError.value = "";
+  try {
+    const res = await invoke<{ chat_id: number }>("review_changes", {
+      workspaceId: props.workspaceId, parentChatId: activeChatId.value ?? 0,
+      base: diffScope.value.kind === "branch" ? "auto" : "",
+    });
+    if (activeChatId.value) openChild(res.chat_id);
+    else terminalTabs.openChat(props.workspaceId, res.chat_id);
+  } catch (error) { scopedDiffError.value = String(error); }
+  finally { reviewing.value = false; }
+}
 function openSpawnDialog() {
   if (!activeChatId.value || !props.workspaceId) return;
   spawnTask.value = "";
@@ -783,31 +965,129 @@ async function confirmSpawnDialog() {
  *  is the CHILD's workspace, not necessarily whichever one is currently active. */
 function openSubagent(chatId: number, workspaceId: number) {
   const state = wsUi(workspaceId);
-  if (!state.openedTabIds.includes("agents")) state.openedTabIds.push("agents");
-  state.activeTab = "agents";
-  // No subAgentViewTarget here: the watcher above carries it across once the
-  // surface and the slot have actually rendered. Setting it now would be the
-  // same too-early Teleport the watcher exists to avoid — and this path is
-  // the worse one, because it may also be switching the surface to "agents".
+  openIn(layoutFor(workspaceId), "agents");
   state.openChildId = chatId;
 }
-function wsUi(id: number): WsUiState {
-  return (wsUiStates[id] ??= { openedTabIds: [], activeTab: null, diffScope: { kind: "workspace" }, openChildId: null });
+/** A chat link to a dev server: show it in that workspace's Browser surface.
+ *  The caller shows the panel. */
+const browserNav = reactive<Record<number, { url: string; n: number }>>({});
+function openBrowserUrl(url: string, workspaceId: number) {
+  openIn(layoutFor(workspaceId), "browser");
+  ensureBrowserPane(workspaceId);
+  browserNav[workspaceId] = { url, n: (browserNav[workspaceId]?.n ?? 0) + 1 };
 }
-const activeTab = computed<string | null>({
-  get: () => wsUi(wsKey.value).activeTab,
-  set: (v) => { wsUi(wsKey.value).activeTab = v; },
+/** A chat link to one of this repo's pull requests: the PRs surface, on its detail. */
+const prOpen = reactive<Record<number, { number: number; url: string; n: number }>>({});
+function openPullRequest(number: number, url: string, workspaceId: number) {
+  openIn(layoutFor(workspaceId), "pull-requests");
+  prOpen[workspaceId] = { number, url, n: (prOpen[workspaceId]?.n ?? 0) + 1 };
+}
+const activeChatAgentName = computed(() => {
+  const chat = activeChatId.value ? chats.sessions.find((s) => s.id === activeChatId.value) : undefined;
+  return chat ? providers.resolve(chat.agentKind)?.name : undefined;
 });
-const openedTabIds = computed<string[]>({
-  get: () => wsUi(wsKey.value).openedTabIds,
-  set: (v) => { wsUi(wsKey.value).openedTabIds = v; },
-});
+/** The Browser surface's "Nothing listening" button: ask the chat on screen,
+ *  through the same doors as its composer — queued behind a running turn, else sent. */
+function askToStartServer(port: number) {
+  const id = activeChatId.value;
+  if (!id) return;
+  const text = `Start the dev server on port ${port} so I can preview it at http://localhost:${port}.`;
+  const session = chatSession(id);
+  if (session.busy.value) void session.enqueueMessage(text);
+  else void session.send({ text });
+}
+/** Open a surface (Background, Progress, Outputs, …) in a workspace's panel
+ *  from outside it — a transcript row that names one. The caller shows the panel. */
+function openPanelSurface(id: string, workspaceId: number) {
+  openIn(layoutFor(workspaceId), id);
+}
+function wsUi(id: number): WsUiState {
+  return (wsUiStates[id] ??= { diffScope: { kind: "workspace" }, openChildId: null, docPath: storedDoc(id), files: storedFiles(id) });
+}
+// ── Layout: two stacked panes per workspace, persisted per device ─────────────
+const PANES = [0, 1] as const;
+const layouts = reactive<Record<number, RpLayout>>(loadLayouts());
+function layoutFor(id: number): RpLayout {
+  return (layouts[id] ??= emptyLayout());
+}
+const layout = computed(() => layoutFor(wsKey.value));
+// Debounced: a split drag mutates `split` on every pointermove.
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+watch(layouts, () => {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const { [NO_WS]: _welcome, ...persisted } = layouts;
+    saveLayouts(persisted);
+  }, 300);
+}, { deep: true });
+/** Is `id` on screen in some pane of the current workspace? */
+const shown = (id: string) => isShown(layout.value, id);
+/** The pane's active surface — null (picker) if it names one that doesn't exist (yet). */
+function act(pi: PaneIndex): string | null {
+  const id = layout.value.panes[pi].active;
+  return id && tabs.value.some((t) => t.id === id) ? id : null;
+}
+function paneVisible(pi: PaneIndex): boolean {
+  const l = layout.value;
+  return pi === 0 ? l.maximized !== 1 : l.bottomOpen && l.maximized !== 0;
+}
+function paneStyle(pi: PaneIndex) {
+  if (props.forceSurface || !(paneVisible(0) && paneVisible(1))) return { flex: "1 1 0" };
+  const share = pi === 0 ? layout.value.split : 1 - layout.value.split;
+  return { flex: `${share} 1 0` };
+}
+const slotEls = reactive<Record<number, HTMLElement | null>>({});
+/** The pane slot a workspace's Browser/Terminal is teleported into, per that
+ *  workspace's own layout (so a project switch moves nothing). */
+function hostSlot(wsId: number, id: "browser" | "terminal"): HTMLElement | null {
+  const pane = paneOf(layoutFor(wsId), id);
+  return pane === -1 ? null : slotEls[pane] ?? null;
+}
+const panesEl = ref<HTMLElement | null>(null);
+function startSplitDrag(e: PointerEvent) {
+  const handle = e.currentTarget as HTMLElement;
+  // Pointer capture keeps the drag alive over the browser's iframe.
+  handle.setPointerCapture(e.pointerId);
+  const onMove = (ev: PointerEvent) => {
+    const rect = panesEl.value?.getBoundingClientRect();
+    if (rect?.height) layout.value.split = clampSplit((ev.clientY - rect.top) / rect.height);
+  };
+  const onUp = () => {
+    handle.removeEventListener("pointermove", onMove);
+    handle.removeEventListener("pointerup", onUp);
+  };
+  handle.addEventListener("pointermove", onMove);
+  handle.addEventListener("pointerup", onUp);
+}
+const SURFACE_MIME = "application/x-burrow-rp-surface";
+function onSurfaceDragStart(id: string, e: DragEvent) {
+  e.dataTransfer?.setData(SURFACE_MIME, id);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
+function onSurfaceDragOver(e: DragEvent) {
+  if (e.dataTransfer?.types.includes(SURFACE_MIME)) e.preventDefault();
+}
+function onSurfaceDrop(pi: PaneIndex, e: DragEvent) {
+  const id = e.dataTransfer?.getData(SURFACE_MIME);
+  if (!id) return;
+  e.preventDefault();
+  moveSurface(id, pi);
+}
+function moveSurface(id: string, to: PaneIndex) {
+  moveTo(layout.value, id, to);
+}
+/** From a pane's picker: an already-open surface moves here rather than
+ *  just being focused in the other pane, which the picker would hide. */
+function pickSurface(pi: PaneIndex, id: string) {
+  const at = paneOf(layout.value, id);
+  if (at !== -1 && at !== pi) moveSurface(id, pi);
+  else void openSurface(id, pi);
+}
 
-watch(activeTab, (cur, prev) => { if (prev === "agents" && cur !== "agents") closeChildDetail(); });
+watch(() => shown("agents"), (on) => { if (!on) closeChildDetail(); });
 watch(() => props.open, (open) => { if (!open) closeChildDetail(); });
 watch(wsKey, (_cur, old) => {
   if (old !== undefined && old !== NO_WS && wsUiStates[old]?.openChildId != null) wsUiStates[old].openChildId = null;
-  subAgentViewTarget.value = null;
 });
 
 const diffScope = computed<DiffScope>({
@@ -859,60 +1139,168 @@ async function openCommitDiff(c: GitCommit) {
 // look incomplete for newly opened folders.
 const tabs = computed(() => {
   const all = [
-    { id: "git", label: "Changes", icon: PhGitBranch, description: "Inspect, stage and commit workspace changes." },
-    { id: "pull-requests", label: "Pull requests", icon: PhGitBranch, description: "Check pull requests for this workspace." },
+    { id: "git", label: "Git", icon: PhGitBranch, description: "Inspect, stage and commit workspace changes." },
+    { id: "pull-requests", label: "PRs", icon: PhGitBranch, description: "Check pull requests for this workspace." },
     { id: "explorer", label: "Files", icon: PhFiles, description: "Browse the current workspace." },
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review the complete workspace diff." },
     { id: "history", label: "Checkpoints", icon: PhClockCounterClockwise, description: "Review and restore agent-turn snapshots." },
-    { id: "agents", label: "Sub-agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
+    { id: "agents", label: "Agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
+    { id: "progress", label: "Progress", icon: PhListChecks, description: "The active chat's live todo list." },
+    { id: "side-chat", label: "Side chat", icon: PhChatsCircle, description: "Ask a quick question about the active chat without disturbing it." },
     { id: "browser", label: "Browser", icon: PhGlobe, description: "Preview a dev server without leaving Burrow." },
     { id: "dev-servers", label: "Dev servers", icon: PhPlugsConnected, description: "See and kill dev servers running in this workspace." },
+    { id: "background", label: "Background", icon: PhTerminalWindow, description: "Background shell tasks the active chat launched." },
+    { id: "outputs", label: "Outputs", icon: PhFileCode, description: "Files this chat created or edited." },
     { id: "terminal", label: "Terminal", icon: PhTerminal, description: "Run shell commands next to your changes." },
   ];
+  // Only exists once something opened a document (chat link, ⌘-click…).
+  if (docPath.value) all.push({ id: "doc", label: docPath.value.split("/").pop()!, icon: PhFileText, description: "Rendered markdown document." });
+  for (const p of wsUi(wsKey.value).files) all.push({ id: FILE_PREFIX + p, label: p.split("/").pop()!, icon: PhFileCode, description: p });
   return [...all, ...extensionSurfaces.value];
 });
 
-const activeExtensionSurface = computed(() =>
-  extensionSurfaces.value.find((surface) => surface.tabId === activeTab.value),
-);
+// Push the repo the commit landed in (git.commit returns it), not whichever
+// one is selected once an auto-generated message has come back.
+async function commitAndPush() {
+  const dir = await git.commit().catch(() => undefined); // the store already toasted the failure
+  if (dir) await git.push(dir);
+}
 
-// One scratch terminal (and its cwd) per workspace, kept mounted forever once
-// opened — like the main Terminal.vue leaves — so an app running in it keeps
-// running when you switch to another project and back.
-const terminalPtyByWs = reactive<Record<number, number>>({});
-const terminalCwdByWs = reactive<Record<number, string>>({});
-const terminalWsIds = computed(() => Object.keys(terminalPtyByWs).map(Number));
-const terminalPtyStarts = new Map<number, Promise<void>>();
+function letterClass(code: string): string {
+  if (code === "A" || code === "?") return "text-success";
+  if (code === "D") return "text-destructive";
+  return "text-warning";
+}
+
+// Per-file +/− for the Git surface rows, keyed "s:<path>" (staged) / "u:<path>".
+// ponytail: two numstat calls per status refresh; untracked files show "new".
+const fileStats = ref<Record<string, [number, number]>>({});
+async function loadFileStats() {
+  const dir = props.cwd;
+  if (!dir || git.error || !shown("git")) return;
+  const run = (args: string[]) =>
+    invoke<{ stdout: string; code: number }>("run_git", { cwd: dir, args }).then((o) => (o.code === 0 ? o.stdout : "")).catch(() => "");
+  const [staged, unstaged] = await Promise.all([run(["diff", "--cached", "--numstat"]), run(["diff", "--numstat"])]);
+  const out: Record<string, [number, number]> = {};
+  for (const [prefix, text] of [["s:", staged], ["u:", unstaged]] as const) {
+    for (const line of text.split("\n")) {
+      const [ins, del, path] = line.split("\t");
+      if (path && ins !== "-") out[prefix + path] = [Number(ins) || 0, Number(del) || 0];
+    }
+  }
+  if (dir === props.cwd) fileStats.value = out;
+}
+watch(() => [git.staged, git.unstaged, props.cwd, shown("git")], () => void loadFileStats(), { immediate: true });
+
+/** The muted number beside a surface's label ("Changes 5"); 0 renders nothing. */
+function surfaceCount(id: string): number {
+  if (id === "git") return git.error ? 0 : git.staged.length + git.unstaged.length + git.untracked.length;
+  if (id === "agents") return childList.value.length;
+  return 0;
+}
+
+function extSurface(pi: PaneIndex) {
+  const id = act(pi);
+  return id ? extensionSurfaces.value.find((surface) => surface.tabId === id) : undefined;
+}
+
+// Terminals per workspace — scratch shells plus the processes agents start via
+// `serve` — kept mounted forever once opened, like the main Terminal.vue
+// leaves, so an app running in one keeps running across project switches.
+const termsByWs = reactive<Record<number, RpTerms>>({});
+const terminalWsIds = computed(() => Object.keys(termsByWs).map(Number).filter((id) => termsByWs[id].terms.length));
+const scratchStarts = new Map<number, Promise<void>>();
 
 // The main terminal restores its saved/daemon sessions asynchronously. The RP
 // can be opened before that restore has advanced the shared id counter, which
 // used to let it reuse a live id. The daemon treats that as an attach, so the
 // fresh RP xterm had no shell output and looked like a permanently blank pane.
-async function ensureTerminalPty(id: number) {
-  if (id in terminalPtyByWs) return;
-  const running = terminalPtyStarts.get(id);
-  if (running) return running;
-
-  const start = (async () => {
-    const sessions = await invoke<Array<{ pty_id: number }>>("list_pty_sessions").catch(() => []);
-    // Keep the retired Mission Control id range from pushing ordinary tabs up.
-    const maxLiveId = sessions.reduce(
-      (max, session) => session.pty_id < 1_000_000 ? Math.max(max, session.pty_id) : max,
-      0,
-    );
-    initPtyCounter(maxLiveId);
-    // Another open may have completed while the daemon request was in flight.
-    if (id in terminalPtyByWs) return;
-    terminalPtyByWs[id] = nextPtyId();
-    terminalCwdByWs[id] = props.cwd;
-  })();
-  terminalPtyStarts.set(id, start);
-  try {
-    await start;
-  } finally {
-    terminalPtyStarts.delete(id);
-  }
+// An XTerm only mounts once its id is in termsByWs, i.e. after this check.
+async function addTerminal(ws: number, t: Omit<RpTerm, "id">): Promise<number> {
+  const sessions = await invoke<Array<{ pty_id: number }>>("list_pty_sessions").catch(() => []);
+  // Keep the retired Mission Control id range from pushing ordinary tabs up.
+  initPtyCounter(sessions.reduce((max, s) => (s.pty_id < 1_000_000 ? Math.max(max, s.pty_id) : max), 0));
+  const id = nextPtyId();
+  addTerm((termsByWs[ws] ??= { terms: [], active: null }), { id, ...t });
+  return id;
 }
+
+/** A shown Terminal surface with nothing in it gets one scratch shell. */
+async function ensureScratch(ws: number) {
+  if (termsByWs[ws]?.terms.length) return;
+  const running = scratchStarts.get(ws);
+  if (running) return running;
+  const start = addTerminal(ws, { cwd: props.cwd, label: "Terminal" }).then(() => {});
+  scratchStarts.set(ws, start);
+  try { await start; } finally { scratchStarts.delete(ws); }
+}
+
+function killPty(ptyId: number) {
+  void invoke("kill_pty", { id: ptyId }).catch((error) => console.warn("[right-panel] could not close terminal", error));
+}
+
+// Closing a terminal means close it, not merely hide a live shell forever.
+// Remove it from the render list first so its XTerm listener is disposed; the
+// daemon kill then makes the PTY unrecoverably gone.
+function closeTerminal(ws: number, ptyId: number) {
+  const s = termsByWs[ws];
+  if (!s) return;
+  removeTerm(s, ptyId);
+  killPty(ptyId);
+  if (!s.terms.length) closeLayoutSurface(layoutFor(ws), "terminal");
+}
+
+// Two serve calls for the same thing in flight (parallel tool calls, MCP and
+// CLI at once) must share one terminal: dedup alone runs before the await.
+const serving = new Map<string, Promise<ServeResult>>();
+function serve(req: ServeRequest): Promise<ServeResult> {
+  const key = `${req.workspaceId}\0${req.cwd}\0${req.cmd.trim().replace(/\s+/g, " ")}`;
+  let p = serving.get(key);
+  if (!p) {
+    p = serveOnce(req).finally(() => serving.delete(key));
+    serving.set(key, p);
+  }
+  return p;
+}
+
+async function serveOnce(req: ServeRequest): Promise<ServeResult> {
+  const ws = req.workspaceId;
+  // Bottom pane unless the user already put the Terminal surface elsewhere.
+  const reveal = () => {
+    openIn(layoutFor(ws), "terminal", 1);
+    if (ws === wsKey.value && !props.open) emit("openPanel");
+  };
+  const hit = findServed(termsByWs[ws], req.cmd, req.cwd);
+  const fg = hit ? await invoke<string>("get_pty_foreground", { id: hit.id }).catch(() => "?") : "";
+  // "" = the daemon no longer has that PTY (its shell exited): drop the dead
+  // tab and start fresh rather than typing into nothing.
+  if (hit && fg === "") removeTerm(termsByWs[ws], hit.id);
+  else if (hit) {
+    termsByWs[ws].active = hit.id;
+    reveal();
+    // Same server asked for again: if it was stopped (only the shell is left
+    // in the foreground), start it again in the same terminal. Ctrl+U first
+    // clears whatever the user left half-typed on the prompt.
+    const restart = onlyShell(fg);
+    if (restart) await invoke("write_pty", { id: hit.id, data: Array.from(new TextEncoder().encode("\x15" + req.cmd + "\n")) });
+    return { pty_id: hit.id, workspace_id: ws, reused: true, restarted: restart };
+  }
+  const id = await addTerminal(ws, { cwd: req.cwd, label: req.name || req.cmd, cmd: req.cmd });
+  reveal();
+  return { pty_id: id, workspace_id: ws, reused: false };
+}
+
+function closePanelTerminal(ptyId: number): boolean {
+  for (const [ws, s] of Object.entries(termsByWs)) {
+    if (s.terms.some((t) => t.id === ptyId)) {
+      closeTerminal(Number(ws), ptyId);
+      return true;
+    }
+  }
+  return false;
+}
+onMounted(() => installPanelTerminals({ serve, close: closePanelTerminal }));
+onBeforeUnmount(() => installPanelTerminals(null));
 
 // Same idea for the browser preview: one BrowserPane per workspace, kept
 // mounted so its URL/history survives switching projects.
@@ -921,48 +1309,75 @@ function ensureBrowserPane(id: number) {
   if (!browserWsIds.value.includes(id)) browserWsIds.value.push(id);
 }
 
-const openedTabs = computed(() => openedTabIds.value
-  .map((id) => tabs.value.find((tab) => tab.id === id))
-  .filter((tab): tab is NonNullable<typeof tab> => Boolean(tab)));
+function paneTabs(pi: PaneIndex) {
+  return layout.value.panes[pi].tabs
+    .map((id) => tabs.value.find((tab) => tab.id === id))
+    .filter((tab): tab is NonNullable<typeof tab> => Boolean(tab));
+}
 
-async function openSurface(id: string) {
+async function openSurface(id: string, pane: PaneIndex = 0) {
   if (!props.open) emit("openPanel");
-  // Allocate the PTY before activating the surface. Otherwise Vue can mount
-  // XTerm with an id that has not been checked against the daemon yet.
-  if (id === "terminal") await ensureTerminalPty(wsKey.value);
-  if (!openedTabIds.value.includes(id)) openedTabIds.value.push(id);
-  activeTab.value = id;
+  if (id === "terminal") await ensureScratch(wsKey.value);
+  openIn(layout.value, id, pane);
   if (id === "browser") ensureBrowserPane(wsKey.value);
 }
+// A layout restored from storage (or a tab clicked after a restart) can show
+// Browser/Terminal before anything allocated them — allocate on first show.
+watch([wsKey, () => shown("terminal")], ([ws, on]) => { if (on) void ensureScratch(ws); }, { immediate: true });
+watch([wsKey, () => shown("browser")], ([ws, on]) => { if (on) ensureBrowserPane(ws); }, { immediate: true });
 
 function closeSurface(id: string) {
   if (id === "terminal") {
-    const workspaceId = wsKey.value;
-    const ptyId = terminalPtyByWs[workspaceId];
-    // Closing the RP Terminal means close it, not merely hide a live scratch
-    // shell forever. Remove it from the render list first so its XTerm listener
-    // is disposed; the daemon kill then makes the PTY unrecoverably gone.
-    if (ptyId !== undefined) {
-      delete terminalPtyByWs[workspaceId];
-      delete terminalCwdByWs[workspaceId];
-      void invoke("kill_pty", { id: ptyId }).catch((error) =>
-        console.warn("[right-panel] could not close terminal", error),
-      );
-    }
+    const s = termsByWs[wsKey.value];
+    s?.terms.forEach((t) => killPty(t.id));
+    delete termsByWs[wsKey.value];
   }
-  openedTabIds.value = openedTabIds.value.filter((openedId) => openedId !== id);
-  if (activeTab.value === id) activeTab.value = openedTabs.value[0]?.id ?? null;
-}
-
-function showSurfacePicker() {
-  activeTab.value = null;
+  if (id.startsWith(FILE_PREFIX)) {
+    const state = wsUi(wsKey.value);
+    state.files = state.files.filter((p) => FILE_PREFIX + p !== id);
+    saveFiles(wsKey.value);
+  }
+  closeLayoutSurface(layout.value, id);
 }
 
 function openGitTab() {
   openSurface("git");
 }
 
-defineExpose({ openGitTab, openSubagent });
+/** Render a markdown file (plan, spec, README) in the panel. */
+function openDoc(path: string) {
+  wsUi(wsKey.value).docPath = path;
+  try {
+    const all = JSON.parse(localStorage.getItem(DOC_KEY) ?? "{}");
+    localStorage.setItem(DOC_KEY, JSON.stringify({ ...all, [wsKey.value]: path }));
+  } catch { /* per-device convenience only */ }
+  void openSurface("doc");
+}
+
+/** Open a file from the explorer as its own panel tab. A new one joins the
+ *  pane that already holds file tabs, so dragging them to the bottom pane
+ *  keeps the tree visible on top. */
+function openFile(path: string, range?: { from: number; to: number }) {
+  const state = wsUi(wsKey.value);
+  if (range) {
+    fileRange[FILE_PREFIX + path] = { ...range };
+    // A line range needs the editor, not the rendered preview.
+    if (isMarkdown(path)) mdEditing[FILE_PREFIX + path] = true;
+  }
+  const pane = state.files.map((p) => paneOf(layout.value, FILE_PREFIX + p)).find((i) => i !== -1) ?? 0;
+  if (!state.files.includes(path)) {
+    state.files.push(path);
+    saveFiles(wsKey.value);
+  }
+  void openSurface(FILE_PREFIX + path, pane);
+}
+provide("openFileInPanel", openFile);
+
+defineExpose({ openGitTab, openSubagent, openPanelSurface, openBrowserUrl, openPullRequest, openDoc, openFile });
+
+// Phone shell (/project/:surface): one surface, full screen, no tab strip or
+// second pane — the phone's own header and back arrow replace them.
+watch([() => props.forceSurface, wsKey], ([id]) => { if (id) pickSurface(0, id); }, { immediate: true });
 
 // --- Checkpoints (History tab) ---
 interface Checkpoint {
@@ -1021,11 +1436,11 @@ async function confirmRestore() {
   }
 }
 
-watch([activeTab, () => props.cwd], () => { if (activeTab.value === "history") loadCheckpoints(); });
-watch([activeTab, () => props.cwd, diffScopeKey, reviewSubject], () => {
+watch([() => shown("history"), () => props.cwd], () => { if (shown("history")) loadCheckpoints(); });
+watch([() => shown("diff"), () => props.cwd, diffScopeKey, reviewSubject], () => {
   // Invalidate in-flight requests even when the diff surface is closed.
   diffRequest++;
-  if (activeTab.value !== "diff") return;
+  if (!shown("diff")) return;
   void loadScopedDiff();
 }, { immediate: true });
 
@@ -1101,19 +1516,19 @@ watch(() => props.cwd, (p) => {
 function autoRefresh() {
   if (props.cwd && !document.hidden) {
     git.refresh(true);
-    if (activeTab.value === "diff" && !scopedDiffLoading.value) void loadScopedDiff(true);
+    if (shown("diff") && !scopedDiffLoading.value) void loadScopedDiff(true);
   }
 }
 
 const ar = useAutoRefresh(autoRefresh, "burrow-git-refresh-interval");
 
 useTurnReviewRefresh(reviewSubject, () => {
-  if (activeTab.value === "diff" && diffScope.value.kind === "last-turn") void loadScopedDiff(true);
+  if (shown("diff") && diffScope.value.kind === "last-turn") void loadScopedDiff(true);
 });
 function onFocus() { autoRefresh(); }
 function onVisible() { if (!document.hidden) autoRefresh(); }
 
-watch(activeTab, (t) => { if (t === "git") autoRefresh(); });
+watch(() => shown("git"), (on) => { if (on) autoRefresh(); });
 
 onMounted(() => {
   loadExtensionSurfaces();

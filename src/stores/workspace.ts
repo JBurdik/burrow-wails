@@ -177,6 +177,11 @@ export const useWorkspaceStore = defineStore("workspace", () => {
 
   async function removeWorktree(id: number, force = false) {
     await invoke("remove_worktree", { id, force });
+    forgetWorktree(id);
+  }
+
+  // Also called for worktrees Go removed itself (worktree cleanup sweep).
+  function forgetWorktree(id: number) {
     workspaces.value = workspaces.value.filter((w) => w.id !== id);
     opened.value = opened.value.filter((w) => w.id !== id);
     if (active.value?.id === id) active.value = null;
@@ -244,7 +249,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
 
   return {
     workspaces, active, opened, icons, topLevel, worktreesByParent,
-    load, create, remove, rename, open, ensureOpen, close, closeWorkspace, setIcon, clearIcon,
+    load, create, remove, forgetWorktree, rename, open, ensureOpen, close, closeWorkspace, setIcon, clearIcon,
     createWorktree, renameWorktreeBranch, removeWorktree, reorderTopLevel,
   };
 });

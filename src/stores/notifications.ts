@@ -11,12 +11,19 @@ export interface Toast {
   workspaceId?: number;
   tabId?: number;
   source?: NotifSource;
+  // An inline button (e.g. Undo). Toast-only: history never keeps it.
+  action?: { label: string; run: () => void };
+  // Auto-dismiss after this many ms (default 5000).
+  duration?: number;
 }
 
 export interface HistoryItem extends Toast {
   ts: number;
   // absent or 1 = a single occurrence; bumped by insertHistory's dedup.
   count?: number;
+  // Per-row read state (Ghostex model). Absent = fall back to the readTs cutoff,
+  // which is all a row persisted before this field existed has.
+  read?: boolean;
 }
 
 let nextId = 0;
@@ -63,7 +70,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
   }
 
   function isUnread(item: HistoryItem): boolean {
-    return item.ts > readTs.value;
+    return item.read === undefined ? item.ts > readTs.value : !item.read;
   }
 
   const unreadCount = computed(() => history.value.filter(isUnread).length);
@@ -76,8 +83,8 @@ export const useNotificationsStore = defineStore("notifications", () => {
     return null;
   });
 
-  function arm(id: number) {
-    timers.set(id, setTimeout(() => dismiss(id), 5000));
+  function arm(id: number, ms = 5000) {
+    timers.set(id, setTimeout(() => dismiss(id), ms));
   }
 
   // Repeated identical notifications (same type/title/source within 60s)
@@ -96,8 +103,9 @@ export const useNotificationsStore = defineStore("notifications", () => {
     ) {
       newest.count = (newest.count ?? 1) + 1;
       newest.ts = now;
+      newest.read = false;
     } else {
-      history.value.unshift({ ...entry, source, ts: now });
+      history.value.unshift({ ...entry, action: undefined, source, ts: now });
       if (history.value.length > 50) history.value.pop();
     }
     persist();
@@ -107,7 +115,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     const id = ++nextId;
     toasts.value.push({ ...toast, id });
     if (toast.type === "pending") return id;
-    arm(id);
+    arm(id, toast.duration);
     insertHistory({ ...toast, id });
     return id;
   }
@@ -122,6 +130,12 @@ export const useNotificationsStore = defineStore("notifications", () => {
     arm(id);
   }
 
+  function runAction(id: number) {
+    const t = toasts.value.find((t) => t.id === id);
+    dismiss(id);
+    t?.action?.run();
+  }
+
   function dismiss(id: number) {
     const timer = timers.get(id);
     if (timer) { clearTimeout(timer); timers.delete(id); }
@@ -133,6 +147,19 @@ export const useNotificationsStore = defineStore("notifications", () => {
   // already-read. No sequence counter for this — millisecond races are fine.
   function markAllRead() {
     readTs.value = Date.now();
+    for (const item of history.value) item.read = true;
+    persist();
+  }
+
+  function setRead(id: number, read: boolean) {
+    const item = history.value.find((i) => i.id === id);
+    if (!item) return;
+    item.read = read;
+    persist();
+  }
+
+  function remove(id: number) {
+    history.value = history.value.filter((i) => i.id !== id);
     persist();
   }
 
@@ -152,7 +179,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
     push,
     resolve,
     dismiss,
+    runAction,
     markAllRead,
+    setRead,
+    remove,
     clearHistory,
   };
 });

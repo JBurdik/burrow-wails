@@ -36,6 +36,7 @@ const (
 )
 
 type acpSession struct {
+	native    *openAISession // built-in agent, sharing ACP events and approvals
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	proto     acpProtocol
@@ -138,6 +139,8 @@ func (a *App) acpReg() *acpRegistry {
 
 // AcpStartOpts mirrors ClaudeChat.vue's acpStartPayload().
 type AcpStartOpts struct {
+	OpenAI          *OpenAIConfig     `json:"openai,omitempty"`
+	SystemPrompt    string            `json:"systemPrompt,omitempty"`
 	ID              string            `json:"id"`
 	Cwd             string            `json:"cwd"`
 	Command         string            `json:"command"` // adapter program: npx, gemini, codex, opencode…
@@ -148,6 +151,9 @@ type AcpStartOpts struct {
 	EnvFile         string            `json:"envFile"`
 	ResumeSessionID string            `json:"resumeSessionId"`
 	EmitHistory     bool              `json:"emitHistory"`
+	// Fork ResumeSessionID instead of resuming it (a side chat, chatside.go).
+	// Codex only; never on the wire.
+	Fork bool `json:"-"`
 }
 
 // jsonRPCReader reads newline JSON from the child and can wait for one response id.
@@ -338,6 +344,11 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 	// successful response merely means the turn is now running and its terminal
 	// notification remains authoritative.
 	if method == "" {
+		// A reply to a request Go issued itself (codexCall, chatbgtasks.go) —
+		// never a turn's: its error must not end the turn.
+		if deliverCodexReply(sess, msg) {
+			return
+		}
 		// The turn/start ack is the first place the running turn's id appears.
 		if tid, _ := mapOf(mapOf(msg["result"])["turn"])["id"].(string); tid != "" {
 			sess.mu.Lock()
@@ -358,6 +369,20 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 			emit(map[string]any{"method": "session/update", "params": map[string]any{"update": update}})
 		}
 	case "item/completed":
+		// Review mode (`review/start`) delivers the finished review as one
+		// exitedReviewMode item; render it as the assistant's message.
+		if item := mapOf(params["item"]); item["type"] == "exitedReviewMode" {
+			if text, _ := item["review"].(string); strings.TrimSpace(text) != "" {
+				messageID, _ := item["id"].(string)
+				emit(map[string]any{"method": "session/update", "params": map[string]any{
+					"update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"messageId":     firstNonEmpty(messageID, "codex-review"),
+						"content":       map[string]any{"text": text},
+					}}})
+			}
+			return
+		}
 		if toolCallID, _, _, ok := codexToolCall(mapOf(params["item"])); ok {
 			item := mapOf(params["item"])
 			failed := codexToolFailed(item)
@@ -396,6 +421,12 @@ func (a *App) pumpCodexLine(chatID string, msg map[string]any, sess *acpSession)
 				"sessionUpdate": "agent_thought_chunk",
 				"content":       map[string]any{"text": delta},
 			}}})
+	case "turn/plan/updated":
+		// Codex's checklist (update_plan). Re-emitted as ACP's standard `plan`
+		// update so it is persisted in chat_stream and NormalizeAcpLine turns
+		// it into the same TodoWrite row a Claude plan is — the Progress
+		// surface reads that, live and after a restart.
+		emit(map[string]any{"method": "session/update", "params": map[string]any{"update": codexPlanUpdate(params)}})
 	case "turn/started":
 		if tid, _ := mapOf(params["turn"])["id"].(string); tid != "" {
 			sess.mu.Lock()
@@ -506,9 +537,40 @@ func codexToolCall(item map[string]any) (id, title string, input map[string]any,
 	}
 }
 
+// codexPlanUpdate maps a `turn/plan/updated` notification ({explanation,
+// plan: [{step, status: pending|inProgress|completed}]}) onto ACP's `plan`
+// session update ({entries: [{content, status, priority}]}).
+func codexPlanUpdate(params map[string]any) map[string]any {
+	entries := []any{}
+	steps, _ := params["plan"].([]any)
+	for _, raw := range steps {
+		step := mapOf(raw)
+		content, _ := step["step"].(string)
+		if content == "" {
+			continue
+		}
+		status, _ := step["status"].(string)
+		switch status {
+		case "inProgress":
+			status = "in_progress"
+		case "completed":
+		default:
+			status = "pending"
+		}
+		entries = append(entries, map[string]any{"content": content, "status": status, "priority": "medium"})
+	}
+	update := map[string]any{"sessionUpdate": "plan", "entries": entries}
+	if explanation, _ := params["explanation"].(string); explanation != "" {
+		update["explanation"] = explanation
+	}
+	return update
+}
+
 func codexToolFailed(item map[string]any) bool {
 	status, _ := item["status"].(string)
-	if status == "failed" || status == "error" {
+	// "declined" = the user refused the approval: the command never ran and
+	// the patch was never applied.
+	if status == "failed" || status == "error" || status == "declined" {
 		return true
 	}
 	return mapOf(item["error"])["message"] != nil
@@ -542,9 +604,9 @@ func codexRPCErrorMessage(msg map[string]any) string {
 	return "The Codex app-server rejected the request without an error message."
 }
 
-// finishCodexTurn turns a terminal Codex notification into the prompt response
-// consumed by AgentChat.  Codex completes turns by notification, unlike ACP's
-// request/response session/prompt API.
+// finishCodexTurn turns a terminal Codex notification into the turn boundary.
+// Codex completes turns by notification, unlike ACP's request/response
+// session/prompt API.
 func (a *App) finishCodexTurn(chatID string, sess *acpSession, emit func(any), failure string) {
 	sess.mu.Lock()
 	rpc := sess.pendingTurn
@@ -566,20 +628,31 @@ func (a *App) finishCodexTurn(chatID string, sess *acpSession, emit func(any), f
 				"messageId":     "codex-runtime-error",
 				"content":       map[string]any{"text": "Codex error: " + failure},
 			}}})
-		// The error bubble above is a text delta, which is normally evidence of
-		// a running turn. Apply the terminal failure after it so the server phase
-		// cannot be regressed back to running by its own diagnostic message.
-		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookError, Detail: failure})
-	} else {
-		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.HookDone})
 	}
-	emit(map[string]any{"id": rpc, "result": map[string]any{}})
+	// The turn boundary, after the error bubble: that bubble is a text delta —
+	// evidence of a running turn — so the failure has to land after it or the
+	// phase would be regressed back to running by its own diagnostic.
+	emit(acpTurnEnd(failure))
+}
+
+// acpTurnEnd is Burrow's own turn-boundary marker on the ACP channel, read as
+// turn.completed / turn.failed (NormalizeAcpLine), which settles the phase
+// and every client's spinner. Go emits it because only Go knows which
+// response or notification ended the turn: the rpc id of a session/prompt or
+// Codex turn/start now never leaves the runtime.
+func acpTurnEnd(failure string) map[string]any {
+	m := map[string]any{"_burrow": "turn"}
+	if failure != "" {
+		m["error"] = failure
+	}
+	return m
 }
 
 // settleAcpPrompt ends the turn when the response to its own session/prompt
-// arrives. NormalizeAcpLine cannot do this — it is stateless, and any other
-// response (a mode switch, a session list) must not end the turn — but the
-// session knows which rpc id it sent.
+// arrives, by emitting the turn-boundary marker after it. NormalizeAcpLine
+// cannot do this — it is stateless, and any other response (a mode switch, a
+// session list) must not end the turn — but the session knows which rpc id it
+// sent.
 func (a *App) settleAcpPrompt(chatID string, sess *acpSession, msg map[string]any) {
 	id, _ := msg["id"].(float64)
 	sess.mu.Lock()
@@ -591,20 +664,17 @@ func (a *App) settleAcpPrompt(chatID string, sess *acpSession, msg map[string]an
 	if !match {
 		return
 	}
-	a.applyChatPhase(chatID, acpPromptOutcome(msg))
-}
-
-// acpPromptOutcome maps a session/prompt response onto the phase event that
-// settles its turn: a JSON-RPC error fails it, stopReason "cancelled" is the
-// user's interrupt, anything else completed.
-func acpPromptOutcome(msg map[string]any) agentphase.Event {
+	failure := ""
 	if e := mapField(msg["error"]); e != nil {
-		return agentphase.Event{Kind: agentphase.HookError, Detail: strField(e["message"])}
+		failure = firstNonEmpty(strField(e["message"]), "the agent rejected the prompt")
+	} else if strField(mapField(msg["result"])["stopReason"]) == "cancelled" {
+		// The user's interrupt: idle first, so the boundary below reads as a
+		// cancelled turn (applyChatPhase drops a turn end on an idle chat).
+		a.applyChatPhase(chatID, agentphase.Event{Kind: agentphase.Interrupt})
 	}
-	if strField(mapField(msg["result"])["stopReason"]) == "cancelled" {
-		return agentphase.Event{Kind: agentphase.Interrupt}
+	if line, err := json.Marshal(acpTurnEnd(failure)); err == nil {
+		a.emitChatLine(chatID, "acp-data", string(line))
 	}
-	return agentphase.Event{Kind: agentphase.HookDone}
 }
 
 func (a *App) applyChatPhase(chatID string, event agentphase.Event) {
@@ -669,8 +739,11 @@ func codexErrorMessage(params map[string]any) string {
 	return "The Codex app-server ended the turn without an error message."
 }
 
-// emitSession hands the frontend the one line its selectors populate from.
+// emitSession hands the frontend the one line its selectors populate from,
+// and records the session / thread id on the chat row: the next start resumes
+// it with no client involved (the Claude twin is observeClaudeLine).
 func (a *App) emitSession(chatID, sessionID string, modes any, configOptions any) {
+	a.recordChatSessionID(chatID, sessionID)
 	if configOptions == nil {
 		configOptions = []any{}
 	}
@@ -690,6 +763,9 @@ func (a *App) emitSession(chatID, sessionID string, modes any, configOptions any
 func (a *App) AcpStart(opts AcpStartOpts) error {
 	if _, live := a.acpReg().get(opts.ID); live {
 		return nil
+	}
+	if opts.OpenAI != nil {
+		return a.startOpenAI(opts)
 	}
 	if opts.Kind == "codex" && opts.Command == "codex" {
 		return a.CodexStart(opts.ID, opts.Cwd, opts.Env, opts.ResumeSessionID)
@@ -851,6 +927,14 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 // CodexStart runs Codex through its native app-server (not an ACP adapter), and
 // asks it for the model catalog so the model picker has real options.
 func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID string) error {
+	return a.codexStart(id, cwd, env, resumeSessionID, false)
+}
+
+// codexStart is CodexStart; fork = thread/fork resumeSessionID into a new
+// thread instead of resuming it (a side chat). A failed fork fails the start:
+// silently falling back to a fresh thread would answer the side question with
+// no context.
+func (a *App) codexStart(id, cwd string, env map[string]string, resumeSessionID string, fork bool) error {
 	if _, live := a.acpReg().get(id); live {
 		return nil
 	}
@@ -907,7 +991,27 @@ func (a *App) CodexStart(id, cwd string, env map[string]string, resumeSessionID 
 		"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
 	}
 	var resp map[string]any
-	if tid := strings.TrimSpace(resumeSessionID); tid != "" {
+	if tid := strings.TrimSpace(resumeSessionID); fork && tid != "" {
+		// thread/fork loads the parent thread from its rollout on disk, so the
+		// parent's own app-server (possibly mid-turn) is never touched.
+		if err := sess.write(map[string]any{
+			"jsonrpc": "2.0", "id": next, "method": "thread/fork",
+			"params": map[string]any{
+				"threadId": tid, "cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
+			},
+		}); err != nil {
+			return fail(err)
+		}
+		r, err := reader.await(next, nil)
+		if err != nil {
+			return fail(err)
+		}
+		next++
+		if e, bad := r["error"]; bad {
+			return fail(fmt.Errorf("codex thread/fork: %v", e))
+		}
+		resp = r
+	} else if tid := strings.TrimSpace(resumeSessionID); tid != "" {
 		if err := sess.write(map[string]any{
 			"jsonrpc": "2.0", "id": next, "method": "thread/resume",
 			"params": map[string]any{
@@ -1039,6 +1143,9 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		return 0, fmt.Errorf("acp adapter not running")
 	}
 	rpc := sess.rpcID()
+	if sess.native != nil {
+		return rpc, sess.native.send(rpc, text, images)
+	}
 
 	// Published AFTER each branch's write succeeds, not once up front —
 	// `acpReg().get(id)` above only proves the session is REGISTERED, not

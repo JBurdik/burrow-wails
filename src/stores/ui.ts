@@ -12,6 +12,7 @@ import {
   variantFor,
 } from "@/themes";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { compact, isWeb } from "@/lib/viewport";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { router, tabsOrWelcome, workspaceRoute } from "@/router";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
@@ -77,6 +78,7 @@ interface Prefs {
   maxAgents: number; // soft per-workspace sub-agent cap for the /burrow skill
   mcpMaxDepth: number; // recursion depth cap for Burrow MCP spawning tools
   debugOverlay: boolean; // show the per-terminal diagnostic overlay (XTerm.vue)
+  debugIds: boolean; // show chat / tab ids in the Sidebar hover card, for bug reports
   floatCorner: string; // which screen corner floating windows snap+stack to
   worktreesDir: string; // parent dir for git worktrees: <dir>/<repo>/<branch>
   defaultProjectDir: string; // starting folder for "Add project" dir pickers
@@ -104,12 +106,23 @@ interface Prefs {
   // ── Floating mission-control chat ──
   floatChatEnabled: boolean; // master toggle for the bottom-right control chat button
   floatChatOpen: boolean; // expanded (true) vs collapsed to a button (false)
-  sidebarVisible: boolean; // left sidebar shown (default off — opens via ⌘B / titlebar toggle)
+  // Left sidebar hidden via ⌘B / the titlebar toggle. Stored inverted on purpose:
+  // the old `sidebarVisible` key was saved as false everywhere while a v-show bug
+  // kept the sidebar on screen, so honouring it would hide everyone's sidebar.
+  sidebarHidden: boolean;
   sidebarWidth: number; // left sidebar panel width in px
   rightPanelWidth: number; // right panel width in px
   toastPosition: ToastPosition; // screen anchor for toast notifications
   defaultChatAgent: string; // default agent for new chat sessions (chatAgents store id)
+  chatAutoSleepMinutes: number; // stop an idle chat's process after N minutes, 0 = off (read by Go, src-wails/chatsleep.go)
+  chatRecaps: boolean; // one-line recap under each chat title (read by Go, src-wails/chatrecap.go)
+  worktreeFromOrigin: boolean; // fetch origin/<base> and branch new worktrees from it (read by Go, src-wails/worktreebase.go)
+  worktreeCleanupMerged: boolean; // remove worktrees whose branch merged (read by Go, src-wails/worktreecleanup.go)
+  worktreeCleanupInactive: boolean; // remove idle worktrees with no chats/tabs (same)
+  worktreeCleanupInactiveDays: number; // idle threshold for the rule above, 0 = off
+  subagentAutoDeliver: boolean; // send a finished/blocked sub-agent's result into its parent chat (read by Go, src-wails/chatsubagentnotice.go)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
+  channelMarker: "art" | "label" | "off"; // dev/beta builds: sidebar artwork + titlebar badge, badge only, or nothing
   // Background text generation (commit messages, PR content, branch names,
   // chat titles) — "kind::provider::model::effort", effort optional.
   textGenerationModel: string;
@@ -155,9 +168,10 @@ export const NTFY_EVENTS: { id: NtfyEvent; label: string }[] = [
 const BASE_FONT_SIZE = 13;
 
 // Haiku is the cheap default t3code picks too (their
-// DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER), and it publishes no reasoning
-// efforts, so the selection stays three-part.
-export const DEFAULT_TEXT_GENERATION_MODEL = "claude::claude::claude-haiku-4-5-20251001";
+// DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER). Three-part = the CLI's own
+// effort default; textgen.go retries a failed Haiku 5.5 call on Haiku 4.5.
+export const DEFAULT_TEXT_GENERATION_MODEL = "claude::claude::claude-haiku-5-5";
+const PREVIOUS_TEXT_GENERATION_MODEL = "claude::claude::claude-haiku-4-5-20251001";
 
 const DEFAULT_PREFS: Prefs = {
   uiFont: UI_FONTS[0].value,
@@ -182,6 +196,7 @@ const DEFAULT_PREFS: Prefs = {
   maxAgents: 3,
   mcpMaxDepth: 3,
   debugOverlay: false,
+  debugIds: false,
   floatCorner: "top-right",
   worktreesDir: "~/burrow-worktrees",
   defaultProjectDir: "~/",
@@ -204,12 +219,20 @@ const DEFAULT_PREFS: Prefs = {
   petsLeveling: true,
   floatChatEnabled: true,
   floatChatOpen: false,
-  sidebarVisible: false,
-  sidebarWidth: 220,
+  sidebarHidden: false,
+  sidebarWidth: 240,
   rightPanelWidth: 300,
   toastPosition: "sidebar",
   defaultChatAgent: "claude",
   spawnMode: "terminal",
+  channelMarker: "art",
+  chatAutoSleepMinutes: 60,
+  chatRecaps: true,
+  worktreeFromOrigin: true,
+  subagentAutoDeliver: true,
+  worktreeCleanupMerged: false,
+  worktreeCleanupInactive: false,
+  worktreeCleanupInactiveDays: 14,
   textGenerationModel: DEFAULT_TEXT_GENERATION_MODEL,
   textGenerationPolicy: "default",
   textGenerationRules: "",
@@ -233,6 +256,12 @@ function normalize(parsed: unknown): Prefs {
       const [kind, model] = stored.textGenerationModel.split("::");
       stored.textGenerationModel = `${kind}::${kind}::${model}`;
     }
+    // Every save persists the model, so installs still on the old default carry
+    // it explicitly. ponytail: indistinguishable from a deliberate Haiku 4.5
+    // pick, which gets bumped too; add a migration marker if anyone wants 4.5 back.
+    if (stored.textGenerationModel === PREVIOUS_TEXT_GENERATION_MODEL) {
+      stored.textGenerationModel = DEFAULT_TEXT_GENERATION_MODEL;
+    }
     // Migrate installs saved below the current default up to it.
     if (stored.uiFontSize < DEFAULT_PREFS.uiFontSize) stored.uiFontSize = DEFAULT_PREFS.uiFontSize;
     // Installs saved before themeMode existed: infer it from their theme
@@ -252,6 +281,31 @@ function normalize(parsed: unknown): Prefs {
     return stored;
   }
   return { ...DEFAULT_PREFS };
+}
+
+// uiPrefs lives in the paired Mac's config.json, shared by every client. Layout
+// is per-device: an iPad closing its right panel must not close the desktop's.
+// A browser client keeps these keys in its own localStorage and writes the
+// shared blob back with the values it found there.
+const LAYOUT_KEYS = ["uiScale", "uiFontSize", "swapPanels", "rightPanelVisible", "sidebarHidden", "sidebarWidth", "rightPanelWidth"] as const;
+const WEB_LAYOUT_KEY = "burrow.layout.web";
+
+function webLayout(): Partial<Prefs> {
+  if (!isWeb) return {};
+  try { return JSON.parse(localStorage.getItem(WEB_LAYOUT_KEY) ?? "{}"); } catch { return {}; }
+}
+
+function splitWebLayout(prefs: Prefs): Prefs {
+  if (!isWeb) return prefs;
+  const shared = getConfig<Partial<Prefs>>(CONFIG_KEY, {});
+  const local: Record<string, unknown> = {};
+  const out: Record<string, unknown> = { ...prefs };
+  for (const k of LAYOUT_KEYS) {
+    local[k] = prefs[k];
+    if (k in shared) out[k] = shared[k];
+  }
+  try { localStorage.setItem(WEB_LAYOUT_KEY, JSON.stringify(local)); } catch { /* private mode */ }
+  return out as unknown as Prefs;
 }
 
 export const useUIStore = defineStore("ui", () => {
@@ -280,6 +334,7 @@ export const useUIStore = defineStore("ui", () => {
   const maxAgents = ref(loaded.maxAgents);
   const mcpMaxDepth = ref(loaded.mcpMaxDepth);
   const debugOverlay = ref(loaded.debugOverlay);
+  const debugIds = ref(loaded.debugIds ?? false);
   const floatCorner = ref(loaded.floatCorner);
   const worktreesDir = ref(loaded.worktreesDir);
   const defaultProjectDir = ref(loaded.defaultProjectDir);
@@ -314,12 +369,20 @@ export const useUIStore = defineStore("ui", () => {
 
   // The compose screen is its own route now (`/`), so "is the composer up" is
   // not a ref anyone can forget to clear — see welcomeVisible below.
-  const sidebarVisible = ref(loaded.sidebarVisible ?? false);
-  const sidebarWidth = ref(loaded.sidebarWidth ?? 220);
+  const sidebarVisible = ref(!(loaded.sidebarHidden ?? false));
+  const sidebarWidth = ref(loaded.sidebarWidth ?? 240);
   const rightPanelWidth = ref(loaded.rightPanelWidth ?? 300);
   const toastPosition = ref<ToastPosition>(loaded.toastPosition ?? "sidebar");
   const defaultChatAgent = ref<string>(loaded.defaultChatAgent ?? 'claude');
   const spawnMode = ref<"terminal" | "chat">(loaded.spawnMode ?? "terminal");
+  const channelMarker = ref<"art" | "label" | "off">(loaded.channelMarker ?? "art");
+  const chatAutoSleepMinutes = ref<number>(loaded.chatAutoSleepMinutes ?? 60);
+  const chatRecaps = ref<boolean>(loaded.chatRecaps ?? true);
+  const worktreeFromOrigin = ref<boolean>(loaded.worktreeFromOrigin ?? true);
+  const subagentAutoDeliver = ref<boolean>(loaded.subagentAutoDeliver ?? true);
+  const worktreeCleanupMerged = ref<boolean>(loaded.worktreeCleanupMerged ?? false);
+  const worktreeCleanupInactive = ref<boolean>(loaded.worktreeCleanupInactive ?? false);
+  const worktreeCleanupInactiveDays = ref<number>(loaded.worktreeCleanupInactiveDays ?? 14);
   const textGenerationModel = ref<string>(loaded.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL);
   const textGenerationPolicy = ref<TextGenerationPolicy>(loaded.textGenerationPolicy ?? "default");
   const textGenerationRules = ref<string>(loaded.textGenerationRules ?? "");
@@ -328,7 +391,7 @@ export const useUIStore = defineStore("ui", () => {
 
   configReady.then(() => {
     migrateFromLocalStorage(PREFS_KEY, CONFIG_KEY);
-    const p = normalize(getConfig<unknown>(CONFIG_KEY, DEFAULT_PREFS));
+    const p = normalize({ ...getConfig<object>(CONFIG_KEY, DEFAULT_PREFS), ...webLayout() });
     uiFont.value = p.uiFont;
     uiFontSize.value = p.uiFontSize;
     uiScale.value = p.uiScale;
@@ -355,6 +418,7 @@ export const useUIStore = defineStore("ui", () => {
     maxAgents.value = p.maxAgents;
     mcpMaxDepth.value = p.mcpMaxDepth;
     debugOverlay.value = p.debugOverlay;
+    debugIds.value = p.debugIds ?? false;
     floatCorner.value = p.floatCorner;
     worktreesDir.value = p.worktreesDir;
     defaultProjectDir.value = p.defaultProjectDir ?? "~/";
@@ -376,12 +440,20 @@ export const useUIStore = defineStore("ui", () => {
     petsLeveling.value = p.petsLeveling;
     floatChatEnabled.value = p.floatChatEnabled;
     floatChatOpen.value = p.floatChatOpen;
-    sidebarVisible.value = p.sidebarVisible ?? false;
-    sidebarWidth.value = p.sidebarWidth ?? 220;
+    sidebarVisible.value = !(p.sidebarHidden ?? false);
+    sidebarWidth.value = p.sidebarWidth ?? 240;
     rightPanelWidth.value = p.rightPanelWidth ?? 300;
     toastPosition.value = p.toastPosition ?? "sidebar";
     defaultChatAgent.value = p.defaultChatAgent ?? "claude";
     spawnMode.value = p.spawnMode ?? "terminal";
+    channelMarker.value = p.channelMarker ?? "art";
+    chatAutoSleepMinutes.value = p.chatAutoSleepMinutes ?? 60;
+    chatRecaps.value = p.chatRecaps ?? true;
+    worktreeFromOrigin.value = p.worktreeFromOrigin ?? true;
+    subagentAutoDeliver.value = p.subagentAutoDeliver ?? true;
+    worktreeCleanupMerged.value = p.worktreeCleanupMerged ?? false;
+    worktreeCleanupInactive.value = p.worktreeCleanupInactive ?? false;
+    worktreeCleanupInactiveDays.value = p.worktreeCleanupInactiveDays ?? 14;
     textGenerationModel.value = p.textGenerationModel ?? DEFAULT_TEXT_GENERATION_MODEL;
     textGenerationPolicy.value = p.textGenerationPolicy ?? "default";
     textGenerationRules.value = p.textGenerationRules ?? "";
@@ -420,6 +492,10 @@ export const useUIStore = defineStore("ui", () => {
     for (const [k, v] of Object.entries(t.vars)) {
       root.style.setProperty(`--${k}`, v);
     }
+    // bg-base stays opaque here even when a wallpaper / animated backdrop makes
+    // --bg-base translucent below: it's the ink on filled buttons (send, badges),
+    // and a translucent ink makes an enabled button look disabled.
+    root.style.setProperty("--bg-solid", t.vars["bg-base"]);
     // Match the terminal frame/pane exactly to the xterm canvas background, so
     // there's no tonal "border" around the terminal content.
     if (t.xterm.background) root.style.setProperty("--terminal-bg", t.xterm.background);
@@ -428,6 +504,8 @@ export const useUIStore = defineStore("ui", () => {
     // Frosted-glass backdrop for translucent themes; else none. (No bundled theme
     // sets this — transparent/vibrancy themes were removed for causing lag.)
     root.style.setProperty("--backdrop-blur", t.backdropBlur ?? "none");
+    root.style.setProperty("--glow-color", t.glow?.color ?? "var(--accent)");
+    root.style.setProperty("--glow-strength", `${t.glow?.strength ?? 7}%`);
     // Per-element blur vars — each surface reads its own, independent of theme.
     const mkBlur = (n: number) => (n > 0 ? `blur(${n}px)` : "none");
     root.style.setProperty("--blur-panels", mkBlur(blurPanels.value));
@@ -446,9 +524,24 @@ export const useUIStore = defineStore("ui", () => {
       // Dropdowns float over content and need to stay legible — clamp opacity higher.
       root.style.setProperty("--bg-dropdown", hexToRgba(t.vars["bg-panel"], Math.min(1, Math.max(0.88, op))));
       if (!t.backdropBlur) root.style.setProperty("--backdrop-blur", "blur(20px)");
+    } else if (t.animated) {
+      // Animated backdrop (AnimatedBackdrop.vue): bg-base becomes an opaque floor
+      // under the canvas, surfaces go translucent over it, and the terminal pane
+      // goes clear — xterm paints its own opaque bg, so output stays readable.
+      root.style.setProperty("--anim-floor", t.vars["bg-base"]);
+      root.style.setProperty("--bg-image", `linear-gradient(${t.vars["bg-base"]}, ${t.vars["bg-base"]})`);
+      root.style.setProperty("--bg-base", hexToRgba(t.vars["bg-base"], 0.5));
+      root.style.setProperty("--bg-panel", hexToRgba(t.vars["bg-panel"], 0.6));
+      root.style.setProperty("--terminal-bg", "transparent");
+      // Frosted panels would smear the backdrop into mush — keep them clear.
+      root.style.setProperty("--blur-panels", "none");
+      root.style.setProperty("--bg-dropdown", t.vars["bg-panel"]);
     } else {
       root.style.setProperty("--bg-dropdown", "var(--bg-panel)");
     }
+    // App.vue's [data-animated] rules key off this (glow, split gaps, Settings).
+    if (t.animated && !bgImageUrl.value) root.dataset.animated = t.animated.kind;
+    else delete root.dataset.animated;
   }
 
   // Load a wallpaper from disk (base64 → blob URL) and apply it.
@@ -492,7 +585,7 @@ export const useUIStore = defineStore("ui", () => {
   function savePrefs() {
     setConfig(
       CONFIG_KEY,
-      {
+      splitWebLayout({
         uiFont: uiFont.value,
         uiFontSize: uiFontSize.value,
         uiScale: uiScale.value,
@@ -515,6 +608,7 @@ export const useUIStore = defineStore("ui", () => {
         maxAgents: maxAgents.value,
         mcpMaxDepth: mcpMaxDepth.value,
         debugOverlay: debugOverlay.value,
+        debugIds: debugIds.value,
         floatCorner: floatCorner.value,
         worktreesDir: worktreesDir.value,
         defaultProjectDir: defaultProjectDir.value,
@@ -537,16 +631,24 @@ export const useUIStore = defineStore("ui", () => {
         petsLeveling: petsLeveling.value,
         floatChatEnabled: floatChatEnabled.value,
         floatChatOpen: floatChatOpen.value,
-        sidebarVisible: sidebarVisible.value,
+        sidebarHidden: !sidebarVisible.value,
         sidebarWidth: sidebarWidth.value,
         rightPanelWidth: rightPanelWidth.value,
         toastPosition: toastPosition.value,
         defaultChatAgent: defaultChatAgent.value,
         spawnMode: spawnMode.value,
+        channelMarker: channelMarker.value,
+        chatAutoSleepMinutes: chatAutoSleepMinutes.value,
+        chatRecaps: chatRecaps.value,
+        worktreeFromOrigin: worktreeFromOrigin.value,
+        subagentAutoDeliver: subagentAutoDeliver.value,
+        worktreeCleanupMerged: worktreeCleanupMerged.value,
+        worktreeCleanupInactive: worktreeCleanupInactive.value,
+        worktreeCleanupInactiveDays: worktreeCleanupInactiveDays.value,
         textGenerationModel: textGenerationModel.value,
         textGenerationPolicy: textGenerationPolicy.value,
         textGenerationRules: textGenerationRules.value,
-      } satisfies Prefs,
+      } satisfies Prefs),
     );
   }
 
@@ -559,10 +661,10 @@ export const useUIStore = defineStore("ui", () => {
     [uiFont, uiFontSize, uiScale, terminalFont, terminalFontSize, swapPanels, theme, themeMode,
      preferredDarkTheme, preferredLightTheme,
      soundEnabled, soundDoneEnabled, soundWaitingEnabled, soundDoneId, soundDoneCustomPath,
-     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, floatCorner, worktreesDir, defaultProjectDir, mode,
+     soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -726,7 +828,12 @@ export const useUIStore = defineStore("ui", () => {
   // ChatView is simply unmounted); our terminals must stay mounted to keep the
   // PTY stream and the chat event listeners alive, so the state is explicit
   // instead of implied by the DOM.
-  const welcomeVisible = computed(() => router.currentRoute.value.name === "welcome");
+  // On a phone `/` is the thread list (src/components/phone/) and the composer
+  // is `/new`; on the desktop `/new` redirects to `/`, so both count here.
+  const welcomeVisible = computed(() => {
+    const name = router.currentRoute.value.name;
+    return name === "new" || (name === "welcome" && !compact.value);
+  });
   const viewingTabs = computed(() => {
     const name = router.currentRoute.value.name;
     return name === "workspace" || name === "tab";
@@ -750,7 +857,7 @@ export const useUIStore = defineStore("ui", () => {
   }
 
   function openWelcome() {
-    return router.push("/");
+    return router.push(compact.value ? "/new" : "/");
   }
   // Dismissing the composer is an explicit "show me the tabs", so it goes there
   // even when the workspace has nothing live yet — a tab being opened in the
@@ -768,6 +875,9 @@ export const useUIStore = defineStore("ui", () => {
   }
   function pickProjectThenWelcome() {
     spotlightApi.value?.show({ projectOnly: true });
+  }
+  function openSpotlight() {
+    spotlightApi.value?.show();
   }
 
   return {
@@ -810,6 +920,7 @@ export const useUIStore = defineStore("ui", () => {
     maxAgents,
     mcpMaxDepth,
     debugOverlay,
+    debugIds,
     floatCorner,
     worktreesDir,
     defaultProjectDir,
@@ -849,6 +960,7 @@ export const useUIStore = defineStore("ui", () => {
     closeWelcome,
     registerSpotlightApi,
     pickProjectThenWelcome,
+    openSpotlight,
     sidebarVisible,
     toggleSidebar,
     sidebarWidth,
@@ -856,6 +968,14 @@ export const useUIStore = defineStore("ui", () => {
     toastPosition,
     defaultChatAgent,
     spawnMode,
+    channelMarker,
+    chatAutoSleepMinutes,
+    chatRecaps,
+    worktreeFromOrigin,
+    subagentAutoDeliver,
+    worktreeCleanupMerged,
+    worktreeCleanupInactive,
+    worktreeCleanupInactiveDays,
     textGenerationModel,
     textGenerationPolicy,
     textGenerationRules,

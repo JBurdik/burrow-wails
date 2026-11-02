@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createTransport, MAX_CONNECT_FAILURES } from "./transport";
+import { createTransport, MAX_CONNECT_FAILURES, MAX_IN_FLIGHT } from "./transport";
 import { createBackoff } from "./reconnectBackoff";
 
 /** Minimal scriptable WebSocket stand-in. */
@@ -86,6 +86,18 @@ describe("createTransport", () => {
     expect(call.cmd).toBe("early");
     ws.deliver({ t: "reply", id: call.id, result: "ok" });
     await expect(p).resolves.toBe("ok");
+  });
+
+  it("holds calls past MAX_IN_FLIGHT until a reply frees a slot", async () => {
+    const { t } = setup();
+    await tick();
+    const ws = FakeWS.instances[0];
+    for (let i = 0; i <= MAX_IN_FLIGHT; i++) void t.invoke("burst");
+    ws.open();
+    const calls = () => ws.sent.map((f) => JSON.parse(f)).filter((f) => f.t === "call");
+    expect(calls()).toHaveLength(MAX_IN_FLIGHT);
+    ws.deliver({ t: "reply", id: calls()[0].id, result: null });
+    expect(calls()).toHaveLength(MAX_IN_FLIGHT + 1);
   });
 
   it("rejects invoke on an error reply", async () => {

@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -21,7 +22,14 @@ import (
 // The skill dir is ours, so it's written wholesale. CLAUDE.md/AGENTS.md are the
 // user's, so we only own a marker-delimited block inside them.
 //
-//go:embed agentdocs
+// Claude no longer gets the CLAUDE.md block: it was loaded by every Claude
+// session on the machine, Burrow or not. The rule now rides in only where
+// Burrow launches Claude — `--append-system-prompt` for chats, the burrow mod
+// (agentdocs/mod/burrow, via CLAUDE_CODE_PLUGIN_DIRS) for PTY tabs.
+//
+// `all:` because the mod's manifest lives in a dot-dir (.claude-plugin).
+//
+//go:embed all:agentdocs
 var agentDocs embed.FS
 
 const (
@@ -41,7 +49,7 @@ func installAgentDocs() {
 
 	for _, dir := range claude {
 		writeSkills(dir)
-		mergeDocBlock(filepath.Join(dir, "CLAUDE.md"), docAsset("agentdocs/claude-rule.md"))
+		removeDocBlock(filepath.Join(dir, "CLAUDE.md"))
 	}
 	for _, dir := range codex {
 		mergeDocBlock(filepath.Join(dir, "AGENTS.md"), docAsset("agentdocs/codex-agents.md"))
@@ -103,6 +111,67 @@ func mergeDocBlock(path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(merged), 0o644); err != nil {
 		log.Printf("agent docs: write %s: %v", path, err)
+	}
+}
+
+// removeDocBlock drops our marker block (and the blank line we put before it)
+// from a file the user also writes to. No block → the file is not touched.
+func removeDocBlock(path string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	existing := string(b)
+	start := strings.Index(existing, docBeginMarker)
+	end := strings.Index(existing, docEndMarker)
+	if start < 0 || end < start {
+		return
+	}
+	head := strings.TrimRight(existing[:start], "\n")
+	tail := strings.TrimLeft(existing[end+len(docEndMarker):], "\n")
+	out := head
+	if head != "" && tail != "" {
+		out += "\n\n"
+	}
+	out += tail
+	if head != "" && tail == "" {
+		out += "\n"
+	}
+	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+		log.Printf("agent docs: write %s: %v", path, err)
+	}
+}
+
+// claudeModDir is where installClaudeMod lays the burrow Claude Code mod.
+func claudeModDir(dataDir string) string {
+	return filepath.Join(dataDir, "claude-mod", "burrow")
+}
+
+// installClaudeMod writes the embedded mod wholesale (the dir is ours). Its
+// tests stay behind: they're for `claude plugin test` in the repo.
+func installClaudeMod(dataDir string) {
+	const root = "agentdocs/mod/burrow"
+	target := claudeModDir(dataDir)
+	_ = os.RemoveAll(target)
+	err := fs.WalkDir(agentDocs, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(path, root), "/")
+		if d.IsDir() {
+			if rel == "tests" {
+				return fs.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(target, rel), 0o755)
+		}
+		body, err := agentDocs.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(target, rel), body, 0o644)
+	})
+	if err != nil {
+		log.Printf("claude mod: install %s: %v", target, err)
 	}
 }
 

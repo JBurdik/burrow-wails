@@ -123,3 +123,33 @@ describe("transcript projection", () => {
     expect(isProjectedEvent("session.exited")).toBe(false);
   });
 });
+
+describe("message.note", () => {
+  it("renders a spawned sub-agent row that opens the child chat", () => {
+    // Go writes this row into the parent's chat_stream at spawn
+    // (chatspawn.go publishSubagentRow); the id is what makes it clickable.
+    const state: ChatProjectionState = { messages: [], nextMsgId: 0 };
+    expect(isProjectedEvent("message.note")).toBe(true);
+    expect(applyChatEvent(state, {
+      type: "message.note", role: "system-info", text: "Spawned sub-agent: fix it", subagentChatId: 42, subagentAgent: "codex",
+    })).toBe(true);
+    expect(state.messages).toEqual([
+      { id: 0, role: "system-info", text: "Spawned sub-agent: fix it", subagentChatId: 42, subagentAgent: "codex" },
+    ]);
+  });
+
+  it("keeps the Right Panel surface a note row points at", () => {
+    // chatspawn.go publishSurfaceNote: background task / plan / changed files.
+    const state: ChatProjectionState = { messages: [], nextMsgId: 0 };
+    expect(applyChatEvent(state, {
+      type: "message.note", role: "system-info", text: "Changed 3 files", surface: "outputs",
+    })).toBe(true);
+    expect(state.messages).toEqual([{ id: 0, role: "system-info", text: "Changed 3 files", surface: "outputs" }]);
+  });
+
+  it("ignores a note with no role or text", () => {
+    const state: ChatProjectionState = { messages: [], nextMsgId: 0 };
+    expect(applyChatEvent(state, { type: "message.note", text: "x" })).toBe(false);
+    expect(state.messages).toEqual([]);
+  });
+});

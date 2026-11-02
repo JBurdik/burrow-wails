@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
-	"time"
 
 	"burrow/internal/agentphase"
 	"burrow/internal/agentproc"
@@ -19,18 +19,26 @@ import (
 // App is the Wails-bound struct exposing methods to the frontend, replacing
 // the #[tauri::command] surface in src-tauri/src/lib.rs.
 type App struct {
-	ctx    context.Context
-	db     *sql.DB
-	daemon *DaemonClient
-	phases *PhaseStore
-	poller *phasePoller
+	ctx     context.Context
+	db      *sql.DB
+	daemon  *DaemonClient
+	phases  *PhaseStore
+	perms   *permRegistry
+	poller  *phasePoller
+	prompts *promptIndexer // nil until startup; refresh is nil-safe
+	push    *webPusher     // nil until startup (push.go)
 
 	streamOnce sync.Once
 	streamW    *chatStreamWriter
 
 	claudeAgents *agentproc.Manager
-	acpSessions  *acpRegistry
-	lspMgr       *lspManager
+	// claudeProcs overrides claudeAgents in tests (agents.go chatProcs).
+	claudeProcs chatProcs
+	// rpcStarter overrides the Codex / ACP start in tests (chatruntime.go startRPC).
+	rpcStarter  func(opts AcpStartOpts, transport string) error
+	chatRT      chatRuntime
+	acpSessions *acpRegistry
+	lspMgr      *lspManager
 
 	hookSrv       *HookServer
 	control       *control.Core
@@ -38,6 +46,7 @@ type App struct {
 	controlToken  string
 	burrowBinDir  string
 	sessionDir    string
+	claudeModDir  string
 	environmentID string
 
 	endpointProviders []EndpointProvider
@@ -64,7 +73,21 @@ type App struct {
 	burrowMcpMaxDepth int
 }
 
-const httpServerPort = 37892
+// httpServerPort: stable keeps 37892 (Tailscale Serve configs point at it); beta and
+// dev get their own so they can run remote access next to an installed Burrow.
+// BURROW_HTTP_PORT overrides all three.
+func httpServerPort() int {
+	if p, err := strconv.Atoi(os.Getenv("BURROW_HTTP_PORT")); err == nil && p > 0 {
+		return p
+	}
+	switch buildChannel {
+	case "beta":
+		return 37893
+	case "dev":
+		return 37894
+	}
+	return 37892
+}
 
 // httpEnabledPrefPath is the marker file that survives a restart. Its
 // presence is the whole pref — the Rust backend used the same
@@ -104,7 +127,7 @@ func (a *App) setHttpEnabled(enabled bool) error {
 		return nil
 	}
 	if enabled {
-		addr := fmt.Sprintf("127.0.0.1:%d", httpServerPort)
+		addr := fmt.Sprintf("127.0.0.1:%d", httpServerPort())
 		// Both guards fail CLOSED, before the listener exists (spec §4
 		// invariants 1 and 2). A warning in a log nobody reads is not a
 		// guard: funnel would publish this exact handler — same host, same
@@ -143,6 +166,7 @@ func (a *App) setHttpEnabled(enabled bool) error {
 		}
 	}
 	a.httpSrvRunning = enabled
+	setRemoteAwake(enabled)
 	return nil
 }
 
@@ -158,7 +182,7 @@ type HttpServerStatus struct {
 }
 
 func (a *App) GetHttpServerStatus() HttpServerStatus {
-	return HttpServerStatus{Enabled: a.httpSrvRunning, Port: httpServerPort}
+	return HttpServerStatus{Enabled: a.httpSrvRunning, Port: httpServerPort()}
 }
 
 func NewApp() *App {
@@ -167,6 +191,7 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	watchFileDrop(ctx)
 	// The bus has exactly ONE sink now: remotews.handle's per-connection
 	// subscription. It is still the single door for every event a client may
 	// care about — what went away is the second delivery path, not the door.
@@ -192,8 +217,8 @@ func (a *App) startup(ctx context.Context) {
 		a.environmentID = id
 	}
 	a.endpointProviders = []EndpointProvider{
-		newLoopbackProvider(httpServerPort),
-		newTailscaleProvider(a.GetTailscaleStatus),
+		newLoopbackProvider(httpServerPort()),
+		newTailscaleProvider(a.GetTailscaleStatus, httpServerPort()),
 	}
 	db, err := openDB(dataDir)
 	if err != nil {
@@ -201,10 +226,16 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.db = db
+	a.push = newWebPusher(filepath.Join(dataDir, "vapid.pem"))
 	if ps, err := NewPhaseStore(db); err != nil {
 		log.Printf("phase store: %v", err)
 	} else {
 		a.phases = ps
+		a.perms = newPermRegistry(ps)
+		ps.onChange = func(id string, prev, next agentphase.Phase) {
+			a.perms.phaseChanged(id, next)
+			a.pushPhaseChanged(id, prev, next)
+		}
 	}
 
 	// Chat transcripts used to live in config.json; move them into SQLite before
@@ -217,6 +248,10 @@ func (a *App) startup(ctx context.Context) {
 	// Upgrade path: the Manager is gone, so its `control = 1` rows would
 	// otherwise come back as ordinary chats.
 	a.archiveLegacyManagerChats()
+	// DeleteChat used to leave the raw stream behind; drop what it orphaned.
+	a.pruneOrphanChatStreams()
+	// Per-chat launch settings move from config.json onto the rows, once.
+	a.backfillChatLaunchSettings()
 
 	a.daemon = NewDaemonClient(ctx, filepath.Join(dataDir, "daemon.sock"))
 	if err := a.daemon.Ensure(); err != nil {
@@ -236,11 +271,16 @@ func (a *App) startup(ctx context.Context) {
 	// a config the user or another tool edited.
 	installStatusHooks(dataDir)
 	installAgentDocs()
+	installClaudeMod(dataDir)
+	a.claudeModDir = claudeModDir(dataDir)
 
 	// Warm the font list so the Settings pickers don't pay the ~1 s scan.
 	go ListFonts()
 
-	go a.reapIdleAgents()
+	go a.chatSleepLoop()
+	go a.chatScheduleLoop()
+	go a.worktreeCleanupLoop()
+	a.startPromptIndex()
 
 	a.initControl(dataDir)
 
@@ -279,7 +319,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	if a.phases != nil {
-		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground)
+		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground, a.daemon.ForegroundPid)
 	}
 }
 
@@ -345,6 +385,15 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	if a.hookSrv != nil {
 		env = append(env, fmt.Sprintf("BURROW_HOOK_PORT=%d", a.hookSrv.port))
 	}
+	// Loads the burrow mod into any Claude Code started in this tab, on top of
+	// whatever plugin dirs the user already names.
+	if a.claudeModDir != "" {
+		dirs := a.claudeModDir
+		if own := os.Getenv("CLAUDE_CODE_PLUGIN_DIRS"); own != "" {
+			dirs = own + string(os.PathListSeparator) + dirs
+		}
+		env = append(env, "CLAUDE_CODE_PLUGIN_DIRS="+dirs)
+	}
 	if err := a.daemon.CreatePty(id, cwd, cols, rows, env); err != nil {
 		return err
 	}
@@ -395,6 +444,12 @@ func (a *App) WritePty(id string, data []int) error {
 	return a.daemon.Write(id, data)
 }
 
+// PtySince returns what PTY `id` wrote from byte `since` on: how a terminal view
+// fills the hole a dropped /v2/ws left (pty-data-* is not in the shell ring).
+func (a *App) PtySince(id string, since uint64) (ptyChunk, error) {
+	return a.daemon.Since(id, since)
+}
+
 func (a *App) ResizePty(id string, cols, rows uint16) error {
 	return a.daemon.Resize(id, cols, rows)
 }
@@ -422,26 +477,6 @@ func (a *App) GetPtyForeground(id string) string {
 		return ""
 	}
 	return name
-}
-
-// Idle-agent reaping, modelled on t3code's ProviderSessionReaper (same
-// thresholds): a chat's CLI is only worth its ~150 MB while something is
-// happening on it. Killing it emits the usual exit event, so the frontend marks
-// the chat cold and the next prompt spawns a replacement with --resume.
-const (
-	agentIdleThreshold = 30 * time.Minute
-	agentSweepInterval = 5 * time.Minute
-)
-
-func (a *App) reapIdleAgents() {
-	for range time.Tick(agentSweepInterval) {
-		if a.claudeAgents == nil {
-			continue
-		}
-		if reaped := a.claudeAgents.ReapIdle(agentIdleThreshold); len(reaped) > 0 {
-			log.Printf("reaped %d idle agent session(s): %v", len(reaped), reaped)
-		}
-	}
 }
 
 // cleanupOnShutdown kills every agent CLI subprocess we started. Without it

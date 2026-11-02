@@ -18,7 +18,9 @@ import (
 // process re-emits these as Wails events; the daemon re-emits them as
 // socket data frames to attached clients).
 type Events interface {
-	OnData(id string, data []byte)
+	// off is the offset of data's first byte in everything this PTY has
+	// written, so a client that lost some can ask Since for exactly that.
+	OnData(id string, off uint64, data []byte)
 	OnExit(id string)
 }
 
@@ -32,6 +34,7 @@ type session struct {
 	id   string
 	cmd  *exec.Cmd
 	file *os.File
+	ring *byteRing
 }
 
 func NewManager(events Events) *Manager {
@@ -83,7 +86,7 @@ func (m *Manager) Create(id, cwd string, cols, rows uint16, env []string) error 
 		return err
 	}
 
-	sess := &session{id: id, cmd: c, file: f}
+	sess := &session{id: id, cmd: c, file: f, ring: newByteRing(ringSize)}
 	m.mu.Lock()
 	m.sessions[id] = sess
 	m.mu.Unlock()
@@ -98,7 +101,8 @@ func (m *Manager) pump(sess *session) {
 	for {
 		n, err := sess.file.Read(buf)
 		if n > 0 {
-			m.events.OnData(sess.id, append([]byte(nil), buf[:n]...))
+			data := append([]byte(nil), buf[:n]...)
+			m.events.OnData(sess.id, sess.ring.write(data), data)
 		}
 		if err != nil {
 			break
@@ -138,6 +142,17 @@ func (m *Manager) Kill(id string) error {
 	return sess.file.Close()
 }
 
+// Since returns this PTY's output from offset `from` on, and the offset it
+// actually starts at — later than `from` when the ring no longer holds it all.
+func (m *Manager) Since(id string, from uint64) (uint64, []byte, error) {
+	sess, ok := m.get(id)
+	if !ok {
+		return 0, nil, errUnknown(id)
+	}
+	off, data := sess.ring.since(from)
+	return off, data, nil
+}
+
 func (m *Manager) List() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -172,17 +187,26 @@ func (m *Manager) get(id string) (*session, bool) {
 // (`/^claude$/`, `/^zsh$/`). p_comm is truncated to 16 chars by the kernel,
 // which no command name we match comes close to.
 func (m *Manager) Foreground(id string) (string, error) {
+	name, _, err := m.ForegroundInfo(id)
+	return name, err
+}
+
+// ForegroundInfo is Foreground plus the foreground process group id. A job-
+// controlling shell makes the command it launches the leader of its own group,
+// so for `claude` typed at a prompt the pgid IS claude's pid — the key of its
+// ~/.claude/sessions/<pid>.json. 0 when there is no foreground group.
+func (m *Manager) ForegroundInfo(id string) (string, int, error) {
 	sess, ok := m.get(id)
 	if !ok {
-		return "", errUnknown(id)
+		return "", 0, errUnknown(id)
 	}
 	pgid, err := unix.IoctlGetInt(int(sess.file.Fd()), unix.TIOCGPGRP)
 	if err != nil || pgid <= 0 {
 		// No foreground group: the session is being torn down. Not an error the
 		// caller can act on — a poll that reports nothing is the truthful answer.
-		return "", nil
+		return "", 0, nil
 	}
-	return processName(pgid), nil
+	return processName(pgid), pgid, nil
 }
 
 func processName(pid int) string {

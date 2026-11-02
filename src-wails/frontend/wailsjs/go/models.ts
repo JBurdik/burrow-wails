@@ -27,6 +27,90 @@ export namespace agentphase {
 
 }
 
+export namespace control {
+	
+	export class Recurrence {
+	    kind: string;
+	    every_min?: number;
+	    weekdays?: number[];
+	    time_of_day?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Recurrence(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.every_min = source["every_min"];
+	        this.weekdays = source["weekdays"];
+	        this.time_of_day = source["time_of_day"];
+	    }
+	}
+	export class ScheduledPrompt {
+	    id: number;
+	    chat_id: number;
+	    name: string;
+	    text: string;
+	    // Go type: time
+	    due_at: any;
+	    // Go type: time
+	    created_at: any;
+	    rule: Recurrence;
+	    recurs: string;
+	    new_chat: boolean;
+	    workspace_id?: number;
+	    agent?: string;
+	    paused: boolean;
+	    // Go type: time
+	    last_run_at?: any;
+	    attempts?: number;
+	    last_error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScheduledPrompt(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.chat_id = source["chat_id"];
+	        this.name = source["name"];
+	        this.text = source["text"];
+	        this.due_at = this.convertValues(source["due_at"], null);
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.rule = this.convertValues(source["rule"], Recurrence);
+	        this.recurs = source["recurs"];
+	        this.new_chat = source["new_chat"];
+	        this.workspace_id = source["workspace_id"];
+	        this.agent = source["agent"];
+	        this.paused = source["paused"];
+	        this.last_run_at = this.convertValues(source["last_run_at"], null);
+	        this.attempts = source["attempts"];
+	        this.last_error = source["last_error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace forge {
 	
 	export class Check {
@@ -142,7 +226,29 @@ export namespace forge {
 
 export namespace main {
 	
+	export class OpenAIConfig {
+	    baseUrl: string;
+	    apiKey: string;
+	    model: string;
+	    contextWindow: number;
+	    maxOutputTokens: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new OpenAIConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.baseUrl = source["baseUrl"];
+	        this.apiKey = source["apiKey"];
+	        this.model = source["model"];
+	        this.contextWindow = source["contextWindow"];
+	        this.maxOutputTokens = source["maxOutputTokens"];
+	    }
+	}
 	export class AcpStartOpts {
+	    openai?: OpenAIConfig;
+	    systemPrompt?: string;
 	    id: string;
 	    cwd: string;
 	    command: string;
@@ -160,6 +266,8 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.openai = this.convertValues(source["openai"], OpenAIConfig);
+	        this.systemPrompt = source["systemPrompt"];
 	        this.id = source["id"];
 	        this.cwd = source["cwd"];
 	        this.command = source["command"];
@@ -171,6 +279,24 @@ export namespace main {
 	        this.resumeSessionId = source["resumeSessionId"];
 	        this.emitHistory = source["emitHistory"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class AdvertisedEndpoint {
 	    kind: string;
@@ -216,6 +342,53 @@ export namespace main {
 	        this.defaultEffort = source["defaultEffort"];
 	    }
 	}
+	export class CatchUpItem {
+	    tag: string;
+	    text: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CatchUpItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tag = source["tag"];
+	        this.text = source["text"];
+	    }
+	}
+	export class CatchUp {
+	    summary: string;
+	    items: CatchUpItem[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CatchUp(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.summary = source["summary"];
+	        this.items = this.convertValues(source["items"], CatchUpItem);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class Chat {
 	    id: number;
 	    workspace_id: number;
@@ -231,6 +404,20 @@ export namespace main {
 	    archived_at: number;
 	    last_activity_at: number;
 	    parent_chat_id: number;
+	    collected_at: number;
+	    effort: string;
+	    permission_mode: string;
+	    profile_id: string;
+	    append_system_prompt: string;
+	    slept_at: number;
+	    recap: string;
+	    kind: string;
+	    snoozed_until: number;
+	    limit_reset_at: number;
+	    limit_resume_at: number;
+	    pr_number: number;
+	    pr_url: string;
+	    pr_state: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chat(source);
@@ -252,12 +439,27 @@ export namespace main {
 	        this.archived_at = source["archived_at"];
 	        this.last_activity_at = source["last_activity_at"];
 	        this.parent_chat_id = source["parent_chat_id"];
+	        this.collected_at = source["collected_at"];
+	        this.effort = source["effort"];
+	        this.permission_mode = source["permission_mode"];
+	        this.profile_id = source["profile_id"];
+	        this.append_system_prompt = source["append_system_prompt"];
+	        this.slept_at = source["slept_at"];
+	        this.recap = source["recap"];
+	        this.kind = source["kind"];
+	        this.snoozed_until = source["snoozed_until"];
+	        this.limit_reset_at = source["limit_reset_at"];
+	        this.limit_resume_at = source["limit_resume_at"];
+	        this.pr_number = source["pr_number"];
+	        this.pr_url = source["pr_url"];
+	        this.pr_state = source["pr_state"];
 	    }
 	}
 	export class ProviderRuntimeEvent {
 	    type: string;
 	    messageId?: string;
 	    text?: string;
+	    uuid?: string;
 	    toolCallId?: string;
 	    name?: string;
 	    input?: Record<string, any>;
@@ -271,13 +473,19 @@ export namespace main {
 	    cacheCreationTokens?: number;
 	    costUsd?: number;
 	    message?: string;
+	    usageLimit?: boolean;
+	    limitResetAt?: number;
 	    title?: string;
 	    sessionId?: string;
 	    role?: string;
 	    images?: string[];
 	    turnMs?: number;
+	    subagentChatId?: number;
+	    subagentAgent?: string;
+	    surface?: string;
 	    requestId?: string;
 	    requestKind?: string;
+	    cleared?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProviderRuntimeEvent(source);
@@ -288,6 +496,7 @@ export namespace main {
 	        this.type = source["type"];
 	        this.messageId = source["messageId"];
 	        this.text = source["text"];
+	        this.uuid = source["uuid"];
 	        this.toolCallId = source["toolCallId"];
 	        this.name = source["name"];
 	        this.input = source["input"];
@@ -301,13 +510,19 @@ export namespace main {
 	        this.cacheCreationTokens = source["cacheCreationTokens"];
 	        this.costUsd = source["costUsd"];
 	        this.message = source["message"];
+	        this.usageLimit = source["usageLimit"];
+	        this.limitResetAt = source["limitResetAt"];
 	        this.title = source["title"];
 	        this.sessionId = source["sessionId"];
 	        this.role = source["role"];
 	        this.images = source["images"];
 	        this.turnMs = source["turnMs"];
+	        this.subagentChatId = source["subagentChatId"];
+	        this.subagentAgent = source["subagentAgent"];
+	        this.surface = source["surface"];
 	        this.requestId = source["requestId"];
 	        this.requestKind = source["requestKind"];
+	        this.cleared = source["cleared"];
 	    }
 	}
 	export class ChatEventBatch {
@@ -341,6 +556,66 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class ChatMessagesPage {
+	    messages: number[][];
+	    start: number;
+	    total: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatMessagesPage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.messages = source["messages"];
+	        this.start = source["start"];
+	        this.total = source["total"];
+	    }
+	}
+	export class ChatQueueItem {
+	    id: number;
+	    chatId: number;
+	    ord: number;
+	    text: string;
+	    attachments: string[];
+	    createdAt: number;
+	    attempts: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatQueueItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.chatId = source["chatId"];
+	        this.ord = source["ord"];
+	        this.text = source["text"];
+	        this.attachments = source["attachments"];
+	        this.createdAt = source["createdAt"];
+	        this.attempts = source["attempts"];
+	    }
+	}
+	export class ChatSearchHit {
+	    chat_id: number;
+	    workspace_id: number;
+	    title: string;
+	    snippet: string;
+	    ts: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatSearchHit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.chat_id = source["chat_id"];
+	        this.workspace_id = source["workspace_id"];
+	        this.title = source["title"];
+	        this.snippet = source["snippet"];
+	        this.ts = source["ts"];
+	    }
 	}
 	export class ChatStreamLine {
 	    ord: number;
@@ -478,6 +753,24 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.available = source["available"];
+	    }
+	}
+	export class CodexBgTerminal {
+	    itemId: string;
+	    processId: string;
+	    command: string;
+	    cwd: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CodexBgTerminal(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.itemId = source["itemId"];
+	        this.processId = source["processId"];
+	        this.command = source["command"];
+	        this.cwd = source["cwd"];
 	    }
 	}
 	export class ControlVerbArg {
@@ -713,6 +1006,7 @@ export namespace main {
 	    installCmd?: string;
 	    authCmd?: string;
 	    docsUrl?: string;
+	    canCheckout?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ForgeStatus(source);
@@ -727,6 +1021,7 @@ export namespace main {
 	        this.installCmd = source["installCmd"];
 	        this.authCmd = source["authCmd"];
 	        this.docsUrl = source["docsUrl"];
+	        this.canCheckout = source["canCheckout"];
 	    }
 	}
 	export class GitOutput {
@@ -761,6 +1056,28 @@ export namespace main {
 	        this.port = source["port"];
 	    }
 	}
+	export class LaunchSettingsPatch {
+	    model?: string;
+	    effort?: string;
+	    permission_mode?: string;
+	    profile_id?: string;
+	    append_system_prompt?: string;
+	    row_only?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LaunchSettingsPatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.model = source["model"];
+	        this.effort = source["effort"];
+	        this.permission_mode = source["permission_mode"];
+	        this.profile_id = source["profile_id"];
+	        this.append_system_prompt = source["append_system_prompt"];
+	        this.row_only = source["row_only"];
+	    }
+	}
 	export class LocalEndpointInfo {
 	    ws_url: string;
 	    ticket: string;
@@ -775,6 +1092,21 @@ export namespace main {
 	        this.ws_url = source["ws_url"];
 	        this.ticket = source["ticket"];
 	        this.environment_id = source["environment_id"];
+	    }
+	}
+	
+	export class OpenAIModel {
+	    id: string;
+	    label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OpenAIModel(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
 	    }
 	}
 	export class OpenTarget {
@@ -807,6 +1139,118 @@ export namespace main {
 	        this.code = source["code"];
 	        this.expires_at = source["expires_at"];
 	        this.locked = source["locked"];
+	    }
+	}
+	export class PlanUsageRow {
+	    label: string;
+	    percent: number;
+	    resets_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanUsageRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.label = source["label"];
+	        this.percent = source["percent"];
+	        this.resets_at = source["resets_at"];
+	    }
+	}
+	export class PlanUsageProvider {
+	    kind: string;
+	    plan: string;
+	    status: string;
+	    reason?: string;
+	    rows: PlanUsageRow[];
+	    extra?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanUsageProvider(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.plan = source["plan"];
+	        this.status = source["status"];
+	        this.reason = source["reason"];
+	        this.rows = this.convertValues(source["rows"], PlanUsageRow);
+	        this.extra = source["extra"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PlanUsage {
+	    providers: PlanUsageProvider[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.providers = this.convertValues(source["providers"], PlanUsageProvider);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	export class PromptSearchHit {
+	    agent: string;
+	    cwd: string;
+	    session_id: string;
+	    ts: number;
+	    snippet: string;
+	    text: string;
+	    resumable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PromptSearchHit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agent = source["agent"];
+	        this.cwd = source["cwd"];
+	        this.session_id = source["session_id"];
+	        this.ts = source["ts"];
+	        this.snippet = source["snippet"];
+	        this.text = source["text"];
+	        this.resumable = source["resumable"];
 	    }
 	}
 	export class ProviderLatest {
@@ -863,6 +1307,7 @@ export namespace main {
 	    scopes: string[];
 	    added_at: number;
 	    last_seen: number;
+	    push: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new RemoteDevice(source);
@@ -876,6 +1321,7 @@ export namespace main {
 	        this.scopes = source["scopes"];
 	        this.added_at = source["added_at"];
 	        this.last_seen = source["last_seen"];
+	        this.push = source["push"];
 	    }
 	}
 	export class SearchHit {
@@ -1008,6 +1454,8 @@ export namespace main {
 	    dns_name?: string;
 	    serving: boolean;
 	    serve_url?: string;
+	    ip?: string;
+	    https_enabled?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TailscaleStatus(source);
@@ -1020,6 +1468,8 @@ export namespace main {
 	        this.dns_name = source["dns_name"];
 	        this.serving = source["serving"];
 	        this.serve_url = source["serve_url"];
+	        this.ip = source["ip"];
+	        this.https_enabled = source["https_enabled"];
 	    }
 	}
 	export class TerminalTab {
@@ -1103,6 +1553,96 @@ export namespace main {
 	        this.url = source["url"];
 	        this.sha256 = source["sha256"];
 	    }
+	}
+	
+	export class WorktreeCleanupItem {
+	    id: number;
+	    name: string;
+	    path: string;
+	    branch: string;
+	    rule: string;
+	    reason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WorktreeCleanupItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.branch = source["branch"];
+	        this.rule = source["rule"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class permRequest {
+	    id: string;
+	    pty_id: string;
+	    tool_name: string;
+	    tool_input: number[];
+	    at: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new permRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.pty_id = source["pty_id"];
+	        this.tool_name = source["tool_name"];
+	        this.tool_input = source["tool_input"];
+	        this.at = source["at"];
+	    }
+	}
+	export class ptyChunk {
+	    off?: number;
+	    data: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ptyChunk(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.off = source["off"];
+	        this.data = source["data"];
+	    }
+	}
+	export class pushSubscription {
+	    endpoint: string;
+	    // Go type: struct { P256dh string "json:\"p256dh\""; Auth string "json:\"auth\"" }
+	    keys: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new pushSubscription(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.endpoint = source["endpoint"];
+	        this.keys = this.convertValues(source["keys"], Object);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

@@ -36,10 +36,19 @@ type phasePoller struct {
 	// goroutine clears through forget().
 	mu    sync.Mutex
 	empty map[string]int
+
+	// Claude's own status file (claudestatus.go). Both nil/"" = disabled, which
+	// is also what a daemon too old to report the foreground pid looks like.
+	fgPid       func(string) int
+	sessionsDir string
+	// lastFile is the status file's last-applied "status|waitingFor" per pty. The
+	// file is only applied on a CHANGE: re-applying `busy` every tick would
+	// stomp a hook's waiting_approval for the 2 s until the file catches up.
+	lastFile map[string]string
 }
 
 func newPhasePoller(ps *PhaseStore, list func() ([]string, error), fg func(string) string) *phasePoller {
-	return &phasePoller{phases: ps, list: list, fg: fg, empty: make(map[string]int)}
+	return &phasePoller{phases: ps, list: list, fg: fg, empty: make(map[string]int), lastFile: make(map[string]string)}
 }
 
 func (p *phasePoller) tick() {
@@ -77,6 +86,7 @@ func (p *phasePoller) tick() {
 	for id := range p.empty {
 		if !seen[id] {
 			delete(p.empty, id)
+			delete(p.lastFile, id)
 		}
 	}
 	p.mu.Unlock()
@@ -88,7 +98,36 @@ func (p *phasePoller) tick() {
 func (p *phasePoller) forget(id string) {
 	p.mu.Lock()
 	delete(p.empty, id)
+	delete(p.lastFile, id)
 	p.mu.Unlock()
+}
+
+// applyClaudeFile feeds claude's status file into the phase, on change only.
+// Absent/unreadable file → nothing, and the baseline resets so a later claude
+// in the same tab re-asserts. Hooks and the foreground logic are untouched, so
+// an old CLI (no file) behaves exactly as before.
+func (p *phasePoller) applyClaudeFile(id, key string) {
+	var cur string
+	var ev agentphase.Event
+	ok := false
+	if p.fgPid != nil && p.sessionsDir != "" {
+		if st, found := readClaudeStatus(p.sessionsDir, p.fgPid(id)); found {
+			if ev, ok = st.event(); ok {
+				cur = st.Status + "|" + st.WaitingFor
+			}
+		}
+	}
+	p.mu.Lock()
+	changed := p.lastFile[id] != cur
+	if cur == "" {
+		delete(p.lastFile, id)
+	} else {
+		p.lastFile[id] = cur
+	}
+	p.mu.Unlock()
+	if ok && changed {
+		p.phases.Apply(key, ev)
+	}
 }
 
 func (p *phasePoller) pollOne(id string, alive bool) {
@@ -125,9 +164,17 @@ func (p *phasePoller) pollOne(id string, alive bool) {
 	switch {
 	case agentRE.MatchString(name):
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollAgent, Bool: true})
+		if name == "claude" {
+			// The one place the poll may speak for an agent's turn: claude's own
+			// status file is first-hand, not an inference from "it is foreground".
+			p.applyClaudeFile(id, key)
+		}
 	case shellRE.MatchString(name):
 		// Back at the prompt: whatever ran is over. This also rescues an agent
 		// the user Ctrl+C'd, which fires no Stop hook.
+		p.mu.Lock()
+		delete(p.lastFile, id) // the next claude here is a new process
+		p.mu.Unlock()
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollAgent, Bool: false})
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollNotBusy})
 	default:
@@ -157,8 +204,9 @@ func cutPtyKey(key string) (string, bool) {
 // startPhasePoll runs the poll for the life of the app. It lives on the server
 // side because the phase must be derivable with no client attached. It returns
 // the poller so CreatePty can clear a reused id's watchdog counter.
-func startPhasePoll(ctx context.Context, ps *PhaseStore, list func() ([]string, error), fg func(string) string) *phasePoller {
+func startPhasePoll(ctx context.Context, ps *PhaseStore, list func() ([]string, error), fg func(string) string, fgPid func(string) int) *phasePoller {
 	p := newPhasePoller(ps, list, fg)
+	p.fgPid, p.sessionsDir = fgPid, claudeSessionsDir()
 	go func() {
 		t := time.NewTicker(2 * time.Second)
 		defer t.Stop()

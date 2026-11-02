@@ -1,4 +1,4 @@
-import { computed, effectScope, nextTick, ref, watch, type ComputedRef, type EffectScope, type Ref } from "vue";
+import { computed, effectScope, ref, watch, type ComputedRef, type EffectScope, type Ref } from "vue";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type {
@@ -8,6 +8,7 @@ import {
   applyChatEvent, isProjectedEvent, settleTranscript, type ChatEventBatch, type ChatProjectionState,
 } from "@/lib/chatProjection";
 import { parseAcpPermRequest } from "@/lib/acpParser";
+import { isImageStub, parseImageStub } from "@/lib/chatImages";
 import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import { appChatHost, type ChatHost } from "@/lib/chatHost";
 
@@ -35,7 +36,7 @@ import { appChatHost, type ChatHost } from "@/lib/chatHost";
 /**
  * What the session asks of a view. The LAST attached view's hooks stay
  * installed after it unmounts — a turn finishing behind a closed view still
- * restores ACP selections and drains its queue through them — so a hook must
+ * restores ACP selections through them — so a hook must
  * be safe to call on an unmounted instance (scrolling a detached element is).
  */
 export interface ChatViewHooks {
@@ -50,8 +51,6 @@ export interface ChatViewHooks {
   restoreAcpSelections(): void;
   /** True for ACP / Codex, false for the native Claude transport. */
   usesRpcRuntime(): boolean;
-  /** Send a follow-up as its own turn (the queue drain). */
-  send(text: string, images?: string[]): Promise<void>;
 }
 
 /** The session's outside world. Injected so tests can run it with no Tauri, no Pinia. */
@@ -103,6 +102,15 @@ export type PendingAnswer =
 // nothing would re-emit it and the ring would vanish until the next turn.
 // Stale after an external /clear, and self-healing on the next turn.
 // ponytail: one unpruned map; revisit if someone keeps thousands of chats.
+/** Messages per window when a transcript is read back (`load_chat_messages_page`). */
+export const TRANSCRIPT_PAGE = 60;
+/** One window of a transcript: rows [start, start+messages.length) of `total`. */
+export interface ChatMessagesPage {
+  messages: ChatMessage[];
+  start: number;
+  total: number;
+}
+
 const CTX_STORE_KEY = "burrow.ctxTokens";
 type CtxEntry = { tokens: number; window: number; split?: CtxSplit | null };
 function readCtxStore(): Record<string, CtxEntry> {
@@ -113,47 +121,31 @@ function hasFocus(): boolean {
   return typeof document !== "undefined" && document.hasFocus();
 }
 
-export interface ChatSession {
-  readonly chatId: number;
-
+/**
+ * The session's state. Writable here, inside the module, where the reducers
+ * and the intent methods below keep its invariants; everything outside reads
+ * it through ChatSession, which hands the same refs back read-only.
+ */
+interface SessionState {
   // ── transcript ──
   messages: Ref<ChatMessage[]>;
-  /** Monotonic id generator for messages; plain field, never rendered. */
-  nextMsgId: number;
   /**
-   * Highest chat_stream ord this session has actually put through a reducer.
-   * `foldedOrd` handed to save_chat_messages is this + 1 — "everything up to
-   * and including lastOrd is now in chat_messages", which is what lets the
-   * backend trim safely (chatstream.go).
+   * How many EARLIER messages exist in storage that `messages` does not hold
+   * (a long chat is opened from its tail, `loadEarlier` fetches the rest).
+   * While it is > 0, `messages` is a window, so nothing may write it back as
+   * the whole transcript — see `save`.
    */
-  lastOrd: number;
-  /** True once a restart replay has run (or been ruled out) for this session. */
-  replayed: boolean;
+  hiddenBefore: Ref<number>;
+  loadingEarlier: Ref<boolean>;
 
   // ── turn state ──
   busy: Ref<boolean>;
   lastActivityAt: Ref<number>;
+  /** Set while busy; stamped onto the turn's user message as turnMs when it settles. */
   turnStartedAt: Ref<number>;
-  /**
-   * FIFO of follow-ups, DERIVED from the transcript's own `queued` entries.
-   * There is deliberately no second array: the queue and its placeholder
-   * bubbles used to be two structures synchronised by hand in five methods,
-   * and `moveQueuedMessageNext` only ever updated one of them — "Send Next"
-   * reordered what was sent while the transcript kept showing the old order.
-   * Deriving it also makes the queue survive a relaunch for free, since the
-   * placeholders are persisted with the transcript.
-   */
-  messageQueue: ComputedRef<QueuedChatMessage[]>;
-  enqueueMessage(text: string, images?: string[]): QueuedChatMessage;
-  removeQueuedMessage(id: number): void;
-  clearQueuedMessages(): void;
-  moveQueuedMessageNext(id: number): void;
-  takeNextQueuedMessage(): QueuedChatMessage | undefined;
-  suppressNextDone: Ref<boolean>;
   sessionId: Ref<string>;
   turnStats: Ref<TurnStats | null>;
   sessionCost: Ref<number>;
-  runtimeStarted: Ref<boolean>;
 
   // ── context meter + /context report ──
   contextTokens: Ref<number>;
@@ -161,8 +153,6 @@ export interface ChatSession {
   contextSplit: Ref<CtxSplit | null>;
   contextReport: Ref<CtxReportRow[] | null>;
   contextReportPending: Ref<boolean>;
-  /** A `/context` was sent out of band; its report is lifted out of the stream. */
-  awaitingContextReport: Ref<boolean>;
   /** Claude named the thread — later heuristics must not overwrite it. */
   claudeGeneratedTitle: Ref<boolean>;
 
@@ -175,7 +165,6 @@ export interface ChatSession {
   pendingQuestionMsgId: Ref<number | null>;
   pendingPlanMsgId: Ref<number | null>;
   pendingDiffMsgId: Ref<number | null>;
-  settledControlRequestIds: Set<string>;
   /** A native control response is being written; the prompt stays until it lands. */
   nativeControlResponsePending: Ref<boolean>;
 
@@ -186,17 +175,52 @@ export interface ChatSession {
    *  remount, and a fresh view's local id would never match it. */
   acpPermRpcId: Ref<number | null>;
   acpPermMsgId: Ref<number | null>;
-  acpPromptRpcId: Ref<number | null>;
   /** An answer to acpPermReq is in flight (Codex clears it on serverRequest/resolved). */
   permissionResponsePending: Ref<boolean>;
   /** Codex `item/tool/requestUserInput`: blocking, so it must outlive the view. */
   codexUserInput: Ref<CodexUserInputReq | null>;
   codexUserInputPending: Ref<boolean>;
-  acpControlIds: Set<number>;
-  /** Ids of OUR OWN selector restore pushes — their replies must not restore again. */
-  acpRestorePushIds: Set<number>;
   acpModes: Ref<AcpModes | null>;
   acpConfigOptions: Ref<AcpConfigOption[]>;
+}
+
+type ReadonlyRefs<T> = { readonly [K in keyof T]: T[K] extends Ref<infer V> ? Readonly<Ref<V>> : T[K] };
+
+/** A user turn as the composer hands it over. */
+export interface UserPrompt {
+  text: string;
+  images?: string[];
+  /** What the bubble shows when it differs from what was sent (paste chips). */
+  displayText?: string;
+}
+
+/**
+ * A chat's live session, as everything outside this module sees it: read-only
+ * state plus intents. Nothing outside writes a ref — that is what keeps the
+ * idle invariant (no pending request, not busy → evictable) true, since the
+ * only code that can break it is in this file.
+ */
+export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">> {
+  readonly chatId: number;
+  /** Read-only: rows are added by the reducers and the intents below. */
+  readonly messages: Readonly<Ref<readonly ChatMessage[]>>;
+
+  /**
+   * FIFO of follow-ups, mirrored from Go's `chat_queue` (chatqueue.go) via
+   * `chat-queue-changed`. Go drains it once the chat settles — with no view
+   * mounted, the desktop closed or the phone asleep — so there is no drain
+   * here. The intents below write through the `chat_queue_*` commands and
+   * update the mirror optimistically; the next event is the truth.
+   */
+  messageQueue: ComputedRef<QueuedChatMessage[]>;
+  /** Append to Go's queue. Null when Go refused (already reported in the transcript). */
+  enqueueMessage(text: string, images?: string[]): Promise<QueuedChatMessage | null>;
+  removeQueuedMessage(id: number): void;
+  /** Rewrite a queued follow-up's text in place (position kept); an empty text is ignored. Never touches the running turn. */
+  editQueuedMessage(id: number, text: string): void;
+  clearQueuedMessages(): void;
+  /** Move a queued follow-up to position `toIndex` of the queue (0 = next). */
+  moveQueuedMessage(id: number, toIndex: number): Promise<void>;
 
   /** Every request the agent is blocked on, whatever the transport. */
   pendingRequests: ComputedRef<PendingRequest[]>;
@@ -208,24 +232,75 @@ export interface ChatSession {
    */
   respond(answer: PendingAnswer): Promise<boolean>;
 
+  // ── intents ──
+  /** An app-authored assistant row (a failed action, an error) — saved with the transcript. */
+  notice(text: string): void;
+  /** Show the user's prompt and claim its echo. Returns the bubble's id. Does not start the turn. */
+  postUserMessage(prompt: UserPrompt): number;
+  /** The prompt is on its way: the chat is busy until a turn boundary. */
+  startTurn(): void;
+  /** The send failed: report it and leave the turn. */
+  failTurn(error: unknown): void;
+  /**
+   * Send a prompt as its own turn — the one door for every transport: show
+   * the bubble, mark busy, `chat_send` (the Go chat runtime starts the process
+   * if there is none). Resolves the bubble's id, or null when the send failed
+   * (already reported in the transcript).
+   */
+  send(prompt: UserPrompt): Promise<number | null>;
+  /**
+   * Deliver queued follow-up `queuedId` INTO the running turn now (`chat_steer`)
+   * instead of after it — Claude CLI and Codex only (`canSteer`). The queued
+   * placeholder becomes a user bubble; the turn stays the same turn (still busy).
+   * Resolves false when nothing was sent — no running turn, or the provider
+   * refused — and the message is back in the queue at its old position.
+   */
+  steer(queuedId: number): Promise<boolean>;
+  /** Stop the process; Go publishes session.reset and the next send starts a fresh one. */
+  restart(): Promise<void>;
+  /** End the running turn (no "finished" toast); Go restarts if the provider can't stop in place. */
+  interrupt(): Promise<void>;
+  /** Wipe the transcript and the agent session; Go publishes session.reset{cleared}. */
+  clear(): Promise<void>;
+  /**
+   * Drop this user message and everything after it; the agent's next turn
+   * continues from just before it (Claude only, `chat_rewind`). Resolves false
+   * when Go refused (already reported).
+   */
+  rewind(message: ChatMessage): Promise<boolean>;
+  /** A new chat continuing from this message's turn (`chat_fork`). Resolves its id, or null. */
+  fork(message: ChatMessage): Promise<number | null>;
+  /** A selector push we sent; `restore` marks our own restore push, whose reply must not restore again. */
+  trackAcpControl(rpcId: number, restore?: boolean): void;
+  /** Optimistically show an ACP selector pick ("mode", or a config option id) before the adapter confirms. */
+  showAcpSelection(id: string, value: string): void;
+  /** Learned or cached ACP capabilities, for a session that has none yet. */
+  seedAcpCapabilities(modes: AcpModes | null, configOptions: AcpConfigOption[]): void;
+  /** The coming turn end is ours (restart, interrupt) — no "finished" toast. */
+  suppressDoneToast(): void;
+  /** Ask the CLI for `/context` out of band; its report is lifted out of the stream. */
+  requestContextReport(): Promise<void>;
+  /** First paint from storage, for a session that has no transcript yet. */
+  hydrate(state: { messages?: ChatMessage[]; hiddenBefore?: number; sessionId?: string }): void;
+  /** Fetch the next page of older messages into the window (`load_chat_messages_page`). */
+  loadEarlier(): Promise<void>;
+  /**
+   * Open the permission / question the agent is blocked on, if it arrived while
+   * no view was listening. Call after listenClaude/listenAcp (`load_pending_chat_requests`).
+   */
+  recoverPendingRequests(): Promise<void>;
+  /** Resolve image `i` of a message that arrived as a stub (`load_chat_image`); returns its data URL. */
+  loadImage(message: ChatMessage, i: number): Promise<string>;
+  /** Take the last user message back out to edit it (↑ in an empty composer). */
+  recallLastUserMessage(): string | null;
+
+  // ── lifecycle ──
   /** Point the session's hooks at this view. Replaces any previous view's. */
   attachView(view: ChatViewHooks): void;
-  /** A prompt this client is about to send — drop its echo when Go publishes it. */
-  expectEcho(text: string): void;
   /** Persist the transcript (fire-and-forget), with the folded stream mark. */
   save(): void;
   /** Mirror busy / message count into the chat list and the remote mirror. */
   sync(): void;
-  /** Settle partial rows and stuck tool spinners (a turn ended somehow). */
-  settleTranscript(failedTools?: boolean): void;
-  /** Remove a system-info marker row by id. */
-  removeFeedMarker(id: number | null): void;
-  /** Record a native control request as answered (a replay must not reopen it). */
-  settleControlRequest(requestId: string): void;
-  /** Answer a native can_use_tool request. Throws if the write failed. */
-  respondControl(requestId: string, response: Record<string, unknown>): Promise<void>;
-  /** Send the next queued follow-up if the chat is idle. */
-  drain(): void;
   /** Attach the domain-event listener (idempotent). Both transports use it. */
   listenEvents(): Promise<void>;
   /** Attach the native Claude stream listener (idempotent). */
@@ -258,7 +333,38 @@ export interface ChatSession {
   isWatched(): boolean;
 }
 
-interface InternalSession extends ChatSession {
+interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionState> {
+  /** Monotonic id generator for messages; plain field, never rendered. */
+  nextMsgId: number;
+  /**
+   * Highest chat_stream ord this session has actually put through a reducer.
+   * `foldedOrd` handed to save_chat_messages is this + 1 — "everything up to
+   * and including lastOrd is now in chat_messages", which is what lets the
+   * backend trim safely (chatstream.go).
+   */
+  lastOrd: number;
+  /** True once a restart replay has run (or been ruled out) for this session. */
+  replayed: boolean;
+  suppressNextDone: Ref<boolean>;
+  /** A `/context` was sent out of band; its report is lifted out of the stream. */
+  awaitingContextReport: Ref<boolean>;
+  settledControlRequestIds: Set<string>;
+  acpControlIds: Set<number>;
+  /** Ids of OUR OWN selector restore pushes — their replies must not restore again. */
+  acpRestorePushIds: Set<number>;
+  /** Go's queue as last seen (`chat-queue-changed` / `chat_queue_list`). */
+  queue: Ref<QueuedChatMessage[]>;
+  queueUL: UnlistenFn | null;
+  /** A prompt this client is about to send — drop its echo when Go publishes it. */
+  expectEcho(text: string): void;
+  /** Settle partial rows and stuck tool spinners (a turn ended somehow). */
+  settleTranscript(failedTools?: boolean): void;
+  /** Remove a system-info marker row by id. */
+  removeFeedMarker(id: number | null): void;
+  /** Record a native control request as answered (a replay must not reopen it). */
+  settleControlRequest(requestId: string): void;
+  /** Answer a native can_use_tool request. Throws if the write failed. */
+  respondControl(requestId: string, response: Record<string, unknown>): Promise<void>;
   deps: ChatSessionDeps;
   view: ChatViewHooks | null;
   /** Prompts this client sent and has not yet seen echoed back (see expectEcho). */
@@ -275,10 +381,20 @@ interface InternalSession extends ChatSession {
   acpReqUL: UnlistenFn | null;
 }
 
-/** A transcript entry read back as a queue entry; [] for anything else. */
-function queuedEntry(message: ChatMessage): QueuedChatMessage[] {
-  if (message.role !== "queued") return [];
-  return [{ id: message.id, text: message.text, ...(message.images?.length ? { images: message.images } : {}) }];
+/**
+ * Whether a chat on `transport` can take a message mid-turn (`chat_steer`):
+ * Claude CLI picks a stdin user line up at the next tool boundary, Codex has
+ * `turn/steer`. Generic ACP has neither. An empty transport is an old Claude row.
+ */
+export function canSteer(transport: string | undefined): boolean {
+  return !transport || transport === "claude-cli" || transport === "codex-app-server";
+}
+
+/** A `chat_queue` row as Go sends it (chatqueue.go). */
+interface GoQueueItem { id: number; chatId: number; text: string; attachments: string[] }
+
+function fromGo(item: GoQueueItem): QueuedChatMessage {
+  return { id: item.id, text: item.text, ...(item.attachments?.length ? { images: item.attachments } : {}) };
 }
 
 const sessions = new Map<number, InternalSession>();
@@ -331,9 +447,9 @@ export async function replayChatStream(chatId: number): Promise<void> {
 /** Delay before an unwatched, settled session is dropped. */
 const EVICT_DELAY_MS = 2_000;
 
-/** Nobody is looking, nothing is in flight, nothing is waiting to be sent. */
+/** Nobody is looking and nothing is in flight. A queue does not pin it: Go drains it. */
 function evictable(s: InternalSession): boolean {
-  return s.refCount === 0 && isIdle(s) && s.messageQueue.value.length === 0;
+  return s.refCount === 0 && isIdle(s);
 }
 
 function isIdle(s: InternalSession): boolean {
@@ -349,6 +465,8 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     view: null,
     pendingSends: new Set<string>(),
     messages: ref<ChatMessage[]>([]),
+    hiddenBefore: ref(0),
+    loadingEarlier: ref(false),
     nextMsgId: 0,
     lastOrd: -1,
     replayed: false,
@@ -356,12 +474,13 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     busy: ref(false),
     lastActivityAt: ref(Date.now()),
     turnStartedAt: ref(0),
-    messageQueue: computed(() => s.messages.value.flatMap(queuedEntry)),
+    queue: ref<QueuedChatMessage[]>([]),
+    queueUL: null,
+    messageQueue: computed(() => s.queue.value),
     suppressNextDone: ref(false),
     sessionId: ref(""),
     turnStats: ref<TurnStats | null>(null),
     sessionCost: ref(0),
-    runtimeStarted: ref(false),
 
     contextTokens: ref(ctx?.tokens ?? 0),
     contextWindow: ref(ctx?.window ?? 0),
@@ -385,7 +504,6 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     acpPermReq: ref<AcpPermReq | null>(null),
     acpPermRpcId: ref<number | null>(null),
     acpPermMsgId: ref<number | null>(null),
-    acpPromptRpcId: ref<number | null>(null),
     permissionResponsePending: ref(false),
     codexUserInput: ref<CodexUserInputReq | null>(null),
     codexUserInputPending: ref(false),
@@ -406,30 +524,236 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     }),
     respond: (answer) => respond(s, answer),
 
-    enqueueMessage(text, images) {
-      const entry: QueuedChatMessage = { id: s.nextMsgId++, text, ...(images?.length ? { images } : {}) };
-      s.messages.value.push({ id: entry.id, role: "queued", text, ...(entry.images ? { images: entry.images } : {}) });
-      return entry;
+    notice(text) {
+      pushRow(s, "assistant", text);
+    },
+    postUserMessage({ text, images, displayText }) {
+      const id = s.nextMsgId++;
+      s.messages.value.push({ id, role: "user", text, ...(images?.length ? { images } : {}), ...(displayText ? { displayText } : {}) });
+      // Claim the echo before the send goes out — a loopback round trip can
+      // land user.delta before the caller's next line runs.
+      s.expectEcho(text);
+      return id;
+    },
+    startTurn() {
+      s.busy.value = true;
+    },
+    failTurn(error) {
+      pushRow(s, "assistant", `Error: ${error}`);
+      s.busy.value = false;
+      s.sync();
+    },
+    async send(prompt) {
+      const id = s.postUserMessage(prompt);
+      s.startTurn();
+      s.save();
+      s.sync();
+      s.view?.scrollToBottom(true);
+      try {
+        await s.deps.invoke("chat_send", { chatId, text: prompt.text, images: prompt.images ?? [] });
+        return id;
+      } catch (e) {
+        s.failTurn(e);
+        return null;
+      }
+    },
+    async steer(queuedId) {
+      const index = s.queue.value.findIndex((q) => q.id === queuedId);
+      if (index < 0 || !s.busy.value || !canSteer(s.deps.host.chat(chatId)?.transport)) return false;
+      const entry = s.queue.value[index];
+      // Take it out of Go's queue first: once removed, the drain can't also
+      // send it. A failed remove means Go already sent (or someone removed) it.
+      try {
+        await s.deps.invoke("chat_queue_remove", { id: queuedId });
+      } catch {
+        return false;
+      }
+      s.queue.value = s.queue.value.filter((q) => q.id !== queuedId);
+      const prompt = { text: entry.text, images: entry.images };
+      const id = s.postUserMessage(prompt);
+      s.save();
+      s.sync();
+      s.view?.scrollToBottom(true);
+      try {
+        await s.deps.invoke("chat_steer", { chatId, text: prompt.text, images: prompt.images ?? [] });
+        return true;
+      } catch (e) {
+        // Nothing was sent or recorded: un-claim the echo and put the entry
+        // back where it was (Go drains it once the turn settles).
+        s.pendingSends.delete(prompt.text);
+        s.messages.value = s.messages.value.filter((m) => !(m.id === id && m.role === "user"));
+        s.save();
+        console.warn("[chat] steer refused, left queued:", e);
+        const back = await s.enqueueMessage(entry.text, entry.images);
+        if (back) {
+          const ids = s.queue.value.map((q) => q.id).filter((q) => q !== back.id);
+          ids.splice(Math.min(index, ids.length), 0, back.id);
+          await s.deps.invoke("chat_queue_reorder", { chatId, ids }).catch(() => {});
+        }
+        return false;
+      }
+    },
+    async restart() {
+      await s.deps.invoke("chat_restart", { chatId }).catch(() => {});
+    },
+    async interrupt() {
+      // The trailing turn end of a stopped turn is not a "finished" one.
+      s.suppressNextDone.value = true;
+      await s.deps.invoke("chat_interrupt", { chatId }).catch(() => {});
+    },
+    async clear() {
+      // The reset that empties the transcript arrives on the events channel.
+      await s.listenEvents();
+      await s.deps.invoke("chat_clear", { chatId }).catch((e: unknown) => s.notice(`Could not clear the chat: ${e}`));
+    },
+    async rewind(message) {
+      const before = s.messages.value;
+      const index = before.findIndex((m) => m.id === message.id && m.role === message.role);
+      if (index < 0) return false;
+      // Cut first: a save racing the call must write the truncated transcript,
+      // not put the dropped turns back. Queued follow-ups (Go's) stay queued.
+      s.messages.value = before.slice(0, index);
+      try {
+        await s.deps.invoke("chat_rewind", { chatId, index: index + s.hiddenBefore.value, text: message.text });
+        return true;
+      } catch (e) {
+        s.messages.value = before;
+        s.notice(`Could not rewind: ${e}`);
+        return false;
+      }
+    },
+    async fork(message) {
+      const index = s.messages.value.findIndex((m) => m.id === message.id && m.role === message.role);
+      if (index < 0) return null;
+      try {
+        const chat = await s.deps.invoke<{ id: number }>("chat_fork", { chatId, index: index + s.hiddenBefore.value, text: message.text });
+        return chat.id;
+      } catch (e) {
+        s.notice(`Could not fork: ${e}`);
+        return null;
+      }
+    },
+    trackAcpControl(rpcId, restore = false) {
+      s.acpControlIds.add(rpcId);
+      if (restore) s.acpRestorePushIds.add(rpcId);
+    },
+    showAcpSelection(id, value) {
+      if (id === "mode") {
+        if (s.acpModes.value) s.acpModes.value.currentModeId = value;
+        return;
+      }
+      const option = s.acpConfigOptions.value.find((o) => o.id === id);
+      if (option) option.currentValue = value;
+    },
+    seedAcpCapabilities(modes, configOptions) {
+      if (s.acpModes.value || s.acpConfigOptions.value.length) return;
+      s.acpModes.value = modes;
+      s.acpConfigOptions.value = configOptions;
+    },
+    suppressDoneToast() {
+      s.suppressNextDone.value = true;
+    },
+    async requestContextReport() {
+      if (s.busy.value || s.contextReportPending.value) return;
+      s.contextReportPending.value = true;
+      s.awaitingContextReport.value = true;
+      try {
+        await s.deps.invoke("chat_send", { chatId, text: "/context", images: [] });
+      } catch {
+        s.contextReportPending.value = false;
+        s.awaitingContextReport.value = false;
+      }
+    },
+    async loadImage(message, i) {
+      const src = message.images?.[i] ?? "";
+      const ref = parseImageStub(src);
+      if (!ref) return src;
+      const data = await s.deps.invoke<string>("load_chat_image", { chatId, index: ref.index, image: ref.image });
+      // The row the view holds is this session's own object — replace the stub
+      // in place so every reader (the bubble, ↑-to-edit, a later save) sees the image.
+      const row = s.messages.value.find((m) => m.id === message.id && m.role === message.role);
+      if (row?.images?.[i] === src) row.images[i] = data;
+      return data;
+    },
+    async loadEarlier() {
+      if (s.loadingEarlier.value || s.hiddenBefore.value <= 0) return;
+      s.loadingEarlier.value = true;
+      try {
+        const page = await s.deps.invoke<ChatMessagesPage>("load_chat_messages_page", {
+          chatId, before: s.hiddenBefore.value, limit: TRANSCRIPT_PAGE,
+        });
+        const older = page.messages;
+        const have = new Set(s.messages.value.map((m) => `${m.role}:${m.id}`));
+        s.messages.value = [...older.filter((m) => !have.has(`${m.role}:${m.id}`)), ...s.messages.value];
+        s.hiddenBefore.value = page.start;
+      } catch (e) {
+        s.notice(`Could not load earlier messages: ${e}`);
+      } finally {
+        s.loadingEarlier.value = false;
+      }
+    },
+    hydrate({ messages, hiddenBefore, sessionId }) {
+      if (messages && s.messages.value.length === 0) {
+        // Follow-ups queued by an older build sit in the transcript as
+        // `queued` rows: hand them to Go's queue, in order, once.
+        const legacy = messages.filter((m) => m.role === "queued");
+        if (legacy.length) {
+          messages = messages.filter((m) => m.role !== "queued");
+          void (async () => {
+            for (const m of legacy) await s.enqueueMessage(m.text, m.images);
+            s.save();
+          })();
+        }
+        s.messages.value = messages;
+        s.hiddenBefore.value = hiddenBefore ?? 0;
+        // Ids must continue past the loaded history, or new messages collide
+        // with old ones on the same `:key`.
+        s.nextMsgId = messages.reduce((max, m) => Math.max(max, m.id + 1), s.nextMsgId);
+      }
+      if (sessionId) s.sessionId.value = sessionId;
+    },
+    recallLastUserMessage() {
+      const lastUser = [...s.messages.value].reverse().find((m) => m.role === "user");
+      if (!lastUser) return null;
+      s.messages.value = s.messages.value.filter((m) => m !== lastUser);
+      return lastUser.text;
+    },
+
+    async enqueueMessage(text, images) {
+      try {
+        const item = await s.deps.invoke<GoQueueItem>("chat_queue_add", { chatId, text, images: images ?? [] });
+        const entry = fromGo(item);
+        if (!s.queue.value.some((q) => q.id === entry.id)) s.queue.value = [...s.queue.value, entry];
+        return entry;
+      } catch (e) {
+        s.notice(`Could not queue the message: ${e}`);
+        return null;
+      }
     },
     removeQueuedMessage(id) {
-      s.messages.value = s.messages.value.filter((message) => message.id !== id || message.role !== "queued");
+      s.queue.value = s.queue.value.filter((q) => q.id !== id);
+      void s.deps.invoke("chat_queue_remove", { id }).catch(() => {});
+    },
+    editQueuedMessage(id, text) {
+      const next = text.trim();
+      if (!next) return;
+      s.queue.value = s.queue.value.map((q) => (q.id === id ? { ...q, text: next } : q));
+      void s.deps.invoke("chat_queue_update", { id, text: next }).catch(() => {});
     },
     clearQueuedMessages() {
-      s.messages.value = s.messages.value.filter((message) => message.role !== "queued");
+      const ids = s.queue.value.map((q) => q.id);
+      s.queue.value = [];
+      for (const id of ids) void s.deps.invoke("chat_queue_remove", { id }).catch(() => {});
     },
-    moveQueuedMessageNext(id) {
-      const messages = s.messages.value;
-      const from = messages.findIndex((m) => m.id === id && m.role === "queued");
-      const head = messages.findIndex((m) => m.role === "queued");
-      if (from < 0 || from === head) return;
-      const [entry] = messages.splice(from, 1);
-      messages.splice(head, 0, entry);
-    },
-    takeNextQueuedMessage() {
-      const index = s.messages.value.findIndex((m) => m.role === "queued");
-      if (index < 0) return undefined;
-      const [message] = s.messages.value.splice(index, 1);
-      return queuedEntry(message)[0];
+    async moveQueuedMessage(id, toIndex) {
+      const queue = [...s.queue.value];
+      const from = queue.findIndex((q) => q.id === id);
+      const to = Math.min(Math.max(toIndex, 0), queue.length - 1);
+      if (from < 0 || from === to) return;
+      const [entry] = queue.splice(from, 1);
+      queue.splice(to, 0, entry);
+      s.queue.value = queue;
+      await s.deps.invoke("chat_queue_reorder", { chatId, ids: queue.map((q) => q.id) }).catch(() => {});
     },
 
     scope,
@@ -447,6 +771,13 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.pendingSends.add(text);
     },
     save() {
+      // A window is not the transcript: save_chat_messages replaces the whole
+      // chat, so writing this would delete everything above it. Go folds and
+      // persists the stream itself (chattranscript.go); what this skips is only
+      // client-made rows (notes), which are not worth a truncated history.
+      if (s.hiddenBefore.value > 0) return;
+      // Same for a transcript still holding image stubs: they would replace the stored images.
+      if (s.messages.value.some((m) => m.images?.some(isImageStub))) return;
       // Partial messages are mid-stream and get re-sent; the cap only guards
       // against a pathological chat, not storage (a row per message is cheap).
       const toSave = s.messages.value.filter((m) => !m.partial).slice(-2000);
@@ -459,7 +790,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     sync() {
       s.deps.host.syncChat(chatId, {
         busy: s.busy.value,
-        messageCount: s.messages.value.filter((m) => m.role !== "tool").length,
+        messageCount: s.messages.value.filter((m) => m.role !== "tool").length + s.hiddenBefore.value,
       });
       // The remote mirror is discovery + reconnect history only; incremental
       // updates travel over the stream itself.
@@ -510,26 +841,34 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.settleControlRequest(requestId);
       s.sync();
     },
-    drain() {
-      if (s.busy.value || !s.view) return;
-      // Let the finishing turn settle its transcript, status and provider
-      // correlation first, then re-check: Claude can resume the same session
-      // on its own in that gap (markActive), and taking the message before the
-      // gap meant the re-queue on the far side put it back at the TAIL.
-      nextTick(() => {
-        if (s.busy.value || !s.view) return;
-        const next = s.takeNextQueuedMessage();
-        if (!next) return;
-        s.save();
-        void s.view.send(next.text, next.images);
-      });
-    },
     async listenEvents() {
       if (!s.eventsUL) {
         s.eventsUL = await s.deps.listen<ChatEventBatch>(`chat-event-${chatId}`, (e) => {
           if (e.payload.ord > s.lastOrd) s.lastOrd = e.payload.ord;
           onEvents(s, e.payload);
         });
+      }
+      if (!s.queueUL) {
+        s.queueUL = await s.deps.listen<{ chatId: number; items: GoQueueItem[] }>("chat-queue-changed", (e) => {
+          if (e.payload.chatId === chatId) s.queue.value = e.payload.items.map(fromGo);
+        });
+        try {
+          s.queue.value = ((await s.deps.invoke<GoQueueItem[]>("chat_queue_list", { chatId })) ?? []).map(fromGo);
+        } catch {
+          // Best effort: the next chat-queue-changed brings it.
+        }
+      }
+    },
+    async recoverPendingRequests() {
+      try {
+        const lines = await s.deps.invoke<StreamEvent[]>("load_pending_chat_requests", { chatId });
+        for (const ev of lines ?? []) {
+          // onLine already ignores a request that was answered or is on screen.
+          if (ev.kind === "claude-data") feed(s, ev, onLine);
+          else if (ev.kind === "acp-req") feed(s, ev, onAcpReq);
+        }
+      } catch {
+        // Best effort: an older backend has no such call, and the live path still works.
       }
     },
     async listenClaude() {
@@ -548,6 +887,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     detach() {
       if (s.evictTimer) { clearTimeout(s.evictTimer); s.evictTimer = null; }
       s.eventsUL?.(); s.eventsUL = null;
+      s.queueUL?.(); s.queueUL = null;
       s.claudeUL?.(); s.claudeUL = null;
       s.acpDataUL?.(); s.acpDataUL = null;
       s.acpReqUL?.(); s.acpReqUL = null;
@@ -559,10 +899,9 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
 
     maybeEvict() {
       if (s.evictTimer) clearTimeout(s.evictTimer);
-      // Deferred, and re-checked when it fires: a turn boundary is immediately
-      // followed by the queued-message flush (a nextTick away), and evicting
-      // between the two would hand that send a detached session while the next
-      // mount built a fresh one.
+      // Deferred, and re-checked when it fires: a turn boundary is often
+      // followed by another turn (Go's queue drain a moment later), and
+      // evicting in between would drop listeners the next mount rebuilds.
       s.evictTimer = setTimeout(() => {
         s.evictTimer = null;
         if (!evictable(s)) return;
@@ -582,13 +921,20 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       // session, and the next mount finds the result already here.
     },
   };
-  // A turn ending is the ONLY thing that releases the queue, so watch the flag
-  // rather than calling the drain from each place that clears it: `session.exited`
-  // (the CLI died mid-turn) and the send-failure branches also clear `busy`.
-  // Owned here, not by a watcher in the view: a chat leaf unmounts the moment
-  // the user looks at another tab, and a component watcher died with it — the
-  // queue then sat parked behind a send button the queue itself disables.
-  scope.run(() => watch(s.busy, (running) => { if (!running) s.drain(); }));
+  // Turn clock: stamped onto the user message that opened the turn when it
+  // settles, so it persists with the history and the fold row can say
+  // "Worked for 26s" after a reload.
+  scope.run(() => watch(s.busy, (running) => {
+    if (running) {
+      s.lastActivityAt.value = Date.now();
+      s.turnStartedAt.value = Date.now();
+      return;
+    }
+    if (!s.turnStartedAt.value) return;
+    const lastUser = [...s.messages.value].reverse().find((m) => m.role === "user");
+    if (lastUser) lastUser.turnMs = Date.now() - s.turnStartedAt.value;
+    s.turnStartedAt.value = 0;
+  }, { flush: "sync" }));
   return s;
 }
 
@@ -656,9 +1002,9 @@ function markActive(s: InternalSession) {
   s.sync();
 }
 
-/** Everything a finished turn does beyond the transcript. Shared by the native
- *  boundary (turn.completed) and the ACP one (the response to our own
- *  session/prompt, which only the sender can correlate). */
+/** Everything a finished turn does beyond the transcript. Every transport ends
+ *  its turn with turn.completed / turn.failed — for Codex / ACP the Go runtime
+ *  emits it after the response to its own prompt. */
 function finishTurn(s: InternalSession) {
   s.busy.value = false;
   s.settleTranscript();
@@ -694,8 +1040,13 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
       }
     }
     if (isProjectedEvent(event.type)) {
-      if (!(s.view?.usesRpcRuntime() ?? false)) markActive(s);
+      // A message.note is Burrow's own row, not agent output — "Changed N files"
+      // lands right after turn.completed and would restart a turn nothing ends.
+      if (event.type !== "message.note" && !(s.view?.usesRpcRuntime() ?? false)) markActive(s);
+      const before = s.messages.value.length;
       if (applyChatEvent(projectionOf(s), event)) s.view?.scrollToBottom();
+      // Arrival time for the visit watermark — the same stamp Go's fold puts on its copy.
+      for (const m of s.messages.value.slice(before)) m.at ??= Date.now();
       if (event.type === "tool.started" && event.toolCallId && (event.name === "Task" || event.name === "Agent")) {
         host.subagentStarted(s.chatId, event.toolCallId, event.input);
       }
@@ -745,19 +1096,67 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
         }
         break;
       case "session.exited":
-        // The process is gone, so the next send must spawn a replacement.
-        s.runtimeStarted.value = false;
-        if (s.busy.value) {
-          // Died mid-turn with no boundary of its own — settle it here or the
-          // spinner runs forever.
-          s.busy.value = false;
-          s.settleTranscript(true);
-          s.sync();
+      case "session.reset":
+        // The process is gone — it died (exited) or the chat runtime stopped
+        // it on purpose (reset: restart, interrupt, clear, a launch-settings
+        // change). Either way the next send spawns a replacement, nothing the
+        // old process asked is answerable any more, and no turn is running.
+        {
+          const cleared = event.type === "session.reset" && event.cleared === true;
+          resetRuntime(s, cleared);
+          // Go restarted the stream's numbering with it.
+          if (cleared) s.lastOrd = batch.ord;
         }
-        s.maybeEvict();
         break;
     }
   }
+}
+
+/**
+ * The process is gone — nothing it asked is answerable any more and no turn is
+ * running. `cleared` also empties the transcript and the turn accounting.
+ */
+function resetRuntime(s: InternalSession, cleared: boolean) {
+  dropPendingRequests(s);
+  if (cleared) {
+    s.messages.value = [];
+    s.hiddenBefore.value = 0;
+    s.sessionId.value = "";
+    s.turnStats.value = null;
+    s.sessionCost.value = 0;
+    s.claudeGeneratedTitle.value = false;
+  }
+  if (s.busy.value) {
+    // Died mid-turn with no boundary of its own — settle it here or the
+    // spinner runs forever.
+    s.busy.value = false;
+    s.settleTranscript(true);
+  } else {
+    s.settleTranscript();
+  }
+  s.sync();
+  s.maybeEvict();
+}
+
+/** Every pending request belongs to a process; when it goes, they all go. */
+function dropPendingRequests(s: InternalSession) {
+  const slots = [
+    [s.pendingPermission, s.pendingPermissionMsgId],
+    [s.pendingDiff, s.pendingDiffMsgId],
+    [s.pendingQuestion, s.pendingQuestionMsgId],
+    [s.pendingPlan, s.pendingPlanMsgId],
+    [s.acpPermReq, s.acpPermMsgId],
+  ] as const;
+  for (const [request, markerId] of slots) {
+    if (request.value) s.removeFeedMarker(markerId.value);
+    markerId.value = null;
+    request.value = null;
+  }
+  s.nativeControlResponsePending.value = false;
+  s.acpPermRpcId.value = null;
+  s.permissionResponsePending.value = false;
+  s.codexUserInput.value = null;
+  s.codexUserInputPending.value = false;
 }
 
 function hasActiveControlRequest(s: InternalSession, requestId: string) {
@@ -862,8 +1261,8 @@ function onLine(s: InternalSession, line: string) {
   // assistant / user (tool results) / result / exit arrive as domain events.
 }
 
-/** Lines from acp-data-{chatId}: the session handshake, selector replies, the
- *  session/prompt response that ends a turn, Codex's serverRequest/resolved. */
+/** Lines from acp-data-{chatId}: the session handshake, selector replies,
+ *  Codex's serverRequest/resolved. The turn end is a domain event. */
 function onAcpData(s: InternalSession, raw: string) {
   let msg: Record<string, unknown>;
   try { msg = JSON.parse(raw); } catch { console.warn(`[chat-diag] unparseable acp-data line, dropped (len=${raw.length})`); return; }
@@ -884,7 +1283,7 @@ function onAcpData(s: InternalSession, raw: string) {
     return;
   }
 
-  // Emitted by acp_start after the handshake: sessionId (for resume) plus the
+  // Emitted by the Go runtime after an ACP / Codex handshake: sessionId (for resume) plus the
   // modes/configOptions that populate the selectors.
   if (msg._burrow === "session") {
     const sid = msg.sessionId as string;
@@ -905,25 +1304,21 @@ function onAcpData(s: InternalSession, raw: string) {
 
   if ("id" in msg && !("method" in msg)) {
     const rid = msg.id as number;
-    if (s.acpControlIds.has(rid)) {
-      s.acpControlIds.delete(rid);
-      // Reply to a restore push we sent ourselves: apply it, but do NOT
-      // restore from it — that is the ping-pong the guard exists for.
-      const wasRestorePush = s.acpRestorePushIds.delete(rid);
-      const result = msg.result as { configOptions?: AcpConfigOption[]; modes?: AcpModes } | undefined;
-      if (result?.configOptions) s.acpConfigOptions.value = result.configOptions;
-      if (result?.modes) s.acpModes.value = result.modes;
-      // A model / mode / effort switch comes back with the adapter's whole
-      // selector set reset to its defaults — put the user's picks back.
-      if (!wasRestorePush && (result?.configOptions || result?.modes)) s.view?.restoreAcpSelections();
-      return;
-    }
-    // The turn is settled by the response to OUR session/prompt.
-    if (s.acpPromptRpcId.value === null || rid !== s.acpPromptRpcId.value) return;
-    s.acpPromptRpcId.value = null;
-    finishTurn(s);
+    // A selector reply carries the adapter's whole selector set — apply it
+    // whoever asked (the Go runtime pushes the row's settings after a start).
+    const result = msg.result as { configOptions?: AcpConfigOption[]; modes?: AcpModes } | undefined;
+    if (result?.configOptions) s.acpConfigOptions.value = result.configOptions;
+    if (result?.modes) s.acpModes.value = result.modes;
+    if (!s.acpControlIds.delete(rid)) return;
+    // Reply to a restore push we sent ourselves: apply it, but do NOT
+    // restore from it — that is the ping-pong the guard exists for.
+    const wasRestorePush = s.acpRestorePushIds.delete(rid);
+    // A model / mode / effort switch comes back with the adapter's whole
+    // selector set reset to its defaults — put the user's picks back.
+    if (!wasRestorePush && (result?.configOptions || result?.modes)) s.view?.restoreAcpSelections();
   }
-  // session/update and the {_burrow:"exit"} EOF arrive as domain events.
+  // session/update, the turn boundary and the {_burrow:"exit"} EOF arrive as
+  // domain events.
 }
 
 /** Lines from acp-req-{chatId}: blocking permission and user-input requests. */

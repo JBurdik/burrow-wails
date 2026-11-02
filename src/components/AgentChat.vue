@@ -1,9 +1,10 @@
 <template>
-  <div class="claude-chat flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
-    <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden bg-base">
+  <div class="claude-chat surface-glow [--glow-base:var(--bg-base)] drop-zone flex h-full flex-row overflow-hidden bg-base" :style="{ '--agent-accent': agentAccentColor }" @mousedown.capture="onWindowFocus">
+    <div class="chat-main flex min-w-0 flex-1 flex-col overflow-hidden">
 
     <!-- Chat title bar -->
-    <div v-if="activeSession?.title" class="chat-title-bar flex flex-shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[12px] font-medium text-foreground">
+    <!-- Only when embedded (Right Panel sub-agent): a full-size chat shows its title in the window's top row. -->
+    <div v-if="compact && activeSession?.title" class="chat-title-bar flex flex-shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[12px] font-medium text-foreground" :title="activeSession.recap || undefined">
       <span class="min-w-0 flex-1 truncate">{{ activeSession.title }}</span>
       <span v-if="turnCount > 0" class="flex-shrink-0 text-[11px] font-normal text-muted-foreground">{{ turnCount }} turn{{ turnCount === 1 ? '' : 's' }}</span>
       <span v-if="activeModelLabel" class="flex flex-shrink-0 items-center gap-1 text-[11px] font-normal text-muted-foreground">
@@ -137,15 +138,40 @@
       @cancel="cancelCodexUserInput"
     />
 
-    <div ref="scrollEl" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
+    <div class="relative flex min-h-0 flex-1">
+    <ThreadFindBar :messages="messages" :container="scrollEl" @reveal="revealForFind" />
+    <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
-      <div v-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+      <!-- A remount starts with no messages until the transcript is read back, which on
+           a slow link (remote client) takes long enough to read as an empty conversation. -->
+      <div v-if="messages.length === 0 && transcriptLoading" class="flex flex-col gap-6 px-4 py-4" aria-busy="true" aria-label="Loading conversation">
+        <div class="ml-auto h-9 w-2/5 animate-pulse rounded-2xl bg-hover" />
+        <div class="flex flex-col gap-2">
+          <div class="h-3 w-full animate-pulse rounded bg-hover" />
+          <div class="h-3 w-11/12 animate-pulse rounded bg-hover" />
+          <div class="h-3 w-3/5 animate-pulse rounded bg-hover" />
+        </div>
+        <div class="ml-auto h-9 w-1/3 animate-pulse rounded-2xl bg-hover" />
+        <div class="flex flex-col gap-2">
+          <div class="h-3 w-10/12 animate-pulse rounded bg-hover" />
+          <div class="h-3 w-2/3 animate-pulse rounded bg-hover" />
+        </div>
+      </div>
+      <div v-else-if="messages.length === 0" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
         <div class="chat-empty-avatar mb-2 flex h-11 w-11 items-center justify-center rounded-[var(--radius-avatar)] border border-border" style="background: var(--surface-elevated);" aria-hidden="true">
           <component :is="currentAgentIcon" :size="28" :style="{ color: 'var(--agent-accent)' }" />
         </div>
         <span class="text-[9px] font-semibold uppercase tracking-[.08em] text-muted-foreground">New conversation</span>
         <span class="text-base font-semibold text-foreground">Start a focused conversation</span>
         <span class="mt-0.5 font-mono text-[11px] text-muted-foreground">Working in {{ cwdDisplay }}</span>
+      </div>
+
+      <div v-if="hiddenBefore > 0" class="flex justify-center py-2">
+        <button
+          class="rounded-md border border-border px-3 py-1 text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground disabled:opacity-50"
+          :disabled="loadingEarlier"
+          @click="loadEarlierKeepingScroll"
+        >{{ loadingEarlier ? "Loading…" : `Load earlier (${hiddenBefore} more)` }}</button>
       </div>
 
       <div
@@ -155,10 +181,12 @@
         class="chat-message"
         :class="[`role-${msg.role}`, { partial: msg.partial }]"
       >
+        <div v-if="msg.id === watermarkRowId" class="flex items-center gap-2 px-4 pt-1 pb-2 text-[11px] font-medium text-primary" role="separator" aria-label="New messages">
+          <span class="h-px flex-1 bg-primary/40" />New<span class="h-px flex-1 bg-primary/40" />
+        </div>
         <!-- Collapsed tool-call group pill ("Ran N commands" / "Used N tools") -->
         <template v-if="msg.role === 'tool-group-header'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
             <div class="tool-row" :class="{ 'tool-row-failed': groupHasFailure(msg.items) }" @click="toggleGroup(msg.groupId)">
               <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': isGroupExpanded(msg.groupId) }" />
               <component :is="groupIcon(msg.items)" :size="12" class="tool-icon" />
@@ -172,28 +200,48 @@
         <!-- Settled turn: its thinking/tool rows fold behind this one row -->
         <template v-else-if="msg.role === 'turn-fold'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
-            <div class="tool-row" @click="foldedTurns[msg.turnKey] = !msg.folded">
-              <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': !msg.folded }" />
-              <PhClock :size="11" class="tool-icon" />
-              <span>{{ msg.label }}</span>
-            </div>
+            <button class="worked-bar" @click="foldedTurns[msg.turnKey] = !msg.folded">
+              <PhCaretRight :size="12" weight="bold" class="tool-caret" :class="{ 'tool-caret-open': !msg.folded }" />
+              <span class="font-semibold text-foreground">{{ msg.label }}</span>
+              <span class="ml-auto flex items-center gap-1.5">
+                <span v-if="msg.toolCount" class="worked-pill"><PhWrench :size="12" />{{ msg.toolCount }} tool {{ msg.toolCount === 1 ? 'call' : 'calls' }}</span>
+                <span v-if="msg.fileCount" class="worked-pill"><PhPencilSimple :size="12" />{{ msg.fileCount }} {{ msg.fileCount === 1 ? 'file' : 'files' }}</span>
+              </span>
+            </button>
           </div>
         </template>
 
-        <!-- Changed files this turn touched, with a +/- diffstat -->
+        <!-- Files this turn edited: a diffstat card whose rows expand into the
+             edit's own before/after lines (Ghostex-style inline diff). -->
         <template v-else-if="msg.role === 'changed-files'">
-          <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
-            <div class="changed-files max-w-[min(560px,90%)]">
-              <div class="changed-files-head">
-                <PhGitDiff :size="11" class="flex-shrink-0" />
-                <span>Changed files ({{ msg.files.length }})</span>
-                <span class="ml-auto flex-shrink-0 font-mono text-[10px]"><span class="diff-add">+{{ msg.added }}</span> <span class="diff-del">−{{ msg.removed }}</span></span>
+          <div class="flex items-start gap-2.5 px-4 py-1">
+            <div class="diff-card min-w-0 max-w-[720px] flex-1">
+              <div class="diff-card-head">
+                <span class="diff-card-icon"><PhPencilSimple :size="14" /></span>
+                <div class="min-w-0">
+                  <div class="text-[13px] font-semibold text-foreground">Edited {{ msg.files.length }} {{ msg.files.length === 1 ? 'file' : 'files' }}</div>
+                  <div class="truncate text-[11px] text-muted-foreground">{{ diffDirs(msg.files) }}</div>
+                </div>
+                <span class="ml-auto flex-shrink-0 font-mono text-[12px]"><span class="diff-add">+{{ msg.added }}</span> <span class="diff-del">−{{ msg.removed }}</span></span>
+                <span class="diff-ratio"><span class="diff-ratio-add" :style="{ width: diffRatio(msg.added, msg.removed) + '%' }" /></span>
               </div>
-              <div v-for="f in msg.files" :key="f.path" class="changed-files-row cursor-pointer" :title="f.path" @click="openChangedFileDiff(f.path)">
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ basename(f.path) }}</span>
-                <span class="ml-auto flex-shrink-0 font-mono text-[10px]"><span class="diff-add">+{{ f.added }}</span> <span class="diff-del">−{{ f.removed }}</span></span>
+              <div v-for="(f, fi) in msg.files" :key="f.path">
+                <div class="diff-file-row" :title="f.path" @click="toggleDiff(msg.id, f.path, fi)">
+                  <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': diffOpen(msg.id, f.path, fi) }" />
+                  <PhFileText :size="13" class="flex-shrink-0 text-[var(--chat-info)]" />
+                  <span class="max-w-[55%] flex-shrink-0 truncate font-semibold text-foreground">{{ basename(f.path) }}</span>
+                  <span class="min-w-0 truncate text-muted-foreground" style="direction: rtl; text-align: left;">{{ dirOf(f.path) }}</span>
+                  <span class="ml-auto flex-shrink-0 font-mono text-[11px]"><span class="diff-add">+{{ f.added }}</span> <span class="diff-del">−{{ f.removed }}</span></span>
+                  <span class="diff-blocks"><i v-for="(b, bi) in diffBlocks(f.added, f.removed)" :key="bi" :class="b" /></span>
+                  <button class="diff-open" title="Open the file's diff" @click.stop="openChangedFileDiff(f.path)"><PhArrowSquareOut :size="12" /></button>
+                </div>
+                <div v-if="diffOpen(msg.id, f.path, fi)" class="diff-lines">
+                  <template v-for="(l, li) in hunkLines(f.hunks).lines" :key="li">
+                    <div v-if="l.kind === 'sep'" class="diff-sep">⋯</div>
+                    <div v-else class="diff-line" :class="l.kind === 'add' ? 'diff-line-add' : 'diff-line-del'"><span class="diff-sign">{{ l.kind === 'add' ? '+' : '−' }}</span>{{ l.text || ' ' }}</div>
+                  </template>
+                  <div v-if="hunkLines(f.hunks).hidden" class="diff-more" @click="openChangedFileDiff(f.path)">{{ hunkLines(f.hunks).hidden }} more lines — open diff</div>
+                </div>
               </div>
             </div>
           </div>
@@ -202,16 +250,39 @@
         <!-- User message -->
         <template v-else-if="msg.role === 'user'">
           <div class="group flex items-end justify-end gap-1.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
-            <div class="bubble-user max-w-[72%] rounded-[var(--radius-bubble)] px-3.5 py-2.5 text-[13px] leading-[1.55]" style="background: var(--accent); color: #fff;">
+            <div class="flex flex-shrink-0 items-center self-center">
+              <button class="message-copy-btn" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
+                <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
+                <PhCopy v-else :size="13" />
+              </button>
+              <button class="message-copy-btn" aria-label="Edit" title="Edit — put this text back in the composer" @click="editMessage(msg)">
+                <PhPencilSimple :size="13" />
+              </button>
+              <template v-if="canBranch">
+                <button class="message-copy-btn" aria-label="Rewind to here" title="Rewind to here — drop this message and everything after it, then edit and resend" @click="rewindTo(msg)">
+                  <PhArrowCounterClockwise :size="13" />
+                </button>
+                <button class="message-copy-btn" aria-label="Fork from here" title="Fork from here — continue this conversation in a new chat" @click="forkFrom(msg)">
+                  <PhGitFork :size="13" />
+                </button>
+              </template>
+            </div>
+            <div class="bubble-user max-w-[72%] rounded-[18px] px-4 py-2.5 text-[13px] leading-[1.55]" style="background: var(--bg-selected); color: var(--text-primary);">
               <div v-if="msg.images && msg.images.length > 0" class="mb-1.5 flex flex-wrap gap-1.5">
-                <img
-                  v-for="(img, i) in msg.images"
-                  :key="i"
-                  :src="img"
-                  class="block max-h-40 max-w-[200px] cursor-pointer rounded object-cover"
-                  :alt="`Image ${i + 1}`"
-                  @click="showImage(img)"
-                />
+                <template v-for="(img, i) in msg.images" :key="i">
+                  <button
+                    v-if="isImageStub(img)"
+                    class="flex h-16 items-center gap-1.5 rounded border border-border px-3 text-[11.5px] text-secondary-foreground hover:bg-hover"
+                    @click="openStubImage(msg, i)"
+                  ><PhImage :size="14" />{{ loadingImages.has(`${msg.id}:${i}`) ? "Loading…" : "Show image" }}</button>
+                  <img
+                    v-else
+                    :src="img"
+                    class="block max-h-40 max-w-[200px] cursor-pointer rounded object-cover"
+                    :alt="`Image ${i + 1}`"
+                    @click="showImage(img)"
+                  />
+                </template>
               </div>
               <div class="md-body">
                 <template v-for="(seg, segIdx) in userMsgSegments(msg)" :key="segIdx">
@@ -220,8 +291,6 @@
                 </template>
               </div>
             </div>
-            <div v-if="isLastOfRun(msgIdx)" class="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-border bg-hover text-[11px] font-bold text-secondary-foreground">U</div>
-            <div v-else class="w-[26px] flex-shrink-0" />
           </div>
         </template>
 
@@ -229,7 +298,6 @@
         <template v-else-if="msg.role === 'tool'">
           <template v-if="!groupIdOf(msg.id) || isGroupExpanded(groupIdOf(msg.id))">
             <div class="group flex items-start gap-2.5 px-4 py-[3px]">
-              <div class="w-[26px] flex-shrink-0" />
               <div class="tool-row" :class="`tool-row-${toolStatus(msg)}`" @click="msg.toolExpanded = !msg.toolExpanded">
                 <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': msg.toolExpanded }" />
                 <component :is="toolIconFor(msg)" :size="12" class="tool-icon" />
@@ -240,7 +308,6 @@
               </div>
             </div>
             <div v-if="msg.toolExpanded" class="flex items-start gap-2.5 px-4 py-[3px]">
-              <div class="w-[26px] flex-shrink-0" />
               <div class="flex flex-col gap-1.5">
                 <div v-if="msg.toolInput && Object.keys(msg.toolInput).length" class="flex flex-col gap-[3px]">
                   <div v-for="k in ['file_path','command','pattern','url','description']" :key="k" v-show="msg.toolInput[k] !== undefined" class="flex max-w-[min(560px,90vw)] gap-1.5 font-mono text-[10px]">
@@ -272,6 +339,21 @@
           </div>
         </template>
 
+        <!-- Surface marker (background task, plan, changed files): a pointer to a Right Panel surface -->
+        <template v-else-if="msg.role === 'system-info' && msg.surface">
+          <div class="flex justify-center px-4 py-1">
+            <button
+              class="flex max-w-[min(440px,85%)] items-center gap-1.5 rounded-[20px] border border-border bg-hover px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-accent/45 hover:text-foreground"
+              :title="msg.text"
+              @click="openSurfaceFromTranscript(msg.surface)"
+            >
+              <component :is="surfaceIcon(msg.surface)" :size="11" class="shrink-0" />
+              <span class="truncate">{{ msg.text }}</span>
+              <PhArrowRight :size="10" class="shrink-0" />
+            </button>
+          </div>
+        </template>
+
         <!-- System info marker (permission requested, plan ready, etc.) -->
         <template v-else-if="msg.role === 'system-info'">
           <div class="flex justify-center px-4 py-1">
@@ -282,7 +364,6 @@
         <!-- Permission log -->
         <template v-else-if="msg.role === 'permission'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
             <div class="bubble-permission" :class="msg.text.startsWith('✓') ? 'perm-granted' : 'perm-rejected'">
               <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ msg.text }}</span>
             </div>
@@ -292,7 +373,6 @@
         <!-- Thinking -->
         <template v-else-if="msg.role === 'thinking'">
           <div class="flex items-start gap-2.5 px-4 py-[3px]">
-            <div class="w-[26px] flex-shrink-0" />
             <div class="max-w-[90%]">
               <div class="tool-row" @click="thinkingExpanded[msg.id] = !thinkingExpanded[msg.id]">
                 <PhCaretRight :size="10" class="tool-caret" :class="{ 'tool-caret-open': thinkingExpanded[msg.id] }" />
@@ -305,12 +385,8 @@
 
         <!-- Assistant message -->
         <template v-else>
-          <div class="flex items-start gap-2.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-2.5 pb-[3px]' : 'py-[1px]'">
-            <div v-if="isFirstOfRun(msgIdx)" class="agent-avatar mt-0.5 flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center">
-              <component :is="currentAgentIcon" :size="14" :style="{ color: 'var(--agent-accent)' }" />
-            </div>
-            <div v-else class="mt-0.5 w-[26px] flex-shrink-0" />
-            <div class="min-w-0 flex-1 pt-1 text-[13px] leading-[1.65] text-foreground">
+          <div class="group flex items-start gap-2.5 px-4" :class="isFirstOfRun(msgIdx) ? 'pt-3 pb-1' : 'py-[1px]'">
+            <div class="min-w-0 flex-1 pt-1 text-[14.5px] leading-[1.7] text-foreground">
               <TranscriptComments
                 :message-id="msg.id"
                 :text="msg.text"
@@ -322,43 +398,65 @@
                 @follow-up="jumpToFeedback"
               >
                 <!-- eslint-disable-next-line vue/no-v-html -->
-                <div class="md-body" v-html="renderMd(msg.text)" />
+                <div class="md-body" v-html="renderAssistantMd(msg)" @click="onRichBlockClick" />
               </TranscriptComments>
             </div>
-            <button class="message-copy-btn mt-0.5" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
-              <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
-              <PhCopy v-else :size="13" />
-            </button>
+            <div class="mt-0.5 flex flex-shrink-0 items-center">
+              <button class="message-copy-btn" :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" :title="copiedMessageId === msg.id ? 'Copied' : 'Copy message'" @click="copyMessage(msg)">
+                <PhCheck v-if="copiedMessageId === msg.id" :size="13" weight="bold" />
+                <PhCopy v-else :size="13" />
+              </button>
+              <button v-if="canBranch && finalReplyIds.has(msg.id)" class="message-copy-btn" aria-label="Fork from here" title="Fork from here — continue this conversation in a new chat" @click="forkFrom(msg)">
+                <PhGitFork :size="13" />
+              </button>
+            </div>
           </div>
         </template>
       </div>
 
-      <div v-if="busy" class="flex items-center gap-1.5 px-4 py-1.5">
-        <div class="agent-avatar flex h-[22px] w-[22px] items-center justify-center">
-          <component :is="currentAgentIcon" :size="12" :style="{ color: 'var(--agent-accent)' }" />
-        </div>
-        <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
-        <span class="ml-1 text-[11px] italic text-muted-foreground tabular-nums">Working for {{ workingElapsed }}</span>
+      <!-- Working line (Ghostex-style): a slowly spinning spark, a playful verb, the clock. -->
+      <div v-if="busy" class="flex items-center gap-2 px-4 py-2">
+        <PhSparkle :size="15" weight="fill" class="working-spark" />
+        <span class="text-[13px] text-secondary-foreground">{{ workingVerb }}…</span>
+        <span class="text-[12px] tabular-nums text-muted-foreground">{{ workingElapsed }}</span>
       </div>
 
-      <!-- Queued follow-ups, pinned below the live turn (Claude desktop-style) -->
-      <div v-for="q in messageQueue" :key="q.id" class="flex flex-col items-end gap-0.5 px-4 py-[3px]">
-        <div class="inline-flex max-w-[min(460px,85%)] items-center gap-1.5 rounded-[14px] border border-dashed border-border bg-hover px-3 py-2 text-[13px] text-muted-foreground">
-          <span v-html="renderUserMd(q.text)" />
-        </div>
-        <div class="flex gap-2 text-[11px] text-muted-foreground">
-          <button class="border-none bg-transparent p-0 hover:text-foreground" @click="removeQueued(q.id)">Remove</button>
-          <button class="border-none bg-transparent p-0 hover:text-foreground" @click="sendQueuedNow(q.id)" title="Interrupt the current turn and send this now">Send now</button>
-        </div>
+      <!-- Usage limit (src-wails/chatlimit.go): the last turn failed on it. -->
+      <div v-if="usageLimit && !busy" class="mx-4 my-2 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
+        <PhWarningCircle :size="13" weight="bold" class="flex-shrink-0" />
+        <span class="flex-1 truncate">
+          Usage limit reached — resets at <span class="text-foreground">{{ usageLimit.label }}</span><template v-if="usageLimit.armed"> · resuming automatically</template>
+        </span>
+        <button v-if="!usageLimit.armed" class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_arm')">Resume automatically</button>
+        <button class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_dismiss')">{{ usageLimit.armed ? 'Cancel' : 'Dismiss' }}</button>
       </div>
       </div>
+    </div>
+    <!-- Minimap (after Ghostex): one dash per prompt you sent, longer for
+         longer prompts; hover previews it, click jumps to it. -->
+    <div v-if="minimapPrompts.length >= 2" class="minimap-rail" @mouseleave="minimapHover = null">
+      <button
+        v-for="(p, i) in minimapPrompts"
+        :key="p.id"
+        class="minimap-dash"
+        :class="{ 'is-current': p.id === minimapCurrent, 'is-hover': minimapHover?.id === p.id }"
+        :style="{ width: p.width + 'px' }"
+        :aria-label="`Jump to prompt ${i + 1}`"
+        @mouseenter="minimapHover = { ...p, index: i }"
+        @click="jumpToMessage(p.id)"
+      />
+      <div v-if="minimapHover" class="minimap-preview">
+        <div class="mb-1 text-[11px] text-muted-foreground">Prompt {{ minimapHover.index + 1 }} of {{ minimapPrompts.length }}</div>
+        <div class="line-clamp-6 whitespace-pre-wrap text-[12.5px] leading-[1.5] text-foreground">{{ minimapHover.text }}</div>
+      </div>
+    </div>
     </div>
 
     <!-- Jump back to live: only while scrolled up (autoscroll paused) -->
     <div class="relative h-0">
       <button
         v-if="!atBottom"
-        class="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] text-secondary-foreground transition-colors hover:bg-hover"
+        class="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-[var(--bg-dropdown)] px-2.5 py-1 text-[11px] text-secondary-foreground transition-colors hover:bg-hover"
         title="Jump to latest"
         @click="scrollToBottom(true)"
       >
@@ -367,7 +465,7 @@
     </div>
 
     <!-- New-style input bar -->
-    <div class="flex-shrink-0 bg-base px-[18px] pb-2 pt-2.5">
+    <div class="flex-shrink-0 px-[18px] pb-2 pt-2.5">
       <div class="mx-auto w-full max-w-[760px]">
       <!-- Branch-changed banner: session.branch (created-on snapshot) vs. current workspace branch -->
       <div v-if="branchChanged && !branchBannerDismissed" class="mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -376,6 +474,42 @@
         <span v-if="restoreBranchError" class="flex-shrink-0 text-destructive">{{ restoreBranchError }}</span>
         <button class="flex-shrink-0 font-medium text-foreground hover:underline disabled:opacity-50" :disabled="restoringBranch" @click="restoreBranch">{{ restoringBranch ? 'Restoring…' : 'Restore branch' }}</button>
         <button class="flex-shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss" @click="branchBannerDismissed = true"><PhX :size="11" weight="bold" /></button>
+      </div>
+      <div v-if="catchUp.open" class="catchup-card mb-2">
+        <div class="flex items-center gap-2">
+          <PhSparkle :size="14" class="text-foreground" />
+          <span class="text-[13px] font-semibold text-foreground">Catch me up</span>
+          <span v-if="catchUp.loading" class="text-[11.5px] text-muted-foreground">Reading the last {{ CATCH_UP_MESSAGES }} messages…</span>
+          <span class="ml-auto flex items-center gap-3 text-[11.5px] text-secondary-foreground">
+            <button class="hover:text-foreground disabled:opacity-40" :disabled="catchUp.loading" @click="runCatchUp">Refresh</button>
+            <button class="hover:text-foreground disabled:opacity-40" :disabled="!catchUp.summary" @click="copyCatchUp">{{ catchUp.copied ? 'Copied' : 'Copy' }}</button>
+            <button class="hover:text-foreground" title="Close" @click="catchUp.open = false"><PhX :size="12" /></button>
+          </span>
+        </div>
+        <p v-if="catchUp.error" class="mt-1.5 text-[12.5px] text-[var(--red)]">{{ catchUp.error }}</p>
+        <template v-else-if="catchUp.summary">
+          <p class="mt-1.5 text-[13px] leading-[1.5] text-foreground">{{ catchUp.summary }}</p>
+          <div v-for="(it, i) in catchUp.items" :key="i" class="mt-1.5 flex items-start gap-2 text-[12.5px] leading-[1.5] text-foreground">
+            <span class="catchup-tag" :class="'tag-' + it.tag">{{ CATCH_UP_LABELS[it.tag] ?? it.tag }}</span>
+            <span>{{ it.text }}</span>
+          </div>
+        </template>
+      </div>
+      <div v-if="subagentChildren.length" class="subagents-card mb-2">
+        <button class="subagents-head" @click="subagentsCollapsed = !subagentsCollapsed">
+          <PhUsersThree :size="14" class="flex-shrink-0 text-secondary-foreground" />
+          <span class="font-semibold text-foreground">Sub-agents</span>
+          <span class="text-muted-foreground">{{ subagentChildren.length }} {{ subagentChildren.length === 1 ? 'thread' : 'threads' }}</span>
+          <PhCaretDown :size="11" class="ml-auto text-muted-foreground transition-transform" :class="{ '-rotate-90': subagentsCollapsed }" />
+        </button>
+        <template v-if="!subagentsCollapsed">
+          <button v-for="c in subagentChildren" :key="c.id" class="subagent-row" :title="c.title" @click="openSubagentFromTranscript(c.id)">
+            <span class="status-dot shrink-0" :class="subagentDotClass(c.id)" />
+            <span class="shrink-0 font-medium text-foreground">{{ c.title }}</span>
+            <span class="subagent-badge" :class="'tone-' + subagentState(c.id).tone">{{ subagentState(c.id).label }}</span>
+            <span class="min-w-0 truncate text-muted-foreground">{{ chatAttention.phaseFor(c.id)?.detail ?? subagentDetail[c.id] }}</span>
+          </button>
+        </template>
       </div>
       <TranscriptFeedbackBar
         :count="transcriptFeedback.pending.value.length"
@@ -389,7 +523,51 @@
            inside it: .chat-input-box is overflow-hidden, and an inline list
            pushed the whole toolbar down as the user typed. -->
       <ComposerSuggestions :items="suggestions" :active-index="activeIndex" @pick="completion.apply" />
-      <div class="chat-input-box overflow-hidden rounded-[var(--radius-composer)] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: color-mix(in srgb, var(--agent-accent, var(--accent)) 4%, var(--chat-surface));">
+      <div class="chat-input-box overflow-hidden rounded-[18px] border border-border transition-[border-color,box-shadow]" :class="{ 'input-queued': busy && inputText.trim() }" style="background: var(--bg-panel);">
+        <!-- Queued follow-ups live inside the composer (Ghostex-style): one row
+             each, drag to reorder, play = interrupt and send now, pencil = take
+             it back into the input. -->
+        <div v-if="messageQueue.length" class="flex flex-col gap-1.5 px-2.5 pt-2.5">
+          <div v-if="messageQueue.length > 1" class="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <button v-if="messageQueue.length > 3" class="queue-act" style="width:auto;padding:0 6px" :title="queueCollapsed ? 'Expand queued messages' : 'Collapse queued messages'" @click="queueCollapsed = !queueCollapsed">
+              <component :is="queueCollapsed ? PhCaretRight : PhCaretDown" :size="11" /><span class="ml-1">{{ messageQueue.length }} queued</span>
+            </button>
+            <span v-else>{{ messageQueue.length }} queued</span>
+            <button class="queue-act ml-auto" style="width:auto;padding:0 6px" @click="clearQueued">Clear {{ messageQueue.length }} queued messages</button>
+          </div>
+          <template v-if="!queueCollapsed || messageQueue.length <= 3">
+          <div
+            v-for="(q, qi) in messageQueue"
+            :key="q.id"
+            draggable="true"
+            tabindex="0"
+            @keydown.alt.up.prevent="moveQueuedBy(q.id, qi, -1)"
+            @keydown.alt.down.prevent="moveQueuedBy(q.id, qi, 1)"
+            class="queue-row group flex cursor-grab items-center gap-2 rounded-[9px] border border-border px-2.5 py-1.5 text-[13px] text-secondary-foreground"
+            :class="{ 'opacity-40': draggingQueuedId === q.id, 'queue-row-drop': dropQueuedIndex === qi && draggingQueuedId !== q.id }"
+            @dragstart="draggingQueuedId = q.id"
+            @dragend="draggingQueuedId = null; dropQueuedIndex = null"
+            @dragover.prevent="draggingQueuedId != null && (dropQueuedIndex = qi)"
+            @drop.prevent="dropQueued(qi)"
+          >
+            <PhDotsSixVertical :size="13" class="flex-shrink-0 text-muted-foreground" />
+            <input
+              v-if="editingQueuedId === q.id"
+              v-model="editingQueuedText"
+              class="min-w-0 flex-1 bg-transparent outline-none"
+              @keydown.enter.prevent="commitQueuedEdit"
+              @keydown.esc.stop.prevent="editingQueuedId = null"
+              @blur="commitQueuedEdit"
+            />
+            <span v-else class="min-w-0 flex-1 truncate">{{ q.text }}</span>
+            <PhImage v-if="q.images?.length" :size="12" class="flex-shrink-0 text-muted-foreground" />
+            <button v-if="steerable" class="queue-act" title="Steer: deliver this into the running turn now (⌘↵ in the composer)" @click="void S.steer(q.id)"><PhArrowRight :size="12" /></button>
+            <button class="queue-act" title="Interrupt the current turn and send this now" @click="sendQueuedNow(q.id)"><PhPlay :size="12" weight="fill" /></button>
+            <button class="queue-act" title="Edit this queued message" @click="startQueuedEdit(q)"><PhPencilSimple :size="12" /></button>
+            <button class="queue-act" title="Remove from queue" @click="removeQueued(q.id)"><PhX :size="12" /></button>
+          </div>
+          </template>
+        </div>
         <!-- Working indicator — sits above the textarea, only for tool activity.
              Thinking has its own bubble in the chat body, so it's not duplicated here. -->
         <div v-if="currentActivity" class="flex items-center gap-1.5 border-b border-border px-3 pb-1 pt-1.5">
@@ -445,11 +623,19 @@
             </div>
           </div>
         </div>
+        <div class="relative">
+        <button
+          v-if="showCatchUpBtn"
+          class="catchup-btn"
+          title="Summarize where this chat is at (text-generation model, nothing is sent to the agent)"
+          @click="runCatchUp"
+        ><PhSparkle :size="13" /> Catch me up</button>
         <ComposerTextInput
           ref="inputEl"
           v-model="inputText"
-          class="chat-input composer-input box-border block max-h-40 min-h-10 w-full border-none bg-transparent px-3 pb-1 pt-2.5 font-sans text-[13px] leading-[1.5] text-foreground outline-none"
-          :placeholder="busy ? 'Type next message — will send when Claude finishes…' : 'Ask your agent anything...'"
+          class="chat-input composer-input box-border block max-h-40 min-h-12 w-full border-none bg-transparent px-4 pb-1 pt-3 font-sans text-[14px] leading-[1.55] text-foreground outline-none"
+          :class="[showCatchUpBtn && 'pr-[132px]', phone && '!min-h-0 !pt-2.5']"
+          :placeholder="phone ? (busy ? 'Queue a message…' : 'Message…') : busy ? 'Keep typing — Enter queues it for when the agent is free.\nUse @ to mention a file and $ for skills.' : 'Press Enter to send a message.\nUse @ to mention a file and $ for skills.'"
           :skills="completion.skills.value"
           :commands="allCommands"
           :files="completion.files.value"
@@ -457,10 +643,18 @@
           @input="onInput"
           @paste="onPaste"
         />
+        </div>
           <ComposerImages v-model="pendingImages" class="px-3 pb-1.5" />
-          <div class="composer-toolbar px-2 pb-2 pt-1.5">
+          <div class="composer-toolbar px-2.5 pb-2.5 pt-2">
           <!-- Left: share selection, model dropdown, perm mode -->
-          <div class="composer-pillbar">
+          <!-- Phone: attach + a toggle that folds the model/effort/permission
+               pills away, so the composer is one line of text and one of buttons. -->
+          <template v-if="phone">
+            <button class="composer-pill" title="Attach image" @click="imagePicker?.click()"><PhPaperclip :size="16" /></button>
+            <input ref="imagePicker" type="file" accept="image/*" multiple hidden @change="onPickImages" />
+            <button class="composer-pill" :class="{ 'text-foreground': phoneSettingsOpen }" title="Model and permissions" @click="phoneSettingsOpen = !phoneSettingsOpen"><PhSlidersHorizontal :size="16" /></button>
+          </template>
+          <div v-show="!phone || phoneSettingsOpen" class="composer-pillbar">
             <button
               v-if="editorCtx.selection"
               class="composer-pill"
@@ -469,18 +663,22 @@
             >
               <PhTextAa :size="13" />
             </button>
+            <span v-if="asleep" class="composer-pill pointer-events-none opacity-70" title="Sleeping: the agent process was stopped to free memory. Sending a message wakes it."><PhMoon :size="13" weight="fill" /></span>
+            <button v-if="!compact && !phone && sideChatAvailable" class="composer-pill" title="Side chat: ask a quick question about this chat without disturbing it" aria-label="Side chat" @click="openSideChat"><PhChatsCircle :size="13" /></button>
             <!-- Agent + model in one popover (the old header bar is gone) -->
             <ModelPicker
               :agent-id="agentKind"
               :model-id="effectiveTransport === 'claude-cli' ? selectedModel : acpActiveModelId"
               :models="liveModels.length ? liveModels : undefined"
               :cwd="cwd"
+              :settings="pickerSettings"
               @select="onPickModel"
+              @setting="onPickerSetting"
             />
             <!-- Claude Agent SDK effort is forwarded to the local Claude Code CLI. -->
             <ComposerPill
               v-if="effectiveTransport === 'claude-cli'"
-              :label="selectedEffortLabel"
+              :label="selectedEffortLabel.replace(/ effort$/, '')"
               :items="CLAUDE_EFFORTS"
               :active="selectedEffort"
               title="Claude reasoning effort"
@@ -501,7 +699,6 @@
             <ComposerPill
               v-if="effectiveTransport === 'claude-cli'"
               :icon="PERM_ICON[permMode]"
-              :label="permMeta.label"
               :items="permItems"
               :active="permMode"
               :danger="permMeta.danger"
@@ -533,8 +730,10 @@
             />
           </div>
 
+          <span v-if="phone && !phoneSettingsOpen" class="flex-1" />
           <!-- Right: cost badge + abort/send -->
           <div class="composer-sendgroup">
+            <ComposerStash ref="stashEl" v-model:text="inputText" v-model:images="pendingImages" />
             <HoverCardRoot v-if="contextUsageRatio > 0" v-model:open="ctxCardOpen" :open-delay="120" :close-delay="120">
               <HoverCardTrigger as-child>
                 <div class="ctx-ring" :class="contextUsageClass">
@@ -604,14 +803,12 @@
         </div>
       </div>
       </div>
-      <WorkspaceTargetPicker
-        :mode="chatWorkspace?.parent_id ? 'new' : 'current'"
-        :current-branch="chatBranch"
-        :detail="chatWorkspace?.worktree_branch || undefined"
-        appearance="attached"
-        wide
-        readonly
-      />
+      <!-- Where this chat works, as one quiet line (Ghostex-style) — it was a
+           read-only target bar, which looked like a control and wasn't. -->
+      <div v-if="!phone" class="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+        <PhGitBranch v-if="chatWorkspace?.parent_id" :size="11" />
+        <span class="truncate">{{ chatRepoName }} · {{ chatBranch }}</span>
+      </div>
       </div>
 
       <!-- Status line below input — hidden when nothing to show -->
@@ -625,57 +822,168 @@
     </div>
     </div><!-- end .chat-main -->
 
+    <HtmlPageModal v-if="pageView" v-bind="pageView" @close="pageView = null" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhClock, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage } from "@phosphor-icons/vue";
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useFileDrop, appendRef } from "@/lib/useFileDrop";
+import { compact as phone } from "@/lib/viewport";
 import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
-import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { chatAsleep, useClaudeChatsStore } from "@/stores/claudeChats";
+import { childrenOf } from "@/stores/chatTree";
+import { canSideChat } from "@/stores/chatTree";
+import { newSideChat } from "@/lib/sideChat";
+import { PhChatsCircle } from "@phosphor-icons/vue";
 import { useChatAttentionStore } from "@/stores/chatAttention";
+import { visitWatermark } from "@/lib/visitWatermark";
 import { useEditorContextStore } from "@/stores/editorContext";
 import { useImageLightbox } from "@/composables/useImageLightbox";
-import { useScriptsStore } from "@/stores/scripts";
 import { useGitStore } from "@/stores/git";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useProvidersStore, chatTransportFor, binaryFor, type ChatTransport } from "@/stores/providers";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
+import { useProvidersStore, chatTransportFor, type ChatTransport } from "@/stores/providers";
 import { agentIconComp } from "@/lib/agentIcons";
 import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } from "reka-ui";
-import ModelPicker from "@/components/ModelPicker.vue";
+import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
+import ThreadFindBar from "@/components/ThreadFindBar.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
+import ComposerStash from "@/components/composer/ComposerStash.vue";
+import { isStashShortcut } from "@/lib/promptStash";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
-import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
-import { chatSession, replayChatStream } from "@/lib/chatSession";
-import type { ChatMessage } from "@/lib/chatTypes";
+import { isImageStub } from "@/lib/chatImages";
+import { chatSession, canSteer, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
+import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
+import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
 import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { chatSettingKey } from "@/lib/chatSettings";
 import { splitMentions } from "@/lib/mentionTokens";
-import { editOf, fmtDuration, mergeEdits, type FileEdit } from "@/lib/chatTurns";
+import { editOf, fmtDuration, hunkLines, isProjectPath, mergeEdits, type FileEdit } from "@/lib/chatTurns";
 import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import { escapeHtml, formatAnswers, renderChatMd } from "@/lib/chatBlocks";
+import { linkifyFileRefs } from "@/lib/localLink";
+import { cachedMermaid, renderMermaid } from "@/lib/mermaidRender";
+import { useDiagram } from "@/composables/useDiagram";
+import HtmlPageModal from "./HtmlPageModal.vue";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import {
   getAcpCapabilities, getAcpChatSetting, getLastAcpSetting,
   setAcpCapabilities, setAcpChatSetting, type AcpChatSettings,
 } from "@/lib/acpSettings";
 import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
-import { restoreSubagentCodexSettings } from "@/lib/subagentProfiles";
 import TranscriptComments from "./review/TranscriptComments.vue";
 import TranscriptFeedbackBar from "./review/TranscriptFeedbackBar.vue";
 import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
 
 function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string);
+}
+
+// An assistant reply may carry ```visual / ```questions blocks (chatBlocks.ts).
+// A questions form counts as answered once any user message follows it.
+const answeredMsgIds = computed(() => {
+  const ids = new Set<number>();
+  let seenUser = false;
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const m = messages.value[i];
+    if (m.role === "user") seenUser = true;
+    else if (seenUser && m.role === "assistant") ids.add(m.id);
+  }
+  return ids;
+});
+function renderAssistantMd(msg: ChatMessage): string {
+  return DOMPurify.sanitize(linkifyFileRefs(renderChatMd(msg.text, answeredMsgIds.value.has(msg.id))));
+}
+
+// The questions form is v-html, so its clicks are delegated: selection state
+// lives in the DOM (aria-pressed) until Send reads it back.
+function onRichBlockClick(event: MouseEvent) {
+  const target = event.target as HTMLElement;
+  const cm = target.closest<HTMLElement>("[data-cm-action]");
+  if (cm) {
+    const src = decodeURIComponent(cm.closest<HTMLElement>(".cm-mermaid")?.dataset.mermaidSrc ?? "");
+    if (cm.dataset.cmAction === "open") useDiagram().showDiagram(src);
+    else void navigator.clipboard.writeText(src);
+    return;
+  }
+  const page = target.closest<HTMLElement>("[data-cv-page]");
+  if (page) { void openPage(page.dataset.cvPage ?? "", page.dataset.cvPageTitle ?? ""); return; }
+  const opt = target.closest<HTMLButtonElement>(".cq-opt");
+  if (opt && !opt.disabled) {
+    const q = opt.closest<HTMLElement>(".cq-q");
+    const on = opt.getAttribute("aria-pressed") !== "true";
+    if (q?.dataset.cqMulti !== "1") q?.querySelectorAll(".cq-opt").forEach((o) => o.setAttribute("aria-pressed", "false"));
+    opt.setAttribute("aria-pressed", String(on));
+    return;
+  }
+  const action = target.closest<HTMLElement>("[data-cq-action]");
+  const form = action?.closest<HTMLElement>("[data-chat-questions]");
+  if (!action || !form) return;
+  const skip = action.dataset.cqAction === "skip";
+  const answers = [...form.querySelectorAll<HTMLElement>(".cq-q")].map((q) => ({
+    question: q.dataset.cqQuestion ?? "",
+    picked: skip ? [] : [...q.querySelectorAll<HTMLElement>('.cq-opt[aria-pressed="true"]')].map((o) => o.dataset.cqOpt ?? ""),
+    other: skip ? "" : q.querySelector<HTMLInputElement>(".cq-other")?.value ?? "",
+  }));
+  const notes = skip ? "" : form.querySelector<HTMLTextAreaElement>(".cq-notes")?.value ?? "";
+  form.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea").forEach((el) => (el.disabled = true));
+  void sendMessage(formatAnswers(answers, notes));
+}
+
+// ```mermaid blocks arrive as placeholders (a plain code block carrying the
+// source); swap in the rendered SVG after every patch. A cached diagram swaps
+// synchronously — v-html re-inserts the placeholder on every streamed token,
+// and this runs before paint, so it doesn't flicker. Invalid source rejects
+// and stays a code block.
+function hydrateMermaid() {
+  for (const el of scrollEl.value?.querySelectorAll<HTMLElement>(".cm-mermaid:not([data-cm-state])") ?? []) {
+    el.dataset.cmState = "pending";
+    const src = decodeURIComponent(el.dataset.mermaidSrc ?? "");
+    const show = (svg: string) => {
+      const box = el.querySelector(".cm-diagram");
+      if (!box) return;
+      box.innerHTML = svg;
+      el.classList.add("cm-ok");
+      el.dataset.cmState = "ok";
+    };
+    const hit = cachedMermaid(src);
+    if (hit) show(hit);
+    else renderMermaid(src).then(show, () => (el.dataset.cmState = "failed"));
+  }
+}
+onMounted(hydrateMermaid);
+onUpdated(hydrateMermaid);
+// A theme switch doesn't re-run v-html; re-render the diagrams already shown.
+// (useUIStore() here: the `uiStore` const is declared further down.)
+watch(() => [useUIStore().theme, useUIStore().themeMode], () => nextTick(() => {
+  scrollEl.value?.querySelectorAll<HTMLElement>(".cm-mermaid[data-cm-state='ok']").forEach((el) => delete el.dataset.cmState);
+  hydrateMermaid();
+}));
+
+// Page cards (```visual {"page": …}): the agent's HTML file opens in a
+// sandboxed iframe modal, never inline in the transcript.
+const pageView = ref<{ title: string; path: string; html: string } | null>(null);
+async function openPage(path: string, title: string) {
+  const abs = path.startsWith("/") ? path : `${props.cwd}/${path}`;
+  let html: string;
+  try {
+    html = await invoke<string>("read_text_file_checked", { path: abs });
+  } catch (e) {
+    html = `<p style="font:13px system-ui;color:#b91c1c;padding:16px">Could not read ${escapeHtml(abs)}: ${escapeHtml(e)}</p>`;
+  }
+  pageView.value = { title: title || abs, path: abs, html };
 }
 
 // A sent message that still carries a `wrapPaste` block (see composerDom.ts)
@@ -740,8 +1048,6 @@ const props = defineProps<{
   // Compact mode (float chat): hide the heavy chrome (changes panel + diff
   // sidebar), keep the message stream + input + inline permission gates.
   compact?: boolean;
-  // Extra system prompt passed to claude_start as --append-system-prompt.
-  appendSystemPrompt?: string;
   // Use a dedicated localStorage key for the model selection instead of the
   // shared global one, so this chat's model is independent of every other
   // chat. Falls back to the global key.
@@ -793,23 +1099,32 @@ async function sendTranscriptNotes() {
 const emit = defineEmits<{ (e: "prompt-sent"): void }>();
 
 const chats = useClaudeChatsStore();
+const asleep = computed(() => chatAsleep(chats.sessions.find((s) => s.id === props.chatId)));
 const chatAttention = useChatAttentionStore();
 // Whether this instance holds one of chatAttention's watch counts. Tracked so
 // mount/unmount and isWatching flips stay balanced.
 let attentionHeld = false;
+// The receipt as it was when this visit began; null once the user sends.
+const visitSeenAt = ref<number | null>(null);
 function holdAttention(value: boolean) {
   if (value === attentionHeld) return;
   attentionHeld = value;
+  // Freeze the receipt for the "New" divider before watching marks it seen.
+  if (value) visitSeenAt.value = chatAttention.seenAtFor(props.chatId);
   chatAttention.setWatching(props.chatId, value);
 }
 const workspaces = useWorkspaceStore();
 const git = useGitStore();
 const uiStore = useUIStore();
-const scriptsStore = useScriptsStore();
 const chatAgents = useProvidersStore();
 const editorCtx = useEditorContextStore();
 const { showImage } = useImageLightbox();
 const chatWorkspace = computed(() => workspaces.workspaces.find((workspace) => workspace.id === props.workspaceId));
+const chatRepoName = computed(() => {
+  const ws = chatWorkspace.value;
+  const repo = ws?.parent_id ? workspaces.workspaces.find((w) => w.id === ws.parent_id) : ws;
+  return repo?.name ?? "";
+});
 const chatBranch = computed(() => chatWorkspace.value?.worktree_branch || git.branchByWs[props.workspaceId] || "HEAD");
 
 // Branch-changed banner: the branch a chat was created on (session.branch,
@@ -820,6 +1135,24 @@ const branchChanged = computed(() => {
   return !!created && created !== chatBranch.value;
 });
 const branchBannerDismissed = ref(false);
+// Usage-limit banner: Go records the reset (limit_reset_at); arming makes it
+// send "Continue where you left off." then (chat_limit_arm / _dismiss).
+const usageLimit = computed(() => {
+  const at = activeSession.value?.limitResetAt;
+  if (!at) return null;
+  const d = new Date(at);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const label = d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  return { label, armed: !!activeSession.value?.limitResumeAt };
+});
+async function limitAction(cmd: "chat_limit_arm" | "chat_limit_dismiss") {
+  try {
+    await invoke(cmd, { chatId: props.chatId });
+  } catch (e) {
+    S.notice(`Could not update the usage-limit resume: ${e}`);
+  }
+  await chats.reload();
+}
 const restoringBranch = ref(false);
 const restoreBranchError = ref("");
 // Purely informational per product decision — dismiss on close or on send,
@@ -855,12 +1188,11 @@ const effectiveTransport = computed<ChatTransport>(() =>
   props.transport ?? (currentAgent.value ? chatTransportFor(currentAgent.value) : 'claude-cli')
 );
 const usesRpcRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
+// Steer (chat_steer): a queued follow-up delivered into the running turn.
+const steerable = computed(() => busy.value && canSteer(effectiveTransport.value));
 // Codex's app-server bridge reports the same modes/configOptions shape, so
 // everything ACP-flavoured (effort, mode, history) applies to it too.
 const isAcpRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
-const runtimeLabel = computed(() =>
-  effectiveTransport.value === 'codex-app-server' ? 'Codex app-server' : effectiveTransport.value === 'acp' ? 'ACP adapter' : 'Claude CLI'
-);
 // Per-agent accent color.
 const agentAccentColor = computed(() =>
   agentKind.value === 'claude' ? 'var(--chat-accent)' : (currentAgent.value?.color ?? 'var(--chat-accent)'),
@@ -874,16 +1206,15 @@ const agentAccentColor = computed(() =>
 // handle stays correct for the component's whole life.
 const S = chatSession(props.chatId);
 const {
-  messages, busy, lastActivityAt, turnStartedAt, messageQueue, suppressNextDone,
-  sessionId, turnStats, sessionCost, runtimeStarted,
+  messages, hiddenBefore, loadingEarlier, busy, lastActivityAt, turnStartedAt, messageQueue,
+  turnStats, sessionCost,
   pendingPermission, pendingQuestion, pendingPlan, pendingDiff,
-  acpPermReq, acpPermRpcId, acpPermMsgId, acpPromptRpcId, acpControlIds, acpModes, acpConfigOptions,
+  acpPermReq, acpModes, acpConfigOptions,
   permissionResponsePending, codexUserInput, codexUserInputPending,
-  nativeControlResponsePending, acpRestorePushIds,
-  contextTokens, contextWindow, contextSplit, contextReport, contextReportPending, awaitingContextReport,
+  nativeControlResponsePending,
+  contextTokens, contextWindow, contextSplit, contextReport, contextReportPending,
   claudeGeneratedTitle,
-  enqueueMessage, removeQueuedMessage, clearQueuedMessages, moveQueuedMessageNext,
-  removeFeedMarker,
+  enqueueMessage, removeQueuedMessage, editQueuedMessage, clearQueuedMessages, moveQueuedMessage,
 } = S;
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
@@ -942,43 +1273,45 @@ watch([acpModes, acpConfigOptions], ([modes, configOptions]) => {
   if (!isAcpRuntime.value || (!modes && configOptions.length === 0)) return;
   setAcpCapabilities(props.chatId, { agentId: agentKind.value, modes, configOptions });
 }, { deep: true });
-// acpRestorePushIds (the session's): request ids of OUR OWN restore pushes.
-// The reply to a restore carries the adapter's selector set again, so
+// trackAcpControl(rid, restore) (the session's): request ids of OUR OWN restore
+// pushes. The reply to a restore carries the adapter's selector set again, so
 // re-restoring from it is what would ping-pong forever — skipping just those
 // replies breaks the loop, while every OTHER reset (session start, or the
 // reply to a user's mode/effort/model pick) still gets repaired.
 
+// A pick is also recorded on the row (row_only — this push applies it live):
+// the row is what the chat runtime re-applies after its next start.
 async function acpSelectMode(modeId: string, userPick = true) {
-  if (acpModes.value) acpModes.value.currentModeId = modeId;
+  S.showAcpSelection("mode", modeId);
   setAcpChatSetting(props.chatId, agentKind.value, "mode", modeId);
+  if (userPick) void persistLaunch({ permission_mode: modeId, row_only: true });
   try {
     const rid = await invoke<number>("acp_set_mode", { id: props.chatId, modeId });
-    acpControlIds.add(rid);
-    if (!userPick) acpRestorePushIds.add(rid);
+    S.trackAcpControl(rid, !userPick);
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set mode: ${e}` });
+    S.notice(`Failed to set mode: ${e}`);
   }
 }
 async function acpSelectModel(value: string, userPick = true) {
-  if (acpModelOption.value) acpModelOption.value.currentValue = value;
+  S.showAcpSelection("model", value);
   setAcpChatSetting(props.chatId, agentKind.value, "model", value);
+  if (userPick) void persistLaunch({ model: value, row_only: true });
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "model", value });
-    acpControlIds.add(rid);
-    if (!userPick) acpRestorePushIds.add(rid);
+    S.trackAcpControl(rid, !userPick);
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set model: ${e}` });
+    S.notice(`Failed to set model: ${e}`);
   }
 }
 async function acpSelectEffort(value: string, userPick = true) {
-  if (acpEffortOption.value) acpEffortOption.value.currentValue = value;
+  S.showAcpSelection("effort", value);
   setAcpChatSetting(props.chatId, agentKind.value, "effort", value);
+  if (userPick) void persistLaunch({ effort: value, row_only: true });
   try {
     const rid = await invoke<number>("acp_set_config", { id: props.chatId, configId: "effort", value });
-    acpControlIds.add(rid);
-    if (!userPick) acpRestorePushIds.add(rid);
+    S.trackAcpControl(rid, !userPick);
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to set effort: ${e}` });
+    S.notice(`Failed to set effort: ${e}`);
   }
 }
 
@@ -1008,54 +1341,10 @@ function restoreAcpSelections() {
 // Agent switcher dropdown.
 async function selectAgent(id: string) {
   if (id === agentKind.value) return;
-  // Stop OLD process before agentKind changes (effectiveTransport depends on it).
-  await (usesRpcRuntime.value ? stopRpcRuntime() : invoke('claude_stop', { id: props.chatId })).catch(() => {});
+  // chat_clear (below) stops whichever process the chat has, by id.
   agentKind.value = id;
   chats.sync(props.chatId, { agentKind: id, transport: currentAgent.value ? chatTransportFor(currentAgent.value) : 'claude-cli' });
   await clearChat();
-}
-
-// Build the acp_start invoke payload from the current agent + per-project settings.
-function acpStartPayload(emitHistory = false) {
-  const a = currentAgent.value;
-  const proj = scriptsStore.settingsFor(props.cwd);
-  return {
-    emitHistory,
-    id: props.chatId,
-    cwd: props.cwd,
-    command: a ? binaryFor(a) || "npx" : "npx",
-    args: a?.transportArgs ?? [],
-    env: a?.env ?? {},
-    kind: a?.kind ?? "custom",
-    configDir: proj.claude_config_dir || a?.env?.CLAUDE_CONFIG_DIR || null,
-    envFile: proj.env_file || null,
-    // Resume the chat's prior ACP session (server-side history) when we have its id.
-    resumeSessionId: sessionId.value || null,
-  };
-}
-
-async function startRpcRuntime(emitHistory = false) {
-  await ensureAcpListeners();
-  if (effectiveTransport.value === "codex-app-server") {
-    const agent = currentAgent.value;
-    const result = await invoke("codex_start", {
-      id: props.chatId,
-      cwd: props.cwd,
-      env: agent?.env ?? {},
-      resumeSessionId: sessionId.value || null,
-    });
-    await restoreSubagentCodexSettings(props.chatId, invoke);
-    return result;
-  }
-  return invoke("acp_start", acpStartPayload(emitHistory));
-}
-
-function stopRpcRuntime() {
-  return invoke(effectiveTransport.value === "codex-app-server" ? "codex_stop" : "acp_stop", { id: props.chatId });
-}
-
-function sendRpcRuntime(text: string, images?: string[]) {
-  return invoke<number>(effectiveTransport.value === "codex-app-server" ? "codex_send" : "acp_send", { id: props.chatId, text, images });
 }
 
 // Relative-to-cwd path for a shared selection's @-reference.
@@ -1074,18 +1363,37 @@ function shareSelection() {
   nextTick(() => inputEl.value?.focus());
 }
 
+// Launch settings live on the chat row (docs/plans/006-chat-runtime.md): the
+// Go chat runtime starts the process from it. The legacy per-chat config.json
+// keys are still read as a fallback (the PR1 backfill copied them over).
+function chatRow() {
+  return chats.sessions.find((s) => s.id === props.chatId);
+}
+async function persistLaunch(patch: LaunchSettingsPatch) {
+  await setLaunchSettings(props.chatId, patch).catch((e: unknown) => {
+    S.notice(`Couldn't save the chat settings: ${e}`);
+  });
+}
+function seedLaunchRow() {
+  const row = chatRow();
+  if (!row) return;
+  const patch: LaunchSettingsPatch = { row_only: true };
+  if (!row.model) patch.model = selectedModel.value;
+  if (!row.effort) patch.effort = selectedEffort.value;
+  if (!row.permissionMode) patch.permission_mode = permMode.value;
+  if (!row.profileId && selectedProfileId.value) patch.profile_id = selectedProfileId.value;
+  if (Object.keys(patch).length > 1) void persistLaunch(patch);
+}
+
 // Profile switcher — the Claude provider instances (each one is a config dir).
 const claudeProfiles = computed(() => chatAgents.active.filter((a) => a.providerId === "claude"));
 const defaultProfileId = computed(() => claudeProfiles.value[0]?.id ?? "claude");
 // Legacy per-chat localStorage key prefix (kept only for the one-time migration below).
 function loadProfileId(id: number): string {
+  const row = chatRow()?.profileId;
+  if (row) return row;
   const rec = getConfig<Record<string, string>>("chatProfileSelection", {});
   return rec[String(id)] ?? defaultProfileId.value;
-}
-function saveProfileId(id: number, profileId: string) {
-  const rec = { ...getConfig<Record<string, string>>("chatProfileSelection", {}) };
-  rec[String(id)] = profileId;
-  setConfig("chatProfileSelection", rec);
 }
 const selectedProfileId = ref<string>(loadProfileId(props.chatId));
 const selectedProfile = computed(() => chatAgents.byId(selectedProfileId.value) ?? claudeProfiles.value[0]);
@@ -1095,8 +1403,8 @@ const profileItems = computed<ComposerPillItem[]>(() =>
 async function selectProfile(id: string) {
   if (id === selectedProfileId.value) return;
   selectedProfileId.value = id;
-  saveProfileId(props.chatId, id);
-  await restartClaude();
+  // Go restarts a live process with the new profile; a cold one starts with it.
+  await persistLaunch({ profile_id: id });
 }
 
 // One popover drives both provider and model. Switching provider restarts the
@@ -1137,7 +1445,7 @@ const MODEL_CONFIG_KEY = props.modelKey ? `chatLastUsedModel:${props.modelKey}` 
 const MODEL_BY_CHAT_KEY = "chatModelByChat";
 const chatSettingId = computed(() => chatSettingKey(props.chatId, props.modelKey));
 function storedChatModel(): ClaudeModelId | null {
-  const v = getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {})[chatSettingId.value];
+  const v = chatRow()?.model || getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {})[chatSettingId.value];
   return claudeModels().some((m) => m.id === v) ? (v as ClaudeModelId) : null;
 }
 /** The model this chat starts with: its own pick, else the caller's explicit
@@ -1156,18 +1464,13 @@ function loadModel(): ClaudeModelId {
   if (claudeModels().some((m) => m.id === v)) return v as ClaudeModelId;
   return claudeModels()[0].id;
 }
-function saveChatModel(id: ClaudeModelId) {
-  const rec = { ...getConfig<Record<string, string>>(MODEL_BY_CHAT_KEY, {}) };
-  rec[chatSettingId.value] = id;
-  setConfig(MODEL_BY_CHAT_KEY, rec);
-}
 const selectedModel = ref<ClaudeModelId>(loadModel());
 async function selectModel(id: ClaudeModelId) {
   if (id === selectedModel.value) return;
   selectedModel.value = id;
-  saveChatModel(id);
   setConfig(MODEL_CONFIG_KEY, id); // seed for the NEXT new chat only
-  await restartClaude();
+  // Go applies it in place (set_model) when Claude takes it, else restarts.
+  await persistLaunch({ model: id });
 }
 
 // Mirror the live model into the session so the Sidebar can badge the thread
@@ -1202,7 +1505,7 @@ function isEffort(v: unknown): v is ClaudeEffort {
   return CLAUDE_EFFORTS.some((option) => option.id === v);
 }
 function storedChatEffort(): ClaudeEffort | null {
-  const v = getConfig<Record<string, string>>(EFFORT_BY_CHAT_KEY, {})[chatSettingId.value];
+  const v = chatRow()?.effort || getConfig<Record<string, string>>(EFFORT_BY_CHAT_KEY, {})[chatSettingId.value];
   return isEffort(v) ? v : null;
 }
 function loadEffort(): ClaudeEffort {
@@ -1211,19 +1514,13 @@ function loadEffort(): ClaudeEffort {
   const saved = getConfig<string | null>(EFFORT_CONFIG_KEY, null);
   return isEffort(saved) ? saved : "high";
 }
-function saveChatEffort(effort: ClaudeEffort) {
-  const rec = { ...getConfig<Record<string, string>>(EFFORT_BY_CHAT_KEY, {}) };
-  rec[chatSettingId.value] = effort;
-  setConfig(EFFORT_BY_CHAT_KEY, rec);
-}
 const selectedEffort = ref<ClaudeEffort>(loadEffort());
 const selectedEffortLabel = computed(() => CLAUDE_EFFORTS.find((option) => option.id === selectedEffort.value)?.label ?? "High effort");
 async function selectEffort(effort: ClaudeEffort) {
   if (effort === selectedEffort.value) return;
   selectedEffort.value = effort;
-  saveChatEffort(effort);
   setConfig(EFFORT_CONFIG_KEY, effort); // seed for the NEXT new chat only
-  await restartClaude();
+  await persistLaunch({ effort });
 }
 
 
@@ -1267,12 +1564,35 @@ const openRightPanelSubagent = inject<(chatId: number, workspaceId: number) => v
 function openSubagentFromTranscript(chatId: number) {
   openRightPanelSubagent(chatId, props.workspaceId);
 }
+// Same for a row naming a panel surface (icons match RightPanel's tab strip).
+const openRightPanelSurface = inject<(surface: string, workspaceId: number) => void>("openRightPanelSurface", () => {});
+function openSurfaceFromTranscript(surface: string) {
+  openRightPanelSurface(surface, props.workspaceId);
+}
+// Side chat (src-wails/chatside.go): a fork of this chat's current session in
+// the Right Panel. Needs a session to fork — before the first answer there is
+// nothing to ask about.
+const sideChatAvailable = computed(() => !!activeSession.value?.claudeSessionId && canSideChat(activeSession.value));
+async function openSideChat() {
+  try {
+    await newSideChat(props.chatId);
+    openRightPanelSurface("side-chat", props.workspaceId);
+  } catch (e) {
+    S.notice(`Could not start a side chat: ${e}`);
+  }
+}
+function surfaceIcon(surface: string) {
+  return surface === "background" ? PhTerminalWindow : surface === "progress" ? PhListChecks : surface === "outputs" ? PhFileCode : PhArrowSquareOut;
+}
 
 // Live dot on a transcript's spawn row, straight off the bus — same event and
 // field RightPanel's Sub-agents list reads. Listeners are set up lazily, one
 // per distinct subagentChatId this transcript has ever shown (a spawn row
 // never disappears, so there is nothing to unsubscribe until unmount).
+// This thread's live children (the Sub-agents card above the composer).
+const subagentChildren = computed(() => (props.chatId ? childrenOf(chats.sessions, props.chatId) : []));
 const subagentPhase = reactive<Record<number, string>>({});
+const subagentDetail = reactive<Record<number, string>>({});
 const subagentPhaseUnsubs: Array<() => void> = [];
 // `listen()` is async; a component unmounted before it resolves would have
 // already run onBeforeUnmount's forEach below by the time the `.then()`
@@ -1283,12 +1603,18 @@ const subagentPhaseUnsubs: Array<() => void> = [];
 // is in flight; here, it's this component itself going away.
 let subagentPhaseUnmounted = false;
 watch(
-  () => messages.value.filter((m) => m.role === "system-info" && m.subagentChatId).map((m) => m.subagentChatId as number),
+  () => [
+    ...messages.value.filter((m) => m.role === "system-info" && m.subagentChatId).map((m) => m.subagentChatId as number),
+    ...subagentChildren.value.map((c) => c.id),
+  ],
   (ids) => {
     for (const id of ids) {
       if (id in subagentPhase) continue;
       subagentPhase[id] = "idle";
-      listen<Phase>(`phase-chat:${id}`, (ev) => { subagentPhase[id] = ev.payload?.state ?? "idle"; }).then((un) => {
+      listen<Phase>(`phase-chat:${id}`, (ev) => {
+        subagentPhase[id] = ev.payload?.state ?? "idle";
+        subagentDetail[id] = ev.payload?.detail ?? "";
+      }).then((un) => {
         if (subagentPhaseUnmounted) { un(); return; }
         subagentPhaseUnsubs.push(un);
       });
@@ -1297,11 +1623,33 @@ watch(
   { immediate: true, deep: true },
 );
 watch(() => props.isWatching, (value) => holdAttention(value ?? true));
+useFileDrop(() => inputEl.value?.element?.closest(".claude-chat"), {
+  image: (uri) => pendingImages.value.push(uri),
+  ref: (r) => { inputText.value = appendRef(inputText.value, r); nextTick(() => inputEl.value?.focus()); },
+});
 onBeforeUnmount(() => {
   holdAttention(false);
   subagentPhaseUnmounted = true;
   subagentPhaseUnsubs.forEach((un) => un());
 });
+
+// Sub-agents card above the composer: this thread's live children, one row
+// each, with the state that matters to the parent (Ghostex "Threads" card).
+const subagentsCollapsed = ref(false);
+// The store holds every live chat's phase seeded from shell_snapshot; the local
+// listener only starts at mount, so on its own a child already running when
+// this view opened read "Idle" until its next phase change.
+function subagentStateOf(chatId: number): string | undefined {
+  return chatAttention.phaseFor(chatId)?.state ?? subagentPhase[chatId];
+}
+function subagentState(chatId: number): { label: string; tone: string } {
+  const state = subagentStateOf(chatId);
+  if (state === "waiting_input" || state === "waiting_approval") return { label: "Needs you", tone: "needs" };
+  if (state === "running") return { label: "Running", tone: "running" };
+  if (state === "failed") return { label: "Failed", tone: "failed" };
+  if (state === "done") return { label: "Done", tone: "done" };
+  return { label: "Idle", tone: "idle" };
+}
 
 // The robot icon already says "sub-agent"; the stored prefix only eats width.
 function subagentLabel(text: string): string {
@@ -1309,7 +1657,7 @@ function subagentLabel(text: string): string {
 }
 
 function subagentDotClass(chatId: number): string {
-  const state = subagentPhase[chatId];
+  const state = subagentStateOf(chatId);
   if (state === "running") return "status-running";
   if (state === "waiting_input" || state === "waiting_approval") return "status-waiting";
   if (state === "done") return "status-done";
@@ -1413,17 +1761,56 @@ const grouping = computed(() => {
   }
   return { display, groupIdByMsgId, groupsById };
 });
+// Inline diff card. The first file starts open; a click flips it.
+const diffToggles = reactive<Record<string, boolean>>({});
+function diffOpen(msgId: string, path: string, index: number): boolean {
+  return diffToggles[`${msgId}:${path}`] ?? index === 0;
+}
+function toggleDiff(msgId: string, path: string, index: number) {
+  diffToggles[`${msgId}:${path}`] = !diffOpen(msgId, path, index);
+}
+function dirOf(path: string): string {
+  const rel = props.cwd && path.startsWith(props.cwd + "/") ? path.slice(props.cwd.length + 1) : path;
+  return rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "";
+}
+function diffDirs(files: FileEdit[]): string {
+  const dirs = [...new Set(files.map((f) => dirOf(f.path).replace(/\/$/, "")).filter(Boolean))];
+  return dirs.slice(0, 3).join(" · ") + (dirs.length > 3 ? ` · +${dirs.length - 3}` : "");
+}
+function diffRatio(added: number, removed: number): number {
+  return added + removed ? Math.round((added / (added + removed)) * 100) : 0;
+}
+/** GitHub-style five blocks: green/red in proportion, grey for the rest of a small change. */
+function diffBlocks(added: number, removed: number): string[] {
+  const total = added + removed;
+  const filled = Math.min(5, Math.max(1, Math.ceil(total / 10)));
+  const green = total ? Math.round((added / total) * filled) : 0;
+  return Array.from({ length: 5 }, (_, i) => (i < green ? "b-add" : i < filled ? "b-del" : "b-off"));
+}
+
 // Turn fold + per-turn changed-files summary. A turn starts at a user message
 // and ends at the next one (or at the end of an idle chat). Once it's settled,
 // its thinking/tool rows collapse behind one "Worked for Xs" row and the files
 // it touched are summed into a diffstat card — the transcript stays readable
 // when scrolling back over a long session.
-interface TurnFoldRow { role: "turn-fold"; id: string; turnKey: number; label: string; folded: boolean; partial?: false }
+interface TurnFoldRow { role: "turn-fold"; id: string; turnKey: number; label: string; folded: boolean; toolCount: number; fileCount: number; partial?: false }
 interface ChangedFilesRow { role: "changed-files"; id: string; files: FileEdit[]; added: number; removed: number; partial?: false }
 type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow;
 
 const WORK_ROLES = new Set(["thinking", "tool", "tool-group-header"]);
 const foldedTurns = reactive<Record<number, boolean>>({});
+
+// The display row the "New" divider sits above: the first one holding a
+// message at or after the watermark. ponytail: a watermark inside a folded
+// turn lands on the next visible row; unfold-to-it if that ever matters.
+const watermarkRowId = computed(() => {
+  const target = visitWatermark(messages.value, visitSeenAt.value);
+  if (target === null) return null;
+  const pos = new Map(messages.value.map((m, i) => [m.id, i]));
+  const from = pos.get(target) ?? Infinity;
+  const row = displayItems.value.find((r) => (pos.get(r.role === "tool-group-header" ? (r as ToolGroupHeader).items[(r as ToolGroupHeader).items.length - 1].id : (r as ChatMessage).id) ?? -1) >= from);
+  return row?.id ?? null;
+});
 
 const displayItems = computed<DisplayRow[]>(() => {
   const src = grouping.value.display;
@@ -1441,18 +1828,23 @@ const displayItems = computed<DisplayRow[]>(() => {
     // The last turn is settled only once the chat is idle; earlier ones always are.
     const settled = hasLaterTurn || !busy.value;
     const folded = settled && (foldedTurns[user.id] ?? hasLaterTurn);
-    const label = user.turnMs ? `Worked for ${fmtDuration(user.turnMs)}` : "Worked";
+    const label = user.turnMs ? `Worked ${fmtDuration(user.turnMs)}` : "Worked";
+    const toolCount = turnRows.filter((r) => r.role === "tool").length;
+    const projectEdit = (r: ChatMessage | ToolGroupHeader) => {
+      if (r.role !== "tool") return null;
+      const e = editOf((r as ChatMessage).toolInput);
+      return e && isProjectPath(e.path, props.cwd) ? e : null;
+    };
+    const fileCount = new Set(turnRows.map((r) => projectEdit(r)?.path).filter(Boolean)).size;
 
     const edits: FileEdit[] = [];
     let foldEmitted = false;
     for (const r of turnRows) {
-      if (r.role === "tool") {
-        const e = editOf((r as ChatMessage).toolInput);
-        if (e) edits.push(e);
-      }
+      const e = projectEdit(r);
+      if (e) edits.push(e);
       if (settled && WORK_ROLES.has(r.role)) {
         if (!foldEmitted) {
-          out.push({ role: "turn-fold", id: `fold-${user.id}`, turnKey: user.id, label, folded });
+          out.push({ role: "turn-fold", id: `fold-${user.id}`, turnKey: user.id, label, folded, toolCount, fileCount });
           foldEmitted = true;
         }
         if (folded) continue;
@@ -1481,10 +1873,6 @@ function isFirstOfRun(idx: number): boolean {
   const items = displayItems.value;
   return items[idx - 1]?.role !== items[idx].role;
 }
-function isLastOfRun(idx: number): boolean {
-  const items = displayItems.value;
-  return items[idx + 1]?.role !== items[idx].role;
-}
 function groupIdOf(msgId: number): string | undefined {
   return grouping.value.groupIdByMsgId.get(msgId);
 }
@@ -1496,6 +1884,20 @@ function isGroupExpanded(groupId: string | undefined): boolean {
 }
 function toggleGroup(groupId: string) {
   toolGroupExpanded[groupId] = !isGroupExpanded(groupId);
+}
+// ⌘F landed on a message: open every fold hiding it (its turn, its tool
+// group, the tool/thinking row itself).
+function revealForFind(id: number) {
+  const i = messages.value.findIndex((m) => m.id === id);
+  const msg = messages.value[i];
+  if (msg?.role !== "tool" && msg?.role !== "thinking") return;
+  for (let u = i - 1; u >= 0; u--) {
+    if (messages.value[u].role === "user") { foldedTurns[messages.value[u].id] = false; break; }
+  }
+  const group = groupIdOf(id);
+  if (group) toolGroupExpanded[group] = true;
+  if (msg.role === "tool") msg.toolExpanded = true;
+  else thinkingExpanded[id] = true;
 }
 
 // Built-in claude slash commands
@@ -1529,20 +1931,23 @@ interface AccountInfo {
 // version re-serialised every chat's history — 5.6 MB per saved message once a
 // few dozen chats had accumulated. Migration of existing histories happens once
 // in Go at startup.
-async function loadMessages(chatId: number): Promise<ChatMessage[]> {
+async function loadMessages(chatId: number): Promise<{ messages: ChatMessage[]; hiddenBefore: number }> {
+  // The newest window only — the rest is one "Load earlier" away. An older
+  // backend without the paged call falls back to reading everything.
+  try {
+    const page = await invoke<ChatMessagesPage>("load_chat_messages_page", { chatId, before: -1, limit: TRANSCRIPT_PAGE });
+    if (Array.isArray(page?.messages)) return { messages: page.messages, hiddenBefore: page.start };
+  } catch { /* fall through */ }
   try {
     const raw = await invoke<string>("load_chat_messages", { chatId });
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as ChatMessage[]) : [];
+    return { messages: Array.isArray(parsed) ? (parsed as ChatMessage[]) : [], hiddenBefore: 0 };
   } catch {
-    return [];
+    return { messages: [], hiddenBefore: 0 };
   }
 }
 
 
-function clearMessageHistory(chatId: number) {
-  void invoke("delete_chat_messages", { chatId }).catch(() => {});
-}
 
 const DRAFT_KEY = computed(() => `burrow.draft.chat.${props.chatId}`);
 const inputText = ref(localStorage.getItem(DRAFT_KEY.value) ?? "");
@@ -1574,24 +1979,14 @@ stallTimer = setInterval(() => { if (busy.value) nowTick.value = Date.now(); }, 
 const workingElapsed = computed(() =>
   turnStartedAt.value ? fmtDuration(nowTick.value - turnStartedAt.value) : "0s"
 );
-watch(busy, (val) => {
-  if (val) {
-    lastActivityAt.value = Date.now();
-    nowTick.value = Date.now();
-    turnStartedAt.value = Date.now();
-    return;
-  }
-  if (turnStartedAt.value) {
-    const lastUser = [...messages.value].reverse().find((m) => m.role === "user");
-    if (lastUser) lastUser.turnMs = Date.now() - turnStartedAt.value;
-    turnStartedAt.value = 0;
-  }
-}, { flush: "sync" });
+// The session stamps the turn (turnStartedAt, turnMs); the view only ticks.
+watch(busy, (val) => { if (val) nowTick.value = Date.now(); }, { flush: "sync" });
 const copiedMessageId = ref<number | null>(null);
 let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 // Set before an INTENTIONAL claude restart (mode switch / abort) so the `exit`
 // event that teardown emits doesn't fire a spurious "Claude finished" toast.
 const pendingImages = ref<string[]>([]); // data URIs
+const stashEl = ref<InstanceType<typeof ComposerStash> | null>(null);
 const scrollEl = ref<HTMLElement | null>(null);
 const inputEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
 
@@ -1604,12 +1999,6 @@ const completion = useComposerCompletion({
   commands: allCommands,
 });
 const { suggestions, activeIndex } = completion;
-
-// Attach the acp-data/acp-req listeners if not already. onMounted only attaches
-// them when the chat STARTS as an ACP agent; switching to an ACP agent at runtime
-// (selectAgent → clearChat → acp_start) must attach them too, or every adapter
-// event (model/config + the whole turn) is dropped → no model, stuck "thinking".
-const ensureAcpListeners = () => S.listenAcp();
 
 // Permission mode (per-chat, persisted). Mirrors `claude --permission-mode`:
 // default | auto | acceptEdits | plan | dontAsk | bypassPermissions.
@@ -1627,7 +2016,7 @@ interface ChatPermissionModeConfig {
 }
 function loadPermMode(id: number): PermMode {
   const cfg = getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} });
-  const v = cfg.byChat[String(id)];
+  const v = chatRow()?.permissionMode || cfg.byChat[String(id)];
   if (isPermMode(v)) return v;
   // Migrate the old boolean "dangerous mode" flag → bypassPermissions.
   if (cfg.dangerousByChat[String(id)]) return "bypassPermissions";
@@ -1635,9 +2024,12 @@ function loadPermMode(id: number): PermMode {
   if (isPermMode(cfg.last)) return cfg.last;
   return "default";
 }
+/** `last` is this device's default for the next new chat; the chat's own mode
+ *  is its row's for claude-cli (persistLaunch), still config.json for the RPC
+ *  runtimes until they move into the Go chat runtime. */
 function savePermMode(id: number, mode: PermMode) {
   const cfg = { ...getConfig<ChatPermissionModeConfig>("chatPermissionMode", { byChat: {}, dangerousByChat: {} }) };
-  cfg.byChat = { ...cfg.byChat, [String(id)]: mode };
+  if (usesRpcRuntime.value) cfg.byChat = { ...cfg.byChat, [String(id)]: mode };
   cfg.last = mode;
   setConfig("chatPermissionMode", cfg);
 }
@@ -1672,6 +2064,36 @@ const permItems = computed<ComposerPillItem[]>(() => PERM_MODES.map((m) => ({
   id: m, ...PERM_META[m], icon: PERM_ICON[m],
 })));
 
+// The model picker's quick-settings row: the same state and handlers as the
+// composer pills, only what this transport supports.
+const pickerSettings = computed<PickerSetting[]>(() => {
+  if (effectiveTransport.value === "claude-cli") {
+    return [
+      { key: "effort", label: "Effort", items: CLAUDE_EFFORTS.map((o) => ({ id: o.id, label: o.label.replace(/ effort$/, "") })), active: selectedEffort.value },
+      { key: "plan", label: "Plan", toggle: true, items: [{ id: "default", label: "Off" }, { id: "plan", label: "On" }], active: permMode.value },
+      { key: "perm", label: "Permissions", items: permItems.value, active: permMode.value },
+    ];
+  }
+  const out: PickerSetting[] = [];
+  if (isAcpRuntime.value && acpEffortOption.value) {
+    out.push({ key: "effort", label: "Effort", items: acpEffortItems.value, active: acpEffortOption.value.currentValue });
+  }
+  if (isAcpRuntime.value && acpModes.value) {
+    const modes = acpModeItems.value;
+    if (modes.some((m) => m.id === "plan")) {
+      out.push({ key: "acp-plan", label: "Plan", toggle: true, items: [{ id: modes.find((m) => m.id !== "plan")!.id, label: "Off" }, { id: "plan", label: "On" }], active: acpModes.value.currentModeId });
+    }
+    out.push({ key: "mode", label: "Permissions", items: modes, active: acpModes.value.currentModeId });
+  }
+  return out;
+});
+function onPickerSetting(key: string, value: string) {
+  const claude = effectiveTransport.value === "claude-cli";
+  if (key === "effort") void (claude ? selectEffort(value as ClaudeEffort) : acpSelectEffort(value));
+  else if (key === "perm" || key === "plan") void selectPermMode(value as PermMode);
+  else if (key === "mode" || key === "acp-plan") void acpSelectMode(value);
+}
+
 
 // Is the user actually looking at this chat right now?
 //
@@ -1693,23 +2115,63 @@ function watchingNow(): boolean {
 // Queued follow-ups
 function removeQueued(id: number) {
   removeQueuedMessage(id);
-  S.save();
 }
-function sendQueuedNow(id: number) {
+const draggingQueuedId = ref<number | null>(null);
+const dropQueuedIndex = ref<number | null>(null);
+function dropQueued(toIndex: number) {
+  if (draggingQueuedId.value != null) void moveQueuedMessage(draggingQueuedId.value, toIndex);
+  draggingQueuedId.value = null;
+  dropQueuedIndex.value = null;
+}
+const editingQueuedId = ref<number | null>(null);
+const editingQueuedText = ref("");
+const queueCollapsed = ref(false);
+function startQueuedEdit(q: QueuedChatMessage) {
+  editingQueuedId.value = q.id;
+  editingQueuedText.value = q.text;
+}
+function commitQueuedEdit() {
+  const id = editingQueuedId.value;
+  if (id == null) return;
+  editingQueuedId.value = null;
+  editQueuedMessage(id, editingQueuedText.value);
+}
+function moveQueuedBy(id: number, index: number, delta: number) {
+  void moveQueuedMessage(id, index + delta);
+}
+function clearQueued() {
+  if (!window.confirm(`Clear ${messageQueue.value.length} queued messages?`)) return;
+  clearQueuedMessages();
+}
+async function sendQueuedNow(id: number) {
   // Interrupt, don't steer: a follow-up has to remain its own turn for every
-  // provider (Codex, generic ACP). The abort clears `busy`, and the session's
-  // drain then sends the queue head — which this message just became.
-  moveQueuedMessageNext(id);
-  S.save();
+  // provider (Codex, generic ACP). The turn settles, and Go's queue drain then
+  // sends the queue head — which this message just became.
+  await moveQueuedMessage(id, 0);
   void abortTurn();
 }
+
+// The working line's verb rotates every few seconds — a small sign of life
+// that reads better than three dots (Ghostex does the same).
+const WORKING_VERBS = ["Working", "Thinking", "Reading", "Tinkering", "Pondering", "Wrangling", "Skedaddling", "Noodling", "Untangling", "Cooking"];
+const workingVerbIndex = ref(0);
+let workingVerbTimer: number | undefined;
+watch(busy, (on) => {
+  window.clearInterval(workingVerbTimer);
+  if (!on) return;
+  workingVerbIndex.value = Math.floor(Math.random() * WORKING_VERBS.length);
+  workingVerbTimer = window.setInterval(() => { workingVerbIndex.value = (workingVerbIndex.value + 1) % WORKING_VERBS.length; }, 4000);
+}, { immediate: true });
+onBeforeUnmount(() => window.clearInterval(workingVerbTimer));
+const workingVerb = computed(() => WORKING_VERBS[workingVerbIndex.value]);
 
 // Context meter. The window is whatever the CLI says the model had on the last
 // turn (a [1m] model is five times a 200k one); 200k until it has said.
 const CONTEXT_FALLBACK = 200_000;
 // contextTokens / contextWindow / contextSplit are the session's (remembered
 // per chat there, so the ring survives a remount).
-const contextMax = computed(() => contextWindow.value || CONTEXT_FALLBACK);
+// ponytail: >200k used with no window reported yet can only be a 1M model.
+const contextMax = computed(() => contextWindow.value || (contextTokens.value > CONTEXT_FALLBACK ? 1_000_000 : CONTEXT_FALLBACK));
 const contextUsageRatio = computed(() => Math.min(contextTokens.value / contextMax.value, 1));
 const contextUsageClass = computed(() => {
   const r = contextUsageRatio.value;
@@ -1737,18 +2199,10 @@ const ctxCardOpen = ref(false);
 // report whose useful part is one small table and whose bulk is a row per MCP
 // tool — well over a thousand of them — so it is sent out of band and the
 // table is lifted into the card instead of landing in the transcript.
-// contextReport / contextReportPending / awaitingContextReport: the session's.
+// contextReport / contextReportPending: the session's.
 
 async function loadContextReport() {
-  if (!canCompact.value || busy.value || contextReportPending.value) return;
-  contextReportPending.value = true;
-  awaitingContextReport.value = true;
-  try {
-    await invoke("claude_send", { id: props.chatId, text: "/context", sessionId: sessionId.value || null, images: [] });
-  } catch {
-    contextReportPending.value = false;
-    awaitingContextReport.value = false;
-  }
+  if (canCompact.value) await S.requestContextReport();
 }
 const CTX_R = 6;
 const CTX_C = 2 * Math.PI * CTX_R;
@@ -1905,7 +2359,43 @@ const atBottom = ref(true);
 function onScroll() {
   const el = scrollEl.value;
   if (el) atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+  updateMinimapCurrent();
 }
+
+// ── minimap ──
+const minimapPrompts = computed(() =>
+  messages.value
+    .filter((m) => m.role === "user" && m.text?.trim())
+    .map((m) => ({ id: m.id, text: m.text.slice(0, 480), width: m.text.length > 400 ? 24 : m.text.length > 150 ? 16 : m.text.length > 50 ? 11 : 8 })),
+);
+const minimapHover = ref<{ id: number; text: string; index: number } | null>(null);
+const minimapCurrent = ref<number | null>(null);
+/** The prompt whose message sits nearest the top of the viewport (last one above it). */
+function updateMinimapCurrent() {
+  const el = scrollEl.value;
+  if (!el || minimapPrompts.value.length < 2) return;
+  const top = el.getBoundingClientRect().top + 40;
+  let current: number | null = minimapPrompts.value[0].id;
+  for (const p of minimapPrompts.value) {
+    const node = el.querySelector(`[data-message-id="${p.id}"]`);
+    if (node && node.getBoundingClientRect().top <= top) current = p.id;
+  }
+  minimapCurrent.value = current;
+}
+function jumpToMessage(id: number) {
+  scrollEl.value?.querySelector(`[data-message-id="${id}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+// Older messages land ABOVE the viewport: without compensating, the view would
+// jump to the top of the newly inserted block instead of staying on what you read.
+async function loadEarlierKeepingScroll() {
+  const el = scrollEl.value;
+  const prevHeight = el?.scrollHeight ?? 0;
+  const prevTop = el?.scrollTop ?? 0;
+  await S.loadEarlier();
+  await nextTick();
+  if (el) el.scrollTop = prevTop + (el.scrollHeight - prevHeight);
+}
+
 function scrollToBottom(force = false) {
   if (!force && !atBottom.value) return;
   nextTick(() => {
@@ -1913,6 +2403,45 @@ function scrollToBottom(force = false) {
     atBottom.value = true;
   });
 }
+
+// Catch me up (after Ghostex): the text-generation model reads the chat's tail
+// and answers in a card above the composer. Nothing reaches the agent.
+const CATCH_UP_MESSAGES = 30;
+const CATCH_UP_LABELS: Record<string, string> = {
+  needs_you: "Needs you", blocked: "Blocked", in_progress: "In progress", done: "Done", untested: "Untested",
+};
+const showCatchUpBtn = computed(() => !inputText.value.trim() && messages.value.length > 2 && !catchUp.open);
+const catchUp = reactive({
+  open: false, loading: false, error: "", copied: false, summary: "",
+  items: [] as { tag: string; text: string }[],
+});
+async function runCatchUp() {
+  const chatAtStart = props.chatId;
+  Object.assign(catchUp, { open: true, loading: true, error: "", copied: false });
+  const transcript = messages.value
+    .filter((m) => (m.role === "user" || m.role === "assistant") && m.text?.trim())
+    .slice(-CATCH_UP_MESSAGES)
+    .map((m) => `${m.role === "user" ? "User" : "Agent"}: ${m.text.slice(0, 1500)}`)
+    .join("\n\n");
+  try {
+    const res = await invoke<{ summary: string; items: { tag: string; text: string }[] }>("generate_catch_up", {
+      cwd: props.cwd, model: uiStore.textGenerationModel, transcript,
+    });
+    if (props.chatId !== chatAtStart) return;
+    Object.assign(catchUp, { summary: res.summary, items: res.items ?? [] });
+  } catch (e) {
+    if (props.chatId === chatAtStart) catchUp.error = `Couldn't catch up: ${e}`;
+  } finally {
+    if (props.chatId === chatAtStart) catchUp.loading = false;
+  }
+}
+async function copyCatchUp() {
+  const text = [catchUp.summary, ...catchUp.items.map((it) => `- ${CATCH_UP_LABELS[it.tag] ?? it.tag}: ${it.text}`)].join("\n");
+  await navigator.clipboard.writeText(text).catch(() => {});
+  catchUp.copied = true;
+  setTimeout(() => { catchUp.copied = false; }, 1500);
+}
+watch(() => props.chatId, () => Object.assign(catchUp, { open: false, summary: "", items: [], error: "" }));
 
 // Upgrade the heuristic title with a model-written one (headless `claude -p`,
 // same cheap model as the commit-message button). Fire-and-forget: the
@@ -1973,6 +2502,68 @@ async function acpRespond(optionId: string, optName: string, kind: string) {
   await S.respond({ kind: "acpOption", optionId, label: optName, reject: kind.startsWith("reject") });
 }
 
+// Rewind / fork ride Claude's --resume-session-at (chatrewind.go); Codex and
+// generic ACP have nothing like it, so they only get Copy / Edit.
+const canBranch = computed(() => !isAcpRuntime.value);
+// The reply that closes each settled turn: the last assistant bubble before the
+// next prompt, with no tool call or thinking after it.
+const finalReplyIds = computed(() => {
+  const ids = new Set<number>();
+  let last: number | null = null;
+  for (const m of messages.value) {
+    if (m.role === "assistant") last = m.partial ? null : m.id;
+    else if (m.role === "tool" || m.role === "thinking") last = null;
+    else if (m.role === "user" || m.role === "queued") {
+      if (last !== null) ids.add(last);
+      last = null;
+    }
+  }
+  if (last !== null && !busy.value) ids.add(last);
+  return ids;
+});
+const termTabs = useTerminalTabsStore();
+
+// Images a transcript page left out (chatImages.ts) are fetched on click.
+const loadingImages = reactive(new Set<string>());
+async function openStubImage(msg: ChatMessage, i: number) {
+  const key = `${msg.id}:${i}`;
+  if (loadingImages.has(key)) return;
+  loadingImages.add(key);
+  try {
+    showImage(await S.loadImage(msg, i));
+  } catch (e) {
+    S.notice(`Could not load the image: ${e}`);
+  } finally {
+    loadingImages.delete(key);
+  }
+}
+
+async function putInComposer(msg: ChatMessage) {
+  inputText.value = msg.displayText ?? msg.text;
+  // A stub in the composer would be SENT as the image, so fetch the real ones first.
+  const images = msg.images ? await Promise.all(msg.images.map((img, i) => (isImageStub(img) ? S.loadImage(msg, i).catch(() => "") : img))) : [];
+  pendingImages.value = images.filter(Boolean);
+  nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(inputText.value.length); });
+}
+
+function editMessage(msg: ChatMessage) {
+  putInComposer(msg);
+}
+
+async function rewindTo(msg: ChatMessage) {
+  const snapshot = { ...msg };
+  if (await S.rewind(msg)) putInComposer(snapshot);
+}
+
+async function forkFrom(msg: ChatMessage) {
+  const id = await S.fork(msg);
+  if (id === null) return;
+  // The tab opener looks the chat up in the store; an unknown id would mint a
+  // new empty chat instead.
+  await chats.reload();
+  termTabs.openChat(props.workspaceId, id);
+}
+
 async function copyMessage(msg: ChatMessage) {
   if (!msg.text) return;
   try {
@@ -1997,24 +2588,15 @@ async function copyMessage(msg: ChatMessage) {
       copyFeedbackTimer = null;
     }, 1_200);
   } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Could not copy message: ${e}` });
+    S.notice(`Could not copy message: ${e}`);
     S.save();
   }
 }
 
-// The welcome-screen composer creates a chat and its first prompt together. The
-// send has to wait for the runtime: claude_start is awaited, but an ACP adapter
-// only has a session after its handshake lands on acp-data.
-// ponytail: 20 s cap, no retry — if the adapter is that slow the prompt stays in
-// the feed as a plain user message and the user can resend.
+// The welcome-screen composer creates a chat and its first prompt together.
+// chat_send starts the process itself, whatever the transport.
 async function sendInitialPrompt(prompt: string, images?: string[]) {
   emit("prompt-sent");
-  if (usesRpcRuntime.value && !sessionId.value) {
-    await new Promise<void>((resolve) => {
-      const stop = watch(sessionId, (v) => { if (v) { stop(); resolve(); } });
-      setTimeout(() => { stop(); resolve(); }, 20_000);
-    });
-  }
   await sendMessage(prompt, images);
 }
 
@@ -2030,8 +2612,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   let text = strippedBaseline;
   if (!text && !feedbackBatch.length) return null;
   branchBannerDismissed.value = true;
-  // A cold chat (never opened this launch) has no process yet — start it now.
-  if (await ensureRuntime()) return null;
   // /pr: build a PR description prompt from git diff
   if (text.match(/^\/pr\b/)) {
     try {
@@ -2039,7 +2619,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
       const diff = await invoke<{ stdout: string }>("run_git", { cwd: props.cwd, args: ["diff", "HEAD~1", "--no-color"] });
       text = `Write a PR description for these changes:\n\n${stat.stdout}\n\`\`\`diff\n${diff.stdout.slice(0, 8000)}\n\`\`\``;
     } catch (e) {
-      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error reading git diff: ${e}` });
+      S.notice(`Error reading git diff: ${e}`);
       return null;
     }
   }
@@ -2054,11 +2634,11 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
   // as steering, and generic adapters have no negotiated queue capability.
   if (busy.value) {
-    const queued = enqueueMessage(text, images);
+    const queued = await enqueueMessage(text, images);
+    if (!queued) return null;
     acceptFeedback();
     pendingImages.value = [];
     inputText.value = "";
-    S.save();
     await nextTick();
     scrollToBottom(true);
     return { id: queued.id, text };
@@ -2072,11 +2652,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   // Only set when the /pr rewrite above didn't replace `text` with a generated
   // prompt — that one has no paste chip of its own to show.
   const displayText = text === strippedBaseline && hasPasteMarkers(raw) ? raw.trim() : undefined;
-  const sentId = S.nextMsgId++;
-  messages.value.push({ id: sentId, role: "user", text, images: msgImages, ...(displayText ? { displayText } : {}) });
-  // Claim the echo before the send goes out — a loopback round trip can land
-  // user.delta before the next line runs.
-  S.expectEcho(text);
   // This is the durable start receipt. It captures the recovery checkpoint and
   // creates one audit row; provider completion freezes its final diff.
   await invoke("start_turn_audit", {
@@ -2084,7 +2659,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     subjectId: `chat:${props.chatId}`,
     label: text.slice(0, 60),
   }).catch(() => {});
-  busy.value = true;
 
   // Auto-title from first user message (only if still at default and Claude hasn't set one yet)
   if (!claudeGeneratedTitle.value) {
@@ -2095,33 +2669,13 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     }
   }
 
-  S.save();
+  pendingImages.value = [];
   syncStore();
-  scrollToBottom(true);
-  if (usesRpcRuntime.value) {
-    try {
-      pendingImages.value = [];
-      acpPromptRpcId.value = await sendRpcRuntime(text, msgImages);
-      acceptFeedback();
-      return { id: sentId, text };
-    } catch (e) {
-      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
-      busy.value = false;
-      syncStore();
-    }
-    return null;
-  }
-  try {
-    pendingImages.value = [];
-    await invoke("claude_send", { id: props.chatId, text, sessionId: sessionId.value || null, images: msgImages });
-    acceptFeedback();
-    return { id: sentId, text };
-  } catch (e) {
-    messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Error: ${e}` });
-    busy.value = false;
-    syncStore();
-    return null;
-  }
+  const sentId = await S.send({ text, images: msgImages, displayText });
+  if (sentId === null) return null;
+  visitSeenAt.value = null;
+  acceptFeedback();
+  return { id: sentId, text };
 }
 
 
@@ -2177,6 +2731,7 @@ async function respondPlan(approve: boolean) {
   if (approve && resolved && permMode.value === "plan") {
     permMode.value = "auto";
     savePermMode(props.chatId, "auto");
+    if (!usesRpcRuntime.value) void persistLaunch({ permission_mode: "auto", row_only: true });
   }
 }
 
@@ -2196,127 +2751,39 @@ async function selectPermMode(mode: PermMode) {
         id: props.chatId,
         modeId: mode,
       });
-      acpControlIds.add(requestId);
+      S.trackAcpControl(requestId);
+      void persistLaunch({ permission_mode: mode, row_only: true });
     } catch (err) {
       // Do not leave the picker claiming a policy that the server rejected.
       permMode.value = previousMode;
       savePermMode(props.chatId, previousMode);
-      messages.value.push({
-        id: S.nextMsgId++,
-        role: "assistant",
-        text: `Couldn't update the permission mode: ${String(err)}`,
-      });
+      S.notice(`Couldn't update the permission mode: ${String(err)}`);
       syncStore();
     }
     return;
   }
 
-  await restartClaude();
+  await persistLaunch({ permission_mode: mode });
 }
 
-// Stop + restart the claude proc (with --resume so the session continues) and
-// settle all turn state. Used by abort AND every setting switch (mode/model/
-// profile) — the teardown `exit` is suppressed so it emits no STOP, so the
-// status machine MUST be settled here via INTERRUPT or the dot sticks at
-// running/permission forever.
-async function restartClaude() {
-  suppressNextDone.value = true; // restart — don't toast on the teardown `exit`
-  if (usesRpcRuntime.value) {
-    await stopRpcRuntime().catch(() => {});
-    await startRpcRuntime().catch(() => {});
-    // Drop any in-flight permission gate — the rpc id is dead after restart.
-    removeFeedMarker(acpPermMsgId.value); acpPermMsgId.value = null;
-    acpPermReq.value = null; acpPermRpcId.value = null;
-    busy.value = false;
-    const lastAcp = messages.value[messages.value.length - 1];
-    if (lastAcp?.partial) lastAcp.partial = false;
-    syncStore();
-    return;
-  }
-  // claude_stop removes the proc from the map so the subsequent claude_start actually spawns.
-  // claude_abort (SIGINT) leaves a dead entry in the map → claude_start is a no-op.
-  await invoke("claude_stop", { id: props.chatId }).catch(() => {});
-  await invoke("claude_start", {
-    id: props.chatId,
-    cwd: props.cwd,
-    resumeSessionId: sessionId.value || null,
-    permissionMode: permMode.value,
-    appendSystemPrompt: props.appendSystemPrompt || null,
-    model: selectedModel.value,
-    effort: selectedEffort.value,
-    configDir: selectedProfile.value?.configDir || null,
-    profileCommand: selectedProfile.value?.binary || null,
-    profileArgs: selectedProfile.value?.args.join(" ") || null,
-    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
-  }).catch(() => {});
-  runtimeStarted.value = true;
-  busy.value = false;
-  // Drop any in-flight permission/question/plan prompts — the proc backing them is gone.
-  pendingPermission.value = null;
-  pendingDiff.value = null;
-  pendingQuestion.value = null;
-  pendingPlan.value = null;
-  const last = messages.value[messages.value.length - 1];
-  if (last?.partial) last.partial = false;
-  syncStore();
-}
-
+// Restart / abort / clear are the chat runtime's (lib/chatSession.ts intents →
+// chat_restart / chat_interrupt / chat_clear): Go stops the process and
+// publishes session.reset, whose reducer drops the dead prompts, closes the
+// partial and clears busy — for every client, not just this view. The next
+// send starts a fresh process, resuming the session unless it was cleared.
 async function abortTurn() {
-  // Codex can stop a turn in place: the thread stays loaded, so nothing has to
-  // be resumed (a failed thread/resume after a kill silently started a fresh
-  // thread). The turn then ends through its own turn/completed, which clears
-  // `busy` and lets the queue drain. A stalled chat, a refused interrupt (no
-  // addressable turn yet) or one Codex never answers still gets the restart.
-  if (effectiveTransport.value === "codex-app-server" && !stalled.value) {
-    const ok = await invoke("codex_interrupt", { id: props.chatId }).then(() => true, () => false);
-    if (ok) {
-      suppressNextDone.value = true; // user stopped it — no "finished" toast
-      const started = turnStartedAt.value;
-      setTimeout(() => {
-        if (busy.value && turnStartedAt.value === started) void restartClaude();
-      }, 5_000);
-      return;
-    }
-  }
-  await restartClaude();
+  // A stalled turn gets the restart its button promises; otherwise the
+  // provider stops the turn in place where it can (Claude, Codex), and Go
+  // falls back to a restart where it cannot or does not answer.
+  await (stalled.value ? S.restart() : S.interrupt());
 }
 
 async function clearChat() {
-  const rpc = usesRpcRuntime.value;
-  await (rpc ? stopRpcRuntime() : invoke("claude_stop", { id: props.chatId })).catch(() => {});
-  messages.value = [];
-  sessionId.value = "";
-  busy.value = false;
+  // The draft side is this view's own; the transcript side is Go's.
   clearQueuedMessages();
   pendingImages.value = [];
-  turnStats.value = null;
-  sessionCost.value = 0;
-  claudeGeneratedTitle.value = false;
-  acpPermRpcId.value = null;
-  clearMessageHistory(props.chatId);
   chats.sync(props.chatId, { claudeSessionId: "", busy: false, messageCount: 0, title: `Chat` });
-  const projSettings = scriptsStore.settingsFor(props.cwd);
-  if (rpc) {
-    const startErr = await startRpcRuntime().catch((e: unknown) => e);
-    if (startErr) messages.value.push({ id: S.nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
-    return;
-  }
-  await invoke("claude_start", {
-    id: props.chatId,
-    cwd: props.cwd,
-    permissionMode: permMode.value,
-    appendSystemPrompt: props.appendSystemPrompt || null,
-    model: selectedModel.value,
-    effort: selectedEffort.value,
-    configDir: selectedProfile.value?.configDir || projSettings.claude_config_dir || null,
-    profileCommand: selectedProfile.value?.binary || null,
-    profileArgs: selectedProfile.value?.args.join(" ") || null,
-    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
-  }).catch(() => {});
-  runtimeStarted.value = true;
-  // Switched to a stream-json agent at runtime → ensure the claude-data listener
-  // exists (onMounted only attaches it when the chat starts as stream-json).
-  await S.listenClaude();
+  await S.clear();
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -2328,12 +2795,12 @@ function onKeydown(e: KeyboardEvent) {
   if (pendingPlan.value && e.key === "Escape") { e.preventDefault(); respondPlan(false); return; }
   if (busy.value && e.key === "Escape" && !pendingPermission.value && !pendingDiff.value) { e.preventDefault(); abortTurn(); nextTick(() => inputEl.value?.focus()); return; }
   if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); clearChat(); return; }
+  if (isStashShortcut(e)) { e.preventDefault(); stashEl.value?.stash(); return; }
   if (e.key === "ArrowUp" && inputText.value === "" && !busy.value) {
-    const lastUser = [...messages.value].reverse().find((m) => m.role === "user");
-    if (lastUser) {
+    const recalled = S.recallLastUserMessage();
+    if (recalled !== null) {
       e.preventDefault();
-      inputText.value = lastUser.text;
-      messages.value = messages.value.filter((m) => m !== lastUser);
+      inputText.value = recalled;
       nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(inputText.value.length); });
       return;
     }
@@ -2341,11 +2808,25 @@ function onKeydown(e: KeyboardEvent) {
   // Suggestion nav claims Arrow/Tab/Enter/Escape while the list is open, so it
   // has to run before the Enter-sends check below.
   if (completion.handleKeydown(e)) return;
+  // ⌘/Ctrl+Enter while busy: queue it, then steer it into the running turn.
+  if (e.key === "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey) && steerable.value) {
+    e.preventDefault();
+    void sendMessage().then((queued) => { if (queued) void S.steer(queued.id); });
+    return;
+  }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
 
 function onInput() {
   void completion.update();
+}
+
+function addImageFile(file: File) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result === "string") pendingImages.value.push(reader.result);
+  };
+  reader.readAsDataURL(file);
 }
 
 function onPaste(e: ClipboardEvent) {
@@ -2355,14 +2836,19 @@ function onPaste(e: ClipboardEvent) {
     if (item.type.startsWith("image/")) {
       e.preventDefault();
       const file = item.getAsFile();
-      if (!file) continue;
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") pendingImages.value.push(reader.result);
-      };
-      reader.readAsDataURL(file);
+      if (file) addImageFile(file);
     }
   }
+}
+
+// Phone has no clipboard paste of screenshots worth relying on: a file picker
+// (photo library / camera) feeds the same pendingImages.
+const imagePicker = ref<HTMLInputElement | null>(null);
+const phoneSettingsOpen = ref(false);
+function onPickImages(e: Event) {
+  const input = e.target as HTMLInputElement;
+  for (const file of Array.from(input.files ?? [])) if (file.type.startsWith("image/")) addImageFile(file);
+  input.value = "";
 }
 
 function onWindowKeydown(e: KeyboardEvent) {
@@ -2463,67 +2949,6 @@ function migrateLegacyChatConfig() {
   }
 }
 
-// --- Lazy runtime start -----------------------------------------------------
-// A chat's CLI is expensive (each idle `claude` holds ~150 MB), and Terminal.vue
-// keeps EVERY chat of every opened workspace mounted. Starting a process per
-// mount meant 40 persisted chats = 40 live CLIs = multi-GB at launch for chats
-// the user never opened. So the process is started on demand instead: on send,
-// or up front only for a chat spawned with a prompt to deliver. agentproc's
-// sweeper takes it back once the chat goes quiet.
-let runtimeStarting: Promise<unknown> | null = null;
-
-// Only a chat spawned with a prompt still to deliver warms itself up. Merely
-// looking at a chat does not need a process — the transcript is on disk.
-function shouldAutoStart(): boolean {
-  return props.initialPrompt !== undefined;
-}
-
-// Starts the backing process once. Returns a truthy error if the start failed
-// (the message is already surfaced in the feed), falsy on success.
-async function ensureRuntime(): Promise<unknown> {
-  if (runtimeStarted.value) return null;
-  if (runtimeStarting) return runtimeStarting;
-  runtimeStarting = (async (): Promise<unknown> => {
-    const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? sessionId.value ?? "";
-    if (usesRpcRuntime.value) {
-      await scriptsStore.loadForPath(props.cwd);
-      const startErr = await startRpcRuntime().catch((e: unknown) => e);
-      if (startErr) {
-        messages.value.push({ id: S.nextMsgId++, role: 'assistant', text: `Failed to start ${runtimeLabel.value}: ${startErr}` });
-        return startErr;
-      }
-      runtimeStarted.value = true;
-      return null;
-    }
-    const startErr = await invoke("claude_start", {
-      id: props.chatId,
-      cwd: props.cwd,
-      resumeSessionId: stored || null,
-      permissionMode: permMode.value,
-      appendSystemPrompt: props.appendSystemPrompt || null,
-      model: selectedModel.value,
-      effort: selectedEffort.value,
-      configDir: selectedProfile.value?.configDir || null,
-      profileCommand: selectedProfile.value?.binary || null,
-      profileArgs: selectedProfile.value?.args.join(" ") || null,
-    autoCompactWindow: selectedProfile.value?.autoCompactWindow || null,
-    }).catch((e: unknown) => {
-      // A swallowed failure here (missing `claude` binary, bad profile) used to
-      // look like a chat that simply never answers.
-      messages.value.push({ id: S.nextMsgId++, role: "assistant", text: `Failed to start Claude CLI: ${e}` });
-      return e;
-    });
-    await S.listenClaude();
-    if (!startErr) runtimeStarted.value = true;
-    return startErr ?? null;
-  })();
-  try {
-    return await runtimeStarting;
-  } finally {
-    runtimeStarting = null;
-  }
-}
-
 // Set on unmount so the long async onMounted() below can stop writing into
 // this instance's (possibly by-then-evicted) session once nothing is
 // watching — see the guards after each `await` inside onMounted.
@@ -2556,6 +2981,8 @@ function onWindowFocus() {
   if (watchingNow()) chatAttention.markSeen(props.chatId);
 }
 
+// True until this mount has read the transcript back (see the skeleton in the template).
+const transcriptLoading = ref(true);
 onMounted(async () => {
   // Point the session's view hooks at this mount and take a reference. The
   // session already holds the listeners and reduces the stream itself, so no
@@ -2567,7 +2994,6 @@ onMounted(async () => {
     onAcpSession: () => learnModels(agentKind.value, liveModels.value),
     restoreAcpSelections,
     usesRpcRuntime: () => usesRpcRuntime.value,
-    send: async (text, images) => { await sendMessage(text, images); },
   });
   // The transcript arrives on this channel for BOTH transports, so it is
   // attached unconditionally — unlike the raw ones, which are per-runtime.
@@ -2584,43 +3010,39 @@ onMounted(async () => {
   migrateLegacyChatConfig();
   if (isAcpRuntime.value && !acpModes.value && acpConfigOptions.value.length === 0) {
     const cached = getAcpCapabilities(props.chatId, agentKind.value);
-    if (cached) {
-      acpModes.value = cached.modes;
-      acpConfigOptions.value = cached.configOptions;
-    }
+    if (cached) S.seedAcpCapabilities(cached.modes, cached.configOptions);
   }
   // Only read the transcript back from SQLite when the session has none. A
   // non-empty session is the LIVE copy — it kept receiving while this view was
   // unmounted, so it is ahead of the DB, and assigning over it would throw the
   // newer part away (exactly the hole this plan is about).
   if (messages.value.length === 0) {
-    const loaded = await loadMessages(props.chatId);
-    if (unmounted) return;
-    messages.value = loaded;
-    // Ids must continue past the loaded history, or new messages collide with
-    // old ones on the same `:key`.
-    S.nextMsgId = messages.value.reduce((max, m) => Math.max(max, m.id + 1), 0);
+    try {
+      const loaded = await loadMessages(props.chatId);
+      if (unmounted) return;
+      S.hydrate({ messages: loaded.messages, hiddenBefore: loaded.hiddenBefore });
+    } finally {
+      transcriptLoading.value = false;
+    }
     // Catch up on anything the agent said after that transcript was written —
     // i.e. a turn that was in flight when the app was last closed or crashed.
     await replayChatStream(props.chatId);
     if (unmounted) return;
   }
+  transcriptLoading.value = false;
   // A remount is how you come back to a chat now (fáze 3 unmounts hidden chat
   // leaves), so land on the newest message. The activeByWs watcher below cannot
   // do it: the active id is already this chat before the fresh instance mounts,
   // so it never fires and the view opened scrolled to the top of the history.
   scrollToBottom(true);
-  // A queue parked by an older build (or by a relaunch — the placeholders are
-  // persisted with the transcript) has no busy transition left to release it.
-  S.drain();
   selectedProfileId.value = loadProfileId(props.chatId);
   selectedModel.value = loadModel();
-  // Pin the resolved model to this chat on first mount, so it survives a
-  // remount even if the shared last-used key moves on in the meantime.
-  if (!storedChatModel()) saveChatModel(selectedModel.value);
   selectedEffort.value = loadEffort();
-  if (!storedChatEffort()) saveChatEffort(selectedEffort.value);
   permMode.value = loadPermMode(props.chatId);
+  // Pin what this device resolved (its "last used" defaults) onto the row on
+  // first mount: the row is what Go starts the process with, and it must not
+  // start a different model than the picker shows.
+  if (!usesRpcRuntime.value) seedLaunchRow();
 
   // Mounted normally means visible (Terminal.isChatVisible), but a chat spawned
   // with a prompt can mount unwatched — marking that one seen would clear a dot
@@ -2633,20 +3055,19 @@ onMounted(async () => {
   // still tighten via the perm-mode switch / Deny.
   if (props.compact) chats.addPermissionRule("Bash:burrow");
   const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
-  if (stored) sessionId.value = stored;
+  if (stored) S.hydrate({ sessionId: stored });
   S.sync();
-  // The stream-json listener is JS-only and free — attach it even when the
-  // runtime is still cold, so a later ensureRuntime() streams immediately.
-  if (!usesRpcRuntime.value) {
-    await S.listenClaude();
-  }
-  if (shouldAutoStart()) {
-    const startErr = await ensureRuntime();
-    if (!startErr && props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
-    // No drain here: it already ran above, unconditionally. Two drains in one
-    // mount each take their own message and send both turns at once.
-    if (usesRpcRuntime.value) return;
-  }
+  // The raw listeners are JS-only and free — attach both, so a cold chat
+  // (its process is started by chat_send, in Go) and an agent switch stream
+  // immediately.
+  await S.listenClaude();
+  await S.listenAcp();
+  // A request that arrived before these listeners existed (a view mounted late —
+  // slow link, chat started elsewhere) is not replayed by the stream; ask for it.
+  await S.recoverPendingRequests();
+  // No drain here: it already ran above, unconditionally. Two drains in one
+  // mount each take their own message and send both turns at once.
+  if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
 
   // Load account info (plan, 5h window) — non-blocking.
   invoke<AccountInfo>("claude_get_account", { cwd: props.cwd })
@@ -2862,77 +3283,49 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
   --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></svg>');
 }
 
-/* A user bubble already sits on the accent surface, so the assistant's dark
-   code-block fill would fight it — quiet the fences down inside the bubble. */
+/* The user bubble is a quiet neutral surface (--bg-selected), so fences and
+   chips inside it only need a faint tint of the text color. */
 .bubble-user .md-body :deep(pre) {
-  background: rgba(0, 0, 0, 0.28);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 12%, transparent);
 }
-.bubble-user .md-body :deep(code) { background: rgba(0, 0, 0, 0.25); color: inherit; }
-.bubble-user .md-body :deep(a) { color: inherit; }
-/* The paste chip's default styling (composer.css) is accent-on-transparent,
-   which disappears against a bubble whose own background IS the accent color —
-   invert to white-on-dark here so it still reads as a chip. */
+.bubble-user .md-body :deep(code) { background: color-mix(in srgb, var(--text-primary) 10%, transparent); color: inherit; }
+.bubble-user .md-body :deep(a) { color: var(--chat-info); }
 .bubble-user .md-body :deep(.composer-inline-chip) {
-  background: rgba(0, 0, 0, 0.25);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 18%, transparent);
   color: inherit;
   cursor: pointer;
 }
 
 /* Tool row — quiet activity-log line, expandable */
+/* Tool rows read as quiet text lines (Ghostex): "› Read chatSession.ts". No
+   chip chrome; a running or failed row only changes its colour. */
 .tool-row {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 9px 3px 6px;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-chip);
-  font-size: 11px;
+  gap: 7px;
+  padding: 3px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  font-size: 13px;
   color: var(--text-secondary, rgba(255,255,255,0.55));
   cursor: pointer;
   user-select: none;
   max-width: 100%;
   overflow: hidden;
-  transition: background .1s, color .1s, border-color .1s;
+  transition: background .1s, color .1s;
 }
 .tool-row:hover {
-  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 13%, var(--surface-elevated));
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
   color: var(--text-primary);
 }
-.tool-row-running { border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 35%, var(--border)); }
-.tool-row-failed {
-  background: color-mix(in srgb, var(--red, #ef4444) 8%, var(--surface-elevated));
-  border-color: color-mix(in srgb, var(--red, #ef4444) 30%, transparent);
-}
-.changed-files {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  font-size: 11px;
-  color: var(--text-secondary, rgba(255,255,255,0.55));
-}
-.changed-files-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 6%, transparent);
-  border-bottom: 1px solid var(--border);
-}
-.changed-files-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  font-family: var(--font-mono, monospace);
-}
-.changed-files-row + .changed-files-row { border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
+.tool-row-running { color: var(--text-primary); }
+.tool-row-failed { color: var(--red, #ef4444); }
 .tool-caret {
   flex-shrink: 0;
-  color: var(--agent-accent, var(--accent));
+  color: var(--text-muted);
   transition: transform .15s;
 }
 .tool-caret-open { transform: rotate(90deg); }
@@ -3105,16 +3498,85 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .md-body :deep(h2) { font-size: 14px; }
 .md-body :deep(h3) { font-size: 13px; }
 .md-body :deep(a) { color: var(--chat-accent); text-decoration: underline; text-underline-offset: 2px; }
+.md-body :deep(a[data-file-ref]) { cursor: pointer; }
 .md-body :deep(hr) { border: none; border-top: 1px solid var(--chat-border); margin: 10px 0; }
 .md-body :deep(table) { border-collapse: collapse; font-size: 12px; margin: 8px 0; }
 .md-body :deep(th), .md-body :deep(td) { border: 1px solid var(--chat-border); padding: 5px 10px; }
 .md-body :deep(th) { background: color-mix(in srgb, var(--chat-text) 5%, transparent); font-weight: 600; }
 
+/* Ghostex-style "Worked 42s" bar and the working spark. */
+.worked-bar { display: flex; width: 100%; align-items: center; gap: 9px; padding: 9px 14px; border: none; border-radius: 12px; font-size: 13.5px; text-align: left; cursor: pointer; background: color-mix(in srgb, var(--chat-text) 4%, var(--chat-bg)); }
+.worked-bar:hover { background: color-mix(in srgb, var(--chat-text) 7%, var(--chat-bg)); }
+.worked-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--chat-border); font-size: 11.5px; color: var(--chat-text-secondary); }
+.working-spark { color: #E0876A; animation: working-spin 9s linear infinite, working-pulse 1.6s ease-in-out infinite; }
+@keyframes working-spin { to { transform: rotate(360deg); } }
+@keyframes working-pulse { 50% { opacity: .55; } }
+
+/* Inline diff card (changed-files row). */
+.diff-card { border: 1px solid var(--chat-border); border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }
+.diff-card-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+.diff-card-icon { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px; color: var(--chat-accent); background: color-mix(in srgb, var(--chat-accent) 16%, transparent); }
+.diff-ratio { width: 90px; height: 5px; flex-shrink: 0; border-radius: 3px; overflow: hidden; background: var(--red, #D9827A); }
+.diff-ratio-add { display: block; height: 100%; background: var(--chat-success); }
+.diff-file-row { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12.5px; cursor: pointer; border-top: 1px solid var(--chat-border); background: color-mix(in srgb, var(--chat-text) 3%, transparent); }
+.diff-file-row:hover { background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
+.diff-blocks { display: flex; gap: 2px; flex-shrink: 0; }
+.diff-blocks i { width: 7px; height: 7px; border-radius: 2px; }
+.diff-blocks .b-add { background: var(--chat-success); }
+.diff-blocks .b-del { background: var(--red, #D9827A); }
+.diff-blocks .b-off { background: var(--chat-border); }
+.diff-open { display: flex; padding: 3px; border: none; border-radius: 5px; background: transparent; color: var(--chat-text-secondary); cursor: pointer; }
+.diff-open:hover { color: var(--chat-text); background: color-mix(in srgb, var(--chat-text) 8%, transparent); }
+.diff-lines { border-top: 1px solid var(--chat-border); padding: 4px 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.6; overflow-x: auto; }
+.diff-line { padding: 0 14px; white-space: pre; color: var(--chat-text-secondary); }
+.diff-line-add { background: color-mix(in srgb, var(--chat-success) 14%, transparent); color: color-mix(in srgb, var(--chat-success) 55%, var(--chat-text)); }
+.diff-line-del { background: color-mix(in srgb, var(--red, #D9827A) 14%, transparent); color: color-mix(in srgb, var(--red, #D9827A) 55%, var(--chat-text)); }
+.diff-sign { display: inline-block; width: 16px; opacity: 0.7; user-select: none; }
+.diff-sep { padding: 0 14px; color: var(--chat-muted); user-select: none; }
+.diff-more { padding: 4px 14px; font-family: var(--font-sans); font-size: 11.5px; color: var(--chat-text-secondary); cursor: pointer; }
+.diff-more:hover { color: var(--chat-text); }
+
+/* Transcript minimap rail. */
+.minimap-rail { position: absolute; top: 72px; right: 10px; z-index: 5; display: flex; flex-direction: column; align-items: flex-end; gap: 9px; padding: 6px 4px; max-height: calc(100% - 140px); overflow: hidden; }
+.minimap-dash { height: 2px; border: none; border-radius: 1px; padding: 0; background: color-mix(in srgb, var(--chat-text) 28%, transparent); cursor: pointer; transition: width .12s, background-color .12s; }
+.minimap-dash::before { content: ""; display: block; height: 10px; margin-top: -4px; }
+.minimap-dash.is-current { background: var(--chat-text); }
+.minimap-dash.is-hover { background: var(--chat-accent); width: 28px !important; }
+.minimap-preview { position: absolute; top: 0; right: 40px; width: 320px; padding: 10px 12px; border: 1px solid var(--chat-border); border-radius: 12px; background: var(--chat-surface); box-shadow: 0 12px 32px rgba(0,0,0,.35); pointer-events: none; }
+
+/* Catch me up: button in the empty composer, card above it. */
+.catchup-btn { position: absolute; top: 8px; right: 10px; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--chat-border); background: var(--chat-surface); color: var(--chat-text); font-size: 12px; cursor: pointer; }
+.catchup-btn:hover { background: color-mix(in srgb, var(--chat-text) 6%, var(--chat-surface)); }
+.catchup-card { border: 1px solid var(--chat-border); border-radius: 14px; padding: 12px 14px; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }
+.catchup-tag { flex-shrink: 0; margin-top: 1px; padding: 0 6px; border-radius: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.catchup-tag.tag-needs_you { color: var(--chat-warn); background: color-mix(in srgb, var(--chat-warn) 16%, transparent); }
+.catchup-tag.tag-blocked { color: var(--red, #D9827A); background: color-mix(in srgb, var(--red, #D9827A) 14%, transparent); }
+.catchup-tag.tag-in_progress { color: var(--chat-info); background: color-mix(in srgb, var(--chat-info) 14%, transparent); }
+.catchup-tag.tag-done { color: var(--chat-success); background: color-mix(in srgb, var(--chat-success) 14%, transparent); }
+.catchup-tag.tag-untested { color: var(--chat-text-secondary); background: color-mix(in srgb, var(--chat-text) 8%, transparent); }
+
+/* Sub-agents card above the composer. */
+.subagents-card { border: 1px solid var(--chat-border); border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }
+.subagents-head { display: flex; width: 100%; align-items: center; gap: 8px; padding: 9px 14px; font-size: 12.5px; border: none; background: transparent; cursor: pointer; }
+.subagent-row { display: flex; width: 100%; align-items: center; gap: 9px; padding: 6px 14px; font-size: 12.5px; text-align: left; border: none; border-top: 1px solid color-mix(in srgb, var(--chat-border) 60%, transparent); background: transparent; cursor: pointer; }
+.subagent-row:hover { background: color-mix(in srgb, var(--chat-text) 5%, transparent); }
+.subagent-badge { flex-shrink: 0; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+.subagent-badge.tone-needs { color: var(--chat-warn); background: color-mix(in srgb, var(--chat-warn) 16%, transparent); }
+.subagent-badge.tone-running { color: var(--chat-info); background: color-mix(in srgb, var(--chat-info) 14%, transparent); }
+.subagent-badge.tone-done { color: var(--chat-success); background: color-mix(in srgb, var(--chat-success) 14%, transparent); }
+.subagent-badge.tone-failed { color: var(--red, #D9827A); background: color-mix(in srgb, var(--red, #D9827A) 14%, transparent); }
+.subagent-badge.tone-idle { color: var(--chat-text-secondary); background: color-mix(in srgb, var(--chat-text) 6%, transparent); }
+
+/* Queued follow-up rows inside the composer. */
+.queue-row { background: color-mix(in srgb, var(--chat-text) 3%, transparent); }
+.queue-row-drop { border-color: var(--chat-accent); }
+.queue-act { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent; color: var(--chat-text-secondary); cursor: pointer; }
+.queue-act:hover { background: color-mix(in srgb, var(--chat-text) 8%, transparent); color: var(--chat-text); }
+
 /* Chat input box: quiet by default, agent-accent ring on focus so the active
    composer is unambiguous without a heavy persistent border. */
 .chat-input-box:focus-within {
-  border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 55%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent, var(--accent)) 14%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 22%, var(--border));
 }
 
 .chat-input-box { position: relative; z-index: 1; }

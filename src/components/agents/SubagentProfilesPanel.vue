@@ -12,10 +12,10 @@ const ui = useUIStore();
 const selected = shallowRef("scout");
 const draft = shallowRef<SubagentProfile>({ ...profiles.profiles[0] });
 const saved = shallowRef(false);
-const supported = computed(() => providers.chatAgents.filter((agent) => ["claude-cli", "codex-app-server"].includes(agent.transport)));
+const supported = computed(() => providers.chatAgents.filter((agent) => (["claude-cli", "codex-app-server"].includes(agent.transport) || agent.providerId === "openai-compatible")));
 const agent = computed(() => draft.value.agentId ? providers.byId(draft.value.agentId) : providers.byId(ui.defaultChatAgent));
 const models = computed(() => agent.value ? visibleModelsFor(agent.value.transport === "claude-cli" ? "claude" : agent.value.id) : []);
-const validAgent = computed(() => !!agent.value?.enabled && ["claude-cli", "codex-app-server"].includes(agent.value?.transport ?? ""));
+const validAgent = computed(() => !!agent.value?.enabled && (["claude-cli", "codex-app-server"].includes(agent.value?.transport ?? "") || agent.value?.providerId === "openai-compatible"));
 const permissions = Object.entries(PROFILE_PERMISSION_LABELS) as [ProfilePermission, string][];
 watch([selected, () => profiles.profiles], () => {
   draft.value = { ...profiles.find(selected.value)! };
@@ -30,7 +30,7 @@ async function save() { profiles.save(draft.value); await nextTick(); saved.valu
   <div class="flex max-w-[760px] flex-col gap-4">
     <div>
       <h3 class="m-0 text-sm font-semibold text-foreground">Sub-agent profiles</h3>
-      <p class="m-0 mt-1 text-xs leading-relaxed text-muted-foreground">Reusable roles for delegation. Changes apply to newly spawned agents. Available with Claude CLI and Codex app-server.</p>
+      <p class="m-0 mt-1 text-xs leading-relaxed text-muted-foreground">Reusable roles for delegation. Changes apply to newly spawned agents. Available with Claude CLI, Codex app-server, and OpenAI Compatible.</p>
     </div>
     <div class="flex gap-1 border-b border-border" role="tablist" aria-label="Sub-agent role">
       <button v-for="profile in profiles.profiles" :key="profile.id" type="button" role="tab" :aria-selected="selected === profile.id" class="rounded-t px-3 py-2 text-xs hover:bg-hover focus-visible:outline focus-visible:outline-accent" :class="selected === profile.id ? 'bg-hover font-semibold text-foreground' : 'text-muted-foreground'" @click="selected = profile.id">{{ profile.name }}</button>
@@ -51,12 +51,12 @@ async function save() { profiles.save(draft.value); await nextTick(); saved.valu
         </select>
       </label>
     </div>
-    <p v-if="!validAgent" role="alert" class="m-0 text-xs text-warning">Choose an enabled Claude or Codex provider to use this profile.</p>
+    <p v-if="!validAgent" role="alert" class="m-0 text-xs text-warning">Choose an enabled Claude, Codex, or OpenAI Compatible provider to use this profile.</p>
     <label class="grid gap-1 text-xs text-secondary-foreground">Permissions
       <select :value="draft.permissionMode" aria-label="Profile permissions" class="h-8 max-w-[320px] rounded-[var(--radius-input)] border border-border bg-base px-2 text-xs text-foreground focus:outline-accent" @change="update({permissionMode: ($event.target as HTMLSelectElement).value as ProfilePermission})">
         <option v-for="[value, label] in permissions" :key="value" :value="value">{{ label }}</option>
       </select>
-      <span class="text-[11px] leading-relaxed text-muted-foreground">{{ draft.permissionMode === 'plan' ? 'Investigate and plan without workspace writes.' : draft.permissionMode === 'auto' ? 'The provider reviews routine actions automatically; risky actions still ask.' : 'Commands and file changes remain subject to approval.' }}</span>
+      <span class="text-[11px] leading-relaxed text-muted-foreground">{{ draft.permissionMode === 'plan' ? 'Investigate and plan without workspace writes.' : draft.permissionMode === 'auto' ? (agent?.providerId === 'openai-compatible' ? 'File changes and commands run without approval.' : 'The provider reviews routine actions automatically; risky actions still ask.') : 'Commands and file changes remain subject to approval.' }}</span>
     </label>
     <label class="grid gap-1 text-xs text-secondary-foreground">Role instructions
       <textarea :value="draft.instructions" aria-label="Role instructions" rows="6" class="w-full resize-y rounded-[var(--radius-input)] border border-border bg-base p-2 text-xs leading-relaxed text-foreground focus:outline-accent" @input="update({instructions: ($event.target as HTMLTextAreaElement).value})" />

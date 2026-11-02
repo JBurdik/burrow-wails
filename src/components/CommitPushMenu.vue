@@ -19,7 +19,7 @@
     </button>
     <div
       v-if="open"
-      class="absolute left-0 top-[calc(100%+5px)] z-[1500] min-w-[170px] overflow-hidden rounded-md border border-border bg-panel py-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+      class="absolute left-0 top-[calc(100%+5px)] z-[1500] min-w-[170px] overflow-hidden rounded-md border border-border bg-[var(--bg-dropdown)] py-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
       @click.stop
     >
       <button

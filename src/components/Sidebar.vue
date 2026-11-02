@@ -1,31 +1,23 @@
 <template>
-  <aside class="flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-panel [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
-    <!-- Search: filters workspaces/chats/tabs below by substring -->
-    <div class="px-1.5 pt-1.5">
-      <input
-        v-model="searchQuery"
-        type="text"
-        placeholder="Filter…"
-        class="w-full rounded-md border border-border/65 bg-transparent px-2 py-1 text-[11.5px] text-foreground outline-none placeholder:text-muted-foreground focus:border-accent/60"
-        @keydown.esc="clearSearch"
-      />
-    </div>
-    <!-- Project filter: "All projects" or one repo, narrows the feed below -->
-    <div class="flex shrink-0 items-center gap-1 p-1.5 pb-1" ref="filterEl">
+  <aside class="surface-glow relative isolate [--glow-base:var(--sidebar-bg)] flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-[var(--sidebar-bg)] [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
+    <StageBackdrop />
+    <!-- Top row: new thread + quiet icon actions. The project picker is a
+         menu now: the feed below is already grouped by project. -->
+    <div class="flex shrink-0 items-center gap-1 px-2 pb-1 pt-2" ref="filterEl">
       <button
-        class="flex min-w-0 flex-1 items-center gap-[7px] rounded-[7px] px-1.5 py-1.5 text-left transition-colors hover:bg-hover"
-        :class="filterOpen && 'bg-hover'"
-        @click.stop="filterOpen = !filterOpen"
+        v-if="active"
+        class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground"
+        :class="ui.welcomeVisible && 'bg-hover text-foreground'"
+        @click="ui.openWelcome()"
       >
-        <PhFolder :size="13" weight="fill" class="shrink-0 text-accent" />
-        <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-foreground">{{ filterProjectId == null ? "All projects" : (repoById(filterProjectId)?.name ?? "All projects") }}</span>
-        <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground" />
+        <PhPlus :size="14" class="shrink-0" />
+        <span class="truncate whitespace-nowrap">New thread</span>
       </button>
-      <button class="flex shrink-0 items-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground active:scale-90" title="Open folder…" @click="pickFolder">
-        <PhFolderPlus :size="14" />
-      </button>
+      <span v-else class="flex-1" />
+      <button class="sb-icon" title="Projects" :class="filterOpen && 'text-foreground'" @click.stop="filterOpen = !filterOpen"><PhFolders :size="15" /></button>
+      <button class="sb-icon" title="Open folder…" @click="pickFolder"><PhFolderPlus :size="15" /></button>
       <Teleport to="body">
-        <div v-if="filterOpen" class="fixed z-[1000] max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-panel p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]" :style="filterMenuStyle" @click.stop>
+        <div v-if="filterOpen" class="fixed z-[1000] max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-[var(--bg-dropdown)] p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]" :style="filterMenuStyle" @click.stop>
           <button
             class="flex w-full items-center gap-[7px] rounded-md border-0 bg-transparent px-2 py-1.5 text-left font-ui text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground"
             :class="filterProjectId == null && 'bg-selected text-foreground'"
@@ -51,201 +43,99 @@
         </div>
       </Teleport>
     </div>
-
-    <!-- Every new thread starts on the composer; this is its only entry point. -->
-    <div v-if="active" class="flex shrink-0 items-center gap-1 px-1.5 pb-1.5">
-      <button
-        class="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-border/65 bg-transparent px-2 py-1.5 text-[11px] font-medium text-secondary-foreground transition-colors hover:border-border hover:bg-hover hover:text-foreground active:scale-[0.985]"
-        :class="ui.welcomeVisible && 'border-accent/45 bg-accent/[0.08] text-foreground'"
-        @click="ui.openWelcome()"
-      >
-        <PhPlus :size="12" class="text-accent" />
-        New thread
-      </button>
-      <button v-if="activeRepo" class="flex shrink-0 items-center rounded-md border border-border/65 p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-foreground active:scale-90" title="New worktree" @click="openWtDialog(activeRepo)"><PhGitBranch :size="13" /></button>
+    <div v-if="filterProjectId != null" class="mx-2 mb-1 flex items-center gap-1.5 rounded-lg bg-hover px-2.5 py-1 text-[12px] text-secondary-foreground">
+      Only <span class="truncate font-medium text-foreground">{{ repoById(filterProjectId)?.name }}</span>
+      <button class="ml-auto text-muted-foreground hover:text-foreground" title="Show all projects" @click="filterProjectId = null"><PhX :size="11" weight="bold" /></button>
     </div>
 
     <div class="flex-1 overflow-y-auto pb-2" @scroll="cancelHoverCard">
-      <!-- Live feed: every open project's tabs, newest activity first -->
-      <div
-        v-for="row in filteredLive"
-        :key="rowKey(row)"
-        class="group relative cursor-pointer border-b border-border/40 px-2.5 py-[7px] transition-colors hover:rounded-lg hover:bg-hover"
-        :class="[
-          isActiveRow(row) && 'rounded-lg bg-selected',
-          row.tab.isAgent && `agent-state-${attentionState(row)}`,
-        ]"
-        @click="selectTab(row)"
-        @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
-        @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
-        @mouseleave="cancelHoverCard"
-      >
-        <span v-if="isActiveRow(row)" class="absolute inset-y-0 left-0 w-[2px] bg-accent" />
-
-        <!-- line 1: project + when -->
-        <div class="flex items-center gap-1.5">
-          <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-3.5 w-3.5 shrink-0 rounded-[3px] object-cover" />
-          <PhFolder v-else :size="14" weight="fill" class="shrink-0 text-accent/80" />
-          <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[10.5px] text-muted-foreground">{{ repoName(row.ws) }}</span>
-          <!-- Status ↔ Settle swap via visibility in one grid cell — display
-               swapping resized the row and made it jump on hover. -->
-          <span class="grid shrink-0 justify-items-end">
-            <span
-              class="flex items-center gap-1 [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible"
-              :class="statusClass(row.tab.status)"
-            >
-              <PhWarningCircle
-                v-if="attentionState(row) === 'needs-input'"
-                :size="10"
-                weight="fill"
-                class="shrink-0 text-[var(--yellow)]"
-                aria-hidden="true"
-              />
-              <span
-                v-else-if="attentionState(row) === 'done-unread'"
-                class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--blue)]"
-                title="Unread completion"
-                role="status"
-                aria-label="Unread completion"
-              />
-              <span>{{ statusText(row) }}</span>
-            </span>
-            <button
-              class="invisible flex items-center gap-[3px] self-center rounded px-1 text-[10px] font-semibold leading-none text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-[var(--green)] group-hover:visible"
-              title="Settle"
-              @click.stop="toggleSettled(row.tab, row.ws.id)"
-            >
-              <PhCheck :size="11" weight="bold" />
-              Settle
-            </button>
+      <!-- Live feed, grouped by project (Ghostex-style): a header per repo with
+           its uncommitted diffstat, one compact line per thread, a thread's
+           sub-agents indented under it. Branch/model/PR live in the hover card. -->
+      <div v-for="group in topGroups" :key="group.repoId" class="px-2 pt-1.5">
+        <div v-if="group.repoId === PINNED" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">Pinned</div>
+        <div v-else class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover" @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
+          <button class="flex min-w-0 flex-1 items-center gap-2 text-left" @click="toggleGroup(group.repoId)">
+            <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground transition-transform" :class="collapsedGroups.has(group.repoId) && '-rotate-90'" />
+            <img v-if="store.icons[group.repoId]" :src="store.icons[group.repoId]" class="h-[18px] w-[18px] shrink-0 rounded-[5px] object-cover" />
+            <span v-else class="sb-repo-tile" :style="{ background: repoColor(group.repoId) }">{{ (repoById(group.repoId)?.name ?? '?').slice(0, 1).toUpperCase() }}</span>
+            <span class="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{{ repoById(group.repoId)?.name ?? '…' }}</span>
+          </button>
+          <span v-if="repoDiff[group.repoId] && (repoDiff[group.repoId]!.added || repoDiff[group.repoId]!.removed)" class="shrink-0 text-[11.5px] tabular-nums group-hover/hdr:hidden" :title="'Uncommitted changes'">
+            <span class="text-[var(--green)]">+{{ repoDiff[group.repoId]!.added }}</span>
+            <span class="ml-1 text-[var(--red)]">-{{ repoDiff[group.repoId]!.removed }}</span>
           </span>
+          <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!, false)"><PhPlus :size="13" /></button>
         </div>
-
-        <!-- line 2: thread title -->
-        <div class="mt-[3px] flex items-center gap-1.5">
-          <component
-            v-if="row.tab.agentIcon"
-            :is="agentIconComp(row.tab.agentIcon)"
-            :size="14"
-            class="shrink-0"
-            :class="[row.tab.isChat ? 'text-[var(--yellow)]' : 'ws-term-icon-agent text-accent']"
-          />
-          <PhChatCenteredText v-else-if="row.tab.isChat" :size="14" class="shrink-0 text-[var(--yellow)]" />
-          <PhRobot v-else-if="row.tab.isAgent" :size="14" class="ws-term-icon-agent shrink-0 text-accent" />
-          <PhTerminal v-else :size="14" class="shrink-0 text-muted-foreground" />
-          <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" aria-label="Pinned" />
-          <input
-            v-if="editingTab?.wsId === row.ws.id && editingTab?.tabId === row.tab.id"
-            v-model="editingTabTitle"
-            class="ws-term-rename-input m-0 w-full min-w-0 flex-1 border-0 border-b border-accent bg-transparent p-0 text-[12px] font-semibold text-foreground outline-none"
-            @blur="commitTabRename"
-            @keydown.enter.prevent="commitTabRename"
-            @keydown.esc.prevent="cancelTabRename"
-            @click.stop
-          />
-          <span
-            v-else
-            class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-semibold text-foreground"
-            @dblclick.stop="startTabRename(row.ws.id, row.tab)"
-          >{{ row.tab.title }}</span>
-          <PhX
-            :size="10"
-            weight="bold"
-            class="shrink-0 rounded-sm p-px text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:!text-destructive"
-            title="Close tab"
-            @click.stop="termTabs.close(row.ws.id, row.tab.id)"
-          />
-        </div>
-
-        <!-- line 3: branch + badges -->
-        <div class="mt-[3px] flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <PhGitBranch v-if="row.ws.parent_id" :size="9" class="shrink-0 text-accent" />
-          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{{ branchOf(row.ws) || row.tab.branch }}</span>
-          <span class="ml-auto flex shrink-0 items-center gap-1">
-            <SubagentBadge :summary="subagentActivity(row)" />
-            <span v-if="row.tab.model" class="rounded bg-hover px-1 font-mono text-[9px] leading-[1.5] text-muted-foreground" :title="row.tab.model">{{ shortModel(row.tab.model) }}</span>
-            <span v-if="(row.tab.leafCount ?? 1) > 1" class="rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]" :title="`${row.tab.leafCount} panes`">{{ row.tab.leafCount }}</span>
-            <span
-              v-if="row.tab.bottomTerms"
-              class="flex items-center gap-[2px] rounded bg-hover px-1 text-[9px] font-semibold leading-[1.5]"
-              :title="`${row.tab.bottomTerms} bottom terminal(s) running (⌘J)`"
-            ><PhTerminal :size="9" />{{ row.tab.bottomTerms > 1 ? row.tab.bottomTerms : "" }}</span>
-            <span v-if="row.tab.isAgent && (row.tab.round ?? 0) > 1" class="text-[9px] font-semibold opacity-70" :title="`${row.tab.round} messages sent this session`">↺{{ row.tab.round }}</span>
-            <span
-              v-if="git.prByWs[row.ws.id]"
-              class="flex items-center gap-[3px] rounded-[7px] bg-hover px-[5px] py-px pl-1 font-mono text-[9px] font-semibold leading-none"
-              :class="prClass(git.prByWs[row.ws.id]!)"
-              :title="prTitle(git.prByWs[row.ws.id]!)"
-            ><span class="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />#{{ git.prByWs[row.ws.id]!.number }}</span>
-            <PhBell v-if="row.tab.status === 'permission'" :size="10" weight="fill" class="text-[var(--yellow)]" title="Permission required" />
-            <span
-              v-if="row.tab.status && row.tab.status !== 'idle'"
-              class="status-dot"
-              :class="`status-${row.tab.status}`"
-              :title="attentionLabel(attentionState(row))"
-              role="status"
-            >{{ row.tab.status === 'running' ? spinnerFrame : '' }}</span>
-          </span>
+        <div v-if="!collapsedGroups.has(group.repoId)">
+          <div v-for="row in group.rows" :key="rowKey(row)">
+            <div
+              class="sb-row group relative mt-px flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[7px]"
+              :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`]"
+              @click="onRowClick(row)"
+              @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+              @pointerdown="startLongPress(row, $event)"
+              @pointermove="moveLongPress"
+              @pointerup="cancelLongPress"
+              @pointercancel="cancelLongPress"
+              @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
+              @mouseleave="cancelHoverCard"
+            >
+              <PhCrown v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" :size="14" weight="fill" class="shrink-0 text-[var(--yellow)]" />
+              <PhGitBranch v-else-if="row.ws.parent_id" :size="14" class="shrink-0 text-muted-foreground" />
+              <component v-else-if="row.tab.agentIcon" :is="agentIconComp(row.tab.agentIcon)" :size="14" class="shrink-0 text-[#E0876A]" />
+              <PhChatCenteredText v-else-if="row.tab.isChat" :size="14" class="shrink-0 text-muted-foreground" />
+              <PhTerminal v-else :size="14" class="shrink-0 text-muted-foreground" />
+              <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" />
+              <PhMoon v-if="chatIsAsleep(row.tab.chatId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground opacity-70" title="Sleeping — sending a message wakes it" />
+              <input
+                v-if="editingTab?.wsId === row.ws.id && editingTab?.tabId === row.tab.id"
+                v-model="editingTabTitle"
+                class="ws-term-rename-input m-0 w-full min-w-0 flex-1 border-0 border-b border-accent bg-transparent p-0 text-[13.5px] text-foreground outline-none"
+                @blur="commitTabRename"
+                @keydown.enter.prevent="commitTabRename"
+                @keydown.esc.prevent="cancelTabRename"
+                @click.stop
+              />
+              <span v-else class="min-w-0 flex-1 truncate text-[13.5px]" :class="isActiveRow(row) ? 'font-medium text-foreground' : 'text-foreground/90'" @dblclick.stop="startTabRename(row.ws.id, row.tab)">{{ row.tab.title }}</span>
+              <span v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="flex shrink-0 items-center gap-0.5 text-[11.5px] text-secondary-foreground group-hover:hidden"><PhUsersThree :size="12" />{{ childrenOfChat(row.tab.chatId).length }}</span>
+              <span class="flex shrink-0 items-center gap-1 text-[11.5px] tabular-nums group-hover:hidden" :class="statusClass(row.tab.status)">
+                <PhWarningCircle v-if="attentionState(row) === 'needs-input'" :size="11" weight="fill" class="text-[var(--yellow)]" />
+                <span v-else-if="attentionState(row) === 'done-unread'" class="h-[7px] w-[7px] rounded-full bg-[var(--blue)]" title="Unread completion" />
+                <span v-else-if="row.tab.status === 'running'" class="sb-spark">{{ spinnerFrame }}</span>
+                <span v-if="row.tab.status !== 'running' && attentionState(row) !== 'done-unread'">{{ statusText(row) }}</span>
+              </span>
+              <span class="sb-hover-acts hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                <button class="sb-row-act" title="Settle" @click.stop="toggleSettled(row.tab, row.ws.id)"><PhCheck :size="12" weight="bold" /></button>
+                <button class="sb-row-act hover:!text-destructive" title="Delete thread" @click.stop="deleteThread(row.ws.id, row.tab)"><PhX :size="11" weight="bold" /></button>
+              </span>
+              <!-- Touch has no hover and no right click: this opens the same menu. -->
+              <button class="sb-row-more sb-row-act" title="More" aria-label="Thread actions" @click.stop="openRowMenu(row.ws, row.tab, $event)"><PhDotsThree :size="16" weight="bold" /></button>
+            </div>
+            <div v-if="chatRecapOf(row.tab.chatId)" class="ml-[22px] truncate px-2.5 pb-1 text-[11px] leading-tight text-muted-foreground" :title="chatRecapOf(row.tab.chatId)">{{ chatRecapOf(row.tab.chatId) }}</div>
+            <div v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="ml-[22px]">
+              <button
+                v-for="c in childrenOfChat(row.tab.chatId)"
+                :key="c.id"
+                class="sb-row flex w-full items-center gap-2 rounded-lg px-2.5 py-[6px] text-left"
+                :title="c.title"
+                @click="openSubagent(c.id, row.ws.id)"
+              >
+                <PhAsterisk :size="13" weight="bold" class="shrink-0" :class="c.status === 'idle' || !c.status ? 'text-muted-foreground' : 'text-[#E0876A]'" />
+                <span class="min-w-0 flex-1 truncate text-[13px] text-foreground/85">{{ c.title }}</span>
+                <span v-if="c.status && c.status !== 'idle'" class="status-dot" :class="`status-${c.status}`" />
+                <span v-else class="text-[11px] text-muted-foreground">{{ ago(c.lastActivityAt ?? 0) }}</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div v-if="!filteredLive.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
-        <template v-if="searchQuery.trim()">No matches for “{{ searchQuery.trim() }}”.</template>
-        <template v-else-if="store.workspaces.length === 0">No projects.<br />Open a folder to start.</template>
+      <div v-if="!allRows.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
+        <template v-if="store.workspaces.length === 0">No projects.<br />Open a folder to start.</template>
         <template v-else-if="active">No threads here yet.<br />Start one above.</template>
         <template v-else>Nothing open.<br />Pick a project up top.</template>
       </div>
-
-      <!-- Settled: chats the agent finished with, no attention needed right now -->
-      <template v-if="filteredSettled.length">
-        <button class="section-header" @click="toggleSection('settled')">
-          <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('settled') && '-rotate-90'" />
-          Settled
-          <span class="opacity-60">{{ filteredSettled.length }}</span>
-        </button>
-        <template v-if="!collapsed.includes('settled')">
-          <div
-            v-for="row in settledChatsVisible"
-            :key="rowKey(row)"
-            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:rounded-lg hover:bg-hover hover:opacity-100"
-            @click="selectTab(row)"
-            @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
-            @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
-            @mouseleave="cancelHoverCard"
-          >
-            <div class="flex items-center gap-1.5">
-              <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : PhChatCenteredText" :size="10" class="shrink-0" />
-              <PhPushPin v-if="isChatPinned(row.tab.chatId)" :size="10" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned" aria-label="Pinned" />
-              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
-              <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
-              <span class="grid shrink-0 justify-items-end">
-                <span class="[grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
-                <button
-                  class="invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
-                  title="Move back to active"
-                  @click.stop="toggleSettled(row.tab, row.ws.id)"
-                >
-                  <PhArrowCounterClockwise :size="11" weight="bold" />
-                </button>
-              </span>
-            </div>
-            <div class="mt-[2px] flex items-center gap-1.5 pl-[15px]">
-              <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-2.5 w-2.5 shrink-0 rounded-[2px] object-cover" />
-              <PhFolder v-else :size="9" weight="fill" class="shrink-0 text-accent/80" />
-              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] opacity-70" :title="row.ws.name">{{ repoName(row.ws) }}</span>
-              <span v-if="git.prByWs[row.ws.id]" class="shrink-0 font-mono text-[9px]">#{{ git.prByWs[row.ws.id]!.number }}</span>
-            </div>
-          </div>
-          <button
-            v-if="filteredSettled.length > settledChatsLimit"
-            class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
-            @click="settledChatsLimit += 25"
-          >
-            <PhPlus :size="10" />
-            Show {{ filteredSettled.length - settledChatsLimit }} more
-          </button>
-        </template>
-      </template>
 
       <!-- Archived: the current workspace's chats closed by the user — no open
            tab, process stopped, reversible by clicking to reopen. -->
@@ -286,21 +176,116 @@
 
     </div>
 
+    <!-- Docked shelf (t3code): Working, then Snoozed and Settled. Working is
+         open by default; collapsed it still shows the thread on screen. -->
+    <div v-if="shelfSections.length" class="flex max-h-[45%] shrink-0 flex-col overflow-y-auto border-t border-border px-2 pb-1.5 pt-0.5" @scroll="cancelHoverCard">
+      <div
+        v-for="sec in shelfSections"
+        :key="sec.key"
+        @pointerenter="sec.key === 'working' && onShelfHover($event, true)"
+        @pointerleave="sec.key === 'working' && onShelfHover($event, false)"
+      >
+        <button class="section-header !mx-0 !w-full" @click="toggleShelf(sec.key)">
+          {{ sec.label }}
+          <span class="opacity-60">{{ sec.count }}</span>
+          <PhCaretRight :size="9" weight="bold" class="shrink-0 transition-transform" :class="shelfOpen(sec.key) && 'rotate-90'" />
+          <span
+            v-if="sec.key === 'settled'"
+            role="button"
+            class="ml-auto rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground"
+            title="Delete all settled threads (pinned ones are kept)"
+            @click.stop="deleteAllSettled"
+          >
+            <PhTrash :size="10" />
+          </span>
+        </button>
+        <div>
+          <div
+            v-for="row in sec.rows"
+            :key="rowKey(row)"
+            class="sb-row group cursor-pointer rounded-lg px-2.5 py-[5px]"
+            :class="[isActiveRow(row) && 'sb-row-active', sec.key !== 'working' && 'text-muted-foreground opacity-60 transition-opacity hover:opacity-100']"
+            @click="onRowClick(row)"
+            @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+            @pointerdown="startLongPress(row, $event)"
+            @pointermove="moveLongPress"
+            @pointerup="cancelLongPress"
+            @pointercancel="cancelLongPress"
+            @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
+            @mouseleave="cancelHoverCard"
+          >
+            <div class="flex items-center gap-1.5">
+              <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : row.tab.isChat ? PhChatCenteredText : PhTerminal" :size="10" class="shrink-0" />
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]" :class="sec.key === 'working' && 'text-foreground/90'">{{ row.tab.title }}</span>
+              <component :is="prGlyphOf(row.tab.chatId)!.icon" v-if="prGlyphOf(row.tab.chatId)" :size="10" class="shrink-0" :class="prGlyphOf(row.tab.chatId)!.cls" :title="prGlyphOf(row.tab.chatId)!.title" />
+              <template v-if="sec.key === 'working'">
+                <span v-if="row.tab.status === 'running'" class="sb-spark shrink-0 text-[11px]">{{ spinnerFrame }}</span>
+                <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground">{{ ago(shelf.startedAt.get(rowKey(row)) ?? row.ts) }}</span>
+              </template>
+              <template v-else>
+                <span v-if="snoozedUntilOf(row.tab.chatId)" class="flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums" :title="`Snoozed until ${new Date(snoozedUntilOf(row.tab.chatId)).toLocaleString()}`">
+                  <PhAlarm :size="10" />{{ formatWakeTime(snoozedUntilOf(row.tab.chatId), Date.now()) }}
+                </span>
+                <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
+                <span class="grid shrink-0 justify-items-end">
+                  <span v-if="sec.key === 'settled'" class="sb-ago [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
+                  <button
+                    class="sb-unsettle invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
+                    :title="sec.key === 'snoozed' ? 'Unsnooze' : 'Move back to active'"
+                    @click.stop="sec.key === 'snoozed' ? chats.snooze(row.tab.chatId!, 0) : toggleSettled(row.tab, row.ws.id)"
+                  >
+                    <PhArrowCounterClockwise :size="11" weight="bold" />
+                  </button>
+                </span>
+              </template>
+            </div>
+            <div class="mt-[2px] flex items-center gap-1.5 pl-[15px]">
+              <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-2.5 w-2.5 shrink-0 rounded-[2px] object-cover" />
+              <PhFolder v-else :size="9" weight="fill" class="shrink-0 text-accent/80" />
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] opacity-70" :title="row.ws.name">{{ repoName(row.ws) }}</span>
+              <span v-if="git.prByWs[row.ws.id]" class="shrink-0 text-[9px] tabular-nums">#{{ git.prByWs[row.ws.id]!.number }}</span>
+            </div>
+          </div>
+        </div>
+        <button
+          v-if="sec.key === 'settled' && shelfOpen('settled') && filteredSettled.length > settledChatsLimit"
+          class="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
+          @click="settledChatsLimit += 25"
+        >
+          <PhPlus :size="10" />
+          Show {{ filteredSettled.length - settledChatsLimit }} more
+        </button>
+      </div>
+    </div>
+
+    <!-- App + provider update banners, docked above the toasts (Ghostex keeps
+         its notices in the sidebar, not floating over the work). -->
+    <div class="flex shrink-0 flex-col gap-1 px-2 pb-1.5 empty:hidden">
+      <UpdateBanner docked />
+      <ProviderUpdateBanner docked />
+    </div>
     <!-- Toasts docked above the bottom bar (toastPosition "sidebar"), t3code-style. -->
-    <TransitionGroup v-if="ui.toastPosition === 'sidebar'" tag="div" name="sb-toast" class="flex shrink-0 flex-col gap-1 px-1.5 empty:hidden [&:not(:empty)]:pb-1">
-      <button
+    <!-- Same quiet row as the update notices above, so a running op reads as one more notice. -->
+    <TransitionGroup v-if="ui.toastPosition === 'sidebar'" tag="div" name="sb-toast" class="flex shrink-0 flex-col gap-1 px-2 empty:hidden [&:not(:empty)]:pb-1.5">
+      <div
         v-for="t in notif.toasts"
         :key="t.id"
-        class="flex w-full items-center gap-2 rounded-md bg-hover/60 px-2 py-1.5 text-left transition-colors hover:bg-hover"
+        class="sb-notice"
+        role="button"
         :title="t.body ? `${t.title} — ${t.body}` : t.title"
         @click="notif.dismiss(t.id)"
       >
-        <PhCircleNotch v-if="t.type === 'pending'" :size="12" class="shrink-0 animate-spin text-muted-foreground" />
-        <PhWarningCircle v-else-if="t.type === 'error'" :size="12" class="shrink-0 text-destructive" />
-        <PhCheckCircle v-else-if="t.type === 'done'" :size="12" class="shrink-0 text-lime-500" />
-        <PhInfo v-else :size="12" class="shrink-0 text-blue-500" />
-        <span class="min-w-0 flex-1 truncate text-[11px] text-secondary-foreground">{{ t.title }}<span v-if="t.body" class="text-muted-foreground"> · {{ t.body }}</span></span>
-      </button>
+        <PhCircleNotch v-if="t.type === 'pending'" :size="15" class="shrink-0 animate-spin text-muted-foreground" />
+        <PhWarningCircle v-else-if="t.type === 'error'" :size="15" weight="fill" class="shrink-0 text-destructive" />
+        <PhCheckCircle v-else-if="t.type === 'done'" :size="15" weight="fill" class="shrink-0 text-success" />
+        <PhInfo v-else :size="15" weight="fill" class="shrink-0 text-accent" />
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-[12.5px] text-foreground">{{ t.title }}</span>
+          <span v-if="t.body" class="block truncate text-[11px] text-muted-foreground">{{ t.body }}</span>
+        </span>
+        <button v-if="t.action" class="shrink-0 rounded px-1.5 text-[12px] font-semibold text-accent hover:bg-hover" @click.stop="notif.runAction(t.id)">{{ t.action.label }}</button>
+        <button v-if="t.type !== 'pending'" class="sb-notice-x" title="Dismiss" @click.stop="notif.dismiss(t.id)"><PhX :size="11" /></button>
+      </div>
     </TransitionGroup>
 
     <!-- Bottom bar: what the vertical ActivityBar used to hold -->
@@ -320,6 +305,7 @@
         @click="ui.toggleDashboard()"
       ><PhSquaresFour :size="14" /></button>
       <span class="flex-1" />
+      <PlanUsageIndicator />
       <div class="relative" ref="scriptsEl">
         <button
           class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground active:scale-90"
@@ -337,7 +323,7 @@
     <!-- Scripts popover -->
     <div
       v-if="scriptsOpen"
-      class="fixed z-[1000] min-w-[240px] max-w-[420px] rounded-lg border border-border bg-panel p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+      class="fixed z-[1000] min-w-[240px] max-w-[420px] rounded-lg border border-border bg-[var(--bg-dropdown)] p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
       :style="scriptsMenuStyle"
       @click.stop
     >
@@ -362,7 +348,7 @@
          Shared by live/settled/archived rows via hoverInfoFrom{Row,Archived}. -->
     <div
       v-if="hoverInfo"
-      class="pointer-events-none fixed z-[900] w-64 max-w-[calc(100vw-16px)] rounded-lg border border-border bg-panel p-2.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+      class="pointer-events-none fixed z-[900] w-64 max-w-[calc(100vw-16px)] rounded-lg border border-border bg-[var(--bg-dropdown)] p-2.5 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
       :style="hoverStyle"
     >
       <div class="mb-1.5 wrap-break-word text-[11px] font-semibold leading-[1.4] text-foreground">{{ hoverInfo.title }}</div>
@@ -398,6 +384,7 @@
           <span class="truncate">Last activity {{ ago(hoverInfo.ts) }}</span>
         </div>
         <div v-if="hoverInfo.sessionId" class="min-w-0 truncate font-mono text-[9.5px] text-muted-foreground" :title="hoverInfo.sessionId">{{ hoverInfo.sessionId }}</div>
+        <div v-if="ui.debugIds && hoverInfo.debugId" class="min-w-0 truncate font-mono text-[9.5px] text-muted-foreground">{{ hoverInfo.debugId }}</div>
         <div
           v-if="git.prByWs[hoverInfo.ws.id]"
           class="flex min-w-0 items-center gap-1.5"
@@ -420,7 +407,7 @@
     <!-- Row context menu -->
     <div
       v-if="rowMenu"
-      class="fixed z-[1000] w-[196px] rounded-lg border border-border bg-panel p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+      class="fixed z-[1000] w-[196px] rounded-lg border border-border bg-[var(--bg-dropdown)] p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
       :style="rowMenuStyle"
       @click.stop
     >
@@ -434,8 +421,27 @@
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
           {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
         </button>
-        <button class="menu-item" @click="withMenu((ws, tab) => termTabs.close(ws.id, tab!.id))">Close tab</button>
-        <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws, tab) => deleteThread(ws.id, tab!))">Delete thread…</button>
+        <template v-if="rowMenu.tab.isChat && rowMenu.tab.chatId != null">
+          <button v-if="snoozedUntilOf(rowMenu.tab.chatId)" class="menu-item" @click="withMenu((_ws, tab) => chats.snooze(tab!.chatId!, 0))">
+            <PhAlarm :size="15" class="mr-1.5 shrink-0" />Unsnooze
+          </button>
+          <button class="menu-item" @click="snoozeMenuOpen = !snoozeMenuOpen">
+            <PhAlarm :size="15" class="mr-1.5 shrink-0" />Snooze
+            <PhCaretDown :size="9" weight="bold" class="ml-auto shrink-0 transition-transform" :class="!snoozeMenuOpen && '-rotate-90'" />
+          </button>
+          <template v-if="snoozeMenuOpen">
+            <button
+              v-for="preset in snoozePresets(Date.now())"
+              :key="preset.label"
+              class="menu-item !pl-7"
+              @click="withMenu((_ws, tab) => chats.snooze(tab!.chatId!, preset.until))"
+            >
+              {{ preset.label }}
+            </button>
+          </template>
+        </template>
+        <button class="menu-item" @click="withMenu((ws, tab) => closeTab(ws.id, tab!))">Close tab</button>
+        <button class="menu-item !text-destructive hover:!bg-destructive/10" @click="withMenu((ws, tab) => deleteThread(ws.id, tab!))">{{ rowMenu.tab.isChat ? "Delete thread" : "Delete thread…" }}</button>
         <div class="menu-sep" />
       </template>
       <button class="menu-item" @click="withMenu(newChatSession)">New chat</button>
@@ -458,19 +464,19 @@
     <!-- Generic destructive confirm — window.confirm() is a silent no-op in the
          Wails webview (no native dialog delegate wired up), so any delete that
          needs a confirmation must go through this instead. -->
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="confirmDialog" @click.self="confirmDialog = null">
-      <div class="flex w-[380px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-5">
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="confirmDialog" @click.self="confirmDialog = null" @keydown.esc="confirmDialog = null">
+      <div class="flex w-[380px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-5">
         <p class="text-[12.5px] leading-[1.6] text-foreground">{{ confirmDialog.message }}</p>
         <div class="flex justify-end gap-2">
           <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="confirmDialog = null">Cancel</button>
-          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" @click="runConfirm">Delete</button>
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90" v-focus @click="runConfirm">Delete</button>
         </div>
       </div>
     </div>
 
     <!-- Delete confirm — destructive: a worktree delete removes files from disk -->
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="deleteTarget" @click.self="deleteTarget = null">
-      <div class="flex w-[420px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="deleteTarget" @click.self="deleteTarget = null" @keydown.esc="deleteTarget = null">
+      <div class="flex w-[420px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">
           Delete {{ deleteTarget!.parent_id ? "worktree" : "project" }} “{{ deleteTarget!.worktree_branch || deleteTarget!.name }}”?
         </h3>
@@ -490,7 +496,7 @@
         <p v-if="deleteError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ deleteError }}</p>
         <div class="flex justify-end gap-2">
           <button class="flex items-center gap-[5px] rounded-md border border-border bg-hover px-3.5 py-1.5 text-xs text-secondary-foreground hover:border-[#444] hover:text-foreground" @click="deleteTarget = null">Cancel</button>
-          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-default disabled:opacity-50" @click="confirmDelete" :disabled="deleteBusy">
+          <button class="flex items-center gap-[5px] rounded-md border-0 bg-destructive px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-default disabled:opacity-50" v-focus @click="confirmDelete" :disabled="deleteBusy">
             {{ deleteBusy ? "Deleting…" : "Delete" }}
           </button>
         </div>
@@ -499,7 +505,7 @@
 
     <!-- Rename dialog -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="renameId !== null" @click.self="renameId = null">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">Rename workspace</h3>
         <input
           v-model="renameName"
@@ -518,7 +524,7 @@
 
     <!-- Name dialog -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="pendingPath" @click.self="pendingPath = ''">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">Name this workspace</h3>
         <p class="overflow-hidden text-ellipsis whitespace-nowrap rounded border border-border bg-base px-2 py-1.5 font-mono text-[11px] text-secondary-foreground">{{ pendingPath }}</p>
         <input
@@ -538,7 +544,7 @@
 
     <!-- New worktree dialog -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" v-if="wtParent" @click.self="closeWtDialog">
-      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-panel p-6">
+      <div class="flex w-[400px] flex-col gap-3 rounded-[10px] border border-border bg-[var(--bg-dropdown)] p-6">
         <h3 class="text-sm font-semibold text-foreground">New worktree — {{ wtParent?.name }}</h3>
         <label class="-mb-1.5 text-[11px] font-semibold text-secondary-foreground">Branch</label>
         <input
@@ -552,17 +558,33 @@
           ref="wtBranchEl"
         />
         <label class="-mb-1.5 text-[11px] font-semibold text-secondary-foreground">Base branch <span class="font-normal text-muted-foreground">(only for a new branch)</span></label>
-        <input
-          v-model="wtBase"
-          class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
-          placeholder="defaults to current HEAD"
-          list="wt-base-branches"
-          spellcheck="false"
-          @keydown.enter="confirmWorktree"
-          @keydown.esc="closeWtDialog"
-        />
+        <div class="relative">
+          <input
+            v-model="wtBase"
+            class="w-full rounded-md border border-border bg-base px-2.5 py-[7px] text-[13px] text-foreground outline-none focus:border-accent"
+            placeholder="Search branches — empty = current HEAD"
+            spellcheck="false"
+            @focus="wtBaseOpen = true"
+            @blur="wtBaseOpen = false"
+            @input="wtBaseOpen = true"
+            @keydown.enter="confirmWorktree"
+            @keydown.esc.stop="wtBaseOpen ? (wtBaseOpen = false) : closeWtDialog()"
+          />
+          <div
+            v-if="wtBaseOpen && wtBaseMatches.length"
+            class="absolute left-0 right-0 top-full z-10 mt-1 max-h-[200px] overflow-y-auto rounded-md border border-border bg-[var(--bg-dropdown)] py-1"
+          >
+            <button
+              v-for="b in wtBaseMatches"
+              :key="b"
+              class="block w-full truncate px-2.5 py-1 text-left text-[12px] hover:bg-hover"
+              :class="b === wtBase ? 'text-accent' : 'text-foreground'"
+              @mousedown.prevent="wtBase = b; wtBaseOpen = false"
+            >{{ b }}</button>
+          </div>
+        </div>
         <datalist id="wt-base-branches">
-          <option v-for="b in wtBaseList" :key="b" :value="b" />
+          <option v-for="b in wtLocalBranches" :key="b" :value="b" />
         </datalist>
         <p class="overflow-hidden text-ellipsis whitespace-nowrap rounded border border-border bg-base px-2 py-1.5 font-mono text-[11px] text-secondary-foreground">{{ wtTargetPath }}</p>
         <p v-if="wtError" class="whitespace-pre-wrap break-words text-[11px] text-destructive">{{ wtError }}</p>
@@ -593,7 +615,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
+import { ref, reactive, computed, shallowRef, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
 import {
   PhFolder,
   PhFolderPlus,
@@ -602,9 +624,10 @@ import {
   PhX,
   PhTerminal,
   PhRobot,
-  PhBell,
   PhPlus,
   PhGitBranch,
+  PhGitPullRequest,
+  PhGitMerge,
   PhChatCenteredText,
   PhGear,
   PhCircleNotch,
@@ -617,39 +640,55 @@ import {
   PhArchive,
   PhPushPin,
   PhWarningCircle,
+  PhFolders,
+  PhCrown,
+  PhUsersThree,
+  PhAsterisk,
+  PhMoon,
+  PhDotsThree,
+  PhAlarm,
+  PhCaretRight,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
-import SubagentBadge from "./SubagentBadge.vue";
+import UpdateBanner from "./UpdateBanner.vue";
+import StageBackdrop from "./StageBackdrop.vue";
+import ProviderUpdateBanner from "./ProviderUpdateBanner.vue";
+import PlanUsageIndicator from "./PlanUsageIndicator.vue";
 import { pickDir } from "@/lib/pickPath";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore, type TabSummary } from "@/stores/terminalTabs";
-import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
+import { chatAsleep, useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
 import { useUIStore } from "@/stores/ui";
 import { router } from "@/router";
 import { spinnerFrame } from "@/lib/spinner";
 import { agentIconComp } from "@/lib/agentIcons";
 import {
   getAgentAttentionState,
-  summarizeChildActivity,
   type AgentAttentionState,
-  type ChildActivitySummary,
   type TermStatus,
 } from "@/lib/terminalStatus";
 import { useGitStore, type PrInfo } from "@/stores/git";
 import { useNotificationsStore } from "@/stores/notifications";
 import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
 import { isChatPinned, toggleChatPin, unpinChat } from "@/lib/pinnedChats";
+import { createPendingDeletes } from "@/lib/pendingDeletes";
 import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
-import { buildActivityRows, type ActivityRow } from "@/lib/sidebarGroups";
+import {
+  buildActivityRows,
+  groupByRepo,
+  parseShortstat,
+  splitSections,
+  stepWorkingShelf,
+  routeRowOnly,
+  EMPTY_WORKING_SHELF,
+  type ActivityRow,
+} from "@/lib/sidebarGroups";
+import { childrenOf } from "@/stores/chatTree";
 import { toggleTabSettled } from "@/lib/settledTabs";
+import { formatWakeTime, snoozePresets } from "@/lib/snoozePresets";
 import { getProjectSettings } from "@/lib/projectSettings";
 
-/** "claude-opus-4-8" → "opus-4-8"; drops the vendor prefix + date suffix so the
- *  badge stays one short token. */
-function shortModel(id: string): string {
-  return id.replace(/^(claude|gpt|gemini)-/, "").replace(/-\d{8}$/, "");
-}
 
 import { useScriptsStore, type Script } from "@/stores/scripts";
 
@@ -657,6 +696,21 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 const store = useWorkspaceStore();
 const termTabs = useTerminalTabsStore();
 const chats = useClaudeChatsStore();
+const snoozedUntilOf = (chatId: number | null | undefined) =>
+  (chatId != null && chats.sessions.find((s) => s.id === chatId)?.snoozedUntil) || 0;
+// Linked PR glyph (chatpr.go): state as last refreshed, no polling.
+const PR_GLYPH = {
+  open: { icon: PhGitPullRequest, cls: "text-success" },
+  draft: { icon: PhGitPullRequest, cls: "text-muted-foreground" },
+  merged: { icon: PhGitMerge, cls: "text-accent" },
+  closed: { icon: PhGitPullRequest, cls: "text-destructive" },
+} as const;
+const prGlyphOf = (chatId: number | null | undefined) => {
+  const s = chatId != null ? chats.sessions.find((c) => c.id === chatId) : undefined;
+  return s?.prNumber && s.prState ? { ...PR_GLYPH[s.prState], title: `PR #${s.prNumber} ${s.prState}` } : null;
+};
+const chatIsAsleep = (chatId: number | null | undefined) => chatId != null && chatAsleep(chats.sessions.find((s) => s.id === chatId));
+const chatRecapOf = (chatId: number | null | undefined) => (chatId != null && ui.chatRecaps ? chats.sessions.find((s) => s.id === chatId)?.recap : undefined);
 const ui = useUIStore();
 const git = useGitStore();
 const notif = useNotificationsStore();
@@ -704,10 +758,19 @@ const filterRepos = computed(() =>
   [...store.topLevel].sort((a, b) => Number(isArchived(a.id)) - Number(isArchived(b.id))),
 );
 
+// Chats deleted inside their undo window are hidden here, not gone yet.
+const pendingDeletes = createPendingDeletes();
+const visibleTabsByWs = computed(() => {
+  if (!pendingDeletes.hidden.size) return termTabs.tabsByWs;
+  const out: Record<number, TabSummary[]> = {};
+  for (const [ws, tabs] of Object.entries(termTabs.tabsByWs)) out[Number(ws)] = tabs.filter((t) => !pendingDeletes.isHidden(t.chatId));
+  return out;
+});
+
 const feed = computed(() =>
   buildActivityRows({
     openedWorkspaces: store.opened,
-    tabsByWs: termTabs.tabsByWs,
+    tabsByWs: visibleTabsByWs.value,
     // A chat's recency is the DB-backed `last_activity_at` on its row, not the
     // localStorage stamp: the stamps are pruned for any key a setTabs list
     // doesn't mention, so a restart (chat tabs restore after the pty ones) wiped
@@ -722,78 +785,208 @@ const feed = computed(() =>
   }),
 );
 
-const subagentActivityByParent = computed(() => {
-  const statuses = new Map<number, TermStatus[]>();
-  for (const session of chats.sessions) {
-    if (session.parentChatId == null || session.archivedAt) continue;
-    const list = statuses.get(session.parentChatId) ?? [];
-    list.push(session.status ?? "idle");
-    statuses.set(session.parentChatId, list);
-  }
-  const summaries = new Map<number, ChildActivitySummary>();
-  for (const [parentId, childStatuses] of statuses) {
-    const summary = summarizeChildActivity(childStatuses);
-    if (summary) summaries.set(parentId, summary);
-  }
-  return summaries;
+// ── sections (t3code-style): Pinned + Active scroll on top; Working, Snoozed
+// and Settled are docked at the bottom. Search lives in Spotlight (⌘P).
+const allRows = computed(() => [...feed.value.live, ...feed.value.settledChats]);
+
+// The Working shelf's own state: when each turn started, and the exit grace
+// that keeps a row that just stopped in place for a beat (stepWorkingShelf).
+const shelf = shallowRef(EMPTY_WORKING_SHELF);
+const workingHover = ref(false);
+let shelfTimer: number | undefined;
+const runningKeys = computed(() =>
+  allRows.value.filter((r) => r.tab.status === "running").map(rowKey).sort().join(","),
+);
+function stepShelf() {
+  window.clearTimeout(shelfTimer);
+  const { state, wakeAt } = stepWorkingShelf(shelf.value, new Set(runningKeys.value.split(",").filter(Boolean)), Date.now(), workingHover.value);
+  shelf.value = state;
+  if (wakeAt != null) shelfTimer = window.setTimeout(stepShelf, Math.max(0, wakeAt - Date.now()));
+}
+watch([runningKeys, workingHover], stepShelf, { immediate: true });
+// Touch has no hover: a finger lifting would otherwise "leave" and drop rows mid-read.
+function onShelfHover(e: PointerEvent, inside: boolean) {
+  if (e.pointerType === "mouse") workingHover.value = inside;
+}
+
+const sections = computed(() =>
+  splitSections(allRows.value, {
+    isPinned: (r) => isChatPinned(r.tab.chatId),
+    isSnoozed: (r) => snoozedUntilOf(r.tab.chatId) > 0,
+    inWorking: (r) => shelf.value.shown.has(rowKey(r)),
+    unseen: (r) => termTabs.isCompletionUnseen(r.ws.id, r.tab.id),
+    startedAt: (r) => shelf.value.startedAt.get(rowKey(r)) ?? r.ts,
+  }),
+);
+const filteredSettled = computed(() => sections.value.settled);
+
+const WORKING_EXPANDED_KEY = "burrow.sidebar.workingExpanded";
+const workingExpanded = ref(localStorage.getItem(WORKING_EXPANDED_KEY) !== "0");
+function shelfOpen(key: "working" | "snoozed" | "settled"): boolean {
+  return key === "working" ? workingExpanded.value : !collapsed.value.includes(key);
+}
+function toggleShelf(key: "working" | "snoozed" | "settled") {
+  if (key !== "working") return toggleSection(key);
+  workingExpanded.value = !workingExpanded.value;
+  try { localStorage.setItem(WORKING_EXPANDED_KEY, workingExpanded.value ? "1" : "0"); } catch { /* private mode */ }
+}
+const shelfSections = computed(() => {
+  const s = sections.value;
+  return [
+    // Collapsed Working still shows the thread on screen (t3code's routeThreadOnly).
+    { key: "working" as const, label: "Working", count: s.working.length, rows: workingExpanded.value ? s.working : routeRowOnly(s.working, isActiveRow) },
+    { key: "snoozed" as const, label: "Snoozed", count: s.snoozed.length, rows: shelfOpen("snoozed") ? s.snoozed : [] },
+    { key: "settled" as const, label: "Settled", count: s.settled.length, rows: shelfOpen("settled") ? settledChatsVisible.value : [] },
+  ].filter((sec) => sec.count);
 });
 
-// ── search ───────────────────────────────────────────────────────────────────
-// Plain substring match over workspace name + tab title; a row survives the
-// filter if either side matches, which is what keeps a project visible for a
-// matching thread inside it without a separate "workspace" row to filter.
-const searchQuery = ref("");
-function matchesSearch(ws: Workspace, title: string): boolean {
-  const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return true;
-  return repoName(ws).toLowerCase().includes(q) || title.toLowerCase().includes(q);
+// ── project groups (Ghostex-style feed) ─────────────────────────────────────
+const liveGroups = computed(() =>
+  groupByRepo(sections.value.active, activeRepo.value ? [activeRepo.value.id] : []),
+);
+/** Pinned rows sit above every repo group, as one pseudo-group under this id. */
+const PINNED = -1;
+const topGroups = computed(() =>
+  sections.value.pinned.length ? [{ repoId: PINNED, rows: sections.value.pinned }, ...liveGroups.value] : liveGroups.value,
+);
+
+const COLLAPSED_KEY = "burrow.sidebar.collapsedRepos";
+function loadCollapsed(): Set<number> {
+  try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]")); } catch { return new Set(); }
 }
-function clearSearch() {
-  searchQuery.value = "";
+const collapsedGroups = reactive(loadCollapsed());
+function toggleGroup(repoId: number) {
+  if (collapsedGroups.has(repoId)) collapsedGroups.delete(repoId);
+  else collapsedGroups.add(repoId);
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedGroups])); } catch { /* private mode */ }
 }
 
-const filteredLive = computed(() => feed.value.live.filter((row) => matchesSearch(row.ws, row.tab.title)));
-const filteredSettled = computed(() => feed.value.settledChats.filter((row) => matchesSearch(row.ws, row.tab.title)));
+const REPO_TILE_COLORS = ["#7C6FF0", "#4C8B6A", "#C26A4A", "#3D7FB8", "#A0558C", "#8A7A3A"];
+function repoColor(repoId: number): string {
+  return REPO_TILE_COLORS[repoId % REPO_TILE_COLORS.length];
+}
+
+// Uncommitted +/− per repo header (`git diff --shortstat HEAD`: staged and
+// unstaged tracked changes; untracked files don't count).
+// ponytail: polled every 15 s + on window focus for the repos on screen; a
+// file watcher in Go is the upgrade if this ever shows up in a profile.
+const repoDiff = reactive<Record<number, { added: number; removed: number } | undefined>>({});
+async function refreshRepoDiffs() {
+  for (const g of liveGroups.value) {
+    const repo = repoById(g.repoId);
+    if (!repo) continue;
+    // Not gated on `is_git`: a stale row can say false for a real repo; a
+    // non-repo simply fails here and keeps no stat.
+    const out = await invoke<{ stdout: string; success: boolean }>("run_git", { cwd: repo.path, args: ["diff", "--shortstat", "HEAD"] }).catch(() => null);
+    if (out?.success) repoDiff[g.repoId] = parseShortstat(out.stdout);
+  }
+}
+watch(() => liveGroups.value.map((g) => g.repoId).join(","), () => void refreshRepoDiffs(), { immediate: true });
+let diffTimer: number | undefined;
+onMounted(() => {
+  diffTimer = window.setInterval(() => void refreshRepoDiffs(), 15_000);
+  window.addEventListener("focus", refreshRepoDiffs);
+});
+onUnmounted(() => {
+  window.clearInterval(diffTimer);
+  window.removeEventListener("focus", refreshRepoDiffs);
+});
+
+function childrenOfChat(chatId: number): ClaudeSession[] {
+  return childrenOf(chats.sessions, chatId);
+}
+const openRightPanelSubagent = inject<(chatId: number, workspaceId: number) => void>("openRightPanelSubagent", () => {});
+function openSubagent(chatId: number, wsId: number) {
+  openRightPanelSubagent(chatId, wsId);
+}
 
 const settledChatsLimit = ref(12);
 const settledChatsVisible = computed(() => filteredSettled.value.slice(0, settledChatsLimit.value));
 const archivedChats = computed(() => {
   const all = active.value ? chats.archivedSessionsForWs(active.value.id) : [];
-  return active.value ? all.filter((s) => matchesSearch(active.value!, s.title)) : all;
+  return all.filter((s) => !pendingDeletes.isHidden(s.id));
 });
 
 function unarchiveAndOpen(chatId: number) {
   if (!active.value) return;
   termTabs.openChat(active.value.id, chatId);
 }
+// Confirm dialogs focus their action, so Enter confirms and Esc (bubbling to
+// the overlay) cancels without reaching for the mouse.
+const vFocus = { mounted: (el: HTMLElement) => el.focus() };
 const confirmDialog = ref<{ message: string; onConfirm: () => void } | null>(null);
 function runConfirm() {
   confirmDialog.value?.onConfirm();
   confirmDialog.value = null;
 }
+// Deleting a chat asks nothing: its rows hide at once and an Undo toast holds
+// the real delete for 8 s (t3code's undo notice). A plain terminal tab keeps
+// its confirm — closing it kills the process, which no undo can bring back.
+function deleteChatsWithUndo(items: { wsId: number; tabId?: number; chatId: number }[], title: string) {
+  // The thread on screen is about to vanish from the list — send the view
+  // home, same as settling it does.
+  if (items.some((i) => i.tabId != null && store.active?.id === i.wsId && termTabs.activeByWs[i.wsId] === i.tabId)) ui.openWelcome();
+  const undo = pendingDeletes.schedule(items.map((i) => i.chatId), async () => {
+    for (const i of items) {
+      // close() is a single request slot — let Terminal take each one. Sequential
+      // remove(): it stops each chat's process before deleting its row.
+      if (i.tabId != null) { termTabs.close(i.wsId, i.tabId); await nextTick(); }
+      unpinChat(i.chatId);
+      await chats.remove(i.chatId);
+    }
+  });
+  notif.push({ type: "info", title, duration: 8000, action: { label: "Undo", run: undo } });
+}
 function deletePermanently(chatId: number) {
+  const title = chats.sessions.find((s) => s.id === chatId)?.title ?? "chat";
+  deleteChatsWithUndo([{ wsId: active.value?.id ?? 0, chatId }], `Deleted “${title}”`);
+}
+function deleteAllSettled() {
+  const rows = filteredSettled.value.filter((r) => !(r.tab.isChat && isChatPinned(r.tab.chatId)));
+  const chatRows = rows.filter((r) => r.tab.isChat && r.tab.chatId != null);
+  const ptyRows = rows.filter((r) => !chatRows.includes(r));
+  const run = () => {
+    for (const r of ptyRows) termTabs.close(r.ws.id, r.tab.id);
+    if (chatRows.length) {
+      deleteChatsWithUndo(
+        chatRows.map((r) => ({ wsId: r.ws.id, tabId: r.tab.id, chatId: r.tab.chatId! })),
+        chatRows.length === 1 ? `Deleted “${chatRows[0].tab.title}”` : `Deleted ${chatRows.length} threads`,
+      );
+    }
+  };
+  if (!ptyRows.length) return run();
   confirmDialog.value = {
-    message: "Delete this chat permanently? This cannot be undone.",
-    onConfirm: () => {
-      unpinChat(chatId);
-      chats.remove(chatId);
-    },
+    message: `Close ${ptyRows.length} settled terminal tab${ptyRows.length === 1 ? "" : "s"} and kill their processes? Pinned threads are kept; deleted chats can be undone.`,
+    onConfirm: run,
   };
 }
 // Last step of a thread's life: settled → archived → gone. A chat row is a
 // stored session, so it needs the store's hard delete; a plain terminal tab
 // only exists as long as its PTY, so closing it *is* the delete.
 function deleteThread(wsId: number, tab: TabSummary) {
+  if (tab.isChat && tab.chatId != null) {
+    deleteChatsWithUndo([{ wsId, tabId: tab.id, chatId: tab.chatId }], `Deleted “${tab.title}”`);
+    return;
+  }
   confirmDialog.value = {
     message: `Delete “${tab.title}” permanently? This cannot be undone.`,
-    onConfirm: () => {
-      termTabs.close(wsId, tab.id);
-      if (tab.isChat && tab.chatId != null) {
-        unpinChat(tab.chatId);
-        chats.remove(tab.chatId);
-      }
-    },
+    onConfirm: () => termTabs.close(wsId, tab.id),
   };
+}
+// Closing a chat tab archives it (Terminal's stopChatSession); reopening the
+// chat is the existing unarchive path, so that is the Undo.
+// ponytail: an Undo landing before archive()'s process stop resolves gets
+// re-archived by it; 8 s window vs a stop of a few ms, not worth a lock.
+function closeTab(wsId: number, tab: TabSummary) {
+  termTabs.close(wsId, tab.id);
+  if (!tab.isChat || tab.chatId == null) return;
+  const chatId = tab.chatId;
+  notif.push({
+    type: "info",
+    title: `Archived “${tab.title}”`,
+    duration: 8000,
+    action: { label: "Undo", run: () => termTabs.openChat(wsId, chatId) },
+  });
 }
 function toggleSettled(tab: TabSummary, wsId: number) {
   // Settling the tab the user is currently looking at leaves nothing to show
@@ -811,8 +1004,8 @@ function toggleSettled(tab: TabSummary, wsId: number) {
   if (!wasSettled && wasFocused) ui.openWelcome();
 }
 
-type SectionKey = "settled" | "archived";
-const collapsed = ref<SectionKey[]>(["settled", "archived"]);
+type SectionKey = "snoozed" | "settled" | "archived";
+const collapsed = ref<SectionKey[]>(["snoozed", "settled", "archived"]);
 function toggleSection(key: SectionKey) {
   collapsed.value = collapsed.value.includes(key)
     ? collapsed.value.filter((k) => k !== key)
@@ -833,6 +1026,8 @@ interface HoverInfo {
   round?: number;
   sessionId?: string;
   status?: TermStatus;
+  /** Settings → Developer → Show internal IDs. */
+  debugId?: string;
   ts: number;
 }
 
@@ -851,6 +1046,7 @@ function hoverInfoFromRow(row: ActivityRow): HoverInfo {
     round: row.tab.isAgent ? row.tab.round : undefined,
     sessionId: row.tab.sessionId,
     status: row.tab.status,
+    debugId: row.tab.chatId != null ? `chat ${row.tab.chatId}` : `tab ${row.tab.id}`,
     ts: row.ts,
   };
 }
@@ -862,6 +1058,7 @@ function hoverInfoFromArchived(s: ClaudeSession, ws: Workspace): HoverInfo {
     model: s.model,
     round: s.messageCount,
     sessionId: s.claudeSessionId,
+    debugId: `chat ${s.id}`,
     ts: s.archivedAt ?? Date.now(),
   };
 }
@@ -946,19 +1143,7 @@ function attentionState(row: ActivityRow): AgentAttentionState {
   return getAgentAttentionState(row.tab.status, termTabs.isCompletionUnseen(row.ws.id, row.tab.id));
 }
 
-function subagentActivity(row: ActivityRow): ChildActivitySummary | null {
-  return row.tab.chatId == null ? null : subagentActivityByParent.value.get(row.tab.chatId) ?? null;
-}
 
-function attentionLabel(state: AgentAttentionState): string {
-  switch (state) {
-    case "error": return "Error";
-    case "needs-input": return "Needs input";
-    case "done-unread": return "Done unread";
-    case "working": return "Working";
-    default: return "Idle";
-  }
-}
 
 function prClass(info: PrInfo): string {
   if (info.checks === "fail") return "text-destructive bg-[color-mix(in_srgb,var(--red)_14%,transparent)]";
@@ -978,10 +1163,11 @@ function prTitle(info: PrInfo): string {
 /**
  * Picking a project in the filter both narrows the feed and opens that repo on
  * the composer — the sidebar no longer lists projects, so this is how a repo
- * with no threads gets mounted at all.
+ * with no threads gets mounted at all. A group header's "+" passes
+ * `narrow = false`: it starts a thread, it doesn't pick a filter.
  */
-function pickProject(repo: Workspace) {
-  filterProjectId.value = repo.id;
+function pickProject(repo: Workspace, narrow = true) {
+  if (narrow) filterProjectId.value = repo.id;
   filterOpen.value = false;
   // Navigate to welcome BEFORE store.open(): App.vue's watcher on
   // ws.active?.id force-navigates to /ws/:id whenever the active workspace
@@ -1045,8 +1231,42 @@ const rowMenuStyle = computed(() =>
       }
     : {},
 );
-function openRowMenu(ws: Workspace, tab: TabSummary | null, e: MouseEvent) {
+const snoozeMenuOpen = ref(false);
+function openRowMenu(ws: Workspace, tab: TabSummary | null, e: { clientX: number; clientY: number }) {
   rowMenu.value = { ws, tab, x: e.clientX, y: e.clientY };
+  snoozeMenuOpen.value = false;
+}
+
+// Long press = right click on touch (iOS Safari never fires `contextmenu` for it).
+// Mouse and pen keep right click; a finger that moves is a scroll, not a press.
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
+let longPress: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
+let swallowClick = false;
+function startLongPress(row: ActivityRow, e: PointerEvent) {
+  cancelLongPress();
+  if (e.pointerType !== "touch") return;
+  const { clientX: x, clientY: y } = e;
+  longPress = {
+    x, y,
+    timer: setTimeout(() => {
+      longPress = null;
+      swallowClick = true; // the finger lifting after this must not open the row
+      navigator.vibrate?.(10);
+      openRowMenu(row.ws, row.tab, { clientX: x, clientY: y });
+    }, LONG_PRESS_MS),
+  };
+}
+function moveLongPress(e: PointerEvent) {
+  if (longPress && Math.hypot(e.clientX - longPress.x, e.clientY - longPress.y) > LONG_PRESS_SLOP) cancelLongPress();
+}
+function cancelLongPress() {
+  if (longPress) clearTimeout(longPress.timer);
+  longPress = null;
+}
+function onRowClick(row: ActivityRow) {
+  if (swallowClick) { swallowClick = false; return; }
+  selectTab(row);
 }
 /** Run an action against the menu's row, then close the menu. */
 function withMenu(fn: (ws: Workspace, tab: TabSummary | null) => void) {
@@ -1229,6 +1449,7 @@ onUnmounted(() => {
   if (prTimer) clearInterval(prTimer);
   if (clock) clearInterval(clock);
   if (hoverTimer) clearTimeout(hoverTimer);
+  window.clearTimeout(shelfTimer);
   document.removeEventListener("click", onDocClick);
   document.removeEventListener("keydown", onKeydown);
 });
@@ -1241,22 +1462,21 @@ watch(() => active.value?.id, mountSections);
 // ── branch helpers (worktree dialog) ─────────────────────────────────────────
 interface GitOutput { stdout: string; stderr: string; code: number; }
 
-async function listBranches(path: string): Promise<string[]> {
-  if (git.cwd === path && git.branches.length > 0) return git.branches;
-  try {
-    const out = await invoke<GitOutput>("run_git", { cwd: path, args: ["branch", "--list"] });
-    if (out.code === 0) {
-      return out.stdout.split("\n").map((l) => l.replace(/^\*?\s+/, "").trim()).filter(Boolean);
-    }
-  } catch {}
-  return [];
-}
-
 // ── new worktree dialog ──────────────────────────────────────────────────────
 const wtParent = ref<Workspace | null>(null);
 const wtBranch = ref("");
 const wtBase = ref("");
 const wtBaseList = ref<string[]>([]);
+const wtBaseOpen = ref(false);
+// The Branch field suggests existing local branches to check out; the base
+// picker lists remote-tracking ones too (origin/x).
+const wtLocalBranches = ref<string[]>([]);
+const wtBaseMatches = computed(() => {
+  const q = wtBase.value.trim().toLowerCase();
+  // The prefilled default must not hide the rest of the list.
+  if (!q || wtBaseList.value.includes(wtBase.value)) return wtBaseList.value;
+  return wtBaseList.value.filter((b) => b.toLowerCase().includes(q));
+});
 const wtBusy = ref(false);
 const wtError = ref("");
 const wtBranchEl = ref<HTMLInputElement>();
@@ -1274,9 +1494,30 @@ async function openWtDialog(parent: Workspace) {
   wtBase.value = "";
   wtError.value = "";
   wtBaseList.value = [];
+  wtLocalBranches.value = [];
   await nextTick();
   wtBranchEl.value?.focus();
-  wtBaseList.value = await listBranches(parent.path);
+  const [refs, def] = await Promise.all([
+    gitLines(parent.path, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]),
+    gitLines(parent.path, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]),
+  ]);
+  if (wtParent.value !== parent) return;
+  wtLocalBranches.value = refs.filter((r) => r.startsWith("refs/heads/")).map((r) => r.slice("refs/heads/".length));
+  const remote = refs
+    .filter((r) => r.startsWith("refs/remotes/") && !r.endsWith("/HEAD"))
+    .map((r) => r.slice("refs/remotes/".length));
+  wtBaseList.value = [...wtLocalBranches.value, ...remote];
+  // Default to the repo's default branch (origin/HEAD, else main/master), else leave HEAD.
+  const defBranch = def[0]?.replace(/^origin\//, "") ?? ["main", "master"].find((b) => wtLocalBranches.value.includes(b));
+  if (!wtBase.value && defBranch && wtBaseList.value.includes(defBranch)) wtBase.value = defBranch;
+}
+
+async function gitLines(cwd: string, args: string[]): Promise<string[]> {
+  try {
+    const out = await invoke<GitOutput>("run_git", { cwd, args });
+    if (out.code === 0) return out.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  } catch {}
+  return [];
 }
 
 function closeWtDialog() {
@@ -1389,4 +1630,25 @@ async function confirmCreate() {
 .agent-state-error .ws-term-icon-agent { color: var(--red); }
 .agent-state-done-unread .ws-term-icon-agent { color: var(--green); }
 .agent-state-idle .ws-term-icon-agent { color: var(--text-muted); }
+
+/* Ghostex-style feed */
+.sb-icon { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 7px; color: var(--text-muted); transition: background-color .12s, color .12s; }
+.sb-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sb-repo-tile { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; font-size: 10px; font-weight: 700; color: #fff; }
+.sb-row { transition: background-color .12s; border: 1px solid transparent; -webkit-touch-callout: none; }
+.sb-row-more { display: none; }
+/* Finger, no hover: the ⋮ replaces the hover-only buttons, and the settled
+   row's restore button replaces its age. */
+@media (pointer: coarse) {
+  .sb-row-more { display: flex; padding: 6px; }
+  .sb-hover-acts { display: none !important; }
+  .sb-unsettle { visibility: visible !important; padding: 6px; }
+  .sb-ago { visibility: hidden; }
+  .sb-row { padding-top: 10px; padding-bottom: 10px; }
+}
+.sb-row:hover { background: var(--bg-hover); }
+.sb-row-active { background: var(--bg-selected); border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+.sb-row-act { display: flex; padding: 3px; border-radius: 5px; color: var(--text-muted); }
+.sb-row-act:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.sb-spark { color: #E0876A; font-size: 12px; }
 </style>

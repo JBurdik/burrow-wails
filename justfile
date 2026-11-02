@@ -84,7 +84,7 @@ build-beta:
     VITE_APP_CHANNEL=beta just build-web
     just build-mobile
     cd src-wails
-    wails build -platform darwin/arm64 -clean -s
+    wails build -platform darwin/arm64 -clean -s -ldflags "-X main.buildChannel=beta"
     go build -o build/bin/Burrow.app/Contents/MacOS/burrow-daemon ./cmd/burrow-daemon
     go build -o build/bin/Burrow.app/Contents/MacOS/burrow-mcp ./cmd/burrow-mcp
     rm -rf "build/bin/Burrow Beta.app"

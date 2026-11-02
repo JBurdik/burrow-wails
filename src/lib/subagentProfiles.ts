@@ -43,8 +43,8 @@ export function profileTask(profile: SubagentProfile, task: string): string {
   return `Role: ${profile.name}\n\n${profile.instructions.trim()}\n\nTask:\n${task.trim()}`;
 }
 export function assertProfileProvider(agent: ProviderInstance): void {
-  if (!agent.enabled || !["claude-cli", "codex-app-server"].includes(agent.transport)) {
-    throw new Error("Sub-agent profiles require an enabled Claude CLI or Codex app-server provider. Choose one in Settings > Sub-agent profiles.");
+  if (!agent.enabled || (!["claude-cli", "codex-app-server"].includes(agent.transport) && agent.providerId !== "openai-compatible")) {
+    throw new Error("Sub-agent profiles require an enabled Claude CLI, Codex app-server, or OpenAI Compatible provider. Choose one in Settings > Sub-agent profiles.");
   }
 }
 /** Seed only this child, before it becomes observable. Never change global defaults. */
@@ -62,14 +62,9 @@ export function seedSubagentSettings(chatId: number, settings: SubagentLaunchSet
     ...(settings.model ? { model: settings.model } : {}),
   } });
 }
-/** Native Codex must finish restoring the profile before its first prompt. */
-export async function restoreSubagentCodexSettings(chatId: number, invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>): Promise<void> {
-  const saved = getConfig<Record<string, { mode?: string; model?: string }>>("chatAcpSettings", {})[String(chatId)];
-  if (saved?.mode) await invoke("acp_set_mode", { id: chatId, modeId: saved.mode });
-  if (saved?.model) await invoke("acp_set_config", { id: chatId, configId: "model", value: saved.model });
-}
 export function profileTerminalCommand(agent: ProviderInstance, settings: SubagentLaunchSettings, task: string): string {
   assertProfileProvider(agent);
+  if (agent.providerId === "openai-compatible") throw new Error("OpenAI Compatible agents run as chats. Choose the chat target.");
   if (agent.args.length || agent.terminalArgs.trim()) {
     throw new Error("Terminal role profiles cannot be combined with custom provider arguments. Use a provider without extra arguments or launch the role in a chat.");
   }

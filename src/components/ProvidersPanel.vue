@@ -6,7 +6,7 @@
     <div class="flex items-center gap-2.5">
       <div class="flex items-baseline gap-2.5">
         <h2 class="text-[15px] font-semibold text-foreground">Providers</h2>
-        <span class="text-xs text-muted-foreground">Agent CLIs Burrow can launch — in a terminal tab or as a chat</span>
+        <span class="text-xs text-muted-foreground">Coding agents and model servers available in Burrow</span>
       </div>
       <div class="ml-auto flex items-center gap-2">
         <span class="text-[11px] text-muted-foreground/70">{{ checkedLabel }}</span>
@@ -24,7 +24,7 @@
           </Button>
           <div
             v-if="addOpen"
-            class="absolute right-0 top-[calc(100%+6px)] z-30 grid w-[240px] gap-0.5 rounded-lg border border-border bg-base p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+            class="absolute right-0 top-[calc(100%+6px)] z-30 grid w-[240px] gap-0.5 rounded-lg border border-border bg-[var(--bg-dropdown)] p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
             @click.stop
           >
             <div class="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">New instance</div>
@@ -82,9 +82,9 @@
       </div>
     </div>
 
-    <div class="flex min-h-[420px] gap-3.5">
+    <div class="prov-split flex min-h-[420px] gap-3.5">
       <!-- Instance rail -->
-      <aside class="flex w-[260px] shrink-0 flex-col gap-px overflow-hidden rounded-lg border border-border bg-panel/40">
+      <aside class="prov-rail flex w-[260px] shrink-0 flex-col gap-px overflow-hidden rounded-lg border border-border bg-panel/40">
         <button
           v-for="a in store.instances"
           :key="a.id"
@@ -148,6 +148,10 @@
         <div class="flex-1 overflow-y-auto px-4 py-4">
           <!-- Configuration -->
           <div v-if="tab === 'Configuration'" class="flex flex-col gap-4">
+            <OpenAIProviderSettings v-if="inst.providerId === 'openai-compatible'" :key="inst.id" :instance="inst" @update="store.update(inst.id, { openai: $event })" />
+            <SettingField v-if="inst.providerId === 'openai-compatible'" label="New chat shortcut">
+              <ShortcutRecorder v-model="inst.chatShortcut" />
+            </SettingField>
             <SettingField label="Display name" hint="Optional label shown in the provider list.">
               <input v-model="inst.name" type="text" class="w-full rounded-lg border border-border bg-base px-2.5 py-1.5 text-xs text-foreground focus:border-accent/60 focus:outline-none" />
             </SettingField>
@@ -197,7 +201,7 @@
               </div>
             </SettingField>
 
-            <SettingField label="Binary path" :hint="`Program run by this instance. Empty uses ${catalogBinary || 'the command below'}.`">
+            <SettingField v-if="inst.providerId !== 'openai-compatible'" label="Binary path" :hint="`Program run by this instance. Empty uses ${catalogBinary || 'the command below'}.`">
               <input
                 v-model="inst.binary"
                 type="text"
@@ -311,7 +315,7 @@
         </div>
 
         <!-- Advanced -->
-        <details class="border-t border-border px-4 py-2.5">
+        <details v-if="inst.providerId !== 'openai-compatible'" class="border-t border-border px-4 py-2.5">
           <summary class="cursor-pointer list-none text-[12px] text-muted-foreground hover:text-foreground">
             <PhCaretRight :size="11" class="mr-1 inline align-[-1px]" /> Advanced
           </summary>
@@ -370,6 +374,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
 import SettingField from "@/components/SettingField.vue";
+import OpenAIProviderSettings from "@/components/OpenAIProviderSettings.vue";
 import ShortcutRecorder from "@/components/ShortcutRecorder.vue";
 import { useProvidersStore, type ProviderInstance } from "@/stores/providers";
 import { providerFor } from "@/lib/providers";
@@ -470,6 +475,7 @@ function versionBadge(a: ProviderInstance): string {
 function statusLine(a: ProviderInstance): string {
   const s = store.status[a.id];
   if (!a.enabled) return "Disabled";
+  if (a.providerId === "openai-compatible") return "Built-in coding agent";
   if (!s) return "Checking…";
   if (!s.installed) return s.error || "Not installed";
   return s.error ? `Installed · ${s.error}` : "Installed";

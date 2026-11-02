@@ -38,6 +38,72 @@ per-file-per-anything, and `chats-changed` makes both converge within a round tr
 the status **is** the phase (`pty_phase`, keyed `chat:<id>`) — a second copy of it in a
 second table is exactly the drift the phase work removed.
 
+**Launch settings live on the row** (`effort`, `permission_mode`, `profile_id`,
+`append_system_prompt`, plus the existing `model`) — groundwork for the Go chat runtime,
+`docs/plans/006-chat-runtime.md`. They are **read-only on the wire**, like `collected_at`:
+`SaveChats` never writes them, so a client that predates them (an older desktop, the phone)
+cannot blank them by saving a row without them. `backfillChatLaunchSettings` copies the old
+per-device keys (`chatModelByChat`, `chatEffortByChat`, `chatPermissionMode.byChat`,
+`chatProfileSelection`) onto rows once, filling only empty columns, guarded by a
+`chat_migrations` marker; the legacy keys stay for one more release. `resolveClaudeLaunch`
+(`chatlaunch.go`, pure) turns a row into a Claude start: `profile_id` resolved against
+`config.json` `providers` (by id, then `providerAliases`, else the first enabled Claude
+instance), config dir = profile's, else the project's `.burrow/config.toml`
+`claude_config_dir`. Every chat-runtime start calls it.
+
+### Chat runtime (`chatruntime.go`)
+
+**Why Go owns the process.** A chat's CLI used to be started by a mounted `AgentChat.vue` —
+three times over (`restartClaude`, `clearChat`, `ensureRuntime`), each with its own drifted
+`claude_start` payload (only one fell back to the project's config dir; one dropped the
+resume id; one swallowed errors), plus copies in the phone store and `RemoteCreateChat`. A
+spawn therefore needed a desktop: `SubAgentHost.vue` mounted hidden chats just to start
+processes, and `claudeChats.ts` carried a prompt handover for the race in between. Now every
+start reads the row — `claudeLaunchFor` for Claude, `rpcLaunchFor` for Codex and generic ACP
+(the row's `agent_kind` resolved as a provider instance, as `acpStartPayload` used to in the
+view) — whoever asked.
+
+- **`ChatSend` ensures, then sends.** No separate "start" for callers to forget: a cold chat,
+  or one `agentproc.ReapIdle` took back, starts with `--resume <claude_session_id>`. Go
+  records the session id itself (`observeClaudeLine`, on `system/init`) so a chat nobody
+  ever viewed still resumes. A per-chat mutex serialises ensure/send/restart/clear — two
+  concurrent sends to a cold chat start one process.
+- **`session.reset`** is Burrow's, not the CLI's: `agentproc` silences a stopped process, so
+  without it a restart left the old pending prompts on screen. It is written to
+  `chat_stream` under its own kind (`chat-runtime`) like any line, so a replay drops the
+  same requests the live client did, and the Go fold treats it as a turn boundary.
+- **Live settings are confirmed, not assumed.** `set_model` / `set_permission_mode` /
+  `interrupt` are control requests whose `control_response` Go waits for (5 s); a refusal
+  or silence restarts instead. Assuming success would leave a chat in a *more* permissive
+  mode than the picker shows if the CLI refused a stricter one.
+- **Codex / ACP start from the row, then take the row's settings.** A fresh app-server or
+  adapter session runs on its own defaults, so `ensureRPC` pushes the row's model, effort
+  and permission mode (`AcpSetConfig` / `AcpSetMode`) before the first prompt. The mode
+  **fails closed** — Codex starts every thread in Auto, so a mode that does not apply would
+  run the chat more permissively than its row says; model and effort are best-effort.
+- **The ACP / Codex turn boundary is Go's.** Only the sender knows which JSON-RPC response
+  ends a turn (the one to its own `session/prompt`; Codex ends a turn by notification). The
+  view used to hold that rpc id (`acpPromptRpcId`); with the runtime sending, it never
+  leaves Go, so Go writes `{"_burrow":"turn"[,"error"]}` after it and the normalizer reads it
+  as `turn.completed` / `turn.failed` — which also settles the phone, the phase and the Go
+  fold the same way the Claude `result` does.
+- **Interrupt in place where the provider can.** Claude: `interrupt` control request.
+  Codex: `turn/interrupt`, and if the same session is still mid-turn after 5 s, a restart.
+  Generic ACP and every refusal: a restart.
+- **Test seam:** `chatProcs` (agents.go) — `*agentproc.Manager` or the fake in
+  `chatruntime_test.go` — and `App.rpcStarter`, which the tests point at a session over a
+  buffer so they can read what the runtime wrote.
+
+`spawn` with a parent thread runs in Go (`chatspawn.go`): profile → agent → row with launch
+settings (else the parent's) → `ChatSend`. The parent's transcript row is written by Go
+into the **parent's** `chat_stream` as a `chat-note` row carrying `subagentChatId` /
+`subagentAgent` (`publishSubagentRow`), so it needs no client and replays after a restart.
+Every transport spawns here, so `SubAgentHost.vue` (hidden views kept mounted only to start
+processes) and the prompt handover are gone; the one thing it still gave — a permission
+toast for a child nobody has open — comes from `chatAttention`, off the child's
+`waiting_*` phase, when no session in the registry would raise it. The old path —
+the UI read-modify-writing the parent's `chat_messages` — raced the parent's own save.
+
 **`parent_chat_id` is what makes a sub-agent belong to a thread rather than sit beside
 it.** A `spawn` made from inside a chat (carrying `parent_chat_id`, injected from
 `BURROW_CHAT_ID` by `bin/burrow` and `burrow-mcp` alike — see `docs/burrow.html`) creates a
@@ -55,6 +121,19 @@ fresh from the caller's own `parent_chat_id` on every call) rather than trusted 
 request body, because a client-supplied `caller_is_subagent: false` would otherwise let a
 sub-agent's own transcript talk it into spawning a grandchild the app has no plan for
 tracking, displaying, or tearing down.
+
+**Finished sub-agents archive themselves after 30 minutes — on the desktop, not in Go.**
+`chatAttention`'s one-minute sweep calls the same `archive()` the Sidebar uses (one
+`archived_at` column, process stopped) when `subagentArchivable` (`chatTree.ts`, pure, tested)
+holds: phase `done`/`failed`/`idle` (Go turns an open request into `waiting_*`, so that covers
+pending permissions too), not busy, not on screen, `collected_at` set (the parent took the result
+via `wait_result`/`collect_results`), and this device's `seenAt` covers the last turn — with the
+delay counted from the later of the receipt and the last phase change. Go has the phase and
+`collected_at` but not the receipt, which is per-device `localStorage`; a server sweep would have
+to drop "seen" or invent a shared receipt. `collected_at` is therefore on `Chat` read-only
+(`SaveChats` never writes it) and its changes emit `chats-changed`. There is no Archived shelf for
+sub-agents (the Sidebar's shelf lists threads only), so an archived child simply leaves the panel;
+its row and transcript stay, and an uncollected one is never archived.
 
 **What is still per-device, and why.** `chatActiveByWs` stays in `config.json`, next to
 `burrow.seenAt`: which chat is selected is this device's business, and the desktop being on
@@ -75,6 +154,87 @@ remotely-created one used to be indistinguishable from the fifty above it in the
 which is how the chat in the original bug report managed to be on screen and still
 impossible to find.
 
+### Steer, side chats, review, recaps, transcript notes
+
+**Steer (`chatsteer.go`, `chat_steer`).** A queued follow-up can go *into* the running turn
+instead of waiting for it to end. Claude: a plain stdin user line — the CLI picks it up at the
+next tool boundary of the same turn and ends it with one `result` (spiked on claude 2.1.311).
+Codex: `turn/steer {expectedTurnId}`, so a steer that lost the race with the turn's end is
+refused rather than starting a new turn. Generic ACP has no such request and refuses. Only a
+`running` phase is steerable: a user line written while an approval is pending would repaint
+the phase as running over the open request. A refusal leaves the message in the queue, so
+nothing is lost. Limit: a Claude turn with no tool boundary left may finish first, and the
+steer then becomes its own turn.
+
+**Side chats (`chatside.go`, `chat_side_create`, `SideChatSurface.vue`).** A quick question
+*about* a chat that must not disturb it. The row is `parent_chat_id` = that chat, `kind =
+'side'`, and its first start **forks the parent's current session** instead of copying a
+transcript: Claude `--resume <parent session> --fork-session` (`resume_at = "@latest"`,
+`sideForkLatest` — no `--resume-session-at`, the fork is at the session's end; the CLI reads
+the append-only session file, so this works mid-turn), Codex `thread/fork` from a separate
+app-server, generic ACP refused. The parent's process, session and running turn are never
+touched. The forked session's id clears `resume_at`, like a rewind fork. A never-started side
+chat of the same parent is reused instead of piling up empty rows. It is **not** a sub-agent:
+`UncollectedChildren` (so `collect_results`) and `chatTree.ts` skip `kind = 'side'`. It runs
+with the parent's permission mode — a side chat can edit files while the parent runs.
+
+**One-click review (`review.go`, `review_changes`).** The Diff surface's Review button creates a
+chat (a child of the active chat when there is one) on the default chat agent and reviews the
+workspace's changes — uncommitted, or against a base branch (`auto` = origin's HEAD, else
+main / master). Codex runs its native `review/start` on the thread (armed like `turn/start`, so
+the usual turn end closes it) and its `exitedReviewMode` result is re-emitted as agent text;
+every other agent gets `reviewPrompt` through `ChatSend`. Not live-tested on Codex.
+
+**Recaps (`chatrecap.go`, `chats.recap`).** One line under a chat's title in the Sidebar saying
+where it stands. Generated in Go after a live turn completes (opened by a user prompt, produced
+assistant text, ended in `turn.completed`), at most every 2 min per chat, through the same
+textgen model preference as chat titles — so every provider gets it with no per-transport
+code. `chats.recap` is read-only on the wire like `collected_at`; an empty answer never
+overwrites a shown recap. Settings → General "Chat recaps" (`uiPrefs.chatRecaps`, absent = on,
+unreadable config = off).
+
+**Clickable transcript notes (`publishSurfaceNote`, `chatturnnotes.go`, `chatbgnotes.go`).**
+Go writes `chat-note` rows carrying a `surface` into the chat's own `chat_stream`; clicking one
+opens that Right Panel surface (Progress / Outputs / Background). Turn notes ("Plan: 2/5 — …"
+on the turn's first plan, "Changed N files" at its end) hang off the tail of `emitChatLine`, so
+they are derived from neutral events for every provider; background-task notes come from the
+live Claude reader only (Codex background terminals have no stream signal, only a poll). Both
+are **live only by construction**: nothing that replays a stream goes through those callers,
+and the notes are themselves stream rows, so a replay renders them from the log instead of
+deriving them twice. A turn interrupted by an app restart gets no notes.
+
+**Plan usage (`planusage.go`, `plan_usage`, `PlanUsageIndicator.vue`).** Session / weekly
+subscription limits in the Sidebar. Claude: `GET api.anthropic.com/api/oauth/usage` with the
+Claude Code OAuth token from the Keychain (`Claude Code-credentials`, else
+`~/.claude/.credentials.json`), read fresh per fetch and **never refreshed** — rotating the
+refresh token would log the CLI out — and never logged or emitted. Codex: a short-lived
+`codex app-server` asking `account/rateLimits/read`. Cached (Claude 60 s, Codex 120 s; shorter
+after failure); a provider routed through Bedrock / Vertex / an API key in
+`~/.claude/settings.json` is reported as not applicable.
+
+### Transcript search (`src-wails/chatsearch.go`)
+
+Spotlight's "IN CHATS" section is `SearchChats(query, limit)` over an FTS5 table `chat_fts`.
+It indexes `chat_messages` (the readable, folded transcript), **not** `chat_stream` (raw protocol
+lines, trimmed). Only `user` and `assistant` rows' `$.text` are indexed — tool rows are names and
+JSON noise.
+
+**Kept in sync by SQLite triggers on `chat_messages`, not by the Go writers.** There are several
+writers (the fold's upsert, `SaveChatMessages`' replace-all, the fold's prune, `DeleteChatMessages`,
+and `DeleteChat`, which now drops the chat's and its children's transcript) and the next one would
+forget. The FTS rowid *is* the `chat_messages` rowid, so an update/delete is a rowid lookup, not a
+scan. Backfill runs once, only when `chat_fts` did not exist yet.
+
+**Why `_txlock=immediate` in the DSN:** with the triggers in place, a DEFERRED transaction's first
+write reads FTS5's shadow tables before asking for the write lock, and SQLite does not run the busy
+handler for a read→write upgrade — concurrent fold persists failed instantly with `SQLITE_BUSY`
+despite `busy_timeout(5000)`. Every `db.Begin()` in the backend is a writer, so taking the lock at
+BEGIN costs nothing.
+
+Query: every word must match, the last as a prefix; words are quoted so FTS syntax is literal;
+`unicode61 remove_diacritics 2` so `prepis` finds `Přepiš`. One hit per chat (best bm25), archived
+chats and orphan transcripts excluded.
+
 ### Chat stream ownership (`src/lib/chatSession.ts` + `src-wails/chatstream.go`)
 
 A chat's stream is owned by a **session registry keyed by chat id**, not by
@@ -89,7 +249,12 @@ session did not own was written into the dead instance (a Codex
 `requestUserInput` arriving while unmounted was invisible on remount and did not
 block eviction). The component now `attachView`s a small `ChatViewHooks` (scroll,
 question/plan draft resets, ACP selector restore, `send` for the queue drain) on
-mount and `release()`s on unmount. A session is only torn down when it is **idle** — a running turn or a
+mount and `release()`s on unmount. Its interface is **closed**: refs come back
+`Readonly`, and every change from outside is a named intent (`postUserMessage`,
+`startTurn`, `failTurn`, `runtimeReset`, `notice`, …). Before this, `restartClaude`
+cleared pending refs by hand and `controlBridge` pushed rows straight into
+`S.messages`, so the idle invariant below held only as long as every caller
+remembered it. A session is only torn down when it is **idle** — a running turn or a
 pending permission keeps streaming behind an unmounted view (ported from
 t3code's `shouldEvictThreadDetailSubscription`). That is what lets chat leaves
 render with `v-if` (`Terminal.isChatVisible`), so "is the user looking at this"
@@ -125,8 +290,9 @@ what `replayChatStream()` uses.
 
 **Still on the raw channel, deliberately** — these are UI decisions, not
 transcript: the control/permission protocol, Claude `system/init`, the ACP
-handshake (`modes`/`configOptions`), `serverRequest/resolved`, and the
-`acpPromptRpcId` correlation that settles an ACP turn. `chat_messages` is also
+handshake (`modes`/`configOptions`) and selector replies, and `serverRequest/resolved`.
+(The ACP turn end used to be here too — the view correlated `acpPromptRpcId`; it is a Go
+marker now, see the chat runtime.) `chat_messages` is also
 still written by the frontend; making Go its sole writer is fáze 7 in the plan
 and has a real prerequisite (the transcript mixes stream-derived messages with
 client-authored ones).
@@ -138,6 +304,7 @@ Each `XTerm` creates a native PTY in Go (`CreatePty`), streams bytes via a Wails
 **The phase itself is derived in Go, not in the frontend**, so it exists with no client attached at all — the phone asleep, the PWA closed, a cold app restart. This is a hard requirement of the remote-access rewrite: a websocket or MCP client connecting later must be able to ask "what state is this agent in" without having driven any of the events that produced the answer.
 
 - **`internal/agentphase/phase.go`** — a pure function `Next(cur Phase, ev Event, now int64) Phase`, no `database/sql`, no Wails runtime, no `main` import; IO is the store's job, not this package's. States: `idle | running | waiting_input | waiting_approval | done | failed | stale`. Deliberately no `starting` state, and deliberately no `review` (see below — whether a finished turn still needs looking at is per-device, not part of the phase). `Phase` also carries `detail` (error_type / blocking tool), `model`, `title`, `is_agent`, `turn_ended_at` (0 mid-turn), `updated_at`, and is a comparable struct on purpose: the store skips a write and an emit whenever `Next()` returns the input unchanged.
+- **Claude status file** (`claudestatus.go`, read from `phasepoll.go`) — Claude Code ≥ 2.1.139 keeps a per-process registry file `<CLAUDE_CONFIG_DIR or ~/.claude>/sessions/<pid>.json`. Verified on 2.1.291: it is keyed by the **claude process pid** (for a PTY tab, the foreground process-group id — `ptycore.ForegroundInfo`, returned as `Pid` in the daemon's `foreground` reply; a job-control shell makes `claude` its own group leader), carries `kind:"interactive"`, `entrypoint` (`cli` for a PTY, `sdk-cli` for Burrow chats), `status` (`idle`/`busy`/`waiting`, `shell` per omnigent's reference reader) with `statusUpdatedAt`, and `waitingFor` **only** while `waiting` (`"permission prompt"` observed). It is created at start (already `idle`), unlinked on a clean exit, and **left behind by SIGKILL** — hence the reader insists on `pid == foreground pid` and `kind == interactive`, and only reads it while `claude` is the foreground. A nested claude that inherits `CLAUDE_CODE_CHILD_SESSION` writes no file (not the Burrow case: a PTY gets a clean env). Mapping, same channel as the hooks (`Hook*` kinds, so `IsAgent` stays set and the "an agent being foreground is never busy" invariant is untouched — the file is first-hand, the foreground name is not): `busy`→`HookRunning`, `waiting`+`permission prompt`→`HookPermission`, other `waiting`→`HookWaiting`, `idle`/`shell`→`StatusIdle` (new kind: settles an **in-flight** turn to `done` with `TurnEndedAt`, no-op on anything already ended, so an idle first read or an ESC-cancelled turn never mints a review dot). **Applied on change only** (per-pty baseline in `phasePoller.lastFile`, reset when the shell returns and in `forget`): re-applying `busy` every 2 s would overwrite a hook's fresher `waiting_approval`. Hooks remain authoritative for turn-end metadata; the file's value is a lost-`Stop` backstop and an earlier `waiting` signal. Compared with omnigent's `status_file.py`: same file/fields/pid-keying, but omnigent maps `waiting`→running and adds a sessionId scan fallback; Burrow has distinct waiting phases and the foreground pgid is exact, so no scan. Fallback is total: missing/half-written/foreign/unknown-literal file, pid 0 from a pre-upgrade daemon, or an old CLI all leave the previous hooks+foreground behaviour. The path comes from **Burrow's** `CLAUDE_CONFIG_DIR`, not the PTY's — a per-shell override just means the file isn't found.
 - **`phasestore.go`** — `PhaseStore` keeps one `Phase` per key (`pty:<ptyID>` or `chat:<chatID>`, one type for both so a terminal and a chat can never drift into two derivations of "is this agent busy"), persists it in the `pty_phase` table, and emits `phase-pty:<id>` / `phase-chat:<id>` carrying the whole `Phase`. Two producers — the hook server and the foreground poll — can call `Apply` for the same id from their own goroutines; a per-id monotonic `seq` (not `updated_at`, which can tie at millisecond resolution) guards both the SQLite upsert and the bus emit so an out-of-order write can't win either. The seq check alone was not enough — it and the emit have to be *atomic*, or the loser can still emit last and leave the UI a step behind a correct row — so the whole publish tail (staleness check → `persist` → `busEmit` → `terminal_tabs` mirror) runs under a dedicated `emitMu`, taken after `s.mu` is released so no sink ever runs under the state lock. **Phases have a lifecycle**: `CreatePty` asks the daemon whether it already holds the id, and an id the daemon does *not* list is a fresh spawn, not a reattach — it drops the phase row, the map/seq entries (`PhaseStore.Forget`), the poller's watchdog counter and the legacy hook-status cache. PTY ids **are** reused (the frontend's counter reseeds from `max(saved, daemon-alive)`), so without that a new "Terminal 2" opened wearing the review dot and task title of whatever held id 2 last. `Get`/`All` report a never-seen id as `idle`, never `""`. `PhaseStore.Apply` is also the **only** writer of `terminal_tabs.status` (the old `SetTabLiveStatus` Wails binding the frontend used to push this itself is gone) — so `burrow list-tabs` and MCP `list_tabs` now report the phase vocabulary (`waiting_input`, `waiting_approval`, `failed`, `stale`) straight out of SQLite, and never `review`, which never existed server-side.
 - **Inputs, three of them:**
   1. **Global persistent hooks** — unchanged mechanism, because it is what makes status work for every agent session (launched-by-button, typed by hand, or reattached after restart): at startup `installStatusHooks` (`statushooks.go`) merges a status hook into each agent's own global config (Claude `~/.claude/settings.json`, Codex `~/.codex/hooks.json`), non-destructively (appends, dedupes by marker, writes a `.burrow-bak`), a no-op outside Burrow (`BURROW_PTY_ID` unset). Inside a Burrow PTY, `burrow hook` maps `hook_event_name` → state exactly as before (`UserPromptSubmit`/`PostToolUse`→running, `PreToolUse`→waiting for the blocking tools, `PermissionRequest`→permission, `Stop`→done except an interim stop still carrying `background_tasks`, `SessionStart`→session metadata, `StopFailure`→error with `error_type` as `detail`, `Notification`→refined by its `type`) and POSTs `{ptyId,state,…}` to the loopback hook server (`burrow status` reads `<BURROW_HOME_DIR>/hook.port`, rewritten each launch, so the port survives a restart). What changed is what happens next: `hookEvent()` in `hookserver.go` also translates the same payload into an `agentphase.Event` and calls `phases.Apply("pty:"+id, ev)`. The legacy `pty-hook-{id}` bus event is **gone** (phase 6): it survived only for the mobile client's own status derivation, and once the phone moved onto phases it had no consumer left. A hook now has exactly one effect. `HookServer`'s in-memory status cache went with it — `ReplayStatus` replays from `PhaseStore`, which is the better copy anyway since it survives a restart and the map never did.
@@ -275,7 +442,6 @@ the PTY keeps running server-side for the next reattach) and `send_float_snapsho
 over `runtime.EventsEmit`, which only the native window ever receives, or serve the
 removed float-window feature outright) — plus a few cases that reshape args before
 forwarding (`list_pty_sessions` normalizes daemon ids into session records,
-`acp_start` nests flat call-site args into the one Go struct parameter the table names,
 `save_chat_messages` restores the `foldedOrd ?? -1` sentinel the old switch supplied).
 
 **`remoteapi.go`'s `remoteAllowed`** is the security boundary: wire command name → `App`
@@ -365,7 +531,7 @@ resumes exactly as well as one it just dropped.
 
 **What the ring does not hold** (`notRingable` in `bus.go`) is everything that is both
 high-volume **and** already replayable from a durable log of its own: `pty-data-*` (the
-daemon keeps its own ring and replays it on reattach) and the chat channels
+daemon numbers and rings it per PTY, below) and the chat channels
 `claude-data-*`, `acp-data-*`, `acp-req-*`, `chat-event-*` (persisted to `chat_stream`
 with an `ord` before they are ever emitted; `replayChatStream`/`LoadChatEventsSince` catch
 a client up from `chat_stream_state.folded_ord`). This is not only about the cost of
@@ -373,10 +539,19 @@ ringing them — it is what makes resume work at all. One streaming agent emits 
 chat lines per turn, so ringing them would churn all 512 slots in seconds and every
 reconnect would come back a `resync`, making the ring dead weight. What is left is shell
 state — phases, workspaces, pty exits, control results — which changes a handful of times
-a minute, so 512 slots is hours of history. The consequence to keep in mind: a dropped
-connection still loses **PTY bytes** with no reattach to replay them (`pty-data-<id>` is
-emit-once), which is a hole in a terminal's scrollback; phase dots, workspace and chat
-state all survive.
+a minute, so 512 slots is hours of history.
+
+**PTY bytes resume by offset, not by `seq`.** `ptycore` numbers every byte a PTY writes
+and keeps the last **1 MiB** per PTY (`ring.go`); `pty-data-<id>` carries `{off, data}`
+(`off` = offset of the first byte, `null` from a daemon that predates it — an updated app
+keeps talking to the old daemon until it is replaced). `src/runtime/ptyStream.ts` holds the
+next offset a view needs, trims overlap and drops duplicates, and on a reconnect
+(`transport.onState` false→true) or a hole in the offsets calls `pty_since(id, since)`,
+holding live chunks behind that call so order is kept. Never a full replay — that is what
+corrupts a re-fitted xterm. If the gap outran the ring, the rest is rendered and the lost
+byte count is logged; if `pty_since` fails (old daemon), the hole is accepted as before.
+`pty-exit-<id>` resets the position (a reused id numbers from 0 again). The phone renders
+no PTY output, so this is desktop-only.
 
 **`shell_snapshot`** (`scopeOrchRead`) is the first paint in one round trip: workspaces,
 tabs for **every** workspace (a phone opens on one the desktop never mounted), all phases,
@@ -573,10 +748,58 @@ primer; the orchestrating thread decides per task by calling `create_worktree` a
 passing the path as `cwd`.
 
 **Agent docs install** (`agentdocs.go`, at startup): teaches every agent the CLI.
-Claude/Copilot get the `burrow` skill (`agentdocs/skills/burrow/SKILL.md`) plus an
-always-in-context rule in `~/.claude/CLAUDE.md` (so Claude reaches for
-`burrow spawn` before its own `Agent` tool); Codex gets the same content as a
-managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md`.
+Claude/Copilot get the `burrow` skill (`agentdocs/skills/burrow/SKILL.md`); Codex
+gets the same content as a managed `<!-- BURROW:BEGIN/END -->` block in
+`~/.codex/AGENTS.md`. The Claude rule (reach for `burrow spawn` before the built-in
+`Agent` tool) used to be a block in `~/.claude/CLAUDE.md`, which put it in every
+Claude session on the machine, Burrow or not; startup now removes that block and
+Burrow injects the rule only where it launches Claude — `--append-system-prompt`
+for chats, the burrow mod's `prompt.submit` context for PTY tabs. The mod lives in
+`agentdocs/mod/burrow` and also reports tool-call phases in-process (`BURROW_MOD=1`
+makes `burrow hook` skip PreToolUse/PostToolUse). It uses only events the built-in
+`cc-plugin-sec-default` guard lets a user-tier mod see on a Team/Enterprise login:
+`classic.*` and `prompt.compose` are bypassed there, which is why turn end,
+permission and session metadata are classic `hooks` entries in the mod's own
+`hooks/hooks.json` (the eight `claudeHookEvents`, each running `burrow hook`) rather
+than in `~/.claude/settings.json`: the plugin is loaded only in Burrow PTYs via
+`CLAUDE_CODE_PLUGIN_DIRS`, so chats and plain `claude` runs no longer spawn a no-op
+hook, and the guard governs mods, not plugin settings hooks. Startup still strips the
+entries older versions merged into global Claude `settings.json` (non-destructive;
+keep for at least one release — a tab started before the upgrade keeps its old env).
+Codex/Copilot have no plugin equivalent and keep the global install. Hook entries
+are arrays per event, so a second group can be appended — and is: see the next section.
+
+### Answerable PTY permission prompts (`src-wails/ptypermissions.go`, `bin/burrow approve`)
+
+**What:** a Claude tab's permission prompt can be answered from the desktop (toast + a banner above the tab's
+xterm, oldest request with `+N`) without taking the TUI prompt away. Phone is deferred.
+
+**How:** a second `PermissionRequest` entry (`burrow approve`, `timeout: 86400`) next to the status hook in the
+plugin's `hooks.json` (plugin settings-hooks survive the Team/Enterprise guard; the mod's `modules` do not).
+`burrow approve` reads stdin, exits 0/empty at once when `BURROW_PTY_ID` is unset or the tool is
+`AskUserQuestion`/`ExitPlanMode`, otherwise `curl`s `POST /v1/permission_request?pty_id=…` with the control token and
+prints the reply verbatim. The server parks it in `permRegistry`, keyed `pty_id` + hash(`tool_name`,`tool_input`)
+because the payload carries no `tool_use_id`; two byte-identical in-flight requests share one card and each hook
+gets the answer. The pty's whole pending list goes out as `pty-permissions` (state, so a replay can't leave the UI
+wrong); `list_pty_permissions` is the first paint and `answer_pty_permission` the answer door (both in
+`remoteAllowed`).
+
+**Why it fails open to the TUI, never to allow:** Claude reads "no decision" as "ask the user" — empty stdout +
+exit 0. A timeout, invalid JSON or non-zero exit also lands on the TUI prompt. So the CLI, the handler and the
+registry return nothing on every non-answer path, and an unknown answer is an error, not an allow. Claude owns the
+rules: `chatPermissionRules` are not applied to PTY tabs. `always` = `updatedPermissions` `addRules`,
+`destination: "session"` — Claude's first `addRules` suggestion re-pointed at the session when it offered one,
+else the exact Bash command (or the whole tool). Persisted destinations stay the TUI's.
+
+**Spike — what happens when the user answers in the TUI (claude 2.1.291):** Claude does **not** kill the losing
+hook. A `sh` hook with a `sleep` child was still running 30 s+ after the TUI answer and the tool had already run;
+it got SIGTERM only when Claude exited. The docs are silent on this, and it makes the request context
+(`r.Context().Done()`) useless for the "answered in the terminal" case — it only fires when Claude exits or the
+hook is killed. The real signal is the tab's **phase** leaving `waiting_approval` (`PostToolUse`/mod `tool.call`
+→ running, `Stop` → done), wired as `PhaseStore.onChange` → `permRegistry.phaseChanged`. The status hook and the
+approve hook run in parallel, so a request can be parked just before the phase reads `waiting_approval`: it only
+closes on "left waiting_approval" once the approval phase was observed, and before that only a turn end
+(done/idle/failed/stale) closes it.
 ### Backend (`src-wails/*.go`, bound as `App` methods)
 
 Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem:
@@ -589,7 +812,7 @@ Go/Wails methods on `App` replace the old Tauri commands, one file per subsystem
 - **Pull requests** (`forge.go`, `internal/forge/`) — provider-neutral PR operations over each forge's own CLI, and provider detection/override. See "Pull requests go through each forge's own CLI" below
 - **Text generation** (`textgen.go`) — `GenerateCommitMessage`, `GeneratePrContent`, `GenerateBranchName`, `GenerateChatTitle` (see below)
 - **FS** (`fs.go`) — `ReadDirShallow`, `WriteTextFile`
-- **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. `busEmit` **numbers** the event into the replay ring first (unless `notRingable` excludes it) and hands every sink the same `shellEvent{seq,name,payload}` — one struct rather than a growing parameter list, and the same `seq` for all sinks so the ring's order is the order clients receive. There is exactly **one** subscriber: `/v2/ws`'s per-connection subscription (`remotews.go`) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) reach a connected phone and the desktop's own socket by the same path. The v1 tailnet broadcaster went away in phase 6 with the client that needed it; `busEmit` being the single *door* is about where events are published, not about how many things happen to listen. There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own `/v2/ws` connection like any other client, and the only names still delivered on the Wails event channel (`menu-*`, `lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `runtime.EventsEmit` directly, never through `busEmit` (`src/lib/wailsCompat/event.ts` routes exactly those prefixes to `EventsOn`). `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did
+- **Event bus** (`bus.go`) — `busEmit(name, payload)` is the single door for **every** event a client may care about (`emitAll` is gone); `busSubscribe` registers a sink. `busEmit` **numbers** the event into the replay ring first (unless `notRingable` excludes it) and hands every sink the same `shellEvent{seq,name,payload}` — one struct rather than a growing parameter list, and the same `seq` for all sinks so the ring's order is the order clients receive. Record + fan-out of a numbered event run under one `busOrderMu`: without it two concurrent emitters delivered seq N+1 before N, and `transport.ts`, which drops anything at or behind its high-water mark, lost N for good (`TestConcurrentEmitsArriveInSeqOrder`). Holding it across the sink is cheap because the only sink never blocks. There is exactly **one** subscriber: `/v2/ws`'s per-connection subscription (`remotews.go`) — so `phase-pty:{id}`/`phase-chat:{id}` (and every other bus event) reach a connected phone and the desktop's own socket by the same path. The v1 tailnet broadcaster went away in phase 6 with the client that needed it; `busEmit` being the single *door* is about where events are published, not about how many things happen to listen. There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own `/v2/ws` connection like any other client, and the only names still delivered on the Wails event channel (`menu-*`, `lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`) are emitted with `runtime.EventsEmit` directly, never through `busEmit` (`src/lib/wailsCompat/event.ts` routes exactly those prefixes to `EventsOn`). `events_test.go` greps every non-test `.go` file for a direct `EventsEmit(` call and fails unless the file is on an explicit allowlist (menu items, updater progress, LSP messages — genuinely desktop-only), so a new event can't quietly skip remote clients the way `emitWorkspacesChanged` once did
 - **Agent phase** (`phasestore.go`, `phasepoll.go`, `internal/agentphase/phase.go`) — see "PTY / Agent phase" above
 - **Environment identity** (`environment.go`) — `environmentID()` creates and persists a random id in `<app-data>/environment.json` on first run; every client-side record (known environments, endpoint preferences, seen-at receipts) is meant to key off this rather than IP/hostname, which change. `EnvironmentID()` is reachable over `/v2/ws` as `environment_id` (`scopeOrchRead`) — not a Wails binding call any more
 - **Remote endpoints** (`endpoints.go`, `endpoints_tailscale.go`) — `EndpointProvider` registry (currently loopback + Tailscale) contributing `AdvertisedEndpoint`s, `selectEndpoint()` implementing t3code's selection order (preferred kind → hosted-HTTPS-compatible → default → non-loopback → loopback-if-same-machine), surfaced as `remote_endpoints` (`scopeAccessRead`) over `/v2/ws`. **Nothing consumes this yet** — it exists for Settings/pairing in a later phase

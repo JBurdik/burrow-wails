@@ -268,3 +268,16 @@ func TestResumeOnlyMovesAWaitingTurn(t *testing.T) {
 		t.Fatalf("resume from idle: want idle, got %q", got.State)
 	}
 }
+
+func TestStatusIdleSettlesOnlyInFlightTurns(t *testing.T) {
+	got := Next(Phase{State: Running}, Event{Kind: StatusIdle}, 5)
+	if got.State != Done || got.TurnEndedAt != 5 {
+		t.Fatalf("in-flight turn not settled: %+v", got)
+	}
+	for _, st := range []State{Idle, Done, Failed, Stale} {
+		cur := Phase{State: st, TurnEndedAt: 3, IsAgent: true}
+		if next := Next(cur, Event{Kind: StatusIdle}, 9); next != cur {
+			t.Fatalf("%s: idle file changed a settled phase: %+v", st, next)
+		}
+	}
+}

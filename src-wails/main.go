@@ -7,10 +7,10 @@ import (
 	"embed"
 
 	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -22,15 +22,14 @@ func main() {
 	app := NewApp()
 	appMenu := menu.NewMenu()
 	appMenu.Append(menu.AppMenu()) // standard macOS app menu (Quit bound to Cmd+Q)
-	burrowMenu := appMenu.AddSubmenu("Burrow")
-	burrowMenu.AddText("Check for Updates…", nil, func(_ *menu.CallbackData) {
-		runtime.EventsEmit(app.ctx, "menu-check-update")
-	})
 	appMenu.Append(menu.EditMenu())
 	appMenu.Append(menu.WindowMenu())
 	helpMenu := appMenu.AddSubmenu("Help")
 	helpMenu.AddText("Documentation", nil, func(_ *menu.CallbackData) {
 		runtime.EventsEmit(app.ctx, "menu-open-docs")
+	})
+	helpMenu.AddText("What's New", nil, func(_ *menu.CallbackData) {
+		runtime.EventsEmit(app.ctx, "menu-whats-new")
 	})
 	helpMenu.AddText("Show Onboarding Again", nil, func(_ *menu.CallbackData) {
 		runtime.EventsEmit(app.ctx, "menu-show-onboarding")
@@ -48,8 +47,15 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
-		OnDomReady:       app.restoreWindowState,
+		// Real paths for files dragged in from Finder; the webview's own drop
+		// is disabled so it can't navigate to the dropped file. The frontend
+		// hit-tests x/y against the chat composer (AgentChat.vue).
+		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true, DisableWebViewDrop: true},
+		OnStartup:   app.startup,
+		OnDomReady: func(ctx context.Context) {
+			app.restoreWindowState(ctx)
+			installAppMenuItems(func() { runtime.EventsEmit(app.ctx, "menu-check-update") })
+		},
 		OnBeforeClose: func(ctx context.Context) bool {
 			app.saveWindowState(ctx)
 			app.cleanupOnShutdown()
@@ -70,4 +76,12 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
+}
+
+// watchFileDrop forwards Wails' native file drop to the bus. Headless has no
+// window and no Wails context to register on (main_headless.go).
+func watchFileDrop(ctx context.Context) {
+	runtime.OnFileDrop(ctx, func(x, y int, paths []string) {
+		busEmit("file-drop", map[string]any{"x": x, "y": y, "paths": paths})
+	})
 }

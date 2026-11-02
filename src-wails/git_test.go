@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,4 +60,30 @@ func TestBranchDiffBaseFallback(t *testing.T) {
 			t.Fatalf("want release, got %q", got)
 		}
 	})
+}
+
+// Hunk staging depends on stdin reaching `git apply --cached -`.
+func TestRunGitInputPipesStdin(t *testing.T) {
+	dir := t.TempDir()
+	a := &App{}
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}} {
+		if out := a.RunGit(dir, args); out.Code != 0 {
+			t.Fatalf("git %v: %s", args, out.Stderr)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.RunGit(dir, []string{"add", "f.txt"})
+	a.RunGit(dir, []string{"commit", "-qm", "init"})
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("a\nb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := a.RunGit(dir, []string{"diff"}).Stdout
+	if out := a.RunGitInput(dir, []string{"apply", "--cached", "-"}, patch); out.Code != 0 {
+		t.Fatalf("apply: %s", out.Stderr)
+	}
+	if got := a.RunGit(dir, []string{"diff", "--cached", "--name-only"}).Stdout; strings.TrimSpace(got) != "f.txt" {
+		t.Fatalf("staged = %q", got)
+	}
 }

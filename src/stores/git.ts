@@ -25,6 +25,18 @@ export interface GitCommit {
   relTime: string;
 }
 
+/** A row of the commit graph: GitCommit + what the lane layout needs. */
+export interface GraphCommit extends GitCommit {
+  parents: string[];
+  /** `%D` decorations: "HEAD -> main", "origin/main", "tag: v1" */
+  refs: string[];
+}
+
+export interface GitStash { ref: string; message: string; relTime: string }
+
+/** An operation git stopped in the middle of (conflict, or `edit` stop). */
+export type GitOpState = "merge" | "rebase" | "cherry-pick" | "revert" | null;
+
 interface GitOutput {
   stdout: string;
   stderr: string;
@@ -74,10 +86,14 @@ export function rollupChecks(checks: Array<{ conclusion?: string; status?: strin
   return pending ? "pending" : "pass";
 }
 
-function parseStatus(raw: string): { staged: GitFile[]; unstaged: GitFile[]; untracked: GitFile[] } {
+// Unmerged XY pairs from `git status --porcelain` (git-status(1), "Short Format").
+const CONFLICT_CODES = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+
+export function parseStatus(raw: string): { staged: GitFile[]; unstaged: GitFile[]; untracked: GitFile[]; conflicted: GitFile[] } {
   const staged: GitFile[] = [];
   const unstaged: GitFile[] = [];
   const untracked: GitFile[] = [];
+  const conflicted: GitFile[] = [];
 
   for (const line of raw.split("\n")) {
     if (line.length < 3) continue;
@@ -89,13 +105,15 @@ function parseStatus(raw: string): { staged: GitFile[]; unstaged: GitFile[]; unt
 
     if (x === "?" && y === "?") {
       untracked.push(file);
+    } else if (CONFLICT_CODES.has(x + y)) {
+      conflicted.push(file);
     } else {
       if (x !== " " && x !== "?") staged.push(file);
       if (y !== " " && y !== "?") unstaged.push(file);
     }
   }
 
-  return { staged, unstaged, untracked };
+  return { staged, unstaged, untracked, conflicted };
 }
 
 export const useGitStore = defineStore("git", () => {
@@ -105,6 +123,9 @@ export const useGitStore = defineStore("git", () => {
   const staged = ref<GitFile[]>([]);
   const unstaged = ref<GitFile[]>([]);
   const untracked = ref<GitFile[]>([]);
+  const conflicted = ref<GitFile[]>([]);
+  const opState = ref<GitOpState>(null);
+  const stashes = ref<GitStash[]>([]);
   const diff = ref("");
   const diffFile = ref<string | null>(null);
   const diffStaged = ref(false);
@@ -213,7 +234,12 @@ export const useGitStore = defineStore("git", () => {
       staged.value = parsed.staged;
       unstaged.value = parsed.unstaged;
       untracked.value = parsed.untracked;
+      conflicted.value = parsed.conflicted;
       branch.value = branchOut.trim();
+      const [op, st] = await Promise.all([readOpState(dir), readStashes(dir)]);
+      if (stale(g)) return;
+      opState.value = op;
+      stashes.value = st;
       await refreshUpstream(dir, g);
       await refreshLog(dir, g);
       await fetchBranches(dir, g);
@@ -223,6 +249,9 @@ export const useGitStore = defineStore("git", () => {
       staged.value = [];
       unstaged.value = [];
       untracked.value = [];
+      conflicted.value = [];
+      opState.value = null;
+      stashes.value = [];
       branch.value = "";
       ahead.value = 0;
       behind.value = 0;
@@ -294,6 +323,8 @@ export const useGitStore = defineStore("git", () => {
       const args = upstream ? ["push"] : ["push", "-u", "origin", branchName];
       await runGit(dir, args);
       await refresh();
+      // The push may have moved a linked PR's checks/state (chatpr.go).
+      void invoke("chat_prs_refresh", { cwd: dir }).catch(() => {});
       notif.resolve(toastId, { type: "done", title: "Pushed", source: "git" });
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : "git push failed";
@@ -541,6 +572,108 @@ export const useGitStore = defineStore("git", () => {
     await refresh();
   }
 
+  // MERGE/CHERRY_PICK/REVERT_HEAD go away when the op ends; REBASE_HEAD does
+  // not, so a rebase is read from `git status` prose (run_git_input forces LC_ALL=C).
+  async function readOpState(dir: string): Promise<GitOpState> {
+    const has = (ref: string) =>
+      invoke<GitOutput>("run_git", { cwd: dir, args: ["rev-parse", "-q", "--verify", ref] })
+        .then((o) => o.code === 0).catch(() => false);
+    const [merge, pick, revert, rebase] = await Promise.all([
+      ...["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"].map(has),
+      invoke<GitOutput>("run_git_input", { cwd: dir, args: ["status"], stdin: "" })
+        .then((o) => o.stdout.includes("rebase in progress")).catch(() => false),
+    ]);
+    return merge ? "merge" : rebase ? "rebase" : pick ? "cherry-pick" : revert ? "revert" : null;
+  }
+
+  async function readStashes(dir: string): Promise<GitStash[]> {
+    const out = await runGit(dir, ["stash", "list", "--format=%gd%x1f%s%x1f%cr"]).catch(() => "");
+    return out.split("\n").filter(Boolean).map((l) => {
+      const [ref, message, relTime] = l.split("\x1f");
+      return { ref, message, relTime };
+    });
+  }
+
+  // Branches + remotes + tags + HEAD, not --all: --all drags in
+  // refs/prefetch, refs/pull, notes and the stash.
+  async function fetchGraph(limit = 300): Promise<GraphCommit[]> {
+    const dir = cwd.value;
+    if (!dir) return [];
+    const out = await runGit(dir, [
+      "log", "--branches", "--remotes", "--tags", "HEAD",
+      "--decorate-refs=refs/heads", "--decorate-refs=refs/remotes", "--decorate-refs=refs/tags", "--decorate-refs=HEAD",
+      "--topo-order", `-n${limit}`,
+      "--format=%H%x1f%h%x1f%P%x1f%an%x1f%cr%x1f%D%x1f%s%x1e",
+    ]).catch(() => ""); // empty repo: no HEAD yet
+    return out.split("\x1e").map((r) => r.replace(/^\n/, "")).filter(Boolean).map((rec) => {
+      const [hash, shortHash, parents, author, relTime, refs, subject] = rec.split("\x1f");
+      return {
+        hash, shortHash, author, relTime, subject,
+        parents: parents ? parents.split(" ") : [],
+        refs: refs ? refs.split(", ") : [],
+      };
+    });
+  }
+
+  // One door for every write the graph / stash / conflict UI does: toast,
+  // refresh, error surfaced. `input` goes to stdin (hunk patches).
+  async function op(title: string, args: string[], opts: { input?: string; done?: string; quiet?: boolean } = {}) {
+    const dir = cwd.value;
+    if (!dir) return false;
+    const toastId = opts.quiet ? null : notif.push({ type: "pending", title: `${title}…`, source: "git" });
+    try {
+      const out = await invoke<GitOutput>("run_git_input", { cwd: dir, args, stdin: opts.input ?? "" });
+      if (out.code !== 0) throw new Error((out.stderr || out.stdout).trim() || `git ${args[0]} failed`);
+      if (toastId != null) notif.resolve(toastId, { type: "done", title: opts.done ?? title, source: "git" });
+      return true;
+    } catch (e: unknown) {
+      const body = e instanceof Error ? e.message : String(e);
+      if (toastId != null) notif.resolve(toastId, { type: "error", title: `${title} failed`, body, source: "git" });
+      else notif.push({ type: "error", title: `${title} failed`, body, source: "git" });
+      return false;
+    } finally {
+      if (dir === cwd.value) await refresh(true);
+      if (diffFile.value && dir === cwd.value) await showDiff(diffFile.value, diffStaged.value);
+    }
+  }
+
+  // ── hunks ── `--unidiff-zero` lets a zero-context hunk apply.
+  const applyArgs = ["apply", "--unidiff-zero", "--whitespace=nowarn"];
+  const stageHunk = (patch: string) => op("Stage hunk", [...applyArgs, "--cached", "-"], { input: patch, quiet: true });
+  const unstageHunk = (patch: string) => op("Unstage hunk", [...applyArgs, "--cached", "--reverse", "-"], { input: patch, quiet: true });
+  const discardHunk = (patch: string) => op("Discard hunk", [...applyArgs, "--reverse", "-"], { input: patch, quiet: true });
+
+  // ── stash ──
+  const stashPush = (message = "") =>
+    op("Stash", ["stash", "push", "--include-untracked", ...(message.trim() ? ["-m", message.trim()] : [])], { done: "Stashed" });
+  const stashApply = (ref: string) => op("Apply stash", ["stash", "apply", ref]);
+  const stashPop = (ref: string) => op("Pop stash", ["stash", "pop", ref]);
+  const stashDrop = (ref: string) => op("Drop stash", ["stash", "drop", ref]);
+
+  // ── conflicts ──
+  const resolveWith = async (path: string, side: "ours" | "theirs") =>
+    (await op(`Use ${side}`, ["checkout", `--${side}`, "--", path], { quiet: true }))
+    && op("Mark resolved", ["add", "--", path], { quiet: true });
+  const markResolved = (path: string) => op("Mark resolved", ["add", "--", path], { quiet: true });
+  const continueOp = () => {
+    const s = opState.value;
+    if (!s) return Promise.resolve(false);
+    // a merge "continues" by committing; GIT_EDITOR=true keeps the default message
+    return op(`Continue ${s}`, s === "merge" ? ["commit", "--no-edit"] : [s, "--continue"]);
+  };
+  const abortOp = () => (opState.value ? op(`Abort ${opState.value}`, [opState.value, "--abort"]) : Promise.resolve(false));
+
+  // ── history / branches ──
+  const mergeBranch = (name: string) => op(`Merge ${name}`, ["merge", "--no-edit", name]);
+  const rebaseOnto = (name: string) => op(`Rebase onto ${name}`, ["rebase", name]);
+  const cherryPick = (hash: string) => op("Cherry-pick", ["cherry-pick", hash]);
+  const revertCommit = (hash: string) => op("Revert", ["revert", "--no-edit", hash]);
+  const checkoutCommit = (hash: string) => op("Checkout", ["switch", "--detach", hash]);
+  const branchAt = (name: string, hash: string) => op(`Create ${name}`, ["switch", "-c", name, hash]);
+  const tagAt = (name: string, hash: string) => op(`Tag ${name}`, ["tag", name, hash]);
+  const resetTo = (hash: string, mode: "soft" | "mixed" | "hard") => op(`Reset (${mode})`, ["reset", `--${mode}`, hash]);
+  const deleteBranch = (name: string, force = false) => op(`Delete ${name}`, ["branch", force ? "-D" : "-d", name]);
+
   async function gitInit() {
     if (!cwd.value) return;
     loading.value = true;
@@ -556,7 +689,11 @@ export const useGitStore = defineStore("git", () => {
   }
 
   return {
-    cwd, branch, staged, unstaged, untracked,
+    cwd, branch, staged, unstaged, untracked, conflicted, opState, stashes,
+    fetchGraph, stageHunk, unstageHunk, discardHunk,
+    stashPush, stashApply, stashPop, stashDrop,
+    resolveWith, markResolved, continueOp, abortOp,
+    mergeBranch, rebaseOnto, cherryPick, revertCommit, checkoutCommit, branchAt, tagAt, resetTo, deleteBranch,
     diff, diffFile, diffStaged,
     loading, error, commitMsg,
     ahead, behind, hasUpstream, pushing, pulling, generating, generateError, committing, hasWorkingTreeChanges, log, logLoading,

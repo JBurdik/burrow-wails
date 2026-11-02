@@ -39,18 +39,7 @@ func (c *Core) createWorktree(ctx context.Context, p Params) (any, error) {
 		return nil, fmt.Errorf("create_worktree: %w", err)
 	}
 
-	path := p.Str("path")
-	if path == "" {
-		root := "~/burrow-worktrees"
-		if c.deps.WorktreesDir != nil {
-			if d := strings.TrimSpace(c.deps.WorktreesDir()); d != "" {
-				root = d
-			}
-		}
-		path = filepath.Join(expandHome(root), filepath.Base(repoPath), branch)
-	}
-	path = expandHome(path)
-
+	path := c.worktreePath(repoPath, branch, p.Str("path"))
 	id, err := c.deps.Worktrees.Create(repoPath, branch, path, branch, p.Str("base"))
 	if err != nil {
 		return nil, fmt.Errorf("create_worktree: %w", err)
@@ -63,6 +52,21 @@ func (c *Core) createWorktree(ctx context.Context, p Params) (any, error) {
 		uiErr = err.Error()
 	}
 	return map[string]any{"workspace_id": id, "path": path, "branch": branch, "ui_error": uiErr}, nil
+}
+
+// worktreePath is where a worktree for branch lands: the caller's override,
+// else <worktreesDir>/<repo>/<branch>.
+func (c *Core) worktreePath(repoPath, branch, override string) string {
+	if override != "" {
+		return expandHome(override)
+	}
+	root := "~/burrow-worktrees"
+	if c.deps.WorktreesDir != nil {
+		if d := strings.TrimSpace(c.deps.WorktreesDir()); d != "" {
+			root = d
+		}
+	}
+	return filepath.Join(expandHome(root), filepath.Base(repoPath), branch)
 }
 
 func (c *Core) removeWorktree(ctx context.Context, p Params) (any, error) {

@@ -7,7 +7,7 @@ import (
 
 // TestClaudeSendDoesNotRecordAnUndeliveredMessage covers IMPORTANT 3: sending
 // to a chat whose CLI is not running (never started, or reaped idle by
-// agentproc.Manager.ReapIdle) must not leave the user's line in the
+// auto-sleep, chatsleep.go) must not leave the user's line in the
 // transcript. ClaudeSend used to call emitChatLine BEFORE claudeWrite, so the
 // line was recorded even though claudeMgr().Send always fails with "unknown
 // agent session" for an id it has never Start()ed — a permanent, silent data

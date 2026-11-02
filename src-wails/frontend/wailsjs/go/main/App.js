@@ -46,6 +46,10 @@ export function AddMcpServer(arg1, arg2) {
   return window['go']['main']['App']['AddMcpServer'](arg1, arg2);
 }
 
+export function AnswerPtyPermission(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AnswerPtyPermission'](arg1, arg2, arg3);
+}
+
 export function BranchDiff(arg1) {
   return window['go']['main']['App']['BranchDiff'](arg1);
 }
@@ -54,8 +58,124 @@ export function BranchDiffBase(arg1) {
   return window['go']['main']['App']['BranchDiffBase'](arg1);
 }
 
+export function ChatClear(arg1) {
+  return window['go']['main']['App']['ChatClear'](arg1);
+}
+
 export function ChatFoldedOrd(arg1) {
   return window['go']['main']['App']['ChatFoldedOrd'](arg1);
+}
+
+export function ChatFork(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatFork'](arg1, arg2, arg3);
+}
+
+export function ChatInterrupt(arg1) {
+  return window['go']['main']['App']['ChatInterrupt'](arg1);
+}
+
+export function ChatLeaveWorktree(arg1) {
+  return window['go']['main']['App']['ChatLeaveWorktree'](arg1);
+}
+
+export function ChatLimitArm(arg1) {
+  return window['go']['main']['App']['ChatLimitArm'](arg1);
+}
+
+export function ChatLimitDismiss(arg1) {
+  return window['go']['main']['App']['ChatLimitDismiss'](arg1);
+}
+
+export function ChatLinkPr(arg1, arg2) {
+  return window['go']['main']['App']['ChatLinkPr'](arg1, arg2);
+}
+
+export function ChatListBgTerminals(arg1) {
+  return window['go']['main']['App']['ChatListBgTerminals'](arg1);
+}
+
+export function ChatMarkActive(arg1) {
+  return window['go']['main']['App']['ChatMarkActive'](arg1);
+}
+
+export function ChatMoveToWorktree(arg1, arg2) {
+  return window['go']['main']['App']['ChatMoveToWorktree'](arg1, arg2);
+}
+
+export function ChatPrRefresh(arg1) {
+  return window['go']['main']['App']['ChatPrRefresh'](arg1);
+}
+
+export function ChatPrsRefresh(arg1) {
+  return window['go']['main']['App']['ChatPrsRefresh'](arg1);
+}
+
+export function ChatQueueAdd(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatQueueAdd'](arg1, arg2, arg3);
+}
+
+export function ChatQueueList(arg1) {
+  return window['go']['main']['App']['ChatQueueList'](arg1);
+}
+
+export function ChatQueueRemove(arg1) {
+  return window['go']['main']['App']['ChatQueueRemove'](arg1);
+}
+
+export function ChatQueueReorder(arg1, arg2) {
+  return window['go']['main']['App']['ChatQueueReorder'](arg1, arg2);
+}
+
+export function ChatQueueUpdate(arg1, arg2) {
+  return window['go']['main']['App']['ChatQueueUpdate'](arg1, arg2);
+}
+
+export function ChatRestart(arg1) {
+  return window['go']['main']['App']['ChatRestart'](arg1);
+}
+
+export function ChatRewind(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatRewind'](arg1, arg2, arg3);
+}
+
+export function ChatScheduleCancel(arg1) {
+  return window['go']['main']['App']['ChatScheduleCancel'](arg1);
+}
+
+export function ChatScheduleList(arg1) {
+  return window['go']['main']['App']['ChatScheduleList'](arg1);
+}
+
+export function ChatSend(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatSend'](arg1, arg2, arg3);
+}
+
+export function ChatSetLaunchSettings(arg1, arg2) {
+  return window['go']['main']['App']['ChatSetLaunchSettings'](arg1, arg2);
+}
+
+export function ChatSideCreate(arg1) {
+  return window['go']['main']['App']['ChatSideCreate'](arg1);
+}
+
+export function ChatSleep(arg1) {
+  return window['go']['main']['App']['ChatSleep'](arg1);
+}
+
+export function ChatSnooze(arg1, arg2) {
+  return window['go']['main']['App']['ChatSnooze'](arg1, arg2);
+}
+
+export function ChatSteer(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ChatSteer'](arg1, arg2, arg3);
+}
+
+export function ChatStopTask(arg1, arg2) {
+  return window['go']['main']['App']['ChatStopTask'](arg1, arg2);
+}
+
+export function ChatUnlinkPr(arg1) {
+  return window['go']['main']['App']['ChatUnlinkPr'](arg1);
 }
 
 export function CheckUpdate() {
@@ -194,6 +314,10 @@ export function ForgeInstallCLI(arg1) {
   return window['go']['main']['App']['ForgeInstallCLI'](arg1);
 }
 
+export function ForgePrCheckout(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ForgePrCheckout'](arg1, arg2, arg3, arg4);
+}
+
 export function ForgePrCreate(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['ForgePrCreate'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -216,6 +340,10 @@ export function FormatSource(arg1, arg2, arg3) {
 
 export function GenerateBranchName(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GenerateBranchName'](arg1, arg2, arg3, arg4);
+}
+
+export function GenerateCatchUp(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GenerateCatchUp'](arg1, arg2, arg3);
 }
 
 export function GenerateChatTitle(arg1, arg2, arg3, arg4) {
@@ -342,6 +470,10 @@ export function ListOpenTargets() {
   return window['go']['main']['App']['ListOpenTargets']();
 }
 
+export function ListPtyPermissions() {
+  return window['go']['main']['App']['ListPtyPermissions']();
+}
+
 export function ListPtySessions() {
   return window['go']['main']['App']['ListPtySessions']();
 }
@@ -362,12 +494,28 @@ export function LoadChatEventsSince(arg1, arg2) {
   return window['go']['main']['App']['LoadChatEventsSince'](arg1, arg2);
 }
 
+export function LoadChatImage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LoadChatImage'](arg1, arg2, arg3);
+}
+
 export function LoadChatMessages(arg1) {
   return window['go']['main']['App']['LoadChatMessages'](arg1);
 }
 
+export function LoadChatMessagesPage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LoadChatMessagesPage'](arg1, arg2, arg3);
+}
+
 export function LoadChatStreamSince(arg1, arg2) {
   return window['go']['main']['App']['LoadChatStreamSince'](arg1, arg2);
+}
+
+export function LoadChatTaskLinesSince(arg1, arg2) {
+  return window['go']['main']['App']['LoadChatTaskLinesSince'](arg1, arg2);
+}
+
+export function LoadPendingChatRequests(arg1) {
+  return window['go']['main']['App']['LoadPendingChatRequests'](arg1);
 }
 
 export function LocalEndpoint() {
@@ -398,6 +546,10 @@ export function NotifyFloatGrid(arg1, arg2, arg3) {
   return window['go']['main']['App']['NotifyFloatGrid'](arg1, arg2, arg3);
 }
 
+export function OpenAIListModels(arg1) {
+  return window['go']['main']['App']['OpenAIListModels'](arg1);
+}
+
 export function OpenGitPanelWindow() {
   return window['go']['main']['App']['OpenGitPanelWindow']();
 }
@@ -418,12 +570,36 @@ export function PickFiles(arg1, arg2) {
   return window['go']['main']['App']['PickFiles'](arg1, arg2);
 }
 
+export function PlanUsage() {
+  return window['go']['main']['App']['PlanUsage']();
+}
+
+export function PortListening(arg1) {
+  return window['go']['main']['App']['PortListening'](arg1);
+}
+
 export function ProbeProvider(arg1, arg2) {
   return window['go']['main']['App']['ProbeProvider'](arg1, arg2);
 }
 
+export function PtySince(arg1, arg2) {
+  return window['go']['main']['App']['PtySince'](arg1, arg2);
+}
+
 export function PublishChatNote(arg1, arg2) {
   return window['go']['main']['App']['PublishChatNote'](arg1, arg2);
+}
+
+export function PushSubscribe(arg1, arg2) {
+  return window['go']['main']['App']['PushSubscribe'](arg1, arg2);
+}
+
+export function PushUnsubscribe(arg1, arg2) {
+  return window['go']['main']['App']['PushUnsubscribe'](arg1, arg2);
+}
+
+export function PushVapidPublicKey() {
+  return window['go']['main']['App']['PushVapidPublicKey']();
 }
 
 export function ReadClaudeActivity(arg1, arg2) {
@@ -444,6 +620,10 @@ export function ReadDirShallow(arg1) {
 
 export function ReadFileBase64(arg1) {
   return window['go']['main']['App']['ReadFileBase64'](arg1);
+}
+
+export function ReadFileTail(arg1, arg2) {
+  return window['go']['main']['App']['ReadFileTail'](arg1, arg2);
 }
 
 export function ReadKeybindings() {
@@ -484,6 +664,10 @@ export function RemoteListChats() {
 
 export function RemotePairStatus() {
   return window['go']['main']['App']['RemotePairStatus']();
+}
+
+export function RemotePairingEndpoint() {
+  return window['go']['main']['App']['RemotePairingEndpoint']();
 }
 
 export function RemoteRegeneratePairCode() {
@@ -538,6 +722,10 @@ export function RestoreCheckpoint(arg1, arg2) {
   return window['go']['main']['App']['RestoreCheckpoint'](arg1, arg2);
 }
 
+export function ReviewChanges(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ReviewChanges'](arg1, arg2, arg3);
+}
+
 export function RevokeRemoteDevice(arg1) {
   return window['go']['main']['App']['RevokeRemoteDevice'](arg1);
 }
@@ -548,6 +736,10 @@ export function RunExtensionCommand(arg1, arg2, arg3) {
 
 export function RunGit(arg1, arg2) {
   return window['go']['main']['App']['RunGit'](arg1, arg2);
+}
+
+export function RunGitInput(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RunGitInput'](arg1, arg2, arg3);
 }
 
 export function SaveChatMessages(arg1, arg2, arg3) {
@@ -570,8 +762,32 @@ export function SaveTerminalTabs(arg1, arg2) {
   return window['go']['main']['App']['SaveTerminalTabs'](arg1, arg2);
 }
 
+export function ScheduleListAll() {
+  return window['go']['main']['App']['ScheduleListAll']();
+}
+
+export function ScheduleRunNow(arg1) {
+  return window['go']['main']['App']['ScheduleRunNow'](arg1);
+}
+
+export function ScheduleSave(arg1) {
+  return window['go']['main']['App']['ScheduleSave'](arg1);
+}
+
+export function ScheduleSetPaused(arg1, arg2) {
+  return window['go']['main']['App']['ScheduleSetPaused'](arg1, arg2);
+}
+
+export function SearchChats(arg1, arg2) {
+  return window['go']['main']['App']['SearchChats'](arg1, arg2);
+}
+
 export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3);
+}
+
+export function SearchPrompts(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SearchPrompts'](arg1, arg2, arg3);
 }
 
 export function SendFloatSnapshot(arg1, arg2, arg3, arg4) {
@@ -630,6 +846,10 @@ export function ShellSnapshot() {
   return window['go']['main']['App']['ShellSnapshot']();
 }
 
+export function SpawnSubagentChat(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['SpawnSubagentChat'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function StartTurnAudit(arg1, arg2, arg3) {
   return window['go']['main']['App']['StartTurnAudit'](arg1, arg2, arg3);
 }
@@ -664,6 +884,14 @@ export function UpdateProvider(arg1, arg2, arg3, arg4) {
 
 export function WorkingTreeDiff(arg1) {
   return window['go']['main']['App']['WorkingTreeDiff'](arg1);
+}
+
+export function WorktreeCleanupNow(arg1) {
+  return window['go']['main']['App']['WorktreeCleanupNow'](arg1);
+}
+
+export function WorktreeCleanupPreview() {
+  return window['go']['main']['App']['WorktreeCleanupPreview']();
 }
 
 export function WriteConfig(arg1) {

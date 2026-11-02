@@ -12,6 +12,9 @@ export interface TermHandle {
   readOutput(lines: number): string;
 }
 
+/** A PTY foreground (get_pty_foreground) that is just the user's shell. */
+export const SHELL_RE = /^-?(zsh|bash|sh|fish|csh|tcsh|dash)$/;
+
 const handles = new Map<number, TermHandle>();
 
 export function registerTerm(ptyId: number, handle: TermHandle) {

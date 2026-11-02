@@ -77,3 +77,13 @@ export const appChatHost: ChatHost = {
     void osNotify("Burrow — povolení", body);
   },
 };
+
+/** A snoozed chat woke (src-wails/chatsnooze.go): toast + chime + OS notification. */
+export function notifyWoke(chatId: number): void {
+  const chat = appChatHost.chat(chatId);
+  const body = chat?.title || "Chat";
+  useNotificationsStore().push({ type: "info", title: "Snooze over", body, workspaceId: chat?.workspaceId, source: "agent" });
+  playSound("done");
+  maybeNtfy("done", body);
+  void osNotify("Burrow — snooze over", body);
+}

@@ -2,12 +2,18 @@
 import { computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
-import { PhArrowClockwise, PhArrowSquareOut, PhCheck, PhGitPullRequest, PhGitMerge, PhMagnifyingGlass, PhPlus, PhSealWarning, PhX } from "@phosphor-icons/vue";
+import { PhArrowClockwise, PhArrowSquareOut, PhCheck, PhGitFork, PhGitPullRequest, PhGitMerge, PhMagnifyingGlass, PhPlus, PhSealWarning, PhX } from "@phosphor-icons/vue";
 import { usePullRequests, type PrScope } from "@/composables/usePullRequests";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { cn } from "@/lib/utils";
+import { openPrInWorktree } from "@/lib/prCheckout";
 
-const props = defineProps<{ cwd: string }>();
+const props = defineProps<{
+  cwd: string;
+  /** Open this PR's detail (a chat link to it). `n` makes a repeat click re-open it. */
+  openRequest?: { number: number; url: string; n: number };
+}>();
+const emit = defineEmits<{ opened: [] }>();
 const pr = usePullRequests(() => props.cwd);
 const scopes: Array<{ id: PrScope; label: string }> = [{ id: "assigned", label: "Assigned" }, { id: "created", label: "Created" }, { id: "all", label: "All" }];
 const stateLabel = computed(() => pr.selected.value?.isDraft ? "Draft" : pr.selected.value?.state === "merged" ? "Merged" : "Open");
@@ -15,6 +21,18 @@ const checkCount = computed(() => pr.selected.value?.checks?.length ?? 0);
 
 watch(() => props.cwd, () => { pr.selected.value = null; pr.loadForge(); pr.refresh(); }, { immediate: true });
 watch(pr.scope, () => pr.refresh());
+// After the cwd watch above (which clears the selection on mount). `select`
+// shows the stub at once and swaps in `forge_pr_view`'s full detail.
+watch(() => props.openRequest, (req) => {
+  if (!req || !props.cwd) return;
+  void pr.select({ number: req.number, title: `#${req.number}`, url: req.url, state: "open", isDraft: false, headRefName: "", baseRefName: "" });
+  emit("opened");
+}, { immediate: true });
+
+function openInWorktree(number: number) {
+  const ws = useWorkspaceStore().workspaces.find((w) => w.path === props.cwd);
+  if (ws) void openPrInWorktree(ws, number);
+}
 
 async function setProvider(provider: string) {
   if (!provider) return;
@@ -82,7 +100,7 @@ async function setProvider(provider: string) {
           <span>Přihlas se přes <code>{{ pr.forge.value.authCmd }}</code>.</span>
         </template>
         <template v-else>
-          <span>Žádné pull requesty.</span>
+          <span>No pull requests.</span>
         </template>
       </div>
       <button
@@ -104,7 +122,10 @@ async function setProvider(provider: string) {
     <template v-else>
       <header class="flex items-center justify-between border-b border-border p-2">
         <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" @click="pr.selected.value = null">← Pull requests</button>
-        <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open in browser" @click="shellOpen(pr.selected.value.url)"><PhArrowSquareOut :size="13" /></button>
+        <span class="flex items-center gap-1.5">
+          <button v-if="pr.forge.value?.canCheckout" class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open in worktree" @click="openInWorktree(pr.selected.value.number)"><PhGitFork :size="13" /></button>
+          <button class="inline-flex p-0.5 text-muted-foreground hover:rounded hover:bg-hover hover:text-foreground" title="Open in browser" @click="shellOpen(pr.selected.value.url)"><PhArrowSquareOut :size="13" /></button>
+        </span>
       </header>
       <div class="border-b border-border p-2.5">
         <div class="flex justify-between">

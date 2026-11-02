@@ -1,66 +1,94 @@
 <template>
   <Teleport to="body">
     <Transition name="spotlight">
-      <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[165px]" @mousedown.self="close">
-        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-xl border border-border bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.55)] [backdrop-filter:var(--blur-overlay,none)]">
-          <div class="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
-            <PhMagnifyingGlass :size="17" class="shrink-0 text-accent" />
+      <div v-if="isOpen" class="fixed inset-0 z-[9000] flex justify-center bg-black/50 pt-[140px]" :class="{ 's-phone': compact }" @mousedown.self="close">
+        <div class="s-modal flex max-h-[600px] w-[680px] flex-col self-start overflow-hidden rounded-2xl border border-border bg-[var(--bg-dropdown)] shadow-[0_24px_64px_rgba(0,0,0,0.45)] [backdrop-filter:var(--blur-overlay,none)]">
+          <div class="s-head flex h-[60px] shrink-0 items-center gap-3 border-b border-border px-5">
+            <PhMagnifyingGlass :size="18" class="shrink-0 text-muted-foreground" />
             <input
               ref="inputRef"
               v-model="query"
               :placeholder="projectOnly ? 'Search projects…' : 'Search projects, agents, commands, files…'"
-              class="min-w-0 flex-1 border-0 bg-transparent font-sans text-[15px] text-foreground outline-none placeholder:text-muted-foreground/50 [caret-color:var(--accent)]"
+              class="min-w-0 flex-1 border-0 bg-transparent font-sans text-[16px] text-foreground outline-none placeholder:text-muted-foreground/60 [caret-color:var(--accent)]"
               spellcheck="false"
               autocomplete="off"
               @keydown.esc.prevent="close"
-              @keydown.enter.prevent="activate"
+              @keydown.enter.prevent="activate($event)"
               @keydown.up.prevent="move(-1)"
               @keydown.down.prevent="move(1)"
+              @keydown.tab.prevent="cycleFilter($event.shiftKey ? -1 : 1)"
             />
-            <kbd class="shrink-0 rounded border border-border bg-hover px-2 py-0.5 font-mono text-[11px] text-muted-foreground">esc</kbd>
+            <button v-if="compact" type="button" class="s-cancel shrink-0 font-sans text-[15px] text-accent" @click="close">Cancel</button>
+            <div v-if="!projectOnly" class="s-filters flex shrink-0 items-center gap-0.5">
+              <button
+                v-for="f in FILTERS"
+                :key="f.key"
+                type="button"
+                tabindex="-1"
+                class="h-[26px] rounded-lg px-2.5 font-sans text-[12px] transition-colors duration-75"
+                :class="filter === f.key ? 'bg-selected text-foreground' : 'text-muted-foreground hover:bg-hover hover:text-foreground'"
+                @mousedown.prevent="filter = f.key"
+              >{{ f.label }}</button>
+              <template v-if="filter === 'prompts'">
+                <div class="mx-1 h-4 w-px bg-border" />
+                <button
+                  v-for="a in PROMPT_AGENTS"
+                  :key="a.key"
+                  type="button"
+                  tabindex="-1"
+                  class="h-[26px] rounded-lg px-2 font-sans text-[12px] transition-colors duration-75"
+                  :class="promptAgent === a.key ? 'bg-selected text-foreground' : 'text-muted-foreground hover:bg-hover hover:text-foreground'"
+                  @mousedown.prevent="promptAgent = a.key"
+                >{{ a.label }}</button>
+              </template>
+            </div>
           </div>
 
-          <div ref="resultsRef" class="s-results min-h-0 flex-1 overflow-y-auto py-1.5">
-            <template v-for="(section, si) in sections" :key="section.key">
-              <div class="flex h-[26px] items-center px-4 font-sans text-[10px] font-semibold tracking-[0.06em] text-muted-foreground/60">{{ section.label }}</div>
+          <div ref="resultsRef" class="s-results min-h-0 flex-1 overflow-y-auto px-2 py-2">
+            <template v-for="section in sections" :key="section.key">
+              <div class="flex h-7 items-center px-3 pt-1 font-sans text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground/70">{{ section.label }}</div>
               <div
                 v-for="item in section.items"
                 :key="item.id"
                 :data-id="item.id"
-                class="mx-1 flex h-[46px] cursor-pointer items-center gap-3 rounded-md px-3 transition-colors duration-75"
+                class="s-item flex h-[38px] cursor-pointer items-center gap-3 rounded-lg px-3 transition-colors duration-75"
                 :class="selectedId === item.id ? 'bg-selected' : 'hover:bg-hover'"
                 @mouseenter="selectedId = item.id"
                 @click="item.action()"
               >
-                <div
-                  class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] border"
-                  :style="{ background: tint(item.color), borderColor: `${item.color}33` }"
-                >
-                  <img v-if="item.iconUrl" :src="item.iconUrl" class="h-5 w-5 rounded-[4px] object-cover" />
-                  <component v-else :is="item.icon" :size="14" :color="item.color" />
-                </div>
-                <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span class="truncate font-sans text-[13px] font-medium text-foreground">{{ item.title }}</span>
-                  <span v-if="item.desc" class="truncate font-mono text-[11px] text-muted-foreground/70">{{ item.desc }}</span>
-                </div>
-                <span v-if="item.badge" class="shrink-0 rounded border border-accent/25 bg-accent/10 px-1.5 py-0.5 font-sans text-[10px] text-accent">{{ item.badge }}</span>
-                <kbd
-                  v-if="item.shortcut"
-                  class="shrink-0 rounded border border-border bg-hover px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
-                >{{ item.shortcut }}</kbd>
+                <img v-if="item.iconUrl" :src="item.iconUrl" class="h-4 w-4 shrink-0 rounded-[4px] object-cover" />
+                <component v-else :is="item.icon" :size="16" :color="item.color" class="shrink-0" />
+                <span class="truncate font-sans text-[13px] text-foreground" :class="item.segments ? 'min-w-0 flex-1' : 'max-w-[55%] shrink-0'">
+                  <template v-if="item.segments"><template v-for="(seg, i) in item.segments" :key="i"><mark v-if="seg.match" class="s-mark">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template></template></template>
+                  <template v-else>{{ item.title }}</template>
+                </span>
+                <span v-if="item.desc" class="truncate font-sans text-[12px] text-muted-foreground/80" :class="item.segments ? 'max-w-[35%] shrink-0' : 'min-w-0 flex-1'">{{ item.desc }}</span>
+                <div v-else-if="!item.segments" class="flex-1" />
+                <span v-if="item.badge" class="shrink-0 rounded-md bg-hover px-1.5 py-0.5 font-sans text-[10.5px] text-muted-foreground">{{ item.badge }}</span>
+                <kbd v-if="item.shortcut && !compact" class="s-key shrink-0">{{ item.shortcut }}</kbd>
               </div>
-              <div v-if="si < sections.length - 1" class="my-1 h-px bg-border/60" />
             </template>
-            <div v-if="!sections.length" class="px-4 py-6 text-center font-sans text-[12px] text-muted-foreground/60">
-              No matches
+            <div v-if="!sections.length" class="px-4 py-6 text-center font-sans text-[12px] text-muted-foreground/70">
+              {{ !hasQuery && (filter === "files" || filter === "chats" || filter === "prompts") ? "Type to search" : "No matches" }}
             </div>
           </div>
 
-          <div class="flex h-9 shrink-0 items-center gap-4 border-t border-border bg-base px-4 text-[11px] text-muted-foreground/70">
+          <div v-if="!compact" class="flex h-9 shrink-0 items-center gap-3 border-t border-border px-5 font-sans text-[11px] text-muted-foreground/80">
             <span><kbd class="s-key">↑↓</kbd> navigate</span>
-            <span><kbd class="s-key">↵</kbd> run</span>
+            <span class="opacity-50">·</span>
+            <span><kbd class="s-key">↵</kbd> {{ selectedItem?.alt ? (selectedItem.resumable ? "resume" : "copy prompt") : "open" }}</span>
+            <template v-if="selectedItem?.alt && selectedItem.resumable">
+              <span class="opacity-50">·</span>
+              <span><kbd class="s-key">⌘↵</kbd> copy prompt</span>
+            </template>
+            <template v-if="!projectOnly">
+              <span class="opacity-50">·</span>
+              <span><kbd class="s-key">⇥</kbd> filter</span>
+            </template>
+            <span class="opacity-50">·</span>
+            <span><kbd class="s-key">esc</kbd> close</span>
             <div class="flex-1" />
-            <span class="truncate font-mono text-muted-foreground/50">{{ wsStore.active?.name ?? "no project" }}</span>
+            <span class="truncate text-muted-foreground/60">{{ wsStore.active?.name ?? "no project" }}</span>
           </div>
         </div>
       </div>
@@ -73,17 +101,25 @@ import { ref, computed, watch, nextTick } from "vue";
 import {
   PhTerminal, PhSparkle, PhCode, PhGitBranch, PhRobot,
   PhFolderOpen, PhGear, PhPlus, PhColumns, PhPalette, PhKeyboard, PhGlobe, PhPlayCircle,
-  PhFileText, PhMagnifyingGlass, PhArrowsClockwise, PhMoonStars,
+  PhFileText, PhMagnifyingGlass, PhArrowsClockwise, PhMoonStars, PhChatCircleText, PhGitPullRequest,
 } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useProvidersStore } from "@/stores/providers";
 import { useScriptsStore } from "@/stores/scripts";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useUIStore } from "@/stores/ui";
+import { compact } from "@/lib/viewport";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useKeybindingsStore } from "@/stores/keybindings";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
+import { binaryFor } from "@/lib/providers";
+import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
+import OpenAIIcon from "@/components/icons/OpenAIIcon.vue";
+import router from "@/router";
 import { pickDir } from "@/lib/pickPath";
 import type { Component } from "vue";
+import { parsePrRef } from "@/lib/prLinkInput";
+import { openPrInWorktree } from "@/lib/prCheckout";
 
 const emit = defineEmits<{
   launch: [cmd: string];
@@ -101,6 +137,7 @@ const wsStore = useWorkspaceStore();
 const keys = useKeybindingsStore();
 const ui = useUIStore();
 const notifStore = useNotificationsStore();
+const termTabs = useTerminalTabsStore();
 
 const isOpen = ref(false);
 const query = ref("");
@@ -117,19 +154,48 @@ const projectOnly = ref(false);
 // honest, and results die with the palette anyway.
 interface SearchHit { path: string; line: number; text: string }
 const hits = ref<SearchHit[]>([]);
+// Transcript hits: SQLite FTS over every chat (chatsearch.go), not just the
+// active project.
+interface ChatHit { chat_id: number; workspace_id: number; title: string; snippet: string; ts: number }
+const chatHits = ref<ChatHit[]>([]);
+// Every prompt the user typed into Claude Code / Codex, in or out of Burrow
+// (promptsearch.go indexes the agents' own history.jsonl). The match inside
+// `snippet` is wrapped in \x02 … \x03.
+interface PromptHit { agent: string; cwd: string; session_id: string; ts: number; snippet: string; text: string; resumable: boolean }
+const promptHits = ref<PromptHit[]>([]);
+type PromptAgent = "" | "claude" | "codex";
+const PROMPT_AGENTS: { key: PromptAgent; label: string }[] = [
+  { key: "", label: "Any agent" },
+  { key: "claude", label: "Claude" },
+  { key: "codex", label: "Codex" },
+];
+const promptAgent = ref<PromptAgent>("");
 let searchTimer: number | undefined;
 let searchSeq = 0;
 
-watch(query, (q) => {
+watch([query, promptAgent], ([q]) => {
   clearTimeout(searchTimer);
   const term = q.trim();
   const cwd = wsStore.active?.path;
-  if (term.length < 2 || !cwd || projectOnly.value) return (hits.value = []);
+  if (term.length < 2 || projectOnly.value) {
+    hits.value = [];
+    chatHits.value = [];
+    promptHits.value = [];
+    return;
+  }
   const seq = ++searchSeq;
   searchTimer = window.setTimeout(async () => {
-    const found = await invoke<SearchHit[]>("search_files", { cwd, query: term, limit: 24 }).catch(() => []);
+    const [found, chats, prompts] = await Promise.all([
+      cwd ? invoke<SearchHit[]>("search_files", { cwd, query: term, limit: 24 }).catch(() => []) : [],
+      invoke<ChatHit[]>("search_chats", { query: term, limit: 8 }).catch(() => []),
+      invoke<PromptHit[]>("search_prompts", { query: term, agent: promptAgent.value, limit: 20 }).catch(() => []),
+    ]);
     // Drop a slow reply whose query the user has already typed past.
-    if (seq === searchSeq) hits.value = found;
+    if (seq === searchSeq) {
+      hits.value = found;
+      chatHits.value = chats;
+      promptHits.value = prompts;
+    }
   }, 140);
 });
 
@@ -141,10 +207,20 @@ const ICON_MAP: Record<string, Component> = {
   terminal: PhTerminal,
 };
 
-// Icon-chip background: the accent colour at ~11% over the panel.
-function tint(hex: string): string {
-  if (!hex.startsWith("#") || hex.length < 7) return "var(--bg-hover)";
-  return `${hex}1f`;
+// Filter chips (⇥ cycles). "commands" covers everything runnable.
+type Filter = "all" | "files" | "chats" | "prompts" | "commands";
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "files", label: "Files" },
+  { key: "chats", label: "Chats" },
+  { key: "prompts", label: "Prompts" },
+  { key: "commands", label: "Commands" },
+];
+const filter = ref<Filter>("all");
+function cycleFilter(dir: 1 | -1) {
+  if (projectOnly.value) return;
+  const i = FILTERS.findIndex((f) => f.key === filter.value);
+  filter.value = FILTERS[(i + dir + FILTERS.length) % FILTERS.length].key;
 }
 
 interface SpotlightItem {
@@ -156,7 +232,12 @@ interface SpotlightItem {
   color: string;
   shortcut?: string;
   badge?: string;
+  /** Title rendered with highlighted matches instead of `title`. */
+  segments?: { text: string; match: boolean }[];
   action: () => void;
+  /** ⌘↵ */
+  alt?: () => void;
+  resumable?: boolean;
 }
 
 const MUTED = "#8b8b8b";
@@ -260,6 +341,112 @@ const fileItems = computed<SpotlightItem[]>(() =>
   })),
 );
 
+const chatItems = computed<SpotlightItem[]>(() =>
+  chatHits.value.map((h) => ({
+    id: `chat-${h.chat_id}`,
+    title: h.title || `Chat ${h.chat_id}`,
+    desc: h.snippet.replace(/\s+/g, " "),
+    icon: PhChatCircleText as Component,
+    color: "#f472b6",
+    badge: wsStore.workspaces.find((w) => w.id === h.workspace_id)?.name,
+    action: () => { close(); void openChatHit(h); },
+  })),
+);
+
+// Same as a Sidebar click (termTabs.openChat), after making the chat's project
+// the routed one — a hit can live in any project, not just the active one.
+async function openChatHit(h: ChatHit) {
+  const ws = wsStore.workspaces.find((w) => w.id === h.workspace_id);
+  if (!ws) return;
+  wsStore.open(ws);
+  await router.push(`/ws/${ws.id}`);
+  termTabs.openChat(ws.id, h.chat_id);
+}
+
+function relTime(ms: number): string {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  if (s < 86400 * 30) return `${Math.round(s / 86400)}d ago`;
+  return new Date(ms).toLocaleDateString();
+}
+
+// snippet() marks matches with \x02 … \x03 — split into text segments so the
+// highlight is markup Vue escapes, never v-html of a prompt.
+function markSegments(snippet: string) {
+  return snippet.replace(/\s+/g, " ").split(/(\x02[^\x03]*\x03)/).filter(Boolean).map((part) =>
+    part.startsWith("\x02") ? { text: part.slice(1, -1), match: true } : { text: part, match: false });
+}
+
+const promptItems = computed<SpotlightItem[]>(() =>
+  promptHits.value.map((h, i) => ({
+    id: `prompt-${i}`,
+    title: h.text,
+    segments: markSegments(h.snippet),
+    desc: [h.cwd.split("/").filter(Boolean).pop(), relTime(h.ts), h.resumable ? "" : "expired"].filter(Boolean).join(" · "),
+    icon: (h.agent === "codex" ? OpenAIIcon : ClaudeIcon) as Component,
+    color: h.agent === "codex" ? "#74aa9c" : "#d97757",
+    // An expired session (transcript pruned) can't resume: ↵ copies instead.
+    action: () => { close(); void (h.resumable ? resumePrompt(h) : copyPrompt(h.text)); },
+    alt: () => { close(); void copyPrompt(h.text); },
+    resumable: h.resumable,
+  })),
+);
+
+// The project the session ran in: exact path, else the deepest workspace that
+// contains it (a subdirectory of a repo), else the active one — the tab still
+// starts in the session's cwd, which is what `claude --resume` keys on.
+function workspaceFor(cwd: string) {
+  const all = wsStore.workspaces;
+  return all.find((w) => w.path === cwd)
+    ?? all.filter((w) => cwd.startsWith(w.path.replace(/\/$/, "") + "/")).sort((a, b) => b.path.length - a.path.length)[0]
+    ?? wsStore.active;
+}
+
+// Same path as the control API's new_tab: open the workspace, ask its Terminal
+// for a tab running the command, then route to it.
+async function resumePrompt(h: PromptHit) {
+  // The id lands in a shell command line; history files are not ours to trust.
+  if (!/^[\w-]+$/.test(h.session_id)) return;
+  const inst = providers.active.find((i) => i.providerId === h.agent);
+  const bin = inst ? binaryFor(inst) : h.agent;
+  const cmd = h.agent === "codex" ? `${bin} resume ${h.session_id}` : `${bin} --resume ${h.session_id}`;
+  const target = workspaceFor(h.cwd);
+  if (!target) {
+    notifStore.push({ type: "error", title: "Open a project first", source: "system" });
+    return;
+  }
+  wsStore.open(target);
+  const ptyId = await termTabs.add(target.id, cmd, h.cwd ? { cwd: h.cwd } : undefined);
+  if (ptyId !== undefined) await router.push(`/ws/${target.id}/tab/${ptyId}`);
+}
+
+// ponytail: clipboard, not a composer insert — composers live in several
+// components with no shared door; paste lands it wherever the caret is.
+async function copyPrompt(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    notifStore.push({ type: "done", title: "Prompt copied", source: "system" });
+  } catch (e) {
+    notifStore.push({ type: "error", title: "Couldn't copy the prompt", body: String(e), source: "system" });
+  }
+}
+
+// A pasted PR URL or "#123": check it out into a worktree + chat of the active project.
+const prItems = computed<SpotlightItem[]>(() => {
+  const ref = parsePrRef(query.value, false);
+  const ws = wsStore.active;
+  if (!ref || !ws) return [];
+  return [{
+    id: `pr-${ref.number}`,
+    title: `Open PR #${ref.number} in a worktree`,
+    desc: ref.url ?? ws.name,
+    icon: PhGitPullRequest as Component,
+    color: "#34d399",
+    action: () => { close(); void openPrInWorktree(ws, ref.number, ref.url); },
+  }];
+});
+
 // Empty query = context + commands (your projects, then everything runnable).
 // Agents, scripts and file hits only appear once you type — running a raw
 // agent isn't a default action, and search results are meaningless empty.
@@ -268,12 +455,25 @@ const sections = computed(() => {
     return [{ key: "projects", label: "PROJECTS", items: projectItems.value }]
       .filter((s) => s.items.length);
   }
+  if (filter.value === "files") return [{ key: "files", label: "Files", items: fileItems.value }].filter((s) => s.items.length);
+  if (filter.value === "chats") return [{ key: "chats", label: "In chats", items: chatItems.value }].filter((s) => s.items.length);
+  if (filter.value === "prompts") return [{ key: "prompts", label: "Prompts", items: promptItems.value }].filter((s) => s.items.length);
+  if (filter.value === "commands") {
+    return [
+      { key: "commands", label: "Commands", items: commandItems.value },
+      { key: "agents", label: "Agents", items: agentItems.value },
+      { key: "scripts", label: "Scripts", items: scriptItems.value },
+    ].filter((s) => s.items.length);
+  }
   const all = hasQuery.value
     ? [
+        { key: "pr", label: "PULL REQUEST", items: prItems.value },
         { key: "agents", label: "AGENTS", items: agentItems.value },
         { key: "projects", label: "PROJECTS", items: projectItems.value },
         { key: "scripts", label: "SCRIPTS", items: scriptItems.value },
         { key: "commands", label: "COMMANDS", items: commandItems.value },
+        { key: "chats", label: "IN CHATS", items: chatItems.value },
+        { key: "prompts", label: "PROMPTS", items: promptItems.value.slice(0, 6) },
         { key: "files", label: "IN FILES", items: fileItems.value },
       ]
     : [
@@ -307,8 +507,12 @@ function move(dir: 1 | -1) {
   });
 }
 
-function activate() {
-  flatItems.value.find((i) => i.id === selectedId.value)?.action();
+const selectedItem = computed(() => flatItems.value.find((i) => i.id === selectedId.value));
+
+function activate(e: KeyboardEvent) {
+  const item = selectedItem.value;
+  if (e.metaKey && item?.alt) item.alt();
+  else item?.action();
 }
 
 function openSettingsAt(section: string) {
@@ -351,8 +555,12 @@ async function newProject() {
 function show(opts?: { projectOnly?: boolean }) {
   isOpen.value = true;
   projectOnly.value = !!opts?.projectOnly;
+  filter.value = "all";
   query.value = "";
   hits.value = [];
+  chatHits.value = [];
+  promptHits.value = [];
+  promptAgent.value = "";
   nextTick(() => {
     inputRef.value?.focus();
     selectFirst();
@@ -368,21 +576,41 @@ defineExpose({ show, close, newProject });
 
 <style scoped>
 .s-key {
-  border-radius: 3px;
+  display: inline-block;
+  min-width: 18px;
+  border-radius: 5px;
   border: 1px solid var(--border);
-  background: var(--bg-hover);
-  padding: 1px 5px;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  padding: 0 5px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
   color: var(--text-secondary);
 }
 
 /* Custom scrollbar (::-webkit-scrollbar has no Tailwind utility) and the
    Vue <Transition> phase classes stay as real CSS. */
+.s-mark {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 500;
+}
+
 .s-results::-webkit-scrollbar { width: 4px; }
 .s-results::-webkit-scrollbar-track { background: transparent; }
 .s-results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+/* Phone: a full-screen search sheet. Filters get their own scrolling row,
+   keyboard hints go (no keyboard to hint at), rows reach touch height. */
+.s-phone { padding-top: 0; }
+.s-phone .s-modal { width: 100%; max-height: none; height: 100dvh; border-radius: 0; border: 0; padding-top: env(safe-area-inset-top, 0px); }
+.s-phone .s-head { flex-wrap: wrap; height: auto; row-gap: 6px; padding: 10px 16px 8px; }
+.s-phone .s-head input { height: 36px; }
+.s-phone .s-filters { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; }
+.s-phone .s-filters button { height: 32px; font-size: 13px; flex-shrink: 0; }
+.s-phone .s-results { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+.s-phone .s-item { height: 48px; }
+.s-phone .s-item span { font-size: 14px; }
 .spotlight-enter-active,
 .spotlight-leave-active {
   transition: opacity 0.12s ease;

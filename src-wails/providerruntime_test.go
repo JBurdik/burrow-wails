@@ -46,7 +46,7 @@ func TestNormalizeClaudeStreamLine(t *testing.T) {
 		{
 			name: "message id falls back to uuid, then to a constant",
 			line: `{"type":"assistant","uuid":"u9","message":{"content":[{"type":"text","text":"x"}]}}`,
-			want: []ProviderRuntimeEvent{{Type: EvtTextDelta, MessageID: "u9", Text: "x"}},
+			want: []ProviderRuntimeEvent{{Type: EvtTextDelta, MessageID: "u9", Text: "x", UUID: "u9"}},
 		},
 		{
 			name: "a tool_use with no id is dropped — nothing could match its result",
@@ -501,5 +501,14 @@ func TestRequestEventsDriveTheChatPhase(t *testing.T) {
 		if p.State != st.want {
 			t.Fatalf("step %d (%s): want %s, got %s", i, st.ev.Type, st.want, p.State)
 		}
+	}
+}
+
+func TestAcpTurnMarker(t *testing.T) {
+	if got := NormalizeAcpLine(`{"_burrow":"turn"}`); len(got) != 1 || got[0].Type != EvtTurnCompleted {
+		t.Fatalf("turn: %+v", got)
+	}
+	if got := NormalizeAcpLine(`{"_burrow":"turn","error":"boom"}`); len(got) != 1 || got[0].Type != EvtTurnFailed || got[0].Message != "boom" {
+		t.Fatalf("failed turn: %+v", got)
 	}
 }

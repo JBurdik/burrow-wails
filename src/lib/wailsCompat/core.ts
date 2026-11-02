@@ -16,7 +16,7 @@ import {
   SendFloatSnapshot,
 } from "../../../src-wails/frontend/wailsjs/go/main/App";
 import { createTransport, type Transport } from "@/runtime/transport";
-import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource } from "@/runtime/remoteEndpoint";
+import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource, setActiveEnvironment } from "@/runtime/remoteEndpoint";
 
 type Args = Record<string, any>;
 
@@ -78,6 +78,20 @@ export function desktopTransport(): Transport {
 export function remoteTransport(): Transport {
   if (!remote) remote = createTransport(remoteEndpointSource(loadRemoteCredentials));
   return remote;
+}
+
+/**
+ * Makes another paired machine (or none: `null` → the switcher / pairing
+ * screen) the active one. Closes the socket and reloads rather than swapping
+ * transports in place: event.ts listeners, the shell snapshot and every store
+ * were built against the old backend, and a reload is the one reset that
+ * cannot miss one.
+ */
+export function switchEnvironment(id: string | null, reload: () => void = () => location.reload()): void {
+  setActiveEnvironment(id);
+  remote?.close();
+  remote = null;
+  reload();
 }
 
 /** Which transport this context can use, or null before pairing. */
@@ -147,20 +161,6 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
         .filter((pty_id) => Number.isFinite(pty_id))
         .map((pty_id) => ({ pty_id, cwd: "", title: "", alive: true })) as T;
     }
-
-    // AcpStart takes ONE Go struct (AcpStartOpts), so the wire carries the
-    // whole options object under a single key — remoteapi.go's `acp_start`
-    // names exactly one argument, `opts`, because one Go parameter cannot be
-    // spread across several table entries. Call sites pass the fields flat
-    // (AgentChat.acpStartPayload), which is the shape the old switch
-    // assembled the struct from, so that assembly lives here now.
-    //
-    // `id` must be stringified on this side: callApp's number->string
-    // coercion only looks at the TOP-LEVEL args the table names — here that
-    // is `opts` itself — and never reaches inside the object, so a bare
-    // numeric id would fail to unmarshal into AcpStartOpts.ID.
-    case "acp_start":
-      return t.invoke<T>("acp_start", { opts: { ...args, id: String(args.id) } });
 
     // foldedOrd -1 is the "don't know" sentinel, which leaves the existing
     // fold mark alone (chatstore.go writes it only when >= 0). An absent

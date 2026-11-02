@@ -24,12 +24,15 @@ type HookServer struct {
 }
 
 type hookPayload struct {
-	PtyID  string `json:"ptyId"`
-	State  string `json:"state"`
-	Detail string `json:"detail,omitempty"`
-	Model  string `json:"model,omitempty"`
-	Source string `json:"source,omitempty"`
-	Title  string `json:"title,omitempty"`
+	// json.Number, not string: `burrow hook` and the mod both send ptyId as a
+	// bare number, and a string field 400'd every one of them — curl -sf then
+	// exited 0, so every turn end/permission was silently lost.
+	PtyID  json.Number `json:"ptyId"`
+	State  string      `json:"state"`
+	Detail string      `json:"detail,omitempty"`
+	Model  string      `json:"model,omitempty"`
+	Source string      `json:"source,omitempty"`
+	Title  string      `json:"title,omitempty"`
 }
 
 // StartHookServer listens on a loopback ephemeral port. Callers pass registrars
@@ -91,7 +94,7 @@ func (h *HookServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	if h.phases != nil && p.PtyID != "" {
 		if ev, ok := hookEvent(p); ok {
-			h.phases.Apply("pty:"+p.PtyID, ev)
+			h.phases.Apply("pty:"+p.PtyID.String(), ev)
 		}
 	}
 

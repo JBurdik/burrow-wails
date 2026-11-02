@@ -54,6 +54,7 @@
     letter-spacing: 0.04em;
   }
   .tag-latest { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+  .tag-beta { background: rgba(167,139,250,0.15); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.3); }
   .section { margin-bottom: 14px; }
   .section-label {
     font-size: 11px;
@@ -79,12 +80,423 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
-  <!-- v0.4.7 -->
+  <!-- v0.9.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.9.0</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">listopad 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Git panel</div>
+    <ul>
+      <li><strong>Staging po hunkách</strong> — každou hunku diffu jde zvlášť stagnout, unstagnout nebo zahodit. Nová binding <code>run_git_input</code> posílá patch do <code>git apply</code> přes stdin.</li>
+      <li><strong>Graf commitů</strong> — historie s kreslenými liniemi větví a štítky refů; kontextové menu: checkout, merge, rebase, nová větev/tag, cherry-pick, revert, reset, kopírovat hash.</li>
+      <li><strong>Stash a konflikty</strong> — sekce se stashi a banner při konfliktu s Continue/Abort pro merge, rebase, cherry-pick i revert. <code>GIT_EDITOR=true</code>, takže <code>--continue</code> nikdy nečeká na editor.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Telefon a kanály</div>
+    <ul>
+      <li><strong>Beta/dev PWA jako samostatná aplikace</strong> — kanál určuje běžící binárka: <code>mobile.html</code> a manifest dostanou vlastní název, <code>id</code> a ikony, takže se beta nainstaluje vedle stabilní. Každý kanál má vlastní HTTP port (37892 / 37893 / 37894).</li>
+      <li><strong>Karta Thread details</strong> — na širokém okně se při otevřeném RP ukotví vedle něj; když není místo, otevře ji tlačítko (i) jako popover nad chatem (zavře klik mimo nebo Esc).</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Chat navždy „Thinking…“</strong> — poznámka „Changed N files“ přišla až po <code>turn.completed</code>, prošla <code>markActive</code> a znovu nastavila busy, který už nic neukončilo.</li>
+      <li><strong>Chaty vytvořené na jiném klientu</strong> — reload seznamu přeskakoval každé <code>chats-changed</code>, dokud měl klient rozpracované uložení (při streamování pořád), a po resyncu se nereloadovalo vůbec. Teď se přeskakují jen vlastní echa, resync reloaduje a zastaralá odpověď <code>list_chats</code> se zahodí.</li>
+      <li><strong>Nastavení, onboarding a diff na telefonu</strong> — Settings jako seznam → detail, onboarding s tlačítkem Skip, diff v RP přes celou obrazovku, swipe od okraje zpět a větší tlačítko zavření.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
+  <!-- v0.8.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.8.0</span>
+        <span class="date">říjen 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Sidebar a vlákna (inspirováno t3code)</div>
+    <ul>
+      <li><strong>Sekce sidebaru</strong> — nahoře Pinned a Active seřazené podle toho, co od tebe chce (permission &gt; waiting &gt; error &gt; neviděné hotové). Dole ukotvené <strong>Working</strong> (běžící chaty i Claude v terminálových tabech), <strong>Snoozed</strong> a <strong>Settled</strong>. Doběhnuté vlákno se z Working přesune nahoru po 3 s, ne pod kurzorem.</li>
+      <li><strong>Snooze</strong> — vlákno se schová do zvoleného času (1 h, dnes 18:00, zítra 9:00, pondělí 9:00), pak samo vyskočí nahoru s notifikací. Sloupec <code>chats.snoozed_until</code>, budí ho Go sweep, funguje i z telefonu.</li>
+      <li><strong>Undo místo potvrzování</strong> — smazání chatu, hromadné smazání settled vláken a archivace ukážou toast s Undo na 8 s; skutečné smazání proběhne až potom. Smazání terminálového tabu dál potvrzuje dialog.</li>
+      <li><strong>Karta Thread details</strong> — plovoucí karta vpravo nahoře: workspace/worktree (Move/Leave worktree), Open in, skripty, větev + PR, Commit/Push, Changes +/−, servery, naplánované zprávy a rodokmen vlákna. Open in, větev a Commit/Push se do ní přesunuly z titlebaru, kde zůstala drobečková navigace <code>projekt / vlákno</code>.</li>
+      <li><strong>Co je nového</strong> — po aktualizaci se jednou ukáže přehled změn z tohoto changelogu; kdykoli znovu přes Help → What's New. „Check for Updates…“ se přesunulo do menu aplikace pod About.</li>
+      <li><strong>Označení kanálu</strong> — beta má za hlavičkou sidebaru noční oblohu, dev blueprint mřížku. Nastavení → Appearance: Artwork / Label only / Off.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Chat</div>
+    <ul>
+      <li><strong>Prompt stash</strong> — ⌘⇧S odloží rozepsaný prompt i s obrázky a vyprázdní composer; vytažení ze seznamu (max 20) nahradí obsah a ten původní se odloží sám.</li>
+      <li><strong>Oddělovač „New“</strong> — po návratu do chatu čára nad první nepřečtenou zprávou, když přišly aspoň dvě nové odpovědi.</li>
+      <li><strong>⌘F v chatu</strong> — hledání v textu, výstupech nástrojů i plánech; sbalené bloky s nálezem se rozbalí.</li>
+      <li><strong>Fronta zpráv v Go</strong> — zprávy napsané během turnu drží SQLite (<code>chat_queue</code>) a odejdou i se zavřeným desktopem nebo uspaným telefonem. Pořadí doručení: výsledky sub-agentů → tvoje fronta → naplánované zprávy.</li>
+      <li><strong>Pokračování po usage limitu</strong> — turn zastavený limitem ukáže banner „resets at HH:MM“; Resume automatically pošle po resetu „Continue where you left off.“ Claude turn zastavený limitem se teď ukazuje jako failed.</li>
+      <li><strong>Opakované naplánované úlohy</strong> — <code>burrow schedule</code> umí <code>--every 1h</code> (min. 15 min) a <code>--weekly "mon,wed 09:00"</code>, s <code>--new-chat</code> založí pro každý běh nový chat ve workspace se zvoleným agentem. Nová stránka Nastavení → Scheduled (vytvořit, upravit, pozastavit, spustit hned, smazat); karta Thread details ukazuje opakování. Běh zmeškaný při zavřené aplikaci proběhne po startu jednou, ne za každý vynechaný slot.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Sub-agenti</div>
+    <ul>
+      <li><strong>Výsledky chodí samy</strong> — dokončený sub-agent pošle výsledek do rodičovského vlákna, jakmile to dokončí turn (jednou, nad 4000 znaků zkráceně s odkazem na <code>collect_results</code>). Zaseknutý sub-agent rodiče upozorní, na co čeká. Vypínač v Nastavení → General.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Worktree a PR</div>
+    <ul>
+      <li><strong>Setup skript po vytvoření worktree</strong> — skript workspace s volbou „Run when a worktree is created“ se spustí v novém worktree, výstup je vidět v Right Panelu.</li>
+      <li><strong>Worktree z <code>origin</code></strong> — nová worktree se větví z čerstvě fetchnutého <code>origin/&lt;base&gt;</code> (při chybě z lokální větve); základní větev se vybírá ze seznamu.</li>
+      <li><strong>PR u vlákna</strong> — PR vytvořený z chatu se k němu připojí, jde připojit i ručně (<code>#N</code> nebo URL) a odpojit; stav PR je vidět v kartě i v sidebaru.</li>
+      <li><strong>PR do worktree a chatu</strong> — „Open in worktree“ v panelu PR, nebo vložená URL / <code>#123</code> ve Spotlightu či welcome composeru: fetch hlavy PR, worktree, nový chat a připravený (neodeslaný) prompt.</li>
+      <li><strong>Úklid worktree</strong> — volitelná pravidla (mergnuté větve, nepoužívané N dní) s náhledem a tlačítkem „Remove N“. Dirty, živá a méně než hodinu stará worktree se nikdy nesmažou. Ve výchozím stavu vypnuto.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Telefon</div>
+    <ul>
+      <li><strong>Push notifikace na telefon</strong> — spárovaná PWA (More → Notifications) dostane Web Push, když chat nebo Claude v terminálovém tabu čeká na povolení nebo na tebe, když chatu doběhne turn a když skončí snooze. Rozhoduje Go, takže to chodí i se zavřeným desktopem; bez relay serveru, šifrování RFC 8291 bez nové závislosti. Nepípá, když chat právě sleduješ na desktopu, max 1× za 30 s na vlákno. Na iPhonu jen z PWA přidané na plochu. Paired devices v Nastavení ukazují zvonek.</li>
+      <li><strong>Víc strojů v jednom klientovi</strong> — telefon (More → Connection) i desktop (Nastavení → Remote access) si pamatují všechny spárované Macy, aktivní je vždy jeden: přepnutí, Add machine, přejmenování, zapomenutí. QR kód stroj přidá, nepřepíše; odvolání smaže jen ten jeden a vrátí na výběr strojů. Starý jediný slot se převede sám.</li>
+      <li><strong>QR párování</strong> — Nastavení ukáže QR kód, telefon po naskenování spáruje sám; kód jede ve fragmentu URL, takže se nedostane do logů. Nastavení ukazuje správnou adresu (Tailscale HTTPS) a srozumitelný důvod, když HTTPS na tailnetu chybí.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Smazání worktree mohlo smazat untracked soubory</strong> — při <code>status.showUntrackedFiles=no</code> git ochranu přeskočil; teď ji vynucujeme.</li>
+      <li><strong>Fetch na pozadí se nezasekne na hesle</strong> — fetch hlavy PR („Open in worktree“) a fetch základní větve nové worktree běží s <code>GIT_TERMINAL_PROMPT=0</code> a <code>GCM_INTERACTIVE=never</code>; bez přihlášení selžou, místo aby čekaly na výzvu, kterou nikdo nevidí.</li>
+      <li><strong>Checkpoint mohl přehlédnout úpravu</strong> — změna souboru na stejnou délku ve stejné sekundě se do snímku nedostala (kopie indexu dostala nový čas a git ji pak považoval za čistou); kopie teď drží čas původního indexu.</li>
+      <li><strong>Souběžné git operace na jednom stromu</strong> — checkpointy, vytváření/mazání worktree a přesun chatu se na stejné cestě už nepřekrývají.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
+  <!-- v0.7.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.7.0</span>
+    <span class="date">říjen 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Řízení běžícího chatu</div>
+    <ul>
+      <li><strong>Steer</strong> — zpráva z fronty jde rovnou do běžícího turnu (Cmd/Ctrl+Enter), místo aby čekala na jeho konec. Claude ji dostane jako řádek na stdin a přečte ji na další hranici nástroje, Codex přes <code>turn/steer</code>. Jde jen ve fázi <code>running</code>; odmítnutá zpráva zůstane ve frontě.</li>
+      <li><strong>Side chat</strong> — rychlá otázka k vláknu, která ho neruší. Při prvním startu forkne aktuální session rodiče (Claude <code>--fork-session</code>, Codex <code>thread/fork</code>), takže má celý kontext a rodičovský proces ani běžící turn se nedotkne. Otevírá se v Right Panelu a není to sub-agent.</li>
+      <li><strong>Review jedním klikem</strong> — tlačítko Review v Diff panelu založí chat, který zreviduje změny workspace (necommitnuté, nebo proti base větvi). Codex používá nativní <code>review/start</code>, ostatní agenti review prompt.</li>
+      <li><strong>Úprava fronty</strong> — zprávu ve frontě jde upravit inline, přesouvat Alt+↑/↓, smazat celou frontu nebo ji sbalit.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Right Panel</div>
+    <ul>
+      <li><strong>Progress, Outputs, Background</strong> — živý todo list aktivního chatu (u Codexu z <code>turn/plan/updated</code>), soubory, které chat vytvořil nebo upravil, a shell úlohy na pozadí s výstupem a tlačítkem Stop (Claude <code>stop_task</code>, Codex background terminály).</li>
+      <li><strong>Klikací poznámky v transcriptu</strong> — Go zapíše do chatu řádek „Plan: 2/5 — …“, „Changed N files“ nebo start/konec úlohy na pozadí; klik otevře odpovídající panel. Poznámky vznikají jen živě, replay je jen přehraje z logu.</li>
+      <li><strong>Soubory z exploreru jako taby</strong> — klik otevře soubor jako tab v Right Panelu (dvojklik dál v hlavním editoru), Markdown se zobrazí vyrenderovaný s přepínačem edit/preview.</li>
+      <li><strong>Odkazy <code>soubor#L10-20</code></strong> — odkazy na soubor s řádky v odpovědi agenta otevřou soubor a skočí na dané řádky.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Přehled</div>
+    <ul>
+      <li><strong>Limity předplatného</strong> — v Sidebaru je vidět čerpání session/týdenního limitu Claude a Codexu. Claude token se čte z Keychainu při každém dotazu a nikdy se neobnovuje (rotace refresh tokenu by odhlásila CLI).</li>
+      <li><strong>Recap vlákna</strong> — pod názvem chatu v Sidebaru jeden řádek, kde vlákno stojí. Generuje se po dokončeném turnu (nejvýš jednou za 2 min) stejným modelem jako názvy chatů; vypínač v Nastavení → General.</li>
+      <li><strong>Kompaktní composer na telefonu</strong> — jednořádkový placeholder, výběr modelu/effortu/oprávnění schovaný za přepínač a sponka pro přiložení fotky.</li>
+      <li><strong><code>burrow spawn --detach</code></strong> — vlákno může otevřít samostatný chat nebo tab místo sub-agenta.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Bílá obrazovka v PWA</strong> — telefon si ze sdíleného <code>config.json</code> obnovil všechny workspacy otevřené na Macu a namountoval všechny jejich terminály (32 xtermů, každý s přehráním až 1 MiB historie); iOS stránku zabil. Vzdálený klient teď mountuje jen terminály aktivního workspace.</li>
+      <li><strong>Zaseknutý status PTY tabů</strong> — hook server odmítal <code>ptyId</code> poslané jako číslo (400, spolknuté <code>curl -sf</code>), takže se ztrácely konce turnů a žádosti o oprávnění. A nový Claude Code běží jako <code>claude.exe</code>, což poll nepoznal a tab zůstal v <code>running</code>.</li>
+      <li><strong>Rewind mazal příliš brzy</strong> — poslední zpráva se do <code>chat_stream</code> zapisuje asynchronně, takže ji <code>DELETE</code> při rewindu mohl předběhnout a nechat v transcriptu. Rewind teď nejdřív počká na zápis fronty.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
+  <!-- v0.6.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.6.0</span>
+    <span class="date">říjen 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Burrow v mobilu a na iPadu</div>
+    <ul>
+      <li><strong>Vzdálený klient je celá desktopová aplikace</strong> — PWA měla vlastní store, pohledy i reducer chatu. Teď spouští desktopový <code>App.vue</code> přes stejný <code>/v2/ws</code>: na iPadu plný layout, na telefonu kompaktní. Z <code>src/mobile</code> zbylo jen párování. Rozložení panelů a zoom se ukládají per zařízení, takže iPad nepřepisuje layout desktopu.</li>
+      <li><strong>Telefon jako mobilní aplikace</strong> — spodní navigace Threads / Inbox / Project / More. Inbox řadí živá vlákna do <em>Čeká na tebe</em> / <em>Hotovo nepřečteno</em> / <em>Běží</em> (s badgem), Project ukazuje větev a ahead/behind a otevírá Changes, PR, dev servery a sub-agenty. Vlákno má hlavičku se zpět a akcemi (stop, restart, clear), přepínání tabů nahrazuje route, takže funguje nativní swipe-back na iOS i back na Androidu.</li>
+      <li><strong>Klávesnice na iOS nepřekrývá composer</strong> — aplikace je připnutá na visual viewport a klávesnice ji zmenší, místo aby ji Safari posouval.</li>
+      <li><strong>Menu vlákna dotykem</strong> — iOS Safari při dlouhém stisku nevyvolá <code>contextmenu</code>, takže přejmenovat/připnout/smazat nešlo. Teď long press (500 ms) a na dotykových zařízeních tlačítko ⋮ místo hover-only akcí.</li>
+      <li><strong>Mac zůstane vzhůru pro telefon</strong> — se zapnutým vzdáleným přístupem drží <code>caffeinate -is</code> (jen na adaptéru). Telefon ukáže banner, když je Mac nedostupný (po 3 s), a panel dev serverů nabízí Preview odkaz na tailnet IP.</li>
+      <li><strong>Chyba startu místo prázdné obrazovky</strong> — telefon nemá devtools, takže selhaný start klient teď vypíše (s Reload / Zapomenout zařízení). <code>mobile.html</code> a <code>sw.js</code> se servírují bez cache — zastaralý entry point odkazující na smazaný bundle byl další prázdná obrazovka.</li>
+    </ul>
+  </div>
+
+  <div class="section perf">
+    <div class="section-label">Dlouhé chaty</div>
+    <ul>
+      <li><strong>Chat se otevírá od nejnovějších zpráv</strong> — dřív se při otevření načítal celý transcript; na iPadu přes tailnet to bylo 5–10 s. <code>load_chat_messages_page</code> vrací okno zpráv a tlačítko „Načíst starší“ přidá předchozí stránku se zachovanou pozicí scrollu. Dokud je načtené jen okno, frontend transcript neukládá (<code>save_chat_messages</code> přepisuje celý chat a smazal by vše nad oknem).</li>
+      <li><strong>Obrázky se načtou až na kliknutí</strong> — staré zprávy mají screenshoty inline v base64 (jeden měl 3,2 MB). Stránka nese místo každého data URL nad 4 KB stub a <code>load_chat_image</code> vrátí originál po kliknutí na „Zobrazit obrázek“. Uložený transcript se nemění.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Vlákna a sub-agenti</div>
+    <ul>
+      <li><strong>Ruční uspání chatu</strong> — odložení (settle) chatu volá <code>chat_sleep</code> a proces hned zastaví, se stejnými pojistkami jako auto-sleep (běžící chat se neuspí).</li>
+      <li><strong>Hromadné smazání odložených vláken</strong> — koš v sekci Settled smaže všechna odložená vlákna kromě připnutých. <code>DeleteChat</code> navíc maže i <code>chat_stream</code> řádky chatu a jeho sub-agentů; start aplikace uklidí ty, které osiřely ve starších verzích.</li>
+      <li><strong><code>burrow spawn --name</code></strong> — sub-agent dostane krátký název místo prvního řádku úkolu, ať se dají v panelu rozlišit.</li>
+      <li><strong><code>burrow spawn --permission-mode</code></strong> — vlákno může sub-agentovi zúžit oprávnění (např. <code>plan</code> pro průzkum). Nikdy ne víc, než má samo — širší režim spawn odmítne.</li>
+      <li><strong>Model sub-agenta</strong> — v Right Panelu je u každého sub-agenta vidět model a holé <code>--model</code> (bez profilu) se opravdu propíše do chatu.</li>
+      <li><strong>Interní ID v hover kartě</strong> — přepínač „Show internal IDs“ v Nastavení ukáže id chatu/tabu, hodí se do bug reportů.</li>
+      <li><strong>Dialogy</strong> — pozadí jako dropdowny, fokus na potvrzovacím tlačítku, Esc ruší.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Ztracené dotazy na oprávnění</strong> — request se otevíral jen v živém listeneru a replay přehrává doménové eventy, ne surové řádky. Dotaz poslaný dřív, než se view připojilo (telefon na pomalé lince, chat z welcome composeru), se nikdy neukázal a agent zůstal navždy blokovaný. <code>load_pending_chat_requests</code> vrátí otevřené requesty aktuálního tahu (jen ve fázi <code>waiting_*</code>).</li>
+      <li><strong>Otevření chatu přeskupovalo projekty v sidebaru</strong> — dohnání řádků streamovaných mimo pohled se počítalo jako aktivita. Teď jen když chat běží.</li>
+      <li><strong>Problikávání předchozího tabu při startu chatu</strong> — composer se zavřel dřív, než <code>create_chat</code> vrátil; teď se naviguje až na hotový tab.</li>
+      <li><strong><code>too_many_calls</code> po reconnectu</strong> — flush fronty poslal všechna volání najednou a přetekl serverový limit 64. Klient drží max. 48 volání v letu.</li>
+      <li><strong>Kontextové okno nad 200k</strong> — když agent limit neuvádí a použití přesáhne 200k, počítá se s 1M.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
+  <!-- v0.5.2 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.5.2</span>
+        <span class="date">říjen 2026</span>
+  </div>
+
+  <div class="section perf">
+    <div class="section-label">Výkon</div>
+    <ul>
+      <li><strong>Zpráva v chatu se odešle hned</strong> — před každým tahem se dělá git checkpoint (<code>start_turn_audit</code>) a odeslání na něj čeká. Dočasný index se plnil přes <code>read-tree HEAD</code>, který nemá stat cache, takže <code>add -A</code> znovu hashoval každý soubor — a <code>CreateCheckpoint</code> snapshot dělal dvakrát. V repu s velkými soubory to byly ~4 s před každou zprávou, teď ~40 ms: snapshot startuje z kopie skutečného indexu a strom se počítá jen jednou.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- v0.5.1 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.5.1</span>
+            <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Průhledný model picker a další plovoucí prvky u animovaných témat</strong> — model picker, menu a návrhy v composeru, Spotlight, dialogy, kontextová menu a bannery používaly <code>--bg-panel</code>, který animovaná témata dělají poloprůhledným, takže přes ně prosvítal obsah. Nově používají <code>--bg-dropdown</code>, který zůstává neprůhledný (u ostatních témat se nic nemění).</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- v0.5.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.5.0</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Nový vzhled (inspirovaný Ghostex)</div>
+      <ul>
+        <li><strong>Redesign celé aplikace</strong> — nové výchozí téma <strong>Plum</strong>, sidebar seskupený po projektech s počtem necommitnutých <code>+/-</code> řádků a sub-agenty pod svým threadem, titlebar s navigací zpět/vpřed a názvem otevřeného threadu, místo barevného pruhu malý odznak DEV/BETA.</li>
+        <li><strong>Chat transcript</strong> — bez avatarů, odpovědi přes celou šířku ve větším písmu, bubliny jen pro tvé zprávy. Hotový turn se sbalí za lištu „Worked 42s“ s počtem tool callů a souborů, nahoře minimapa a karta s diffem každého turnu.</li>
+        <li><strong>Composer, model picker, Spotlight, Settings, pravý panel</strong> — vše přestylované: model a effort v jednom chipu, picker s taby agentů a oblíbenými, Spotlight s filtry (Tab přepíná), Settings jako karty se segmented ovládáním, pravý panel s mřížkou surfaces.</li>
+        <li><strong>Mission Control</strong> — dashboard s kartami agentů ze všech workspaců ve třech drahách (Needs you / Running / Review); oprávnění z PTY tabu jde odklepnout přímo na kartě.</li>
+        <li><strong>Notifikace</strong> — panel jako čtečka: skupiny Nepřečtené / Přečtené, „Next unread“, „Mark all read“. Otevření panelu už neoznačí vše jako přečtené.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Témata</div>
+      <ul>
+        <li><strong>Nové rodiny Fire, Matcha, Peach a Synthwave</strong> — každá s tmavou i světlou variantou. Synthwave má výrazný fialový glow (téma si může nastavit vlastní barvu a sílu glow).</li>
+        <li><strong>Animovaná pozadí</strong> — <strong>Matrix 💊</strong> (padající znaky), Nebula ✨ (hvězdy), Tide 🫧 (bubliny) a Stonks (rakety 🚀). Plochy jsou nad animací poloprůhledné, terminál, kontextová menu a dialogy zůstávají neprůhledné a čitelné. Animace běží max. 20–30 fps, stojí ve skrytém okně a respektuje „omezit pohyb“.</li>
+        <li><strong>Glow bez pruhů</strong> — přechod na plochách byl poskládaný z několika průhledných vrstev a WebKit každou zaokrouhlí zvlášť na 8 bitů, takže byly vidět stupně. Teď je to jedna neprůhledná vrstva s hladkou (kosinovou) křivkou.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Chaty</div>
+      <ul>
+        <li><strong>Chat runtime v Go pro všechny transporty</strong> — Claude, Codex i obecné ACP: proces chatu drží Go podle id chatu, takže <code>spawn</code>, telefon i <code>chat_send</code> fungují i bez otevřeného okna. Nastavení spuštění (model, effort, permission mode, profil) jsou sloupce v databázi.</li>
+        <li><strong>Rewind a fork</strong> — u tvé zprávy „Rewind to here“ / „Fork from here“ (jen Claude). Původní session soubor se nikdy nemění, jede se přes <code>--resume-session-at</code> + <code>--fork-session</code>.</li>
+        <li><strong>Auto-sleep</strong> — nečinný chat (výchozí 60 min, Settings → General) uspí svůj proces; další zpráva ho probudí a naváže session. Sledovaný chat nikdy neusne. Nahrazuje starý reaper, který zabíjel CLI čekající na schválení oprávnění.</li>
+        <li><strong>Mermaid diagramy a HTML stránky v chatu</strong> — <code>```mermaid</code> se vykreslí jako karta, agentem napsaná <code>.html</code> stránka jako karta otevíraná v sandboxovaném iframu bez sítě. K tomu bloky <code>```visual</code> (grafy, tabulky) a <code>```questions</code> (formulář s otázkami).</li>
+        <li><strong>OpenAI-kompatibilní provider</strong> — vestavěný agent pro libovolný <code>/v1/chat/completions</code> server (llama.cpp, LM Studio, Ollama).</li>
+        <li><strong>Fronta zpráv</strong> — čekající zprávy jdou přetahovat a vrátit k úpravě do composeru. „Catch me up“ shrne, co se v chatu stalo.</li>
+        <li><strong>Hotové sub-agenty</strong> — po 30 minutách od přečtení a vyzvednutí výsledku se samy archivují, seznam v pravém panelu už neroste do nekonečna.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Hledání a pravý panel</div>
+      <ul>
+        <li><strong>Fulltext v chatech i promptech</strong> — Spotlight hledá v přepisech chatů (FTS5) a nově i ve všech promptech poslaných do Claude Code a Codexu (<code>~/.claude/history.jsonl</code>, <code>~/.codex/history.jsonl</code>). Enter obnoví session v novém tabu, ⌘Enter zkopíruje prompt.</li>
+        <li><strong>Pravý panel na dvě části</strong> — dva panely s vlastními taby, surfaces se přesouvají tažením, rozložení si pamatuje každý workspace.</li>
+        <li><strong><code>burrow serve</code></strong> — agent spustí dev server v terminálu pravého panelu, kde ho vidíš a můžeš do něj psát, místo backgroundovaného procesu v Bash toolu.</li>
+        <li><strong>Markdown dokumenty</strong> — klik na lokální <code>.md</code> odkaz v chatu ho otevře vykreslený v pravém panelu s osnovou a živým reloadem.</li>
+        <li><strong>Terminál navazuje po výpadku spojení</strong> — daemon čísluje výstup každého PTY a drží poslední 1 MiB; po reconnectu se dotáhne přesně chybějící kus místo prázdné díry.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Diff karta ukazovala soubory mimo projekt</strong> — počítaly se všechny zapsané soubory, takže turn, který uložil jen agentovu paměťovou poznámku, ji hlásil jako změnu. Teď jen cesty uvnitř pracovního adresáře chatu.</li>
+        <li><strong>Sidebar nešel skrýt</strong> — <code>v-show</code> na komponentě s více root elementy Vue ignoruje; preference se nově ukládá jako <code>sidebarHidden</code>.</li>
+        <li><strong>Plná tlačítka vypadala disabled</strong> — ikona na tlačítku (send, odznaky) brala barvu z <code>--bg-base</code>, který je u animovaných témat a s tapetou průhledný. Nově z neprůhledného <code>--bg-solid</code>.</li>
+        <li><strong>Ztracené události po reconnectu</strong> — dvě souběžná vysílání mohla doručit seq N+1 před N a klient pak N zahodil natrvalo. Číslování a rozeslání teď běží pod jedním zámkem.</li>
+        <li><strong>Welcome screen padal při načtení</strong> — composer četl <code>target</code> dřív, než byl deklarován (TDZ <code>ReferenceError</code>).</li>
+        <li><strong>Odebrány zkratky Alt+1–9</strong> pro výběr modelu (v composeru i v pickeru) — šipky, Tab a Enter v pickeru zůstávají.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- v0.4.11 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.11</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Terminál</div>
+      <ul>
+        <li><strong>Spodní terminálový panel na welcome screenu</strong> — <code>⌘J</code> fungoval jen uvnitř threadu, takže na welcome screenu nešel otevřít (panel se otevřel ve skrytém workspace). Welcome screen má teď vlastní panel; shell startuje v projektu vybraném v composeru, přežije odchod z welcome screenu a při ukončení aplikace se zabije, aby v daemonu nezůstal osiřelý proces.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Modely</div>
+      <ul>
+        <li><strong>Haiku 5.5 jako výchozí model pro generování textu</strong> — commit zprávy, PR, názvy větví a chatů. Instalace s původním výchozím Haiku 4.5 se převedou; starší CLI, které id <code>claude-haiku-5-5</code> nezná, automaticky spadne zpět na Haiku 4.5.</li>
+        <li><strong>Cena Claude Opus 5.5</strong> — odhad ceny chatu počítá s jeho sazbou ($4 / $20 za MTok) místo sazby Opus 5.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Terminál v pravém panelu blokoval ostatní surfaces</strong> — <code>XTerm.vue</code> má fragment root (dva root elementy), na kterém Vue tiše ignoruje <code>v-show</code>. Terminál proto zůstal vidět pořád, picker po <code>+</code> se zmáčkl nad něj a jiný tab (Checkpoints, Sub-agents…) přes něj nešel zobrazit. XTerm je teď obalený divem, který <code>v-show</code> nese.</li>
+        <li><strong>Víc terminálů ve spodním panelu bylo vidět najednou</strong> — stejná příčina v <code>BottomTerminalPanel.vue</code>: přepínání mezi terminály neschovávalo neaktivní. Stejná oprava.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- v0.4.10 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.10</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Modely</div>
+      <ul>
+        <li><strong>Claude Haiku 5.5</strong> — nový model v pickeru chatu (<code>claude-haiku-5-5</code>) s úrovněmi effort <code>low</code> až <code>max</code>, výchozí <code>medium</code> jako v samotném CLI. Odhad ceny chatu počítá s jeho sazbou ($0.10 / $0.50 za MTok).</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong>Odkazy se otevírají v systémovém prohlížeči</strong> — Wails WKWebView nemá delegáta navigace ani nových oken, takže klik na odkaz (v markdownu chatu, v nastavení…) přepnul celé okno aplikace na cizí stránku bez možnosti zpět nebo zavřít. Teď každý externí <code>http(s)</code> odkaz — klik, prostřední tlačítko i <code>window.open</code> — jde přes <code>BrowserOpenURL</code> ven.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- v0.4.9 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="version">v0.4.9</span>
+      <span class="date">říjen 2026</span>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Přetahování souborů do chatu</div>
+      <ul>
+        <li><strong>Drag &amp; drop z Finderu</strong> — soubor pustíš kamkoli do okna chatu nebo na uvítací obrazovku. Obrázky (png, jpg, gif, webp) se přidají jako příloha stejně jako při <code>⌘V</code>, ostatní soubory se vloží jako <code>@/cesta/k/souboru</code>, aby si je agent přečetl sám z disku. Cesty s mezerou se vloží jako <code>@"…"</code>.</li>
+        <li><strong>Fullscreen nápověda</strong> — při tahu souboru nad okno se zobrazí backdrop s textem „Drop files to attach“. Pustit jde jen tam, kde je chat nebo composer; drop reaguje jen chat pod kurzorem.</li>
+        <li><strong>Jak to funguje</strong> — Wails <code>DragAndDrop.EnableFileDrop</code> dává skutečné cesty (HTML5 <code>File</code> je nemá), proto je vypnutý vlastní drop webview. Událost <code>file-drop</code> jde přes bus a není v replay ringu, aby se po reconnectu nevložila podruhé.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Odpovědi na povolení v terminálových tabech</div>
+      <ul>
+        <li><strong>Allow / Always / Deny z Burrow</strong> — dotaz Claude na oprávnění k nástroji jde zodpovědět toastem i bannerem nad xtermem, zatímco prompt v TUI zůstává. Nikdy se nespadne na „povolit“: aplikace nedostupná, chyba, odpojení hooku, <code>AskUserQuestion</code> i <code>ExitPlanMode</code> nechají rozhodnout TUI.</li>
+        <li><strong>Odpověď v terminálu uklidí banner</strong> — Claude hook po odpovědi v TUI neukončí, proto požadavek zavírá změna fáze mimo <code>waiting_approval</code>, ne odpojení.</li>
+      </ul>
+    </div>
+
+    <div class="section feat">
+      <div class="section-label">Stav a hooky Claude tabů</div>
+      <ul>
+        <li><strong>Burrow Claude Code mod</strong> — v PTY tabu hlásí běh nástrojů přímo z procesu Claude (<code>BURROW_MOD=1</code>), takže <code>burrow hook</code> nespouští <code>sh</code> + <code>curl</code> při každém volání nástroje, a přikládá delegační pravidlo jednou za session.</li>
+        <li><strong>Hooky vázané na plugin</strong> — stavové hooky Claude jsou v <code>hooks/hooks.json</code> pluginu a platí jen v PTY tabech Burrow; chaty a cizí session je nespouští. Staré záznamy v <code>settings.json</code> se při startu odstraní.</li>
+        <li><strong>Fáze z <code>sessions/&lt;pid&gt;.json</code></strong> — foreground poll čte i vlastní stavový soubor Claude (<code>busy</code>, <code>waiting</code>, <code>idle</code>), takže fáze sedí i tam, kde hook nedorazí. Bere se jen při změně, nepřepíše čerstvější hook.</li>
+        <li><strong>Skills a příkazy z pluginů</strong> — seznam skillů a slash příkazů v composeru zahrnuje i ty, které dodávají nainstalované pluginy Claude.</li>
+      </ul>
+    </div>
+
+    <div class="section fix">
+      <div class="section-label">Opravy</div>
+      <ul>
+        <li><strong><code>send_to_tab</code> vloží vstup jako bracketed paste</strong> — dřív se víceřádkový text mohl rozpadnout na jednotlivé odeslané řádky. Teď dorazí jako jeden hotový paste.</li>
+        <li><strong>Vitest mimo testy pluginu a vnořené worktrees</strong> — testy v adresáři pluginu a ve vnořených worktrees se už nesbírají do <code>pnpm test</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
   <!-- v0.4.8 -->
   <div class="release">
     <div class="release-header">
       <span class="version">v0.4.8</span>
-      <span class="tag tag-latest">nejnovější</span>
       <span class="date">říjen 2026</span>
     </div>
 

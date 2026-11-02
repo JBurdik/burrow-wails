@@ -1,4 +1,6 @@
 import { createRouter, createMemoryHistory, createWebHashHistory, type RouteRecordRaw } from "vue-router";
+import { compact } from "@/lib/viewport";
+import { isPhoneOnlyRoute } from "@/lib/phoneNav";
 
 // The URL is the view state (fáze 4 of docs/plans/003-view-state-routes.md).
 // Before this, "what is the user looking at" was a pair of refs in the ui store
@@ -27,6 +29,13 @@ export const routes: RouteRecordRaw[] = [
   { path: "/ws/:wsId(\\d+)", name: "workspace", component: NONE },
   { path: "/ws/:wsId(\\d+)/tab/:tabId(\\d+)", name: "tab", component: NONE },
   { path: "/dashboard", name: "dashboard", component: NONE },
+  // Phone shell screens (src/components/phone/, src/lib/phoneNav.ts). On a
+  // phone `/` is the thread list and the composer moves to `/new`.
+  { path: "/inbox", name: "inbox", component: NONE },
+  { path: "/project", name: "project", component: NONE },
+  { path: "/project/:surface(git|pull-requests|dev-servers|agents)", name: "project-surface", component: NONE },
+  { path: "/more", name: "more", component: NONE },
+  { path: "/new", name: "new", component: NONE },
   // Anything unrecognised is the composer, not a blank shell.
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
@@ -38,6 +47,10 @@ export const router = createRouter({
   history: typeof window === "undefined" ? createMemoryHistory() : createWebHashHistory(),
   routes,
 });
+
+// A phone-only screen on a wide window (a deep link, a stale tab) has nothing
+// to render there — the desktop's `/` is the composer it would have led to.
+router.beforeEach((to) => (isPhoneOnlyRoute(to.name) && !compact.value ? "/" : true));
 
 /** Numeric route param, or null when absent/malformed. */
 export function routeId(value: unknown): number | null {

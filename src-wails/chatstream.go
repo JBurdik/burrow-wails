@@ -2,9 +2,11 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,6 +94,7 @@ type ChatStreamLine struct {
 type chatStreamRow struct {
 	chatID string
 	line   ChatStreamLine
+	done   chan struct{} // flush barrier: closed once every earlier row is written
 }
 
 // chatStreamWriter serialises appends onto one goroutine so the stream path
@@ -119,8 +122,8 @@ type chatStreamWriter struct {
 
 func newChatStreamWriter(db *sql.DB) *chatStreamWriter {
 	w := &chatStreamWriter{
-		db:      db,
-		ch:      make(chan chatStreamRow, chatStreamQueue),
+		db:          db,
+		ch:          make(chan chatStreamRow, chatStreamQueue),
 		nextOrd:     map[string]int64{},
 		appends:     map[string]int{},
 		tails:       map[string]*chatTail{},
@@ -164,6 +167,15 @@ func (w *chatStreamWriter) append(chatID, kind, line string) int64 {
 	return ord
 }
 
+// flush blocks until every row queued before the call is in chat_stream. A
+// delete by ord range needs it: a line already numbered but still queued would
+// otherwise be inserted after the delete and survive the cut.
+func (w *chatStreamWriter) flush() {
+	done := make(chan struct{})
+	w.ch <- chatStreamRow{done: done}
+	<-done
+}
+
 // loadMaxOrdLocked resumes a chat's numbering across app restarts, so a replay
 // after a crash sees one continuous sequence. Runs once per chat per run.
 func (w *chatStreamWriter) loadMaxOrdLocked(chatID string) int64 {
@@ -180,6 +192,10 @@ func (w *chatStreamWriter) loadMaxOrdLocked(chatID string) int64 {
 
 func (w *chatStreamWriter) run() {
 	for row := range w.ch {
+		if row.done != nil {
+			close(row.done)
+			continue
+		}
 		if _, err := w.db.Exec(
 			`INSERT OR REPLACE INTO chat_stream (chat_id, ord, kind, line) VALUES (?, ?, ?, ?)`,
 			row.chatID, row.line.Ord, row.line.Kind, row.line.Line,
@@ -299,6 +315,7 @@ func (w *chatStreamWriter) foldedOrd(chatID string) (int64, bool, error) {
 // assuming every emitted line was actually processed — false across a crash,
 // and the trim would then delete lines nobody rendered.
 func (a *App) emitChatLine(chatID, kind, line string) {
+	a.chatRT.touchChat(chatID, time.Now())
 	var ord int64 = -1
 	if w := a.chatStream(); w != nil {
 		ord = w.append(chatID, kind, line)
@@ -315,13 +332,21 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 
 		if a.phases != nil {
 			for _, e := range events {
+				a.noteUsageLimitEvent(chatID, e, time.Now())
 				if pev, ok := chatPhaseEvent(e); ok {
+					before := a.phases.Get("chat:" + chatID)
 					a.applyChatPhase(chatID, pev) // also settles the turn audit
+					after := a.phases.Get("chat:" + chatID)
+					a.noteSubagentPhase(chatID, before, after, e)
+					if before.InFlight() && !after.InFlight() {
+						a.kickChatDelivery() // queued follow-ups go out now, not on the next sweep
+					}
 				}
 			}
 			if a.phases.Get("chat:"+chatID).State == agentphase.Running {
 				a.clearSettledOverrideOnRunning(chatID)
 				a.clearCollectedOnRunning(chatID)
+				a.clearUsageLimitOnRunning(chatID)
 			}
 		}
 
@@ -330,6 +355,11 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 		// keeps NormalizeChatLine at one call per line: two readings of the
 		// same line that had to agree anyway.
 		a.foldChatLine(chatID, ord, events)
+
+		// Plan / changed-files transcript notes (chatturnnotes.go). Last, so a
+		// note lands after the line that triggered it; it re-enters this
+		// function as a chat-note line, which it ignores.
+		a.chatTurnNotes(chatID, kind, events)
 	}
 }
 
@@ -379,8 +409,13 @@ func (a *App) clearCollectedOnRunning(chatID string) {
 	if err != nil {
 		return
 	}
-	if _, err := a.db.Exec(`UPDATE chats SET collected_at = 0 WHERE id = ? AND collected_at != 0`, id); err != nil {
+	res, err := a.db.Exec(`UPDATE chats SET collected_at = 0 WHERE id = ? AND collected_at != 0`, id)
+	if err != nil {
 		log.Printf("clear collected_at for chat %d: %v", id, err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		busEmit("chats-changed", nil)
 	}
 }
 
@@ -488,4 +523,83 @@ func (a *App) deleteChatStream(chatID string) error {
 	}
 	_, err := a.db.Exec(`DELETE FROM chat_stream WHERE chat_id = ?`, chatID)
 	return err
+}
+
+// pendingScanLines bounds how far back LoadPendingChatRequests looks: a request
+// that is still unanswered is among the newest lines of its turn.
+const pendingScanLines = 400
+
+// LoadPendingChatRequests returns the raw permission / question requests a chat
+// is still blocked on, oldest first, so a view that mounts AFTER the request was
+// emitted can open it. The live listeners only see lines emitted while they are
+// attached, and replayChatStream deliberately re-plays domain events, not raw
+// lines (a raw replay would re-open requests answered before a restart) — so
+// without this a request that arrived while no view was mounted (a phone opening
+// the chat over a slow link, a chat started from the welcome composer) is
+// unanswerable for good.
+//
+// Gated on the chat's phase: only waiting_input / waiting_approval can have an
+// open request, which is what keeps an answered one from coming back.
+func (a *App) LoadPendingChatRequests(chatID string) ([]ChatStreamLine, error) {
+	if a.db == nil {
+		return []ChatStreamLine{}, nil
+	}
+	if st := a.phases.Get("chat:" + chatID).State; st != agentphase.WaitingInput && st != agentphase.WaitingApproval {
+		return []ChatStreamLine{}, nil
+	}
+	rows, err := a.db.Query(
+		`SELECT ord, kind, line FROM chat_stream WHERE chat_id = ? ORDER BY ord DESC LIMIT ?`,
+		chatID, pendingScanLines,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var found []ChatStreamLine // newest first while walking back
+	cancelled := map[string]bool{}
+scan:
+	for rows.Next() {
+		var l ChatStreamLine
+		if err := rows.Scan(&l.Ord, &l.Kind, &l.Line); err != nil {
+			return nil, err
+		}
+		switch l.Kind {
+		case "claude-data":
+			var m struct {
+				Type      string `json:"type"`
+				RequestID string `json:"request_id"`
+				Request   struct {
+					Subtype string `json:"subtype"`
+				} `json:"request"`
+			}
+			if json.Unmarshal([]byte(l.Line), &m) != nil {
+				continue
+			}
+			switch {
+			case m.Type == "result":
+				break scan // the turn before this one: nothing older can be open
+			case m.Type == "control_cancel_request":
+				cancelled[m.RequestID] = true
+			case m.Type == "control_request" && m.Request.Subtype == "can_use_tool" && !cancelled[m.RequestID]:
+				found = append(found, l)
+			}
+		case "acp-data":
+			if strings.Contains(l.Line, `"_burrow":"turn"`) {
+				break scan
+			}
+		case "acp-req":
+			found = append(found, l)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(found)-1; i < j; i, j = i+1, j-1 {
+		found[i], found[j] = found[j], found[i]
+	}
+	if found == nil {
+		found = []ChatStreamLine{}
+	}
+	return found, nil
 }

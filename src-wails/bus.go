@@ -22,6 +22,9 @@ var (
 	busMu     sync.RWMutex
 	busSinks  []busEntry
 	busNextID uint64
+
+	// busOrderMu serializes a numbered event's record + fan-out (busEmit).
+	busOrderMu sync.Mutex
 )
 
 // busSubscribe registers a sink and returns a function that removes it.
@@ -70,6 +73,13 @@ func busEmit(name string, payload any) {
 	// ring's order is the order clients receive.
 	ev := shellEvent{Name: name, Payload: payload}
 	if isRingable(name) {
+		// Numbering and fan-out happen under one lock, or two emitters can
+		// deliver seq 6 before seq 5 — and the client, which drops anything
+		// at or behind its high-water mark, would lose seq 5 for good.
+		// Holding it across the sinks is cheap: the only sink never blocks
+		// (remotews drops a full queue instead).
+		busOrderMu.Lock()
+		defer busOrderMu.Unlock()
 		ev = recordShellEvent(name, payload)
 	}
 
@@ -88,7 +98,8 @@ func busEmit(name string, payload any) {
 // hold. Every one of them is BOTH high-volume and already replayable from a
 // durable log of its own, which is the whole test for belonging on this list:
 //
-//	pty-data-*    the daemon keeps its own ring and replays it on reattach
+//	pty-data-*    numbered per pty by the daemon (payload {off,data}) and kept
+//	              in its own 1 MiB ring; a view catches up with pty_since
 //	claude-data-* ┐
 //	acp-data-*    ├ persisted to chat_stream with an ord before they are ever
 //	acp-req-*     │ emitted; replayChatStream/LoadChatEventsSince catch a
@@ -122,6 +133,9 @@ var notRingable = []string{
 	// durably logged with an ord — a reconnecting client re-reads the
 	// transcript (or replays from folded_ord) rather than resuming these.
 	chatMessagesChangedPrefix,
+	// A one-shot UI gesture: replaying a stale drop on resume would insert the
+	// files into the composer a second time.
+	"file-drop",
 }
 
 // isRingable reports whether an event belongs in the replay ring.

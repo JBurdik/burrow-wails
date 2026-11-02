@@ -12,7 +12,7 @@
     </button>
 
     <Transition name="ar-menu">
-      <div v-if="menuOpen" class="absolute right-0 top-[calc(100%+4px)] z-[200] flex min-w-[56px] flex-col gap-px rounded-md border border-border bg-panel p-1 shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
+      <div v-if="menuOpen" class="absolute right-0 top-[calc(100%+4px)] z-[200] flex min-w-[56px] flex-col gap-px rounded-md border border-border bg-[var(--bg-dropdown)] p-1 shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
         <button
           v-for="n in AUTO_REFRESH_INTERVALS"
           :key="n"

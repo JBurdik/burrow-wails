@@ -334,10 +334,6 @@ function remoteAllowedTable(): Map<string, string[]> {
  * nothing) or one `command.argument` pair. Keep the reason with the entry.
  */
 const ARGUMENT_SHAPE_EXCEPTIONS: Record<string, string> = {
-  // Reshaped in core.ts before dispatch: call sites pass the AcpStartOpts
-  // fields flat, and core.ts packs them into the single `opts` key the table
-  // names (one Go struct parameter cannot be spread across table entries).
-  acp_start: "core.ts packs the flat call-site fields into `opts`",
   // Also reshaped in core.ts, which supplies the `foldedOrd` sentinel the
   // call sites may omit.
   save_chat_messages: "core.ts fills in foldedOrd",
@@ -364,7 +360,7 @@ describe("invoke() command surface", () => {
     expect(allowed.get("create_pty")).toEqual(["id", "cwd", "cols", "rows"]);
     expect(allowed.get("list_workspaces")).toEqual([]);
     // The one entry whose Args list wraps across several lines.
-    expect(allowed.get("claude_start")).toContain("appendSystemPrompt");
+    expect(allowed.get("spawn_subagent_chat")).toContain("parentChatId");
   });
 
   it("read the argument objects at the call sites", () => {

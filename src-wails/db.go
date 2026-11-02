@@ -26,8 +26,14 @@ func openDB(appDataDir string) (*sql.DB, error) {
 	// immediate SQLITE_BUSY instead of a short wait. Both pragmas go in the
 	// DSN so every pooled connection gets them; the path is URL-escaped
 	// because the macOS app data dir contains a space.
+	//
+	// _txlock=immediate: every db.Begin() here is a writer, and a DEFERRED
+	// transaction that touches chat_fts (via the chat_messages triggers) reads
+	// FTS5's shadow tables before it asks for the write lock. SQLite never runs
+	// the busy handler for that upgrade, so busy_timeout was skipped and the
+	// write failed instantly with SQLITE_BUSY. Taking the lock at BEGIN waits.
 	dsn := "file:" + (&url.URL{Path: dbPath}).String() +
-		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -41,6 +47,11 @@ func openDB(appDataDir string) (*sql.DB, error) {
 
 func migrate(db *sql.DB) error {
 	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS openai_sessions (
+			chat_id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			messages_json TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS workspaces (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
@@ -126,11 +137,17 @@ func migrate(db *sql.DB) error {
 	stmts = append(stmts, chatMessagesSchema()...)
 	stmts = append(stmts, chatStreamSchema()...)
 	stmts = append(stmts, remoteDevicesSchema()...)
+	stmts = append(stmts, pushSchema()...)
 	stmts = append(stmts, chatsSchema()...)
+	stmts = append(stmts, `CREATE TRIGGER IF NOT EXISTS openai_session_delete AFTER DELETE ON chats
+        BEGIN DELETE FROM openai_sessions WHERE chat_id = CAST(old.id AS TEXT); END`)
 	stmts = append(stmts, usageSchema()...)
 	stmts = append(stmts, diffCommentsSchema()...)
 	stmts = append(stmts, orchSchema()...)
 	stmts = append(stmts, turnAuditSchema()...)
+	stmts = append(stmts, chatSchedulesSchema()...)
+	stmts = append(stmts, subagentNoticesSchema()...)
+	stmts = append(stmts, chatQueueSchema()...)
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return err
@@ -170,10 +187,38 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE mission_tasks ADD COLUMN board_order REAL DEFAULT 0`,
 		`ALTER TABLE mission_tasks ADD COLUMN updated_at INTEGER`,
 		`ALTER TABLE chats ADD COLUMN parent_chat_id INTEGER NOT NULL DEFAULT 0`,
-		// Bookkeeping for collect_results only — deliberately not on Chat/
-		// chatColumns, or it would ride SaveChats' last-writer-wins path.
+		// Bookkeeping for collect_results. Read through Chat/chatColumns (the
+		// sub-agent auto-archive sweep needs it) but never in SaveChats' column
+		// lists, so it can't ride that last-writer-wins path.
 		`ALTER TABLE chats ADD COLUMN collected_at INTEGER NOT NULL DEFAULT 0`,
+		// Launch settings (docs/plans/006-chat-runtime.md). Read through
+		// Chat/chatColumns, kept out of SaveChats like collected_at.
+		`ALTER TABLE chats ADD COLUMN effort TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN permission_mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN append_system_prompt TEXT NOT NULL DEFAULT ''`,
+		// A pending rewind/fork resume point (chatrewind.go), cleared once the
+		// forked session reports its own id.
+		`ALTER TABLE chats ADD COLUMN resume_at TEXT NOT NULL DEFAULT ''`,
+		// Auto-sleep stamp (chatsleep.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN slept_at INTEGER NOT NULL DEFAULT 0`,
+		// One-line session recap (chatrecap.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN recap TEXT NOT NULL DEFAULT ''`,
+		// "side" marks a side chat (chatside.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
+		// Snooze wake time (chatsnooze.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN snoozed_until INTEGER NOT NULL DEFAULT 0`,
+		// Usage-limit resume (chatlimit.go); the first two read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN limit_reset_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE chats ADD COLUMN limit_resume_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE chats ADD COLUMN limit_failed_at INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE chats ADD COLUMN limit_resumed_key TEXT NOT NULL DEFAULT ''`,
+		// Linked pull request (chatpr.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE chats ADD COLUMN pr_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN pr_state TEXT NOT NULL DEFAULT ''`,
 	}
+	alters = append(alters, chatSchedulesAlters()...)
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
 			return fmt.Errorf("%s: %w", s, err)
@@ -189,6 +234,14 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	if err := migrateChatSearch(db); err != nil {
+		return err
+	}
+	for _, s := range promptSearchSchema() {
+		if _, err := db.Exec(s); err != nil {
+			return err
+		}
+	}
 	return migratePtyPhaseColumns(db)
 }
 

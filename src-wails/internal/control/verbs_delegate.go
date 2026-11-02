@@ -41,11 +41,14 @@ func delegationVerbs(c *Core) []Verb {
 		Summary: "Delegate a task to a sub-agent in a new tab (or chat), visible to the user",
 		Args: []Arg{
 			{Name: "task", Type: "string", Desc: "The full task prompt for the sub-agent: what to do, what not to touch, what to report", Required: true},
+			{Name: "name", Type: "string", Desc: "Short title for the sub-agent shown in the UI, e.g. \"Fix login test\"; defaults to the task's first line"},
 			{Name: "profile", Type: "string", Desc: "Saved sub-agent role: scout, worker, or reviewer (Settings > Sub-agent profiles)"},
 			{Name: "agent", Type: "string", Desc: "Agent instance to run (name or id from list_agents); defaults to the user's default"},
 			{Name: "model", Type: "string", Desc: "Model override for this task, e.g. claude-haiku-4-5-20251001 for mechanical work"},
+			{Name: "permission_mode", Type: "string", Desc: "Chat sub-agent's permission mode: plan, default, acceptEdits, auto, dontAsk or full-access; defaults to the profile's, else the parent thread's own. Never more permissive than the parent"},
 			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work; defaults to the caller's"},
-			{Name: "target", Type: "string", Desc: "tab (default; live terminal, result capture) or chat (structured). Ignored when spawning from a chat thread — that sub-agent is always a chat"},
+			{Name: "target", Type: "string", Desc: "tab (default; live terminal, result capture) or chat (structured). Ignored when spawning from a chat thread — that sub-agent is always a chat — unless detach is set"},
+			{Name: "detach", Type: "boolean", Desc: "From a chat thread: open a standalone top-level chat or tab (honours target) instead of a sub-agent of this thread. Use when the user asks for a new chat/tab of its own"},
 			{Name: "capture", Type: "boolean", Desc: "Capture the agent's final message for wait_result (tab target only, default true; a chat sub-agent is waited on with chat_id instead)"},
 			{Name: "parent_chat_id", Type: "integer", Desc: "Set automatically from BURROW_CHAT_ID — the thread this sub-agent belongs to"},
 			{Name: "caller_is_subagent", Type: "boolean", Desc: "Set automatically — a sub-agent may not spawn further sub-agents"},
@@ -113,7 +116,7 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "submit", Type: "boolean", Desc: "Press Enter after typing (default true)"},
 		},
 		Scope: ScopeLocal,
-		Fn:    func(ctx context.Context, p Params) (any, error) { return c.sendToTab(p) },
+		Fn:    func(ctx context.Context, p Params) (any, error) { return c.sendToTab(ctx, p) },
 	}, {
 		Name:    "chat_send",
 		Summary: "Send a follow-up message to a chat sub-agent and submit it",
@@ -128,6 +131,12 @@ func delegationVerbs(c *Core) []Verb {
 			}
 			if strings.TrimSpace(p.Str("text")) == "" {
 				return nil, fmt.Errorf("chat_send needs text")
+			}
+			if rt := c.deps.ChatRuntime; rt != nil {
+				if err := rt.SendToChat(p.Int("chat_id"), p.Str("text")); err != nil {
+					return nil, err
+				}
+				return map[string]any{"chat_id": p.Int("chat_id"), "sent": true}, nil
 			}
 			var out any
 			return out, c.ui(ctx, "chat_send", map[string]any{"chatId": p.Int("chat_id"), "text": p.Str("text")}, &out)
@@ -166,6 +175,10 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 		return nil, fmt.Errorf("sub-agent cannot spawn sub-agents")
 	}
 	parent := p.Int("parent_chat_id")
+	// detach: the caller wants a peer in the Sidebar, not a child of its thread.
+	if p.Bool("detach") {
+		parent = 0
+	}
 
 	target := p.Str("target")
 	if target == "" {
@@ -188,8 +201,23 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 		token = fmt.Sprintf("res%d", time.Now().UnixNano())
 	}
 
+	// A thread's sub-agent runs in the host's chat runtime: no view has to be
+	// mounted, so spawn works with the desktop closed. The host also records
+	// the spawn in the parent's transcript (its chat_stream).
+	if parent > 0 && c.deps.ChatRuntime != nil {
+		got, err := c.deps.ChatRuntime.SpawnSubagent(SpawnRequest{
+			Task: p.Str("task"), Profile: p.Str("profile"), Agent: p.Str("agent"),
+			Model: p.Str("model"), PermissionMode: p.Str("permission_mode"), Cwd: p.Str("cwd"), Name: p.Str("name"), ParentChatID: parent,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return SpawnResult{ChatID: got.ChatID, Target: "chat"}, nil
+	}
+
 	args := map[string]any{
 		"task":           p.Str("task"),
+		"name":           p.Str("name"),
 		"profile":        p.Str("profile"),
 		"agent":          p.Str("agent"),
 		"model":          p.Str("model"),
@@ -206,16 +234,89 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	return res, nil
 }
 
-func (c *Core) sendToTab(p Params) (any, error) {
+const (
+	pasteStart = "\x1b[200~"
+	pasteEnd   = "\x1b[201~"
+	readyPoll  = 100 * time.Millisecond
+	readyWait  = 10 * time.Second
+)
+
+// waitForTabTail requires three identical, non-empty terminal captures. A
+// phase alone cannot prove that a newly spawned TUI has mounted its composer.
+func (c *Core) waitForTabTail(ctx context.Context, id int64, changedFrom string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, readyWait)
+	defer cancel()
+	previous, stable := "", 0
+	for {
+		blocked := false
+		if c.deps.Phases != nil {
+			state, _ := c.deps.Phases.Phase(fmt.Sprintf("pty:%d", id))
+			if state == "running" || state == "waiting_approval" || state == "waiting_input" || state == "stale" || state == "failed" {
+				previous, stable = "", 0
+				blocked = true
+			}
+		}
+		if !blocked {
+			var tail struct {
+				Text string `json:"text"`
+			}
+			if err := c.ui(ctx, "tab_output", map[string]any{"ptyId": id, "lines": 12}, &tail); err != nil {
+				return "", fmt.Errorf("send_to_tab: read terminal: %w", err)
+			}
+			if strings.TrimSpace(tail.Text) != "" && tail.Text != changedFrom {
+				if tail.Text == previous {
+					stable++
+				} else {
+					previous, stable = tail.Text, 1
+				}
+				if stable >= 3 {
+					return tail.Text, nil
+				}
+			} else {
+				previous, stable = "", 0
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("send_to_tab: prompt/draft not ready: %w", ctx.Err())
+		case <-time.After(readyPoll):
+		}
+	}
+}
+
+func (c *Core) sendToTab(ctx context.Context, p Params) (any, error) {
 	if c.deps.PTY == nil {
 		return nil, fmt.Errorf("send_to_tab: no terminal backend")
 	}
+	id := p.Int("pty_id")
 	text := p.Str("text")
-	if p["submit"] == nil || p.Bool("submit") {
-		text += "\r"
+	if id <= 0 || strings.TrimSpace(text) == "" {
+		return nil, fmt.Errorf("send_to_tab: pty_id and non-empty text required")
 	}
-	if err := c.deps.PTY.WritePty(p.Str("pty_id"), text); err != nil {
+	if strings.ContainsAny(text, "\x1b\x00") {
+		return nil, fmt.Errorf("send_to_tab: text contains a terminal control byte")
+	}
+	before, err := c.waitForTabTail(ctx, id, "")
+	if err != nil {
+		return nil, err
+	}
+	// Newlines inside the paste are data to both Claude Code and Codex. Keep
+	// Enter outside the paste so it submits exactly once.
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	if strings.HasSuffix(text, "\\") {
+		// A trailing backslash can escape the separate submit Enter in Claude.
+		text += "\n"
+	}
+	if err := c.deps.PTY.WritePty(fmt.Sprint(id), pasteStart+text+pasteEnd); err != nil {
 		return nil, fmt.Errorf("send_to_tab: %w", err)
+	}
+	if p["submit"] == nil || p.Bool("submit") {
+		if _, err := c.waitForTabTail(ctx, id, before); err != nil {
+			return nil, err
+		}
+		if err := c.deps.PTY.WritePty(fmt.Sprint(id), "\r"); err != nil {
+			return nil, fmt.Errorf("send_to_tab: submit: %w", err)
+		}
 	}
 	return map[string]any{"sent": true}, nil
 }

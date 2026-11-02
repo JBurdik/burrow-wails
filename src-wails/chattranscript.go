@@ -177,7 +177,7 @@ func (t *chatTail) combined() []ChatMessage { return t.slice(0) }
 // transcript is the fold, not a subset of it).
 func isTurnBoundary(evType string) bool {
 	switch evType {
-	case EvtTurnCompleted, EvtTurnFailed, EvtSessionExited:
+	case EvtTurnCompleted, EvtTurnFailed, EvtSessionExited, EvtSessionReset:
 		return true
 	}
 	return false
@@ -231,6 +231,7 @@ func (a *App) foldChatLine(chatID string, ord int64, events []ProviderRuntimeEve
 		switch {
 		case len(t.st.messages) > before:
 			// A new bubble: the only changed row is the one just appended.
+			t.st.messages[before].At = time.Now().UnixMilli()
 			widen(len(t.adopted) + before)
 		case ev.Type == EvtToolCompleted, ev.Type == EvtMessagePatchUser,
 			strings.HasPrefix(ev.MessageID, "acp:"):

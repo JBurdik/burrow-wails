@@ -1,5 +1,5 @@
 <template>
-  <div class="welcome">
+  <div class="welcome surface-glow drop-zone">
     <template v-if="target">
       <h1 class="welcome-title">
         What should we build in
@@ -47,7 +47,14 @@
         <template #toolbar>
           <div class="composer-toolbar">
             <div class="composer-pillbar">
-              <ModelPicker :agent-id="selectedAgentId" :model-id="selectedModel" :cwd="target.path" @select="onModelSelect" />
+              <ModelPicker
+                :agent-id="selectedAgentId"
+                :model-id="selectedModel"
+                :cwd="target.path"
+                :settings="pickerSettings"
+                @select="onModelSelect"
+                @setting="onPickerSetting"
+              />
               <template v-if="isClaude">
                 <ComposerPill
                   :label="selectedEffortLabel"
@@ -85,7 +92,9 @@
               </template>
             </div>
             <div class="composer-sendgroup">
+              <ComposerStash ref="stashEl" v-model:text="text" v-model:images="pendingImages" />
               <ComposerPill
+                v-if="selectedAgent.providerId !== 'openai-compatible'"
                 :icon="launchMode === 'chat' ? PhChatCenteredText : PhTerminal"
                 :items="launchItems"
                 :active="launchMode"
@@ -135,16 +144,21 @@ import { getLastAcpSetting, setLastAcpSetting } from "@/lib/acpSettings";
 import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { visibleModelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
-import ModelPicker from "@/components/ModelPicker.vue";
+import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
+import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { stripPasteMarkers } from "@/lib/composerDom";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
+import ComposerStash from "@/components/composer/ComposerStash.vue";
+import { isStashShortcut } from "@/lib/promptStash";
 import ComposerPill, { type ComposerPillItem } from "@/components/composer/ComposerPill.vue";
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
-import { getProjectSettings } from "@/lib/projectSettings";
+import { getProjectSettings, worktreePath as projectWorktreePath } from "@/lib/projectSettings";
+import { parsePrRef } from "@/lib/prLinkInput";
+import { openPrInWorktree } from "@/lib/prCheckout";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
 
 const emit = defineEmits<{ (e: "open-folder"): void }>();
@@ -173,6 +187,20 @@ function cycleProvider() {
   onModelSelect(next.id, next.kind === "claude" ? getConfig<string>("chatLastUsedModel", visibleModelsFor("claude")[0].id) : "");
 }
 
+// Active workspace, else the most recently opened one, unless the user picked
+// a different one from the dropdown. Declared before useComposerCompletion:
+// that prefetches skills/files at setup, so its `cwd` getter reads `target`
+// immediately (a later `const` threw a TDZ ReferenceError on every load).
+const override = ref<Workspace | null>(null);
+const target = computed<Workspace | null>(
+  () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
+);
+function pick(repo: Workspace) { override.value = repo; }
+// Someone else switching the active project (⌘⇧O's picker, the Sidebar) wins
+// over a stale local pick — otherwise the composer kept showing whatever was
+// last chosen here.
+watch(() => store.active?.id, () => { override.value = null; });
+
 // @file / $skill completion + skill pills — the same engine the chat composer
 // uses (lib/composerCompletion.ts), so the two cannot drift.
 const completion = useComposerCompletion({
@@ -185,6 +213,7 @@ const { suggestions, activeIndex } = completion;
 function onComposerKeydown(e: KeyboardEvent) {
   // Completion first: Enter picks the highlighted suggestion instead of sending.
   if (completion.handleKeydown(e)) return;
+  if (isStashShortcut(e)) { e.preventDefault(); stashEl.value?.stash(); return; }
   if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
     e.preventDefault();
     submit();
@@ -192,6 +221,11 @@ function onComposerKeydown(e: KeyboardEvent) {
 }
 
 const pendingImages = ref<string[]>([]);
+const stashEl = ref<InstanceType<typeof ComposerStash>>();
+useFileDrop(() => inputEl.value?.element?.closest(".welcome"), {
+  image: (uri) => pendingImages.value.push(uri),
+  ref: (r) => { text.value = appendRef(text.value, r); nextTick(() => inputEl.value?.focus()); },
+});
 
 function attachImages(files: Iterable<File>) {
   for (const file of files) {
@@ -335,18 +369,6 @@ watch([isCodex, selectedAgentModels], () => {
   if (saved !== next) saveAcp("model", next);
 }, { immediate: true });
 
-// Active workspace, else the most recently opened one, unless the user picked
-// a different one from the dropdown.
-const override = ref<Workspace | null>(null);
-const target = computed<Workspace | null>(
-  () => override.value ?? store.active ?? [...store.topLevel].sort((a, b) => (b.last_opened ?? 0) - (a.last_opened ?? 0))[0] ?? null,
-);
-function pick(repo: Workspace) { override.value = repo; }
-// Someone else switching the active project (⌘⇧O's picker, the Sidebar) wins
-// over a stale local pick — otherwise the composer kept showing whatever was
-// last chosen here.
-watch(() => store.active?.id, () => { override.value = null; });
-
 // Exposed so App.vue can point the titlebar/right-panel git surfaces at
 // whatever project this screen is targeting — picking a project here doesn't
 // touch ws.active (sending the first message does, via store.open() below),
@@ -428,9 +450,7 @@ async function createBranch(name: string) {
 }
 
 function worktreePath(workspace: Workspace, branch: string): string {
-  const repo = workspace.path.split("/").filter(Boolean).pop() || "repo";
-  const root = getProjectSettings(workspace.parent_id ?? workspace.id).worktreesDir || ui.worktreesDir;
-  return `${root}/${repo}/${branch.replaceAll("/", "-")}`;
+  return projectWorktreePath(workspace, branch, ui.worktreesDir);
 }
 
 // git.branches (what the branch-switch dropdown lists) is otherwise only
@@ -467,6 +487,27 @@ const CODEX_PERM_MODES: ComposerPillItem[] = [
 const codexPermMode = computed(() => lastAcp("mode") ?? "auto");
 const codexPermLabel = computed(() => CODEX_PERM_MODES.find((m) => m.id === codexPermMode.value)?.label ?? "Auto");
 function pickCodexPermMode(id: string) { saveAcp("mode", id); }
+
+// The model picker's quick-settings row — the same state as the pills above.
+const pickerSettings = computed<PickerSetting[]>(() => {
+  if (isClaude.value) {
+    return [
+      { key: "effort", label: "Effort", items: CLAUDE_EFFORTS.map((o) => ({ id: o.id, label: o.label.replace(/ effort$/, "") })), active: selectedEffort.value },
+      { key: "plan", label: "Plan", toggle: true, items: [{ id: "default", label: "Off" }, { id: "plan", label: "On" }], active: selectedPermMode.value },
+      { key: "perm", label: "Permissions", items: permItems.value, active: selectedPermMode.value },
+    ];
+  }
+  if (!isCodex.value) return [];
+  const out: PickerSetting[] = [];
+  if (codexEfforts.value.length) out.push({ key: "effort", label: "Effort", items: codexEffortItems.value, active: codexEffort.value });
+  out.push({ key: "mode", label: "Permissions", items: CODEX_PERM_MODES, active: codexPermMode.value });
+  return out;
+});
+function onPickerSetting(key: string, value: string) {
+  if (key === "effort") (isClaude.value ? pickEffort : pickCodexEffort)(value);
+  else if (key === "perm" || key === "plan") pickPermMode(value);
+  else if (key === "mode") pickCodexPermMode(value);
+}
 
 // Chat UI (rich conversation) or a plain PTY running the agent's own CLI. The
 // prompt is the same either way — only the surface it lands in differs.
@@ -518,6 +559,13 @@ async function submit() {
   const prompt = stripPasteMarkers(rawPrompt);
   let t = target.value;
   if (!prompt || !t) return;
+  // The whole prompt is a PR URL or "#123": check it out into a worktree + chat
+  // (a draft prompt waits there) instead of sending it to an agent.
+  const prRef = parsePrRef(prompt, false);
+  if (prRef) {
+    text.value = "";
+    return void openPrInWorktree(t, prRef.number, prRef.url);
+  }
   if (worktreeMode.value === "new") {
     const branch = worktreeBranch.value.trim();
     if (!branch) return;
@@ -541,7 +589,7 @@ async function submit() {
     }).catch(() => {});
   }
   const images = [...pendingImages.value];
-  const terminalPrompt = launchMode.value === "terminal" && images.length > 0
+  const terminalPrompt = launchMode.value === "terminal" && selectedAgent.value.providerId !== "openai-compatible" && images.length > 0
     ? promptWithImagePaths(prompt, await persistTerminalImages(images))
     : prompt;
   // Snapshot the user's picks now — store.open(t) below can change `target`'s
@@ -554,7 +602,7 @@ async function submit() {
   const permMode = selectedPermMode.value;
   const wasOpen = store.opened.some((w) => w.id === t.id);
   store.open(t);
-  const open = launchMode.value === "terminal"
+  const open = launchMode.value === "terminal" && agent.providerId !== "openai-compatible"
     ? () => termTabs.add(t.id, buildTerminalCommand(
         { kind: agent.kind, command: binaryFor(agent), model, permMode },
         terminalPrompt,
@@ -567,7 +615,10 @@ async function submit() {
   worktreeBranch.value = "";
   // Leaving the composer for the tabs is the navigation that ends this screen —
   // it also covers the dashboard case the old explicit setMode("terminal") did.
-  ui.closeWelcome();
+  // Not for a chat: its tab exists only after create_chat's round trip, and
+  // leaving now showed the workspace's previous tab until then. Terminal's
+  // openClaudeChat navigates to the new tab itself.
+  if (launchMode.value === "terminal" && agent.providerId !== "openai-compatible") ui.closeWelcome();
 }
 </script>
 

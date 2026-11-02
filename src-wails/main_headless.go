@@ -39,6 +39,11 @@ func main() {
 	}
 
 	log.Printf("burrow server up (environment %s, hook port %d)", app.environmentID, app.hookPort)
+	// No Settings window here, so the log is the only place a pairing code can
+	// be read. Single use, 3 minutes; restart the server for a fresh one.
+	if c := app.RemotePairStatus().Code; c != "" {
+		log.Printf("phone pairing code: %s (expires in 3 minutes)", c)
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -47,3 +52,5 @@ func main() {
 	log.Printf("shutting down")
 	app.cleanupOnShutdown()
 }
+
+func watchFileDrop(context.Context) {}

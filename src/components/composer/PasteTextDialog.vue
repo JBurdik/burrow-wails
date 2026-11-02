@@ -3,7 +3,7 @@
     <div v-if="modelValue !== null" class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70" @click.self="close">
       <div
         class="flex max-h-[90vh] w-[90vw] max-w-[900px] flex-col overflow-hidden rounded-lg shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
-        style="background: var(--bg-panel, #18181c); border: 1px solid var(--border, rgba(255,255,255,0.08));"
+        style="background: var(--bg-dropdown, #18181c); border: 1px solid var(--border, rgba(255,255,255,0.08));"
       >
         <div class="flex shrink-0 items-center justify-between border-b px-3 py-2" style="border-color: var(--border, rgba(255,255,255,0.08));">
           <span class="text-sm" style="color: var(--text-secondary, rgba(255,255,255,0.6));">Pasted text</span>

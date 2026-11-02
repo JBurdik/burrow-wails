@@ -128,7 +128,7 @@ func vcsVerbs(c *Core) []Verb {
 			if base == "" {
 				base = "main"
 			}
-			return c.deps.Forge.Create(p.Str("cwd"), p.Str("title"), p.Str("body"), base, p.Str("head"))
+			return c.deps.Forge.Create(p.Str("cwd"), p.Str("title"), p.Str("body"), base, p.Str("head"), callerChat(p))
 		},
 	}, {
 		Name:    "pr_list",

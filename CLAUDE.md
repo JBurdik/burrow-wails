@@ -111,6 +111,166 @@ status **is** the phase (`pty_phase`, key `chat:<id>`).
 `parent_chat_id` makes a sub-agent belong to a thread: Sidebar filters on `!parentChatId`, RP's
 Sub-agents surface uses `childrenOf(sessions, activeChatId)`, `DeleteChat` cascades to children.
 Depth capped at **one level**, derived server-side (`chatIsSubagent`), never trusted from the request.
+A settled, seen, **collected** (`collected_at`, read-only on `Chat`) sub-agent is auto-archived after
+30 min by `chatAttention`'s desktop sweep (`subagentArchivable` in `chatTree.ts`) — client-side because
+`seenAt` is per-device. No Archived shelf for sub-agents: it just leaves the RP list.
+
+**Snooze** (`chatsnooze.go`): `chats.snoozed_until` (unix ms, 0 = none, read-only on the wire) keeps a chat
+in Settled until then (`settledFor`); `ChatSnooze` / `chat_snooze` sets or clears it, and `chatScheduleLoop`'s
+sweep wakes it — clears the column and the settle pin, bumps `last_activity_at`, emits `chat-snooze-woke`
+(`chatAttention` drops the receipt and notifies). Presets: `src/lib/snoozePresets.ts`.
+
+**Linked PR** (`chatpr.go`): `chats.pr_number` / `pr_url` / `pr_state` (open|draft|merged|closed, read-only on the
+wire; the forge is the workspace's). `forgePrCreate` auto-links a created PR to the calling chat (`pr_create` verb →
+`callerChat`) else to every unarchived chat on that workspace whose `branch` is the head or empty; `chat_link_pr`
+(`#N` / URL, refused if the URL is another repo's) / `chat_unlink_pr` from ThreadDetailsCard's PR row. Unlink writes a
+`chat_pr_dismissed` tombstone that auto-link respects and a manual link clears. No polling: `chat_pr_refresh` when the
+card opens, `chat_prs_refresh(cwd)` after a push from `git.push`; Sidebar rows show the state glyph.
+
+**PR → worktree + chat** (`ForgePrCheckout`, `src/lib/prCheckout.ts`): optional `forge.HeadFetcher` (`FetchRef(n)` —
+GitHub/Gitea `pull/N/head`, GitLab `merge-requests/N/head`; Azure has none, `ForgeStatus.canCheckout` hides the action).
+`forge_pr_checkout` fetches it from origin and passes the `FETCH_HEAD` sha to `CreateWorktree` (setup scripts run;
+`resolveWorktreeBase` leaves a full sha alone); the client names the branch after the PR head, creates the chat, links
+it (`#N`) and stores `Review / continue PR #N: <title>` as the composer draft — never sent. Doors: PullRequestsPanel
+detail header, Spotlight and the welcome composer on a pasted PR URL / `#123` (`parsePrRef` in `prLinkInput.ts`).
+Both unattended fetches (this PR head, `resolveWorktreeBase`'s `git fetch origin B`) run with `gitNoPromptEnv`
+(`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`): nobody sees a credential prompt, so it must fail, not hang.
+
+**Launch settings** (`effort`, `permission_mode`, `profile_id`, `append_system_prompt`, + `model`) are
+columns too, **read-only on the wire** (SaveChats never writes them, like `collected_at`); backfilled once
+from the per-device `config.json` keys (`chat_migrations` marker). `resolveClaudeLaunch` (`chatlaunch.go`)
+resolves them + profile (`providers`) + project `claude_config_dir` into Claude start params at every start
+(plan: `docs/plans/006-chat-runtime.md`).
+
+### Chat runtime (`src-wails/chatruntime.go`, `chatspawn.go`, `src/lib/chatRuntime.ts`)
+
+Every chat's process is Go's, keyed by chat id — **all three transports** (claude-cli, Codex app-server,
+generic ACP); no mounted view needed (`spawn`, the phone, `chat_send` all work with the desktop closed).
+`chat_send` **ensures the process itself** (start from the row + resume `claude_session_id` — Go captures it
+from Claude `system/init` and from the ACP/Codex handshake; covers a send after `ReapIdle`), then sends; a
+per-chat lock makes concurrent ensures one start. Codex/ACP resolve the row's `agent_kind` as a provider
+instance (`resolveRPCLaunch`: binary, `transportArgs`, env, project `env_file` / `claude_config_dir`) and
+then push the row's model / effort / permission mode into the fresh session — the **mode fails closed**
+(Codex starts every thread in Auto). `chat_restart` / `chat_interrupt` (Claude
+`interrupt` control request; Codex `turn/interrupt` + a 5 s still-running check; ACP and every refusal →
+restart) / `chat_clear` (wipe `chat_messages` + `chat_stream` +
+session id) all publish **`session.reset`** (stream kind `chat-runtime`, `{cleared}` for clear); the
+`chatSession` reducer — same branch as `session.exited` — drops every pending request, closes the partial,
+clears busy. **Steer** (`chat_steer`, `chatsteer.go`): a queued follow-up delivered INTO the running turn —
+Claude = a plain stdin user line (the CLI picks it up at the next tool boundary, same turn, one `result`),
+Codex = `turn/steer {expectedTurnId}`; generic ACP refuses. Only a `running` phase is steerable (a user line
+would repaint a pending approval as running); a refusal leaves the message queued. **Side chat** (`chat_side_create`, `chatside.go`): `kind='side'`
+child that **forks the parent's current session** on first start (Claude `--fork-session`, `resume_at="@latest"`;
+Codex `thread/fork`; ACP refused) — parent untouched, not a sub-agent (`collect_results` / Sub-agents skip it).
+**Review** (`review_changes`, `review.go`): new chat reviewing the workspace diff — Codex native `review/start`, else a
+prompt. **Recap** (`chatrecap.go`): one-line `chats.recap` (read-only on the wire) via textgen after a live completed
+turn, ≤ 1 per 2 min, Settings → General. **Transcript notes** (`publishSurfaceNote`): Go-written `chat-note` rows with a
+`surface` (plan, changed files, Claude background tasks) that open the RP surface; live only — replays never derive
+them again. Full rationale: `docs/architecture.md` → "Steer, side chats, review, recaps, transcript notes". **Rewind / fork** (`chatrewind.go`, Claude only — Codex/ACP refuse and the UI hides them):
+`chat_rewind(id, index, text)` cuts the transcript before a user message (folded_ord jumps past every recorded
+line, ords keep counting) and `chat_fork` copies it through that turn into a new row with the parent's session;
+both park the cut's Claude record uuid (`ChatMessage.uuid`, stamped by the fold) in `chats.resume_at`, and the
+next start adds the hidden `--resume-session-at <uuid> --fork-session` — the resumed session file is never
+modified. The forked session's id (system/init) clears `resume_at`. `chat_set_launch_settings(id, patch)` writes the row and applies live — Claude via confirmed
+`set_model` / `set_permission_mode` control requests, Codex/ACP via `AcpSetConfig` / `AcpSetMode` — else
+restarts (`row_only` = record only). Process starters: `chatProcs` (`agentproc.Manager` / test fake) and
+`App.rpcStarter` (nil = real `CodexStart`/`AcpStart`; tests register a session over a buffer).
+`claude_start`/`claude_send`/`acp_start`/`codex_start`/`acp_send`/`codex_send`/`codex_interrupt` are in
+`remoteDenied`; `remote_create_chat` only creates the row (Claude and Codex). **An ACP/Codex turn ends on a
+Go-emitted `{"_burrow":"turn"[,"error"]}` marker** (→ `turn.completed` / `turn.failed`), written after the
+response to the runtime's own `session/prompt` or Codex's terminal turn notification — the rpc id never
+leaves Go, so there is no client-side prompt correlation any more.
+
+**Auto-sleep** (`chatsleep.go`): a sweep (1 min) stops a live chat process whose phase is settled
+(idle/done/failed/stale, no open ACP turn) and that had no activity for `uiPrefs.chatAutoSleepMinutes`
+(Settings → General, default 60, 0 = off; read fresh from `config.json`). Activity = a send, a start,
+any streamed line, or `chat_mark_active` — `chatAttention` pings it every minute for each chat on screen
+while the window has focus, which is how "never sleep a watched chat" reaches Go. The row gets
+`slept_at` (read-only on the wire; moon in Sidebar + composer); the next `chat_send` resumes and clears
+it — opening a chat does not wake it. A **manual** settle (`settle()` in `claudeChats.ts` → `chat_sleep`) sleeps the chat immediately through the same `sleepChat` (same phase/open-turn guards, no idle window; unsettle does not wake it). It replaced `agentproc.ReapIdle`, which reaped on stdout silence
+and so killed a CLI blocked on a permission prompt. PTY agent tabs are **not** slept: killing one loses the
+TUI, and restoring it means relaunching `claude --resume <id>` into the same tab (not built).
+
+**Worktree cleanup** (`worktreecleanup.go`): an hourly ticker removes worktrees by opt-in rules read fresh from
+`uiPrefs` (Settings → General): `worktreeCleanupMerged` (pushed branch is an ancestor of `origin/<default>` after a
+fetch, or the forge's PR for it merged and every commit is on a remote — also `git branch -D`s it) and
+`worktreeCleanupInactive` + `worktreeCleanupInactiveDays` (default 14; no unarchived chats, no tab rows, no activity).
+`worktreeProtected` beats every rule: dirty (incl. untracked) trees, a live chat process, a tab with a live PTY, the
+active workspace (`burrow.open_workspaces.activeId`), a pinned chat (`sidebarPinnedChats`), < 1 h old; an unreadable
+config skips the run. Pure verdict `worktreeCleanupVerdict` is table-tested. Removal = `removeWorktree` (non-forced,
+workspace lock) + `DeleteWorkspace`; branch kept unless merged; `worktrees-cleaned` → summary toast. Settings'
+**Preview** (`worktree_cleanup_preview`) evaluates both rules even while off; "Remove N" (`worktree_cleanup_now(ids)`)
+re-checks each id before removing.
+
+**Checkpoints** (`checkpoints.go`): a snapshot is `add -A` + `write-tree` into a throwaway `GIT_INDEX_FILE` seeded
+from a **copy of the real index** (its stat cache is what keeps it fast). The copy **keeps the real index's mtime** —
+git's racy-clean check only distrusts a stat-clean entry that is not older than the index file, so a fresh mtime made
+a same-size, same-second edit look unchanged and the snapshot kept the old content
+(`TestSnapshotTreeSeesSameSizeSameSecondEdit`).
+
+**Sub-agent notices** (`chatsubagentnotice.go`): a sub-agent (`parent_chat_id`, not `kind='side'`) whose
+turn ends (done/failed) or that enters `waiting_*` gets a row in `subagent_notices`, keyed per (child, turn /
+blocked episode) — recorded in `emitChatLine` on the phase transition, delivered by the 15 s schedule sweep
+(ahead of `chat_schedules`) into the **parent** via `ChatSend` only once the parent `chatSettled`. A completion
+marks the child collected unless cut at 4000 chars. A notice goes ahead of the user's queued follow-ups
+(`deliveryOrder`, below). Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
+
+**Queued follow-ups are Go's** (`chatqueue.go`, `chatdelivery.go`): a message typed while a turn runs goes to
+SQLite `chat_queue` via `chat_queue_add` (`_list` / `_update` / `_remove` / `_reorder`; event
+`chat-queue-changed` = the chat's whole queue). `chatSession` only mirrors it — **no client drain**, so it
+drains with the desktop closed or the phone asleep; legacy `queued` transcript rows are migrated through
+`chat_queue_add` on hydrate. Every Go-initiated send (notices, queue, schedules) goes through one pass,
+`deliverPending`: pure `deliveryOrder` (notice → queue head → schedule), one item per settled chat per pass,
+run by the 15 s sweep **and** kicked 300 ms after a turn settles (`emitChatLine`) or an item is queued into a
+settled chat. Production send is `chatSendSettled` — re-checks `chatSettled` **under the chat lock**, so a
+drain racing the user's own mid-start `ChatSend` returns `errChatBusy` instead of steering. An item is claimed
+by being **deleted in the read's transaction**; a failed send re-inserts it at the head under its old id
+(5 failures park the head until edited). Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
+
+**Usage-limit resume** (`chatlimit.go`): the normalizer marks a turn that failed on a usage / rate limit
+(`turn.failed{usageLimit}` — Claude's `is_error` result with the limit text or a 429, which used to read as
+`turn.completed`; Codex's "usage limit" turn error) and Claude's rejected `rate_limit_event` as a `usage.limit`
+hint. `emitChatLine` parses the reset **live** (`usageLimitReset`: `|<epoch>`, "resets 3pm (tz)", "try again
+at …", "reset after 1h 2m"; else the hint; else the exhausted `plan_usage` window, async) into
+`chats.limit_reset_at` — never one already past at failure time (would loop). AgentChat's banner: [Resume
+automatically] → `chat_limit_arm` (`limit_resume_at`), [Dismiss] → `chat_limit_dismiss`; both columns read-only
+on the wire, cleared by any running turn. The delivery pass sends "Continue where you left off." once due and
+settled (`deliverLimitResume`, after notices, before the queue), claiming the row and stamping
+`limit_resumed_key` = chat:failedAt:resetAt so an episode resumes once; a still-limited chat gets **no**
+deliveries at all (each would fail on the limit).
+
+**Self-management verbs** (`internal/control/verbs_self.go`, local-only, default to the caller's chat):
+`schedule` / `schedule_list` / `schedule_cancel` (`chatschedule.go`) — SQLite `chat_schedules`, a 15 s sweep
+delivers due items via `ChatSend` **only once the chat has settled** (`chatSettled`: phase not in flight, no
+open Codex/ACP turn) — `ChatSend` into a running turn is a steer, not a queue — one per chat per sweep, 5
+retries; `DeleteChat` drops a chat's items. `move_to_worktree` / `leave_worktree` (`chatmove.go`) rewrite
+`chats.workspace_id`/`branch` — **read-only to `SaveChats`** since then (a client saves per streamed message
+and would move it back) — and flag `chatRT.moved`; the next ensure **after the turn settles**
+(`restartIfMoved`) stops the old-cwd process so the start resumes in the new cwd. Claude's session file is
+symlinked into `<config>/projects/<new-cwd-slug>/` (2.1.311 resumes by id from any cwd and appends to the
+original; older CLIs / another `CLAUDE_CONFIG_DIR` look only there). Codex resumes with the new cwd; generic
+ACP refuses.
+
+**Recurring schedules** (`internal/control/recurrence.go`, `chatschedule.go`): a `chat_schedules` row may carry a
+rule — `kind` once | interval (`every_min` ≥ 15) | weekly (`weekdays` + local `time_of_day`) — plus `paused`,
+`last_run_at` and a **new-chat target** (`new_chat` + `workspace_id` + `agent`: each run creates a chat titled
+`<name> · <date>` and sends into it, held back by no turn). A run moves `due_at` to the one pure
+`control.NextDue(rule, now, loc)` (table-tested: DST, weekday wrap) — computed from the run, **not** the missed slot,
+so an app closed through N slots fires once on launch; a one-shot is deleted as before; 5 failed attempts skip to the
+next slot. Resume skips slots missed while paused; run-now = `due_at = now` + a delivery kick (refused while paused).
+Verbs: `schedule --every / --weekly / --new-chat`, `schedule_pause` / `_resume` / `_run_now`; wire:
+`schedule_list_all` / `schedule_save` / `schedule_set_paused` / `schedule_run_now` (Settings → Scheduled,
+`ScheduledTasksPanel.vue`).
+
+**`spawn` of a thread's sub-agent runs in Go** (`spawnSubagent`, `control.Deps.ChatRuntime`): profile
+(defaults duplicated from `subagentProfiles.ts`, test-guarded) → agent (arg / profile / parent's / default
+chat agent / first enabled) → row with launch settings (arg / profile / the parent's **when it runs on the
+same transport**) → `ChatSend(task)`, every transport. The parent's transcript row is Go's: a `chat-note`
+row (`subagentChatId`/`subagentAgent`) in the **parent's** `chat_stream` (`publishSubagentRow`), projected as
+`message.note`. The Right Panel's button reaches the same code via `spawn_subagent_chat`. Top-level chat and
+tab spawns stay UI. There is no hidden host mounting sub-agents any more: a child's view mounts only when
+the Right Panel shows it, and a permission request from a chat with **no session in the registry** is
+toasted by `chatAttention` off its `waiting_*` phase.
 
 Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatTurns`,
 `chatPermissionRules`. Phone-created chats are titled `Chat N (phone)`.
@@ -126,8 +286,13 @@ for the drain — and `release()`s on unmount; the last view's hooks stay instal
 down when **idle** (`pendingRequests` — a typed `PendingRequest` union — empty and not busy; every answer
 goes through the one `respond(PendingAnswer)` door, which also closes a generic ACP prompt on write since
 only Codex sends `serverRequest/resolved` — a running turn or pending permission keeps
-streaming behind an unmounted view). That's what lets chat leaves render with `v-if`. Deps (`invoke`,
-`listen`, host) are injectable: `chatSession.test.ts` drives the reducers through fake listeners.
+streaming behind an unmounted view). That's what lets chat leaves render with `v-if`. **The interface is
+closed**: `ChatSession` hands every ref back `Readonly` (writable `SessionState` is module-private) plus
+intents — **`send` / `restart` / `interrupt` / `clear`** (forward to `chat_*`; the one door for AgentChat,
+the queue drain via `ChatViewHooks.send`), `notice`, `suppressDoneToast`, `requestContextReport`,
+`hydrate`, … — so nothing outside can break the idle invariant. The turn clock
+(`turnStartedAt` → `turnMs`) is the session's too. Deps (`invoke`, `listen`, host) are injectable:
+`chatSession.test.ts` drives it **only** through that interface and fake listeners.
 
 Every agent line is appended to SQLite `chat_stream(chat_id, ord, kind, line)` *before* it is emitted;
 `chat_stream_state.folded_ord` records how far the frontend folded it into `chat_messages`, so a trim
@@ -142,7 +307,7 @@ Claude stream-json and ACP JSON-RPC are parsed in **one** place (Go) and re-emit
 `AgentChat.onEvents` for scroll/notify/accounting); `LoadChatEventsSince` replays the log as events.
 
 **Deliberately still on the raw channel** (UI decisions, not transcript): the control/permission
-protocol, Claude `system/init`, the ACP handshake, `serverRequest/resolved`, `acpPromptRpcId`.
+protocol, Claude `system/init`, the ACP handshake, selector replies, `serverRequest/resolved`.
 `chat_messages` is still written by the frontend.
 
 ### PTY / Agent phase (`src-wails/internal/agentphase`, `phasestore.go`, `phasepoll.go`)
@@ -161,14 +326,24 @@ a hard requirement of remote access. `XTerm.vue` has no status emits left; it on
   after `s.mu` is released) so the loser can't emit last. `CreatePty` `Forget`s a phase the daemon
   doesn't list — **PTY ids are reused**, so without that a fresh tab wore the old one's review dot.
   `PhaseStore.Apply` is the **only** writer of `terminal_tabs.status`.
-- **Three inputs:** (1) global persistent hooks — `installStatusHooks` merges a hook into each agent's
-  own global config non-destructively; `burrow hook` maps `hook_event_name` → state and POSTs to the
+- **Three inputs:** (1) persistent hooks — Claude's live in the burrow plugin's `hooks/hooks.json`
+  (`hooks` key, PTY-scoped via `CLAUDE_CODE_PLUGIN_DIRS`, so chats and non-Burrow sessions never run
+  them); `installStatusHooks` still merges a hook into Codex's global config non-destructively and
+  writes Copilot's file, and for Claude only strips the entries older versions merged into
+  `settings.json` (migration, keep ≥ 1 release); `burrow hook` maps `hook_event_name` → state and POSTs to the
   loopback hook server (port from `<BURROW_HOME_DIR>/hook.port`); `hookEvent()` applies the phase. The
   legacy `pty-hook-{id}` event is gone. (2) foreground poll (`phasepoll.go`, 2 s, server-side) — an
   agent being foreground is **never** busy; only the shell branch may clear `is_agent`; three empty
   reads + daemon not listing the PTY ⇒ `stale`. (3) the interrupt keystroke — `App.WritePty` applies
   `agentphase.Interrupt` on a payload that is exactly one byte of `0x03`/`0x1b` (length is what
-  separates a cancel from an arrow key); guarded on `cur.InFlight()`.
+  separates a cancel from an arrow key); guarded on `cur.InFlight()`. **Plus a fourth, claude-only
+  source inside the poll** (`claudestatus.go`): when the foreground is `claude`, the poll reads Claude's
+  own `<CLAUDE_CONFIG_DIR|~/.claude>/sessions/<pid>.json` (pid = foreground pgid, from the daemon's
+  `foreground` reply `Pid`; `kind:"interactive"`, `pid` must match) and applies `busy`→`HookRunning`,
+  `waiting`(+`waitingFor:"permission prompt"`)→`HookPermission`/else `HookWaiting`, `idle`/`shell`→
+  `StatusIdle` (settles an *in-flight* turn to `done`, no-op otherwise). **On change only** (a per-pty
+  baseline), so an unchanged file never overwrites a fresher hook. Absent/foreign/unknown file, pid 0
+  (old daemon) or an old CLI ⇒ exactly the previous behaviour.
 - **Chats feed the same store** via `chatPhaseEvent()` in `providerruntime.go`, applied in
   `emitChatLine`.
 
@@ -186,8 +361,8 @@ trailing turn end on an idle chat is dropped), a generic ACP turn settles on its
 response. `src/stores/chatAttention.ts` (instantiated in `App.vue`) is the **only writer of
 `session.status`**: `displayStatus(phase-chat, seenAt, watching)`, receipts in `burrow.seenAt` as
 `chat:<id>`, watching = a count held by the mounted `AgentChat` / RP sub-agent detail while the window
-has focus. There is no chat state machine any more. The phone does the same with its own receipt
-(`burrow.chatSeenAt.mobile`). A permission request fires a toast + (unfocused) a native notification
+has focus. There is no chat state machine any more. A paired phone runs this same store with its
+own `localStorage` receipts. A permission request fires a toast + (unfocused) a native notification
 via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
 list, distinguished only by icon.
 
@@ -215,7 +390,7 @@ request-dir transport.
 normalised, `cwd` always riding along as `$BURROW_CWD`. Only `curl` + `sed`, so it works from Claude's
 Bash tool and from hooks. Non-verb subcommands (status plumbing, deliberately independent of the
 control API): `burrow status <state>` (**POSTs to `/hook`** — serving only `/status` silently killed
-every status dot), `burrow hook`, `burrow notify`, `burrow capture <token>` (writes
+every status dot), `burrow hook`, `burrow approve`, `burrow notify`, `burrow capture <token>` (writes
 `<session>/<token>.result` + `.done`, so results survive a restart).
 
 **`burrow-mcp`** (`cmd/burrow-mcp`) is the same verbs as MCP tools — `/v1/_verbs` → JSON schemas,
@@ -261,15 +436,19 @@ that reshape args.
 
 ### The shell stream: `seq`, the ring, resume (`src-wails/shellstream.go` + `shellsnapshot.go`)
 
-`busEmit` **numbers** every event and keeps the last **512** in a ring (`shellRingSize`). `welcome`
+`busEmit` **numbers** every event and keeps the last **512** in a ring (`shellRingSize`); numbering and
+fan-out share one lock (`busOrderMu`) — two emitters otherwise deliver seq N+1 before N and the client's
+high-water dedup drops N for good. `welcome`
 carries `currentSeq()`; a client sends `{t:"resume", since}` and gets deltas or a `resync`. A process
 restart always means `resync` (`since > shellSeq`). **No per-client state on the server** — the ring is
 shared and `resumeSince` is a pure function over it.
 
 **Not ringed** (`notRingable` in `bus.go`): `pty-data-*` and the chat channels — both high-volume *and*
 replayable from their own durable logs. One streaming turn would churn all 512 slots and make every
-reconnect a `resync`. Consequence: a dropped connection still loses **PTY bytes** (a hole in
-scrollback); phases, workspace and chat state survive.
+reconnect a `resync`. PTY bytes resume by **byte offset** instead: the daemon numbers each PTY's
+output and keeps the last 1 MiB (`internal/ptycore/ring.go`); `pty-data-<id>` is `{off, data}`;
+`src/runtime/ptyStream.ts` dedupes by offset and, on reconnect or a hole, fetches exactly the gap via
+`pty_since` (never a full replay). Gap past the ring / old daemon ⇒ the hole stays, as before.
 
 **`shell_snapshot`** (`scopeOrchRead`) is the first paint in one round trip: workspaces, tabs for
 *every* workspace, all phases, chats, and the `seq` it's current as of — **`seq` read first, before any
@@ -316,30 +495,57 @@ role would need.
 
 ### The phone (`src/mobile/` + `src/runtime/remoteEndpoint.ts`)
 
-**The PWA is a client of the same socket, command table and event names as the desktop.** Only the
-ticket source differs; `core.ts`'s `activeTransport()` picks Wails runtime → desktop, stored
-credentials → remote, neither → a `no endpoint` throw. Adding the phone added **no** second data path,
-so `commandSurface.test.ts` covers `src/mobile` too.
+**The phone runs the desktop app.** A paired browser (phone, iPad) boots the same `App.vue`, Pinia stores,
+socket, command table and event names as the desktop; only the ticket source differs (`core.ts`'s
+`activeTransport()`: Wails runtime → desktop, stored credentials → remote, neither → a `no endpoint` throw).
+There is no second data path and no mobile store. `src/mobile/` is only `main.ts` (credentials → import the
+desktop app, else `ConnectView.vue`, the pairing screen; also a boot-error screen, since a phone has no
+devtools) and `ConnectView.vue`.
+
+Phone width (`compact` in `src/lib/viewport.ts`, ≤ 767 px) switches `App.vue` to the phone shell
+(`src/components/phone/`: bottom nav, Inbox / Project / More screens, sidebar as the Threads screen); an iPad
+gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the browser's own
+`localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's; read receipts (`burrow.seenAt`)
+are per device the same way.
+
+**Release channel is decided by the serving binary, not the bundle** (`src-wails/channel.go`): `buildChannel` is
+`dev` under `wails dev` (`channel_dev.go`, the `dev` build tag) and `beta` via `just build-beta`'s
+`-ldflags -X main.buildChannel=beta`. `handleAssets` rewrites `mobile.html` (`data-channel`, title, icons) and the
+manifest (name, `id`, icons → `public/icons/<channel>/`), so a beta/dev PWA installs as its own app with its own
+icon; `releaseChannel.ts` reads `data-channel` for the phone header badge. Each channel gets its own HTTP port
+(stable 37892, beta 37893, dev 37894; `BURROW_HTTP_PORT` overrides) so they can serve side by side.
 
 Credentials live in `localStorage`, not `@/lib/config` — config reads through `invoke`, which needs the
 transport, which needs the credentials (a cycle that deadlocks on first load). A **401 from
-`/v2/ws-ticket` clears them** and throws `RevokedError`; a 500 does not.
+`/v2/ws-ticket` clears them** and throws `RevokedError` (`main.ts` then reloads into pairing); a 500 does not.
 
-Gone from `src/mobile/store.ts` because the shared runtime does it: its own websocket client and
-reconnect loop; its own status derivation (dots now come from `phase-pty:{id}` through `displayStatus`,
-with a per-**device** receipt under `burrow.seenAt.mobile`); an N+1 first paint (one `shell_snapshot`
-replaced `list_workspaces` + one `list_terminal_tabs` per workspace). `transport.onState` is what the
-dashboard reads.
+**Several machines, one active** (`remoteEndpoint.ts`): `burrow.remote.environments` is a catalog
+`[{environment_id, name, baseUrl, deviceToken, addedAt, lastConnectedAt}]` keyed by `/v2/pair`'s
+`environment_id` (re-pairing the same Mac refreshes its row), `burrow.remote.activeEnvironment` picks one;
+the old single `burrow.remote.credentials` slot is migrated on first read and deleted. `loadRemoteCredentials`
+= the active entry, so every caller stayed as it was. No simultaneous connections: `switchEnvironment(id|null)`
+(`core.ts`) closes the remote transport, sets the active id and **reloads** — stores, listeners and the shell
+snapshot all assume one backend. A 401 forgets **only that** machine and clears the active pointer, so the
+phone reloads into `ConnectView`, which lists saved machines above the pair form (editable URL — `/v2/pair` and
+`/v2/ws-ticket` answer CORS, `/v2/ws` takes any origin). A scanned `#pair=` QR always pairs, i.e. **adds**.
+Phone UI: More → Connection; desktop: Settings → Remote access → Connect to another Burrow (the drive-remote
+switch applies to the selected machine). The catalog is per **origin** (localStorage): a PWA opened from
+another Mac's URL has its own.
 
-Still mobile-specific: the view stack, the `WorkspaceGroup` shape, and the **chat permission channel**
-(still raw — the control/permission protocol is deliberately not in the neutral vocabulary). `store.ts`
-was **not** deleted and mobile was **not** moved onto the desktop's Pinia stores: no gain in capability,
-different shape and lifetime. `DiffView.vue` completes the PWA v1 surface, read-only (untracked files
-diff against `/dev/null`).
 
 **The v1 surface is gone**: `/ws`, `/rpc/`, `/pair`, `Broadcast`, `installWSSink`, and the shared
 `http.token` — **deleted from disk at startup** rather than migrated (a token with no scopes, identity
 or revocation can't be translated honestly). `TestV1SurfaceIsGone` requires a **404**, not a 401.
+
+**Web Push** (`webpush.go`, `push.go`, `pushtrigger.go`, `public/sw.js`): straight to the browser's push
+service, no relay; stdlib RFC 8291 aes128gcm + VAPID ES256 (RFC vector in `webpush_test.go`), key in
+`<app-data>/vapid.pem` (0600, never rotated — rotating orphans every subscription). `push_subscribe` /
+`push_unsubscribe` act as the **calling** device: `remotews.go` overwrites the `_device` arg (`deviceArg`) with
+the ticket's device id, so a client can't name another; revoke deletes a device's rows, a 404/410 deletes that
+row. Decided in Go on `PhaseStore.onChange` (now `prev, next`): chats + PTY tabs entering
+`waiting_approval`/`waiting_input`, a chat's `done` (not sub-agents, not archived), snooze wake. `pushGate`:
+none while `chat_mark_active` < 90 s ago, ≤ 1 per key per 30 s; tag/Topic per chat/tab. Chat deep link is
+`#/ws/<ws>?chat=<id>` (chat tab ids are client-side). Phone toggle: More screen. PTY tabs have no watch signal.
 
 **No manual GUI verification of any of this has been done.** Try first: pair a phone; kill the socket
 mid-turn; revoke a device; heavy terminal output; ESC mid-turn.
@@ -356,8 +562,40 @@ Manager thread per project as an ordinary chat. Consequence in `spawn`: a call w
 **always** forces `target: "chat"` — the exemption for a control chat is gone with it.
 
 **Agent docs install** (`agentdocs.go`, at startup): Claude/Copilot get the `burrow` skill
-(`agentdocs/skills/burrow/SKILL.md`) plus an always-in-context rule in `~/.claude/CLAUDE.md`; Codex gets
-the same content as a managed `<!-- BURROW:BEGIN/END -->` block in `~/.codex/AGENTS.md`.
+(`agentdocs/skills/burrow/SKILL.md`); Codex gets the same content as a managed `<!-- BURROW:BEGIN/END -->`
+block in `~/.codex/AGENTS.md`. The Claude delegation rule (`agentdocs/claude-rule.md`) is **no longer** in
+`~/.claude/CLAUDE.md` (startup removes the old block): chats get it via `--append-system-prompt`, PTY tabs
+via the **burrow Claude Code mod**.
+
+**The burrow mod** (`agentdocs/mod/burrow`, written to `<app-data>/claude-mod/burrow`, loaded through
+`CLAUDE_CODE_PLUGIN_DIRS` in every PTY; needs Claude Code ≥ 2.1.287). Only in a PTY (`BURROW_PTY_ID`):
+`tool.call` reports running/waiting in-process and sets `BURROW_MOD=1`, so `burrow hook` skips
+`PreToolUse`/`PostToolUse` (no sh+curl per tool call); `prompt.submit` attaches the rule as `context`
+once per session. **Load-bearing:** on a Team/Enterprise login the built-in `cc-plugin-sec-default`
+guard bypasses user-tier mods on `classic.*` and `prompt.compose/context/section` — so no turn-end,
+permission or system-prompt hooks in the mod's `modules`; those are classic `hooks` entries in the
+same `hooks/hooks.json` (the `cc-plugin-sec-default` guard governs mods, not settings hooks), each
+running `burrow hook`. A second `PermissionRequest` group in that array runs `burrow approve` (below). Tests:
+`claude plugin test src-wails/agentdocs/mod/burrow`.
+
+### Answerable PTY permission prompts (`src-wails/ptypermissions.go`, `bin/burrow approve`)
+
+A Claude tab's tool-permission prompt can be answered from Burrow (toast with Allow / Always / Deny **plus**
+a banner above that tab's xterm showing the oldest request and a `+N` counter) while the TUI prompt stays
+up. The second `PermissionRequest` hook (`burrow approve`, `timeout: 86400`) long-polls loopback
+`POST /v1/permission_request?pty_id=` (control.token auth); `permRegistry` parks it, keyed by
+`pty_id` + hash(`tool_name`,`tool_input`) (the payload has no `tool_use_id`), and publishes the pty's whole
+pending list as `pty-permissions` (state, not delta). **Never falls back to allow:** every path that is not an
+explicit answer — app down, any error, hook disconnect, phase leaving `waiting_approval`, `AskUserQuestion` /
+`ExitPlanMode` (out of v1, TUI decides) — is empty stdout + exit 0 = TUI decides. Answers: `allow`, `deny`
+(+message), `always` = `updatedPermissions` `addRules` with `destination: "session"` (Claude's first `addRules`
+suggestion re-pointed at the session, else the exact Bash command / the tool). `chatPermissionRules` do **not**
+apply to PTY tabs. Commands: `list_pty_permissions` (read), `answer_pty_permission` (operate) in `remoteAllowed`.
+**Load-bearing (spiked, claude 2.1.291): Claude does NOT kill the hook when the user answers in the TUI** — it
+lingers until Claude exits (then SIGTERM). So a request answered in the terminal is cleared by the **phase**
+leaving `waiting_approval` (`PhaseStore.onChange` → `permRegistry.phaseChanged`; before `waiting_approval` was
+ever observed only a turn end closes it, because the status hook races the approve hook), not by the
+disconnect.
 
 ### Backend (`src-wails/*.go`, bound as `App` methods)
 
@@ -369,6 +607,7 @@ One file per subsystem:
 | `db.go` | `workspaces` + `terminal_tabs`; `<app-data>/workspaces.db`, WAL + `busy_timeout(5000)` (the chat-stream writer appends from its own goroutine) |
 | `chats.go` | `chats` table, `ListChats`/`CreateChat`/`SaveChats`/`DeleteChat`, `chats-changed`, the one-time migration out of `config.json` |
 | `chatstore.go` | `chat_messages`, `SaveChatMessages(chatID, json, foldedOrd)` / `LoadChatMessages` |
+| `chatsearch.go` | `chat_fts` (FTS5) over user/assistant `$.text` of `chat_messages`, kept in sync by **triggers** (every writer — fold upsert, replace-all, prune, `DeleteChat` — is covered without remembering to); backfilled once when the table is first created; `SearchChats(query, limit)` → Spotlight's "IN CHATS". Triggers are why the DSN has `_txlock=immediate`: a deferred tx reads FTS5 shadow tables before taking the write lock, and SQLite skips `busy_timeout` for that upgrade |
 | `chatstream.go` | append-only `chat_stream` + `chat_stream_state`; `emitChatLine` is the single door for agent output (persist, then emit) |
 | `git.go` | `RunGit` wraps the system git binary |
 | `forge.go`, `internal/forge/` | Provider-neutral PR operations over each forge's own CLI (`gh`, `glab`, `az repos`, `tea`). `internal/forge` owns the `Forge` interface, one normalized `PullRequest` struct and the four adapters; it takes an injected `Runner` and never imports `main`, so every adapter is tested against captured JSON with no network. The provider is detected from the remote URL, with a per-repo override (`workspaces.forge_provider`) that a worktree inherits by climbing `parent_id`. Optional fields ARE the capability model: a provider that cannot supply checks leaves them empty and the panel hides that section, rather than the app keeping a capability registry that can drift |
@@ -377,7 +616,7 @@ One file per subsystem:
 | `bus.go` | `busEmit` is the single door for **every** client-visible event; numbers it into the ring unless `notRingable`; exactly **one** subscriber (`/v2/ws`'s per-connection subscription) |
 | `phasestore.go`, `phasepoll.go`, `internal/agentphase` | agent phase (above) |
 | `environment.go` | `environmentID()` — random id in `<app-data>/environment.json`; client records key off this, not IP/hostname |
-| `endpoints.go`, `endpoints_tailscale.go` | `EndpointProvider` registry, `selectEndpoint()`, `remote_endpoints`. **Nothing consumes this yet** |
+| `endpoints.go`, `endpoints_tailscale.go` | `EndpointProvider` registry, `selectEndpoint()`, `remote_endpoints`; `RemotePairingEndpoint` (`remote_pairing_endpoint`) runs the list through `selectEndpoint` as seen from another machine — the address Settings' pairing QR uses |
 | `remoteapi.go`, `remoteproto.go`, `remotews.go`, `shellstream.go`, `shellsnapshot.go` | the `/v2/ws` surface (above) |
 | `remoteauth.go`, `remotedevices.go`, `remoteguard.go` | pairing, devices, startup guards (above) |
 
@@ -463,29 +702,30 @@ Feature plans and implementation notes live in `docs/plans/`. Read the relevant 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **burrow-wails** (6314 symbols, 11895 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **burrow-wails** (13682 symbols, 43194 relationships, 1189 execution flows).
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- **MUST run impact before editing.** Use `impact({target: "symbolName", direction: "upstream"})` or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`; report callers, processes, and risk. Never substitute grep for graph analysis.
+- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "main"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "main" --repo .`.
+- MUST warn on HIGH/CRITICAL `risk` pre-edit; never use `riskSharedAxes` to waive a HIGH/CRITICAL `risk` warning. Compare File/symbol: MCP File omits axes; Graph-RAG expands File.
+- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
+- **MUST use `query({search_query: "concept"})` for concepts/flows, `context({name: "symbolName"})` for a named symbol, or `impact` for blast radius, on read-only callers, dependencies, imports, or execution flow.** Graph first; text search only for empty/`UNKNOWN`/literals.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+- NEVER edit a function, class, or method before MCP/CLI impact analysis.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit before MCP/CLI graph change analysis.
 
 ## Resources
 
 | Resource | Use for |
-|----------|---------|
+| --- | --- |
 | `gitnexus://repo/burrow-wails/context` | Codebase overview, check index freshness |
 | `gitnexus://repo/burrow-wails/clusters` | All functional areas |
 | `gitnexus://repo/burrow-wails/processes` | All execution flows |
@@ -494,13 +734,13 @@ This project is indexed by GitNexus as **burrow-wails** (6314 symbols, 11895 rel
 ## CLI
 
 | Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+| --- | --- |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
 

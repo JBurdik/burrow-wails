@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -145,6 +147,22 @@ func (s *HTTPServer) handleAssets(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := fs.Stat(sub, name); err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	// The embedded FS has no modtime, so the browser gets no validator and an
+	// installed PWA decides freshness for itself. The entry points name
+	// hashed assets that change every build: a stale mobile.html pointing at a
+	// deleted bundle is a blank screen. Hashed files under /assets/ never change.
+	if !strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	if buildChannel != "" && (name == "mobile.html" || name == "manifest.webmanifest") {
+		body, err := fs.ReadFile(sub, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(channelizeAsset(name, body, buildChannel)))
 		return
 	}
 	http.ServeFileFS(w, r, sub, name)

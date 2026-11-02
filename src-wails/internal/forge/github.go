@@ -7,6 +7,8 @@ import (
 
 type githubForge struct{ run Runner }
 
+func (g *githubForge) FetchRef(number int) string { return "pull/" + itoa(number) + "/head" }
+
 func (g *githubForge) Provider() Provider { return GitHub }
 
 func (g *githubForge) CLI() CLIInfo {

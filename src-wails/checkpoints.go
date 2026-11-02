@@ -69,9 +69,15 @@ func snapshotTree(cwd string) (string, error) {
 	defer os.Remove(idx)
 	env := []string{"GIT_INDEX_FILE=" + idx}
 
-	// Seed from HEAD so `add -A` only has to walk the delta. Fails (harmlessly)
-	// in a repo with no commits yet, where the empty index is already correct.
-	runGitEnv(cwd, env, "read-tree", "HEAD")
+	// Seed from a copy of the real index: its stat cache lets `add -A` hash
+	// only changed files (`read-tree HEAD` has none, so every file was rehashed
+	// — seconds per send in a repo with big tracked files). `add -A` then makes
+	// the copy match the worktree, so staged-vs-unstaged state doesn't matter.
+	// The copy keeps the real index's mtime (copyFile) or racy-git breaks.
+	// No index (fresh repo) → seed from HEAD, harmless failure with no commits.
+	if real, ok := gitLine(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index"); !ok || copyFile(real, idx) != nil {
+		runGitEnv(cwd, env, "read-tree", "HEAD")
+	}
 
 	// ponytail: plain `add -A`, so anything the repo does not .gitignore lands
 	// in the snapshot. If a workspace tracks huge un-ignored build output this
@@ -86,13 +92,9 @@ func snapshotTree(cwd string) (string, error) {
 	return strings.TrimSpace(out.Stdout), nil
 }
 
-// snapshotCommit wraps snapshotTree in a commit object parented on HEAD, and
-// pins it with a ref so gc keeps it. Returns (commit, tree).
-func snapshotCommit(cwd, msg string) (string, string, error) {
-	tree, err := snapshotTree(cwd)
-	if err != nil {
-		return "", "", err
-	}
+// snapshotCommit wraps a snapshotTree result in a commit object parented on
+// HEAD, and pins it with a ref so gc keeps it. Returns (commit, tree).
+func snapshotCommit(cwd, tree, msg string) (string, string, error) {
 	args := []string{"commit-tree", tree, "-m", msg}
 	if head, ok := gitLine(cwd, "rev-parse", "HEAD"); ok && head != "" {
 		args = append(args, "-p", head)
@@ -106,6 +108,25 @@ func snapshotCommit(cwd, msg string) (string, string, error) {
 	return commit, tree, nil
 }
 
+// copyFile copies src to dst and keeps src's mtime. Load-bearing for the index
+// copy: git's racy-clean check distrusts a stat-clean entry only when the file
+// is not older than the index file itself. A fresh mtime on the copy made a
+// same-size, same-second edit (v1 → v2) look clean, so the snapshot kept v1.
+func copyFile(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	fi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, b, 0o600); err != nil {
+		return err
+	}
+	return os.Chtimes(dst, fi.ModTime(), fi.ModTime())
+}
+
 func isGitRepo(cwd string) bool {
 	if cwd == "" {
 		return false
@@ -117,7 +138,13 @@ func isGitRepo(cwd string) bool {
 // CreateCheckpoint snapshots cwd. Returns a zero-id Checkpoint (no error) when
 // there is nothing to record: not a git repo, or the tree is byte-identical to
 // the newest checkpoint — an agent turn that changed no files gets no entry.
-func (a *App) CreateCheckpoint(cwd, ptyID, label string) (Checkpoint, error) {
+func (a *App) CreateCheckpoint(cwd, ptyID, label string) (cp Checkpoint, err error) {
+	withWorkspaceLock(cwd, func() { cp, err = a.createCheckpoint(cwd, ptyID, label) })
+	return cp, err
+}
+
+// createCheckpoint is CreateCheckpoint for a caller already holding cwd's lock.
+func (a *App) createCheckpoint(cwd, ptyID, label string) (Checkpoint, error) {
 	if !isGitRepo(cwd) {
 		return Checkpoint{}, nil
 	}
@@ -132,7 +159,7 @@ func (a *App) CreateCheckpoint(cwd, ptyID, label string) (Checkpoint, error) {
 		return Checkpoint{}, nil
 	}
 
-	commit, tree, err := snapshotCommit(cwd, "burrow checkpoint: "+label)
+	commit, tree, err := snapshotCommit(cwd, tree, "burrow checkpoint: "+label)
 	if err != nil {
 		return Checkpoint{}, err
 	}
@@ -217,22 +244,34 @@ func (a *App) CheckpointDiff(cwd, commit string) (string, error) {
 			return frozen, nil
 		}
 	}
-	nowTree, err := snapshotTree(cwd)
-	if err != nil {
-		return "", err
-	}
-	out := runGitEnv(cwd, nil, "diff", commit, nowTree)
-	if !out.Success {
-		return "", gitErr(out)
-	}
-	return out.Stdout, nil
+	var diff string
+	var err error
+	// Locked so the diff never sees a half-restored tree.
+	withWorkspaceLock(cwd, func() {
+		var nowTree string
+		if nowTree, err = snapshotTree(cwd); err != nil {
+			return
+		}
+		out := runGitEnv(cwd, nil, "diff", commit, nowTree)
+		if !out.Success {
+			err = gitErr(out)
+			return
+		}
+		diff = out.Stdout
+	})
+	return diff, err
 }
 
 // RestoreCheckpoint puts the working tree back to a checkpoint. It snapshots
 // the current state first and returns that safety checkpoint, so a restore is
 // itself undoable. The index is left where it was (pointing at HEAD) — this
 // restores file contents, it does not stage or commit anything.
-func (a *App) RestoreCheckpoint(cwd, commit string) (Checkpoint, error) {
+func (a *App) RestoreCheckpoint(cwd, commit string) (cp Checkpoint, err error) {
+	withWorkspaceLock(cwd, func() { cp, err = a.restoreCheckpoint(cwd, commit) })
+	return cp, err
+}
+
+func (a *App) restoreCheckpoint(cwd, commit string) (Checkpoint, error) {
 	if !isGitRepo(cwd) {
 		return Checkpoint{}, errors.New("not a git repository")
 	}
@@ -240,7 +279,7 @@ func (a *App) RestoreCheckpoint(cwd, commit string) (Checkpoint, error) {
 		return Checkpoint{}, errors.New("checkpoint object is gone (pruned by git gc?)")
 	}
 
-	safety, err := a.CreateCheckpoint(cwd, "", "before restore")
+	safety, err := a.createCheckpoint(cwd, "", "before restore")
 	if err != nil {
 		return Checkpoint{}, fmt.Errorf("safety snapshot failed, refusing to restore: %w", err)
 	}

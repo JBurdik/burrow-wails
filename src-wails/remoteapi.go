@@ -51,6 +51,10 @@ const (
 // This table is therefore the only place that knows an argument's name — which
 // is fine, because it is also the only place that decides what is reachable at
 // all.
+// deviceArg is the argument name the WS handler fills with the calling
+// connection's device id, overwriting anything the client sent.
+const deviceArg = "_device"
+
 type remoteCmd struct {
 	Method string
 	Args   []string
@@ -146,6 +150,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"write_pty":          {Method: "WritePty", Args: []string{"id", "data"}, Scope: scopeTerminal},
 	"resize_pty":         {Method: "ResizePty", Args: []string{"id", "cols", "rows"}, Scope: scopeTerminal},
 	"kill_pty":           {Method: "KillPty", Args: []string{"id"}, Scope: scopeTerminal},
+	"pty_since":          {Method: "PtySince", Args: []string{"id", "since"}, Scope: scopeTerminal},
 	"get_pty_foreground": {Method: "GetPtyForeground", Args: []string{"id"}, Scope: scopeOrchRead},
 	"list_pty_sessions":  {Method: "ListPtySessions", Args: nil, Scope: scopeOrchRead},
 
@@ -155,11 +160,17 @@ var remoteAllowed = map[string]remoteCmd{
 	// rather than terminal:operate itself (it isn't a PTY).
 	"list_dev_servers": {Method: "ListDevServers", Args: []string{"workspacePath"}, Scope: scopeOrchRead},
 	"kill_dev_server":  {Method: "KillDevServer", Args: []string{"pid"}, Scope: scopeOrchOperate},
+	// The Browser surface's "Nothing listening on localhost:N" check: a
+	// loopback connect on the host, no data read or written.
+	"port_listening": {Method: "PortListening", Args: []string{"port"}, Scope: scopeOrchRead},
 
 	// Environment. environment_id is also what the WS handler test calls,
 	// because it is safe on a bare &App{} — most commands are not.
-	"environment_id":   {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
-	"remote_endpoints": {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
+	"environment_id": {Method: "EnvironmentID", Args: nil, Scope: scopeOrchRead},
+	// Subscription usage limits (planusage.go). Never carries a token.
+	"plan_usage":              {Method: "PlanUsage", Args: nil, Scope: scopeOrchRead},
+	"remote_endpoints":        {Method: "RemoteEndpoints", Args: nil, Scope: scopeAccessRead},
+	"remote_pairing_endpoint": {Method: "RemotePairingEndpoint", Args: nil, Scope: scopeAccessRead},
 
 	// Paired devices. Both sit on access:* and are therefore desktop-only,
 	// since a paired device is never granted access:write (remotedevices.go)
@@ -169,6 +180,13 @@ var remoteAllowed = map[string]remoteCmd{
 	// knowing what else is paired is not part of driving an agent.
 	"remote_devices":       {Method: "RemoteDevices", Args: nil, Scope: scopeAccessRead},
 	"revoke_remote_device": {Method: "RevokeRemoteDevice", Args: []string{"id"}, Scope: scopeAccessWrite},
+
+	// Web Push (push.go). Subscribe/unsubscribe act as the CALLING device:
+	// `_device` is injected by the WS handler, so a phone cannot add or drop
+	// another device's subscription. The public key is public by definition.
+	"push_vapid_public_key": {Method: "PushVapidPublicKey", Args: nil, Scope: scopeOrchRead},
+	"push_subscribe":        {Method: "PushSubscribe", Args: []string{deviceArg, "subscription"}, Scope: scopeOrchOperate},
+	"push_unsubscribe":      {Method: "PushUnsubscribe", Args: []string{deviceArg, "endpoint"}, Scope: scopeOrchOperate},
 
 	// Pairing, desktop side. Both at access:write, including the read: the
 	// pairing code IS the credential, so handing it out is handing out the
@@ -192,6 +210,25 @@ var remoteAllowed = map[string]remoteCmd{
 	// terminal, so this takes the orchestration scope instead. A paired device
 	// holds both, so the choice is about naming, not reach.
 	"stop_chat": {Method: "StopChat", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// Thread details card (chatdetails.go): the self-management verbs, aimed at
+	// a chat the desktop names.
+	"chat_schedule_list":   {Method: "ChatScheduleList", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_schedule_cancel": {Method: "ChatScheduleCancel", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"schedule_list_all":    {Method: "ScheduleListAll", Args: []string{}, Scope: scopeOrchRead},
+	"schedule_save":        {Method: "ScheduleSave", Args: []string{"schedule"}, Scope: scopeOrchOperate},
+	"schedule_set_paused":  {Method: "ScheduleSetPaused", Args: []string{"id", "paused"}, Scope: scopeOrchOperate},
+	"schedule_run_now":     {Method: "ScheduleRunNow", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// The user's queued follow-ups (chatqueue.go), drained by Go.
+	"chat_queue_list":    {Method: "ChatQueueList", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_queue_add":     {Method: "ChatQueueAdd", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_queue_update":  {Method: "ChatQueueUpdate", Args: []string{"id", "text"}, Scope: scopeOrchOperate},
+	"chat_queue_remove":  {Method: "ChatQueueRemove", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"chat_queue_reorder": {Method: "ChatQueueReorder", Args: []string{"chatId", "ids"}, Scope: scopeOrchOperate},
+	// Usage-limit banner (chatlimit.go).
+	"chat_limit_arm":        {Method: "ChatLimitArm", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_limit_dismiss":    {Method: "ChatLimitDismiss", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_move_to_worktree": {Method: "ChatMoveToWorktree", Args: []string{"chatId", "branch"}, Scope: scopeOrchOperate},
+	"chat_leave_worktree":   {Method: "ChatLeaveWorktree", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 
 	// Diff review notes (diffcomments.go) — DiffTab.vue's batch review flow.
 	"list_diff_comments":        {Method: "ListDiffComments", Args: []string{"wsId"}, Scope: scopeOrchRead},
@@ -212,9 +249,11 @@ var remoteAllowed = map[string]remoteCmd{
 	"save_terminal_tabs":  {Method: "SaveTerminalTabs", Args: []string{"workspaceId", "tabs"}, Scope: scopeOrchOperate},
 
 	// Worktrees
-	"create_worktree":        {Method: "CreateWorktree", Args: []string{"repoPath", "name", "path", "branch", "baseRef"}, Scope: scopeOrchOperate},
-	"rename_worktree_branch": {Method: "RenameWorktreeBranch", Args: []string{"id", "oldBranch", "newBranch"}, Scope: scopeOrchOperate},
-	"remove_worktree":        {Method: "RemoveWorktree", Args: []string{"id", "force"}, Scope: scopeOrchOperate},
+	"create_worktree":          {Method: "CreateWorktree", Args: []string{"repoPath", "name", "path", "branch", "baseRef"}, Scope: scopeOrchOperate},
+	"rename_worktree_branch":   {Method: "RenameWorktreeBranch", Args: []string{"id", "oldBranch", "newBranch"}, Scope: scopeOrchOperate},
+	"remove_worktree":          {Method: "RemoveWorktree", Args: []string{"id", "force"}, Scope: scopeOrchOperate},
+	"worktree_cleanup_preview": {Method: "WorktreeCleanupPreview", Args: nil, Scope: scopeOrchRead},
+	"worktree_cleanup_now":     {Method: "WorktreeCleanupNow", Args: []string{"ids"}, Scope: scopeOrchOperate},
 
 	// Git / forge / text generation. RunGit is a generic passthrough (it can
 	// run a write command like `commit` or `push`), so it gets the mutating
@@ -225,15 +264,18 @@ var remoteAllowed = map[string]remoteCmd{
 	// not what a read scope should authorize, so these are operate scope
 	// despite returning only a string.
 	"run_git":                 {Method: "RunGit", Args: []string{"cwd", "args"}, Scope: scopeOrchOperate},
+	"run_git_input":           {Method: "RunGitInput", Args: []string{"cwd", "args", "stdin"}, Scope: scopeOrchOperate},
 	"forge_info":              {Method: "ForgeInfo", Args: []string{"cwd"}, Scope: scopeOrchRead},
 	"forge_pr_list":           {Method: "ForgePrList", Args: []string{"cwd", "scope", "state"}, Scope: scopeOrchRead},
 	"forge_pr_view":           {Method: "ForgePrView", Args: []string{"cwd", "number"}, Scope: scopeOrchRead},
+	"forge_pr_checkout":       {Method: "ForgePrCheckout", Args: []string{"repoPath", "number", "branch", "path"}, Scope: scopeOrchOperate},
 	"forge_pr_create":         {Method: "ForgePrCreate", Args: []string{"cwd", "title", "body", "base", "head"}, Scope: scopeOrchOperate},
 	"forge_pr_merge":          {Method: "ForgePrMerge", Args: []string{"cwd", "number", "squash"}, Scope: scopeOrchOperate},
 	"set_forge_provider":      {Method: "SetForgeProvider", Args: []string{"wsId", "provider"}, Scope: scopeOrchOperate},
 	"forge_install_cli":       {Method: "ForgeInstallCLI", Args: []string{"provider"}, Scope: scopeOrchOperate},
 	"generate_commit_message": {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy", "rules"}, Scope: scopeOrchOperate},
 	"generate_chat_title":     {Method: "GenerateChatTitle", Args: []string{"cwd", "model", "policy", "text"}, Scope: scopeOrchOperate},
+	"generate_catch_up":       {Method: "GenerateCatchUp", Args: []string{"cwd", "model", "transcript"}, Scope: scopeOrchOperate},
 	"generate_branch_name":    {Method: "GenerateBranchName", Args: []string{"cwd", "model", "policy", "message"}, Scope: scopeOrchOperate},
 	"generate_pr_content":     {Method: "GeneratePrContent", Args: []string{"cwd", "model", "policy", "rules", "baseBranch", "headBranch"}, Scope: scopeOrchOperate},
 
@@ -339,6 +381,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"read_text_file":         {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
 	"read_text_file_checked": {Method: "ReadTextFile", Args: []string{"path"}, Scope: scopeOrchRead},
 	"read_file_base64":       {Method: "ReadFileBase64", Args: []string{"path"}, Scope: scopeOrchRead},
+	"read_file_tail":         {Method: "ReadFileTail", Args: []string{"path", "maxBytes"}, Scope: scopeOrchRead},
 	"home_dir":               {Method: "HomeDir", Args: nil, Scope: scopeOrchRead},
 	"config_file_path":       {Method: "ConfigFilePath", Args: nil, Scope: scopeOrchRead},
 	"create_dir":             {Method: "CreateDir", Args: []string{"path"}, Scope: scopeOrchOperate},
@@ -359,45 +402,42 @@ var remoteAllowed = map[string]remoteCmd{
 
 	// Claude Code — id is the frontend's chat id; the Go side emits
 	// claude-data-<id> under exactly that name, so it must round-trip.
-	"claude_start": {Method: "ClaudeStart", Args: []string{
-		"id", "cwd", "resumeSessionId", "permissionMode", "appendSystemPrompt",
-		"model", "effort", "configDir", "profileCommand", "profileArgs",
-		"autoCompactWindow",
+	// The chat runtime (chatruntime.go): every client starts, sends to,
+	// restarts and reconfigures a chat through these, by chat id. The process
+	// is Go's to start — claude_start/claude_send are in remoteDenied.
+	"chat_send":                {Method: "ChatSend", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_restart":             {Method: "ChatRestart", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_clear":               {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_sleep":               {Method: "ChatSleep", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_mark_active":         {Method: "ChatMarkActive", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_snooze":              {Method: "ChatSnooze", Args: []string{"chatId", "untilMs"}, Scope: scopeOrchOperate},
+	"chat_link_pr":             {Method: "ChatLinkPr", Args: []string{"chatId", "ref"}, Scope: scopeOrchOperate},
+	"chat_unlink_pr":           {Method: "ChatUnlinkPr", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_pr_refresh":          {Method: "ChatPrRefresh", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_prs_refresh":         {Method: "ChatPrsRefresh", Args: []string{"cwd"}, Scope: scopeOrchRead},
+	"chat_rewind":              {Method: "ChatRewind", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
+	"chat_fork":                {Method: "ChatFork", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
+	"chat_side_create":         {Method: "ChatSideCreate", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_interrupt":           {Method: "ChatInterrupt", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_steer":               {Method: "ChatSteer", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_stop_task":           {Method: "ChatStopTask", Args: []string{"chatId", "taskId"}, Scope: scopeOrchOperate},
+	"chat_set_launch_settings": {Method: "ChatSetLaunchSettings", Args: []string{"chatId", "patch"}, Scope: scopeOrchOperate},
+	"spawn_subagent_chat": {Method: "SpawnSubagentChat", Args: []string{
+		"parentChatId", "task", "profile", "agent", "model", "cwd",
 	}, Scope: scopeOrchOperate},
-	"claude_send":  {Method: "ClaudeSend", Args: []string{"id", "text", "sessionId", "images"}, Scope: scopeOrchOperate},
-	"claude_stop":  {Method: "ClaudeStop", Args: []string{"id"}, Scope: scopeOrchOperate},
-	"claude_abort": {Method: "ClaudeAbort", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"review_changes": {Method: "ReviewChanges", Args: []string{"workspaceId", "parentChatId", "base"}, Scope: scopeOrchOperate},
+	"claude_stop":    {Method: "ClaudeStop", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"claude_abort":   {Method: "ClaudeAbort", Args: []string{"id"}, Scope: scopeOrchOperate},
 
 	// ACP / Codex — the Go bridge owns the JSON-RPC handshake and emits
-	// acp-data-<id> / acp-req-<id> under the frontend's chat id.
-	//
-	// AcpStart takes a single Go struct argument (AcpStartOpts), unlike every
-	// other entry here which is scalar positional args — core.ts assembles
-	// that struct client-side from a flat args object. There is no way to
-	// spread a struct's fields across multiple table entries for one Go
-	// parameter (the arity test requires exactly one Args name for one Go
-	// param), so the wire carries the whole options object under a single
-	// key. This is the one call in this table I could not port as a literal
-	// 1:1 transcription of core.ts's argument list.
-	//
-	// NOTE for Task 3's client: callApp's number->string coercion only looks
-	// at TOP-LEVEL args named in Args — here that's "opts" itself, not the
-	// fields nested inside it. AcpStartOpts.ID is a string, and core.ts:160
-	// does String(args.id) before nesting it into the object it passes to
-	// App.AcpStart. A caller that sends {"opts":{"id":3,...}} (a bare numeric
-	// id, unstringified) will fail to unmarshal, because the coercion never
-	// reaches inside the object. Whoever builds the opts payload must
-	// stringify id itself, same as core.ts already does.
-	"acp_start":         {Method: "AcpStart", Args: []string{"opts"}, Scope: scopeOrchOperate},
-	"codex_start":       {Method: "CodexStart", Args: []string{"id", "cwd", "env", "resumeSessionId"}, Scope: scopeOrchOperate},
-	"acp_send":          {Method: "AcpSend", Args: []string{"id", "text", "images"}, Scope: scopeOrchOperate},
-	"codex_send":        {Method: "CodexSend", Args: []string{"id", "text", "images"}, Scope: scopeOrchOperate},
+	// acp-data-<id> / acp-req-<id> under the frontend's chat id. Starting and
+	// prompting are chat_send's (the chat runtime); what stays is the view's
+	// own selector pushes, history picker and explicit stop.
 	"acp_set_mode":      {Method: "AcpSetMode", Args: []string{"id", "modeId"}, Scope: scopeOrchOperate},
 	"acp_set_config":    {Method: "AcpSetConfig", Args: []string{"id", "configId", "value"}, Scope: scopeOrchOperate},
 	"acp_list_sessions": {Method: "AcpListSessions", Args: []string{"id", "cwd"}, Scope: scopeOrchOperate},
 	"acp_stop":          {Method: "AcpStop", Args: []string{"id"}, Scope: scopeOrchOperate},
 	"codex_stop":        {Method: "CodexStop", Args: []string{"id"}, Scope: scopeOrchOperate},
-	"codex_interrupt":   {Method: "CodexInterrupt", Args: []string{"id"}, Scope: scopeOrchOperate},
 	// CodexListModels spawns `codex app-server` to probe the model catalog
 	// (acp.go) — a host process spawn, so operate scope, not read, matching
 	// the generate_* calls above for the same reason.
@@ -413,6 +453,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// path unchanged, then runs it (`exec.CommandContext(ctx, path,
 	// "--version")`, providers.go) — arbitrary host process execution, so
 	// operate scope, not read.
+	"openai_list_models": {Method: "OpenAIListModels", Args: []string{"config"}, Scope: scopeOrchOperate},
 	"probe_provider":     {Method: "ProbeProvider", Args: []string{"binary", "cwd"}, Scope: scopeOrchOperate},
 	"latest_npm_version": {Method: "LatestNpmVersion", Args: []string{"pkg"}, Scope: scopeOrchRead},
 	"update_provider":    {Method: "UpdateProvider", Args: []string{"binary", "pkg", "homebrewFormula", "cwd"}, Scope: scopeOrchOperate},
@@ -441,6 +482,8 @@ var remoteAllowed = map[string]remoteCmd{
 
 	// Control/permission responses
 	"claude_respond_control": {Method: "ClaudeRespondControl", Args: []string{"id", "requestId", "response"}, Scope: scopeOrchOperate},
+	"list_pty_permissions":   {Method: "ListPtyPermissions", Args: []string{}, Scope: scopeOrchRead},
+	"answer_pty_permission":  {Method: "AnswerPtyPermission", Args: []string{"id", "behavior", "message"}, Scope: scopeOrchOperate},
 	"acp_respond_permission": {Method: "AcpRespondPermission", Args: []string{"id", "rpcId", "optionId"}, Scope: scopeOrchOperate},
 	"acp_respond_user_input": {Method: "AcpRespondUserInput", Args: []string{"id", "rpcId", "answers"}, Scope: scopeOrchOperate},
 
@@ -453,13 +496,20 @@ var remoteAllowed = map[string]remoteCmd{
 	"set_burrow_mcp_max_depth": {Method: "SetBurrowMcpMaxDepth", Args: []string{"n"}, Scope: scopeOrchOperate},
 
 	// Chat transcripts (SQLite — they outgrew config.json)
-	"load_chat_messages":     {Method: "LoadChatMessages", Args: []string{"chatId"}, Scope: scopeOrchRead},
-	"save_chat_messages":     {Method: "SaveChatMessages", Args: []string{"chatId", "messages", "foldedOrd"}, Scope: scopeOrchOperate},
-	"chat_folded_ord":        {Method: "ChatFoldedOrd", Args: []string{"chatId"}, Scope: scopeOrchRead},
-	"load_chat_events_since": {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
-	"load_chat_stream_since": {Method: "LoadChatStreamSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
-	"delete_chat_messages":   {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"publish_chat_note":      {Method: "PublishChatNote", Args: []string{"chatId", "note"}, Scope: scopeOrchOperate},
+	"load_chat_messages":         {Method: "LoadChatMessages", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"load_chat_messages_page":    {Method: "LoadChatMessagesPage", Args: []string{"chatId", "before", "limit"}, Scope: scopeOrchRead},
+	"load_chat_image":            {Method: "LoadChatImage", Args: []string{"chatId", "index", "image"}, Scope: scopeOrchRead},
+	"save_chat_messages":         {Method: "SaveChatMessages", Args: []string{"chatId", "messages", "foldedOrd"}, Scope: scopeOrchOperate},
+	"chat_folded_ord":            {Method: "ChatFoldedOrd", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"load_chat_events_since":     {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
+	"load_pending_chat_requests": {Method: "LoadPendingChatRequests", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"load_chat_stream_since":     {Method: "LoadChatStreamSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
+	"load_chat_task_lines_since": {Method: "LoadChatTaskLinesSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
+	"chat_list_bg_terminals":     {Method: "ChatListBgTerminals", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"search_chats":               {Method: "SearchChats", Args: []string{"query", "limit"}, Scope: scopeOrchRead},
+	"search_prompts":             {Method: "SearchPrompts", Args: []string{"query", "agent", "limit"}, Scope: scopeOrchRead},
+	"delete_chat_messages":       {Method: "DeleteChatMessages", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"publish_chat_note":          {Method: "PublishChatNote", Args: []string{"chatId", "note"}, Scope: scopeOrchOperate},
 
 	// App config file
 	"read_config":  {Method: "ReadConfig", Args: nil, Scope: scopeOrchRead},
@@ -538,6 +588,16 @@ var remoteAllowed = map[string]remoteCmd{
 // remoteDenied names the App methods that are deliberately NOT reachable over
 // the wire, each with the reason. An entry here is a decision, not a TODO.
 var remoteDenied = map[string]string{
+	// Superseded by chat_send: a client building its own start payload is how
+	// three copies of it drifted apart (docs/plans/006-chat-runtime.md).
+	"ClaudeStart":    "a chat's process is the chat runtime's to start, from the row's launch settings — use chat_send",
+	"ClaudeSend":     "sending to a process the caller did not start fails after a reap — use chat_send, which ensures the process",
+	"AcpStart":       "a chat's process is the chat runtime's to start, from the row's provider and launch settings — use chat_send",
+	"CodexStart":     "a chat's process is the chat runtime's to start, from the row's provider and launch settings — use chat_send",
+	"AcpSend":        "the turn boundary is the runtime's to emit, and a send must ensure the process — use chat_send",
+	"CodexSend":      "the turn boundary is the runtime's to emit, and a send must ensure the process — use chat_send",
+	"CodexInterrupt": "falls back to a restart only through the runtime — use chat_interrupt",
+
 	// LocalEndpoint issues the single-use ticket that authorizes a /v2/ws
 	// connection in the first place. Being in-process (a Wails binding) IS
 	// the desktop's authorization for calling it; an already-authenticated

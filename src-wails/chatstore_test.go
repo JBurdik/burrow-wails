@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -14,8 +16,17 @@ func newTestApp(t *testing.T) *App {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
-	return &App{db: db}
+	a := &App{db: db}
+	t.Cleanup(func() {
+		// The chat stream writer inserts on its own goroutine. Let its queue
+		// land first, or a late INSERT hits a closed DB / recreates the WAL in
+		// a TempDir that is being removed ("directory not empty").
+		if a.streamW != nil {
+			drainChatStream(t, a, "__cleanup__")
+		}
+		db.Close()
+	})
+	return a
 }
 
 func TestSaveAndLoadChatMessagesRoundTrip(t *testing.T) {
@@ -180,5 +191,97 @@ func TestMigrateChatHistoryNoopWithoutKey(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".bak"); err == nil {
 		t.Fatal("wrote a backup for a no-op migration")
+	}
+}
+
+func TestLoadChatMessagesPageWindowsFromTheTail(t *testing.T) {
+	a := newTestApp(t)
+	var in []string
+	for i := 0; i < 10; i++ {
+		in = append(in, fmt.Sprintf(`{"id":%d,"role":"user","text":"m%d"}`, i, i))
+	}
+	if err := a.SaveChatMessages(9, "["+strings.Join(in, ",")+"]", -1); err != nil {
+		t.Fatal(err)
+	}
+	texts := func(p ChatMessagesPage) []string {
+		var out []string
+		for _, raw := range p.Messages {
+			var m struct{ Text string }
+			_ = json.Unmarshal(raw, &m)
+			out = append(out, m.Text)
+		}
+		return out
+	}
+	newest, err := a.LoadChatMessagesPage(9, -1, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newest.Start != 6 || newest.Total != 10 || strings.Join(texts(newest), ",") != "m6,m7,m8,m9" {
+		t.Fatalf("newest page: %+v %v", newest, texts(newest))
+	}
+	older, _ := a.LoadChatMessagesPage(9, newest.Start, 4)
+	if older.Start != 2 || strings.Join(texts(older), ",") != "m2,m3,m4,m5" {
+		t.Fatalf("older page: %+v %v", older, texts(older))
+	}
+	oldest, _ := a.LoadChatMessagesPage(9, older.Start, 4)
+	if oldest.Start != 0 || strings.Join(texts(oldest), ",") != "m0,m1" {
+		t.Fatalf("oldest page should be short and start at 0: %+v %v", oldest, texts(oldest))
+	}
+	empty, err := a.LoadChatMessagesPage(404, -1, 4)
+	if err != nil || len(empty.Messages) != 0 || empty.Total != 0 {
+		t.Fatalf("unknown chat: %+v %v", empty, err)
+	}
+}
+
+// The in-memory fold is ahead of the table; a page must index into it the same way.
+func TestLoadChatMessagesPageReadsTheLiveFold(t *testing.T) {
+	a := newTestApp(t)
+	if err := a.SaveChatMessages(9, `[{"id":0,"role":"user","text":"old0"},{"id":1,"role":"assistant","text":"old1"}]`, -1); err != nil {
+		t.Fatal(err)
+	}
+	a.emitChatLine("9", chatUserKind, "live")
+	p, err := a.LoadChatMessagesPage(9, -1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Total != 3 || p.Start != 1 || len(p.Messages) != 2 || !strings.Contains(string(p.Messages[1]), "live") {
+		t.Fatalf("page over the live fold: %+v", p)
+	}
+}
+
+func TestPageStubsLargeImagesAndLoadChatImageReturnsThem(t *testing.T) {
+	a := newTestApp(t)
+	big := "data:image/png;base64," + strings.Repeat("A", chatImageStubMin)
+	small := "data:image/png;base64,AAAA"
+	in := fmt.Sprintf(`[{"id":0,"role":"assistant","text":"hi"},{"id":1,"role":"user","text":"look","images":[%q,%q]}]`, big, small)
+	if err := a.SaveChatMessages(9, in, -1); err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.LoadChatMessagesPage(9, -1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Messages) != 2 || strings.Contains(string(p.Messages[1]), "AAAAAAAA") {
+		t.Fatalf("large image must not travel in the page: %.200s", p.Messages[1])
+	}
+	var m struct {
+		Text   string
+		Images []string
+	}
+	_ = json.Unmarshal(p.Messages[1], &m)
+	if m.Text != "look" || len(m.Images) != 2 || m.Images[0] != chatImageStubPrefix+"1/0" || m.Images[1] != small {
+		t.Fatalf("want a stub for the big image and the small one inline: %+v", m)
+	}
+	got, err := a.LoadChatImage(9, 1, 0)
+	if err != nil || got != big {
+		t.Fatalf("LoadChatImage = %.40q, %v", got, err)
+	}
+	if _, err := a.LoadChatImage(9, 1, 5); err == nil {
+		t.Fatal("an out-of-range image must be an error")
+	}
+	// The stored transcript is untouched: a full read still has the image.
+	full, _ := a.LoadChatMessages(9)
+	if !strings.Contains(full, big) {
+		t.Fatal("stubbing must only affect the page, never the stored transcript")
 	}
 }

@@ -107,12 +107,12 @@
   <h3>Delegation &amp; supervision</h3>
   <table>
     <tr><th>Verb</th><th>What it does</th></tr>
-    <tr><td>spawn</td><td>Delegate a <em>task</em> to a sub-agent in a new tab (or chat). Args: <code>task*</code>, <code>agent</code>, <code>model</code>, <code>cwd</code>, <code>target</code>, <code>capture</code>. Returns the new <code>pty_id</code> and a result <code>token</code>.</td></tr>
+    <tr><td>spawn</td><td>Delegate a <em>task</em> to a sub-agent in a new tab (or chat). Args: <code>task*</code>, <code>profile</code>, <code>agent</code>, <code>model</code>, <code>cwd</code>, <code>target</code>, <code>capture</code>. Returns the new <code>pty_id</code> and a result <code>token</code> (tab), or <code>chat_id</code> (chat). A thread's sub-agent (<code>parent_chat_id</code>, always a chat) is created and started <strong>in the backend</strong> on any agent (Claude, Codex, ACP) — no window needs to be open; launch settings come from the profile / args, else the parent chat's when it runs on the same transport. Top-level chats and tabs still go through the UI.</td></tr>
     <tr><td>list_agents</td><td>Agent instances configured in Settings → Providers, spawnable by name.</td></tr>
     <tr><td>agent_status</td><td>Every agent in the app (tabs and chats) with its live status. Optional: <code>--only-children</code> (bool) filters to only this caller's chat sub-agents (auto-detected from <code>BURROW_CHAT_ID</code>; if unset, returns all agents). Tab-target sub-agents without a parent are omitted from the filtered view.</td></tr>
     <tr><td>tab_output</td><td>Tail of a tab's terminal output — how you check on an agent mid-task.</td></tr>
-    <tr><td>send_to_tab</td><td>Type a follow-up into a running agent's tab and submit it.</td></tr>
-    <tr><td>chat_send</td><td>Send a follow-up message into a chat sub-agent and submit it — the chat equivalent of <code>send_to_tab</code>, reachable even when nobody has that chat's view open. Args: <code>chat_id*</code>, <code>text*</code> (both named; <code>chat_send</code> has no positional argument).</td></tr>
+    <tr><td>send_to_tab</td><td>Wait for a non-busy agent phase and three identical non-empty terminal tails, deliver text as one bracketed paste, then wait for the changed terminal tail to settle before pressing Enter. Multiline text stays one message. <code>--submit false</code> leaves the draft open. If the prompt or changed tail is not ready within 10 seconds, the verb returns an error without pressing Enter. Requires the tab's live terminal view.</td></tr>
+    <tr><td>chat_send</td><td>Send a follow-up message into a chat sub-agent and submit it — the chat equivalent of <code>send_to_tab</code>, reachable even when nobody has that chat's view open (a Claude chat is sent to by the backend's chat runtime, which starts its process if it is not running). Args: <code>chat_id*</code>, <code>text*</code> (both named; <code>chat_send</code> has no positional argument).</td></tr>
     <tr><td>close_chat</td><td>Delete a chat sub-agent and any children spawned under it — the chat equivalent of <code>tab_close</code>. Cascades, so a thread's own sub-agents go with it. Destructive — confirm with the user first. Args: <code>chat_id*</code>.</td></tr>
     <tr><td>wait_result</td><td>Block until a spawned agent finishes; returns its final message. Args: <code>token</code> <em>or</em> <code>chat_id</code> (one or the other — a chat sub-agent has no result token, so this resolves it by polling that chat's phase instead), <code>timeout</code>.</td></tr>
     <tr><td>collect_results</td><td>Take every finished result that hasn't been collected yet — both file-captured tab results and, via <code>parent_chat_id</code> (set automatically from <code>BURROW_CHAT_ID</code>), this thread's finished chat sub-agents.</td></tr>
@@ -126,9 +126,25 @@
     <tr><td>focus_workspace</td><td>Switch the user's view to a workspace, opening it if needed.</td></tr>
     <tr><td>focus_tab</td><td>Activate a tab by pty id, switching workspace first.</td></tr>
     <tr><td>new_tab</td><td>Open a plain terminal tab.</td></tr>
+    <tr><td>serve</td><td>Run a long-lived process (dev server, watcher) in an interactive terminal in the Right Panel's bottom pane; returns its <code>pty_id</code>. Same command again reuses that terminal (restarting it if stopped). Agents are told to use it instead of background Bash.</td></tr>
     <tr><td>tab_rename / tab_close</td><td>Retitle a tab; close it and kill its PTY.</td></tr>
     <tr><td>workspace_create</td><td>Add a directory as a workspace and open it.</td></tr>
     <tr><td>diagram</td><td>Render Mermaid source in a panel for the user.</td></tr>
+  </table>
+
+  <h3>Self-management (the calling chat)</h3>
+  <p>
+    Default to the caller's chat (<code>parent_chat_id</code> from <code>BURROW_CHAT_ID</code>); <code>--chat-id</code> targets another.
+    Local-only: both drive an agent that holds tool permissions later or elsewhere.
+  </p>
+  <table>
+    <tr><th>Verb</th><th>What it does</th></tr>
+    <tr><td>schedule</td><td>Queue a prompt for a chat: <code>--in 30m|2h|1d</code> or <code>--at 15:04|2006-01-02 15:04|RFC3339</code> (a past clock time means tomorrow). A wake-up is just <code>"Wake-up: &lt;reason&gt;"</code>. Rows live in SQLite <code>chat_schedules</code>, so they survive a restart; a 15 s sweep (<code>chatschedule.go</code>) delivers due items through <code>ChatSend</code> (which resumes a stopped or slept process) — but only once the chat's phase has settled and no Codex/ACP turn is open, one per chat per sweep, because a send into a running turn is a steer, not a queued prompt. A failed delivery is retried 5× a minute apart; a deleted chat's items go with it.</td></tr>
+    <tr><td>schedule (recurring)</td><td><code>--every 1h</code> (min 15m) or <code>--weekly "mon,wed 09:00"</code> (<code>daily</code> / <code>weekdays</code>) keeps the row: each run moves <code>due_at</code> to <code>control.NextDue(rule, now)</code> — computed from the run, not the missed slot, so a closed app fires once on launch. <code>--new-chat</code> (+ <code>--workspace-id</code>, <code>--agent</code>) starts a new chat per run titled <code>&lt;name&gt; · &lt;date&gt;</code> instead of posting into this one; it waits on no turn.</td></tr>
+    <tr><td>schedule_list / schedule_cancel</td><td>Pending items, soonest first (<code>--all</code> for every chat), with <code>recurs</code> (rule in words) and <code>due_at</code> (next run); cancel by id.</td></tr>
+    <tr><td>schedule_pause / schedule_resume / schedule_run_now</td><td>Pause keeps the rule but skips runs; resume moves a recurring item past the slots missed meanwhile; run-now makes it due immediately (still held until the chat settles).</td></tr>
+    <tr><td>move_to_worktree</td><td>Re-home a chat in a worktree of its repo — an existing worktree on <code>branch</code> is reused, else <code>create_worktree</code>'s machinery makes one. Updates <code>chats.workspace_id</code>/<code>branch</code> (both now read-only to <code>SaveChats</code>, or a client's save-per-message would move it back). The live process is replaced on the first send after the turn settles, never mid-turn (the caller is usually that turn). Claude: the session file is symlinked into the new cwd's <code>projects/&lt;slug&gt;/</code> (claude 2.1.311 resumes across cwds on its own; older CLIs and a different <code>CLAUDE_CONFIG_DIR</code> don't). Codex: <code>thread/resume</code> takes the new cwd. Generic ACP: refused.</td></tr>
+    <tr><td>leave_worktree</td><td>Move the chat back to the worktree's parent repo. The worktree stays (<code>worktree_remove</code> deletes it).</td></tr>
   </table>
 
   <h3>Repo, worktrees, pull requests</h3>
@@ -197,6 +213,7 @@
     <tr><th>Subcommand</th><th>Role</th></tr>
     <tr><td>burrow status</td><td>Report this tab's agent state to <code>/hook</code>: <code>running</code>, <code>waiting</code>, <code>permission</code>, <code>done</code>, <code>error --detail</code>, <code>session --model/--source/--title</code>, plus <code>--pid</code> for the liveness sweep. Port resolution is file-first (<code>hook.port</code> is rewritten every launch; the baked <code>BURROW_HOOK_PORT</code> goes stale after a restart). Sticky states retry 3×; <code>running</code> takes one fast attempt.</td></tr>
     <tr><td>burrow hook</td><td>Invoked by the globally-installed Claude/Codex hooks; maps <code>hook_event_name</code> → state with <code>sed</code>, no node/jq.</td></tr>
+    <tr><td>burrow approve</td><td>Second <code>PermissionRequest</code> hook in the burrow plugin (<code>timeout: 86400</code>): long-polls <code>POST /v1/permission_request?pty_id=</code> so the desktop can answer a Claude permission prompt, and prints the reply verbatim. Empty stdout + exit 0 (the TUI decides) when outside Burrow, for <code>AskUserQuestion</code>/<code>ExitPlanMode</code>, and on any error — it never prints an allow of its own. Claude does not kill it when the prompt is answered in the TUI; the app closes the request when the tab's phase leaves <code>waiting_approval</code>.</td></tr>
     <tr><td>burrow notify</td><td>Legacy Codex notify-program path, kept as a fallback.</td></tr>
     <tr><td>burrow capture</td><td>Result capture, above.</td></tr>
   </table>
@@ -223,7 +240,7 @@
   <h2>How agents discover the CLI</h2>
   <p><code>installAgentDocs</code> (<code>src-wails/agentdocs.go</code>, at startup) writes into every known config dir:</p>
   <ul>
-    <li><strong>Claude</strong> — the <code>burrow</code> skill at <code>&lt;dir&gt;/skills/burrow/SKILL.md</code>, plus a short always-in-context rule in <code>&lt;dir&gt;/CLAUDE.md</code> inside a managed <code>&lt;!-- BURROW:BEGIN/END --&gt;</code> block, so Claude reaches for <code>burrow spawn</code> before its own in-process <code>Agent</code> tool.</li>
+    <li><strong>Claude</strong> — the <code>burrow</code> skill at <code>&lt;dir&gt;/skills/burrow/SKILL.md</code>, plus a short rule so Claude reaches for <code>burrow spawn</code> before its own in-process <code>Agent</code> tool — injected only into Claude sessions Burrow launches (<code>--append-system-prompt</code> for chats, the burrow Claude Code mod for PTY tabs), no longer a block in <code>&lt;dir&gt;/CLAUDE.md</code>.</li>
     <li><strong>Codex</strong> — the same content as a managed block in <code>&lt;dir&gt;/AGENTS.md</code> (no skill mechanism).</li>
     <li><strong>Copilot</strong> — the skill, plus its <code>skills</code> dir registered in <code>settings.json</code>'s <code>skillDirectories</code> (Copilot has no implicit lookup).</li>
   </ul>
