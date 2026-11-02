@@ -4,7 +4,10 @@ package main
 // accounts this machine is logged into.
 //
 // Claude: GET api.anthropic.com/api/oauth/usage with the Claude Code OAuth
-// access token (what Claude Desktop does; works on Team). The token is read
+// access token (what Claude Desktop does; works on Team). The endpoint rate
+// limits (429) on its own schedule; then — and on any other failure short of a
+// rejected login — the rows fall back to the newest `rate_limit_event` a Claude
+// chat streamed (same windows, as fresh as the last chat turn). The token is read
 // fresh from the Keychain on every fetch and is NEVER refreshed here —
 // rotating the refresh token would log the CLI out. An expired token or a 401
 // is reported as unavailable; the CLI refreshes it on its next run. The token
@@ -89,7 +92,7 @@ func (a *App) PlanUsage() PlanUsage {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		out[0] = planUsageClaude.get(60*time.Second, 20*time.Second, fetchClaudePlanUsage)
+		out[0] = planUsageClaude.get(60*time.Second, 20*time.Second, func() PlanUsageProvider { return fetchClaudePlanUsage(a.latestClaudeRateLimit) })
 	}()
 	go func() {
 		defer wg.Done()
@@ -103,13 +106,40 @@ func (a *App) PlanUsage() PlanUsage {
 
 const claudeUsageURL = "https://api.anthropic.com/api/oauth/usage"
 
+var claudeRateSnap struct {
+	sync.Mutex
+	line string
+	at   time.Time // zero = read back from chat_stream, age unknown
+}
+
+// noteClaudeRateLimit keeps the newest rate_limit_event line (emitChatLine).
+func noteClaudeRateLimit(kind, line string) {
+	if kind != "claude-data" || !strings.Contains(line, `"rate_limit_event"`) {
+		return
+	}
+	claudeRateSnap.Lock()
+	claudeRateSnap.line, claudeRateSnap.at = line, time.Now()
+	claudeRateSnap.Unlock()
+}
+
+// latestClaudeRateLimit returns the newest event, seeding from the durable
+// stream once after a restart.
+func (a *App) latestClaudeRateLimit() (string, time.Time) {
+	claudeRateSnap.Lock()
+	defer claudeRateSnap.Unlock()
+	if claudeRateSnap.line == "" && a.db != nil {
+		_ = a.db.QueryRow(`SELECT line FROM chat_stream WHERE kind = 'claude-data' AND line LIKE '%"type":"rate_limit_event"%' ORDER BY rowid DESC LIMIT 1`).Scan(&claudeRateSnap.line)
+	}
+	return claudeRateSnap.line, claudeRateSnap.at
+}
+
 type claudeOAuthCreds struct {
 	AccessToken      string `json:"accessToken"`
 	ExpiresAt        int64  `json:"expiresAt"` // ms
 	SubscriptionType string `json:"subscriptionType"`
 }
 
-func fetchClaudePlanUsage() PlanUsageProvider {
+func fetchClaudePlanUsage(latest func() (string, time.Time)) PlanUsageProvider {
 	p := PlanUsageProvider{Kind: "claude"}
 	if why := claudeRoutedElsewhere(); why != "" {
 		p.Status, p.Reason = "not_applicable", why
@@ -117,38 +147,50 @@ func fetchClaudePlanUsage() PlanUsageProvider {
 	}
 	creds, err := readClaudeOAuthCreds()
 	if err != nil || creds.AccessToken == "" {
-		p.Status, p.Reason = "not_applicable", "No Claude subscription login found"
+		p.Status, p.Reason = "unavailable", "Not signed in to Claude — run `claude /login`"
 		return p
 	}
 	p.Plan = creds.SubscriptionType
+	why := ""
 	if creds.ExpiresAt > 0 && time.Now().UnixMilli() >= creds.ExpiresAt {
-		p.Status, p.Reason = "unavailable", "Login token expired — it refreshes the next time Claude runs"
-		return p
+		why = "Login token expired — it refreshes the next time Claude runs"
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		code, body, err := claudeUsageRequest(ctx, creds.AccessToken)
+		switch {
+		case err != nil:
+			why = "Usage request failed"
+		case code == http.StatusUnauthorized:
+			// A rejected login is the one failure the fallback must not hide.
+			p.Status, p.Reason = "unavailable", "Claude login rejected — run `claude /login` to sign in again"
+			return p
+		case code == http.StatusTooManyRequests:
+			why = "Usage endpoint is rate limiting"
+		case code != http.StatusOK:
+			why = fmt.Sprintf("Usage endpoint returned HTTP %d", code)
+		default:
+			rows, extra, err := parseClaudeUsage(body)
+			if err == nil {
+				p.Status, p.Rows, p.Extra = "ok", rows, extra
+				return p
+			}
+			why = "Unexpected usage response"
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	code, body, err := claudeUsageRequest(ctx, creds.AccessToken)
-	if err != nil {
-		p.Status, p.Reason = "unavailable", "Usage request failed"
-		return p
+	// Fallback: what the CLI itself last reported.
+	now := time.Now()
+	if line, at := latest(); line != "" {
+		if rows, err := parseClaudeRateLimitEvent(line, now); err == nil && len(rows) > 0 {
+			p.Status, p.Rows = "ok", rows
+			p.Extra = "As of the last chat turn"
+			if m := int(now.Sub(at).Minutes()); !at.IsZero() && m >= 1 {
+				p.Extra = fmt.Sprintf("As of the last chat turn, %d min ago", m)
+			}
+			return p
+		}
 	}
-	switch {
-	case code == http.StatusUnauthorized:
-		p.Status, p.Reason = "unavailable", "Claude login rejected — run `claude /login` to sign in again"
-		return p
-	case code == http.StatusTooManyRequests:
-		p.Status, p.Reason = "unavailable", "Usage endpoint is rate limiting — retrying shortly"
-		return p
-	case code != http.StatusOK:
-		p.Status, p.Reason = "unavailable", fmt.Sprintf("Usage endpoint returned HTTP %d", code)
-		return p
-	}
-	rows, extra, err := parseClaudeUsage(body)
-	if err != nil {
-		p.Status, p.Reason = "unavailable", "Unexpected usage response"
-		return p
-	}
-	p.Status, p.Rows, p.Extra = "ok", rows, extra
+	p.Status, p.Reason = "unavailable", why
 	return p
 }
 
@@ -161,9 +203,6 @@ var claudeUsageRequest = func(ctx context.Context, token string) (int, []byte, e
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 	req.Header.Set("Accept", "application/json")
-	// The endpoint answers 429 to any User-Agent that is not `claude-code/<semver>`
-	// (Go's default and bare "claude-code" included); the version itself is not checked.
-	req.Header.Set("User-Agent", "claude-code/2.1.0")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, nil, err
@@ -293,6 +332,48 @@ func parseClaudeUsage(body []byte) ([]PlanUsageRow, string, error) {
 		}
 	}
 	return rows, extra, nil
+}
+
+var claudeWindowLabels = []struct{ key, label string }{
+	{"five_hour", "5-hour limit"},
+	{"seven_day", "Weekly · all models"},
+	{"seven_day_sonnet", "Weekly · Sonnet"},
+	{"seven_day_opus", "Weekly · Opus"},
+}
+
+// parseClaudeRateLimitEvent maps unifiedWindows (utilization is 0..1,
+// resetsAt unix seconds). A window whose reset already passed has rolled
+// over since the event, so it reads 0 %.
+func parseClaudeRateLimitEvent(line string, now time.Time) ([]PlanUsageRow, error) {
+	var ev struct {
+		Info struct {
+			Windows map[string]struct {
+				Utilization *float64 `json:"utilization"`
+				ResetsAt    int64    `json:"resetsAt"`
+			} `json:"unifiedWindows"`
+		} `json:"rate_limit_info"`
+	}
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		return nil, err
+	}
+	rows := []PlanUsageRow{}
+	for _, l := range claudeWindowLabels {
+		w, ok := ev.Info.Windows[l.key]
+		if !ok || w.Utilization == nil {
+			continue
+		}
+		row := PlanUsageRow{Label: l.label, Percent: clampPct(*w.Utilization * 100)}
+		if w.ResetsAt > 0 {
+			reset := time.Unix(w.ResetsAt, 0)
+			if !reset.After(now) {
+				row.Percent = 0
+			} else {
+				row.ResetsAt = reset.UTC().Format(time.RFC3339)
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func clampPct(v float64) float64 {

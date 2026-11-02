@@ -44,12 +44,39 @@ func TestParseClaudeUsageAllNull(t *testing.T) {
 	}
 }
 
+// Real rate_limit_event a Claude chat streamed (Team account).
+const claudeRateLimitFixture = `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792362000,"rateLimitType":"five_hour","overageStatus":"rejected","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.08,"resetsAt":1792362000},"seven_day":{"utilization":0.17,"resetsAt":1792594800}}},"uuid":"x","session_id":"y"}`
+
+func TestParseClaudeRateLimitEvent(t *testing.T) {
+	before := time.Unix(1792362000-3600, 0)
+	rows, err := parseClaudeRateLimitEvent(claudeRateLimitFixture, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []PlanUsageRow{
+		{Label: "5-hour limit", Percent: 8, ResetsAt: "2026-10-18T22:20:00Z"},
+		{Label: "Weekly · all models", Percent: 17, ResetsAt: "2026-10-21T15:00:00Z"},
+	}
+	if len(rows) != len(want) || rows[0] != want[0] || rows[1] != want[1] {
+		t.Fatalf("rows = %+v, want %+v", rows, want)
+	}
+	// After the 5-hour reset the window has rolled over: 0 %, no reset shown.
+	rows, _ = parseClaudeRateLimitEvent(claudeRateLimitFixture, time.Unix(1792362000+60, 0))
+	if rows[0].Percent != 0 || rows[0].ResetsAt != "" || rows[1].Percent != 17 {
+		t.Fatalf("rolled over rows = %+v", rows)
+	}
+}
+
 func TestFetchClaudePlanUsageStatuses(t *testing.T) {
 	origCreds, origReq := readClaudeOAuthCreds, claudeUsageRequest
 	t.Cleanup(func() { readClaudeOAuthCreds, claudeUsageRequest = origCreds, origReq })
 	home := t.TempDir() // no ~/.claude/settings.json → not routed elsewhere
 	t.Setenv("HOME", home)
 
+	none := func() (string, time.Time) { return "", time.Time{} }
+	event := func() (string, time.Time) {
+		return claudeRateLimitFixture, time.Now().Add(-5*time.Minute - 10*time.Second)
+	}
 	future := time.Now().Add(time.Hour).UnixMilli()
 	readClaudeOAuthCreds = func() (claudeOAuthCreds, error) {
 		return claudeOAuthCreds{AccessToken: "SECRETTOKEN", ExpiresAt: future, SubscriptionType: "team"}, nil
@@ -59,13 +86,26 @@ func TestFetchClaudePlanUsageStatuses(t *testing.T) {
 		gotToken = token
 		return http.StatusOK, []byte(claudeTeamUsageFixture), nil
 	}
-	p := fetchClaudePlanUsage()
+	p := fetchClaudePlanUsage(none)
 	if p.Status != "ok" || p.Plan != "team" || len(p.Rows) != 3 || gotToken != "SECRETTOKEN" {
 		t.Fatalf("ok case: %+v", p)
 	}
 
+	// 429 falls back to the last rate_limit_event; without one it says why.
+	claudeUsageRequest = func(context.Context, string) (int, []byte, error) { return 429, nil, nil }
+	if p := fetchClaudePlanUsage(event); p.Status != "ok" || len(p.Rows) != 2 || !strings.Contains(p.Extra, "5 min ago") {
+		t.Fatalf("429 fallback case: %+v", p)
+	}
+	if p := fetchClaudePlanUsage(none); p.Status != "unavailable" || !strings.Contains(p.Reason, "rate limiting") {
+		t.Fatalf("429 no-fallback case: %+v", p)
+	}
+
+	// A rejected login is surfaced even when a fallback exists.
 	claudeUsageRequest = func(context.Context, string) (int, []byte, error) { return 401, nil, nil }
-	if p := fetchClaudePlanUsage(); p.Status != "unavailable" || strings.Contains(p.Reason, "SECRETTOKEN") {
+	if p := fetchClaudePlanUsage(event); p.Status != "unavailable" || !strings.Contains(p.Reason, "/login") {
+		t.Fatalf("401 with fallback case: %+v", p)
+	}
+	if p := fetchClaudePlanUsage(none); p.Status != "unavailable" || strings.Contains(p.Reason, "SECRETTOKEN") {
 		t.Fatalf("401 case: %+v", p)
 	}
 
@@ -76,12 +116,12 @@ func TestFetchClaudePlanUsageStatuses(t *testing.T) {
 		t.Fatal("expired token must not be sent")
 		return 0, nil, nil
 	}
-	if p := fetchClaudePlanUsage(); p.Status != "unavailable" {
+	if p := fetchClaudePlanUsage(none); p.Status != "unavailable" {
 		t.Fatalf("expired case: %+v", p)
 	}
 
 	readClaudeOAuthCreds = func() (claudeOAuthCreds, error) { return claudeOAuthCreds{}, os.ErrNotExist }
-	if p := fetchClaudePlanUsage(); p.Status != "not_applicable" {
+	if p := fetchClaudePlanUsage(none); p.Status != "unavailable" || !strings.Contains(p.Reason, "/login") {
 		t.Fatalf("no login case: %+v", p)
 	}
 }

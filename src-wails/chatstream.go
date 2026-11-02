@@ -321,6 +321,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 		ord = w.append(chatID, kind, line)
 	}
 	busEmit(kind+"-"+chatID, ChatStreamLine{Ord: ord, Kind: kind, Line: line})
+	noteClaudeRateLimit(kind, line)
 
 	// Also publish the provider-neutral reading of the line (providerruntime.go).
 	// Running alongside the raw channel rather than replacing it: the desktop

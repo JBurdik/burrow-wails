@@ -207,7 +207,11 @@ deriving them twice. A turn interrupted by an app restart gets no notes.
 subscription limits in the Sidebar. Claude: `GET api.anthropic.com/api/oauth/usage` with the
 Claude Code OAuth token from the Keychain (`Claude Code-credentials`, else
 `~/.claude/.credentials.json`), read fresh per fetch and **never refreshed** — rotating the
-refresh token would log the CLI out — and never logged or emitted. Codex: a short-lived
+refresh token would log the CLI out — and never logged or emitted. The endpoint 429s on its own
+schedule; on that (or any failure short of a 401, which stays visible as "run `claude /login`") the
+rows fall back to the newest `rate_limit_event` a Claude chat streamed (`unifiedWindows`, kept by
+`emitChatLine`, seeded from `chat_stream` after a restart), labelled "as of the last chat turn". No
+spoofed User-Agent: Burrow is not a first-party client. Codex: a short-lived
 `codex app-server` asking `account/rateLimits/read`. Cached (Claude 60 s, Codex 120 s; shorter
 after failure); a provider routed through Bedrock / Vertex / an API key in
 `~/.claude/settings.json` is reported as not applicable.
