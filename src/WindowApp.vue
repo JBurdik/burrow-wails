@@ -8,7 +8,7 @@
     <div class="relative min-h-0 flex-1">
       <Settings v-if="kind === 'settings'" windowed @close="closeSelf" />
       <XTerm v-else-if="kind === 'terminal'" :pty-id="leafId" :cwd="cwd" :initially-titled="true" />
-      <GitWindow v-else-if="kind === 'git' && ready" :initial-ws-id="wsId || undefined" class="h-full" />
+      <GitWindow v-else-if="kind === 'git' && ready" :initial-ws-id="wsId || undefined" class="absolute inset-0" />
       <AgentChat
         v-else-if="kind === 'chat' && chatId != null && ready"
         :chat-id="chatId"
