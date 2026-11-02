@@ -2,9 +2,9 @@
   <div v-if="!commits.length" class="flex flex-1 items-center justify-center text-xs text-muted-foreground">
     {{ loaded ? "No commits yet. Make the first one in Changes." : "Loading history…" }}
   </div>
-  <div v-else ref="hostRef" class="flex min-h-0 flex-1">
+  <div v-else ref="hostRef" class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
     <!-- commit list -->
-    <div class="flex min-w-[380px] flex-col" :style="{ width: split * 100 + '%' }">
+    <div class="gh-list flex min-w-[300px] flex-col" :style="{ width: split * 100 + '%' }">
       <button
         v-if="dirty > 0"
         class="flex h-[34px] shrink-0 items-center gap-3 border-b border-border pr-3 text-left hover:bg-hover"
@@ -42,7 +42,7 @@
             <circle v-else :cx="laneX(rows[i].lane)" :cy="MID" r="4.5" :fill="laneColor(rows[i].color)" stroke="var(--bg-panel)" stroke-width="2" />
           </svg>
           <div class="flex min-w-0 flex-1 items-center gap-1.5">
-            <span v-if="c.refs.length" class="flex min-w-0 max-w-[60%] shrink items-center gap-1 overflow-hidden">
+            <span v-if="c.refs.length" class="flex max-w-[60%] shrink-0 items-center gap-1 overflow-hidden">
               <span
                 v-for="r in refPills(c.refs)"
                 :key="r.kind + r.label"
@@ -62,7 +62,7 @@
               :class="[c.hash === selected || c.hash === headHash ? 'text-foreground' : 'text-secondary-foreground', rows[i].isMerge && '!text-muted-foreground']"
             >{{ c.subject }}</span>
           </div>
-          <span class="ml-3 w-[120px] shrink-0 truncate text-right text-[12px] text-muted-foreground">{{ c.author }}</span>
+          <span class="gh-author ml-3 w-[120px] shrink-0 truncate text-right text-[12px] text-muted-foreground">{{ c.author }}</span>
           <span class="ml-3 w-[86px] shrink-0 truncate text-right text-[12px] tabular-nums text-muted-foreground">{{ c.relTime }}</span>
         </div>
       </div>
@@ -74,7 +74,7 @@
     </div>
 
     <!-- commit detail -->
-    <div class="flex min-w-[360px] flex-1 flex-col bg-[color-mix(in_srgb,var(--bg-panel)_60%,transparent)]">
+    <div class="flex min-w-0 flex-1 flex-col overflow-hidden bg-[color-mix(in_srgb,var(--bg-panel)_60%,transparent)]">
       <GitCommitDetail v-if="selected" :key="selected" :cwd="cwd" :hash="selected" @select="selected = $event" />
       <div v-else class="flex flex-1 items-center justify-center text-xs text-muted-foreground">Select a commit.</div>
     </div>
@@ -302,6 +302,9 @@ const vFocus = { mounted: (el: HTMLElement, b: { value?: boolean }) => { if (b.v
 </script>
 
 <style scoped>
+/* ponytail: narrow list drops the author column so the subject keeps its room */
+.gh-list { container-type: inline-size; }
+@container (max-width: 620px) { .gh-author { display: none; } }
 .gh-menu-item {
   display: block; width: 100%; text-align: left; border-radius: 5px;
   padding: 5px 8px; font-size: 12px; color: var(--text-secondary);

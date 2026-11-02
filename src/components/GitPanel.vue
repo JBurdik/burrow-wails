@@ -529,7 +529,7 @@ const gitBusy = computed(() => git.generating || git.committing || git.pushing);
 
 async function popout() {
   const id = selectedWsId.value;
-  await openWindow("git", `/window/git${id != null ? `?ws=${id}` : ""}`, "Git", 1100, 780);
+  await openWindow("git", `/window/git${id != null ? `?ws=${id}` : ""}`, "Git", 1400, 900);
 }
 const selectedWsId = ref<number | null>(props.initialWsId ?? wsStore.active?.id ?? null);
 const selectedWsIdModel = computed<string | undefined>({ get: () => selectedWsId.value?.toString(), set: (id) => { selectedWsId.value = id ? Number(id) : null; } });

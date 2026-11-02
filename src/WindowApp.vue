@@ -1,5 +1,5 @@
 <template>
-  <div class="window-app flex h-screen flex-col bg-[var(--terminal-bg)]">
+  <div class="window-app flex h-full flex-col bg-[var(--terminal-bg)]">
     <!-- Hidden-inset titlebar: the traffic lights sit over this strip, which is
          also what drags the window. -->
     <div v-if="kind !== 'settings'" class="window-titlebar flex h-[30px] shrink-0 items-center justify-center text-[12px] text-muted-foreground" style="--wails-draggable: drag">
