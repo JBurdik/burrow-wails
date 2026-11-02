@@ -56,3 +56,42 @@ export function installPanelTerminals(p: PanelTerminals | null): void {
 export function panelTerminals(): PanelTerminals | null {
   return panel;
 }
+
+// ── Persistence ──────────────────────────────────────────────────────────────
+// The terminal list outlives the RightPanel instance that drew it: the panel
+// moves into its own window and back (each mount reads this), and the shells
+// survive an app restart in the daemon. Without it a remount lost the list and
+// orphaned every running shell in the daemon.
+export const RP_TERMS_KEY = "burrow.rpTerms";
+type Store = Pick<Storage, "getItem" | "setItem">;
+
+export function loadTerms(storage: Store | undefined = globalThis.localStorage): Record<number, RpTerms> {
+  try {
+    const raw = JSON.parse(storage?.getItem(RP_TERMS_KEY) ?? "{}") as Record<string, RpTerms>;
+    const out: Record<number, RpTerms> = {};
+    for (const [ws, s] of Object.entries(raw)) {
+      const terms = Array.isArray(s?.terms) ? s.terms.filter((t) => typeof t?.id === "number" && typeof t.cwd === "string") : [];
+      if (terms.length) out[Number(ws)] = { terms, active: terms.some((t) => t.id === s.active) ? s.active : terms[0].id };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveTerms(map: Record<number, RpTerms>, storage: Store | undefined = globalThis.localStorage): void {
+  try {
+    storage?.setItem(RP_TERMS_KEY, JSON.stringify(map));
+  } catch { /* quota: the list just won't survive a remount */ }
+}
+
+/** Only the shells the daemon still has: reattaching to a dead id would start
+ *  an unrelated fresh shell under an old label. */
+export function keepLive(map: Record<number, RpTerms>, live: Set<number>): Record<number, RpTerms> {
+  const out: Record<number, RpTerms> = {};
+  for (const [ws, s] of Object.entries(map)) {
+    const terms = s.terms.filter((t) => live.has(t.id));
+    if (terms.length) out[Number(ws)] = { terms, active: terms.some((t) => t.id === s.active) ? s.active : terms[0].id };
+  }
+  return out;
+}

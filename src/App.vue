@@ -17,7 +17,7 @@
       @toggle-bottom="toggleBottomTerminal"
       @toggle-sidebar="ui.toggleSidebar()"
       @back="ws.close()"
-      @toggle-rightpanel="ui.toggleRightPanel()"
+      @toggle-rightpanel="rpPopped ? openRightPanelWindow() : ui.toggleRightPanel()"
     />
     <Settings v-if="ui.settingsOpen" @close="ui.closeSettings()" />
     <Onboarding v-if="onboardingOpen" @complete="completeOnboarding" @skip="completeOnboarding" />
@@ -84,8 +84,11 @@
       <InboxScreen v-if="compact && phone === 'inbox'" />
       <ProjectScreen v-else-if="compact && phone === 'project'" />
       <MoreScreen v-else-if="compact && phone === 'more'" />
-      <div v-show="!compact && ui.rightPanelVisible" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
+      <div v-show="!compact && ui.rightPanelVisible && !rpPopped" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
+      <!-- v-if on rpPopped: the panel lives in its own window then, and two
+           panels would attach the same terminal PTYs (rpWindow.ts). -->
       <RightPanel
+        v-if="!rpPopped"
         ref="rightPanelRef"
         class="panel-right"
         :class="{ 'phone-hidden': compact && phone !== 'project-surface' }"
@@ -97,6 +100,7 @@
         @open-panel="ui.rightPanelVisible = true"
         @close-panel="ui.rightPanelVisible = false"
         @open-project-config="showProjectConfig = true"
+        @pop-out="popOutRightPanel"
       />
     </div>
     <WorkspaceConfig
@@ -204,6 +208,10 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { installControlBridge } from "@/lib/controlBridge";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { openWindow } from "@/lib/windows";
+import { RP_WINDOW_KEY, publishFollow, remotePanel } from "@/lib/rpWindow";
+import { installPanelTerminals } from "@/lib/rpTerminals";
+import { activeChatIdFor } from "@/stores/chatTree";
 import DiagramModal from "@/components/DiagramModal.vue";
 import ImageLightbox from "@/components/ImageLightbox.vue";
 import HtmlPageModal from "@/components/HtmlPageModal.vue";
@@ -412,8 +420,25 @@ watch(detailsFits, (fits) => { if (fits && detailsPeek.value) { detailsPeek.valu
 // ⌘J / the titlebar button: the Right Panel's terminal. The RP follows
 // displayWs, so on the welcome screen it is the targeted project's.
 function toggleBottomTerminal() {
+  if (rpPopped.value) return void openRightPanelWindow();
   void rightPanelRef.value?.toggleTerminal();
 }
+
+// ── The Right Panel in its own window (optional, its header's button) ─────────
+// This window unmounts its panel and publishes what the panel should follow;
+// closing that window brings the panel back here. See src/lib/rpWindow.ts.
+const rpPopped = ref(false);
+function openRightPanelWindow() {
+  return openWindow(RP_WINDOW_KEY, "/window/rightpanel", "Right panel", 480, 820);
+}
+async function popOutRightPanel() {
+  rpPopped.value = true;
+  await nextTick(); // the panel is unmounted (its terminal list saved) before the window mounts one
+  installPanelTerminals(remotePanel);
+  await openRightPanelWindow().catch(() => { rpPopped.value = false; });
+}
+watch(rpPopped, (on) => { if (!on) installPanelTerminals(null); }); // the remounted panel installs itself
+void listen<string>("window-closed", ({ payload }) => { if (payload === RP_WINDOW_KEY) rpPopped.value = false; });
 
 const welcomeEl = useTemplateRef<{ focus: () => void; cycleProvider: () => void; target: Workspace | null }>("welcomeEl");
 watch(showWelcome, (on) => { if (on) nextTick(() => welcomeEl.value?.focus()); });
@@ -423,6 +448,18 @@ watch(showWelcome, (on) => { if (on) nextTick(() => welcomeEl.value?.focus()); }
 // picking there doesn't open the workspace until the first message is sent).
 const displayWs = computed<Workspace | null>(() =>
   showWelcome.value ? (welcomeEl.value?.target ?? ws.active) : ws.active,
+);
+// What a popped-out Right Panel shows (rpWindow.ts); defined after displayWs,
+// which the immediate getter reads.
+watch(
+  () => ({
+    workspaceId: displayWs.value?.id,
+    cwd: displayWs.value?.path ?? "",
+    isGit: displayWs.value?.is_git !== false,
+    chatId: displayWs.value ? activeChatIdFor(tabsStore.tabsByWs, tabsStore.activeByWs, displayWs.value.id) : null,
+  }),
+  (f) => publishFollow(f),
+  { immediate: true, deep: true },
 );
 
 const panelStyles = computed(() => compact.value
@@ -832,7 +869,7 @@ const KEY_ACTIONS: Record<string, () => void> = {
   settings: () => ui.toggleSettings(),
   cheatsheet: () => { cheatsheetOpen.value = !cheatsheetOpen.value; },
   sidebar: () => ui.toggleSidebar(),
-  rightPanel: () => { ui.rightPanelVisible = !ui.rightPanelVisible; },
+  rightPanel: () => { if (rpPopped.value) void openRightPanelWindow(); else ui.rightPanelVisible = !ui.rightPanelVisible; },
   // ⌘J: the Right Panel's terminal (the per-thread bottom terminal is gone).
   bottomPanel: toggleBottomTerminal,
   focusComposer,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addTerm, findServed, onlyShell, removeTerm, type RpTerms } from "./rpTerminals";
+import { addTerm, findServed, keepLive, loadTerms, onlyShell, removeTerm, RP_TERMS_KEY, saveTerms, type RpTerms } from "./rpTerminals";
 
 describe("rpTerminals", () => {
   it("dedups a served command per cwd, ignoring whitespace", () => {
@@ -29,5 +29,23 @@ describe("rpTerminals", () => {
     expect(["zsh", "-zsh", "bash"].every(onlyShell)).toBe(true);
     // "" = the PTY is gone (shell exited): not restartable in place.
     expect(["node", "python3", "zshy", ""].some(onlyShell)).toBe(false);
+  });
+});
+
+describe("terminal list persistence", () => {
+  const mem = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }; };
+  it("round-trips and keeps only the shells the daemon still has", () => {
+    const s = mem();
+    saveTerms({ 1: { terms: [{ id: 5, cwd: "/a", label: "T" }, { id: 6, cwd: "/a", label: "dev", cmd: "pnpm dev" }], active: 6 } }, s);
+    const loaded = loadTerms(s);
+    expect(loaded[1].terms.map((t) => t.id)).toEqual([5, 6]);
+    const live = keepLive(loaded, new Set([5]));
+    expect(live[1]).toEqual({ terms: [{ id: 5, cwd: "/a", label: "T" }], active: 5 });
+    expect(keepLive(loaded, new Set())).toEqual({});
+  });
+  it("survives garbage", () => {
+    const s = mem();
+    s.setItem(RP_TERMS_KEY, "{not json");
+    expect(loadTerms(s)).toEqual({});
   });
 });

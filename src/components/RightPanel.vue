@@ -58,6 +58,13 @@
         <button v-if="pi === 0 && !layout.bottomOpen" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Split the panel" aria-label="Split the panel" @click="openBottom(layout)"><PhRows :size="14" /></button>
         <button v-if="layout.bottomOpen" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" :title="layout.maximized === pi ? 'Restore' : 'Maximize'" :aria-label="layout.maximized === pi ? 'Restore pane' : 'Maximize pane'" @click="toggleMaximize(layout, pi)"><component :is="layout.maximized === pi ? PhArrowsInSimple : PhArrowsOutSimple" :size="13" /></button>
         <button v-if="pi === 1" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Close pane (its surfaces move to the top)" aria-label="Close pane" @click="closeBottom(layout)"><PhX :size="13" /></button>
+        <button
+          v-if="pi === 0 && !props.forceSurface && (inWindow || canOpenWindows())"
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground"
+          :title="inWindow ? 'Back into the main window' : 'Open the panel in its own window'"
+          :aria-label="inWindow ? 'Back into the main window' : 'Open the panel in its own window'"
+          @click="inWindow ? emit('closePanel') : emit('popOut')"
+        ><component :is="inWindow ? PhArrowSquareIn : PhArrowSquareOut" :size="14" /></button>
       </div>
 
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -684,8 +691,10 @@ import {
   PhArrowUp, PhArrowDown, PhCaretRight, PhCaretLeft,
   PhArrowUUpLeft, PhArrowsOutSimple, PhPlus, PhGlobe, PhTerminal, PhRobot, PhPlugsConnected,
   PhSpinner, PhWarningCircle, PhRows, PhSparkle, PhArrowsInSimple, PhPlay, PhFileText, PhFileCode, PhEye,
-  PhListChecks,
+  PhListChecks, PhArrowSquareOut, PhArrowSquareIn,
 } from "@phosphor-icons/vue";
+import { canOpenWindows, isSecondaryWindow } from "@/lib/windows";
+import { answerPanelOps } from "@/lib/rpWindow";
 import {
   closeBottom, closeSurface as closeLayoutSurface, emptyLayout, hideBottom, isShown, loadLayouts, moveTo, openBottom, openIn,
   paneOf, saveLayouts, toggleMaximize, clampSplit, type PaneIndex, type RpLayout,
@@ -731,10 +740,16 @@ import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
 import ExtensionNativeSurface from "./ExtensionNativeSurface.vue";
 import { initPtyCounter, nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
-import { addTerm, findServed, installPanelTerminals, onlyShell, removeTerm, type RpTerm, type RpTerms, type ServeRequest, type ServeResult } from "@/lib/rpTerminals";
+import { addTerm, findServed, installPanelTerminals, keepLive, loadTerms, onlyShell, removeTerm, saveTerms, type RpTerm, type RpTerms, type ServeRequest, type ServeResult } from "@/lib/rpTerminals";
 
-const props = withDefaults(defineProps<{ cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean; forceSurface?: string }>(), { isGit: true, open: true });
-const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: [] }>();
+const props = withDefaults(defineProps<{
+  cwd: string; workspaceId?: number; isGit?: boolean; open?: boolean; forceSurface?: string;
+  /** The panel's own window has no thread tabs to read the active chat from: the main window publishes it (rpWindow.ts). */
+  activeChat?: number | null;
+}>(), { isGit: true, open: true, activeChat: undefined });
+const emit = defineEmits<{ openPanel: []; closePanel: []; openProjectConfig: []; popOut: [] }>();
+/** Mounted in its own window (WindowApp kind "rightpanel"), not the main one. */
+const inWindow = isSecondaryWindow();
 const git = useGitStore();
 // Confirm dialogs focus their action: Enter confirms, Esc cancels.
 const vFocus = { mounted: (el: HTMLElement) => el.focus() };
@@ -810,7 +825,7 @@ function subagentTime(ts: number): string {
 // sub-agents" while a chat was open. The tabs mirror already
 // carries `chatId` for chat tabs (Terminal.vue is its writer), so it is the
 // same source of truth the user is actually looking at.
-const activeChatId = computed(() =>
+const activeChatId = computed(() => props.activeChat !== undefined ? props.activeChat :
   activeChatIdFor(terminalTabs.tabsByWs, terminalTabs.activeByWs, props.workspaceId),
 );
 const childList = computed(() => (activeChatId.value ? childrenOf(chats.sessions, activeChatId.value) : []));
@@ -1178,6 +1193,17 @@ function extSurface(pi: PaneIndex) {
 // `serve` — kept mounted forever once opened, like the main Terminal.vue
 // leaves, so an app running in one keeps running across project switches.
 const termsByWs = reactive<Record<number, RpTerms>>({});
+// The list is persisted (rpTerminals.ts) so a remount — the panel moving into its
+// own window and back, an app restart — reattaches to the same live shells
+// instead of orphaning them. Nothing allocates a terminal before this restore:
+// a scratch shell started first would be a duplicate.
+const termsRestored = (async () => {
+  const sessions = await invoke<Array<{ pty_id: number }>>("list_pty_sessions").catch(() => []);
+  Object.assign(termsByWs, keepLive(loadTerms(), new Set(sessions.map((s) => s.pty_id))));
+})();
+void termsRestored.then(() => {
+  watch(termsByWs, () => saveTerms(JSON.parse(JSON.stringify(termsByWs))), { deep: true, immediate: true });
+});
 const terminalWsIds = computed(() => Object.keys(termsByWs).map(Number).filter((id) => termsByWs[id].terms.length));
 const scratchStarts = new Map<number, Promise<void>>();
 
@@ -1187,6 +1213,7 @@ const scratchStarts = new Map<number, Promise<void>>();
 // fresh RP xterm had no shell output and looked like a permanently blank pane.
 // An XTerm only mounts once its id is in termsByWs, i.e. after this check.
 async function addTerminal(ws: number, t: Omit<RpTerm, "id">): Promise<number> {
+  await termsRestored;
   const sessions = await invoke<Array<{ pty_id: number }>>("list_pty_sessions").catch(() => []);
   // Keep the retired Mission Control id range from pushing ordinary tabs up.
   initPtyCounter(sessions.reduce((max, s) => (s.pty_id < 1_000_000 ? Math.max(max, s.pty_id) : max), 0));
@@ -1197,6 +1224,7 @@ async function addTerminal(ws: number, t: Omit<RpTerm, "id">): Promise<number> {
 
 /** A shown Terminal surface with nothing in it gets one scratch shell. */
 async function ensureScratch(ws: number) {
+  await termsRestored;
   if (termsByWs[ws]?.terms.length) return;
   const running = scratchStarts.get(ws);
   if (running) return running;
@@ -1269,8 +1297,17 @@ function closePanelTerminal(ptyId: number): boolean {
   }
   return false;
 }
-onMounted(() => installPanelTerminals({ serve, close: closePanelTerminal }));
-onBeforeUnmount(() => installPanelTerminals(null));
+// In its own window the main window's control bridge still receives `serve`;
+// it forwards it here (rpWindow.ts).
+let panelOpsOff: (() => void) | null = null;
+onMounted(() => {
+  installPanelTerminals({ serve, close: closePanelTerminal });
+  if (inWindow) panelOpsOff = answerPanelOps();
+});
+onBeforeUnmount(() => {
+  installPanelTerminals(null);
+  panelOpsOff?.();
+});
 
 // Same idea for the browser preview: one BrowserPane per workspace, kept
 // mounted so its URL/history survives switching projects.

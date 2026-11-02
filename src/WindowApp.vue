@@ -9,6 +9,18 @@
     <div class="relative min-h-0 flex-1">
       <Settings v-if="kind === 'settings'" windowed @close="closeSelf" />
       <XTerm v-else-if="kind === 'terminal'" :pty-id="leafId" :cwd="cwd" :initially-titled="true" />
+      <!-- The whole Right Panel, following the main window's project and chat (rpWindow.ts). -->
+      <RightPanel
+        v-else-if="kind === 'rightpanel' && ready"
+        class="absolute inset-0 !w-full"
+        :cwd="follow.cwd"
+        :workspace-id="follow.workspaceId"
+        :is-git="follow.isGit"
+        :active-chat="follow.chatId"
+        :open="true"
+        @close-panel="closeSelf"
+        @open-panel="() => {}"
+      />
       <GitWindow v-else-if="kind === 'git' && ready" :initial-ws-id="wsId || undefined" class="absolute inset-0" />
       <AgentChat
         v-else-if="kind === 'chat' && chatId != null && ready"
@@ -28,12 +40,14 @@ import { Window } from "@wailsio/runtime";
 import { hideSplash } from "@/lib/splash";
 import { useUIStore } from "@/stores/ui";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { readFollow, RP_FOLLOW_KEY, type RpFollow } from "@/lib/rpWindow";
 
 // A secondary window: "#/window/<kind>/<id>?<params>" (src/lib/windows.ts).
 const Settings = defineAsyncComponent(() => import("@/components/Settings.vue"));
 const XTerm = defineAsyncComponent(() => import("@/components/XTerm.vue"));
 const AgentChat = defineAsyncComponent(() => import("@/components/AgentChat.vue"));
 const GitWindow = defineAsyncComponent(() => import("@/components/git/GitWindow.vue"));
+const RightPanel = defineAsyncComponent(() => import("@/components/RightPanel.vue"));
 const TrayPanel = defineAsyncComponent(() => import("@/components/TrayPanel.vue"));
 
 const [path, query = ""] = location.hash.slice(1).split("?");
@@ -44,7 +58,15 @@ const params = new URLSearchParams(query);
 const wsId = Number(params.get("ws") ?? 0);
 const chatId = params.has("chat") ? Number(params.get("chat")) : null;
 const cwd = params.get("cwd") ?? "";
-const title = kind === "settings" ? "Settings" : kind === "git" ? "Git" : (params.get("title") ?? "Burrow");
+const title = kind === "settings" ? "Settings" : kind === "git" ? "Git" : kind === "rightpanel" ? "Right panel" : (params.get("title") ?? "Burrow");
+
+// kind "rightpanel": what the main window has active, kept current by its writes.
+const follow = ref<RpFollow>(readFollow());
+function onStorage(e: StorageEvent) {
+  if (e.key === RP_FOLLOW_KEY) follow.value = readFollow();
+}
+if (kind === "rightpanel") window.addEventListener("storage", onStorage);
+onBeforeUnmount(() => window.removeEventListener("storage", onStorage));
 const ready = ref(false);
 
 const ui = useUIStore();

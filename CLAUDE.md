@@ -463,6 +463,20 @@ re-attached. Closing the tab/pane closes its window. A popped chat's window runs
 its receipt reaches the main window through the `storage` event on `burrow.seenAt` (each write touches only
 its own key, so no window puts stale receipts back). PTY receipts (`Terminal.vue`) are not synced that way.
 
+**The Right Panel in its own window** (`src/lib/rpWindow.ts`, WindowApp kind `rightpanel`, the ↗ button in the RP
+header; optional, never the default): App.vue `v-if`s its panel away (`rpPopped`) — two panels would attach the same
+terminal PTYs — and the window mounts one. What crosses: the **terminal list**, persisted in localStorage
+(`burrow.rpTerms`, `rpTerminals.ts` `saveTerms`/`loadTerms`; every RP mount restores it filtered by
+`list_pty_sessions` via `keepLive`, so RP shells also survive an app restart instead of orphaning in the daemon; no
+terminal is allocated before that restore); **what to follow** — App publishes `burrow.rpFollow` (displayWs + its active
+chat, read via the RP's `activeChat` prop, since the window has no thread tabs); and the **`serve` / close verbs**, which
+the main window's control bridge still receives: while popped it installs `remotePanel`, which forwards them over Wails
+JS events (`rp:op` → `rp:reply`, 15 s) to the window's `answerPanelOps`. Closing the window (or its ↙ button) =
+`window-closed rightpanel` → the panel remounts here. ⌘J / ⌘⌥B while popped focus that window. Old scrollback is not
+replayed into the moved terminal; the shell itself is the same. **⌘J** = the RP's Terminal surface (`toggleTerminal`:
+opens in the bottom pane focused, the next press `hideBottom`s it); the per-thread bottom terminal is gone. RP tabs
+have a hover arrow to move them to the other pane (the split).
+
 **Close = hide**: the backend keeps serving the phone, schedules and running chats; ⌘Q / tray Quit really
 quit (`quitting` flag, `ShouldQuit`), the Dock icon reopens. The tray is a template icon
 (`build/trayicon.png`, black + alpha, embedded; macOS tints it for the menu bar) with the count of phases in
