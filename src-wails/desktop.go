@@ -3,10 +3,11 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"github.com/wailsapp/wails/v3/pkg/services/dock"
 )
 
 // The native window side of the app. Everything here needs a Wails window and
@@ -219,16 +221,23 @@ func (a *App) saveWindowState(w *application.WebviewWindow) {
 	}
 }
 
-// --- Hide on close + system tray ---
+// --- Hide on close + system tray + Dock badge ---
 //
 // Closing the window only hides it: the backend keeps serving the phone,
 // schedules and running chats. ⌘Q / the tray's Quit really quit. The tray
-// shows how many chats and tabs are waiting on the user.
+// icon (a template image, so macOS tints it for a light or dark menu bar) and
+// the Dock badge both show how many chats and tabs are waiting on the user.
+
+//go:embed build/trayicon.png
+var trayIcon []byte
 
 var (
-	quitting atomic.Bool
-	tray     *application.SystemTray
-	trayMu   sync.Mutex
+	quitting   atomic.Bool
+	tray       *application.SystemTray
+	dockBadge  = dock.New()
+	trayMu     sync.Mutex
+	started    atomic.Bool // run loop up: the badge call dispatch_syncs onto the main queue
+	lastBadged int
 )
 
 func showMainWindow() {
@@ -246,38 +255,63 @@ func quitApp(a *App) {
 
 func setupTray(a *App) {
 	tray = wapp.SystemTray.New()
+	tray.SetTemplateIcon(trayIcon)
 	m := application.NewMenu()
 	m.Add("Open Burrow").OnClick(func(*application.Context) { showMainWindow() })
 	m.AddSeparator()
 	m.Add("Quit Burrow").OnClick(func(*application.Context) { quitApp(a) })
 	tray.SetMenu(m)
 	refreshTray(a)
+	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		started.Store(true)
+		go refreshTray(a)
+	})
 }
 
 // refreshTray recounts from PhaseStore.All rather than tracking deltas, so a
 // Forget()ed phase (reused PTY id) can't leave a stale count behind. Called
-// on its own goroutine from onChange: All takes the store's lock.
+// on its own goroutine from onChange: All takes the store's lock, and the
+// Dock badge blocks on the main thread.
 func refreshTray(a *App) {
 	if tray == nil || a.phases == nil {
 		return
 	}
 	trayMu.Lock()
 	defer trayMu.Unlock()
-	tray.SetLabel(trayLabel(a.phases.All()))
+	n := waitingCount(a.phases.All())
+	tray.SetLabel(trayLabel(n))
+	if !started.Load() || n == lastBadged {
+		return
+	}
+	var err error
+	if n == 0 {
+		err = dockBadge.RemoveBadge()
+	} else {
+		err = dockBadge.SetBadge(strconv.Itoa(n))
+	}
+	if err != nil {
+		log.Printf("dock badge: %v", err)
+		return
+	}
+	lastBadged = n
 }
 
-// ponytail: text label, no icon — a template icon can come with the Dock badge.
-func trayLabel(phases map[string]agentphase.Phase) string {
+func waitingCount(phases map[string]agentphase.Phase) int {
 	n := 0
 	for _, p := range phases {
 		if p.State == agentphase.WaitingInput || p.State == agentphase.WaitingApproval {
 			n++
 		}
 	}
+	return n
+}
+
+// trayLabel is the text beside the icon: the count, or nothing.
+func trayLabel(n int) string {
 	if n == 0 {
-		return "◆"
+		return ""
 	}
-	return fmt.Sprintf("◆ %d", n)
+	return strconv.Itoa(n)
 }
 
 func desktopPhaseChanged(a *App) { go refreshTray(a) }

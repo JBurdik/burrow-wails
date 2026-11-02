@@ -459,8 +459,12 @@ re-attached. Closing the tab/pane closes its window. Known gap: a popped chat's 
 review dot in the main Sidebar (receipts are per window).
 
 **Close = hide**: the backend keeps serving the phone, schedules and running chats; ⌘Q / tray Quit really
-quit (`quitting` flag, `ShouldQuit`), the Dock icon reopens. The tray label counts phases in `waiting_*`
-(`trayLabel`, recounted from `PhaseStore.All` on every change). Window → Keep on Top (⌘⌥T).
+quit (`quitting` flag, `ShouldQuit`), the Dock icon reopens. The tray is a template icon
+(`build/trayicon.png`, black + alpha, embedded; macOS tints it for the menu bar) with the count of phases in
+`waiting_*` beside it (none at 0), and the same count is the Dock badge (Wails' `services/dock`, removed at
+0) — `waitingCount`, recounted from `PhaseStore.All` on every change. The badge call `dispatch_sync`s onto the
+main queue, so it runs only on `refreshTray`'s goroutine and only after `ApplicationStarted` (before the run
+loop it would deadlock). Window → Keep on Top (⌘⌥T).
 
 ### `config.json` is written one key at a time (`src-wails/config.go`, `src/lib/config.ts`)
 

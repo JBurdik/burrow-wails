@@ -33,13 +33,14 @@ headless build (`main_headless.go` — no Wails import), daemon, MCP sidecar.
 
 - 1:1 migration: done (`chore(wails): migrate from Wails v2 to v3`). Signing/notarization stayed in the
   justfile (inner binaries must be signed with entitlements before the bundle; `wails3 tool sign` is `--deep`).
-- Hide-on-close + tray: done (text label, no icon yet).
+- Hide-on-close + tray: done. Tray = template icon (`build/trayicon.png`) + waiting count; Dock badge with
+  the same count via Wails' `services/dock` (no cgo of our own). Not yet eyeballed in a running build.
 - Multi-window (pulled into this branch): Settings window (floating under tiling WMs), Open in window for
   terminal/chat leaves (frozen XTerm in the main window), Git window, Keep on Top. Needed per-key config
   writes (`ConfigSet` + `config-changed`). Verified through `just dev-mcp` (Wails' MCP server).
 - Manual smoke: partial (dev window, MCP). Pending: signed build + `just verify`, update from the v2
   build, a week on beta.
-- Later: tray icon + Dock badge, popped-chat read receipts, floating option for popped tabs, live
+- Later: popped-chat read receipts, floating option for popped tabs, live
   reload for the remaining config-backed stores.
 
 ## Decisions (grilled 2026-10-31)
