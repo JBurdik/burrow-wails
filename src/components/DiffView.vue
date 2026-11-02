@@ -14,6 +14,8 @@ const ui = useUIStore();
 const props = defineProps<{
   diff: string;
   diffKey?: string;
+  /** hide the per-file header bar (one DiffView per hunk) */
+  noHeader?: boolean;
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -43,7 +45,7 @@ function render() {
     for (const fileDiff of patch.files) {
       const fileContainer = document.createElement(DIFFS_TAG_NAME);
       containerRef.value.appendChild(fileContainer);
-      const instance = new FileDiff({ theme: ui.activeTheme.shiki, diffStyle: "unified", expansionLineCount: 5 });
+      const instance = new FileDiff({ theme: ui.activeTheme.shiki, diffStyle: "unified", expansionLineCount: 5, disableFileHeader: props.noHeader });
       instance.render({ fileDiff, fileContainer });
       instances.push(instance);
     }

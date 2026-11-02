@@ -264,6 +264,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// not what a read scope should authorize, so these are operate scope
 	// despite returning only a string.
 	"run_git":                 {Method: "RunGit", Args: []string{"cwd", "args"}, Scope: scopeOrchOperate},
+	"run_git_input":           {Method: "RunGitInput", Args: []string{"cwd", "args", "stdin"}, Scope: scopeOrchOperate},
 	"forge_info":              {Method: "ForgeInfo", Args: []string{"cwd"}, Scope: scopeOrchRead},
 	"forge_pr_list":           {Method: "ForgePrList", Args: []string{"cwd", "scope", "state"}, Scope: scopeOrchRead},
 	"forge_pr_view":           {Method: "ForgePrView", Args: []string{"cwd", "number"}, Scope: scopeOrchRead},
