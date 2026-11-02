@@ -66,6 +66,34 @@
                   @keydown.esc.stop.prevent="replyTo = null"
                 />
               </div>
+              <!-- A chat's pending request, answered through its own session (same rules and transcript row as the chat). -->
+              <div v-for="(req, i) in chatPending(row)" :key="row.key + ':' + i" class="mx-2 mb-1.5 ml-[34px] rounded-lg border border-border px-2.5 py-2">
+                <template v-if="req.kind === 'permission' || req.kind === 'diff'">
+                  <div class="truncate font-mono text-[11px] text-secondary-foreground" :title="toolTarget(req.request.input)">{{ req.request.toolName }}<template v-if="toolTarget(req.request.input)">: {{ toolTarget(req.request.input) }}</template></div>
+                  <div class="mt-1.5 flex gap-1.5">
+                    <button type="button" class="tray-chip bg-accent text-accent-foreground hover:opacity-90" @click="answerChat(row.id, { kind: 'permission', allow: true })">Allow</button>
+                    <button type="button" class="tray-chip hover:bg-hover hover:text-foreground" @click="answerChat(row.id, { kind: 'permission', allow: true, always: true })">Always</button>
+                    <button type="button" class="tray-chip hover:bg-hover hover:text-destructive" @click="answerChat(row.id, { kind: 'permission', allow: false })">Deny</button>
+                  </div>
+                </template>
+                <template v-else-if="req.kind === 'acpPermission'">
+                  <div class="truncate text-[11px] text-secondary-foreground" :title="req.request.title">{{ req.request.title }}</div>
+                  <div class="mt-1.5 flex flex-wrap gap-1.5">
+                    <button
+                      v-for="o in req.request.options"
+                      :key="o.optionId"
+                      type="button"
+                      class="tray-chip"
+                      :class="o.kind.startsWith('reject') ? 'hover:bg-hover hover:text-destructive' : o.kind === 'allow_once' ? 'bg-accent text-accent-foreground hover:opacity-90' : 'hover:bg-hover hover:text-foreground'"
+                      @click="answerChat(row.id, { kind: 'acpOption', optionId: o.optionId, label: o.name, reject: o.kind.startsWith('reject') })"
+                    >{{ o.name }}</button>
+                  </div>
+                </template>
+                <!-- A question / plan / Codex input needs the full form: open the thread. -->
+                <button v-else type="button" class="tray-chip hover:bg-hover hover:text-foreground" @click="openRow(row)">
+                  {{ req.kind === 'plan' ? 'Review the plan…' : 'Answer…' }}
+                </button>
+              </div>
               <!-- A Claude tab's tool permission, answerable right here (ptypermissions.go). -->
               <div v-for="req in permsFor(row)" :key="req.id" class="mx-2 mb-1.5 ml-[34px] rounded-lg border border-border px-2.5 py-2">
                 <div class="truncate font-mono text-[11px] text-secondary-foreground" :title="permTarget(req)">{{ req.tool_name }}<template v-if="permTarget(req)">: {{ permTarget(req) }}</template></div>
@@ -141,6 +169,7 @@ import type { TermStatus } from "@/lib/terminalStatus";
 import { settledFor, useClaudeChatsStore } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { Select } from "@/components/ui/select";
+import { chatSession, TRANSCRIPT_PAGE, type ChatMessagesPage, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";
 import { useUIStore } from "@/stores/ui";
 import { smartTitle } from "@/lib/chatTitle";
 
@@ -300,6 +329,57 @@ async function answer(req: PermRequest, behavior: "allow" | "always" | "deny") {
   perms.value = perms.value.filter((p) => p.id !== req.id);
   await invoke("answer_pty_permission", { id: req.id, behavior, message: "" }).catch(() => {});
   void load();
+}
+
+// ── Chat requests (permission / question / plan) ────────────────────────────
+// Only Go's phase knows a chat is blocked; the request itself lives in the
+// chat's session (chatSession.ts). For a row that needs the user the panel
+// holds that session — the same one a mounted AgentChat would use — so an
+// answer goes through respond(): same "Always" rules, same transcript row.
+//
+// LOAD-BEARING: the session must hold the transcript before it can answer.
+// respond() appends a row and save() replaces the whole stored transcript, so
+// an empty, unhydrated session would wipe the chat's history. A failed or
+// empty read ⇒ no inline answer, the row only opens the thread.
+const held = new Map<number, ChatSession>();
+const answerable = ref(new Set<number>());
+async function holdSession(chatId: number) {
+  if (held.has(chatId)) return;
+  const S = chatSession(chatId);
+  S.retain();
+  held.set(chatId, S);
+  if (S.messages.value.length === 0) {
+    const page = await invoke<ChatMessagesPage>("load_chat_messages_page", { chatId, before: -1, limit: TRANSCRIPT_PAGE }).catch(() => null);
+    if (!held.has(chatId)) return; // released while loading
+    if (!page || !Array.isArray(page.messages) || (page.messages.length === 0 && page.start === 0)) return;
+    if (S.messages.value.length === 0) S.hydrate({ messages: page.messages, hiddenBefore: page.start });
+  }
+  await S.listenClaude();
+  await S.listenAcp();
+  await S.recoverPendingRequests();
+  if (held.has(chatId)) answerable.value = new Set([...answerable.value, chatId]);
+}
+function releaseSession(chatId: number) {
+  held.get(chatId)?.release();
+  held.delete(chatId);
+  if (answerable.value.has(chatId)) answerable.value = new Set([...answerable.value].filter((id) => id !== chatId));
+}
+const blockedChats = computed(() => rows.value.filter((r) => r.kind === "chat" && (r.status === "permission" || r.status === "waiting")).map((r) => r.id));
+watch(blockedChats, (ids) => {
+  const want = new Set(ids);
+  for (const id of [...held.keys()]) if (!want.has(id)) releaseSession(id);
+  for (const id of want) void holdSession(id);
+}, { immediate: true });
+
+function chatPending(row: Row): readonly PendingRequest[] {
+  if (row.kind !== "chat" || !answerable.value.has(row.id)) return [];
+  return held.get(row.id)?.pendingRequests.value ?? [];
+}
+function toolTarget(input: Record<string, unknown>): string {
+  return String(input.command ?? input.file_path ?? input.path ?? input.url ?? input.pattern ?? "").slice(0, 200);
+}
+async function answerChat(chatId: number, answer: PendingAnswer) {
+  await held.get(chatId)?.respond(answer);
 }
 
 // ── Quick reply ─────────────────────────────────────────────────────────────
@@ -537,6 +617,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   unlisteners.forEach((f) => f());
   for (const off of phaseListeners.values()) void off.then((f) => f());
+  for (const id of [...held.keys()]) releaseSession(id);
 });
 </script>
 

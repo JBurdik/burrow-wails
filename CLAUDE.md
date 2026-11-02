@@ -487,7 +487,12 @@ and focuses it 250 ms later (verified: `aerospace list-windows --all` no longer 
 (`trayhotkey*.go`): `uiPrefs.trayHotkey` (default `⌥Space`, `""` = off; glyphs + a physical key, recorded from
 `e.code` in Settings → Keyboard Shortcuts → System-wide) → pure `parseHotkey` (table-tested) → Carbon
 `RegisterEventHotKey` (no Accessibility permission); `TraySetHotkey` re-registers live and returns why it failed;
-it shows the panel and emits `menu-tray-compose` (→ New thread). List rows: subtitle = workspace · recap, hover
+it shows the panel and emits `menu-tray-compose` (→ New thread). A blocked chat row shows its request inline: the panel holds that chat's `chatSession`
+(retain + listeners + `recoverPendingRequests`) and answers through `respond()` — same Always rules and transcript
+row as AgentChat; question / plan / Codex input only open the thread. **Load-bearing:** it hydrates the session's
+transcript first (`load_chat_messages_page`) and offers no inline answer if that read fails or is empty — `respond()`
+appends a row and `save()` replaces the whole stored transcript, so an empty session would wipe the history.
+List rows: subtitle = workspace · recap, hover
 **reply** = `chat_queue_add` (a running turn gets it when it settles). The inline chat is the full `AgentChat` with
 a denser composer (TrayPanel's `:deep` CSS) and the panel `provide`s the Right Panel hooks: a sub-agent opens in
 the panel, a surface / git in the main window. Secondary windows never notify
