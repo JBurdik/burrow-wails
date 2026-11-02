@@ -873,12 +873,12 @@
             </div>
           </div>
 
-          <div v-if="releaseChannel" class="flex items-center gap-4 s-row">
+          <div class="flex items-center gap-4 s-row">
             <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-              <span class="text-[13px] font-medium text-foreground">Release channel marker</span>
-              <span class="text-[11px] text-muted-foreground">How this {{ releaseChannel }} build marks itself: artwork behind the sidebar header plus the title bar label, the label only, or nothing.</span>
+              <span class="text-[13px] font-medium text-foreground">{{ releaseChannel ? "Release channel marker" : "Sidebar artwork" }}</span>
+              <span class="text-[11px] text-muted-foreground">{{ releaseChannel ? `How this ${releaseChannel} build marks itself: artwork behind the sidebar header plus the title bar label, the label only, or nothing.` : "Artwork behind the sidebar header." }}</span>
             </div>
-            <Segmented v-model="ui.channelMarker" :options="CHANNEL_MARKER_OPTIONS" />
+            <Segmented v-model="ui.channelMarker" :options="releaseChannel ? CHANNEL_MARKER_OPTIONS : CHANNEL_MARKER_OPTIONS.filter((o) => o.value !== 'label')" />
           </div>
 
           <div class="h-px bg-border" />
