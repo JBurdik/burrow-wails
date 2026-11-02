@@ -8,7 +8,7 @@
     <div class="relative min-h-0 flex-1">
       <Settings v-if="kind === 'settings'" windowed @close="closeSelf" />
       <XTerm v-else-if="kind === 'terminal'" :pty-id="leafId" :cwd="cwd" :initially-titled="true" />
-      <GitPanel v-else-if="kind === 'git' && ready" size="lg" :initial-ws-id="wsId || undefined" class="h-full" />
+      <GitWindow v-else-if="kind === 'git' && ready" :initial-ws-id="wsId || undefined" class="h-full" />
       <AgentChat
         v-else-if="kind === 'chat' && chatId != null && ready"
         :chat-id="chatId"
@@ -32,7 +32,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 const Settings = defineAsyncComponent(() => import("@/components/Settings.vue"));
 const XTerm = defineAsyncComponent(() => import("@/components/XTerm.vue"));
 const AgentChat = defineAsyncComponent(() => import("@/components/AgentChat.vue"));
-const GitPanel = defineAsyncComponent(() => import("@/components/GitPanel.vue"));
+const GitWindow = defineAsyncComponent(() => import("@/components/git/GitWindow.vue"));
 
 const [path, query = ""] = location.hash.slice(1).split("?");
 const parts = path.split("/").filter(Boolean); // ["window", kind, id?]

@@ -83,3 +83,39 @@ export function layoutGraph(commits: GraphCommit[]): { rows: GraphRow[]; maxLane
   }
   return { rows, maxLanes };
 }
+
+/** One file of a multi-file `git show` patch. */
+export interface PatchFile {
+  path: string;
+  /** A | M | D | R */
+  status: string;
+  adds: number;
+  dels: number;
+  /** this file's part of the patch, starting at its `diff --git` line */
+  text: string;
+}
+
+/** Split a unified multi-file patch into per-file pieces with +/- counts. */
+export function splitPatch(patch: string): PatchFile[] {
+  return patch.split(/^(?=diff --git )/m).filter((p) => p.startsWith("diff --git ")).map((text) => {
+    const lines = text.split("\n");
+    const head = lines[0].match(/^diff --git a\/(.*) b\/(.*)$/);
+    let path = head?.[2] ?? lines[0].slice(11);
+    let status = "M";
+    let adds = 0, dels = 0, inHunk = false;
+    for (const l of lines.slice(1)) {
+      if (!inHunk) {
+        if (l.startsWith("new file mode")) status = "A";
+        else if (l.startsWith("deleted file mode")) status = "D";
+        else if (l.startsWith("rename to ")) { status = "R"; path = l.slice(10); }
+        else if (l.startsWith("+++ b/")) path = l.slice(6);
+        else if (l.startsWith("--- a/") && status === "D") path = l.slice(6);
+        else if (l.startsWith("@@")) inHunk = true;
+        continue;
+      }
+      if (l.startsWith("+")) adds++;
+      else if (l.startsWith("-")) dels++;
+    }
+    return { path, status, adds, dels, text };
+  });
+}
