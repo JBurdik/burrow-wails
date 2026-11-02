@@ -464,6 +464,18 @@ describe("stream reducers", () => {
     dropChatSession(64);
   });
 
+  it("a Burrow note after the turn end does not restart the turn", async () => {
+    const { deps, emit } = fakeDeps();
+    const s = chatSession(65, deps);
+    await s.listenEvents();
+    s.startTurn();
+    emit("chat-event-65", { ord: 1, events: [{ type: "turn.completed" }] });
+    emit("chat-event-65", { ord: 2, events: [{ type: "message.note", role: "system-info", text: "Changed 3 files", surface: "outputs" }] });
+    expect(s.busy.value).toBe(false);
+    expect(s.messages.value.at(-1)?.text).toBe("Changed 3 files");
+    dropChatSession(65);
+  });
+
   it("leaves an ACP turn to Go's boundary and applies any selector reply", async () => {
     const view = fakeView({ usesRpcRuntime: () => true });
     const { deps, emit } = fakeDeps();

@@ -1040,7 +1040,9 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
       }
     }
     if (isProjectedEvent(event.type)) {
-      if (!(s.view?.usesRpcRuntime() ?? false)) markActive(s);
+      // A message.note is Burrow's own row, not agent output — "Changed N files"
+      // lands right after turn.completed and would restart a turn nothing ends.
+      if (event.type !== "message.note" && !(s.view?.usesRpcRuntime() ?? false)) markActive(s);
       const before = s.messages.value.length;
       if (applyChatEvent(projectionOf(s), event)) s.view?.scrollToBottom();
       // Arrival time for the visit watermark — the same stamp Go's fold puts on its copy.
