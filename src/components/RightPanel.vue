@@ -44,6 +44,14 @@
             </span>
             <span class="font-medium">{{ tab.label }}</span>
             <span v-if="surfaceCount(tab.id)" class="tabular-nums text-muted-foreground">{{ surfaceCount(tab.id) }}</span>
+            <!-- Move to the other pane — the visible door to the split (drag and right-click do the same). -->
+            <span
+              class="-mr-1 hidden h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground group-hover:flex"
+              role="button"
+              :title="pi === 0 ? 'Move to the bottom pane (split)' : 'Move to the top pane'"
+              :aria-label="pi === 0 ? `Move ${tab.label} to the bottom pane` : `Move ${tab.label} to the top pane`"
+              @click.stop="moveSurface(tab.id, pi === 0 ? 1 : 0)"
+            ><component :is="pi === 0 ? PhArrowDown : PhArrowUp" :size="11" /></span>
           </button>
           <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="layout.panes[pi].active = null"><PhPlus :size="15" /></button>
         </div>
@@ -668,7 +676,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, inject, provide, onMounted, onBeforeUnmount } from "vue";
+import { ref, reactive, computed, watch, inject, provide, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   PhFiles, PhGitBranch, PhGitCommit,
@@ -679,7 +687,7 @@ import {
   PhListChecks,
 } from "@phosphor-icons/vue";
 import {
-  closeBottom, closeSurface as closeLayoutSurface, emptyLayout, isShown, loadLayouts, moveTo, openBottom, openIn,
+  closeBottom, closeSurface as closeLayoutSurface, emptyLayout, hideBottom, isShown, loadLayouts, moveTo, openBottom, openIn,
   paneOf, saveLayouts, toggleMaximize, clampSplit, type PaneIndex, type RpLayout,
 } from "@/lib/rpLayout";
 import { useGitStore, type GitCommit } from "@/stores/git";
@@ -1335,7 +1343,27 @@ function openFile(path: string, range?: { from: number; to: number }) {
 }
 provide("openFileInPanel", openFile);
 
-defineExpose({ openGitTab, openSubagent, openPanelSurface, openBrowserUrl, openPullRequest, openDoc, openFile });
+/** ⌘J (the old bottom terminal's key): the workspace's Terminal surface in the
+ *  bottom pane, focused — or, when it is already on screen, put away (the bottom
+ *  pane hides with its surfaces kept; a top-pane terminal closes the panel). */
+async function toggleTerminal() {
+  const l = layout.value;
+  if (props.open && isShown(l, "terminal")) {
+    if (paneOf(l, "terminal") === 1) hideBottom(l);
+    else emit("closePanel");
+    return;
+  }
+  await openSurface("terminal", paneOf(l, "terminal") === 0 ? 0 : 1);
+  // Teleported into the pane slot on the next render; focus the live shell.
+  await nextTick();
+  requestAnimationFrame(() => {
+    const host = hostSlot(wsKey.value, "terminal");
+    const visible = [...(host?.querySelectorAll<HTMLTextAreaElement>(".xterm-helper-textarea") ?? [])].find((t) => t.offsetParent !== null);
+    visible?.focus();
+  });
+}
+
+defineExpose({ openGitTab, openSubagent, openPanelSurface, openBrowserUrl, openPullRequest, openDoc, openFile, toggleTerminal });
 
 // Phone shell (/project/:surface): one surface, full screen, no tab strip or
 // second pane — the phone's own header and back arrow replace them.

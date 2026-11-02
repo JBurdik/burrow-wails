@@ -28,7 +28,6 @@ export interface TabSummary {
   /** Branch checked out when this tab was created — a snapshot, not live. */
   branch?: string;
   /** Live bottom-panel (⌘J) terminals in this thread, if any. */
-  bottomTerms?: number;
 }
 
 type TabRequest = {

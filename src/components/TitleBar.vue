@@ -176,7 +176,7 @@
       >
         <PhInfo :size="14" />
       </button>
-      <button class="tb-btn" title="Toggle bottom terminal" @click="$emit('toggle-bottom')">
+      <button class="tb-btn" title="Terminal in the right panel (⌘J)" @click="$emit('toggle-bottom')">
         <PhTerminalWindow :size="14" />
       </button>
       <button

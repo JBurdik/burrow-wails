@@ -77,6 +77,12 @@ export function openBottom(l: RpLayout): void {
   l.maximized = null;
 }
 
+/** Put the bottom pane away, its surfaces untouched (⌘J hiding the terminal):
+ *  they stay in the bottom strip and come back with it. */
+export function hideBottom(l: RpLayout): void {
+  collapseBottom(l);
+}
+
 /** Closing the bottom pane never closes its surfaces — they go back on top. */
 export function closeBottom(l: RpLayout): void {
   const moved = l.panes[1].tabs;

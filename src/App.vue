@@ -58,19 +58,6 @@
              buffer. Keeping them mounted avoids the detach/reattach entirely. -->
         <div v-show="ui.mode === 'terminal'" class="terminal-host">
           <WelcomeScreen ref="welcomeEl" v-show="showWelcome" @open-folder="openNewWorkspace" />
-          <!-- ⌘J on the welcome screen: no thread to hang a panel on, so one shared
-               panel lives here. Kept mounted (v-show) so its shells survive leaving. -->
-          <BottomTerminalPanel
-            v-if="welcomeBottom.ptyIds.length"
-            v-show="showWelcome && welcomeBottom.open"
-            :state="welcomeBottom"
-            :cwd="welcomeBottomCwd"
-            class="shrink-0"
-            :style="{ height: welcomeBottom.height + 'px' }"
-            @add="addWelcomeBottomTerminal"
-            @close="closeWelcomeBottomTerminal"
-            @select="(id) => welcomeBottom.activeId = id"
-          />
           <Terminal
             v-for="w in mountedWorkspaces"
             v-show="ws.active && w.id === ws.active.id && !showWelcome"
@@ -168,7 +155,7 @@
 <script setup lang="ts">
 import "@/styles/app.css";
 import { isDesktop } from "@/lib/wailsCompat/desktop";
-import { ref, reactive, onMounted, onBeforeUnmount, computed, provide, watch, nextTick, useTemplateRef } from "vue";
+import { ref, onMounted, onBeforeUnmount, computed, provide, watch, nextTick, useTemplateRef } from "vue";
 import { useRoute } from "vue-router";
 import { router, routeId } from "@/router";
 import { PhMagnifyingGlass, PhPlus, PhX } from "@phosphor-icons/vue";
@@ -196,10 +183,8 @@ import PtyPermissionToasts from "@/components/PtyPermissionToasts.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
-import BottomTerminalPanel from "@/components/BottomTerminalPanel.vue";
 import ThreadDetailsCard from "@/components/ThreadDetailsCard.vue";
 import { detailsLaneInset } from "@/lib/threadDetails";
-import { nextPtyId, initPtyCounter } from "@/lib/ptyId";
 import Onboarding from "@/components/Onboarding.vue";
 import DocsScreen from "@/components/DocsScreen.vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
@@ -362,26 +347,6 @@ watch(
 );
 
 // Screen stays mounted behind v-show, so re-focus its composer each time it shows.
-// Welcome-screen bottom terminal panel (see template). ponytail: fixed height,
-// no resize handle — copy Terminal.vue's startBottomResize if it's wanted here.
-const welcomeBottom = reactive({ open: false, ptyIds: [] as number[], activeId: null as number | null, height: 220 });
-// Fixed at first open: a pty's cwd is only read at spawn anyway.
-const welcomeBottomCwd = ref("");
-async function addWelcomeBottomTerminal() {
-  // No Terminal.vue may have restored sessions yet (nothing opened), so sync the
-  // shared id counter with the daemon first — reusing a live id attaches to it.
-  const sessions = await invoke<Array<{ pty_id: number }>>("list_pty_sessions").catch(() => []);
-  initPtyCounter(sessions.reduce((max, s) => s.pty_id < 1_000_000 ? Math.max(max, s.pty_id) : max, 0));
-  const id = nextPtyId();
-  welcomeBottom.ptyIds.push(id);
-  welcomeBottom.activeId = id;
-}
-function closeWelcomeBottomTerminal(id: number) {
-  void invoke("kill_pty", { id }).catch(() => {});
-  welcomeBottom.ptyIds = welcomeBottom.ptyIds.filter((p) => p !== id);
-  if (welcomeBottom.activeId === id) welcomeBottom.activeId = welcomeBottom.ptyIds[welcomeBottom.ptyIds.length - 1] ?? null;
-  if (!welcomeBottom.ptyIds.length) welcomeBottom.open = false;
-}
 // Thread details card: pinned open or closed per device. Desktop only — the
 // phone shell has its own thread header — and only for something in a workspace.
 const DETAILS_KEY = "burrow.threadDetailsOpen";
@@ -444,16 +409,10 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", onPeekPointer, t
 // Room came back: the popover becomes the docked card again.
 watch(detailsFits, (fits) => { if (fits && detailsPeek.value) { detailsPeek.value = false; detailsOpen.value = true; } });
 
+// ⌘J / the titlebar button: the Right Panel's terminal. The RP follows
+// displayWs, so on the welcome screen it is the targeted project's.
 function toggleBottomTerminal() {
-  if (showWelcome.value) toggleWelcomeBottom();
-  else activeTerm()?.toggleBottomPanel();
-}
-
-function toggleWelcomeBottom() {
-  welcomeBottom.open = !welcomeBottom.open;
-  if (!welcomeBottom.open || welcomeBottom.ptyIds.length) return;
-  welcomeBottomCwd.value = (welcomeEl.value?.target ?? ws.active)?.path ?? "";
-  void addWelcomeBottomTerminal();
+  void rightPanelRef.value?.toggleTerminal();
 }
 
 const welcomeEl = useTemplateRef<{ focus: () => void; cycleProvider: () => void; target: Workspace | null }>("welcomeEl");
@@ -848,9 +807,6 @@ onMounted(async () => {
   unlistenControl = await installControlBridge();
 });
 onBeforeUnmount(() => {
-  // Same as Terminal.vue's bottom panels: not persisted, so nothing would ever
-  // reattach — leaving them alive orphans a process in the daemon for good.
-  welcomeBottom.ptyIds.forEach((id) => void invoke("kill_pty", { id }).catch(() => {}));
   window.removeEventListener("keydown", onKeydown);
   document.removeEventListener("click", onLocalLinkClick, true);
   window.removeEventListener("click", onChatLinkClick, true);
@@ -877,6 +833,8 @@ const KEY_ACTIONS: Record<string, () => void> = {
   cheatsheet: () => { cheatsheetOpen.value = !cheatsheetOpen.value; },
   sidebar: () => ui.toggleSidebar(),
   rightPanel: () => { ui.rightPanelVisible = !ui.rightPanelVisible; },
+  // ⌘J: the Right Panel's terminal (the per-thread bottom terminal is gone).
+  bottomPanel: toggleBottomTerminal,
   focusComposer,
   repaint: () => activeTerm()?.repaintAll(),
   newProject: () => openNewWorkspace(),
@@ -928,11 +886,6 @@ function onKeydown(e: KeyboardEvent) {
         return;
       }
     }
-  }
-  if (showWelcome.value && keys.matches(e, "bottomPanel")) {
-    e.preventDefault();
-    toggleWelcomeBottom();
-    return;
   }
   for (const cmd of keys.inScope("app")) {
     if (KEY_ACTIONS[cmd.id] && matchesShortcut(e, cmd.keys)) {

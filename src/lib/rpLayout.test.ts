@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  closeBottom, closeSurface, emptyLayout, isShown, loadLayouts, moveTo, normalizeLayout, openBottom, openIn, paneOf,
+  closeBottom, closeSurface, emptyLayout, hideBottom, isShown, loadLayouts, moveTo, normalizeLayout, openBottom, openIn, paneOf,
   RP_LAYOUT_KEY, saveLayouts, toggleMaximize,
 } from "./rpLayout";
 
@@ -73,5 +73,19 @@ describe("rpLayout", () => {
     const back = loadLayouts(s);
     expect(back[1].panes[0].tabs).toEqual(["git"]);
     expect(Object.keys(back)).toEqual(["1", "2"]);
+  });
+});
+
+describe("hideBottom", () => {
+  it("hides the bottom pane but keeps its surfaces for the next open", () => {
+    const l = emptyLayout();
+    openIn(l, "git");
+    openIn(l, "terminal", 1);
+    hideBottom(l);
+    expect(isShown(l, "terminal")).toBe(false);
+    expect(l.panes[1].tabs).toEqual(["terminal"]);
+    expect(l.panes[0].active).toBe("git");
+    openIn(l, "terminal", 1);
+    expect(isShown(l, "terminal")).toBe(true);
   });
 });

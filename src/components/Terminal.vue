@@ -171,23 +171,6 @@
       </button>
     </div>
 
-    <div
-      v-show="bottomPanelFor(activeTabId).open"
-      class="bottom-panel-resize-handle"
-      @mousedown="startBottomResize"
-    />
-    <BottomTerminalPanel
-      v-for="tab in tabsWithBottomPanel"
-      :key="tab.id"
-      v-show="tab.id === activeTabId && bottomPanelFor(tab.id).open"
-      :state="bottomPanelFor(tab.id)"
-      :cwd="props.cwd"
-      class="shrink-0"
-      :style="{ height: bottomPanelFor(tab.id).height + 'px' }"
-      @add="addBottomTerminal(tab.id)"
-      @close="(ptyId) => closeBottomTerminal(tab.id, ptyId)"
-      @select="(ptyId) => bottomPanelFor(tab.id).activeId = ptyId"
-    />
 
     <div v-if="confirm" class="confirm-overlay fixed inset-0 z-[9000] flex items-center justify-center bg-black/60" @mousedown.self="answerClose(false)">
       <div class="w-[360px] rounded-xl border border-[#2a2a2a] bg-[#111111] p-5 shadow-[0_24px_64px_rgba(0,0,0,0.6),0_1px_0_rgba(255,255,255,0.08)]">
@@ -205,7 +188,6 @@
 </template>
 
 <script setup lang="ts">
-import { SHELL_RE } from "@/lib/termRegistry";
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { displayStatus, shouldMarkSeen, DONE_AUTOCLEAR_MS, type Phase } from "@/runtime/displayStatus";
 import { PhRobot, PhTerminal, PhTerminalWindow, PhX, PhPlus, PhFileCode, PhGlobe, PhAppWindow } from "@phosphor-icons/vue";
@@ -220,7 +202,6 @@ import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
 import BrowserPane from "./BrowserPane.vue";
-import BottomTerminalPanel from "./BottomTerminalPanel.vue";
 import GitPanel from "./GitPanel.vue";
 import FileViewer from "./FileViewer.vue";
 import { type Leaf, type TreeNode, type SplitNode } from "./TerminalSplitView.vue";
@@ -317,72 +298,6 @@ const inspectorOpen = ref(false);
 const lastChatTabId = ref(0);
 const lastTerminalTabId = ref(0);
 
-// ── Bottom terminal panel: one per thread (tab), ⌘J toggles the active one ──
-// Kept-mounted per tab (like the RightPanel scratch terminal) so switching
-// threads and back doesn't drop output or respawn the shell; killed only when
-// the owning thread itself closes.
-interface BottomPanelState { open: boolean; ptyIds: number[]; activeId: number | null; height: number }
-const bottomPanels = reactive<Record<number, BottomPanelState>>({});
-function bottomPanelFor(tabId: number): BottomPanelState {
-  return (bottomPanels[tabId] ??= { open: false, ptyIds: [], activeId: null, height: 220 });
-}
-const tabsWithBottomPanel = computed(() => tabs.value.filter((t) => bottomPanels[t.id]));
-
-function addBottomTerminal(tabId: number) {
-  const s = bottomPanelFor(tabId);
-  const id = nextPtyId();
-  s.ptyIds.push(id);
-  s.activeId = id;
-}
-
-// A bottom terminal is a PTY like any other, so closing it kills the process
-// group. Ask first when something other than the shell is in the foreground —
-// the same read XTerm's auto-title poll uses. ponytail: one shell-out per pty
-// at close time, no watching.
-async function runningIn(ptyIds: number[]): Promise<string> {
-  for (const id of ptyIds) {
-    const proc = await invoke<string>("get_pty_foreground", { id }).catch(() => "");
-    if (proc && !SHELL_RE.test(proc)) return proc;
-  }
-  return "";
-}
-
-async function closeBottomTerminal(tabId: number, ptyId: number) {
-  const s = bottomPanelFor(tabId);
-  const proc = await runningIn([ptyId]);
-  if (proc && !(await confirmClose(proc))) return;
-  await invoke("kill_pty", { id: ptyId }).catch(() => {});
-  s.ptyIds = s.ptyIds.filter((id) => id !== ptyId);
-  if (s.activeId === ptyId) s.activeId = s.ptyIds[s.ptyIds.length - 1] ?? null;
-}
-
-function toggleBottomPanel() {
-  const s = bottomPanelFor(activeTabId.value);
-  s.open = !s.open;
-  if (s.open && s.ptyIds.length === 0) addBottomTerminal(activeTabId.value);
-}
-
-function startBottomResize(e: MouseEvent) {
-  const s = bottomPanelFor(activeTabId.value);
-  const startY = e.clientY;
-  const startHeight = s.height;
-  function onMove(ev: MouseEvent) {
-    s.height = Math.min(window.innerHeight * 0.8, Math.max(120, startHeight - (ev.clientY - startY)));
-  }
-  function onUp() {
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("mouseup", onUp);
-  }
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup", onUp);
-}
-
-async function killBottomPanel(tabId: number) {
-  const s = bottomPanels[tabId];
-  if (!s) return;
-  await Promise.all(s.ptyIds.map((id) => invoke("kill_pty", { id }).catch(() => {})));
-  delete bottomPanels[tabId];
-}
 const splitChatTab = computed(() =>
   tabs.value.find((tab) => tab.id === lastChatTabId.value && tabIsChat(tab))
   ?? tabs.value.find(tabIsChat),
@@ -1371,8 +1286,6 @@ async function closeTab(tabId: number) {
     const ok = await confirmClose(busyLeaf.title);
     if (!ok) return;
   }
-  const bottomProc = await runningIn(bottomPanels[tabId]?.ptyIds ?? []);
-  if (bottomProc && !(await confirmClose(bottomProc))) return;
   const dirtyLeaf = leaves.find((l) => l.leafType === "editor" && isLeafDirty(l));
   if (dirtyLeaf) {
     const ok = await confirmClose(dirtyLeaf.title, "unsaved");
@@ -1401,7 +1314,6 @@ async function closeTab(tabId: number) {
   );
   // Chat leaves have no PTY — stop their adapter/CLI on explicit close instead.
   leaves.filter((l) => l.leafType === "chat").forEach(stopChatSession);
-  await killBottomPanel(tabId);
 
   const idx = tabs.value.findIndex((t) => t.id === tabId);
   tabs.value.splice(idx, 1);
@@ -1506,7 +1418,6 @@ function onKeydown(e: KeyboardEvent) {
     popOut: () => popOutLeaf(),
     splitV: () => splitFocused("terminal", "v"),
     // On the welcome screen this workspace is hidden; App.vue owns that panel.
-    bottomPanel: () => { if (!uiStore.welcomeVisible) toggleBottomPanel(); },
   };
   for (const cmd of keys.inScope("terminal")) {
     if (actions[cmd.id] && keys.matches(e, cmd.id)) {
@@ -1639,7 +1550,6 @@ function syncStore() {
         // config.json with the session — see claudeChats.create); plain
         // terminal/agent tabs use the per-tab cache backed by SQLite.
         branch: chatSessionOf(t)?.branch ?? branchSnapshotFor(t.id),
-        bottomTerms: bottomPanels[t.id]?.ptyIds.length || undefined,
       };
     }),
   );
@@ -1657,34 +1567,15 @@ watch(
     .join(","),
   syncStore,
 );
-// Bottom panels live outside `tabs`, so the sidebar's terminal chip needs its
-// own trigger.
-watch(bottomPanels, syncStore, { deep: true });
 // Settle is toggled outside this component's own reactive tree (localStorage-
 // backed ref for terminal/agent tabs, settledOverride for chats) — neither
 // mutates `tabs`, so the sidebar mirror needs its own trigger or it only
 // updates on the next unrelated tab change.
 watch(
   () => [settledTabKeys.value.join(","), chatsStore.sessions.map((s) => `${s.id}:${s.settledOverride ?? ""}`).join(",")],
-  () => {
-    syncStore();
-    void reapSettledBottomPanels();
-  },
+  syncStore,
 );
 
-// Settling a thread means "done with this" — its ⌘J terminals go with it, so a
-// forgotten build/dev server does not keep running (and holding a PTY) behind a
-// row the user has filed away. Ask first if something is actually running; a
-// cancel leaves the terminals alone, the settle itself stands.
-async function reapSettledBottomPanels() {
-  for (const tab of tabs.value) {
-    const panel = bottomPanels[tab.id];
-    if (!panel?.ptyIds.length || !tabSettled(tab)) continue;
-    const proc = await runningIn(panel.ptyIds);
-    if (proc && !(await confirmClose(proc))) continue;
-    await killBottomPanel(tab.id);
-  }
-}
 // A tab can be created before the 60s git sweep has ever filled branchByWs
 // for this workspace; catch it up once that first value lands, so it still
 // gets a real snapshot instead of permanently missing one.
@@ -1901,9 +1792,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("focus", onWindowFocus);
   leafUnlisteners.forEach((fns) => fns.forEach((fn) => fn()));
   leafUnlisteners.clear();
-  // Bottom-panel PTYs are not persisted, so nothing would ever reattach to them
-  // — leaving them alive orphans a process in the daemon for good.
-  Object.keys(bottomPanels).forEach((id) => void killBottomPanel(Number(id)));
   tabsStore.clear(props.workspaceId);
 });
 
@@ -1964,7 +1852,7 @@ async function sendReviewNotes(markdown: string): Promise<boolean> {
   } catch { return false; }
 }
 
-defineExpose({ toggleBottomPanel, reviewSubject, sendReviewNotes, addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
+defineExpose({ reviewSubject, sendReviewNotes, addTab, splitPane, spawnAgent, adoptPty, openDiffInTab, openFileInTab, insertContext, focusLeaf, openClaudeChat, openBrowserTab, openGitTab, refitAll, repaintAll });
 </script>
 
 <style scoped>
@@ -1997,18 +1885,6 @@ defineExpose({ toggleBottomPanel, reviewSubject, sendReviewNotes, addTab, splitP
 }
 .tab-flash { animation: tab-flash-anim 0.6s ease-out; }
 
-.bottom-panel-resize-handle {
-  height: 4px;
-  cursor: row-resize;
-  flex-shrink: 0;
-  background: transparent;
-  transition: background 0.15s;
-}
-.bottom-panel-resize-handle:hover,
-.bottom-panel-resize-handle:active {
-  background: var(--accent);
-  opacity: 0.4;
-}
 
 /* ── Focused-pane ring: pseudo-element overlay so it never affects layout ── */
 .pane.focused::after {
