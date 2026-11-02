@@ -681,6 +681,7 @@ import {
   groupByRepo,
   parseShortstat,
   splitSections,
+  attentionRank,
   stepWorkingShelf,
   routeRowOnly,
   EMPTY_WORKING_SHELF,
@@ -812,12 +813,22 @@ function onShelfHover(e: PointerEvent, inside: boolean) {
   if (e.pointerType === "mouse") workingHover.value = inside;
 }
 
+// The clicked row's attention rank, held while it stays focused (onRowClick).
+// ponytail: released only once focus leaves the held row; a click whose
+// navigation never lands keeps holding until the next click.
+const heldRow = shallowRef<{ key: string; rank: number } | null>(null);
+const activeRow = computed(() => allRows.value.find(isActiveRow) ?? null);
+watch(() => (activeRow.value ? rowKey(activeRow.value) : null), (now, prev) => {
+  if (heldRow.value && prev === heldRow.value.key && now !== prev) heldRow.value = null;
+});
+
 const sections = computed(() =>
   splitSections(allRows.value, {
     isPinned: (r) => isChatPinned(r.tab.chatId),
     isSnoozed: (r) => snoozedUntilOf(r.tab.chatId) > 0,
     inWorking: (r) => shelf.value.shown.has(rowKey(r)),
     unseen: (r) => termTabs.isCompletionUnseen(r.ws.id, r.tab.id),
+    heldRank: (r) => (heldRow.value?.key === rowKey(r) ? heldRow.value.rank : undefined),
     startedAt: (r) => shelf.value.startedAt.get(rowKey(r)) ?? r.ts,
   }),
 );
@@ -1272,6 +1283,9 @@ function cancelLongPress() {
 }
 function onRowClick(row: ActivityRow) {
   if (swallowClick) { swallowClick = false; return; }
+  // Opening a thread marks it read, which would drop it down the list right
+  // under the cursor. Hold its pre-click rank until another row is focused.
+  heldRow.value = { key: rowKey(row), rank: attentionRank(row.tab.status, termTabs.isCompletionUnseen(row.ws.id, row.tab.id)) };
   selectTab(row);
 }
 /** Run an action against the menu's row, then close the menu. */

@@ -158,8 +158,15 @@ describe("splitSections", () => {
       row(5, 50, { status: "done" }),
       row(6, 40),
     ];
-    const s = splitSections(rows, { ...base, unseen: (r) => r.tab.id === 5 });
-    expect(s.active.map((r) => r.tab.id)).toEqual([4, 3, 2, 5, 1, 6]);
+    const s = splitSections(rows, { ...base, unseen: (r) => r.tab.id === 2 || r.tab.id === 5 });
+    // unseen only counts on a `review` row: a done row is never "unread"
+    expect(s.active.map((r) => r.tab.id)).toEqual([4, 3, 2, 1, 5, 6]);
+  });
+
+  it("keeps a held row at its held rank after it is marked seen", () => {
+    const rows = [row(1, 90), row(2, 80, { status: "review" })];
+    const s = splitSections(rows, { ...base, unseen: () => false, heldRank: (r) => (r.tab.id === 2 ? 3 : undefined) });
+    expect(s.active.map((r) => r.tab.id)).toEqual([2, 1]);
   });
 });
 

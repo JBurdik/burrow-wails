@@ -84,7 +84,10 @@ export function attentionRank(status: TermStatus, unseen: boolean): number {
   if (status === "permission") return 0;
   if (status === "waiting") return 1;
   if (status === "error") return 2;
-  if (status === "review" || unseen) return 3;
+  // `unseen` is only tracked for `review` (terminalTabs drops it for every other
+  // status), so on its own it is true for every done/idle row — and clicking one
+  // marked it seen for a beat, dropping the row below its peers.
+  if (status === "review" && unseen) return 3;
   return 4;
 }
 
@@ -96,6 +99,8 @@ export interface SectionInput {
   /** running now, or still inside the Working shelf's exit grace */
   inWorking: (row: ActivityRow) => boolean;
   unseen: (row: ActivityRow) => boolean;
+  /** a rank the row may not fall below (the clicked row keeps its place until left) */
+  heldRank?: (row: ActivityRow) => number | undefined;
   /** when the row's current turn started (Working shelf order) */
   startedAt: (row: ActivityRow) => number;
 }
@@ -112,8 +117,8 @@ export function splitSections(rows: ActivityRow[], o: SectionInput): SidebarSect
     })].push(row);
   }
   // sort() is stable, so ties keep the feed's recency order.
-  out.active.sort((a, b) =>
-    attentionRank(a.tab.status, o.unseen(a)) - attentionRank(b.tab.status, o.unseen(b)));
+  const rank = (r: ActivityRow) => Math.min(attentionRank(r.tab.status, o.unseen(r)), o.heldRank?.(r) ?? Infinity);
+  out.active.sort((a, b) => rank(a) - rank(b));
   out.working.sort((a, b) => o.startedAt(b) - o.startedAt(a));
   return out;
 }
