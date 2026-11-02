@@ -297,3 +297,31 @@ func TestPendingChatRequestsSurviveAViewThatMountedLate(t *testing.T) {
 		t.Fatalf("want exactly the open request: %+v %v", got, err)
 	}
 }
+
+// An answer from one view (the tray panel, the phone) must close the request for
+// every other view and for a view that mounts later: the CLI echoes nothing, so
+// Go publishes claudeAnsweredLine.
+func TestAnsweredChatRequestIsResolvedEverywhere(t *testing.T) {
+	a := newTestApp(t)
+	store, err := NewPhaseStore(a.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.phases = store
+	const id = "78"
+	a.emitChatLine(id, "claude-data", `{"type":"control_request","request_id":"p1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{}}}`)
+	a.emitChatLine(id, "claude-data", claudeAnsweredLine("p1"))
+	// The answer's phase write is ClaudeRespondControl's; here only the line's
+	// own reading matters, so put the phase back where a still-blocked chat is.
+	store.Apply("chat:"+id, agentphase.Event{Kind: agentphase.HookPermission})
+	drainChatStream(t, a, id)
+	if got, _ := a.LoadPendingChatRequests(id); len(got) != 0 {
+		t.Fatalf("an answered request must not be recovered: %+v", got)
+	}
+	if ev := NormalizeChatLine("claude-data", claudeAnsweredLine("p1"), 0); len(ev) != 1 || ev[0].Type != EvtRequestResolved || ev[0].RequestID != "p1" {
+		t.Fatalf("want request.resolved p1, got %+v", ev)
+	}
+	if ev := NormalizeChatLine("acp-data", acpAnsweredLine(9), 0); len(ev) != 1 || ev[0].Type != EvtRequestResolved || ev[0].RequestID != "9" {
+		t.Fatalf("want request.resolved 9, got %+v", ev)
+	}
+}

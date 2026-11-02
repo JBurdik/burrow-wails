@@ -356,7 +356,11 @@ running > review > done > idle.
 
 **Chats use the same derivation.** Go derives waiting/permission for every provider from neutral
 `request.opened` / `request.resolved` events (Claude `control_request`, ACP `session/request_permission`,
-Codex approvals/user input); an answer applies `agentphase.Resume`, an abort/stop `Interrupt` (and a
+Codex approvals/user input); an answer applies `agentphase.Resume` **and publishes a synthetic "answered" line** (`claudeAnsweredLine` = a
+`control_cancel_request` + `_burrow:"answered"`; generic ACP `acpAnsweredLine` = a `serverRequest/resolved`, which
+Codex sends itself) — the CLI echoes nothing for a `control_response`, so another window / the phone / the tray
+panel kept a card someone had answered; clients already dismiss both silently, the normalizer reads them as
+`request.resolved` and `LoadPendingChatRequests` skips the id. An abort/stop `Interrupt` (and a
 trailing turn end on an idle chat is dropped), a generic ACP turn settles on its own `session/prompt`
 response. `src/stores/chatAttention.ts` (instantiated in `App.vue`) is the **only writer of
 `session.status`**: `displayStatus(phase-chat, seenAt, watching)`, receipts in `burrow.seenAt` as

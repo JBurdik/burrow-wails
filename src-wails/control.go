@@ -33,7 +33,30 @@ func (a *App) ClaudeRespondControl(id, requestID string, response map[string]any
 		return err
 	}
 	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.Resume})
+	a.emitChatLine(id, "claude-data", claudeAnsweredLine(requestID))
 	return nil
+}
+
+// claudeAnsweredLine tells every OTHER view of the chat that a request was
+// answered. The CLI echoes nothing for a control_response on stdin, so a
+// second window or the phone kept showing a card someone already answered.
+// It is a control_cancel_request on purpose: clients already dismiss that
+// silently, the normalizer reads it as request.resolved, and
+// LoadPendingChatRequests skips the id — no new protocol for any of them.
+// The answering view settled its card first, so to it this is a no-op.
+func claudeAnsweredLine(requestID string) string {
+	b, _ := json.Marshal(map[string]any{"type": "control_cancel_request", "request_id": requestID, "_burrow": "answered"})
+	return string(b)
+}
+
+// acpAnsweredLine is the same for a generic ACP adapter, shaped as Codex's own
+// serverRequest/resolved (which clients and the normalizer already handle).
+// Codex sends the real one itself, so this is only for the other adapters.
+func acpAnsweredLine(rpcID int64) string {
+	b, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "method": "serverRequest/resolved", "params": map[string]any{"requestId": rpcID}, "_burrow": "answered",
+	})
+	return string(b)
 }
 
 // AcpRespondPermission answers a session/request_permission (ACP) or an
@@ -59,9 +82,13 @@ func (a *App) AcpRespondPermission(id string, rpcID int64, optionID string) erro
 	if optionID != "" {
 		outcome = map[string]any{"outcome": "selected", "optionId": optionID}
 	}
-	return a.resumeAfter(id, sess.write(map[string]any{
+	err := a.resumeAfter(id, sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"outcome": outcome},
 	}))
+	if err == nil {
+		a.emitChatLine(id, "acp-data", acpAnsweredLine(rpcID))
+	}
+	return err
 }
 
 // AcpRespondUserInput answers a tool's request for structured user input.
