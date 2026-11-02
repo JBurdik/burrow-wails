@@ -220,6 +220,9 @@ type Deps struct {
 	// WorktreesDir is where a worktree lands when the caller doesn't say:
 	// <dir>/<repo>/<branch>, the same convention as the New-worktree dialog.
 	WorktreesDir func() string
+	// DefaultProjectDir is where workspace_create puts a project given by bare
+	// name (uiPrefs.defaultProjectDir). nil/"" = ~/.
+	DefaultProjectDir func() string
 	// Phases reports the derived agent phase for a key ("chat:<id>", "pty:<id>").
 	// An interface, not the store: this package takes capabilities, never the app.
 	Phases Phases

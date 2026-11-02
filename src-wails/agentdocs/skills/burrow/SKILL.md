@@ -1,6 +1,6 @@
 ---
 name: burrow
-description: Delegate work through the running Burrow IDE. Use when the user asks to run work in parallel, hand off a task, fan out independent subtasks, schedule a later prompt or wake-up for this chat, move this chat into or out of a worktree, or drive Burrow from a shell.
+description: Delegate work through the running Burrow IDE. Use when the user asks to run work in parallel, hand off a task, fan out independent subtasks, schedule a later prompt or wake-up for this chat, move this chat into or out of a worktree, create a new project and start threads in it, or drive Burrow from a shell.
 ---
 
 # Burrow

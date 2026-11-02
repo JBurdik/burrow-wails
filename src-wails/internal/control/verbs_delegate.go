@@ -47,6 +47,7 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "model", Type: "string", Desc: "Model override for this task, e.g. claude-haiku-4-5-20251001 for mechanical work"},
 			{Name: "permission_mode", Type: "string", Desc: "Chat sub-agent's permission mode: plan, default, acceptEdits, auto, dontAsk or full-access; defaults to the profile's, else the parent thread's own. Never more permissive than the parent"},
 			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work; defaults to the caller's"},
+			{Name: "workspace_id", Type: "integer", Desc: "Run in this workspace (its path wins over cwd), e.g. a project just made with workspace_create. With detach + target chat, starts a new top-level thread there with task as its first prompt"},
 			{Name: "target", Type: "string", Desc: "tab (default; live terminal, result capture) or chat (structured). Ignored when spawning from a chat thread — that sub-agent is always a chat — unless detach is set"},
 			{Name: "detach", Type: "boolean", Desc: "From a chat thread: open a standalone top-level chat or tab (honours target) instead of a sub-agent of this thread. Use when the user asks for a new chat/tab of its own"},
 			{Name: "capture", Type: "boolean", Desc: "Capture the agent's final message for wait_result (tab target only, default true; a chat sub-agent is waited on with chat_id instead)"},
@@ -174,6 +175,12 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	if p.Bool("caller_is_subagent") {
 		return nil, fmt.Errorf("sub-agent cannot spawn sub-agents")
 	}
+	cwd := p.Str("cwd")
+	if id := p.Int("workspace_id"); id > 0 {
+		if err := c.deps.DB.QueryRow(`SELECT path FROM workspaces WHERE id = ?`, id).Scan(&cwd); err != nil {
+			return nil, fmt.Errorf("spawn: workspace %d: %w", id, err)
+		}
+	}
 	parent := p.Int("parent_chat_id")
 	// detach: the caller wants a peer in the Sidebar, not a child of its thread.
 	if p.Bool("detach") {
@@ -207,7 +214,7 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	if parent > 0 && c.deps.ChatRuntime != nil {
 		got, err := c.deps.ChatRuntime.SpawnSubagent(SpawnRequest{
 			Task: p.Str("task"), Profile: p.Str("profile"), Agent: p.Str("agent"),
-			Model: p.Str("model"), PermissionMode: p.Str("permission_mode"), Cwd: p.Str("cwd"), Name: p.Str("name"), ParentChatID: parent,
+			Model: p.Str("model"), PermissionMode: p.Str("permission_mode"), Cwd: cwd, Name: p.Str("name"), ParentChatID: parent,
 		})
 		if err != nil {
 			return nil, err
@@ -221,7 +228,7 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 		"profile":        p.Str("profile"),
 		"agent":          p.Str("agent"),
 		"model":          p.Str("model"),
-		"cwd":            p.Str("cwd"),
+		"cwd":            cwd,
 		"target":         target,
 		"token":          token,
 		"parent_chat_id": parent,

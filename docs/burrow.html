@@ -107,7 +107,7 @@
   <h3>Delegation &amp; supervision</h3>
   <table>
     <tr><th>Verb</th><th>What it does</th></tr>
-    <tr><td>spawn</td><td>Delegate a <em>task</em> to a sub-agent in a new tab (or chat). Args: <code>task*</code>, <code>profile</code>, <code>agent</code>, <code>model</code>, <code>cwd</code>, <code>target</code>, <code>capture</code>. Returns the new <code>pty_id</code> and a result <code>token</code> (tab), or <code>chat_id</code> (chat). A thread's sub-agent (<code>parent_chat_id</code>, always a chat) is created and started <strong>in the backend</strong> on any agent (Claude, Codex, ACP) — no window needs to be open; launch settings come from the profile / args, else the parent chat's when it runs on the same transport. Top-level chats and tabs still go through the UI.</td></tr>
+    <tr><td>spawn</td><td>Delegate a <em>task</em> to a sub-agent in a new tab (or chat). Args: <code>task*</code>, <code>profile</code>, <code>agent</code>, <code>model</code>, <code>cwd</code>, <code>workspace_id</code> (run in that workspace; its path wins over <code>cwd</code>), <code>target</code>, <code>detach</code>, <code>capture</code>. Returns the new <code>pty_id</code> and a result <code>token</code> (tab), or <code>chat_id</code> (chat). A thread's sub-agent (<code>parent_chat_id</code>, always a chat) is created and started <strong>in the backend</strong> on any agent (Claude, Codex, ACP) — no window needs to be open; launch settings come from the profile / args, else the parent chat's when it runs on the same transport. Top-level chats and tabs still go through the UI.</td></tr>
     <tr><td>list_agents</td><td>Agent instances configured in Settings → Providers, spawnable by name.</td></tr>
     <tr><td>agent_status</td><td>Every agent in the app (tabs and chats) with its live status. Optional: <code>--only-children</code> (bool) filters to only this caller's chat sub-agents (auto-detected from <code>BURROW_CHAT_ID</code>; if unset, returns all agents). Tab-target sub-agents without a parent are omitted from the filtered view.</td></tr>
     <tr><td>tab_output</td><td>Tail of a tab's terminal output — how you check on an agent mid-task.</td></tr>
@@ -128,7 +128,7 @@
     <tr><td>new_tab</td><td>Open a plain terminal tab.</td></tr>
     <tr><td>serve</td><td>Run a long-lived process (dev server, watcher) in an interactive terminal in the Right Panel's bottom pane; returns its <code>pty_id</code>. Same command again reuses that terminal (restarting it if stopped). Agents are told to use it instead of background Bash.</td></tr>
     <tr><td>tab_rename / tab_close</td><td>Retitle a tab; close it and kill its PTY.</td></tr>
-    <tr><td>workspace_create</td><td>Add a directory as a workspace and open it.</td></tr>
+    <tr><td>workspace_create</td><td>Add a directory as a workspace and open it; returns <code>workspace_id</code>. <code>path*</code> is absolute, <code>~/…</code>, or a bare name placed under <code>uiPrefs.defaultProjectDir</code> (default <code>~/</code>). <code>create</code> makes the directory for a new project and refuses one that exists and is not empty (drop it to add an existing project); <code>git_init</code> runs <code>git init</code> unless a <code>.git</code> is there. A new thread in it: <code>spawn --detach --target chat --workspace-id N</code>.</td></tr>
     <tr><td>diagram</td><td>Render Mermaid source in a panel for the user.</td></tr>
   </table>
 
@@ -270,6 +270,10 @@ burrow collect-results
 # Isolate parallel work in worktrees
 path=$(burrow create-worktree feat/cache-fix | sed -n 's/.*"path":"\([^"]*\)".*/\1/p')
 burrow spawn "Implement the cache fix." --cwd "$path"
+
+# New project + a thread in it (only when the user asks)
+id=$(burrow workspace-create todo-app --create --git-init | sed -n 's/.*"workspace_id":\([0-9]*\).*/\1/p')
+burrow spawn "Scaffold a Vite + Vue app here." --detach --target chat --workspace-id "$id" --name "Scaffold todo-app"
 
 # Supervise
 burrow agent-status

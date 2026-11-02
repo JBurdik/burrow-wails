@@ -88,7 +88,12 @@ func (w worktreeAdapter) Remove(workspaceID int64, force bool) error {
 // worktreesDirPref reads the user's worktree parent dir out of config.json
 // (uiPrefs.worktreesDir) — the same value the New-worktree dialog uses, so a
 // verb-made worktree lands where a hand-made one would.
-func worktreesDirPref() string {
+func worktreesDirPref() string      { return uiPrefString("worktreesDir") }
+func defaultProjectDirPref() string { return uiPrefString("defaultProjectDir") }
+
+// uiPrefString reads one string from config.json's uiPrefs fresh; "" when
+// absent or unreadable.
+func uiPrefString(key string) string {
 	path, err := configFilePath()
 	if err != nil {
 		return ""
@@ -98,14 +103,13 @@ func worktreesDirPref() string {
 		return ""
 	}
 	var cfg struct {
-		UIPrefs struct {
-			WorktreesDir string `json:"worktreesDir"`
-		} `json:"uiPrefs"`
+		UIPrefs map[string]any `json:"uiPrefs"`
 	}
 	if json.Unmarshal(b, &cfg) != nil {
 		return ""
 	}
-	return cfg.UIPrefs.WorktreesDir
+	v, _ := cfg.UIPrefs[key].(string)
+	return v
 }
 
 // --- UI bridge ---------------------------------------------------------------
@@ -188,22 +192,23 @@ func (a *App) AckControlAction(id, resultJSON, errMsg string) {
 func (a *App) initControl(dataDir string) {
 	a.ui = newUIBridge(a)
 	a.control = control.New(control.Deps{
-		DB:           a.db,
-		SessionDir:   a.sessionDir,
-		Git:          gitRunner{a},
-		Forge:        forgeClient{a},
-		Exec:         execRunner{},
-		PTY:          ptyWriter{a},
-		Worktrees:    worktreeAdapter{a},
-		UI:           a.ui,
-		WorktreesDir: worktreesDirPref,
-		Phases:       phasesAdapter{s: a.phases},
-		Chats:        a,
-		ChatStopper:  a,
-		ChatRuntime:  chatRuntimeAdapter{a},
-		Schedules:    scheduleAdapter{a},
-		ChatMover:    chatMoverAdapter{a},
-		PTYs:         a,
+		DB:                a.db,
+		SessionDir:        a.sessionDir,
+		Git:               gitRunner{a},
+		Forge:             forgeClient{a},
+		Exec:              execRunner{},
+		PTY:               ptyWriter{a},
+		Worktrees:         worktreeAdapter{a},
+		UI:                a.ui,
+		WorktreesDir:      worktreesDirPref,
+		DefaultProjectDir: defaultProjectDirPref,
+		Phases:            phasesAdapter{s: a.phases},
+		Chats:             a,
+		ChatStopper:       a,
+		ChatRuntime:       chatRuntimeAdapter{a},
+		Schedules:         scheduleAdapter{a},
+		ChatMover:         chatMoverAdapter{a},
+		PTYs:              a,
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")
 }

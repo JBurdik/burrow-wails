@@ -3,6 +3,8 @@ package control
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -139,18 +141,68 @@ func navigationVerbs(c *Core) []Verb {
 		},
 	}, {
 		Name:    "workspace_create",
-		Summary: "Add a directory as a new workspace and open it",
+		Summary: "Add a directory as a new workspace (project) and open it; with create, make the directory first",
 		Args: []Arg{
-			{Name: "path", Type: "string", Desc: "Absolute path to the project", Required: true},
+			{Name: "path", Type: "string", Desc: "Absolute or ~/ path to the project, or a bare name placed under the user's default project folder (Settings > General)", Required: true},
 			{Name: "name", Type: "string", Desc: "Display name; defaults to the directory name"},
+			{Name: "create", Type: "boolean", Desc: "Create the directory for a NEW project. Refused if it already exists and is not empty — drop create to add an existing project as is"},
+			{Name: "git_init", Type: "boolean", Desc: "Run git init in the directory unless it already has a .git"},
 		},
 		Scope: ScopeLocal,
-		Fn: func(ctx context.Context, p Params) (any, error) {
-			return c.uiAction(ctx, "workspace_create", map[string]any{
-				"path": p.Str("path"), "name": p.Str("name"),
-			})
-		},
+		Fn:    func(ctx context.Context, p Params) (any, error) { return c.workspaceCreate(ctx, p) },
 	}}
+}
+
+func (c *Core) workspaceCreate(ctx context.Context, p Params) (any, error) {
+	def := ""
+	if c.deps.DefaultProjectDir != nil {
+		def = c.deps.DefaultProjectDir()
+	}
+	dir, err := projectDir(p.Str("path"), def)
+	if err != nil {
+		return nil, err
+	}
+	if p.Bool("create") {
+		if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+			return nil, fmt.Errorf("%s already exists and is not empty — drop create to add it as an existing project", dir)
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("workspace_create: %w", err)
+		}
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory — pass create to make a new project", dir)
+	}
+	if p.Bool("git_init") {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+			if c.deps.Git == nil {
+				return nil, fmt.Errorf("git_init: no git runner")
+			}
+			if _, stderr, code := c.deps.Git.Run(dir, []string{"init"}); code != 0 {
+				return nil, fmt.Errorf("git init: %s", strings.TrimSpace(stderr))
+			}
+		}
+	}
+	return c.uiAction(ctx, "workspace_create", map[string]any{"path": dir, "name": p.Str("name")})
+}
+
+// projectDir resolves workspace_create's path: ~ expands, an absolute path is
+// cleaned, a bare name lands under the default project folder (~/ when unset).
+// A relative path with a separator is refused — relative to what is ambiguous.
+func projectDir(path, defaultDir string) (string, error) {
+	path = strings.TrimSpace(path)
+	switch {
+	case path == "" || path == "." || path == "..":
+		return "", fmt.Errorf("workspace_create needs a path or a project name")
+	case path == "~" || strings.HasPrefix(path, "~/"), filepath.IsAbs(path):
+		return filepath.Clean(expandHome(path)), nil
+	case strings.ContainsRune(path, '/'):
+		return "", fmt.Errorf("%q: pass an absolute path or a bare project name", path)
+	}
+	if strings.TrimSpace(defaultDir) == "" {
+		defaultDir = "~/"
+	}
+	return filepath.Join(expandHome(strings.TrimSpace(defaultDir)), path), nil
 }
 
 // uiAction is the shared tail of every UI-performed verb: hand it over, return
