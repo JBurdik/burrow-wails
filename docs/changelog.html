@@ -80,12 +80,48 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v0.9.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v0.9.0</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">listopad 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Git panel</div>
+    <ul>
+      <li><strong>Staging po hunkách</strong> — každou hunku diffu jde zvlášť stagnout, unstagnout nebo zahodit. Nová binding <code>run_git_input</code> posílá patch do <code>git apply</code> přes stdin.</li>
+      <li><strong>Graf commitů</strong> — historie s kreslenými liniemi větví a štítky refů; kontextové menu: checkout, merge, rebase, nová větev/tag, cherry-pick, revert, reset, kopírovat hash.</li>
+      <li><strong>Stash a konflikty</strong> — sekce se stashi a banner při konfliktu s Continue/Abort pro merge, rebase, cherry-pick i revert. <code>GIT_EDITOR=true</code>, takže <code>--continue</code> nikdy nečeká na editor.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Telefon a kanály</div>
+    <ul>
+      <li><strong>Beta/dev PWA jako samostatná aplikace</strong> — kanál určuje běžící binárka: <code>mobile.html</code> a manifest dostanou vlastní název, <code>id</code> a ikony, takže se beta nainstaluje vedle stabilní. Každý kanál má vlastní HTTP port (37892 / 37893 / 37894).</li>
+      <li><strong>Karta Thread details</strong> — na širokém okně se při otevřeném RP ukotví vedle něj; když není místo, otevře ji tlačítko (i) jako popover nad chatem (zavře klik mimo nebo Esc).</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Chat navždy „Thinking…“</strong> — poznámka „Changed N files“ přišla až po <code>turn.completed</code>, prošla <code>markActive</code> a znovu nastavila busy, který už nic neukončilo.</li>
+      <li><strong>Chaty vytvořené na jiném klientu</strong> — reload seznamu přeskakoval každé <code>chats-changed</code>, dokud měl klient rozpracované uložení (při streamování pořád), a po resyncu se nereloadovalo vůbec. Teď se přeskakují jen vlastní echa, resync reloaduje a zastaralá odpověď <code>list_chats</code> se zahodí.</li>
+      <li><strong>Nastavení, onboarding a diff na telefonu</strong> — Settings jako seznam → detail, onboarding s tlačítkem Skip, diff v RP přes celou obrazovku, swipe od okraje zpět a větší tlačítko zavření.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
   <!-- v0.8.0 -->
 <div class="release">
   <div class="release-header">
     <span class="version">v0.8.0</span>
-    <span class="tag tag-latest">nejnovější</span>
-    <span class="date">říjen 2026</span>
+        <span class="date">říjen 2026</span>
   </div>
 
   <div class="section feat">

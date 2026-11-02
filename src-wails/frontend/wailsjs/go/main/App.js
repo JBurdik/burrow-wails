@@ -738,6 +738,10 @@ export function RunGit(arg1, arg2) {
   return window['go']['main']['App']['RunGit'](arg1, arg2);
 }
 
+export function RunGitInput(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RunGitInput'](arg1, arg2, arg3);
+}
+
 export function SaveChatMessages(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveChatMessages'](arg1, arg2, arg3);
 }

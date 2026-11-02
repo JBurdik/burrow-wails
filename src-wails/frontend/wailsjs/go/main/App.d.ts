@@ -372,6 +372,8 @@ export function RunExtensionCommand(arg1:string,arg2:string,arg3:string):Promise
 
 export function RunGit(arg1:string,arg2:Array<string>):Promise<main.GitOutput>;
 
+export function RunGitInput(arg1:string,arg2:Array<string>,arg3:string):Promise<main.GitOutput>;
+
 export function SaveChatMessages(arg1:number,arg2:string,arg3:number):Promise<void>;
 
 export function SaveChats(arg1:Array<main.Chat>):Promise<void>;
