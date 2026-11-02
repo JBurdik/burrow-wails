@@ -20,11 +20,17 @@
     />
     <section
       v-show="paneVisible(pi) && !(props.forceSurface && pi === 1)"
-      class="flex min-h-0 flex-col overflow-hidden"
+      class="relative flex min-h-0 flex-col overflow-hidden"
       :style="paneStyle(pi)"
-      @dragover="onSurfaceDragOver"
+      @dragover="onSurfaceDragOver(pi, $event)"
+      @dragleave="onSurfaceDragLeave"
       @drop="onSurfaceDrop(pi, $event)"
     >
+      <!-- Dragging a tab over the lower part of the only pane: drop opens the split below. -->
+      <div
+        v-if="pi === 0 && splitHint"
+        class="pointer-events-none absolute inset-x-2 bottom-2 top-[55%] z-30 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10 text-[12px] font-medium text-accent"
+      >Drop to split below</div>
       <div v-show="!props.forceSurface" class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
         <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto hide-scrollbar">
           <button
@@ -36,6 +42,7 @@
             :title="`${tab.label} — drag or right-click to move to the ${pi === 0 ? 'bottom' : 'top'} pane`"
             @click="layout.panes[pi].active = tab.id"
             @dragstart="onSurfaceDragStart(tab.id, $event)"
+            @dragend="splitHint = false"
             @contextmenu.prevent="moveSurface(tab.id, pi === 0 ? 1 : 0)"
           >
             <span class="relative flex h-[13px] w-[13px] shrink-0 items-center justify-center">
@@ -1051,14 +1058,28 @@ function onSurfaceDragStart(id: string, e: DragEvent) {
   e.dataTransfer?.setData(SURFACE_MIME, id);
   if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
 }
-function onSurfaceDragOver(e: DragEvent) {
-  if (e.dataTransfer?.types.includes(SURFACE_MIME)) e.preventDefault();
+// With only the top pane on screen there is no bottom pane to drop on, so its
+// lower part (below SPLIT_DROP_AT) stands in for one: dropping there splits.
+const SPLIT_DROP_AT = 0.55;
+const splitHint = ref(false);
+function onSurfaceDragOver(pi: PaneIndex, e: DragEvent) {
+  if (!e.dataTransfer?.types.includes(SURFACE_MIME)) return;
+  e.preventDefault();
+  if (pi !== 0 || paneVisible(1)) { splitHint.value = false; return; }
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  splitHint.value = e.clientY > r.top + r.height * SPLIT_DROP_AT;
+}
+function onSurfaceDragLeave(e: DragEvent) {
+  // Leaving the section itself, not just moving between its children.
+  if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) splitHint.value = false;
 }
 function onSurfaceDrop(pi: PaneIndex, e: DragEvent) {
+  const toBottom = pi === 0 && splitHint.value;
+  splitHint.value = false;
   const id = e.dataTransfer?.getData(SURFACE_MIME);
   if (!id) return;
   e.preventDefault();
-  moveSurface(id, pi);
+  moveSurface(id, toBottom ? 1 : pi);
 }
 function moveSurface(id: string, to: PaneIndex) {
   moveTo(layout.value, id, to);

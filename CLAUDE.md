@@ -475,7 +475,8 @@ JS events (`rp:op` → `rp:reply`, 15 s) to the window's `answerPanelOps`. Closi
 `window-closed rightpanel` → the panel remounts here. ⌘J / ⌘⌥B while popped focus that window. Old scrollback is not
 replayed into the moved terminal; the shell itself is the same. **⌘J** = the RP's Terminal surface (`toggleTerminal`:
 opens in the bottom pane focused, the next press `hideBottom`s it); the per-thread bottom terminal is gone. RP tabs
-have a hover arrow to move them to the other pane (the split).
+have a hover arrow to move them to the other pane (the split), and drag-and-drop between panes; with no bottom pane on
+screen the top pane's lower part (below 55 %) is the drop zone that opens one (`splitHint`).
 
 **Close = hide**: the backend keeps serving the phone, schedules and running chats; ⌘Q / tray Quit really
 quit (`quitting` flag, `ShouldQuit`), the Dock icon reopens. The tray is a template icon
