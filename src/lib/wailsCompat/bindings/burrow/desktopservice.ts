@@ -86,9 +86,18 @@ export function TrayOpen(route: string): $CancellablePromise<void> {
 }
 
 /**
+ * TraySetHotkey re-registers the tray panel's global shortcut after Settings
+ * changed uiPrefs.trayHotkey ("" = none). Returns why it failed, "" if not.
+ */
+export function TraySetHotkey(spec: string): $CancellablePromise<string> {
+    return $Call.ByID(3135577625, spec);
+}
+
+/**
  * TraySetPinned turns the tray panel into a free-standing always-on-top panel:
  * it stays up when it loses focus, resizes, and a tray click shows it where
  * the user left it instead of snapping it back under the icon. Not persisted.
+ * Unpinning puts it back under the icon (the client resizes it first).
  */
 export function TraySetPinned(pinned: boolean): $CancellablePromise<void> {
     return $Call.ByID(2423678597, pinned);

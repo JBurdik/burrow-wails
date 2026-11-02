@@ -29,7 +29,7 @@
         <template v-for="group in groups" :key="group.label">
           <template v-if="group.rows.length">
             <div class="px-2 pb-1 pt-2.5 text-[11px] font-medium text-muted-foreground">{{ group.label }}</div>
-            <div v-for="row in group.rows" :key="row.key">
+            <div v-for="row in group.rows" :key="row.key" class="group relative">
               <button
                 type="button"
                 class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-hover"
@@ -42,10 +42,30 @@
                 </span>
                 <span class="flex min-w-0 flex-1 flex-col">
                   <span class="truncate text-[13px]" :class="row.status === 'idle' ? 'text-secondary-foreground' : 'text-foreground'">{{ row.title }}</span>
-                  <span class="truncate text-[11px] text-muted-foreground">{{ row.workspace }}<template v-if="row.detail"> · {{ row.detail }}</template></span>
+                  <span class="truncate text-[11px] text-muted-foreground" :title="row.recap || undefined">{{ row.workspace }}<template v-if="row.detail || row.recap"> · {{ row.detail || row.recap }}</template></span>
                 </span>
-                <span class="shrink-0 text-[11px]" :class="textClass(row.status)">{{ rightLabel(row) }}</span>
+                <span class="shrink-0 text-[11px]" :class="[textClass(row.status), row.kind === 'chat' && 'group-hover:invisible']">{{ rightLabel(row) }}</span>
               </button>
+              <button
+                v-if="row.kind === 'chat'"
+                type="button"
+                class="tray-icon-btn invisible absolute right-1.5 top-2 group-hover:visible"
+                :title="row.status === 'running' ? 'Queue a message for when it is free' : 'Reply'"
+                @click.stop="toggleReply(row)"
+              >
+                <PhArrowBendUpLeft :size="14" />
+              </button>
+              <!-- Quick reply: queued in Go (chat_queue_add), delivered once the turn settles. -->
+              <div v-if="replyTo === row.id" class="mx-2 mb-1.5 ml-[34px] flex items-center gap-1.5">
+                <input
+                  ref="replyEl"
+                  v-model="replyText"
+                  class="min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 py-1 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-accent"
+                  :placeholder="row.status === 'running' ? 'Queue a follow-up…' : 'Reply…'"
+                  @keydown.enter.prevent="sendReply(row)"
+                  @keydown.esc.stop.prevent="replyTo = null"
+                />
+              </div>
               <!-- A Claude tab's tool permission, answerable right here (ptypermissions.go). -->
               <div v-for="req in permsFor(row)" :key="req.id" class="mx-2 mb-1.5 ml-[34px] rounded-lg border border-border px-2.5 py-2">
                 <div class="truncate font-mono text-[11px] text-secondary-foreground" :title="permTarget(req)">{{ req.tool_name }}<template v-if="permTarget(req)">: {{ permTarget(req) }}</template></div>
@@ -69,7 +89,7 @@
     </template>
 
     <!-- A thread, live, in the panel. Permissions, questions and the composer are AgentChat's own. -->
-    <div v-else-if="view.kind === 'chat'" class="relative flex min-h-0 flex-1 flex-col">
+    <div v-else-if="view.kind === 'chat'" class="tray-chat relative flex min-h-0 flex-1 flex-col">
       <AgentChat
         v-if="wsReady && chatWs(view.chatId)"
         :key="view.chatId"
@@ -109,10 +129,11 @@
 // Status comes from shell_snapshot's phases + this device's receipts.
 // A chat row opens the thread right here (AgentChat — secondary windows don't
 // notify, chatHost.ts), a tab row in Burrow; a tab's permission is answered inline.
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@wailsio/runtime";
-import { PhArrowSquareOut, PhCaretLeft, PhChatCircle, PhPlus, PhPushPin, PhTerminalWindow } from "@phosphor-icons/vue";
+import { PhArrowBendUpLeft, PhArrowSquareOut, PhCaretLeft, PhChatCircle, PhPlus, PhPushPin, PhTerminalWindow } from "@phosphor-icons/vue";
 import { TrayOpen, TraySetPinned } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
 import { displayStatus } from "@/runtime/displayStatus";
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
@@ -135,6 +156,7 @@ interface Row {
   status: TermStatus;
   route: string;
   at: number;
+  recap?: string;
 }
 interface PermRequest {
   id: string;
@@ -188,7 +210,7 @@ const rows = computed<Row[]>(() => {
     out.push({
       key: `chat:${c.id}`, kind: "chat", id: c.id, title: c.title || `Chat ${c.id}`, workspace: wsName.get(c.workspaceId) ?? "",
       detail: status === "permission" || status === "waiting" ? (phase?.detail ?? "") : "",
-      status, route: `/ws/${c.workspaceId}?chat=${c.id}`,
+      status, route: `/ws/${c.workspaceId}?chat=${c.id}`, recap: c.recap,
       at: Math.max(c.lastActivityAt ?? 0, phase?.updated_at ?? 0),
     });
   }
@@ -280,10 +302,35 @@ async function answer(req: PermRequest, behavior: "allow" | "always" | "deny") {
   void load();
 }
 
+// ── Quick reply ─────────────────────────────────────────────────────────────
+const replyTo = ref<number | null>(null);
+const replyText = ref("");
+const replyEl = ref<HTMLInputElement[] | null>(null);
+function toggleReply(row: Row) {
+  replyTo.value = replyTo.value === row.id ? null : row.id;
+  replyText.value = "";
+  void nextTick(() => replyEl.value?.[0]?.focus());
+}
+async function sendReply(row: Row) {
+  const text = replyText.value.trim();
+  if (!text) return;
+  replyText.value = "";
+  replyTo.value = null;
+  // Always the queue: a running turn gets it when it settles, a settled chat
+  // within ~300 ms (chatdelivery.go kicks a pass on every add).
+  await invoke("chat_queue_add", { chatId: row.id, text, images: [] }).catch(() => {});
+}
+
 // ── Navigation ──────────────────────────────────────────────────────────────
 function open(route: string) {
   void TrayOpen(route);
 }
+// AgentChat asks its host for the Right Panel; the panel has none. A sub-agent
+// opens right here, a surface (plan, diff, git) in the main window.
+provide("openRightPanelSubagent", (chatId: number) => { view.value = { kind: "chat", chatId }; });
+provide("openRightPanelSurface", () => { const v = view.value; if (v.kind === "chat") open(chatRoute(v.chatId)); });
+provide("openRightPanelGitTab", () => { const v = view.value; if (v.kind === "chat") open(chatRoute(v.chatId)); });
+
 function openRow(row: Row) {
   if (row.kind === "chat") view.value = { kind: "chat", chatId: row.id };
   else open(row.route);
@@ -401,6 +448,7 @@ function onKeydown(e: KeyboardEvent) {
   else if (!pinned.value) void Window.Hide();
 }
 let timer: number | undefined;
+let unlistenCompose: (() => void) | undefined;
 onMounted(async () => {
   document.documentElement.style.background = "transparent";
   document.body.style.background = "transparent";
@@ -409,6 +457,8 @@ onMounted(async () => {
   timer = window.setInterval(load, 2000);
   window.addEventListener("focus", load);
   window.addEventListener("keydown", onKeydown);
+  // ⌥Space (trayhotkey_darwin.go): straight to a new thread.
+  unlistenCompose = await listen("menu-tray-compose", () => startCompose());
   await workspaces.load().catch(() => {});
   wsReady.value = true;
 });
@@ -416,6 +466,7 @@ onBeforeUnmount(() => {
   clearInterval(timer);
   window.removeEventListener("focus", load);
   window.removeEventListener("keydown", onKeydown);
+  unlistenCompose?.();
 });
 </script>
 
@@ -445,5 +496,33 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: var(--secondary-foreground);
   transition: background-color 0.15s, color 0.15s, opacity 0.15s;
+}
+/* The thread in the panel is the full AgentChat with a tighter composer and
+   transcript margins — styled from here, AgentChat has no "dense" prop. */
+.tray-chat :deep(.chat-messages) {
+  padding-top: 10px;
+}
+.tray-chat :deep(.chat-main > .flex-shrink-0.pb-2) {
+  padding: 6px 8px 6px;
+}
+.tray-chat :deep(.chat-input-box) {
+  border-radius: 12px;
+}
+.tray-chat :deep(.composer-input) {
+  min-height: 2.25rem;
+  padding: 7px 12px 2px;
+  font-size: 13px;
+}
+.tray-chat :deep(.composer-toolbar) {
+  gap: 4px;
+  padding: 2px 6px 5px;
+}
+.tray-chat :deep(.composer-pill) {
+  height: 24px;
+  padding: 0 6px;
+  font-size: 11.5px;
+}
+.tray-chat :deep(.composer-pill-label) {
+  font-size: 11.5px;
 }
 </style>

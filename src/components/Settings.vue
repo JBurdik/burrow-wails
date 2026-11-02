@@ -683,6 +683,26 @@
             </div>
           </div>
 
+          <template v-if="canOpenWindows()">
+            <span class="s-label">System-wide</span>
+            <div class="flex items-center justify-between gap-3 border-b border-border/40 py-1.5">
+              <span class="flex flex-col text-xs text-muted-foreground">
+                Open the tray panel on a new thread, from any app
+                <span v-if="trayHotkeyError" class="text-[11px] text-destructive">{{ trayHotkeyError }}</span>
+              </span>
+              <span class="flex shrink-0 items-center gap-2">
+                <button
+                  class="min-w-[86px] rounded-[var(--radius-chip)] border px-2 py-0.5 font-mono text-[11px] leading-snug"
+                  :class="trayHotkeyRecording ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-hover text-secondary-foreground hover:border-accent/40'"
+                  @click="trayHotkeyRecording = !trayHotkeyRecording; ($event.currentTarget as HTMLElement).focus()"
+                  @keydown="onTrayHotkeyKey"
+                  @blur="trayHotkeyRecording = false"
+                >{{ trayHotkeyRecording ? "press keys…" : (ui.trayHotkey || "off") }}</button>
+                <button v-if="ui.trayHotkey !== '⌥Space'" class="text-[10px] text-muted-foreground hover:text-foreground" title="Reset to ⌥Space" @click="setTrayHotkey('⌥Space')">reset</button>
+              </span>
+            </div>
+          </template>
+
           <span class="s-label">Fixed (not rebindable)</span>
           <div v-for="s in FIXED_SHORTCUTS" :key="s.keys" class="flex items-center justify-between gap-3 border-b border-border/40 py-1.5 last:border-b-0">
             <span class="text-xs text-muted-foreground">{{ s.desc }}</span>
@@ -1287,6 +1307,7 @@ import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEX
 import { releaseChannel } from "@/lib/releaseChannel";
 import { compact } from "@/lib/viewport";
 import { canOpenWindows } from "@/lib/windows";
+import { TraySetHotkey } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import SubagentProfilesPanel from "@/components/agents/SubagentProfilesPanel.vue";
@@ -2055,6 +2076,35 @@ watch(() => wsStore.active?.id, () => { if (active.value === "integrations") ref
 // --- App keybindings (Keybindings section) ---
 const keys = useKeybindingsStore();
 const kbRecording = ref<string | null>(null);
+
+// The tray panel's global shortcut (src-wails/trayhotkey.go). Recorded from
+// e.code, not e.key: with ⌥ held e.key is already a symbol ("⌥K" → "˚").
+const trayHotkeyRecording = ref(false);
+const trayHotkeyError = ref("");
+const TRAY_KEY_NAMES: Record<string, string> = { Space: "Space", Enter: "Enter", Tab: "Tab", Backquote: "Backquote", ArrowLeft: "ArrowLeft", ArrowRight: "ArrowRight", ArrowUp: "ArrowUp", ArrowDown: "ArrowDown" };
+function trayKeyName(code: string): string | null {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F([1-9]|1[0-2])$/.test(code)) return code;
+  return TRAY_KEY_NAMES[code] ?? null;
+}
+async function setTrayHotkey(spec: string) {
+  ui.trayHotkey = spec;
+  trayHotkeyError.value = await TraySetHotkey(spec).catch((e: unknown) => String(e));
+}
+function onTrayHotkeyKey(e: KeyboardEvent) {
+  if (!trayHotkeyRecording.value) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.key === "Escape") { trayHotkeyRecording.value = false; return; }
+  if (e.key === "Backspace") { trayHotkeyRecording.value = false; void setTrayHotkey(""); return; }
+  const key = trayKeyName(e.code);
+  if (!key) return; // a bare modifier, or a key the Go side has no code for
+  if (!e.metaKey && !e.altKey && !e.ctrlKey) { trayHotkeyError.value = "Needs ⌘, ⌥ or ⌃ — a bare key would swallow typing."; return; }
+  const spec = (e.metaKey ? "⌘" : "") + (e.altKey ? "⌥" : "") + (e.ctrlKey ? "⌃" : "") + (e.shiftKey ? "⇧" : "") + key;
+  trayHotkeyRecording.value = false;
+  void setTrayHotkey(spec);
+}
 
 function startKeyRecord(id: string, e: MouseEvent) {
   kbRecording.value = kbRecording.value === id ? null : id;

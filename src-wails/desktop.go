@@ -195,6 +195,15 @@ func showTrayPanel(underIcon bool) {
 	})
 }
 
+// TraySetHotkey re-registers the tray panel's global shortcut after Settings
+// changed uiPrefs.trayHotkey ("" = none). Returns why it failed, "" if not.
+func (s *DesktopService) TraySetHotkey(spec string) string {
+	if err := setTrayHotkey(spec); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 func (s *DesktopService) CloseWindow(key string) {
 	extraMu.Lock()
 	w := extraWins[key]
@@ -368,7 +377,10 @@ func setupTray(a *App) {
 	refreshTray(a)
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		started.Store(true)
-		go prepareTrayPanel(trayWin) // InvokeSync: never from the main thread
+		go func() { // InvokeSync: never from the main thread
+			prepareTrayPanel(trayWin)
+			registerTrayHotkey(a)
+		}()
 		go refreshTray(a)
 	})
 }

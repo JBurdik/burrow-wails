@@ -122,6 +122,7 @@ interface Prefs {
   worktreeCleanupInactive: boolean; // remove idle worktrees with no chats/tabs (same)
   worktreeCleanupInactiveDays: number; // idle threshold for the rule above, 0 = off
   floatPopouts: boolean; // popped-out terminal/chat windows open floating (no zoom button, tiling WMs float them)
+  trayHotkey: string; // global shortcut for the tray panel, "⌥Space" style (src-wails/trayhotkey.go); "" = off
   subagentAutoDeliver: boolean; // send a finished/blocked sub-agent's result into its parent chat (read by Go, src-wails/chatsubagentnotice.go)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
   channelMarker: "art" | "label" | "off"; // dev/beta builds: sidebar artwork + titlebar badge, badge only, or nothing
@@ -233,6 +234,7 @@ const DEFAULT_PREFS: Prefs = {
   worktreeFromOrigin: true,
   subagentAutoDeliver: true,
   floatPopouts: false,
+  trayHotkey: "⌥Space",
   worktreeCleanupMerged: false,
   worktreeCleanupInactive: false,
   worktreeCleanupInactiveDays: 14,
@@ -384,6 +386,7 @@ export const useUIStore = defineStore("ui", () => {
   const worktreeFromOrigin = ref<boolean>(loaded.worktreeFromOrigin ?? true);
   const subagentAutoDeliver = ref<boolean>(loaded.subagentAutoDeliver ?? true);
   const floatPopouts = ref<boolean>(loaded.floatPopouts ?? false);
+  const trayHotkey = ref<string>(loaded.trayHotkey ?? "⌥Space");
   const worktreeCleanupMerged = ref<boolean>(loaded.worktreeCleanupMerged ?? false);
   const worktreeCleanupInactive = ref<boolean>(loaded.worktreeCleanupInactive ?? false);
   const worktreeCleanupInactiveDays = ref<number>(loaded.worktreeCleanupInactiveDays ?? 14);
@@ -457,6 +460,7 @@ export const useUIStore = defineStore("ui", () => {
     worktreeFromOrigin.value = p.worktreeFromOrigin ?? true;
     subagentAutoDeliver.value = p.subagentAutoDeliver ?? true;
     floatPopouts.value = p.floatPopouts ?? false;
+    trayHotkey.value = p.trayHotkey ?? "⌥Space";
     worktreeCleanupMerged.value = p.worktreeCleanupMerged ?? false;
     worktreeCleanupInactive.value = p.worktreeCleanupInactive ?? false;
     worktreeCleanupInactiveDays.value = p.worktreeCleanupInactiveDays ?? 14;
@@ -654,6 +658,7 @@ export const useUIStore = defineStore("ui", () => {
         worktreeFromOrigin: worktreeFromOrigin.value,
         subagentAutoDeliver: subagentAutoDeliver.value,
         floatPopouts: floatPopouts.value,
+        trayHotkey: trayHotkey.value,
         worktreeCleanupMerged: worktreeCleanupMerged.value,
         worktreeCleanupInactive: worktreeCleanupInactive.value,
         worktreeCleanupInactiveDays: worktreeCleanupInactiveDays.value,
@@ -676,7 +681,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, floatPopouts, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, floatPopouts, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -994,6 +999,7 @@ export const useUIStore = defineStore("ui", () => {
     worktreeFromOrigin,
     subagentAutoDeliver,
     floatPopouts,
+    trayHotkey,
     worktreeCleanupMerged,
     worktreeCleanupInactive,
     worktreeCleanupInactiveDays,

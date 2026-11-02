@@ -12,13 +12,14 @@ import (
 // mobile client silently never sees it — which is exactly how
 // emitWorkspacesChanged went missing.
 var wailsRuntimeAllowlist = map[string]string{
-	"desktop.go":          "defines desktopEmit",
-	"main_headless.go":    "defines the no-op desktopEmit",
-	"main.go":             "menu items",
-	"updater.go":          "update:progress, desktop-only",
-	"stubs.go":            "float window snapshots, desktop-only",
-	"lsp.go":              "lsp-msg, desktop-only",
-	"extension_bridge.go": "extension-task, desktop-only",
+	"desktop.go":           "defines desktopEmit",
+	"main_headless.go":     "defines the no-op desktopEmit",
+	"main.go":              "menu items",
+	"updater.go":           "update:progress, desktop-only",
+	"stubs.go":             "float window snapshots, desktop-only",
+	"lsp.go":               "lsp-msg, desktop-only",
+	"extension_bridge.go":  "extension-task, desktop-only",
+	"trayhotkey_darwin.go": "menu-tray-compose, the tray panel window only",
 }
 
 func TestWailsRuntimeEmitIsConfined(t *testing.T) {
