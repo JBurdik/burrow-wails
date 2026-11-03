@@ -38,6 +38,11 @@ type DaemonClient struct {
 	// cannot end up with two live connections — both readLoops would broadcast
 	// the same pty-data frame and every terminal would render doubled output.
 	dialMu sync.Mutex
+
+	// tap sees every live pty-data / pty-exit frame (data nil = exit) before
+	// it goes on the bus — the server-side byte path (OSC 7501, programstatus.go).
+	// Set once before Ensure; nil = off.
+	tap func(id string, data []int)
 }
 
 func NewDaemonClient(ctx context.Context, sockPath string) *DaemonClient {
@@ -287,8 +292,14 @@ func (d *DaemonClient) readLoop(conn net.Conn) {
 			f := env.Frame
 			switch f.Event {
 			case "pty-data":
+				if d.tap != nil {
+					d.tap(f.ID, f.Data)
+				}
 				busEmit("pty-data-"+f.ID, ptyChunk{Off: f.Off, Data: f.Data})
 			case "pty-exit":
+				if d.tap != nil {
+					d.tap(f.ID, nil)
+				}
 				busEmit("pty-exit-"+f.ID, nil)
 			}
 		}

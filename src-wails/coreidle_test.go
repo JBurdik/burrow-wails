@@ -30,3 +30,19 @@ func TestCoreShouldExit(t *testing.T) {
 		}
 	}
 }
+
+func TestCoreShouldRestart(t *testing.T) {
+	now := time.Now()
+	if coreShouldRestart(time.Time{}, now, false) {
+		t.Error("no update: must not restart")
+	}
+	if !coreShouldRestart(now, now, false) {
+		t.Error("update, nothing running: restart")
+	}
+	if coreShouldRestart(now.Add(-time.Minute), now, true) {
+		t.Error("update during a turn: wait")
+	}
+	if !coreShouldRestart(now.Add(-coreRestartMaxWait), now, true) {
+		t.Error("waited the maximum: restart anyway")
+	}
+}

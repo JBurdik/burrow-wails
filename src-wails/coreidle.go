@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -100,13 +101,47 @@ func (a *App) coreAtLogin() bool {
 	return cfg.UI.On
 }
 
-// runCoreIdleExit calls quit once the core should exit. Starts counting from
-// now, so a core a CLI verb just started gets the full grace too.
-func (a *App) runCoreIdleExit(quit func()) {
+// coreRestartMaxWait: an update waits for open turns to settle, but not forever.
+const coreRestartMaxWait = 30 * time.Minute
+
+// coreShouldRestart: the binary on disk changed (an update / `just beta`) and
+// no chat turn would be cut — or it has waited long enough.
+func coreShouldRestart(changedAt, now time.Time, turnOpen bool) bool {
+	return !changedAt.IsZero() && (!turnOpen || now.Sub(changedAt) >= coreRestartMaxWait)
+}
+
+// exeFingerprint is what an update changes: a new file at the same path.
+func exeFingerprint() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	fi, err := os.Stat(exe)
+	if err != nil {
+		return "" // mid-swap: the bundle is being replaced; look again next tick
+	}
+	return fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano())
+}
+
+// runCoreLifecycle quits the core once it is idle (quit) and restarts it onto
+// a new binary once an update landed and its turns settled (restart). Idle
+// counts from now, so a core a CLI verb just started gets the full grace too.
+func (a *App) runCoreLifecycle(quit, restart func()) {
 	grace, tick := coreIdleTiming()
 	lastUI := time.Now()
+	started := exeFingerprint()
+	var changedAt time.Time
 	for range time.Tick(tick) {
 		now := time.Now()
+		if fp := exeFingerprint(); changedAt.IsZero() && fp != "" && started != "" && fp != started {
+			changedAt = now
+			log.Printf("core: binary changed on disk, restarting once chat turns settle")
+		}
+		if coreShouldRestart(changedAt, now, a.coreWork().turnOpen) {
+			log.Printf("core: restarting onto the updated binary")
+			restart()
+			return
+		}
 		ui := a.remoteWS != nil && a.remoteWS.uiConnected()
 		if ui {
 			lastUI = now

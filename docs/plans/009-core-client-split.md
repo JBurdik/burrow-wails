@@ -172,6 +172,17 @@ packaged bundle; errors show under the Settings toggle).
 Version in `welcome`; updater swaps the bundle → asks the core to
 restart-when-settled; banner in the UI.
 
+**Done (2026-11-03), simpler than planned:** no version handshake — the core
+watches its own binary (`exeFingerprint`: size + mtime, every lifecycle tick)
+and, once it changed, restarts as soon as no chat turn is open
+(`coreShouldRestart`, ≤ 30 min, table-tested): it starts the new binary
+through the launcher and quits; a connected UI just reconnects. Covers the
+updater and `just beta` alike. The new core waits ≤ 15 s for the old one's
+`core.lock`. Fixed on the way: the lock's `*os.File` was a local, so the GC
+finalizer closed it and dropped the flock — two cores could run side by
+side (`coreLock`). Not done: the UI process itself stays on the old binary
+until it is relaunched (no banner yet).
+
 ### E — stable switch
 
 Stable on external core; delete the in-process path, `quitting` /

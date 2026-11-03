@@ -74,9 +74,21 @@ func runCore() {
 	if err != nil {
 		log.Fatalf("core: lock: %v", err)
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		log.Printf("core: another core owns %s, exiting", dataDir)
-		return
+	// Held for the process's life. LOAD-BEARING: a local would be collected and
+	// its finalizer would close the fd — dropping the flock, so a second core
+	// (an update restart racing the UI's ensureCore) started next to this one.
+	coreLock = lock
+	// Wait a little: a core restarting onto an update starts us before it
+	// has finished shutting down.
+	for i := 0; ; i++ {
+		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			break
+		}
+		if i == 150 { // 15 s
+			log.Printf("core: another core owns %s, exiting", dataDir)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	// Where `burrow` finds this binary to start a core again after an idle exit.
 	if exe, err := os.Executable(); err == nil {
@@ -113,7 +125,15 @@ func runCore() {
 	setupTray(app)
 	setupNativeNotifications(notifier)
 	coreQuit = func() { quitApp(app) } // tray Quit, ⌥⌘Q in the UI: tells the UI, then stops
-	go app.runCoreIdleExit(func() { wapp.Quit() })
+	go app.runCoreLifecycle(func() { wapp.Quit() }, func() {
+		// Start the new binary first; it waits for this one's lock. A UI sees
+		// the socket drop and reconnects (no core-quit: it must stay open).
+		if exe, err := os.Executable(); err == nil {
+			_ = spawnDetached("core", []string{exe, "--core"}, append(os.Environ(), coreDetachedEnv+"=1"),
+				filepath.Join(dataDir, "core.log"), filepath.Join(dataDir, "hook.port"))
+		}
+		wapp.Quit()
+	})
 	var uiOpenMu sync.Mutex // three verbs at once must not start three windows
 	ensureUIOpen = func() {
 		uiOpenMu.Lock()
@@ -189,6 +209,9 @@ func askCoreToQuit() {
 		resp.Body.Close()
 	}
 }
+
+// coreLock keeps core.lock's fd (and so its flock) alive; see runCore.
+var coreLock *os.File
 
 // coreApp is set in the core role: what the tray opens the UI for.
 var coreApp *App

@@ -24,5 +24,26 @@
         <string>true</string>
         <key>NSHumanReadableCopyright</key>
         <string>© 2026 Jiří Burdych</string>
+        <!-- PTY children (agents, shells) are attributed to this bundle by TCC: without a purpose string their requests are denied. -->
+        <key>NSAppleEventsUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to control other apps with AppleScript. Burrow does not send these commands itself.</string>
+        <key>NSCameraUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to use your camera. Burrow does not use the camera itself.</string>
+        <key>NSMicrophoneUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to use your microphone. Burrow does not record audio itself.</string>
+        <key>NSAudioCaptureUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to record your system's audio. Burrow does not record audio itself.</string>
+        <key>NSBluetoothAlwaysUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to use Bluetooth. Burrow does not use Bluetooth itself.</string>
+        <key>NSCalendarsUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to read your calendars. Burrow does not read them itself.</string>
+        <key>NSContactsUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to read your contacts. Burrow does not read them itself.</string>
+        <key>NSLocationUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to know your location. Burrow does not track location itself.</string>
+        <key>NSPhotoLibraryUsageDescription</key>
+        <string>A program running in a Burrow terminal wants to access your photo library. Burrow does not read your photos itself.</string>
+        <key>NSLocalNetworkUsageDescription</key>
+        <string>Burrow and the programs you run in its terminals use this to find and connect to devices on your local network.</string>
     </dict>
 </plist>

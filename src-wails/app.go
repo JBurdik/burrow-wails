@@ -254,6 +254,9 @@ func (a *App) startup(ctx context.Context) {
 	a.backfillChatLaunchSettings()
 
 	a.daemon = NewDaemonClient(ctx, filepath.Join(dataDir, "daemon.sock"))
+	if a.phases != nil {
+		a.daemon.tap = newProgramStatusTap(a.phases.Apply)
+	}
 	if err := a.daemon.Ensure(); err != nil {
 		log.Printf("daemon: %v", err)
 	}

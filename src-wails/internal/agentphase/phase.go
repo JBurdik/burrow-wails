@@ -72,6 +72,16 @@ const (
 	// blocked on. Unlike HookRunning it only moves a WAITING turn — a late
 	// answer or a cancel that lands after the turn ended must not reopen it.
 	Resume Kind = "resume"
+
+	// ProgramStatus: an OSC 7501 report (internal/progstatus) — the program
+	// itself says what it is doing, so like a hook it marks the leaf IsAgent,
+	// which keeps the poll from overwriting a `blocked` with PollBusy. The
+	// poll's shell branch still clears IsAgent and settles an in-flight state
+	// to done at the next prompt, which is the spec's "drop working/blocked on
+	// process exit / shell prompt" (as done, not idle). ev.State is the target;
+	// Idle means idle/clear and, like Interrupt, only cancels an in-flight
+	// turn, so it never wipes an unseen done.
+	ProgramStatus Kind = "program_status"
 )
 
 type Event struct {
@@ -81,6 +91,7 @@ type Event struct {
 	Source string
 	Title  string
 	Bool   bool
+	State  State // ProgramStatus only
 }
 
 // Next returns the phase after ev. It returns cur unchanged (UpdatedAt
@@ -100,7 +111,7 @@ func Next(cur Phase, ev Event, now int64) Phase {
 	// (PollAgent{false}), which is how a leaf goes back to poll-driven once its
 	// agent exits.
 	switch ev.Kind {
-	case HookRunning, HookWaiting, HookPermission, HookDone, HookError, HookSession, StatusIdle:
+	case HookRunning, HookWaiting, HookPermission, HookDone, HookError, HookSession, StatusIdle, ProgramStatus:
 		next.IsAgent = true
 	}
 
@@ -137,6 +148,25 @@ func Next(cur Phase, ev Event, now int64) Phase {
 		if cur.InFlight() {
 			next.State = Done
 			next.TurnEndedAt = now
+		}
+	case ProgramStatus:
+		switch ev.State {
+		case Running, WaitingInput, WaitingApproval:
+			next.State = ev.State
+			next.Detail = ev.Detail
+			next.TurnEndedAt = 0
+		case Done, Failed:
+			if cur.State != ev.State || cur.Detail != ev.Detail {
+				next.State = ev.State
+				next.Detail = ev.Detail
+				next.TurnEndedAt = now
+			}
+		case Idle:
+			if cur.InFlight() {
+				next.State = Idle
+				next.Detail = ""
+				next.TurnEndedAt = 0
+			}
 		}
 	case PollAgent:
 		next.IsAgent = ev.Bool
