@@ -159,6 +159,7 @@
 <script setup lang="ts">
 import "@/styles/app.css";
 import { isDesktop } from "@/lib/wailsCompat/desktop";
+import { startCoreLink } from "@/lib/coreLink";
 import { ref, onMounted, onBeforeUnmount, computed, provide, watch, nextTick, useTemplateRef } from "vue";
 import { useRoute } from "vue-router";
 import { router, routeId } from "@/router";
@@ -755,6 +756,7 @@ let unlistenMenuOnboarding: UnlistenFn | null = null;
 let unlistenMenuWhatsNew: UnlistenFn | null = null;
 let unlistenMenuShortcuts: UnlistenFn | null = null;
 let unlistenMenuNavigate: UnlistenFn | null = null;
+let stopCoreLink: (() => void) | null = null;
 let unlistenControl: (() => void) | undefined;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
 let unlistenWorktreesCleaned: UnlistenFn | null = null;
@@ -821,6 +823,8 @@ onMounted(async () => {
   unlistenMenuShortcuts = await listen("menu-show-shortcuts", () => { cheatsheetOpen.value = true; });
   // The tray panel opened a thread/tab (desktop.go TrayOpen).
   unlistenMenuNavigate = await listen<string>("menu-navigate", (e) => { if (e.payload) void router.push(e.payload); });
+  // The same from the external core's tray (plan 009), + its quit and Dock count.
+  stopCoreLink = await startCoreLink((route) => void router.push(route));
 
   unlistenWorkspacesChanged = await listen("workspaces-changed", () => {
     ws.load();
@@ -856,6 +860,7 @@ onBeforeUnmount(() => {
   unlistenMenuWhatsNew?.();
   unlistenMenuShortcuts?.();
   unlistenMenuNavigate?.();
+  stopCoreLink?.();
   unlistenWorkspacesChanged?.();
   unlistenWorktreesCleaned?.();
   unlistenControl?.();

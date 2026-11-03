@@ -37,17 +37,20 @@ type webPusher struct {
 	keyMu sync.Mutex
 	key   *ecdsa.PrivateKey
 
-	mu      sync.Mutex
-	last    map[string]time.Time // phase key -> last push sent
-	watched map[string]time.Time // phase key -> last chat_mark_active
+	mu   sync.Mutex
+	last map[string]time.Time // phase key -> last push sent
+	// lastNative: the same for native notifications (external core only).
+	lastNative map[string]time.Time
+	watched    map[string]time.Time // phase key -> last chat_mark_active
 }
 
 func newWebPusher(keyPath string) *webPusher {
 	return &webPusher{
-		keyPath: keyPath,
-		client:  &http.Client{Timeout: 15 * time.Second},
-		last:    map[string]time.Time{},
-		watched: map[string]time.Time{},
+		keyPath:    keyPath,
+		client:     &http.Client{Timeout: 15 * time.Second},
+		last:       map[string]time.Time{},
+		lastNative: map[string]time.Time{},
+		watched:    map[string]time.Time{},
 	}
 }
 

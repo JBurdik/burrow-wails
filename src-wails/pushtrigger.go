@@ -71,19 +71,50 @@ func (p *webPusher) claim(key string, now time.Time) bool {
 	return true
 }
 
+// nativeNotify posts an OS notification; set only by the external core
+// (plan 009), which owns native notifications there — nil in-process, where
+// the webview still posts its own.
+var nativeNotify func(title, body, url, tag string)
+
 // pushPhaseChanged runs under PhaseStore.emitMu: decide cheaply, send async.
 func (a *App) pushPhaseChanged(key string, prev, next agentphase.Phase) {
 	if a.push == nil {
 		return
 	}
 	if reason := pushReason(key, prev.State, next.State); reason != "" {
-		go a.pushFor(key, reason, next)
+		go a.pushFor(key, reason, next, true)
+	} else if nativeNotify != nil && strings.HasPrefix(key, "pty:") && next.State == agentphase.Done && prev.State != next.State {
+		// A tab's finished turn: the desktop said so (Terminal.vue did), the
+		// phone deliberately does not (pushReason).
+		go a.pushFor(key, "done", next, false)
 	}
 }
 
-// pushFor builds the notification for one phase key and sends it if the gate
-// lets it through.
-func (a *App) pushFor(key, reason string, ph agentphase.Phase) {
+// claimNative is claim with its own rate memory (a native banner and a phone
+// push must not use up each other's slot) and a wider watch test: ANY chat
+// watched lately means a focused Burrow window, where the webview used to
+// skip its OS notification (document.hasFocus) and toasts in-app instead.
+// ponytail: a terminal-only view sends no chat_mark_active, so it still gets
+// banners; a real window-focus signal from the UI would fix that.
+func (p *webPusher) claimNative(key string, now time.Time) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var watched time.Time
+	for _, t := range p.watched {
+		if t.After(watched) {
+			watched = t
+		}
+	}
+	if !pushGate(watched, p.lastNative[key], now) {
+		return false
+	}
+	p.lastNative[key] = now
+	return true
+}
+
+// pushFor builds the notification for one phase key and sends it — natively
+// (external core) and, if phone, as Web Push — where each gate lets it.
+func (a *App) pushFor(key, reason string, ph agentphase.Phase, phone bool) {
 	if a.push == nil || a.db == nil {
 		return
 	}
@@ -137,7 +168,11 @@ func (a *App) pushFor(key, reason string, ph agentphase.Phase) {
 	case "snooze":
 		msg.Body = "Snooze ended"
 	}
-	if !a.push.claim(key, time.Now()) {
+	now := time.Now()
+	if nativeNotify != nil && a.push.claimNative(key, now) {
+		nativeNotify(msg.Title, msg.Body, msg.URL, key)
+	}
+	if !phone || !a.push.claim(key, now) {
 		return
 	}
 	payload, _ := json.Marshal(msg)
@@ -147,5 +182,5 @@ func (a *App) pushFor(key, reason string, ph agentphase.Phase) {
 }
 
 func (a *App) pushChat(chatID int64, reason string) {
-	go a.pushFor("chat:"+strconv.FormatInt(chatID, 10), reason, agentphase.Phase{})
+	go a.pushFor("chat:"+strconv.FormatInt(chatID, 10), reason, agentphase.Phase{}, true)
 }

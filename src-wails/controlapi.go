@@ -278,7 +278,7 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		writeJSONFileResponse(w, a.LocalEndpoint())
+		writeJSONFileResponse(w, a.localEndpointFor(desktopUIDevice))
 	})
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		if !a.controlAuthorized(r) {

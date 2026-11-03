@@ -60,6 +60,7 @@ func main() {
 		// composer itself (AgentChat.vue).
 		EnableFileDrop: true,
 		Mac:            application.MacWindow{TitleBar: macTitleBar},
+		URL:            startURL(),
 	})
 	mainWin.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
 		x, y := 0, 0
@@ -93,14 +94,21 @@ func main() {
 		}()
 	} else {
 		app.startup(context.Background())
-		// ponytail: no tray on dev/beta until phase B moves it into the core
-		// (it counts phases from App, which this process no longer has).
-		setupTray(app)
+		setupTray(app) // in-process only: on dev/beta the core owns the tray
 	}
 
 	if err := wapp.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// startURL: a UI the core started for a tray / notification click opens at
+// that route; anything else at the app's root.
+func startURL() string {
+	if r := uiStartRoute(); r != "" {
+		return "/#" + r
+	}
+	return "/"
 }
 
 func appMenu() *application.Menu {

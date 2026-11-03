@@ -511,7 +511,12 @@ type LocalEndpointInfo struct {
 // authorization, and that is not a claim anything on the network can make.
 // The frontend calls this again on every reconnect, since a ticket is spent
 // by the handshake that uses it.
-func (a *App) LocalEndpoint() LocalEndpointInfo {
+func (a *App) LocalEndpoint() LocalEndpointInfo { return a.localEndpointFor("") }
+
+// localEndpointFor mints the all-scope ticket for device: "" = this process's
+// own windows, desktopUIDevice = the separate UI process (plan 009), tracked
+// so the core can tell whether a window is up.
+func (a *App) localEndpointFor(device string) LocalEndpointInfo {
 	if a.tickets == nil {
 		return LocalEndpointInfo{}
 	}
@@ -523,7 +528,7 @@ func (a *App) LocalEndpoint() LocalEndpointInfo {
 	all := []remoteScope{scopeOrchRead, scopeOrchOperate, scopeTerminal, scopeAccessRead, scopeAccessWrite, scopeUIAck}
 	return LocalEndpointInfo{
 		WSURL:         fmt.Sprintf("ws://127.0.0.1:%d/v2/ws", a.hookPort),
-		Ticket:        a.tickets.issue(all),
+		Ticket:        a.tickets.issueFor(device, all),
 		EnvironmentID: a.environmentID,
 	}
 }

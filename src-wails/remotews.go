@@ -204,6 +204,18 @@ func (h *remoteWS) register(mux *http.ServeMux) {
 	mux.HandleFunc("/v2/ws", h.handle)
 }
 
+// desktopUIDevice is the pseudo device of the separate UI process's
+// connections (plan 009): no remote_devices row, nothing to revoke — it is
+// tracked only so uiConnected can answer.
+const desktopUIDevice = "desktop-ui"
+
+// uiConnected: a desktop UI process holds at least one socket.
+func (h *remoteWS) uiConnected() bool {
+	h.connMu.Lock()
+	defer h.connMu.Unlock()
+	return len(h.conns[desktopUIDevice]) > 0
+}
+
 // trackConn registers a connection's shutdown under its device, returning the
 // function that removes it again. A deviceID of "" is the desktop and is not
 // tracked (see the conns field).

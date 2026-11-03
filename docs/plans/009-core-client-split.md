@@ -1,6 +1,6 @@
 # 009 — Split the backend into an always-on core and thin clients
 
-Status: **decided; phase A done** (2026-11-03, branch `v3/core-client-split`).
+Status: **decided; phases A + B done** (2026-11-03, branch `v3/core-client-split`).
 Decisions below came out of a grilling session; change one only on purpose.
 
 ## Why
@@ -105,6 +105,26 @@ notifications from Go (Wails notifications service) on `PhaseStore.onChange`,
 same decisions as `pushtrigger.go` + `chat_mark_active` gate; the frontend's
 `notifyPermission` / `chatHost.notify*` stop notifying natively (toasts stay).
 Dock badge: UI counts from phases it already receives.
+
+**Done (2026-11-03):** the core role is a Wails app with
+`ActivationPolicyAccessory` (no Dock icon, `UIElement`): tray, tray panel
+(served the in-process ticket), hotkey and `notifications` service live
+there. `openUI(route)`: a connected UI (`desktopUIDevice` connections from
+`/v2/local-ticket`, `remoteWS.uiConnected`) gets `ui-open` on the bus, else the
+core starts one with `open -n -a <bundle> --args --route` (start URL
+`/#<route>`). Tray Quit emits `core-quit` (UI quits itself via `QuitApp`)
+before stopping. Dock badge: core emits `waiting-count`, `src/lib/coreLink.ts`
+→ `SetDockBadge` (+ `waiting_count` on load / resync). Notifications: the
+phone-push decisions in `pushtrigger.go` also feed `nativeNotify` (own rate
+slot; suppressed while any chat was `chat_mark_active` in the last 90 s; PTY
+"done" native-only); the webview's `sendNotification` shim stands down when
+`CoreNotifies()`.
+Deviations: **no `burrow://` scheme yet** — the core runs from the same bundle,
+so LaunchServices would route the URL to the core; it comes with the helper
+bundle in C. Not verified: notification authorization on a signed beta (the
+ad-hoc test copy is refused outright), the Dock badge visually, tray clicks.
+Gap: a terminal-only view sends no `chat_mark_active`, so it gets banners
+while focused.
 
 ### C — lifecycle
 

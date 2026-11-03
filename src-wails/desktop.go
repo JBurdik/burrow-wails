@@ -168,6 +168,10 @@ func (s *DesktopService) TrayOpen(route string) {
 	if trayWin != nil && !trayPinned.Load() {
 		trayWin.Hide()
 	}
+	if mainWin == nil {
+		openUI(route)
+		return
+	}
 	showMainWindow()
 	if route != "" {
 		desktopEmit("menu-navigate", route)
@@ -219,6 +223,38 @@ func (s *DesktopService) TraySetHotkey(spec string) string {
 	}
 	return ""
 }
+
+// ShowMain brings the main window forward: the core's ui-open (App.vue).
+func (s *DesktopService) ShowMain() {
+	if mainWin != nil {
+		mainWin.Show()
+		mainWin.Focus()
+	}
+}
+
+// QuitApp quits this process: the UI's answer to the core's core-quit.
+func (s *DesktopService) QuitApp() {
+	quitting.Store(true)
+	if mainWin != nil {
+		s.a.saveWindowState(mainWin)
+	}
+	wapp.Quit()
+}
+
+// SetDockBadge shows n (0 = none) on the Dock icon. In the UI role the
+// count comes from the core's waiting-count; in-process refreshTray does it.
+func (s *DesktopService) SetDockBadge(n int) {
+	if !s.ui || !started.Load() {
+		return
+	}
+	trayMu.Lock()
+	defer trayMu.Unlock()
+	setDockBadge(n)
+}
+
+// CoreNotifies: native notifications come from the external core, so the
+// webview must not post its own (it still toasts).
+func (s *DesktopService) CoreNotifies() bool { return s.ui }
 
 func (s *DesktopService) CloseWindow(key string) {
 	extraMu.Lock()
@@ -321,12 +357,21 @@ func showMainWindow() {
 	if mainWin != nil {
 		mainWin.Show()
 		mainWin.Focus()
+		return
 	}
+	openUI("") // the core role: the window is another process
 }
 
 func quitApp(a *App) {
 	quitting.Store(true)
-	a.saveWindowState(mainWin)
+	if mainWin != nil {
+		a.saveWindowState(mainWin)
+	} else {
+		// The core role. Tell the UI first: it would otherwise see the socket
+		// drop and start a fresh core. Quit = both (plan 009).
+		busEmit("core-quit", nil)
+		time.Sleep(300 * time.Millisecond)
+	}
 	wapp.Quit()
 }
 
@@ -416,7 +461,22 @@ func refreshTray(a *App) {
 	defer trayMu.Unlock()
 	n := waitingCount(a.phases.All())
 	tray.SetLabel(trayLabel(n))
-	if !started.Load() || n == lastBadged {
+	if mainWin == nil { // the core role: the Dock icon belongs to the UI process
+		if n != lastBadged {
+			lastBadged = n
+			busEmit("waiting-count", n)
+		}
+		return
+	}
+	if started.Load() {
+		setDockBadge(n)
+	}
+}
+
+// setDockBadge, under trayMu: the badge call dispatch_syncs onto the main
+// queue, so only ever from a goroutine after ApplicationStarted.
+func setDockBadge(n int) {
+	if n == lastBadged {
 		return
 	}
 	var err error
@@ -430,6 +490,14 @@ func refreshTray(a *App) {
 		return
 	}
 	lastBadged = n
+}
+
+// WaitingCount is the tray / Dock count: chats and tabs waiting on the user.
+func (a *App) WaitingCount() int {
+	if a.phases == nil {
+		return 0
+	}
+	return waitingCount(a.phases.All())
 }
 
 func waitingCount(phases map[string]agentphase.Phase) int {

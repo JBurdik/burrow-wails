@@ -445,9 +445,10 @@ var remoteAllowed = map[string]remoteCmd{
 	"acp_probe":         {Method: "AcpProbe", Args: []string{"agentId", "cwd"}, Scope: scopeOrchOperate},
 
 	// LSP
-	"lsp_start": {Method: "LspStart", Args: []string{"id", "command", "args", "cwd"}, Scope: scopeOrchOperate},
-	"lsp_send":  {Method: "LspSend", Args: []string{"id", "message"}, Scope: scopeOrchOperate},
-	"lsp_stop":  {Method: "LspStop", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"waiting_count": {Method: "WaitingCount", Args: nil, Scope: scopeOrchRead},
+	"lsp_start":     {Method: "LspStart", Args: []string{"id", "command", "args", "cwd"}, Scope: scopeOrchOperate},
+	"lsp_send":      {Method: "LspSend", Args: []string{"id", "message"}, Scope: scopeOrchOperate},
+	"lsp_stop":      {Method: "LspStop", Args: []string{"id"}, Scope: scopeOrchOperate},
 
 	// Providers. ProbeProvider passes its client-supplied `binary` straight to
 	// resolveAgentBin (claudechat.go), which returns any existing absolute

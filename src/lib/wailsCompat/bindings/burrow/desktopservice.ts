@@ -7,6 +7,10 @@
  * (being in-process is the desktop's authorization); the rest is native
  * dialogs, the updater and the float-snapshot relay. Everything else lives
  * on App behind remoteAllowed.
+ * 
+ * ui: the backend is an external core (plan 009); s.a is then a bare App
+ * that was never started — fine for the stateless methods below, while
+ * LocalEndpoint asks the core for a ticket instead.
  * @module
  */
 
@@ -24,6 +28,14 @@ export function CheckUpdate(): $CancellablePromise<$models.UpdateInfo> {
 
 export function CloseWindow(key: string): $CancellablePromise<void> {
     return $Call.ByID(2033037563, key);
+}
+
+/**
+ * CoreNotifies: native notifications come from the external core, so the
+ * webview must not post its own (it still toasts).
+ */
+export function CoreNotifies(): $CancellablePromise<boolean> {
+    return $Call.ByID(2345345355);
 }
 
 export function GetAppVersion(): $CancellablePromise<string> {
@@ -68,12 +80,34 @@ export function PickFiles(filterName: string, filterExts: string[] | null): $Can
     return $Call.ByID(85059111, filterName, filterExts);
 }
 
+/**
+ * QuitApp quits this process: the UI's answer to the core's core-quit.
+ */
+export function QuitApp(): $CancellablePromise<void> {
+    return $Call.ByID(2975844829);
+}
+
 export function RelaunchApp(): $CancellablePromise<void> {
     return $Call.ByID(3832651094);
 }
 
 export function SendFloatSnapshot(ptyID: string, data: string, cols: number, rows: number): $CancellablePromise<void> {
     return $Call.ByID(2139234571, ptyID, data, cols, rows);
+}
+
+/**
+ * SetDockBadge shows n (0 = none) on the Dock icon. In the UI role the
+ * count comes from the core's waiting-count; in-process refreshTray does it.
+ */
+export function SetDockBadge(n: number): $CancellablePromise<void> {
+    return $Call.ByID(2833619663, n);
+}
+
+/**
+ * ShowMain brings the main window forward: the core's ui-open (App.vue).
+ */
+export function ShowMain(): $CancellablePromise<void> {
+    return $Call.ByID(805419081);
 }
 
 /**
