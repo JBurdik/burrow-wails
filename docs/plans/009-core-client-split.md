@@ -1,6 +1,6 @@
 # 009 — Split the backend into an always-on core and thin clients
 
-Status: **decided; A + B done, C in progress** (2026-11-03, branch `v3/core-client-split`).
+Status: **decided; A, B, C done** (C without the helper bundle, see below) (2026-11-03, branch `v3/core-client-split`).
 Decisions below came out of a grilling session; change one only on purpose.
 
 ## Why
@@ -148,10 +148,24 @@ UI quits, `burrow://` scheme in Info.plist, CLI verbs auto-start the core.
 - `ensureUIOpen`: a UI-performed verb (`workspace_create`, `new_tab`, …) on a
   core with no UI opens one first (serialized; ≤ 10 s + 2 s for App.vue's
   control bridge to mount).
+- **Login item without a helper bundle** (decided 2026-11-03, replaces the
+  `Burrow Core.app` helper): `Contents/Library/LaunchAgents/core.plist`
+  (template `build/darwin/core.plist`, label per channel in Taskfile) runs
+  `Contents/MacOS/Burrow --core`; Settings → General → "Start Burrow at login"
+  registers it via `SMAppService.agent` (`corelogin_darwin.go`, macOS 13+) and
+  sets `uiPrefs.coreAtLogin`, which keeps the core from idle-exiting. A helper
+  bundle would have cost a second 58 MB copy of the binary (a signature is
+  bound to one Info.plist), another signing / notarization target, and a
+  second "Burrow Core" entry in Notifications settings.
+- **`burrow://` deferred**: without its own bundle the core shares the UI's
+  bundle id, so LaunchServices may route a URL to the core; `openUI` (socket
+  or `open -n -a … --route`) already covers every in-app door. Revisit when an
+  external deep link (Slack, terminal) is actually wanted.
 Verified on a bundle copy: idle exit after the grace, a schedule keeps the
 core, `burrow workspace_create` with nothing running starts core + UI and
 succeeds, `/v2/core-quit` stops both (daemon stays). Not verified: the window
-close button (no click automation).
+close button (no click automation), SMAppService registration (needs the
+packaged bundle; errors show under the Settings toggle).
 
 ### D — versions + updater
 

@@ -123,6 +123,7 @@ interface Prefs {
   worktreeCleanupInactiveDays: number; // idle threshold for the rule above, 0 = off
   floatPopouts: boolean; // popped-out terminal/chat windows open floating (no zoom button, tiling WMs float them)
   trayHotkey: string; // global shortcut for the tray panel, "⌥Space" style (src-wails/trayhotkey.go); "" = off
+  coreAtLogin: boolean; // the external core stays up for good (read by Go, src-wails/coreidle.go; plan 009)
   subagentAutoDeliver: boolean; // send a finished/blocked sub-agent's result into its parent chat (read by Go, src-wails/chatsubagentnotice.go)
   spawnMode: "terminal" | "chat"; // how `burrow spawn` sub-agents open: a terminal tab or an ACP chat
   channelMarker: "art" | "label" | "off"; // dev/beta builds: sidebar artwork + titlebar badge, badge only, or nothing
@@ -233,6 +234,7 @@ const DEFAULT_PREFS: Prefs = {
   chatRecaps: true,
   worktreeFromOrigin: true,
   subagentAutoDeliver: true,
+  coreAtLogin: false,
   floatPopouts: false,
   trayHotkey: "⌥Space",
   worktreeCleanupMerged: false,
@@ -385,6 +387,7 @@ export const useUIStore = defineStore("ui", () => {
   const chatRecaps = ref<boolean>(loaded.chatRecaps ?? true);
   const worktreeFromOrigin = ref<boolean>(loaded.worktreeFromOrigin ?? true);
   const subagentAutoDeliver = ref<boolean>(loaded.subagentAutoDeliver ?? true);
+  const coreAtLogin = ref<boolean>(loaded.coreAtLogin ?? false);
   const floatPopouts = ref<boolean>(loaded.floatPopouts ?? false);
   const trayHotkey = ref<string>(loaded.trayHotkey ?? "⌥Space");
   const worktreeCleanupMerged = ref<boolean>(loaded.worktreeCleanupMerged ?? false);
@@ -459,6 +462,7 @@ export const useUIStore = defineStore("ui", () => {
     chatRecaps.value = p.chatRecaps ?? true;
     worktreeFromOrigin.value = p.worktreeFromOrigin ?? true;
     subagentAutoDeliver.value = p.subagentAutoDeliver ?? true;
+    coreAtLogin.value = p.coreAtLogin ?? false;
     floatPopouts.value = p.floatPopouts ?? false;
     trayHotkey.value = p.trayHotkey ?? "⌥Space";
     worktreeCleanupMerged.value = p.worktreeCleanupMerged ?? false;
@@ -657,6 +661,7 @@ export const useUIStore = defineStore("ui", () => {
         chatRecaps: chatRecaps.value,
         worktreeFromOrigin: worktreeFromOrigin.value,
         subagentAutoDeliver: subagentAutoDeliver.value,
+        coreAtLogin: coreAtLogin.value,
         floatPopouts: floatPopouts.value,
         trayHotkey: trayHotkey.value,
         worktreeCleanupMerged: worktreeCleanupMerged.value,
@@ -681,7 +686,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, floatPopouts, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, coreAtLogin, floatPopouts, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -998,6 +1003,7 @@ export const useUIStore = defineStore("ui", () => {
     chatRecaps,
     worktreeFromOrigin,
     subagentAutoDeliver,
+    coreAtLogin,
     floatPopouts,
     trayHotkey,
     worktreeCleanupMerged,

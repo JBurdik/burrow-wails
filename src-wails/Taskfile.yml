@@ -44,6 +44,8 @@ tasks:
       - cp build/darwin/icons.icns "{{.APP}}/Contents/Resources/"
       - cp build/darwin/Info.plist "{{.APP}}/Contents/"
       - /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString {{.VERSION}}" -c "Set :CFBundleVersion {{.VERSION}}" "{{.APP}}/Contents/Info.plist"
+      - mkdir -p "{{.APP}}/Contents/Library/LaunchAgents"
+      - sed "s/LABEL/com.agenticide.wails{{if .CHANNEL}}.{{.CHANNEL}}{{end}}.core/" build/darwin/core.plist > "{{.APP}}/Contents/Library/LaunchAgents/core.plist"
       - go build -o "{{.APP}}/Contents/MacOS/burrow-daemon" ./cmd/burrow-daemon
       - go build -ldflags "-X main.buildVersion={{.VERSION}}" -o "{{.APP}}/Contents/MacOS/burrow-mcp" ./cmd/burrow-mcp
 

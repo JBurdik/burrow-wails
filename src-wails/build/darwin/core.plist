@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The always-on core as a login item (plan 009): registered by the UI through
+     SMAppService.agent(plistName: "core.plist") when Settings → General →
+     "Start Burrow at login" is on. LABEL is filled in per channel by Taskfile. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>LABEL</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/Burrow</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>Contents/MacOS/Burrow</string>
+		<string>--core</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>AbandonProcessGroup</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- already under launchd: do not re-launch through the launcher -->
+		<key>BURROW_CORE_DETACHED</key>
+		<string>1</string>
+	</dict>
+</dict>
+</plist>

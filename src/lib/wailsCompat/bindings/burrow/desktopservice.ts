@@ -31,11 +31,27 @@ export function CloseWindow(key: string): $CancellablePromise<void> {
 }
 
 /**
+ * CoreAtLogin reads ("" op) or sets ("on" / "off") the core's login item and
+ * returns its state: on · off · needs-approval (System Settings → Login
+ * Items) · unavailable · unsupported · error: <why>.
+ */
+export function CoreAtLogin(op: string): $CancellablePromise<string> {
+    return $Call.ByID(1696263576, op);
+}
+
+/**
  * CoreNotifies: native notifications come from the external core, so the
  * webview must not post its own (it still toasts).
  */
 export function CoreNotifies(): $CancellablePromise<boolean> {
     return $Call.ByID(2345345355);
+}
+
+/**
+ * ExternalCore: the backend runs as its own process (dev/beta, plan 009).
+ */
+export function ExternalCore(): $CancellablePromise<boolean> {
+    return $Call.ByID(1261789421);
 }
 
 export function GetAppVersion(): $CancellablePromise<string> {

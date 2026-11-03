@@ -256,6 +256,21 @@ func (s *DesktopService) SetDockBadge(n int) {
 // webview must not post its own (it still toasts).
 func (s *DesktopService) CoreNotifies() bool { return s.ui }
 
+// ExternalCore: the backend runs as its own process (dev/beta, plan 009).
+func (s *DesktopService) ExternalCore() bool { return s.ui }
+
+// CoreAtLogin reads ("" op) or sets ("on" / "off") the core's login item and
+// returns its state: on · off · needs-approval (System Settings → Login
+// Items) · unavailable · unsupported · error: <why>.
+func (s *DesktopService) CoreAtLogin(op string) string {
+	code := map[string]int{"on": 1, "off": 2}[op]
+	st, err := coreLoginItem(code)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return st
+}
+
 func (s *DesktopService) CloseWindow(key string) {
 	extraMu.Lock()
 	w := extraWins[key]
