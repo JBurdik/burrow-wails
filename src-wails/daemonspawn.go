@@ -5,8 +5,8 @@ import (
 	"os/exec"
 )
 
-func spawnChild(path string, env []string, out *os.File) error {
-	cmd := exec.Command(path)
+func spawnChild(argv, env []string, out *os.File) error {
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = env
 	if out != nil {
 		cmd.Stdout, cmd.Stderr = out, out

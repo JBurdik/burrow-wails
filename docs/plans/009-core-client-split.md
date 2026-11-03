@@ -1,6 +1,6 @@
 # 009 — Split the backend into an always-on core and thin clients
 
-Status: **decided, phase A in progress** (2026-11-03, branch `v3/core-client-split`).
+Status: **decided; phase A done** (2026-11-03, branch `v3/core-client-split`).
 Decisions below came out of a grilling session; change one only on purpose.
 
 ## Why
@@ -85,6 +85,17 @@ Each phase ships to beta on its own.
    `update:progress`) → `busEmit` (`notRingable` for `lsp-msg-*`), and
    `wailsCompat/event.ts` stops routing those prefixes to Wails.
 6. ⌘Q quits the UI only; the core keeps running (no idle rule yet).
+
+**Done (2026-11-03):** `corerole.go` (`externalCore`, `runCore` with a
+`core.lock` flock, `ensureCore` / `uiLocalEndpoint`), `/v2/local-ticket` in
+`controlapi.go`, `spawnDetached(name, argv, …)` shared by daemon and core,
+`lsp-msg-*` / `extension-task:*` on `busEmit`, `file-drop` desktop-only.
+Verified on a signed bundle copy: core is `ppid 1` and outside the UI's
+coalition, ⌘Q removes the app from the Dock while the core + a running chat
+keep going, a relaunched UI reuses the core, a `kill -9`'d core is
+respawned by the UI within 2 s. Known gaps until phase B: no tray, tray
+panel, hotkey or Dock badge on dev/beta. Until phase D an update leaves the
+old core running (restart it by quitting it: `pkill -f "Burrow --core"`).
 
 ### B — tray, hotkey and notifications in the core
 

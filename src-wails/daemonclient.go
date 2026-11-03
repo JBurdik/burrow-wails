@@ -173,7 +173,7 @@ func (d *DaemonClient) spawn() error {
 	// Inside a .app the app's own stdout is /dev/null, so the daemon logs to
 	// daemon.log or a panic leaves no trace at all.
 	logPath := filepath.Join(filepath.Dir(d.sockPath), "daemon.log")
-	if err := spawnDetached(daemonPath, append(os.Environ(), "BURROW_DAEMON_SOCK="+d.sockPath), logPath, d.sockPath); err != nil {
+	if err := spawnDetached("daemon", []string{daemonPath}, append(os.Environ(), "BURROW_DAEMON_SOCK="+d.sockPath), logPath, d.sockPath); err != nil {
 		return err
 	}
 	log.Printf("daemon: spawned %s", daemonPath)

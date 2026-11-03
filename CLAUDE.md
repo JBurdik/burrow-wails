@@ -719,7 +719,7 @@ One file per subsystem:
 
 There is deliberately **no** bus → Wails-runtime sink: the desktop reads the bus through its own
 `/v2/ws` connection like any client. The only names still on the Wails event channel (`menu-*`,
-`lsp-msg-*`, `float-*`, `extension-task:*`, `update:*`, `window-closed`) are emitted with `desktopEmit` (`desktop.go`) directly,
+`float-*`, `update:*`, `window-closed`, `file-drop`) are emitted with `desktopEmit` (`desktop.go`) directly,
 and `src/lib/wailsCompat/event.ts` routes exactly those prefixes. `events_test.go` greps every non-test
 `.go` file for a direct `desktopEmit(` / `.Event.Emit(` against an explicit allowlist, so a new event can't quietly skip
 remote clients.

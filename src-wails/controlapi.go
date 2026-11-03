@@ -265,6 +265,21 @@ func (a *App) ControlVerbs() []ControlVerb {
 func (a *App) registerControlRoutes(mux *http.ServeMux) {
 	// The `burrow approve` long-poll; own pattern (longest match beats /v1/).
 	mux.HandleFunc("/v1/permission_request", a.handlePermissionRequest)
+	// The desktop UI when it runs as its own process (plan 009): same user,
+	// so reading control.token is the authorization being in-process used to
+	// be. The only door besides LocalEndpoint() that mints scopeUIAck, and it
+	// lives on this loopback-only mux, never on the tailnet server.
+	mux.HandleFunc("/v2/local-ticket", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !a.controlAuthorized(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		writeJSONFileResponse(w, a.LocalEndpoint())
+	})
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		if !a.controlAuthorized(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

@@ -22,21 +22,25 @@ import (
 // launcher — sh backgrounds the daemon and exits — and is booted out as soon
 // as the socket is up; AbandonProcessGroup keeps launchd from reaping the
 // daemon with it. Falls back to a plain child if launchctl refuses.
-func spawnDetached(path string, env []string, logPath, sockPath string) error {
-	label := "dev.burrow.daemon." + filepath.Base(filepath.Dir(logPath))
-	plist := filepath.Join(filepath.Dir(logPath), "daemon-launch.plist")
-	if err := os.WriteFile(plist, daemonPlist(label, path, env, logPath), 0o600); err != nil {
-		return spawnChildLogged(path, env, logPath)
+//
+// name tells jobs apart ("daemon", "core"); readyPath is a file the process
+// creates or rewrites once it is up (its socket / port file).
+func spawnDetached(name string, argv, env []string, logPath, readyPath string) error {
+	label := "dev.burrow." + name + "." + filepath.Base(filepath.Dir(logPath))
+	plist := filepath.Join(filepath.Dir(logPath), name+"-launch.plist")
+	if err := os.WriteFile(plist, launcherPlist(label, argv, env, logPath), 0o600); err != nil {
+		return spawnChildLogged(argv, env, logPath)
 	}
 	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
 	_ = exec.Command("launchctl", "bootout", target).Run() // a leftover from a crashed run
 	if out, err := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), plist).CombinedOutput(); err != nil {
-		log.Printf("daemon: launchctl bootstrap: %v %s; spawning as a child", err, out)
-		return spawnChildLogged(path, env, logPath)
+		log.Printf("%s: launchctl bootstrap: %v %s; spawning as a child", name, err, out)
+		return spawnChildLogged(argv, env, logPath)
 	}
+	started := time.Now().Add(-time.Second) // mtime granularity
 	go func() {
-		for i := 0; i < 50; i++ { // the socket exists ⇒ sh has forked the daemon
-			if _, err := os.Stat(sockPath); err == nil {
+		for i := 0; i < 100; i++ { // readyPath (re)written ⇒ sh has forked the process
+			if fi, err := os.Stat(readyPath); err == nil && fi.ModTime().After(started) {
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -47,16 +51,16 @@ func spawnDetached(path string, env []string, logPath, sockPath string) error {
 	return nil
 }
 
-func spawnChildLogged(path string, env []string, logPath string) error {
+func spawnChildLogged(argv, env []string, logPath string) error {
 	f, err := openLogFile(logPath)
 	if err != nil {
-		return spawnChild(path, env, nil)
+		return spawnChild(argv, env, nil)
 	}
 	defer f.Close() // the child keeps its own fd
-	return spawnChild(path, env, f)
+	return spawnChild(argv, env, f)
 }
 
-func daemonPlist(label, path string, env []string, logPath string) []byte {
+func launcherPlist(label string, argv, env []string, logPath string) []byte {
 	var b bytes.Buffer
 	str := func(s string) {
 		b.WriteString("<string>")
@@ -75,9 +79,12 @@ func daemonPlist(label, path string, env []string, logPath string) []byte {
 	b.WriteString("<array>")
 	str("/bin/sh")
 	str("-c")
-	str(`"$0" </dev/null >>"$1" 2>&1 &`)
-	str(path)
+	// $0 = log, "$@" = argv: background it and exit, so the job is a launcher.
+	str(`log=$0; "$@" </dev/null >>"$log" 2>&1 &`)
 	str(logPath)
+	for _, a := range argv {
+		str(a)
+	}
 	b.WriteString("</array>")
 	key("RunAtLoad")
 	b.WriteString("<true/>")

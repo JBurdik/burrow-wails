@@ -139,6 +139,9 @@ var notRingable = []string{
 	// Carries whole config values (some run to hundreds of KB); a client that
 	// resyncs re-reads config.json instead (src/lib/config.ts).
 	"config-changed",
+	// Language-server stdout chunks (lsp.go): a stream, not state; an editor
+	// that reconnects restarts its LSP session rather than resuming bytes.
+	"lsp-msg-",
 }
 
 // isRingable reports whether an event belongs in the replay ring.

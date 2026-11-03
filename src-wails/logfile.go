@@ -24,6 +24,7 @@ func setupAppLog() {
 	if err != nil {
 		return
 	}
+	_ = os.MkdirAll(dir, 0o755) // first run
 	f, err := openLogFile(filepath.Join(dir, "burrow.log"))
 	if err != nil {
 		return

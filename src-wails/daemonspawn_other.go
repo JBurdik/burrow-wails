@@ -2,11 +2,11 @@
 
 package main
 
-func spawnDetached(path string, env []string, logPath, _ string) error {
+func spawnDetached(_ string, argv, env []string, logPath, _ string) error {
 	f, err := openLogFile(logPath)
 	if err != nil {
-		return spawnChild(path, env, nil)
+		return spawnChild(argv, env, nil)
 	}
 	defer f.Close() // the child keeps its own fd
-	return spawnChild(path, env, f)
+	return spawnChild(argv, env, f)
 }

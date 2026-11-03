@@ -189,7 +189,7 @@ func (b *extensionBridge) reportTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.app != nil {
-		desktopEmit("extension-task:"+b.manifest.ID, task)
+		busEmit("extension-task:"+b.manifest.ID, task)
 	}
 	writeBridgeJSON(w, map[string]bool{"ok": true})
 }

@@ -73,11 +73,27 @@ func pickPaths(dirs, multiple bool, filterName string, filterExts []string) ([]s
 // (being in-process is the desktop's authorization); the rest is native
 // dialogs, the updater and the float-snapshot relay. Everything else lives
 // on App behind remoteAllowed.
-type DesktopService struct{ a *App }
+//
+// ui: the backend is an external core (plan 009); s.a is then a bare App
+// that was never started — fine for the stateless methods below, while
+// LocalEndpoint asks the core for a ticket instead.
+type DesktopService struct {
+	a  *App
+	ui bool
+}
 
-func (s *DesktopService) LocalEndpoint() LocalEndpointInfo { return s.a.LocalEndpoint() }
-func (s *DesktopService) GetAppVersion() string            { return s.a.GetAppVersion() }
-func (s *DesktopService) PickDirectory() (string, error)   { return s.a.PickDirectory() }
+func (s *DesktopService) LocalEndpoint() LocalEndpointInfo {
+	if !s.ui {
+		return s.a.LocalEndpoint()
+	}
+	info, err := ensureCore()
+	if err != nil {
+		log.Printf("ui: %v", err)
+	}
+	return info // empty on failure: the transport retries with a fresh call
+}
+func (s *DesktopService) GetAppVersion() string          { return s.a.GetAppVersion() }
+func (s *DesktopService) PickDirectory() (string, error) { return s.a.PickDirectory() }
 func (s *DesktopService) PickFile(filterName string, filterExts []string) (string, error) {
 	return s.a.PickFile(filterName, filterExts)
 }

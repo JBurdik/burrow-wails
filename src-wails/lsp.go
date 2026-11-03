@@ -77,7 +77,7 @@ func (a *App) LspStart(id, command string, args []string, cwd string) error {
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
-				desktopEmit("lsp-msg-"+id, string(buf[:n]))
+				busEmit("lsp-msg-"+id, string(buf[:n]))
 			}
 			if err != nil {
 				break

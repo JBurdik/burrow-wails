@@ -14,11 +14,9 @@ import (
 var wailsRuntimeAllowlist = map[string]string{
 	"desktop.go":           "defines desktopEmit",
 	"main_headless.go":     "defines the no-op desktopEmit",
-	"main.go":              "menu items",
+	"main.go":              "menu items, file-drop",
 	"updater.go":           "update:progress, desktop-only",
 	"stubs.go":             "float window snapshots, desktop-only",
-	"lsp.go":               "lsp-msg, desktop-only",
-	"extension_bridge.go":  "extension-task, desktop-only",
 	"trayhotkey_darwin.go": "menu-tray-compose, the tray panel window only",
 }
 

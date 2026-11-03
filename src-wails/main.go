@@ -17,6 +17,13 @@ var assets embed.FS
 
 func main() {
 	setupAppLog()
+	// Plan 009: dev/beta run the backend as `Burrow --core`; this process is
+	// then only the windows (ui = true) and never starts App.
+	if externalCore() && coreRoleRequested() {
+		runCore()
+		return
+	}
+	ui := externalCore()
 	app := NewApp()
 	dist, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
@@ -25,7 +32,7 @@ func main() {
 
 	wapp = application.New(application.Options{
 		Name:     "Burrow",
-		Services: []application.Service{application.NewService(&DesktopService{a: app})},
+		Services: []application.Service{application.NewService(&DesktopService{a: app, ui: ui})},
 		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(dist)},
 		Mac:      application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		// ⌘Q never fires WindowClosing, so the geometry is saved here too.
@@ -34,7 +41,11 @@ func main() {
 			app.saveWindowState(mainWin)
 			return true
 		},
-		OnShutdown: app.cleanupOnShutdown,
+		OnShutdown: func() {
+			if !ui { // the external core outlives this process
+				app.cleanupOnShutdown()
+			}
+		},
 	})
 	wapp.Menu.SetApplicationMenu(appMenu())
 
@@ -55,7 +66,7 @@ func main() {
 		if d := e.Context().DropTargetDetails(); d != nil {
 			x, y = d.X, d.Y
 		}
-		busEmit("file-drop", map[string]any{"x": x, "y": y, "paths": e.Context().DroppedFiles()})
+		desktopEmit("file-drop", map[string]any{"x": x, "y": y, "paths": e.Context().DroppedFiles()})
 	})
 	// Close = hide; the backend keeps running for the phone and schedules.
 	mainWin.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
@@ -72,8 +83,20 @@ func main() {
 		app.restoreWindowState(mainWin)
 	})
 
-	app.startup(context.Background())
-	setupTray(app)
+	if ui {
+		// Start (or find) the core now rather than on the webview's first
+		// ticket request, so a cold core boots while the window loads.
+		go func() {
+			if _, err := ensureCore(); err != nil {
+				log.Printf("ui: %v", err)
+			}
+		}()
+	} else {
+		app.startup(context.Background())
+		// ponytail: no tray on dev/beta until phase B moves it into the core
+		// (it counts phases from App, which this process no longer has).
+		setupTray(app)
+	}
 
 	if err := wapp.Run(); err != nil {
 		log.Fatal(err)
