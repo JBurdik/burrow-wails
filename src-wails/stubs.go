@@ -64,7 +64,6 @@ func (a *App) RemoteSyncChat(_chat map[string]any) error { return nil }
 func (a *App) DaemonStats() map[string]any              { return map[string]any{} }
 func (a *App) CleanDaemon() int                         { return 0 }
 func (a *App) KillOrphanSessions(_keepIDs []string) int { return 0 }
-func (a *App) RestartDaemon() error                     { return nil }
 
 func (a *App) FormatSource(_path, content, _cwd string) (string, error) {
 	return content, nil // pass-through: no formatter invocation yet

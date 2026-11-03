@@ -4,6 +4,9 @@
 // window.go / window.runtime globals asks this instead.
 export function isDesktop(): boolean {
   if (typeof window === "undefined") return false;
+  // The mobile bundle is never the desktop — but the native iOS shell
+  // (src-ios/, Wails) registers the same `external` message handler.
+  if (import.meta.env.VITE_TARGET === "mobile") return false;
   const w = window as any;
   return !!(w.webkit?.messageHandlers?.external || w.chrome?.webview);
 }

@@ -102,6 +102,10 @@ describe("groupByRepo", () => {
     const groups = groupByRepo([row(1, null, "a"), row(5, 2, "b"), row(1, null, "c"), row(2, null, "d")], [2, 9]);
     expect(groups.map((g) => [g.repoId, g.rows.map((r) => r.tab.id)])).toEqual([[1, ["a", "c"]], [2, ["b", "d"]], [9, []]]);
   });
+  it("puts pinned repos first in pin order, with a header even when empty", () => {
+    const groups = groupByRepo([row(1, null, "a"), row(5, 2, "b"), row(3, null, "c")], [], [3, 7]);
+    expect(groups.map((g) => g.repoId)).toEqual([3, 7, 1, 2]);
+  });
 });
 
 describe("parseShortstat", () => {

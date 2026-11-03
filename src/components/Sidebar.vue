@@ -1,6 +1,6 @@
 <template>
   <aside class="surface-glow relative isolate [--glow-base:var(--sidebar-bg)] flex w-[var(--sidebar-width,220px)] shrink-0 grow-0 basis-[var(--sidebar-width,220px)] flex-col overflow-hidden border-r border-border bg-[var(--sidebar-bg)] [-webkit-backdrop-filter:var(--blur-panels,none)] [backdrop-filter:var(--blur-panels,none)]">
-    <StageBackdrop />
+    <StageBackdrop v-if="!compact" />
     <!-- Top row: new thread + quiet icon actions. The project picker is a
          menu now: the feed below is already grouped by project. -->
     <div class="flex shrink-0 items-center gap-1 px-2 pb-1 pt-2" ref="filterEl">
@@ -60,6 +60,7 @@
             <img v-if="store.icons[group.repoId]" :src="store.icons[group.repoId]" class="h-[18px] w-[18px] shrink-0 rounded-[5px] object-cover" />
             <span v-else class="sb-repo-tile" :style="{ background: repoColor(group.repoId) }">{{ (repoById(group.repoId)?.name ?? '?').slice(0, 1).toUpperCase() }}</span>
             <span class="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{{ repoById(group.repoId)?.name ?? '…' }}</span>
+            <PhPushPin v-if="isPinned(group.repoId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned project" />
           </button>
           <span v-if="repoDiff[group.repoId] && (repoDiff[group.repoId]!.added || repoDiff[group.repoId]!.removed)" class="shrink-0 text-[11.5px] tabular-nums group-hover/hdr:hidden" :title="'Uncommitted changes'">
             <span class="text-[var(--green)]">+{{ repoDiff[group.repoId]!.added }}</span>
@@ -451,7 +452,8 @@
       <div class="menu-sep" />
       <button v-if="!rowMenu.ws.parent_id" class="menu-item" @click="withMenu(startRename)">Rename project…</button>
       <button v-if="!rowMenu.ws.parent_id" class="menu-item" @click="withMenu((ws) => togglePin(ws.id))">
-        {{ isPinned(rowMenu.ws.id) ? "Unpin" : "Pin to top" }}
+        <PhPushPin :size="15" class="mr-1.5 shrink-0" :weight="isPinned(rowMenu.ws.id) ? 'fill' : 'regular'" />
+        {{ isPinned(rowMenu.ws.id) ? "Unpin project" : "Pin project to top" }}
       </button>
       <button class="menu-item" @click="withMenu((ws) => toggleArchived(ws.id))">
         <PhArchive :size="15" class="mr-1.5 shrink-0" />
@@ -663,6 +665,7 @@ import { useTerminalTabsStore, type TabSummary } from "@/stores/terminalTabs";
 import { chatAsleep, useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
 import { useUIStore } from "@/stores/ui";
 import { router } from "@/router";
+import { compact, isWeb } from "@/lib/viewport";
 import { spinnerFrame } from "@/lib/spinner";
 import { agentIconComp } from "@/lib/agentIcons";
 import {
@@ -672,7 +675,7 @@ import {
 } from "@/lib/terminalStatus";
 import { useGitStore, type PrInfo } from "@/stores/git";
 import { useNotificationsStore } from "@/stores/notifications";
-import { isPinned, togglePin, unpin } from "@/lib/pinnedWorkspaces";
+import { isPinned, pinnedIds, togglePin, unpin } from "@/lib/pinnedWorkspaces";
 import { isChatPinned, toggleChatPin, unpinChat } from "@/lib/pinnedChats";
 import { createPendingDeletes } from "@/lib/pendingDeletes";
 import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
@@ -764,16 +767,28 @@ const filterRepos = computed(() =>
 
 // Chats deleted inside their undo window are hidden here, not gone yet.
 const pendingDeletes = createPendingDeletes();
+// A paired browser mounts only the active workspace's Terminal (App.vue's
+// mountedWorkspaces), so only that one mirrors its tabs. Every other project's
+// threads come straight from the chats table; a row's id is -chatId, which
+// selectTab routes through the `?chat=` deep link.
+// ponytail: chat threads only — an unmounted workspace's PTY tabs stay unlisted.
+function chatRowsFor(wsId: number): TabSummary[] {
+  return chats.sessions
+    .filter((s) => s.workspaceId === wsId && !s.parentChatId && s.kind !== "side" && !s.archivedAt)
+    .map((s) => ({ id: -s.id, title: s.title, isAgent: false, isChat: true, busy: false, status: s.status ?? "idle", chatId: s.id, settled: chats.isSettled(s), model: s.model, branch: s.branch }));
+}
 const visibleTabsByWs = computed(() => {
-  if (!pendingDeletes.hidden.size) return termTabs.tabsByWs;
+  const src: Record<number, TabSummary[]> = { ...termTabs.tabsByWs };
+  if (isWeb) for (const w of store.workspaces) if (!src[w.id]) src[w.id] = chatRowsFor(w.id);
+  if (!pendingDeletes.hidden.size) return src;
   const out: Record<number, TabSummary[]> = {};
-  for (const [ws, tabs] of Object.entries(termTabs.tabsByWs)) out[Number(ws)] = tabs.filter((t) => !pendingDeletes.isHidden(t.chatId));
+  for (const [ws, tabs] of Object.entries(src)) out[Number(ws)] = tabs.filter((t) => !pendingDeletes.isHidden(t.chatId));
   return out;
 });
 
 const feed = computed(() =>
   buildActivityRows({
-    openedWorkspaces: store.opened,
+    openedWorkspaces: isWeb ? store.workspaces : store.opened,
     tabsByWs: visibleTabsByWs.value,
     // A chat's recency is the DB-backed `last_activity_at` on its row, not the
     // localStorage stamp: the stamps are pruned for any key a setTabs list
@@ -856,7 +871,11 @@ const shelfSections = computed(() => {
 
 // ── project groups (Ghostex-style feed) ─────────────────────────────────────
 const liveGroups = computed(() =>
-  groupByRepo(sections.value.active, activeRepo.value ? [activeRepo.value.id] : []),
+  groupByRepo(
+    sections.value.active,
+    activeRepo.value ? [activeRepo.value.id] : [],
+    pinnedIds.value.filter((id) => repoById(id) && !isArchived(id)),
+  ),
 );
 /** Pinned rows sit above every repo group, as one pseudo-group under this id. */
 const PINNED = -1;
@@ -1225,7 +1244,7 @@ function selectTab(row: ActivityRow) {
   // `/ws/<id>` — dropping the tab. That is why clicking a thread in another
   // project used to take two clicks: the first one only switched projects.
   // The route watcher opens the workspace itself, in the right order.
-  void router.push(`/ws/${row.ws.id}/tab/${row.tab.id}`);
+  void router.push(row.tab.id < 0 ? `/ws/${row.ws.id}?chat=${row.tab.chatId}` : `/ws/${row.ws.id}/tab/${row.tab.id}`);
 }
 
 // "New chat" opens the project picker (⌘⇧O's Spotlight mode) rather than a

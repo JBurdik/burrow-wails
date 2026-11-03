@@ -88,7 +88,19 @@ export interface AcpConfigOption {
   id: string;
   name: string;
   type: string;
+  /** ACP semantic category ("model", "mode", "thought_level"…); optional in the spec. */
+  category?: string;
   currentValue: string;
   options: AcpConfigChoice[];
+}
+
+// Adapters name their reasoning-effort option differently (Codex bridge: id
+// "effort"; ACP spec: category "thought_level"; Mistral Vibe: "thinking").
+// Burrow always calls it "effort" — Go maps it back (acpSession.effortID).
+const EFFORT_CATEGORIES = new Set(["thought_level", "thinking"]);
+
+/** The config option Burrow calls `key`, matched by id, or by category for effort. */
+export function acpOption(options: readonly AcpConfigOption[], key: string): AcpConfigOption | undefined {
+  return options.find((o) => o.id === key) ?? (key === "effort" ? options.find((o) => EFFORT_CATEGORIES.has(o.category ?? "")) : undefined);
 }
 

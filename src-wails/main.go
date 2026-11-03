@@ -16,6 +16,7 @@ import (
 var assets embed.FS
 
 func main() {
+	setupAppLog()
 	app := NewApp()
 	dist, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {

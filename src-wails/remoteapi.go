@@ -442,6 +442,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// (acp.go) — a host process spawn, so operate scope, not read, matching
 	// the generate_* calls above for the same reason.
 	"codex_list_models": {Method: "CodexListModels", Args: []string{"cwd"}, Scope: scopeOrchOperate},
+	"acp_probe":         {Method: "AcpProbe", Args: []string{"agentId", "cwd"}, Scope: scopeOrchOperate},
 
 	// LSP
 	"lsp_start": {Method: "LspStart", Args: []string{"id", "command", "args", "cwd"}, Scope: scopeOrchOperate},

@@ -90,6 +90,25 @@
                   @select="pickCodexPermMode"
                 />
               </template>
+              <template v-else-if="isAcpGeneric">
+                <ComposerPill
+                  v-if="acpEffortItems.length"
+                  :label="acpEffortLabel"
+                  :items="acpEffortItems"
+                  :active="acpEffort"
+                  title="Reasoning effort"
+                  @select="pickCodexEffort"
+                />
+                <ComposerPill
+                  v-if="acpModeItems.length"
+                  :icon="PhShieldCheck"
+                  :label="acpModeLabel"
+                  :items="acpModeItems"
+                  :active="acpMode"
+                  detailed
+                  @select="pickCodexPermMode"
+                />
+              </template>
             </div>
             <div class="composer-sendgroup">
               <ComposerStash ref="stashEl" v-model:text="text" v-model:images="pendingImages" />
@@ -143,7 +162,8 @@ import { configReady, getConfig, setConfig } from "@/lib/config";
 import { getLastAcpSetting, setLastAcpSetting } from "@/lib/acpSettings";
 import { invoke } from "@tauri-apps/api/core";
 import { DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { visibleModelsFor, effortsFor, defaultEffortFor, ensureModels } from "@/lib/chatModels";
+import { visibleModelsFor, effortsFor, defaultEffortFor, ensureModels, agentAcpCaps } from "@/lib/chatModels";
+import { acpOption } from "@/lib/chatTypes";
 import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerBox from "@/components/ComposerBox.vue";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
@@ -358,12 +378,14 @@ function saveAcp(field: "mode" | "model" | "effort", value: string) {
 // ready. Resolve that empty/stale selection once real options arrive, preferring
 // the user's last Codex pick and otherwise the CLI-advertised default.
 const selectedAgentModels = computed(() => visibleModelsFor(selectedAgentId.value).filter((model) => model.id));
-watch([isCodex, selectedAgentModels], () => {
-  if (!isCodex.value || !selectedAgentModels.value.length) return;
+watch([isCodex, () => isAcpGeneric.value, selectedAgentModels], () => {
+  if (!(isCodex.value || isAcpGeneric.value) || !selectedAgentModels.value.length) return;
   const saved = lastAcp("model");
+  const adapterDefault = acpOption(acpCaps.value?.configOptions ?? [], "model")?.currentValue;
   const next = selectedAgentModels.value.some((model) => model.id === selectedModel.value)
     ? selectedModel.value
     : selectedAgentModels.value.find((model) => model.id === saved)?.id
+      ?? selectedAgentModels.value.find((model) => model.id === adapterDefault)?.id
       ?? selectedAgentModels.value[0].id;
   if (selectedModel.value !== next) selectedModel.value = next;
   if (saved !== next) saveAcp("model", next);
@@ -488,6 +510,25 @@ const codexPermMode = computed(() => lastAcp("mode") ?? "auto");
 const codexPermLabel = computed(() => CODEX_PERM_MODES.find((m) => m.id === codexPermMode.value)?.label ?? "Auto");
 function pickCodexPermMode(id: string) { saveAcp("mode", id); }
 
+// A generic ACP adapter (Gemini, opencode, Mistral Vibe…) names its own
+// selectors; acp_probe (ensureModels) or its last live session cached them.
+// Picks go to "chatAcpLast" like Codex's, which restoreAcpSelections applies.
+const isAcpGeneric = computed(() => selectedAgent.value.transport === "acp" && selectedAgent.value.providerId !== "openai-compatible");
+const acpCaps = computed(() => (isAcpGeneric.value ? agentAcpCaps.value[selectedAgentId.value] : undefined));
+const acpEffortOpt = computed(() => acpOption(acpCaps.value?.configOptions ?? [], "effort"));
+const acpEffortItems = computed<ComposerPillItem[]>(() => (acpEffortOpt.value?.options ?? []).map((o) => ({ id: o.value, label: o.name, title: o.description })));
+const acpEffort = computed(() => {
+  const saved = lastAcp("effort");
+  return acpEffortItems.value.some((i) => i.id === saved) ? saved! : acpEffortOpt.value?.currentValue ?? "";
+});
+const acpEffortLabel = computed(() => acpEffortItems.value.find((i) => i.id === acpEffort.value)?.label ?? "Effort");
+const acpModeItems = computed<ComposerPillItem[]>(() => (acpCaps.value?.modes?.availableModes ?? []).map((m) => ({ id: m.id, label: m.name, description: m.description })));
+const acpMode = computed(() => {
+  const saved = lastAcp("mode");
+  return acpModeItems.value.some((i) => i.id === saved) ? saved! : acpCaps.value?.modes?.currentModeId ?? "";
+});
+const acpModeLabel = computed(() => acpModeItems.value.find((i) => i.id === acpMode.value)?.label ?? "Mode");
+
 // The model picker's quick-settings row — the same state as the pills above.
 const pickerSettings = computed<PickerSetting[]>(() => {
   if (isClaude.value) {
@@ -496,6 +537,12 @@ const pickerSettings = computed<PickerSetting[]>(() => {
       { key: "plan", label: "Plan", toggle: true, items: [{ id: "default", label: "Off" }, { id: "plan", label: "On" }], active: selectedPermMode.value },
       { key: "perm", label: "Permissions", items: permItems.value, active: selectedPermMode.value },
     ];
+  }
+  if (isAcpGeneric.value) {
+    const out: PickerSetting[] = [];
+    if (acpEffortItems.value.length) out.push({ key: "effort", label: "Effort", items: acpEffortItems.value, active: acpEffort.value });
+    if (acpModeItems.value.length) out.push({ key: "mode", label: "Mode", items: acpModeItems.value, active: acpMode.value });
+    return out;
   }
   if (!isCodex.value) return [];
   const out: PickerSetting[] = [];

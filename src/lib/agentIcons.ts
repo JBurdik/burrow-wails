@@ -3,6 +3,7 @@ import { PhRobot, PhSparkle, PhTerminal, PhCode, PhStarFour, PhBrain, PhGoogleLo
 import ClaudeIcon from "@/components/icons/ClaudeIcon.vue";
 import OpenAIIcon from "@/components/icons/OpenAIIcon.vue";
 import GitHubCopilotIcon from "@/components/icons/GitHubCopilotIcon.vue";
+import MistralIcon from "@/components/icons/MistralIcon.vue";
 
 // Icon keys a chat agent can use, mapped to their render component.
 export const AGENT_ICONS: Record<string, Component> = {
@@ -10,6 +11,7 @@ export const AGENT_ICONS: Record<string, Component> = {
   openai: OpenAIIcon,
   copilot: GitHubCopilotIcon,
   gemini: PhGoogleLogo,
+  mistral: MistralIcon,
   robot: PhRobot,
   sparkle: PhSparkle,
   star: PhStarFour,

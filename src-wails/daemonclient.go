@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,6 +59,11 @@ func (d *DaemonClient) Ensure() error {
 		}
 		// fell through: killed the stale daemon and removed its socket, spawn below
 	}
+	return d.spawnAndConnect()
+}
+
+// spawnAndConnect starts a fresh daemon and waits (≤ 2 s) for its socket.
+func (d *DaemonClient) spawnAndConnect() error {
 	if err := d.spawn(); err != nil {
 		return fmt.Errorf("spawn daemon: %w", err)
 	}
@@ -163,11 +170,47 @@ func (d *DaemonClient) spawn() error {
 		cmd.Stderr = os.Stderr
 		return cmd.Start()
 	}
-	cmd := exec.Command(daemonPath)
-	cmd.Env = append(os.Environ(), "BURROW_DAEMON_SOCK="+d.sockPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Start()
+	// Inside a .app the app's own stdout is /dev/null, so the daemon logs to
+	// daemon.log or a panic leaves no trace at all.
+	logPath := filepath.Join(filepath.Dir(d.sockPath), "daemon.log")
+	if err := spawnDetached(daemonPath, append(os.Environ(), "BURROW_DAEMON_SOCK="+d.sockPath), logPath, d.sockPath); err != nil {
+		return err
+	}
+	log.Printf("daemon: spawned %s", daemonPath)
+	return nil
+}
+
+// Restart kills the running daemon (every live PTY with it) and starts a new
+// one. Returns the new daemon's pid.
+func (d *DaemonClient) Restart() (int, error) {
+	d.dialMu.Lock()
+	defer d.dialMu.Unlock()
+	if !d.connected() {
+		_ = d.connect() // an orphan may still own the socket; reach it to kill it
+	}
+	if d.connected() {
+		if resp, _ := d.call(daemonproto.Request{Kind: "version"}); resp != nil && resp.Pid > 0 {
+			if p, err := os.FindProcess(resp.Pid); err == nil {
+				_ = p.Kill()
+			}
+		}
+	}
+	d.mu.Lock()
+	if d.conn != nil {
+		d.conn.Close()
+		d.conn = nil
+		d.enc = nil
+	}
+	d.mu.Unlock()
+	_ = os.Remove(d.sockPath)
+	if err := d.spawnAndConnect(); err != nil {
+		return 0, err
+	}
+	resp, err := d.call(daemonproto.Request{Kind: "version"})
+	if err != nil {
+		return 0, err
+	}
+	return resp.Pid, nil
 }
 
 // ensureConn reconnects if the daemon dropped us. The daemon closes a client
@@ -185,7 +228,15 @@ func (d *DaemonClient) ensureConn() error {
 	if d.connected() { // another caller won the race
 		return nil
 	}
-	return d.connect()
+	err := d.connect()
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
+		// Nobody listens: the daemon died under a running app. Without this
+		// every terminal stayed dead until the whole app was restarted.
+		log.Printf("daemon: unreachable (%v), respawning", err)
+		_ = os.Remove(d.sockPath)
+		return d.spawnAndConnect()
+	}
+	return err
 }
 
 func (d *DaemonClient) connected() bool {

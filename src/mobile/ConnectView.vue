@@ -19,7 +19,7 @@
     <form class="flex w-full max-w-[340px] flex-col gap-5" @submit.prevent="tryPair">
       <div class="flex flex-col gap-1">
         <h1 class="text-[17px] font-semibold">{{ machines.length ? "Add a machine" : "Connect to Burrow" }}</h1>
-        <input v-model="url" type="url" autocapitalize="off" autocorrect="off" spellcheck="false" :disabled="busy" class="rounded-[8px] border border-border bg-panel px-2.5 py-2 text-[13px] text-foreground outline-none focus:border-accent" />
+        <input v-model="url" type="url" placeholder="https://your-mac.tailnet.ts.net" autocapitalize="off" autocorrect="off" spellcheck="false" :disabled="busy" class="rounded-[8px] border border-border bg-panel px-2.5 py-2 text-[13px] text-foreground outline-none focus:border-accent" />
       </div>
 
       <div class="flex flex-col gap-2">
@@ -56,7 +56,9 @@ import { listEnvironments, pairDevice, setActiveEnvironment } from "@/runtime/re
 // /burrow prefix), so the page's own location is the default address. Editable
 // to add another machine: /v2/pair and /v2/ws-ticket answer CORS, /v2/ws takes
 // any origin.
-const url = ref(`${location.origin}${location.pathname.replace(/\/(?:mobile\.html)?$/, "")}`);
+// The native iOS shell (src-ios/) serves the page itself from wails://localhost,
+// which is no Burrow — there the address starts empty.
+const url = ref(location.protocol.startsWith("http") ? `${location.origin}${location.pathname.replace(/\/(?:mobile\.html)?$/, "")}` : "");
 // Shown when no machine is active: after "Add machine", a revoke, or a QR scan.
 const machines = listEnvironments();
 const hostLabel = (u: string) => u.replace(/^https?:\/\//, "");

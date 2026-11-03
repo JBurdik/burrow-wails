@@ -58,8 +58,13 @@ type providerInstance struct {
 // binaryFor): an instance with no binary of its own runs its provider's.
 var catalogBinary = map[string]string{
 	"claude": "claude", "codex": "codex", "gemini": "gemini", "opencode": "opencode",
-	"copilot": "copilot", "aider": "aider", "cursor": "cursor-agent",
+	"copilot": "copilot", "aider": "aider", "cursor": "cursor-agent", "mistral-vibe": "vibe",
 }
+
+// catalogChatBinary is PROVIDER_CATALOG's chatBinary: the chat adapter for a
+// CLI that ships it as its own program instead of a flag on the TUI binary.
+// ponytail: a binary override replaces both; point it at the adapter for chats.
+var catalogChatBinary = map[string]string{"mistral-vibe": "vibe-acp"}
 
 // resolveRPCLaunch is the Codex / generic ACP start a chat row resolves to —
 // AgentChat.vue's acpStartPayload, moved here so a start needs no view. The
@@ -92,7 +97,7 @@ func resolveRPCLaunch(c Chat, transport string, providers []providerInstance, al
 		opts.SystemPrompt = c.AppendSystemPrompt
 		return opts, nil
 	}
-	opts.Command = firstNonEmpty(strings.TrimSpace(p.Binary), catalogBinary[p.ProviderID], "npx")
+	opts.Command = firstNonEmpty(strings.TrimSpace(p.Binary), catalogChatBinary[p.ProviderID], catalogBinary[p.ProviderID], "npx")
 	opts.Args = p.TransportArgs
 	opts.Kind = firstNonEmpty(p.Kind, "custom")
 	opts.ConfigDir = firstNonEmpty(projectConfigDir, p.Env["CLAUDE_CONFIG_DIR"])

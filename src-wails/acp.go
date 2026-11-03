@@ -57,6 +57,7 @@ type acpSession struct {
 	interrupting bool   // Codex: we asked for this turn to stop, so its abort is not an error
 	turnWatchdog *time.Timer
 	model        string // Codex: model override applied on the next turn/start
+	effortID     string // ACP: the adapter's own id for what Burrow calls "effort" (Vibe: "thinking"); "" = "effort"
 	effort       string
 }
 
@@ -305,6 +306,9 @@ func (a *App) pump(chatID string, r *jsonRPCReader, sess *acpSession) {
 		kind := "acp-data"
 		if hasMethod && hasID {
 			kind = "acp-req"
+		}
+		if isLiveUserEcho(msg) {
+			continue
 		}
 		a.emitChatLine(chatID, kind, raw)
 		if hasID && !hasMethod {
@@ -918,6 +922,7 @@ func (a *App) AcpStart(opts AcpStartOpts) error {
 	close(done)
 
 	sess.sessionID = sessionID
+	sess.effortID = acpEffortID(result["configOptions"])
 	a.acpReg().put(opts.ID, sess)
 	a.emitSession(opts.ID, sessionID, result["modes"], result["configOptions"])
 	go a.pump(opts.ID, reader, sess)
@@ -1321,6 +1326,9 @@ func (a *App) AcpSetConfig(id, configID, value string) (int64, error) {
 		sess.mu.Unlock()
 		return rpc, nil
 	}
+	if configID == "effort" && sess.effortID != "" {
+		configID = sess.effortID
+	}
 	return rpc, sess.write(map[string]any{
 		"jsonrpc": "2.0", "id": rpc, "method": "session/set_config_option",
 		"params": map[string]any{"sessionId": sess.sessionID, "configId": configID, "value": value},
@@ -1519,4 +1527,35 @@ func codexModels(data []any) []AgentModel {
 		})
 	}
 	return out
+}
+
+// acpEffortID finds the adapter's reasoning-effort option: id "effort", else
+// one whose category is the spec's "thought_level" or Vibe's "thinking". Mirrors
+// acpOption in src/lib/chatTypes.ts. "" when the adapter has none or it is
+// already called "effort".
+func acpEffortID(configOptions any) string {
+	opts, _ := configOptions.([]any)
+	for _, o := range opts {
+		if strField(mapOf(o)["id"]) == "effort" {
+			return ""
+		}
+	}
+	for _, o := range opts {
+		m := mapOf(o)
+		if c := strField(m["category"]); c == "thought_level" || c == "thinking" {
+			return strField(m["id"])
+		}
+	}
+	return ""
+}
+
+// isLiveUserEcho: some adapters (Mistral Vibe) echo the prompt we just sent as
+// a user_message_chunk. The UI already shows the user's message, so rendering
+// the echo doubled every message. History replays (session/load) don't come
+// through the pump, so a user chunk here is always that echo.
+func isLiveUserEcho(msg map[string]any) bool {
+	if strField(msg["method"]) != "session/update" {
+		return false
+	}
+	return strField(mapField(mapOf(msg["params"])["update"])["sessionUpdate"]) == "user_message_chunk"
 }

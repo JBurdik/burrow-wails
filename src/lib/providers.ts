@@ -31,6 +31,8 @@ export interface ProviderCatalogEntry {
   label: string;
   /** Default binary; empty for "custom", which has nothing to guess. */
   binary: string;
+  /** Chat-transport binary when the CLI ships its adapter as a separate program (Vibe: `vibe-acp`); unset = `binary`. Mirrored in Go's `catalogChatBinary`. */
+  chatBinary?: string;
   icon: string;
   color: string;
   kind: ProviderKind;
@@ -51,6 +53,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   { id: "codex", label: "Codex", binary: "codex", icon: "openai", color: "#74aa9c", kind: "codex", transport: "codex-app-server", transportArgs: ["app-server"], supportsConfigDir: false, npmPackage: "@openai/codex", homebrewFormula: "codex" },
   { id: "gemini", label: "Gemini", binary: "gemini", icon: "gemini", color: "#1a73e8", kind: "gemini", transport: "acp", transportArgs: ["--acp"], supportsConfigDir: false, npmPackage: "@google/gemini-cli" },
   { id: "opencode", label: "opencode", binary: "opencode", icon: "terminal", color: "#f59e0b", kind: "custom", transport: "acp", transportArgs: ["acp"], supportsConfigDir: false, npmPackage: "opencode-ai", homebrewFormula: "anomalyco/tap/opencode" },
+  { id: "mistral-vibe", label: "Mistral Vibe", binary: "vibe", chatBinary: "vibe-acp", icon: "mistral", color: "#fa520f", kind: "custom", transport: "acp", transportArgs: [], supportsConfigDir: false },
   { id: "copilot", label: "GitHub Copilot", binary: "copilot", icon: "copilot", color: "#8957e5", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false, npmPackage: "@github/copilot" },
   { id: "aider", label: "Aider", binary: "aider", icon: "robot", color: "#fbbf24", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false },
   { id: "cursor", label: "Cursor AI", binary: "cursor-agent", icon: "terminal", color: "#f472b6", kind: "custom", transport: "none", transportArgs: [], supportsConfigDir: false },

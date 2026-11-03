@@ -6,7 +6,7 @@ import { followConfig, getConfig, setConfig } from "./config";
 // worked in without re-opening the picker.
 // ponytail: module-level ref, not a store — it's one array with two callers.
 const KEY = "sidebarPinned";
-const MAX = 3;
+const MAX = 10;
 
 export const pinnedIds = ref<number[]>([]);
 

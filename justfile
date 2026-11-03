@@ -337,3 +337,14 @@ notary-creds password:
     security add-generic-password -s BURROW_NOTARY_PWD -a "{{APPLE_ID}}" -w "{{password}}" -U
     xcrun notarytool store-credentials "{{profile}}" \
         --apple-id "{{APPLE_ID}}" --team-id "{{APPLE_TEAM_ID}}" --password "{{password}}"
+
+# Native iOS shell (src-ios/, Wails v3): the phone bundle in a WebView, signed
+# with the team's wildcard dev profile and installed on the iPhone (wireless ok).
+# Override: just ios IOS_DEVICE=<udid> (xcrun devicectl list devices).
+ios_identity := "DF4CCBA4F69D30AC9FB6A092DB5AB32217DEFDF7"
+ios_profile := env_var('HOME') + "/Library/Developer/Xcode/UserData/Provisioning Profiles/676ff5a2-9942-40d8-95ed-5dcfbdb5f1d4.mobileprovision"
+IOS_DEVICE := "00008140-000E253124A2201C"
+ios:
+    cd src-ios && PATH="$HOME/go/bin:$PATH" wails3 task ios:package IOS_PLATFORM=device CODESIGN_IDENTITY={{ios_identity}} PROVISIONING_PROFILE="{{ios_profile}}"
+    xcrun devicectl device install app --device {{IOS_DEVICE}} src-ios/bin/burrow-ios.app
+    xcrun devicectl device process launch --device {{IOS_DEVICE}} com.jburdik.burrow.ios

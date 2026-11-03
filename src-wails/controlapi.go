@@ -428,7 +428,20 @@ func acpMcpServers() []any {
 	if bin == "" {
 		return []any{}
 	}
-	return []any{map[string]any{"name": "burrow", "command": bin, "args": []string{}, "env": []any{}}}
+	return []any{mcpStdioServer("burrow", bin)}
+}
+
+// mcpStdioServer is one ACP stdio MCP server entry. ACP's `command` is a path,
+// but Mistral Vibe shlex-splits it, so "/Applications/Burrow Dev.app/…" broke
+// at the space. A path with whitespace goes through /bin/sh instead, which
+// survives both readings: a split "/bin/sh" is still "/bin/sh".
+// ponytail: POSIX-only; Windows would need its own wrapper.
+func mcpStdioServer(name, bin string) map[string]any {
+	command, args := bin, []string{}
+	if strings.ContainsAny(bin, " \t") {
+		command, args = "/bin/sh", []string{"-c", `exec "$0"`, bin}
+	}
+	return map[string]any{"name": name, "command": command, "args": args, "env": []any{}}
 }
 
 // addBurrowEnv puts the `burrow` CLI on an agent's PATH and tells it where the

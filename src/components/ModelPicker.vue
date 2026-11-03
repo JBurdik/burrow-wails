@@ -54,7 +54,8 @@
         </div>
 
         <!-- Only what the active transport supports — the parent decides. -->
-        <div v-if="settings?.length" class="mp-settings">
+        <!-- The settings belong to the selected agent — hidden while browsing another's tab. -->
+        <div v-if="settings?.length && (tab === 'fav' || tab === agentId)" class="mp-settings">
           <template v-for="s in settings" :key="s.key">
             <button
               v-if="s.toggle"

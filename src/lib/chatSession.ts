@@ -4,6 +4,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type {
   AcpConfigOption, AcpModes, AcpPermReq, CanUseToolReq, ChatMessage, CodexUserInputReq, QueuedChatMessage, TurnStats,
 } from "@/lib/chatTypes";
+import { acpOption } from "@/lib/chatTypes";
 import {
   applyChatEvent, isProjectedEvent, settleTranscript, type ChatEventBatch, type ChatProjectionState,
 } from "@/lib/chatProjection";
@@ -643,7 +644,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         if (s.acpModes.value) s.acpModes.value.currentModeId = value;
         return;
       }
-      const option = s.acpConfigOptions.value.find((o) => o.id === id);
+      const option = acpOption(s.acpConfigOptions.value, id);
       if (option) option.currentValue = value;
     },
     seedAcpCapabilities(modes, configOptions) {

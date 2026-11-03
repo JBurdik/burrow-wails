@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { followConfig, getConfig, setConfig } from "./config";
+import { acpOption, type AcpConfigOption, type AcpModes } from "./chatTypes";
 
 // Static per-agent model catalog. Only the native Claude CLI takes a --model
 // flag we know the ids for up front; every other runtime negotiates its model
@@ -79,16 +80,45 @@ export function learnModels(agentId: string, entries: ModelEntry[]): void {
   setConfig(SEEN_KEY, seen.value);
 }
 
+// Selector sets (modes + configOptions) a generic ACP adapter reported, per
+// provider instance — what the welcome composer offers before a session exists.
+export interface AgentAcpCaps { modes: AcpModes | null; configOptions: AcpConfigOption[] }
+const CAPS_KEY = "chatAcpAgentCaps";
+export const agentAcpCaps = ref<Record<string, AgentAcpCaps>>({});
+followConfig([CAPS_KEY], () => { agentAcpCaps.value = getConfig<Record<string, AgentAcpCaps>>(CAPS_KEY, {}); });
+
+/** Record an adapter's selectors (from a probe or a live session) and learn its models. */
+export function learnAcpCaps(agentId: string, caps: AgentAcpCaps): void {
+  if (!caps.modes && !caps.configOptions.length) return;
+  const model = acpOption(caps.configOptions, "model");
+  if (model) learnModels(agentId, model.options.map((o) => ({ id: o.value, label: o.name })));
+  if (JSON.stringify(agentAcpCaps.value[agentId]) === JSON.stringify(caps)) return;
+  agentAcpCaps.value = { ...agentAcpCaps.value, [agentId]: caps };
+  setConfig(CAPS_KEY, agentAcpCaps.value);
+}
+
 // Ask the installed CLI for its catalog. Codex answers `model/list` over its
 // app-server, so the picker can list real models before any chat exists — the
 // result is cached, so this only costs a spawn the first time (and whenever the
 // installed CLI's catalog changes).
 const probed = new Set<string>();
 export async function ensureModels(agentId: string, kind: string, cwd: string): Promise<void> {
-  const provider = getConfig<Array<{ id: string; providerId: string; openai?: { model: string } }>>("providers", []).find((p) => p.id === agentId);
+  const provider = getConfig<Array<{ id: string; providerId: string; transport?: string; openai?: { model: string } }>>("providers", []).find((p) => p.id === agentId);
   if (provider?.providerId === "openai-compatible") {
     const model = provider.openai?.model?.trim();
     if (model && !(seen.value[agentId] ?? []).some((m) => m.id === model)) learnModels(agentId, [{ id: model, label: model }, ...(seen.value[agentId] ?? [])]);
+    return;
+  }
+  // A generic ACP adapter reports its selectors only from session/new — probe one.
+  if (provider?.transport === "acp" && kind !== "codex") {
+    if (probed.has(agentId)) return;
+    probed.add(agentId);
+    try {
+      const caps = await invoke<{ modes: AcpModes | null; configOptions: AcpConfigOption[] | null }>("acp_probe", { agentId, cwd });
+      learnAcpCaps(agentId, { modes: caps.modes ?? null, configOptions: caps.configOptions ?? [] });
+    } catch {
+      probed.delete(agentId);
+    }
     return;
   }
   if (kind !== "codex" || MODELS_BY_AGENT[agentId] || probed.has(agentId)) return;

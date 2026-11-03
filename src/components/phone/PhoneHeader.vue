@@ -4,6 +4,7 @@ import { router } from "@/router";
 import { backTarget } from "@/lib/phoneNav";
 import { releaseChannel } from "@/lib/releaseChannel";
 import { useUIStore } from "@/stores/ui";
+import StageBackdrop from "@/components/StageBackdrop.vue";
 
 // Root screens get a large title; details a compact bar with a back arrow.
 const props = defineProps<{ title: string; subtitle?: string; back?: boolean }>();
@@ -18,7 +19,10 @@ function goBack() {
 </script>
 
 <template>
-  <header class="phone-header shrink-0 border-b border-border bg-base" :class="props.back ? 'phone-header--detail' : 'phone-header--root'">
+  <header class="phone-header relative isolate shrink-0 overflow-hidden border-b border-border bg-base" :class="props.back ? 'phone-header--detail' : 'phone-header--root'">
+    <!-- Root screens carry the release-channel artwork up under the status bar
+         (viewport-fit=cover + black-translucent); the Sidebar's own copy is off on a phone. -->
+    <StageBackdrop v-if="!props.back" style="height: calc(80px + env(safe-area-inset-top, 0px))" />
     <div v-if="props.back" class="flex h-12 items-center gap-1 px-1">
       <button class="phone-icon-btn" aria-label="Back" @click="goBack"><PhCaretLeft :size="22" /></button>
       <div class="flex min-w-0 flex-1 flex-col">

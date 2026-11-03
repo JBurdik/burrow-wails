@@ -865,7 +865,8 @@ import { isImageStub } from "@/lib/chatImages";
 import { chatSession, canSteer, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
 import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
-import { modelsFor, learnModels, modelLabel, type ModelEntry } from "@/lib/chatModels";
+import { acpOption } from "@/lib/chatTypes";
+import { modelsFor, learnModels, learnAcpCaps, modelLabel, type ModelEntry } from "@/lib/chatModels";
 import { chatSettingKey } from "@/lib/chatSettings";
 import { splitMentions } from "@/lib/mentionTokens";
 import { editOf, fmtDuration, hunkLines, isProjectPath, mergeEdits, type FileEdit } from "@/lib/chatTurns";
@@ -1250,7 +1251,7 @@ function acpOptClass(kind: string) {
 // rpc ids of in-flight control calls (set_mode/set_config/list) → refresh UI on reply.
 // Legacy per-chat localStorage key prefixes (kept only for the one-time migration below).
 const acpModelOption = computed(() => acpConfigOptions.value.find((o) => o.id === "model"));
-const acpEffortOption = computed(() => acpConfigOptions.value.find((o) => o.id === "effort"));
+const acpEffortOption = computed(() => acpOption(acpConfigOptions.value, "effort"));
 const acpModeLabel = computed(() => acpModes.value?.availableModes.find((m) => m.id === acpModes.value?.currentModeId)?.name ?? "Mode");
 const acpActiveModelId = computed(() => acpModelOption.value?.currentValue ?? "");
 const acpEffortLabel = computed(() => { const o = acpEffortOption.value; return o?.options.find((c) => c.value === o.currentValue)?.name ?? "Effort"; });
@@ -1272,6 +1273,7 @@ const acpModeItems = computed<ComposerPillItem[]>(() =>
 watch([acpModes, acpConfigOptions], ([modes, configOptions]) => {
   if (!isAcpRuntime.value || (!modes && configOptions.length === 0)) return;
   setAcpCapabilities(props.chatId, { agentId: agentKind.value, modes, configOptions });
+  if (effectiveTransport.value === 'acp') learnAcpCaps(agentKind.value, { modes, configOptions });
 }, { deep: true });
 // trackAcpControl(rid, restore) (the session's): request ids of OUR OWN restore
 // pushes. The reply to a restore carries the adapter's selector set again, so

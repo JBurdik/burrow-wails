@@ -77,17 +77,26 @@
       <!-- Worktrees -->
       <Section v-if="worktrees.length > 1" title="Worktrees" :count="worktrees.length">
         <template #icon><PhTreeStructure :size="11" /></template>
-        <Row
-          v-for="w in worktrees"
-          :key="w.path"
-          :active="w.path === git.cwd"
-          :title="home(w.path) + (wsByPath.has(w.path) ? '' : ' (not a Burrow workspace)')"
-          @click="w.path !== git.cwd && openPath(w.path)"
-        >
-          <PhTreeStructure :size="12" class="shrink-0" :class="w.path === git.cwd ? 'text-accent' : 'text-muted-foreground'" />
-          <span class="min-w-0 flex-1 truncate" :class="!wsByPath.has(w.path) && 'opacity-60'">{{ baseName(w.path) }}</span>
-          <span class="max-w-[45%] truncate text-[10.5px] text-muted-foreground">{{ w.branch ?? w.head.slice(0, 7) }}</span>
-        </Row>
+        <ContextMenuRoot v-for="(w, i) in worktrees" :key="w.path">
+          <ContextMenuTrigger as-child>
+            <Row
+              :active="w.path === git.cwd"
+              :title="home(w.path) + (wsByPath.has(w.path) ? '' : ' (not a Burrow workspace)')"
+              @click="w.path !== git.cwd && openPath(w.path)"
+            >
+              <PhTreeStructure :size="12" class="shrink-0" :class="w.path === git.cwd ? 'text-accent' : 'text-muted-foreground'" />
+              <span class="min-w-0 flex-1 truncate" :class="!wsByPath.has(w.path) && 'opacity-60'">{{ baseName(w.path) }}</span>
+              <span class="max-w-[45%] truncate text-[10.5px] text-muted-foreground">{{ w.branch ?? w.head.slice(0, 7) }}</span>
+            </Row>
+          </ContextMenuTrigger>
+          <Menu>
+            <Item :disabled="w.path === git.cwd || !wsByPath.has(w.path)" @select="openPath(w.path)">Open</Item>
+            <Item @select="navigator.clipboard?.writeText(w.path)">Copy path</Item>
+            <ContextMenuSeparator class="my-1 h-px bg-border" />
+            <!-- git refuses to remove the main worktree; index 0 of `worktree list` is always it -->
+            <Item danger :disabled="i === 0" @select="askRemove(w)">Remove worktree…</Item>
+          </Menu>
+        </ContextMenuRoot>
       </Section>
 
       <!-- Remotes -->
@@ -146,6 +155,30 @@
         </ContextMenuRoot>
       </Section>
     </div>
+    <!-- remove-worktree confirm (window.confirm is a no-op in the Wails webview) -->
+    <div v-if="removing" class="fixed inset-0 z-[1001] flex items-start justify-center bg-black/45 pt-[20vh]" @click.self="removing = null" @keydown.esc="removing = null">
+      <div class="flex w-[400px] max-w-[calc(100%-24px)] flex-col rounded-xl border border-border bg-[var(--bg-dropdown)] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
+        <h3 class="text-[14px] font-semibold text-foreground">Remove worktree {{ baseName(removing.wt.path) }}?</h3>
+        <p class="mt-2 text-[12.5px] leading-relaxed text-muted-foreground">
+          Deletes <span class="font-mono">{{ home(removing.wt.path) }}</span> from disk<template v-if="wsByPath.has(removing.wt.path)"> and its Burrow workspace</template>.
+          <template v-if="removing.wt.branch"> Branch <span class="font-mono">{{ removing.wt.branch }}</span> is kept.</template>
+        </p>
+        <p v-if="removing.error" class="mt-2 whitespace-pre-wrap rounded-md bg-destructive/10 px-2.5 py-2 font-mono text-[11.5px] text-destructive">{{ removing.error }}</p>
+        <label class="mt-3 flex items-center gap-2 text-[12.5px] text-secondary-foreground">
+          <input v-model="removing.force" type="checkbox" />
+          Force — discard uncommitted and untracked changes
+        </label>
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="h-7 rounded-md border border-border bg-hover px-2.5 text-xs text-secondary-foreground hover:text-foreground" @click="removing = null">Cancel</button>
+          <button
+            v-focus
+            class="h-7 rounded-md bg-destructive px-3 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-40"
+            :disabled="removing.busy"
+            @click="confirmRemove"
+          >{{ removing.busy ? "Removing…" : "Remove" }}</button>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
@@ -161,6 +194,7 @@ import {
 import { useGitStore } from "@/stores/git";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useNotificationsStore } from "@/stores/notifications";
+import { useTerminalTabsStore } from "@/stores/terminalTabs";
 
 /** The selected workspace id; GitWindow owns it. */
 const wsId = defineModel<number | null>("wsId", { required: true });
@@ -168,6 +202,9 @@ const wsId = defineModel<number | null>("wsId", { required: true });
 const git = useGitStore();
 const wsStore = useWorkspaceStore();
 const notif = useNotificationsStore();
+const termTabs = useTerminalTabsStore();
+const navigator = window.navigator;
+const vFocus = { mounted: (el: HTMLElement) => el.focus() };
 
 interface Ref { full: string; name: string; hash: string; isHead: boolean; track: string; kind: "local" | "remote" | "tag" }
 interface Worktree { path: string; head: string; branch: string | null }
@@ -235,6 +272,39 @@ function openPath(path: string) {
   const w = wsByPath.value.get(path);
   if (w) wsId.value = w.id;
   // ponytail: worktrees Burrow doesn't know as workspaces can't be selected; add one to open it here.
+}
+
+// ── remove worktree (git deletes the directory) ──
+const removing = ref<{ wt: Worktree; force: boolean; busy: boolean; error: string } | null>(null);
+const askRemove = (wt: Worktree) => (removing.value = { wt, force: false, busy: false, error: "" });
+async function confirmRemove() {
+  const r = removing.value;
+  if (!r || r.busy) return;
+  r.busy = true;
+  r.error = "";
+  const ws = wsByPath.value.get(r.wt.path);
+  const main = worktrees.value[0]?.path ?? git.cwd;
+  try {
+    if (ws?.parent_id) {
+      // Burrow's own path: same Go call as the Sidebar's delete, drops the workspace row too.
+      await wsStore.removeWorktree(ws.id, r.force);
+      termTabs.clear(ws.id);
+    } else {
+      const out = await invoke<{ stdout: string; stderr: string; code: number }>("run_git_input", {
+        cwd: main,
+        args: ["-c", "status.showUntrackedFiles=normal", "worktree", "remove", r.wt.path, ...(r.force ? ["--force"] : [])],
+        stdin: "",
+      });
+      if (out.code !== 0) throw new Error((out.stderr || out.stdout).trim());
+    }
+    if (r.wt.path === git.cwd) wsId.value = wsByPath.value.get(main)?.id ?? ws?.parent_id ?? null;
+    removing.value = null;
+    await git.refresh(true);
+    await loadRefs();
+  } catch (e) {
+    r.error = e instanceof Error ? e.message : String(e);
+    r.busy = false;
+  }
 }
 
 const checkout = (name: string) => git.switchBranch(name).catch(() => git.refresh());

@@ -190,9 +190,10 @@ export interface RepoGroup {
 /**
  * Group the flat feed under each row's repo (a worktree folds into its parent),
  * groups ordered by their newest row, rows keeping feed order. `alwaysShow`
- * repos (the active one) get a header even with no rows.
+ * repos (the active one) get a header even with no rows. `pinned` repos always
+ * get a header too and lead the list, in pin order.
  */
-export function groupByRepo(rows: ActivityRow[], alwaysShow: number[] = []): RepoGroup[] {
+export function groupByRepo(rows: ActivityRow[], alwaysShow: number[] = [], pinned: number[] = []): RepoGroup[] {
   const byRepo = new Map<number, RepoGroup>();
   for (const row of rows) {
     const repoId = row.ws.parent_id ?? row.ws.id;
@@ -200,8 +201,9 @@ export function groupByRepo(rows: ActivityRow[], alwaysShow: number[] = []): Rep
     if (!group) byRepo.set(repoId, (group = { repoId, rows: [] }));
     group.rows.push(row);
   }
-  for (const id of alwaysShow) if (!byRepo.has(id)) byRepo.set(id, { repoId: id, rows: [] });
-  return [...byRepo.values()];
+  for (const id of [...alwaysShow, ...pinned]) if (!byRepo.has(id)) byRepo.set(id, { repoId: id, rows: [] });
+  const rank = (id: number) => (pinned.includes(id) ? pinned.indexOf(id) : pinned.length);
+  return [...byRepo.values()].sort((a, b) => rank(a.repoId) - rank(b.repoId)); // stable: unpinned keep feed order
 }
 
 /** `git diff --shortstat` → {added, removed}; empty output (clean tree) → zeros. */
