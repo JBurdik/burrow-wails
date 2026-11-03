@@ -20,6 +20,10 @@ profile := "BURROW_NOTARY"
 # that shows up on some keychains when the name has non-ASCII characters.
 # Signing by the certificate's SHA-1 hash sidesteps the name lookup entirely.
 sign_id := `security find-identity -v -p codesigning | grep "Developer ID Application" | grep "$APPLE_TEAM_ID" | head -1 | awk '{print $2}'`
+# The local beta is signed with a personal Apple Development identity: enough
+# for macOS to grant notifications / login items (an ad-hoc bundle is refused
+# outright), no notarization. BURROW_BETA_SIGN overrides (a SHA-1 or a name).
+beta_sign_id := env_var_or_default("BURROW_BETA_SIGN", `security find-identity -v -p codesigning | grep "Apple Development: jiri.burdych@icloud.com" | head -1 | awk '{print $2}'`)
 
 # GitHub repo hosting releases + the updater manifest (latest.json).
 # Must match updateRepo in src-wails/updater.go.
@@ -79,7 +83,8 @@ check:
 
 # Build a local beta bundle: purple title bar + purple icon, own bundle id so
 # it can sit next to the real Burrow.app in /Applications without colliding.
-# Never signed, notarized, tagged or pushed — this Mac only.
+# Signed with beta_sign_id (Apple Development), never notarized, tagged or
+# pushed — this Mac only.
 build-beta:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -95,9 +100,21 @@ build-beta:
     mv build/bin/Burrow.app "build/bin/Burrow Beta.app"
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.agenticide.wails.beta" "build/bin/Burrow Beta.app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleName Burrow Beta" "build/bin/Burrow Beta.app/Contents/Info.plist"
+    ID="{{beta_sign_id}}"
+    if [ -n "$ID" ]; then
+      # Inner binaries first, then the bundle (it seals the Info.plist edits above).
+      for bin in burrow-daemon burrow-mcp Burrow; do
+        codesign --force --sign "$ID" "build/bin/Burrow Beta.app/Contents/MacOS/$bin"
+      done
+      codesign --force --sign "$ID" "build/bin/Burrow Beta.app"
+      codesign --verify --deep --strict "build/bin/Burrow Beta.app"
+      echo "signed with: $(codesign -dv "build/bin/Burrow Beta.app" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
+    else
+      echo "⚠️  no Apple Development identity found: beta stays ad-hoc (no notifications / login item)"
+    fi
     echo "built: src-wails/build/bin/Burrow Beta.app"
 
-# Build + install the beta locally on this Mac (not signed, not released).
+# Build + install the beta locally on this Mac (personal signature, not released).
 beta: build-beta
     rm -rf "/Applications/Burrow Beta.app"
     cp -R "src-wails/build/bin/Burrow Beta.app" /Applications/
