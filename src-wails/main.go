@@ -47,7 +47,7 @@ func main() {
 			}
 		},
 	})
-	wapp.Menu.SetApplicationMenu(appMenu())
+	wapp.Menu.SetApplicationMenu(appMenu(ui))
 
 	mainWin = wapp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "burrow",
@@ -69,13 +69,21 @@ func main() {
 		}
 		desktopEmit("file-drop", map[string]any{"x": x, "y": y, "paths": e.Context().DroppedFiles()})
 	})
-	// Close = hide; the backend keeps running for the phone and schedules.
+	// In-process: close = hide; the backend keeps running for the phone and
+	// schedules. With an external core the backend is elsewhere, so closing
+	// the window quits this process (plan 009) — popouts go with it.
 	mainWin.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		app.saveWindowState(mainWin)
-		if !quitting.Load() {
-			e.Cancel()
-			mainWin.Hide()
+		if quitting.Load() {
+			return
 		}
+		e.Cancel()
+		if ui {
+			quitting.Store(true)
+			go wapp.Quit()
+			return
+		}
+		mainWin.Hide()
 	})
 	wapp.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
 		showMainWindow()
@@ -111,7 +119,7 @@ func startURL() string {
 	return "/"
 }
 
-func appMenu() *application.Menu {
+func appMenu(ui bool) *application.Menu {
 	m := application.NewMenu()
 	// The first submenu is the macOS app menu; built by hand (not the AppMenu
 	// role) so "Check for Updates…" can sit under About.
@@ -126,6 +134,15 @@ func appMenu() *application.Menu {
 	am.AddRole(application.UnHide)
 	am.AddSeparator()
 	am.AddRole(application.Quit)
+	if ui {
+		// ⌘Q quits only this window process; the core goes on while it has
+		// work (coreidle.go). This one stops the core too.
+		am.Add("Quit Burrow Completely").SetAccelerator("CmdOrCtrl+Alt+Q").OnClick(func(*application.Context) {
+			askCoreToQuit()
+			quitting.Store(true)
+			wapp.Quit()
+		})
+	}
 	m.AddRole(application.EditMenu)
 	wm := m.AddSubmenu("Window")
 	wm.AddRole(application.Minimise)

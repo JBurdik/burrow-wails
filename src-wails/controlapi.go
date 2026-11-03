@@ -157,6 +157,9 @@ func (u *uiBridge) Do(ctx context.Context, action string, args map[string]any) (
 	if args == nil {
 		args = map[string]any{}
 	}
+	if ensureUIOpen != nil {
+		ensureUIOpen() // external core with no window up: the action needs one
+	}
 	u.emit("control:action", map[string]any{"id": id, "action": action, "args": args})
 
 	select {
@@ -279,6 +282,24 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 			return
 		}
 		writeJSONFileResponse(w, a.localEndpointFor(desktopUIDevice))
+	})
+	// "Quit Burrow Completely" from the UI process (plan 009): same door, same
+	// token. Answers first; the quit itself tells every UI (core-quit).
+	mux.HandleFunc("/v2/core-quit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !a.controlAuthorized(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if coreQuit == nil {
+			http.Error(w, "not a core", http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		go coreQuit()
 	})
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		if !a.controlAuthorized(r) {

@@ -59,6 +59,28 @@ _token() {
   [ -n "$BURROW_HOME_DIR" ] && cat "$BURROW_HOME_DIR/control.token" 2>/dev/null
 }
 
+# _start_core: the backend may be a separate process that quit while idle
+# (plan 009). It leaves its executable in core.exe; start it again — without
+# this terminal's per-tab BURROW_* (they would leak into every chat it spawns)
+# — and wait ≤ 5 s for it to rewrite hook.port. Verbs only: hooks never start
+# a core (they fire on every prompt; the phase poll catches up after a start).
+_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+_start_core() {
+  [ -n "$BURROW_HOME_DIR" ] || return 1
+  exe=$(cat "$BURROW_HOME_DIR/core.exe" 2>/dev/null)
+  [ -x "$exe" ] || return 1
+  before=$(_mtime "$BURROW_HOME_DIR/hook.port")
+  env -u BURROW_PTY_ID -u BURROW_CHAT_ID -u BURROW_SESSION_DIR -u BURROW_CWD \
+    -u BURROW_HOOK_PORT -u BURROW_MOD nohup "$exe" --core >/dev/null 2>&1 &
+  i=0
+  while [ $i -lt 50 ]; do
+    sleep 0.1
+    [ "$(_mtime "$BURROW_HOME_DIR/hook.port")" != "$before" ] && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+
 _esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'; }
 
 # _primary <verb> — argument names the positional arguments fill, in order, so
@@ -125,6 +147,7 @@ _call() {
   done
 
   port=$(_port); token=$(_token)
+  if [ -z "$port" ] && _start_core; then port=$(_port); token=$(_token); fi
   if [ -z "$port" ]; then
     echo "burrow: Burrow is not running (no hook.port) — start the app and retry" >&2
     exit 1
@@ -135,11 +158,19 @@ _call() {
   fi
 
   # wait_result blocks by design (a sub-agent takes minutes), so no --max-time.
-  body=$(curl -s -X POST "http://127.0.0.1:$port/v1/$verb" \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer $token" \
-    -d "{$json}" -w '\n%{http_code}')
+  _post() {
+    curl -s -X POST "http://127.0.0.1:$port/v1/$verb" \
+      -H 'Content-Type: application/json' \
+      -H "Authorization: Bearer $token" \
+      -d "{$json}" -w '\n%{http_code}'
+  }
+  body=$(_post)
   code=$(printf '%s' "$body" | tail -n1)
+  if [ "$code" = "000" ] && _start_core; then # nobody listening: an idle core quit
+    port=$(_port)
+    body=$(_post)
+    code=$(printf '%s' "$body" | tail -n1)
+  fi
   payload=$(printf '%s' "$body" | sed '$d')
 
   case "$code" in
@@ -234,7 +265,29 @@ case "$sub" in
       file_port=$(head -n1 "$BURROW_HOME_DIR/hook.port" 2>/dev/null)
     # Build the JSON payload: base {ptyId,state} plus any provided metadata. Values
     # are JSON-escaped (backslash + double-quote) so titles/details can't break it.
-    _esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+    # _start_core: the backend may be a separate process that quit while idle
+# (plan 009). It leaves its executable in core.exe; start it again — without
+# this terminal's per-tab BURROW_* (they would leak into every chat it spawns)
+# — and wait ≤ 5 s for it to rewrite hook.port. Verbs only: hooks never start
+# a core (they fire on every prompt; the phase poll catches up after a start).
+_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+_start_core() {
+  [ -n "$BURROW_HOME_DIR" ] || return 1
+  exe=$(cat "$BURROW_HOME_DIR/core.exe" 2>/dev/null)
+  [ -x "$exe" ] || return 1
+  before=$(_mtime "$BURROW_HOME_DIR/hook.port")
+  env -u BURROW_PTY_ID -u BURROW_CHAT_ID -u BURROW_SESSION_DIR -u BURROW_CWD \
+    -u BURROW_HOOK_PORT -u BURROW_MOD nohup "$exe" --core >/dev/null 2>&1 &
+  i=0
+  while [ $i -lt 50 ]; do
+    sleep 0.1
+    [ "$(_mtime "$BURROW_HOME_DIR/hook.port")" != "$before" ] && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+
+_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
     payload="{\"ptyId\":$BURROW_PTY_ID,\"state\":\"$state\""
     [ -n "$detail" ]   && payload="$payload,\"detail\":\"$(_esc "$detail")\""
     [ -n "$s_model" ]  && payload="$payload,\"model\":\"$(_esc "$s_model")\""

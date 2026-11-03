@@ -1,6 +1,6 @@
 # 009 — Split the backend into an always-on core and thin clients
 
-Status: **decided; phases A + B done** (2026-11-03, branch `v3/core-client-split`).
+Status: **decided; A + B done, C in progress** (2026-11-03, branch `v3/core-client-split`).
 Decisions below came out of a grilling session; change one only on purpose.
 
 ## Why
@@ -131,6 +131,27 @@ while focused.
 `Burrow Core.app` helper + `SMAppService` (login item toggle in Settings →
 General), idle-exit rule, ⌥⌘Q / tray "Quit Completely", last window closed →
 UI quits, `burrow://` scheme in Info.plist, CLI verbs auto-start the core.
+
+**Done (2026-11-03), without the helper bundle:**
+- `coreidle.go`: pure `coreShouldExit` (table-tested) + a 30 s sweep — no UI
+  for 5 min and no `coreWork` (open chat turn, queue / undelivered notice /
+  armed limit resume, unpaused schedule, remote access on, `uiPrefs.coreAtLogin`;
+  unreadable config = stay) ⇒ the core quits. `BURROW_CORE_IDLE_GRACE`
+  shortens it for tests.
+- "Quit Burrow Completely" (⌥⌘Q, UI role only) → `POST /v2/core-quit`
+  (control.token) → the core's tray-Quit path (core-quit, then stop).
+- UI role: closing the main window quits the UI process.
+- `burrow` CLI: a verb that finds nobody listening starts `$(cat core.exe)
+  --core` (written by every core) without the tab's `BURROW_*`, waits ≤ 5 s
+  for hook.port, retries once. A core not started via the launcher re-launches
+  itself through it (`BURROW_CORE_DETACHED`), so closing that tab can't kill it.
+- `ensureUIOpen`: a UI-performed verb (`workspace_create`, `new_tab`, …) on a
+  core with no UI opens one first (serialized; ≤ 10 s + 2 s for App.vue's
+  control bridge to mount).
+Verified on a bundle copy: idle exit after the grace, a schedule keeps the
+core, `burrow workspace_create` with nothing running starts core + UI and
+succeeds, `/v2/core-quit` stops both (daemon stays). Not verified: the window
+close button (no click automation).
 
 ### D — versions + updater
 

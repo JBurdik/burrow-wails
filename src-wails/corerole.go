@@ -31,6 +31,9 @@ import (
 // externalCore: every channel but stable ("") splits the backend out.
 func externalCore() bool { return buildChannel != "" }
 
+// coreDetachedEnv marks a core that was started through spawnDetached.
+const coreDetachedEnv = "BURROW_CORE_DETACHED"
+
 func coreRoleRequested() bool {
 	for _, a := range os.Args[1:] {
 		if a == "--core" {
@@ -47,6 +50,21 @@ func runCore() {
 	if err != nil {
 		log.Fatalf("core: app data dir: %v", err)
 	}
+	// Started by `burrow` inside a terminal tab (or any shell): hand ourselves
+	// to the launchd launcher, or closing that tab would take the core down
+	// with its process group. The UI's ensureCore already goes through it.
+	if os.Getenv(coreDetachedEnv) == "" {
+		if exe, err := os.Executable(); err == nil {
+			_ = os.MkdirAll(dataDir, 0o755)
+			env := append(os.Environ(), coreDetachedEnv+"=1")
+			if spawnDetached("core", []string{exe, "--core"}, env, filepath.Join(dataDir, "core.log"), filepath.Join(dataDir, "hook.port")) == nil {
+				return
+			}
+		}
+	}
+	// Not inherited by the daemon, its shells and chats: a `burrow` started in
+	// one of them must see a core it starts as undetached.
+	os.Unsetenv(coreDetachedEnv)
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		log.Fatalf("core: %v", err)
 	}
@@ -59,6 +77,10 @@ func runCore() {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		log.Printf("core: another core owns %s, exiting", dataDir)
 		return
+	}
+	// Where `burrow` finds this binary to start a core again after an idle exit.
+	if exe, err := os.Executable(); err == nil {
+		_ = os.WriteFile(filepath.Join(dataDir, "core.exe"), []byte(exe), 0o644)
 	}
 	app := NewApp()
 	coreApp = app
@@ -90,6 +112,24 @@ func runCore() {
 	app.startup(context.Background())
 	setupTray(app)
 	setupNativeNotifications(notifier)
+	coreQuit = func() { quitApp(app) } // tray Quit, ⌥⌘Q in the UI: tells the UI, then stops
+	go app.runCoreIdleExit(func() { wapp.Quit() })
+	var uiOpenMu sync.Mutex // three verbs at once must not start three windows
+	ensureUIOpen = func() {
+		uiOpenMu.Lock()
+		defer uiOpenMu.Unlock()
+		if app.remoteWS.uiConnected() {
+			return
+		}
+		openUI("")
+		for i := 0; i < 100 && !app.remoteWS.uiConnected(); i++ { // ≤ 10 s
+			time.Sleep(100 * time.Millisecond)
+		}
+		// ponytail: the socket is up before App.vue has mounted the control
+		// bridge, and an event with no listener yet is dropped; 2 s covers a
+		// cold start. A "bridge ready" handshake would make it exact.
+		time.Sleep(2 * time.Second)
+	}
 	log.Printf("core up (pid %d, hook port %d)", os.Getpid(), app.hookPort)
 
 	sig := make(chan os.Signal, 1)
@@ -132,6 +172,21 @@ func setupNativeNotifications(n *notifications.NotificationService) {
 		if err != nil {
 			log.Printf("core: notify: %v", err)
 		}
+	}
+}
+
+// askCoreToQuit is the UI's ⌥⌘Q: quit completely, core first.
+func askCoreToQuit() {
+	dataDir, err := appDataDir()
+	if err != nil {
+		return
+	}
+	port, _ := os.ReadFile(filepath.Join(dataDir, "hook.port"))
+	token, _ := os.ReadFile(filepath.Join(dataDir, "control.token"))
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%s/v2/core-quit", strings.TrimSpace(string(port))), nil)
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
+	if resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req); err == nil {
+		resp.Body.Close()
 	}
 }
 
@@ -247,7 +302,7 @@ func ensureCore() (LocalEndpointInfo, error) {
 	// Never delete hook.port here: if the core is alive and only slow, the CLI
 	// and every hook would lose it. A new core rewrites it.
 	log.Printf("ui: starting core")
-	if err := spawnDetached("core", []string{exe, "--core"}, os.Environ(), filepath.Join(dataDir, "core.log"), filepath.Join(dataDir, "hook.port")); err != nil {
+	if err := spawnDetached("core", []string{exe, "--core"}, append(os.Environ(), coreDetachedEnv+"=1"), filepath.Join(dataDir, "core.log"), filepath.Join(dataDir, "hook.port")); err != nil {
 		return LocalEndpointInfo{}, err
 	}
 	var last error
