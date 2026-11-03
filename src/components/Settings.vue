@@ -156,13 +156,6 @@
               </div>
               <Switch :checked="ui.subagentAutoDeliver" @update:checked="(v: boolean) => ui.subagentAutoDeliver = v" />
             </div>
-            <div v-if="isDesktop()" class="s-row">
-              <div class="mb-2 flex flex-col gap-0.5">
-                <span class="text-[13px] font-medium text-foreground">Permissions</span>
-                <span class="text-[11px] text-muted-foreground">What macOS lets Burrow do. Each one is checked against the process macOS asks about.</span>
-              </div>
-              <PermissionsPanel />
-            </div>
             <div v-if="canOpenWindows()" class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Float popped-out windows</span>
@@ -350,6 +343,12 @@
             </div>
           </div>
           <div class="h-px bg-border" />
+
+          <div v-if="isDesktop()" class="flex flex-col gap-2.5">
+            <span class="s-label">Permissions</span>
+            <span class="-mt-1 text-[11px] text-muted-foreground">What macOS lets Burrow do, checked against the process macOS asks about: the background core for chats, burrow-daemon for terminals.</span>
+            <PermissionsPanel />
+          </div>
 
           <div class="flex flex-col gap-2.5">
             <span class="s-label">Chat usage</span>

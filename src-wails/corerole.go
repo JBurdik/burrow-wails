@@ -168,11 +168,33 @@ func runCore() {
 // (plan 009): same decisions as the phone push (pushtrigger.go); a click
 // opens the UI at the chat / tab.
 func setupNativeNotifications(n *notifications.NotificationService) {
+	send := func(title, body, url, tag string) {
+		err := n.SendNotification(notifications.NotificationOptions{
+			ID:    tag + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+			Title: title,
+			Body:  body,
+			Data:  map[string]interface{}{"url": url},
+		})
+		if err != nil {
+			log.Printf("core: notify: %v", err)
+		}
+	}
+	// Only an authorized core takes notifications over from the webview.
+	authorize := func(ok bool) string {
+		if ok {
+			nativeNotifier.Store(&send)
+			return "granted"
+		}
+		nativeNotifier.Store(nil)
+		return "denied"
+	}
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		go func() {
-			if ok, err := n.RequestNotificationAuthorization(); !ok {
-				log.Printf("core: notifications not authorized (%v)", err)
+			ok, err := n.RequestNotificationAuthorization()
+			if !ok {
+				log.Printf("core: notifications not authorized (%v); the window posts them", err)
 			}
+			authorize(ok)
 		}()
 	})
 	n.OnNotificationResponse(func(r notifications.NotificationResult) {
@@ -186,6 +208,7 @@ func setupNativeNotifications(n *notifications.NotificationService) {
 		ok, err := n.CheckNotificationAuthorization()
 		switch {
 		case ok:
+			authorize(true) // granted later in System Settings
 			return "granted"
 		case err != nil:
 			return "denied"
@@ -193,21 +216,8 @@ func setupNativeNotifications(n *notifications.NotificationService) {
 		return "not_determined"
 	}
 	nativeNotifyRequest = func() string {
-		if ok, _ := n.RequestNotificationAuthorization(); ok {
-			return "granted"
-		}
-		return "denied"
-	}
-	nativeNotify = func(title, body, url, tag string) {
-		err := n.SendNotification(notifications.NotificationOptions{
-			ID:    tag + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
-			Title: title,
-			Body:  body,
-			Data:  map[string]interface{}{"url": url},
-		})
-		if err != nil {
-			log.Printf("core: notify: %v", err)
-		}
+		ok, _ := n.RequestNotificationAuthorization()
+		return authorize(ok)
 	}
 }
 

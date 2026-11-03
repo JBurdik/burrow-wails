@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"burrow/internal/agentphase"
@@ -71,10 +72,12 @@ func (p *webPusher) claim(key string, now time.Time) bool {
 	return true
 }
 
-// nativeNotify posts an OS notification; set only by the external core
+// nativeNotifier posts an OS notification; set only by the external core
 // (plan 009), which owns native notifications there — nil in-process, where
 // the webview still posts its own.
-var nativeNotify func(title, body, url, tag string)
+// once macOS authorized it — until then (or for good, if refused) the
+// webview keeps posting its own (notification.ts asks privacy_status).
+var nativeNotifier atomic.Pointer[func(title, body, url, tag string)]
 
 // pushPhaseChanged runs under PhaseStore.emitMu: decide cheaply, send async.
 func (a *App) pushPhaseChanged(key string, prev, next agentphase.Phase) {
@@ -83,7 +86,7 @@ func (a *App) pushPhaseChanged(key string, prev, next agentphase.Phase) {
 	}
 	if reason := pushReason(key, prev.State, next.State); reason != "" {
 		go a.pushFor(key, reason, next, true)
-	} else if nativeNotify != nil && strings.HasPrefix(key, "pty:") && next.State == agentphase.Done && prev.State != next.State {
+	} else if nativeNotifier.Load() != nil && strings.HasPrefix(key, "pty:") && next.State == agentphase.Done && prev.State != next.State {
 		// A tab's finished turn: the desktop said so (Terminal.vue did), the
 		// phone deliberately does not (pushReason).
 		go a.pushFor(key, "done", next, false)
@@ -169,8 +172,8 @@ func (a *App) pushFor(key, reason string, ph agentphase.Phase, phone bool) {
 		msg.Body = "Snooze ended"
 	}
 	now := time.Now()
-	if nativeNotify != nil && a.push.claimNative(key, now) {
-		nativeNotify(msg.Title, msg.Body, msg.URL, key)
+	if notify := nativeNotifier.Load(); notify != nil && a.push.claimNative(key, now) {
+		(*notify)(msg.Title, msg.Body, msg.URL, key)
 	}
 	if !phone || !a.push.claim(key, now) {
 		return

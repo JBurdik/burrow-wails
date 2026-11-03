@@ -1,5 +1,6 @@
 import { isDesktop } from "./desktop";
 import { CoreNotifies } from "./bindings/burrow/desktopservice";
+import { invoke } from "./core";
 
 // Shim for "@tauri-apps/plugin-notification". Wails has no built-in native
 // notification API; falls back to the Web Notification API, which works
@@ -14,13 +15,22 @@ export async function requestPermission(): Promise<"granted" | "denied" | "defau
   return Notification.requestPermission();
 }
 
-// Plan 009: with an external core (dev/beta) the core posts every OS
-// notification itself, so a webview banner would be a duplicate. Toasts stay.
-let coreNotifies: Promise<boolean> | null = null;
-function coreOwnsNotifications(): Promise<boolean> {
-  if (!isDesktop()) return Promise.resolve(false);
-  coreNotifies ??= CoreNotifies().catch(() => false);
-  return coreNotifies;
+// Plan 009: with an external core (dev/beta) the core posts OS notifications
+// itself once macOS authorized it, so a webview banner would be a duplicate;
+// until then — or for good, if macOS refuses the core — the webview keeps
+// posting them. Re-checked at most every 30 s. Toasts are unaffected.
+let coreCheckedAt = 0;
+let coreOwns = false;
+async function coreOwnsNotifications(): Promise<boolean> {
+  if (!isDesktop()) return false;
+  if (Date.now() - coreCheckedAt < 30_000) return coreOwns;
+  coreCheckedAt = Date.now();
+  try {
+    coreOwns = (await CoreNotifies()) && (await invoke<{ notifications: string }>("privacy_status")).notifications === "granted";
+  } catch {
+    coreOwns = false;
+  }
+  return coreOwns;
 }
 
 export async function sendNotification(opts: string | { title?: string; body?: string }): Promise<void> {
