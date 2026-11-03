@@ -362,6 +362,12 @@ ios_identity := "DF4CCBA4F69D30AC9FB6A092DB5AB32217DEFDF7"
 ios_profile := env_var('HOME') + "/Library/Developer/Xcode/UserData/Provisioning Profiles/676ff5a2-9942-40d8-95ed-5dcfbdb5f1d4.mobileprovision"
 IOS_DEVICE := "00008140-000E253124A2201C"
 ios:
+    # The shell embeds its own copy of the phone bundle (src-ios/frontend/dist,
+    # gitignored): rebuild it first, or the app ships whatever was copied last.
+    just build-mobile
+    rm -rf src-ios/frontend/dist
+    cp -R src-wails/dist-mobile/app src-ios/frontend/dist
+    cp src-ios/frontend/dist/mobile.html src-ios/frontend/dist/index.html
     cd src-ios && PATH="$HOME/go/bin:$PATH" wails3 task ios:package IOS_PLATFORM=device CODESIGN_IDENTITY={{ios_identity}} PROVISIONING_PROFILE="{{ios_profile}}"
     xcrun devicectl device install app --device {{IOS_DEVICE}} src-ios/bin/burrow-ios.app
     xcrun devicectl device process launch --device {{IOS_DEVICE}} com.jburdik.burrow.ios
