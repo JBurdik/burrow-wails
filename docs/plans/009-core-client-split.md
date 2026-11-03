@@ -172,6 +172,15 @@ packaged bundle; errors show under the Settings toggle).
 Version in `welcome`; updater swaps the bundle → asks the core to
 restart-when-settled; banner in the UI.
 
+**Protocol part done (2026-11-04):** `welcome` carries `rev` + `minClientRev`
+(not the app version — the wire revision is what decides compatibility; two
+app versions with the same rev interoperate). The client compares
+(`checkProtocolRev` in `transport.ts`), stops reconnecting on a mismatch and
+shows a banner (`core.ts` `watchIncompatible`): phone → Reload, desktop →
+"quit completely (⌥⌘Q) and reopen". Still open for D: the core restarting
+itself on an incompatible UI (today the user does it), restart-when-settled
+after an update, and the app version in `welcome` if the banner should name it.
+
 **Done (2026-11-03), simpler than planned:** no version handshake — the core
 watches its own binary (`exeFingerprint`: size + mtime, every lifecycle tick)
 and, once it changed, restarts as soon as no chat turn is open

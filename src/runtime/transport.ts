@@ -43,7 +43,43 @@ export interface Transport {
    * "connecting" until the next transition. Returns an unlisten.
    */
   onState(handler: (up: boolean) => void): () => void;
+  /**
+   * Called once when the core's `welcome` says this client and the core speak
+   * incompatible protocol revisions (checkProtocolRev). The transport has
+   * stopped for good by then — reconnecting would only meet the same core.
+   * Invoked immediately if that already happened. Returns an unlisten.
+   */
+  onIncompatible(handler: (why: Incompatible) => void): () => void;
   close(): void;
+}
+
+/**
+ * The /v2/ws wire revision this client speaks, and the oldest core rev it
+ * still works with. Mirrors protocolRev / minClientRev in
+ * src-wails/remoteproto.go: bump PROTOCOL_REV there and here on any BREAKING
+ * wire change (frame tags, command names / argument shapes, event names /
+ * payloads); additive changes don't count.
+ */
+export const PROTOCOL_REV = 1;
+export const MIN_SERVER_REV = 1;
+
+/** "client-old": this bundle predates what the core requires (reload / restart
+ *  the UI). "core-old": the core predates what this bundle requires (restart
+ *  the core). */
+export type Incompatible = "client-old" | "core-old";
+
+/**
+ * Compares the welcome frame's revs. A core from before the handshake sends
+ * neither field; it speaks rev 1, the wire as it was when revs were introduced.
+ */
+export function checkProtocolRev(
+  welcome: { rev?: number; minClientRev?: number },
+  clientRev = PROTOCOL_REV,
+  minServerRev = MIN_SERVER_REV,
+): Incompatible | null {
+  if (clientRev < (welcome.minClientRev ?? 1)) return "client-old";
+  if ((welcome.rev ?? 1) < minServerRev) return "core-old";
+  return null;
 }
 
 interface Pending {
@@ -85,6 +121,9 @@ export function createTransport(
     WebSocketImpl?: typeof WebSocket;
     backoff?: Backoff;
     maxConnectFailures?: number;
+    /** Test seam: the revs this client claims (default PROTOCOL_REV / MIN_SERVER_REV). */
+    clientRev?: number;
+    minServerRev?: number;
   } = {},
 ): Transport {
   const WS = opts.WebSocketImpl ?? WebSocket;
@@ -114,6 +153,8 @@ export function createTransport(
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const resyncHandlers = new Set<() => void>();
   const stateHandlers = new Set<(up: boolean) => void>();
+  const incompatibleHandlers = new Set<(why: Incompatible) => void>();
+  let incompatible: Incompatible | null = null;
   let up = false;
 
   function setState(next: boolean) {
@@ -253,6 +294,19 @@ export function createTransport(
       return;
     }
     if (frame?.t === "welcome") {
+      const why = checkProtocolRev(frame, opts.clientRev, opts.minServerRev);
+      if (why) {
+        // Stop for good: every reconnect would meet the same core. Calls
+        // queued or already flushed on this socket fail with the reason.
+        incompatible = why;
+        closed = true;
+        failPending(`protocol mismatch: ${why}`);
+        ws?.close();
+        ws = null;
+        setState(false);
+        for (const h of incompatibleHandlers) h(why);
+        return;
+      }
       // Only as a floor, and only when this client holds nothing: a client
       // that connects, never snapshots and then drops still resumes from
       // where the server was when it arrived, rather than from zero.
@@ -273,6 +327,7 @@ export function createTransport(
 
   return {
     invoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+      if (incompatible) return Promise.reject(new Error(`protocol mismatch: ${incompatible}`));
       if (closed) return Promise.reject(new Error("transport closed"));
       // Queueing here would be queueing onto a connection that has already
       // failed to come up `maxConnectFailures` times in a row; the reconnect
@@ -317,6 +372,12 @@ export function createTransport(
       // healthy connection is never.
       handler(up);
       return () => stateHandlers.delete(handler);
+    },
+
+    onIncompatible(handler: (why: Incompatible) => void): () => void {
+      incompatibleHandlers.add(handler);
+      if (incompatible) handler(incompatible);
+      return () => incompatibleHandlers.delete(handler);
     },
 
     close() {

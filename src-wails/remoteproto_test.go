@@ -111,3 +111,26 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+// The welcome frame is the whole version handshake: the client compares its
+// own rev against minClientRev and the core's rev against what it needs.
+func TestWelcomeCarriesProtocolRev(t *testing.T) {
+	b, err := json.Marshal(welcomeFrame("env", nil, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Rev          int `json:"rev"`
+		MinClientRev int `json:"minClientRev"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Rev != protocolRev || got.MinClientRev != minClientRev {
+		t.Fatalf("welcome rev = %d/%d, want %d/%d", got.Rev, got.MinClientRev, protocolRev, minClientRev)
+	}
+	// A core that refuses clients built from its own sources is unusable.
+	if minClientRev < 1 || minClientRev > protocolRev {
+		t.Fatalf("minClientRev %d must be in [1, protocolRev %d]", minClientRev, protocolRev)
+	}
+}

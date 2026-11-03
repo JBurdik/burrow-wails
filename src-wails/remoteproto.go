@@ -45,7 +45,25 @@ type serverFrame struct {
 	EnvironmentID string        `json:"environmentId,omitempty"`
 	Scopes        []remoteScope `json:"scopes,omitempty"`
 	Seq           int64         `json:"seq,omitempty"`
+	Rev           int           `json:"rev,omitempty"`
+	MinClientRev  int           `json:"minClientRev,omitempty"`
 }
+
+// protocolRev numbers the /v2/ws wire contract (frame tags, command names and
+// argument shapes, event names and payloads). Bump it on any BREAKING wire
+// change; additive ones (a new command, a new optional field) don't count.
+// minClientRev is the oldest client rev this core still serves: raise it when
+// a change breaks old clients. Mirrored in src/runtime/transport.ts
+// (PROTOCOL_REV / MIN_SERVER_REV). The CLIENT compares, because the stale side
+// (a cached phone bundle, a UI not restarted after an update) is the one that
+// has to stop reconnecting and tell the user.
+//
+// ponytail: no compat/migration registry. Add per-rev shims at the first
+// breaking wire change that can't simply require a reload / restart.
+const (
+	protocolRev  = 1
+	minClientRev = 1
+)
 
 func decodeClientFrame(b []byte) (clientFrame, error) {
 	var f clientFrame
@@ -102,5 +120,5 @@ func resyncFrame() serverFrame { return serverFrame{T: "resync"} }
 // drops. Without it a reconnecting client's first resume is a guess, and a
 // first-time client has nothing to guess from at all.
 func welcomeFrame(envID string, scopes []remoteScope, seq int64) serverFrame {
-	return serverFrame{T: "welcome", EnvironmentID: envID, Scopes: scopes, Seq: seq}
+	return serverFrame{T: "welcome", EnvironmentID: envID, Scopes: scopes, Seq: seq, Rev: protocolRev, MinClientRev: minClientRev}
 }

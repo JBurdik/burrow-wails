@@ -15,7 +15,7 @@ import {
   SendFloatSnapshot,
 } from "./bindings/burrow/desktopservice";
 import { isDesktop } from "./desktop";
-import { createTransport, type Transport } from "@/runtime/transport";
+import { createTransport, type Incompatible, type Transport } from "@/runtime/transport";
 import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource, setActiveEnvironment } from "@/runtime/remoteEndpoint";
 
 type Args = Record<string, any>;
@@ -40,6 +40,43 @@ let transport: Transport | null = null;
 let remote: Transport | null = null;
 
 /**
+ * A protocol-rev mismatch (transport.ts checkProtocolRev) stops the transport
+ * for good, so the UI would otherwise just freeze. Plain DOM, like
+ * src/mobile/main.ts's unreachable bar: it must render with every store dead.
+ *
+ * Phone + "client-old": the core serves the new bundle, so Reload fixes it.
+ * Desktop: UI and core come from one bundle, so either direction means a
+ * process still running the pre-update binary — quitting both and reopening
+ * is the fix until plan 009 phase D restarts the core itself.
+ */
+function watchIncompatible(t: Transport, desktop: boolean): Transport {
+  t.onIncompatible((why: Incompatible) => {
+    if (typeof document === "undefined" || document.getElementById("burrow-incompatible")) return;
+    const bar = document.createElement("div");
+    bar.id = "burrow-incompatible";
+    bar.setAttribute("role", "alert");
+    bar.style.cssText =
+      "position:fixed;top:0;left:0;right:0;z-index:10000;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;" +
+      "background:var(--destructive,#b91c1c);color:#fff;font:500 12px/1.4 system-ui,sans-serif;text-align:center";
+    const reloadFixes = !desktop && why === "client-old" && !hasWailsRuntime(); // a desktop window driving another Mac has its bundle embedded
+    bar.textContent = desktop
+      ? "Burrow was updated: this window and the background core no longer match. Quit Burrow completely (⌥⌘Q) and reopen it."
+      : reloadFixes
+        ? "This app is older than Burrow on your Mac. "
+        : "Burrow on your Mac is older than this app. Update or restart Burrow on the Mac, then reload.";
+    if (reloadFixes) {
+      const b = document.createElement("button");
+      b.textContent = "Reload";
+      b.style.cssText = "margin-left:8px;padding:2px 10px;border-radius:6px;border:1px solid #fff;background:transparent;color:#fff;font:inherit";
+      b.onclick = () => location.reload();
+      bar.append(b);
+    }
+    document.body.appendChild(bar);
+  });
+  return t;
+}
+
+/**
  * Whether we are running inside the Wails webview at all.
  *
  * vite.config.ts aliases `@tauri-apps/api/core` to this file for BOTH bundles,
@@ -56,10 +93,10 @@ function hasWailsRuntime(): boolean {
  *  for a fresh single-use ticket, including on every reconnect. */
 export function desktopTransport(): Transport {
   if (!transport) {
-    transport = createTransport(async () => {
+    transport = watchIncompatible(createTransport(async () => {
       const info = await LocalEndpoint();
       return { wsUrl: info.ws_url, ticket: info.ticket };
-    });
+    }), true);
   }
   return transport;
 }
@@ -75,7 +112,7 @@ export function desktopTransport(): Transport {
  * the credentials appear.
  */
 export function remoteTransport(): Transport {
-  if (!remote) remote = createTransport(remoteEndpointSource(loadRemoteCredentials));
+  if (!remote) remote = watchIncompatible(createTransport(remoteEndpointSource(loadRemoteCredentials)), false);
   return remote;
 }
 

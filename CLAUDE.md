@@ -437,6 +437,13 @@ that reshape args.
   the `EndpointSource`; `boundary.test.ts` keeps `src/runtime` from importing components/stores/xterm).
   It queues pre-open calls, keeps its listener map across reconnects, asks for a fresh ticket on every attempt,
   and **rejects queued calls rather than replaying them** on a real drop.
+- **Protocol revision** (`protocolRev` / `minClientRev` in `remoteproto.go`, mirrored as `PROTOCOL_REV` /
+  `MIN_SERVER_REV` in `transport.ts`): `welcome` carries `rev` + `minClientRev`; the **client** compares
+  (`checkProtocolRev`; a welcome without them = rev 1). Mismatch ⇒ the transport stops for good, rejects calls and
+  fires `onIncompatible("client-old" | "core-old")`; `core.ts` shows a banner (phone + client-old: Reload, the core
+  serves the new bundle; desktop: quit completely and reopen). **Bump `protocolRev` on any breaking wire change**
+  (frame tags, command names / arg shapes, event names / payloads) and raise `minClientRev` if old clients can't cope;
+  additive changes don't count. No compat registry until the first break that can't just require a reload.
 
 ### Native windows + the desktop shell (`src-wails/desktop.go`, `src/WindowApp.vue`, `src/lib/windows.ts`)
 

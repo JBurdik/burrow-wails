@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 const made: { close: ReturnType<typeof vi.fn> }[] = [];
 vi.mock("@/runtime/transport", () => ({
   createTransport: () => {
-    const t = { close: vi.fn() };
+    const t = { close: vi.fn(), onIncompatible: vi.fn() };
     made.push(t);
     return t;
   },

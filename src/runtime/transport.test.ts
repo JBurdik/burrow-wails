@@ -466,3 +466,64 @@ describe("createTransport", () => {
     });
   });
 });
+
+describe("protocol revision handshake", () => {
+  function setupRevs(clientRev: number, minServerRev: number) {
+    FakeWS.instances = [];
+    const t = createTransport(async () => ({ wsUrl: "ws://x/v2/ws", ticket: "t" }), {
+      WebSocketImpl: FakeWS as unknown as typeof WebSocket,
+      backoff: createBackoff({ baseMs: 1, maxMs: 1, jitter: () => 0 }),
+      clientRev,
+      minServerRev,
+    });
+    return t;
+  }
+  function openWith(ws: FakeWS, welcome: Record<string, unknown>) {
+    ws.readyState = 1;
+    ws.onopen?.();
+    ws.deliver({ t: "welcome", environmentId: "env", scopes: [], ...welcome });
+  }
+
+  it("compatible revs (and a pre-handshake core sending none) change nothing", async () => {
+    for (const welcome of [{ rev: 2, minClientRev: 1 }, {}]) {
+      const t = setupRevs(1, 1);
+      const why = vi.fn();
+      t.onIncompatible(why);
+      await tick();
+      const ws = FakeWS.instances[0];
+      openWith(ws, welcome);
+      const p = t.invoke<number>("answer");
+      await tick();
+      ws.deliver({ t: "reply", id: ws.lastCall().id, result: 1 });
+      await expect(p).resolves.toBe(1);
+      expect(why).not.toHaveBeenCalled();
+      t.close();
+    }
+  });
+
+  it("a client older than minClientRev stops for good and says so", async () => {
+    const t = setupRevs(1, 1);
+    const why = vi.fn();
+    t.onIncompatible(why);
+    await tick();
+    const pending = t.invoke("early");
+    openWith(FakeWS.instances[0], { rev: 3, minClientRev: 2 });
+    await expect(pending).rejects.toThrow("client-old");
+    expect(why).toHaveBeenCalledWith("client-old");
+    await expect(t.invoke("later")).rejects.toThrow("client-old");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(FakeWS.instances).toHaveLength(1); // no reconnect
+    const late = vi.fn();
+    t.onIncompatible(late);
+    expect(late).toHaveBeenCalledWith("client-old");
+  });
+
+  it("a core older than the client requires is core-old", async () => {
+    const t = setupRevs(2, 2);
+    const why = vi.fn();
+    t.onIncompatible(why);
+    await tick();
+    openWith(FakeWS.instances[0], { rev: 1, minClientRev: 1 });
+    expect(why).toHaveBeenCalledWith("core-old");
+  });
+});
