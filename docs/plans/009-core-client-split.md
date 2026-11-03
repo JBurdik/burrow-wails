@@ -181,7 +181,27 @@ updater and `just beta` alike. The new core waits ≤ 15 s for the old one's
 `core.lock`. Fixed on the way: the lock's `*os.File` was a local, so the GC
 finalizer closed it and dropped the flock — two cores could run side by
 side (`coreLock`). Not done: the UI process itself stays on the old binary
-until it is relaunched (no banner yet).
+until it is relaunched — it watches its own binary too (`watchUIBinary`) and
+emits `update:installed`, which puts UpdateBanner straight into "Update ready ·
+Restart" (`RelaunchApp`).
+
+### Permissions (onboarding + Settings, modelled on Rex Beta)
+
+macOS grants privacy permissions to the *responsible* process, and an app
+cannot read another process's grants, so each process reports for itself
+(Rex does the same: `server.apple.privacy_status` with a `responsible_path`):
+`internal/privacy.FullDiskAccess` (opens FDA-only directories — `/Library/Application
+Support/com.apple.TCC`, `~/Library/{Safari,Mail,Messages}` — which fail with
+EPERM silently; the home TCC.db is gone on newer macOS) runs in the core
+(chats) and in the daemon (new `privacy` request: terminals, since every shell
+is the daemon's). `privacy_status` / `request_notifications` are `ui:ack`
+commands (desktop only). `PermissionsPanel.vue` (onboarding step on desktop +
+Settings → General) lists notifications, FDA for chats (drag the .app), FDA
+for terminals (drag `burrow-daemon`) and the login item, re-reading every 2 s;
+"Grant…" opens the FDA pane and floats a native drag panel with the icon
+(`grantpanel_darwin.go`, file-URL drag source), closed once the grant shows up.
+Not verified: dragging into System Settings (no click automation); an old
+daemon reports terminals as unknown until it is restarted.
 
 ### E — stable switch
 

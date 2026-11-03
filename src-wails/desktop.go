@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -255,6 +256,20 @@ func (s *DesktopService) SetDockBadge(n int) {
 // CoreNotifies: native notifications come from the external core, so the
 // webview must not post its own (it still toasts).
 func (s *DesktopService) CoreNotifies() bool { return s.ui }
+
+// ShowGrantHelper opens System Settings at pane (an x-apple.systempreferences
+// URL) and floats path's icon beside it to drag into the list; Close hides it.
+func (s *DesktopService) ShowGrantHelper(path, pane, title, body string) {
+	showGrantHelper(path, pane, title, body)
+}
+func (s *DesktopService) CloseGrantHelper() { closeGrantHelper() }
+
+// OpenSystemSettings opens an x-apple.systempreferences URL (or any URL).
+func (s *DesktopService) OpenSystemSettings(url string) {
+	if strings.HasPrefix(url, "x-apple.systempreferences:") {
+		_ = exec.Command("/usr/bin/open", url).Start()
+	}
+}
 
 // ExternalCore: the backend runs as its own process (dev/beta, plan 009).
 func (s *DesktopService) ExternalCore() bool { return s.ui }

@@ -156,12 +156,12 @@
               </div>
               <Switch :checked="ui.subagentAutoDeliver" @update:checked="(v: boolean) => ui.subagentAutoDeliver = v" />
             </div>
-            <div v-if="externalCore" class="flex items-center gap-4 s-row">
-              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
-                <span class="text-[13px] font-medium text-foreground">Start Burrow at login</span>
-                <span class="text-[11px] text-muted-foreground">Keeps chats, schedules and the phone working from the moment you log in, before the window is opened, and the background part never stops on its own.<template v-if="coreLoginHint"> {{ coreLoginHint }}</template></span>
+            <div v-if="isDesktop()" class="s-row">
+              <div class="mb-2 flex flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Permissions</span>
+                <span class="text-[11px] text-muted-foreground">What macOS lets Burrow do. Each one is checked against the process macOS asks about.</span>
               </div>
-              <Switch :checked="ui.coreAtLogin" @update:checked="setCoreAtLogin" />
+              <PermissionsPanel />
             </div>
             <div v-if="canOpenWindows()" class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
@@ -1314,7 +1314,8 @@ import { useUIStore, UI_FONTS, TERMINAL_FONTS, NTFY_EVENTS, TOAST_POSITIONS, TEX
 import { releaseChannel } from "@/lib/releaseChannel";
 import { compact } from "@/lib/viewport";
 import { canOpenWindows } from "@/lib/windows";
-import { CoreAtLogin, ExternalCore, TraySetHotkey } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
+import { TraySetHotkey } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
+import PermissionsPanel from "@/components/PermissionsPanel.vue";
 import { isDesktop } from "@/lib/wailsCompat/desktop";
 import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
@@ -1385,30 +1386,6 @@ const themeFamilyCards = computed(() =>
 
 const ui = useUIStore();
 
-// Plan 009: on dev/beta the backend is its own process; this registers it as
-// a login item (SMAppService, Contents/Library/LaunchAgents/core.plist).
-// ui.coreAtLogin is what keeps the core from quitting when idle (coreidle.go).
-const externalCore = ref(false);
-const coreLoginState = ref("");
-if (isDesktop()) {
-  void ExternalCore().then(async (ext) => {
-    externalCore.value = ext;
-    if (!ext) return;
-    coreLoginState.value = await CoreAtLogin("");
-    if (coreLoginState.value === "on" || coreLoginState.value === "off") ui.coreAtLogin = coreLoginState.value === "on";
-  }).catch(() => {});
-}
-async function setCoreAtLogin(on: boolean) {
-  coreLoginState.value = await CoreAtLogin(on ? "on" : "off").catch((e: unknown) => `error: ${e}`);
-  ui.coreAtLogin = on && (coreLoginState.value === "on" || coreLoginState.value === "needs-approval");
-}
-const coreLoginHint = computed(() => {
-  const st = coreLoginState.value;
-  if (st === "needs-approval") return "Allow it in System Settings → General → Login Items.";
-  if (st === "unavailable") return "Not available in this build.";
-  if (st === "unsupported") return "Needs macOS 13 or later.";
-  return st.startsWith("error") ? st : "";
-});
 
 function assignedFamily(scheme: "light" | "dark") {
   return scheme === "dark" ? ui.darkFamily.key : ui.lightFamily.key;

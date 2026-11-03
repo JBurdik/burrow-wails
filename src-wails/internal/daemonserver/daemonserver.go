@@ -5,6 +5,7 @@ package daemonserver
 
 import (
 	"bufio"
+	"burrow/internal/privacy"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -146,6 +147,9 @@ func (s *Server) handle(req daemonproto.Request) *daemonproto.Response {
 	case "version":
 		resp.ExePath, _ = os.Executable()
 		resp.Pid = os.Getpid()
+	case "privacy":
+		resp.ExePath, _ = os.Executable()
+		resp.FDA = privacy.FullDiskAccess()
 	default:
 		err = fmt.Errorf("unknown request kind: %s", req.Kind)
 	}

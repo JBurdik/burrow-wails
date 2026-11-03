@@ -9,7 +9,7 @@ package daemonproto
 // Request is a client -> daemon message. Kind selects which fields matter.
 type Request struct {
 	ReqID string   `json:"reqId"`
-	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list" | "foreground" | "version" | "since"
+	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list" | "foreground" | "version" | "since" | "privacy"
 	ID    string   `json:"id,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`
 	Env   []string `json:"env,omitempty"`
@@ -34,7 +34,10 @@ type Response struct {
 	// "orphaned process left over from a deleted build/worktree" and replace
 	// the latter instead of silently reattaching to dead code forever.
 	ExePath string `json:"exePath,omitempty"`
-	Pid     int    `json:"pid,omitempty"`
+	// FDA answers "privacy": this daemon's own Full Disk Access (it is the
+	// process macOS holds responsible for every shell), with ExePath.
+	FDA string `json:"fda,omitempty"`
+	Pid int    `json:"pid,omitempty"`
 	// For "since": the PTY's output from Off on (Off is later than the asked
 	// offset when the daemon's ring no longer holds all of it).
 	Off  uint64 `json:"off,omitempty"`

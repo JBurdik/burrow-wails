@@ -26,6 +26,10 @@ export function CheckUpdate(): $CancellablePromise<$models.UpdateInfo> {
     return $Call.ByID(3715642294);
 }
 
+export function CloseGrantHelper(): $CancellablePromise<void> {
+    return $Call.ByID(2830080927);
+}
+
 export function CloseWindow(key: string): $CancellablePromise<void> {
     return $Call.ByID(2033037563, key);
 }
@@ -75,6 +79,13 @@ export function NotifyFloatGrid(ptyID: string, cols: number, rows: number): $Can
 }
 
 /**
+ * OpenSystemSettings opens an x-apple.systempreferences URL (or any URL).
+ */
+export function OpenSystemSettings(url: string): $CancellablePromise<void> {
+    return $Call.ByID(1092126005, url);
+}
+
+/**
  * floating disables the zoom/fullscreen button: tiling window managers
  * (AeroSpace's isDialogHeuristic) treat such a window as a dialog and float
  * it instead of tiling it, as System Settings is — right for Settings, while
@@ -117,6 +128,14 @@ export function SendFloatSnapshot(ptyID: string, data: string, cols: number, row
  */
 export function SetDockBadge(n: number): $CancellablePromise<void> {
     return $Call.ByID(2833619663, n);
+}
+
+/**
+ * ShowGrantHelper opens System Settings at pane (an x-apple.systempreferences
+ * URL) and floats path's icon beside it to drag into the list; Close hides it.
+ */
+export function ShowGrantHelper(path: string, pane: string, title: string, body: string): $CancellablePromise<void> {
+    return $Call.ByID(341382518, path, pane, title, body);
 }
 
 /**

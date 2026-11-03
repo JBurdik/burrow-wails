@@ -755,10 +755,18 @@ Branch name and chat title return `""` on failure so the caller keeps what it al
 | `\x1b]9998;running\x07` | PTY → app | Claude hook: processing user prompt |
 | `\x1b]9998;waiting\x07` | PTY → app | Claude hook: waiting for user input |
 | `\x1b]9998;done\x07` | PTY → app | Claude hook: turn complete |
+| `\x1b]7501;state=…:msg=<b64>\x07` (or `ESC \`) | PTY → app | Program Status Protocol ([spec](https://www.superlogical.com/rex/docs/build/program-status.md)): any program reports idle/working/blocked/done/error. Parsed **server-side** (`internal/progstatus`, tapped in `daemonclient.go`'s read loop) into the PTY phase |
 
 Writes go to `/dev/tty` with `2>/dev/null || true`. **No `burrow` subcommand uses OSC**: app actions go
 over the loopback control API and results are exchanged as files in `BURROW_SESSION_DIR`, because agent
 subprocesses have no controlling tty. `XTerm.vue` keeps a latent `OSC 9999;spawn` parser that nothing emits.
+
+**OSC 7501** → `agentphase.ProgramStatus`: working→running, blocked(kind=permission)→waiting_approval, other blocked→
+waiting_input, done→done, error→failed, idle/clear→idle (only cancels an in-flight turn, never an unseen done); `msg` →
+`detail`. Root record only — child `id`s are ignored. A report marks the leaf `is_agent`, so the poll can't overwrite a
+`blocked` with `PollBusy`; the shell-prompt branch clears it and settles leftovers to done (the spec's "drop working/
+blocked on exit / next prompt"). Burrow never answers `OSC 7501 ; ?` — Claude Code probes with it and stays silent
+without a reply, so its hooks/status file stay the only Claude inputs; an agent emitting both is one process, latest wins.
 
 ## Auto-update
 

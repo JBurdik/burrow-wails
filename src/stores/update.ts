@@ -1,6 +1,8 @@
 import { ref, computed } from "vue";
 import { defineStore } from "pinia";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { listen } from "@tauri-apps/api/event";
+import { isDesktop } from "@/lib/wailsCompat/desktop";
 
 // Lazy-imported so a browser-only `pnpm dev` (no Tauri) doesn't crash on the
 // plugin's window.__TAURI__ access at module load.
@@ -31,6 +33,16 @@ export const useUpdateStore = defineStore("update", () => {
   const lastChecked = ref<number | null>(null);
 
   let handle: UpdateHandle | null = null;
+
+  // The bundle was replaced under this window (`just beta`, or the updater in
+  // another window): the core restarts itself (plan 009), this process cannot,
+  // so the banner goes straight to "Update ready · Restart". Desktop only.
+  if (isDesktop()) {
+    void listen<string>("update:installed", (e) => {
+      if (e.payload) newVersion.value = e.payload;
+      installed.value = true;
+    }).catch(() => {});
+  }
 
   // Banner shows only if an update is available AND the user hasn't dismissed
   // this exact version (dismissal is per-version so a newer one re-nags).

@@ -16,6 +16,7 @@ var wailsRuntimeAllowlist = map[string]string{
 	"main_headless.go":     "defines the no-op desktopEmit",
 	"main.go":              "menu items, file-drop",
 	"updater.go":           "update:progress, desktop-only",
+	"corerole.go":          "update:installed, the UI process's own binary was replaced",
 	"stubs.go":             "float window snapshots, desktop-only",
 	"trayhotkey_darwin.go": "menu-tray-compose, the tray panel window only",
 }

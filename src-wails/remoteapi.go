@@ -446,9 +446,13 @@ var remoteAllowed = map[string]remoteCmd{
 
 	// LSP
 	"waiting_count": {Method: "WaitingCount", Args: nil, Scope: scopeOrchRead},
-	"lsp_start":     {Method: "LspStart", Args: []string{"id", "command", "args", "cwd"}, Scope: scopeOrchOperate},
-	"lsp_send":      {Method: "LspSend", Args: []string{"id", "message"}, Scope: scopeOrchOperate},
-	"lsp_stop":      {Method: "LspStop", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// This Mac's own privacy permissions: only the desktop UI asks (ui:ack is
+	// granted by LocalEndpoint / local-ticket alone), never a phone.
+	"privacy_status":        {Method: "PrivacyStatus", Args: nil, Scope: scopeUIAck},
+	"request_notifications": {Method: "RequestNotifications", Args: nil, Scope: scopeUIAck},
+	"lsp_start":             {Method: "LspStart", Args: []string{"id", "command", "args", "cwd"}, Scope: scopeOrchOperate},
+	"lsp_send":              {Method: "LspSend", Args: []string{"id", "message"}, Scope: scopeOrchOperate},
+	"lsp_stop":              {Method: "LspStop", Args: []string{"id"}, Scope: scopeOrchOperate},
 
 	// Providers. ProbeProvider passes its client-supplied `binary` straight to
 	// resolveAgentBin (claudechat.go), which returns any existing absolute

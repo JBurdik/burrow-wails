@@ -93,6 +93,7 @@ func main() {
 	})
 
 	if ui {
+		go watchUIBinary()
 		// Start (or find) the core now rather than on the webview's first
 		// ticket request, so a cold core boots while the window loads.
 		go func() {

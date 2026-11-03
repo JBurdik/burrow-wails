@@ -182,6 +182,22 @@ func setupNativeNotifications(n *notifications.NotificationService) {
 		url, _ := r.Response.UserInfo["url"].(string)
 		openUI(strings.TrimPrefix(url, "#"))
 	})
+	nativeNotifyStatus = func() string {
+		ok, err := n.CheckNotificationAuthorization()
+		switch {
+		case ok:
+			return "granted"
+		case err != nil:
+			return "denied"
+		}
+		return "not_determined"
+	}
+	nativeNotifyRequest = func() string {
+		if ok, _ := n.RequestNotificationAuthorization(); ok {
+			return "granted"
+		}
+		return "denied"
+	}
 	nativeNotify = func(title, body, url, tag string) {
 		err := n.SendNotification(notifications.NotificationOptions{
 			ID:    tag + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
@@ -255,6 +271,41 @@ func openUI(route string) {
 	if err := spawnChild(append([]string{exe}, args...), os.Environ(), nil); err != nil {
 		log.Printf("core: open ui: %v", err)
 	}
+}
+
+// watchUIBinary is the UI half of plan 009's update story: the core restarts
+// itself onto a new binary, but this process cannot without losing the
+// window, so it only tells the frontend (update:installed → the "Update
+// ready · Restart" banner, whose Restart is RelaunchApp).
+func watchUIBinary() {
+	started := exeFingerprint()
+	if started == "" {
+		return
+	}
+	for range time.Tick(30 * time.Second) {
+		if fp := exeFingerprint(); fp != "" && fp != started {
+			desktopEmit("update:installed", bundleVersion())
+			return
+		}
+	}
+}
+
+// bundleVersion reads CFBundleShortVersionString of the bundle this binary
+// is in now — the new one after an update. "" outside a bundle.
+func bundleVersion() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	i := strings.Index(exe, ".app/Contents/MacOS/")
+	if i < 0 {
+		return ""
+	}
+	out, err := exec.Command("/usr/libexec/PlistBuddy", "-c", "Print :CFBundleShortVersionString", exe[:i]+".app/Contents/Info.plist").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // uiStartRoute is the --route a core passed when it started this UI.
