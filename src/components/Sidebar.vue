@@ -119,7 +119,7 @@
                 :key="c.id"
                 class="sb-row flex w-full items-center gap-2 rounded-lg px-2.5 py-[6px] text-left"
                 :title="c.title"
-                @click="openSubagent(c.id, row.ws.id)"
+                @click="openSubagent(c.id, row)"
               >
                 <PhAsterisk :size="13" weight="bold" class="shrink-0" :class="c.status === 'idle' || !c.status ? 'text-muted-foreground' : 'text-[#E0876A]'" />
                 <span class="min-w-0 flex-1 truncate text-[13px] text-foreground/85">{{ c.title }}</span>
@@ -687,7 +687,7 @@ import {
   EMPTY_WORKING_SHELF,
   type ActivityRow,
 } from "@/lib/sidebarGroups";
-import { childrenOf } from "@/stores/chatTree";
+import { childrenOf, activeChatIdFor } from "@/stores/chatTree";
 import { toggleTabSettled } from "@/lib/settledTabs";
 import { formatWakeTime, snoozePresets } from "@/lib/snoozePresets";
 import { getProjectSettings } from "@/lib/projectSettings";
@@ -910,8 +910,21 @@ function childrenOfChat(chatId: number): ClaudeSession[] {
   return childrenOf(chats.sessions, chatId);
 }
 const openRightPanelSubagent = inject<(chatId: number, workspaceId: number) => void>("openRightPanelSubagent", () => {});
-function openSubagent(chatId: number, wsId: number) {
-  openRightPanelSubagent(chatId, wsId);
+// The Right Panel only shows children of the thread on screen and drops an
+// open child on any thread switch — so open the parent first, then the child
+// once the parent is the active row.
+function openSubagent(chatId: number, row: ActivityRow) {
+  // Same source the Right Panel reads its active thread from.
+  const parentShown = () => ui.viewingTabs && store.active?.id === row.ws.id
+    && activeChatIdFor(termTabs.tabsByWs, termTabs.activeByWs, row.ws.id) === row.tab.chatId;
+  if (parentShown()) return openRightPanelSubagent(chatId, row.ws.id);
+  selectTab(row);
+  const stop = watch(parentShown, (on) => {
+    if (!on) return;
+    stop(); clearTimeout(timer);
+    void nextTick(() => openRightPanelSubagent(chatId, row.ws.id));
+  });
+  const timer = setTimeout(stop, 3000); // ponytail: navigation never landed — give up silently
 }
 
 const settledChatsLimit = ref(12);
