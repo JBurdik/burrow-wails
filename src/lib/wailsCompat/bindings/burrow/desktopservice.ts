@@ -134,8 +134,8 @@ export function SetDockBadge(n: number): $CancellablePromise<void> {
  * ShowGrantHelper opens System Settings at pane (an x-apple.systempreferences
  * URL) and floats path's icon beside it to drag into the list; Close hides it.
  */
-export function ShowGrantHelper(path: string, pane: string, title: string, body: string): $CancellablePromise<void> {
-    return $Call.ByID(341382518, path, pane, title, body);
+export function ShowGrantHelper(path: string, pane: string, title: string, body: string, theme: $models.GrantTheme): $CancellablePromise<void> {
+    return $Call.ByID(341382518, path, pane, title, body, theme);
 }
 
 /**

@@ -259,8 +259,8 @@ func (s *DesktopService) CoreNotifies() bool { return s.ui }
 
 // ShowGrantHelper opens System Settings at pane (an x-apple.systempreferences
 // URL) and floats path's icon beside it to drag into the list; Close hides it.
-func (s *DesktopService) ShowGrantHelper(path, pane, title, body string) {
-	showGrantHelper(path, pane, title, body)
+func (s *DesktopService) ShowGrantHelper(path, pane, title, body string, theme GrantTheme) {
+	showGrantHelper(path, pane, title, body, theme)
 }
 func (s *DesktopService) CloseGrantHelper() { closeGrantHelper() }
 

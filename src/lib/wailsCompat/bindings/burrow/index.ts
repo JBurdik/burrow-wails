@@ -7,6 +7,7 @@ export {
 };
 
 export type {
+    GrantTheme,
     LocalEndpointInfo,
     UpdateInfo
 } from "./models.js";

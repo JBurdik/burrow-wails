@@ -65,11 +65,34 @@ async function allowNotifications() {
   await refresh();
 }
 
+// The theme's CSS colours as "#rrggbb" for the native drag panel; the browser
+// normalises any CSS colour to rgb() for us.
+function cssHex(name: string): string {
+  const probe = document.createElement("span");
+  probe.style.color = `var(${name})`;
+  document.body.appendChild(probe);
+  const m = getComputedStyle(probe).color.match(/\d+(\.\d+)?/g);
+  probe.remove();
+  if (!m || m.length < 3) return "";
+  return "#" + m.slice(0, 3).map((n) => Math.round(Number(n)).toString(16).padStart(2, "0")).join("");
+}
+function grantTheme() {
+  const bg = cssHex("--bg-panel");
+  const [r, g, b] = bg ? [1, 3, 5].map((i) => parseInt(bg.slice(i, i + 2), 16)) : [0, 0, 0];
+  return {
+    bg,
+    fg: cssHex("--text-primary"),
+    muted: cssHex("--text-muted"),
+    border: cssHex("--border"),
+    dark: 0.299 * r + 0.587 * g + 0.114 * b < 128,
+  };
+}
+
 function grant(which: "chats" | "terminals") {
   const path = which === "chats" ? st.value?.chats_path : st.value?.terminals_path;
   if (!path) return;
   helperFor.value = which;
-  void ShowGrantHelper(path, FDA_PANE, "Full Disk Access", DRAG_HINT);
+  void ShowGrantHelper(path, FDA_PANE, "Full Disk Access", DRAG_HINT, grantTheme());
 }
 
 async function setLogin(on: boolean) {
