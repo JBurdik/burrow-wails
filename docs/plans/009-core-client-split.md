@@ -1,6 +1,7 @@
 # 009 — Split the backend into an always-on core and thin clients
 
-Status: **proposal, not started** (2026-11-03).
+Status: **decided, phase A in progress** (2026-11-03, branch `v3/core-client-split`).
+Decisions below came out of a grilling session; change one only on purpose.
 
 ## Why
 
@@ -21,11 +22,9 @@ whole backend.
 Related: on 2026-11-03 the daemon stopped being a launchd-subordinate of the
 app (`daemonspawn_darwin.go`, a throwaway launchd job). Before that the Dock
 showed a quit Burrow as "running in background" because of it. The core
-would need the same treatment.
+needs the same treatment.
 
 ## What is already in place
-
-The remote-access rewrite did most of the hard part:
 
 - The desktop window reads the backend **only** over `ws://127.0.0.1:<hookPort>/v2/ws`,
   like the phone (`src/runtime/transport.ts`). Its only in-process dependency
@@ -36,49 +35,85 @@ The remote-access rewrite did most of the hard part:
 - Every client-visible event goes through `busEmit`, with seq + ring + resume
   (`shellstream.go`), so a client can attach and detach freely.
 
+## Decisions
+
+| Topic | Decision |
+|---|---|
+| Goal of v1 | ⌘Q closes only the UI; the phone works with the app closed. Linux = phase 2, first-class |
+| Core start | on demand (the UI starts it); Settings toggle "start at login" (login item) |
+| PTY daemon | stays separate from the core (core crash / update must not take the shells) |
+| Core binary (Mac) | **one binary, two roles**: `Burrow --core` runs the core, plain `Burrow` runs the UI. Packaged as helper `Contents/Library/LoginItems/Burrow Core.app` (`LSUIElement`, copy of the same binary), registered via `SMAppService`. *Refines the grilling's "two entrypoints": `App` lives in `package main` (~200 files), a second `main` package would mean moving the whole backend.* |
+| Tray + notifications | in the core: tray menu, tray panel, global hotkey, **all** native notifications (gated by `chat_mark_active`, like `pushGate`). Dock badge stays in the UI |
+| ⌘Q | quits the UI; the core quits too **if it has no work** (below). ⌥⌘Q / tray "Quit Burrow Completely" always stops both |
+| Core has work | running turn or open request · non-empty queue, undelivered notices, armed limit resume · an active (unpaused) schedule · remote access on (then PTY agent tabs count too) · login-item mode. Otherwise the core exits after 5 min with no UI connected |
+| Last window closed | quits the UI process; "close = hide" goes away |
+| UI auth | the UI reads `<app-data>/control.token` (0600) and redeems it on loopback for an all-scope ticket incl. `ui:ack` (`POST /v2/local-ticket`). No other path mints `ui:ack` |
+| Version skew | `welcome` carries the core version. After an update the core restarts once everything settled (max ~30 min) with a banner meanwhile; an incompatible protocol restarts at once |
+| Deep links | URL scheme `burrow://…` handled by the UI (Wails `common:ApplicationLaunchedWithUrl`); notifications / tray open the UI through it |
+| CLI | verbs auto-start the core and wait ≤ 5 s; `burrow hook` / `burrow approve` never do (fire-and-forget; TUI decides) |
+| Modes | **dev + beta: external core only. Stable: in-process until it switches, then the in-process path is deleted.** Selected by `buildChannel`, no user flag |
+| Linux | `systemd --user`: `burrow-core.service` + separate `burrow-daemon.service`, linger, XDG paths, `burrow core install` |
+
 ## Target shape
 
 ```
-burrow-daemon        PTYs                    (unchanged, separate on purpose)
-burrow-core          App: everything above   LaunchAgent, always on
-Burrow.app (UI)      Wails windows + tray     client of burrow-core's /v2/ws
-phone / iPad         PWA                      client (unchanged)
+burrow-daemon             PTYs                         separate on purpose
+Burrow --core             App + tray + notifications   helper .app / systemd unit
+Burrow (UI)               Wails windows + Dock badge   client of the core's /v2/ws
+phone / iPad              PWA                          client (unchanged)
 ```
 
-Keep the daemon separate from the core: a core crash or update must not take
-the shells with it, just as a UI restart doesn't today.
+## Phases
 
-## Steps
+Each phase ships to beta on its own.
 
-1. **Core binary.** Build `main_headless.go` (darwin, cgo allowed) as
-   `Contents/MacOS/burrow-core` in the bundle. Bring it up by default instead
-   of in-process `App` behind a dev flag first (`BURROW_EXTERNAL_CORE=1`).
-2. **UI ↔ core bootstrap.** Replace `LocalEndpoint()` (in-process ticket) with
-   a local credential: the UI reads `<app-data>/control.token` (0600, same
-   user) and redeems it for a full-scope ticket incl. `ui:ack`. Being the
-   same Unix user is the authorization, like the CLI. Keep `ui:ack` off every
-   other path.
-3. **Lifecycle.** Register the core as a LaunchAgent via `SMAppService`
-   (macOS 13+; login item, visible in System Settings → Login Items). UI
-   starts it if not running, waits for `hook.port`, connects.
-   Needs a real "Quit Burrow completely" (tray + menu) that stops the core,
-   separate from ⌘Q = quit UI.
-4. **Version handshake.** `welcome` carries the core's version; UI and core
-   from different releases → UI asks the core to restart (after its turns
-   settle) or shows a banner. Same idea as `staleAndReplaced` for the daemon.
-   The updater (`updater.go`) must restart the core after swapping the bundle.
-5. **Native bits.** These live in `desktop.go` today and need a home:
-   - tray icon + panel, global hotkey, window management → stay in the UI
-     process (no UI = no tray; acceptable for v1)
-   - Dock badge, native notifications, `notifyPermission` → UI process, fed
-     by events it already receives; with the UI closed the phone push
-     (`pushtrigger.go`) is the notification path
-   - `desktopEmit` / Wails-only events (`menu-*`, `float-*`, `lsp-msg-*`,
-     `update:*`, `window-closed`) stay UI-local; `lsp` and extensions need a
-     check whether they belong in the core
-   - `pickPaths` (dialogs) must stay in the UI: the core can't show a dialog
-6. **Drop close = hide.** Closing the last window can quit the UI for real; the
-   tray becomes optional (a `uiPrefs` toggle) rather than load-bearing.
+### A — core as its own process (beta/dev)
+
+1. `main.go` role switch: `--core` → `App.startup` + hook server, no main
+   window; UI role → no `App` at all, only Wails windows + `DesktopService`.
+   `externalCore()` = `buildChannel != "stable"`; stable keeps today's path.
+2. `POST /v2/local-ticket` (Bearer `control.token`) → all-scope ticket incl.
+   `ui:ack`. UI-role `LocalEndpoint()` = read `hook.port` + token, redeem.
+3. UI start: core reachable? else spawn `Burrow --core` detached (the
+   `daemonspawn_darwin.go` launchd launcher, generalised) and wait for
+   `hook.port`.
+4. `DesktopService` split by where the work happens:
+   UI-local (dialogs, windows, float relay, `GetAppVersion`) stay;
+   `InstallAgentDocs`, update checks → core commands over `/v2/ws`;
+   tray methods → core (phase B; until then the UI keeps a tray-less shell).
+5. `desktopEmit` from core code (`lsp-msg-*`, `extension-task:*`,
+   `update:progress`) → `busEmit` (`notRingable` for `lsp-msg-*`), and
+   `wailsCompat/event.ts` stops routing those prefixes to Wails.
+6. ⌘Q quits the UI only; the core keeps running (no idle rule yet).
+
+### B — tray, hotkey and notifications in the core
+
+Core role on Mac = Wails app with no main window: tray + `TrayPanel` NSPanel
++ Carbon hotkey move there; `TrayOpen` opens the UI via `burrow://`. Native
+notifications from Go (Wails notifications service) on `PhaseStore.onChange`,
+same decisions as `pushtrigger.go` + `chat_mark_active` gate; the frontend's
+`notifyPermission` / `chatHost.notify*` stop notifying natively (toasts stay).
+Dock badge: UI counts from phases it already receives.
+
+### C — lifecycle
+
+`Burrow Core.app` helper + `SMAppService` (login item toggle in Settings →
+General), idle-exit rule, ⌥⌘Q / tray "Quit Completely", last window closed →
+UI quits, `burrow://` scheme in Info.plist, CLI verbs auto-start the core.
+
+### D — versions + updater
+
+Version in `welcome`; updater swaps the bundle → asks the core to
+restart-when-settled; banner in the UI.
+
+### E — stable switch
+
+Stable on external core; delete the in-process path, `quitting` /
+`ShouldQuit` / hide-on-close, `LocalEndpoint`'s in-process branch.
+
+### F — Linux
+
+See below.
 
 ## Linux
 
@@ -93,11 +128,10 @@ client for it today. What Linux needs on top:
 - **The daemon must not live in the core's cgroup.** systemd's default
   `KillMode=control-group` kills every process of a unit on stop/restart —
   i.e. the daemon and every shell with the core. That is the Linux twin of
-  the macOS coalition problem (`daemonspawn_darwin.go`). Options: a separate
+  the macOS coalition problem (`daemonspawn_darwin.go`). Decided: a separate
   `burrow-daemon.service` the core starts with `systemctl --user start`
-  (preferred: own lifecycle, own logs in journald), or `systemd-run --user
-  --scope`. Outside systemd (containers, plain `nohup`) a plain child stays the
-  fallback, as `daemonspawn_other.go` does now.
+  (own lifecycle, own logs in journald). Outside systemd (containers, plain
+  `nohup`) a plain child stays the fallback, as `daemonspawn_other.go` does now.
 - **Logs:** under systemd stderr goes to journald; `burrow.log` / `daemon.log`
   in app-data can stay for parity.
 - **App-data path:** `appDataDir()` is `~/Library/Application Support/…` on
@@ -111,26 +145,22 @@ client for it today. What Linux needs on top:
 
 ## Open questions / risks
 
-- **TCC attribution.** Shells and agents spawned by a LaunchAgent core are no
+- **TCC attribution.** Shells and agents spawned by a detached core are no
   longer "responsible" to Burrow.app: Full Disk Access / folder prompts may
-  attach to `burrow-core` / `burrow-daemon` instead. Verify (and document
-  what to grant) before shipping. Applies to the daemon already since
-  2026-11-03.
-- **Always-on server.** The loopback hook server + `/v2/ws` now run with no
-  window open. The pairing + funnel guard + loopback-only bind stay; the
-  difference is visibility: Settings needs a clear "core running / remote
-  access on" state.
-- **One core build for every OS.** Linux / VPS already use `main_headless.go`; this plan should
-  not fork that path — macOS adds a LaunchAgent wrapper, Linux a systemd unit (see Linux).
+  attach to the core / `burrow-daemon` instead. Verify (and document what to
+  grant) before stable. Applies to the daemon already since 2026-11-03.
+- **Always-on server.** The loopback hook server + `/v2/ws` run with no window
+  open. Pairing + funnel guard + loopback-only bind stay; Settings needs a
+  clear "core running / remote access on" state.
+- **One core build for every OS.** Linux / VPS already use `main_headless.go`;
+  don't fork that path — macOS adds the helper app, Linux a systemd unit.
 - **Per-device state** (`burrow.seenAt`, `chatActiveByWs`, layout) is already
   client-side; nothing in it assumes one process.
 - **Tests:** `TestRemoteSurfaceIsExhaustive` and `commandSurface.test.ts`
-  keep guarding the surface; add one that the UI build links no `App`
-  method directly (only `DesktopService` + transport).
+  keep guarding the surface; add one that the UI role never starts `App`.
 
 ## Not in scope
 
 - Merging the PTY daemon into the core.
 - Running the core on another machine for the desktop UI (the phone already
-  covers "remote backend"; the desktop's `Connect to another Burrow` switch
-  exists for that).
+  covers "remote backend"; `Connect to another Burrow` exists for that).
