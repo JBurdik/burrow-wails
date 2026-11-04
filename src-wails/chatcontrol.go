@@ -262,16 +262,17 @@ func (a *App) transcriptItems(chatID int64, activity bool) ([]control.ChatReadIt
 		var m struct {
 			Role     string `json:"role"`
 			Text     string `json:"text"`
-			ToolName string `json:"toolName"`
+			// A tool row: text is the tool name, toolInput its arguments.
+			ToolInput map[string]any `json:"toolInput"`
 		}
-		if json.Unmarshal([]byte(raw), &m) != nil || strings.TrimSpace(m.Text) == "" && m.ToolName == "" {
+		if json.Unmarshal([]byte(raw), &m) != nil || strings.TrimSpace(m.Text) == "" {
 			continue
 		}
 		switch {
 		case m.Role == "user" || m.Role == "assistant":
 			out = append(out, readItem(0, m.Role, m.Text))
 		case activity:
-			out = append(out, readItem(0, "tool", firstNonEmpty(m.ToolName, m.Role)+": "+m.Text))
+			out = append(out, readItem(0, m.Role, m.Text+toolBrief(m.ToolInput)))
 		}
 	}
 	return out, rows.Err()

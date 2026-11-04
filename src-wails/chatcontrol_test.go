@@ -97,3 +97,17 @@ func TestAnswerChatQuestionWritesTheToolAnswer(t *testing.T) {
 		t.Fatalf("wrote %s", last)
 	}
 }
+
+func TestTranscriptItemsToolRow(t *testing.T) {
+	a := newTestApp(t)
+	if err := a.SaveChatMessages(9, `[{"id":1,"role":"user","text":"hi"},{"id":2,"role":"tool","text":"Bash","toolInput":{"command":"ls -la"}},{"id":3,"role":"assistant","text":"done"}]`, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.transcriptItems(9, true)
+	if err != nil || len(got) != 3 || got[1].Role != "tool" || got[1].Text != "Bash: ls -la" {
+		t.Fatalf("got %+v %v", got, err)
+	}
+	if msgs, _ := a.transcriptItems(9, false); len(msgs) != 2 {
+		t.Fatalf("messages view = %+v", msgs)
+	}
+}
