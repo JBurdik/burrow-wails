@@ -401,6 +401,7 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 		return err
 	}
 	if fresh {
+		notePtySize(id, cols, rows)
 		if a.phases != nil {
 			a.phases.Forget("pty:" + id)
 		}
@@ -454,7 +455,39 @@ func (a *App) PtySince(id string, since uint64) (ptyChunk, error) {
 }
 
 func (a *App) ResizePty(id string, cols, rows uint16) error {
-	return a.daemon.Resize(id, cols, rows)
+	if err := a.daemon.Resize(id, cols, rows); err != nil {
+		return err
+	}
+	notePtySize(id, cols, rows)
+	return nil
+}
+
+// PtyGrid is the size a PTY was last given.
+type PtyGrid struct {
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+}
+
+// ptySizes remembers each PTY's grid as the view that owns it (the desktop) set
+// it. A phone mirrors a terminal at this size instead of resizing it to its own
+// width, which re-laid the desktop's TUI out for 45 columns (XTerm.vue `mirror`).
+// ponytail: in memory only — empty after a core restart until a desktop view
+// fits again, and a phone with no size falls back to fitting (the old way).
+var ptySizes sync.Map // id → PtyGrid
+
+func notePtySize(id string, cols, rows uint16) {
+	g := PtyGrid{cols, rows}
+	if prev, ok := ptySizes.Swap(id, g); ok && prev.(PtyGrid) == g {
+		return
+	}
+	busEmit("pty-size-"+id, g)
+}
+
+// PtySize is the grid PTY `id` was last created or resized to ({0,0} = unknown).
+func (a *App) PtySize(id string) PtyGrid {
+	g, _ := ptySizes.Load(id)
+	grid, _ := g.(PtyGrid)
+	return grid
 }
 
 func (a *App) KillPty(id string) error {

@@ -22,6 +22,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useUIStore } from "@/stores/ui";
 import { appTransport } from "@/lib/wailsCompat/core";
 import { createPtyStream, type PtyChunk } from "@/runtime/ptyStream";
+import { compact as phone } from "@/lib/viewport";
 import "@xterm/xterm/css/xterm.css";
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -240,6 +241,37 @@ async function onPaste(e: ClipboardEvent) {
 // fonts.ready re-measures with the real metrics and resizes the PTY to match.
 let lastPtyCols = 0;
 let lastPtyRows = 0;
+
+// Phone = mirror. Resizing the PTY to a phone's 45 columns re-laid the Mac's TUI
+// out for them, so a phone shows the grid the desktop gave the PTY (Go's
+// `pty_size`, live via `pty-size-<id>`) and scales it to its width instead.
+// `mirrorPending` holds every resize until that size is known; an unknown size
+// (no desktop has fitted it since the core started) falls back to fitting.
+type Grid = { cols: number; rows: number };
+const mirror = ref<Grid | null>(null);
+let mirrorPending = phone.value;
+let unlistenSize: UnlistenFn | null = null;
+const ownsGrid = () => !props.frozen && !mirror.value && !mirrorPending;
+
+function applyMirrorScale() {
+  const el = term?.element;
+  const screen = el?.querySelector<HTMLElement>(".xterm-screen");
+  if (!el || !screen || !hostEl.value) return;
+  const s = mirror.value ? Math.min(1, hostEl.value.clientWidth / (screen.offsetWidth || 1)) : 1;
+  el.style.transformOrigin = "0 0";
+  el.style.transform = s < 1 ? `scale(${s})` : "";
+}
+
+async function startMirror() {
+  const apply = (g: Grid | null) => {
+    mirror.value = g && g.cols > 0 && g.rows > 0 ? g : null;
+    mirrorPending = false;
+    if (!mirror.value) { lastPtyCols = lastPtyRows = -1; } // fall back: this view fits and owns it
+    safeFit();
+  };
+  unlistenSize = await listen<Grid>(`pty-size-${props.ptyId}`, (e) => apply(e.payload));
+  apply(await invoke<Grid>("pty_size", { id: props.ptyId }).catch(() => null));
+}
 // Viewport is "stuck to bottom" when the visible region is the live tail.
 // While stuck, new output and reflows keep auto-scrolling; once the user scrolls
 // up to read history, we leave the viewport alone until they return to the tail.
@@ -252,6 +284,14 @@ function isAtBottom(): boolean {
 function safeFit(): boolean {
   if (!term || !fitAddon || !hostEl.value) return false;
   if (hostEl.value.offsetWidth === 0 || hostEl.value.offsetHeight === 0) return false;
+  if (mirror.value) {
+    const { cols, rows } = mirror.value;
+    const changed = term.cols !== cols || term.rows !== rows;
+    if (changed) term.resize(cols, rows);
+    applyMirrorScale();
+    return changed;
+  }
+  if (mirrorPending) return false;
   const stick = isAtBottom();
   fitAddon.fit();
   // A fit re-wraps scrollback (esp. when a hidden tab gets its real size on
@@ -264,7 +304,7 @@ function safeFit(): boolean {
   if (changed) {
     lastPtyCols = term.cols;
     lastPtyRows = term.rows;
-    if (!props.frozen) invoke("resize_pty", { id: props.ptyId, cols: term.cols, rows: term.rows });
+    if (ownsGrid()) invoke("resize_pty", { id: props.ptyId, cols: term.cols, rows: term.rows });
   }
   notifyFloatGrid();
   return changed;
@@ -338,6 +378,7 @@ onMounted(async () => {
   renderAddon = attachRenderer(term);
 
   applyCounterZoom();
+  if (phone.value) void startMirror();
   safeFit();
   deferredFit();
   // Ring-buffer replay from the daemon streams in after the rAF-deferred fit.
@@ -755,6 +796,7 @@ onBeforeUnmount(async () => {
   unlistenSnapReq?.();
   unlistenWrite?.();
   unlistenDrop?.();
+  unlistenSize?.();
   term?.textarea?.removeEventListener("paste", onPaste);
   // detach_pty closes the data stream but leaves the PTY alive in the daemon,
   // so it can be reattached after app restart.
@@ -773,10 +815,11 @@ watch(
     term.options.fontFamily = font as string;
     term.options.fontSize = scaledFontSize();
     applyCounterZoom();
+    if (mirror.value) { safeFit(); forceRepaint(); return; } // the grid is the desktop's; only the scale changes
     fitAddon?.fit();
     lastPtyCols = term.cols;
     lastPtyRows = term.rows;
-    if (!props.frozen) invoke("resize_pty", { id: props.ptyId, cols: term.cols, rows: term.rows });
+    if (ownsGrid()) invoke("resize_pty", { id: props.ptyId, cols: term.cols, rows: term.rows });
     // Font/scale change resizes glyphs → the atlas still holds old-size glyphs.
     // Clear + full redraw so the new metrics render cleanly (no doubled rows).
     forceRepaint();

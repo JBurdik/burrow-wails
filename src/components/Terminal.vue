@@ -130,8 +130,12 @@
             :initial-url="pane.leaf.browserUrl"
           />
           <GitPanel v-else-if="pane.leaf.leafType === 'git'" class="min-w-0 flex-1" />
+          <!-- Phone: only the tab on screen keeps an xterm (+ its replayed 1 MiB
+               ring); a hidden one is detached and re-attached when shown. A leaf
+               still owing its first command mounts anyway — that mount is what
+               spawns it. -->
           <XTerm
-            v-else
+            v-else-if="!phone || isTabVisible(tab) || pane.leaf.initialCmd"
             :pty-id="pane.leaf.id"
             :cwd="pane.leaf.cwd ?? cwd"
             :initial-cmd="pane.leaf.initialCmd"

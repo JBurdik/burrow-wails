@@ -609,7 +609,11 @@ devtools) and `ConnectView.vue`.
 Phone width (`compact` in `src/lib/viewport.ts`, ≤ 767 px) switches `App.vue` to the phone shell
 (`src/components/phone/`: bottom nav Threads / Project / More; Threads is `ThreadsScreen.vue` over `src/lib/threadFeed.ts` —
 the tray panel's feed: every project's active threads grouped Needs you / Working / Unread / Recent from Go's phases,
-not the mounted Terminals, since a phone mounts one workspace; the desktop Sidebar stays hidden there); an iPad
+not the mounted Terminals, since a phone mounts one workspace; the desktop Sidebar stays hidden there). A phone
+**mirrors** a terminal, never resizes it: `XTerm.vue` takes the grid the desktop gave the PTY (`pty_size` /
+`pty-size-<id>`, remembered in Go by `ResizePty`/`CreatePty`, in memory) and CSS-scales it to its width — resizing to
+45 columns re-laid the Mac's TUI out; unknown size ⇒ falls back to fitting. Only the visible tab keeps an XTerm
+(each holds a replayed 1 MiB ring — the iOS WebContent kill); an iPad
 gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the browser's own
 `localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's; read receipts (`burrow.seenAt`)
 are per device the same way.
