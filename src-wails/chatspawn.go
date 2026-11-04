@@ -119,6 +119,33 @@ func (r chatRuntimeAdapter) SendToChat(chatID int64, text string) error {
 	return r.a.ChatSend(chatID, text, nil)
 }
 
+// pickSpawnAgent is spawn's agent choice, shared with list_agents so the
+// "default" it reports is the one a spawn without --agent really gets: the
+// wanted one, else the parent's own, else the user's default chat agent, else
+// the first enabled one.
+func pickSpawnAgent(cfg spawnConfig, wanted, parentKind string) (*providerInstance, error) {
+	if wanted != "" {
+		if inst := providerByIDOrName(wanted, cfg.Providers, cfg.Aliases); inst != nil {
+			return inst, nil
+		}
+		return nil, fmt.Errorf("no agent named %q — call list_agents to see the configured ones", wanted)
+	}
+	if parentKind != "" {
+		if inst := providerByIDOrName(parentKind, cfg.Providers, cfg.Aliases); inst != nil {
+			return inst, nil
+		}
+	}
+	if inst := providerByIDOrName(firstNonEmpty(cfg.UI.DefaultChatAgent, "claude"), cfg.Providers, cfg.Aliases); inst != nil {
+		return inst, nil
+	}
+	for i := range cfg.Providers {
+		if cfg.Providers[i].Enabled {
+			return &cfg.Providers[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no agent is configured in Settings > Providers")
+}
+
 func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, error) {
 	var none control.SpawnedChat
 	if strings.TrimSpace(req.Task) == "" {
@@ -143,44 +170,19 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		profile, task = &p, profileTask(p, req.Task)
 	}
 
-	// Agent: the caller's, else the profile's, else the parent's own, else the
-	// user's default chat agent, else the first enabled one.
 	wanted := req.Agent
 	if wanted == "" && profile != nil {
 		wanted = profile.AgentID
 	}
-	var inst *providerInstance
-	if wanted != "" {
-		if inst = providerByIDOrName(wanted, cfg.Providers, cfg.Aliases); inst == nil {
-			return none, fmt.Errorf("no agent named %q — call list_agents to see the configured ones", wanted)
-		}
-	}
-	if inst == nil && parent.AgentKind != "" {
-		inst = providerByIDOrName(parent.AgentKind, cfg.Providers, cfg.Aliases)
-	}
-	if inst == nil {
-		def := cfg.UI.DefaultChatAgent
-		if def == "" {
-			def = "claude"
-		}
-		inst = providerByIDOrName(def, cfg.Providers, cfg.Aliases)
-	}
-	if inst == nil {
-		for i := range cfg.Providers {
-			if cfg.Providers[i].Enabled {
-				inst = &cfg.Providers[i]
-				break
-			}
-		}
-	}
-	if inst == nil {
-		return none, fmt.Errorf("no agent is configured in Settings > Providers")
+	inst, err := pickSpawnAgent(cfg, wanted, parent.AgentKind)
+	if err != nil {
+		return none, err
 	}
 	if inst.Transport == "none" && inst.Kind != "claude" {
 		return none, fmt.Errorf("This provider does not offer an embedded chat.")
 	}
 	transport := chatTransportOf(*inst)
-	if profile != nil && (!inst.Enabled || (!oneOf(transport, "claude-cli", "codex-app-server") && inst.ProviderID != "openai-compatible")) {
+	if profile != nil && !runsProfiles(*inst) {
 		return none, fmt.Errorf("Sub-agent profiles require an enabled Claude CLI, Codex app-server, or OpenAI Compatible provider. Choose one in Settings > Sub-agent profiles.")
 	}
 	// The parent's launch settings only mean something to the same runtime: a
@@ -217,7 +219,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		AgentKind:      inst.ID,
 		Transport:      transport,
 		Model:          firstNonEmpty(req.Model, profileField(profile, func(p *subagentProfile) string { return p.Model }), inherit.Model),
-		Effort:         inherit.Effort,
+		Effort:         firstNonEmpty(req.Effort, inherit.Effort),
 		PermissionMode: firstNonEmpty(req.PermissionMode, profileField(profile, func(p *subagentProfile) string { return p.PermissionMode }), inherit.PermissionMode),
 		ProfileID:      inst.ID,
 		LastActivityAt: time.Now().UnixMilli(),
@@ -250,6 +252,14 @@ func (a *App) SpawnSubagentChat(parentChatID int64, task, profile, agent, model,
 	}
 	return map[string]any{"chat_id": got.ChatID, "workspace_id": got.WorkspaceID,
 		"task": got.Task, "agent_name": got.AgentName}, nil
+}
+
+// runsProfiles: a sub-agent profile needs a runtime that takes its
+// instructions and permission mode — Claude CLI, Codex app-server or OpenAI
+// Compatible, enabled.
+func runsProfiles(p providerInstance) bool {
+	t := chatTransportOf(p)
+	return p.Enabled && (oneOf(t, "claude-cli", "codex-app-server") || p.ProviderID == "openai-compatible")
 }
 
 func profileField(p *subagentProfile, f func(*subagentProfile) string) string {

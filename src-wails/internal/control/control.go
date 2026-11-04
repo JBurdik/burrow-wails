@@ -186,9 +186,19 @@ type ChatRuntime interface {
 	SendToChat(chatID int64, text string) error
 }
 
+// AgentCatalog answers list_agents / list_subagent_profiles from the host's
+// config, so an agent can see what it may delegate to with no window open.
+type AgentCatalog interface {
+	// ListAgents: caller is the asking chat (0 = none), agent narrows to one.
+	ListAgents(caller int64, agent string) (any, error)
+	ListSubagentProfiles() (any, error)
+}
+
 // SpawnRequest is spawn's chat half, as the caller gave it.
 type SpawnRequest struct {
 	Task, Profile, Agent, Model, Cwd string
+	// Effort empty = the parent's when it runs on the same transport.
+	Effort string
 	// PermissionMode empty = the profile's, else the parent's own.
 	PermissionMode string
 	// Name titles the sub-agent; empty = the task's first line.
@@ -232,6 +242,8 @@ type Deps struct {
 	ChatStopper ChatStopper
 	// ChatRuntime is optional: nil sends every chat spawn/send to the UI.
 	ChatRuntime ChatRuntime
+	// Agents is optional: nil asks the UI (provider store) instead.
+	Agents AgentCatalog
 	// Schedules and ChatMover back the agent self-management verbs
 	// (verbs_self.go). nil = those verbs refuse.
 	Schedules Schedules

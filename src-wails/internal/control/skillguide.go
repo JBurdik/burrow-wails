@@ -41,7 +41,7 @@ A chat sub-agent's result now arrives by itself: when it finishes a turn, Burrow
 ### Both doors for each delegation verb
 
 - spawn: from a tab, choose target chat for a structured chat or target tab for a visible terminal; from a chat, the sub-agent is always a chat.
-- list_agents: lists the configured agents that may be spawned into either a chat or a tab.
+- list_agents: call before spawn. Lists every configured agent with availability (and why not), models + efforts, permission modes, whether it takes a profile, which one spawn picks by default, and what a sub-agent inherits from you. --agent NAME gives one agent's full model list.
 - agent_status: reports both chat and tab agents; use its chat_id or pty_id with the matching follow-up verb.
 - tab_output: reads a tab by pty_id; for a chat, read its structured transcript or wait_result --chat-id instead.
 - send_to_tab: follows up with a tab by pty_id; use chat_send for the equivalent chat follow-up.

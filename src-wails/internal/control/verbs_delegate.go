@@ -44,7 +44,8 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "name", Type: "string", Desc: "Short title for the sub-agent shown in the UI, e.g. \"Fix login test\"; defaults to the task's first line"},
 			{Name: "profile", Type: "string", Desc: "Saved sub-agent role: scout, worker, or reviewer (Settings > Sub-agent profiles)"},
 			{Name: "agent", Type: "string", Desc: "Agent instance to run (name or id from list_agents); defaults to the user's default"},
-			{Name: "model", Type: "string", Desc: "Model override for this task, e.g. claude-haiku-4-5-20251001 for mechanical work"},
+			{Name: "model", Type: "string", Desc: "Model override for this task, e.g. claude-haiku-4-5-20251001 for mechanical work. list_agents lists each agent's models"},
+			{Name: "effort", Type: "string", Desc: "Chat sub-agent's reasoning effort (one the model lists in list_agents); defaults to the parent's when the sub-agent runs on the parent's runtime"},
 			{Name: "permission_mode", Type: "string", Desc: "Chat sub-agent's permission mode: plan, default, acceptEdits, auto, dontAsk or full-access; defaults to the profile's, else the parent thread's own. Never more permissive than the parent"},
 			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work; defaults to the caller's"},
 			{Name: "workspace_id", Type: "integer", Desc: "Run in this workspace (its path wins over cwd), e.g. a project just made with workspace_create. With detach + target chat, starts a new top-level thread there with task as its first prompt"},
@@ -61,14 +62,26 @@ func delegationVerbs(c *Core) []Verb {
 		Summary: "Saved sub-agent roles with instructions, model, provider, and permission mode",
 		Scope:   ScopeLocal,
 		Fn: func(ctx context.Context, p Params) (any, error) {
+			if cat := c.deps.Agents; cat != nil {
+				return cat.ListSubagentProfiles()
+			}
 			var out any
 			return out, c.ui(ctx, "list_subagent_profiles", nil, &out)
 		},
 	}, {
-		Name:    "list_agents",
-		Summary: "Agent instances configured in Settings > Providers, spawnable by name",
-		Scope:   ScopeLocal,
+		Name: "list_agents",
+		Summary: "What you can delegate to — call before spawn: every agent in Settings > Providers with availability (and why not), " +
+			"its models + reasoning efforts, permission modes, whether it takes a profile, which one spawn picks by default, " +
+			"and what a sub-agent inherits from you",
+		Args: []Arg{
+			{Name: "agent", Type: "string", Desc: "Only this agent (name or id), with its full model list instead of the first few"},
+			{Name: "parent_chat_id", Type: "integer", Desc: "Set automatically from BURROW_CHAT_ID — the caller whose settings a sub-agent inherits"},
+		},
+		Scope: ScopeLocal,
 		Fn: func(ctx context.Context, p Params) (any, error) {
+			if cat := c.deps.Agents; cat != nil {
+				return cat.ListAgents(p.Int("parent_chat_id"), p.Str("agent"))
+			}
 			var out any
 			return out, c.ui(ctx, "list_agents", nil, &out)
 		},
@@ -214,7 +227,7 @@ func (c *Core) spawn(ctx context.Context, p Params) (any, error) {
 	if parent > 0 && c.deps.ChatRuntime != nil {
 		got, err := c.deps.ChatRuntime.SpawnSubagent(SpawnRequest{
 			Task: p.Str("task"), Profile: p.Str("profile"), Agent: p.Str("agent"),
-			Model: p.Str("model"), PermissionMode: p.Str("permission_mode"), Cwd: cwd, Name: p.Str("name"), ParentChatID: parent,
+			Model: p.Str("model"), Effort: p.Str("effort"), PermissionMode: p.Str("permission_mode"), Cwd: cwd, Name: p.Str("name"), ParentChatID: parent,
 		})
 		if err != nil {
 			return nil, err
