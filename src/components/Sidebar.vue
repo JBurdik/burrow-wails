@@ -53,7 +53,7 @@
            its uncommitted diffstat, one compact line per thread, a thread's
            sub-agents indented under it. Branch/model/PR live in the hover card. -->
       <div v-for="group in topGroups" :key="group.repoId" class="px-2 pt-1.5">
-        <div v-if="group.repoId === PINNED" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">Pinned</div>
+        <div v-if="group.repoId < 0" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">{{ group.repoId === PINNED ? "Pinned" : "Unread" }}</div>
         <div v-else class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover" @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
           <button class="flex min-w-0 flex-1 items-center gap-2 text-left" @click="toggleGroup(group.repoId)">
             <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground transition-transform" :class="collapsedGroups.has(group.repoId) && '-rotate-90'" />
@@ -874,14 +874,19 @@ const liveGroups = computed(() =>
   groupByRepo(
     sections.value.active,
     activeRepo.value ? [activeRepo.value.id] : [],
-    pinnedIds.value.filter((id) => repoById(id) && !isArchived(id)),
+    // Archive only sinks a repo in the picker; a pin still wins here (the header shows its pin icon).
+    pinnedIds.value.filter((id) => repoById(id)),
   ),
 );
 /** Pinned rows sit above every repo group, as one pseudo-group under this id. */
 const PINNED = -1;
-const topGroups = computed(() =>
-  sections.value.pinned.length ? [{ repoId: PINNED, rows: sections.value.pinned }, ...liveGroups.value] : liveGroups.value,
-);
+/** Unread completions, likewise one block on top (below Pinned). */
+const UNREAD = -2;
+const topGroups = computed(() => [
+  ...(sections.value.pinned.length ? [{ repoId: PINNED, rows: sections.value.pinned }] : []),
+  ...(sections.value.unread.length ? [{ repoId: UNREAD, rows: sections.value.unread }] : []),
+  ...liveGroups.value,
+]);
 
 const COLLAPSED_KEY = "burrow.sidebar.collapsedRepos";
 function loadCollapsed(): Set<number> {

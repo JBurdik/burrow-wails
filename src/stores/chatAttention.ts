@@ -9,6 +9,7 @@ import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { subagentArchivable } from "@/stores/chatTree";
 import { liveChatSessionIds } from "@/lib/chatSession";
 import { appChatHost, notifyWoke } from "@/lib/chatHost";
+import { onSeenChanged, shareSeen } from "@/lib/seenSync";
 
 // Shared with Terminal.vue's PTY receipts: one key, one receipt per subject.
 // PTY leaves use their bare numeric id, chats `chat:<id>` — Terminal.vue's
@@ -117,6 +118,7 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
       const at = Math.max(phase.turn_ended_at, Date.now());
       seenAt.set(chatId, at);
       persistSeenAt(chatId, at);
+      shareSeen(chatKey(chatId));
     }
     refresh(chatId);
   }
@@ -239,6 +241,16 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
       }
     });
   }
+
+  // A receipt from Go: another device (or window) read it, or a snooze woke.
+  onSeenChanged((key, at) => {
+    if (!key.startsWith("chat:")) return;
+    const id = Number(key.slice(5));
+    if (!Number.isFinite(id) || (seenAt.get(id) ?? 0) === at) return;
+    if (at) seenAt.set(id, at);
+    else seenAt.delete(id);
+    refresh(id);
+  });
 
   // Sub-agent auto-archive. Lives here, not in Go, because "seen" is this
   // device's receipt (localStorage) — Go has the phase and collected_at but

@@ -113,7 +113,7 @@ Sub-agents surface uses `childrenOf(sessions, activeChatId)`, `DeleteChat` casca
 Depth capped at **one level**, derived server-side (`chatIsSubagent`), never trusted from the request.
 A settled, seen, **collected** (`collected_at`, read-only on `Chat`) sub-agent is auto-archived after
 30 min by `chatAttention`'s desktop sweep (`subagentArchivable` in `chatTree.ts`) — client-side because
-`seenAt` is per-device. No Archived shelf for sub-agents: it just leaves the RP list.
+"watching" is client-side. No Archived shelf for sub-agents: it just leaves the RP list.
 
 **Snooze** (`chatsnooze.go`): `chats.snoozed_until` (unix ms, 0 = none, read-only on the wire) keeps a chat
 in Settled until then (`settledFor`); `ChatSnooze` / `chat_snooze` sets or clears it, and `chatScheduleLoop`'s
@@ -365,8 +365,11 @@ trailing turn end on an idle chat is dropped), a generic ACP turn settles on its
 response. `src/stores/chatAttention.ts` (instantiated in `App.vue`) is the **only writer of
 `session.status`**: `displayStatus(phase-chat, seenAt, watching)`, receipts in `burrow.seenAt` as
 `chat:<id>`, watching = a count held by the mounted `AgentChat` / RP sub-agent detail while the window
-has focus. There is no chat state machine any more. A paired phone runs this same store with its
-own `localStorage` receipts. A permission request fires a toast + (unfocused) a native notification
+has focus. There is no chat state machine any more. **Receipts are shared across devices**
+(`seenreceipts.go`, `src/lib/seenSync.ts`): `burrow.seenAt` is each client's cache, written optimistically;
+`seen_mark(key)` stamps it in SQLite `seen_receipts` with **Go's clock** (the `turn_ended_at` clock, so a skewed
+phone can't pre-read a turn; MAX, never backwards), `seen-changed` folds it into chatAttention, Terminal.vue and
+threadFeed everywhere; `seen_list` merges on boot; a snooze wake deletes the row. A permission request fires a toast + (unfocused) a native notification
 via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
 list, distinguished only by icon.
 
@@ -526,6 +529,14 @@ the panel, a surface / git in the main window. Secondary windows never notify
 alive and does both once. Right click = the menu.
 Window → Keep on Top (⌘⌥T).
 
+**Tray toasts** (macOS, `desktop.go` "Tray toasts", WindowApp kind `traytoast` = `TrayToast.vue`): with the main window
+unfocused, `pushFor`'s away notices (permission, waiting, chat done, tab done, snooze wake — the Web Push decisions) drop
+from the tray icon instead of an OS notification: own non-activating NSPanel, **never focused** (AeroSpace popup; first
+click reaches the page via a panels-only `acceptsFirstMouse` patch), ≤ 3 stacked, 6 s (hover pauses), click =
+`TrayOpen(route)`, ×. Separate from the tray panel on purpose; none while the panel is up (`showTrayPanel` clears them).
+The webview no longer posts OS notifications on a Mac (`TrayToasts()` in `notification.ts`); the core's native banner
+is only the fallback when the toast window is not ready. Focused main window ⇒ in-app toasts only, as before. Focus: in-process = the main window's own; dev/beta core = what the windows report (`ui_focus`, `uifocus.go` / `src/lib/focusReport.ts`, 20 s heartbeat, 45 s TTL), the 90 s watched-chat guess only until a window reports. A sub-agent's prompts and finished turn toast too (robot icon, `↳ parent`; click opens the parent); its done skips the phone.
+
 ### `config.json` is written one key at a time (`src-wails/config.go`, `src/lib/config.ts`)
 
 Every window and paired phone holds its own copy of config.json. `setConfig` sends only its key
@@ -615,8 +626,7 @@ not the mounted Terminals, since a phone mounts one workspace; the desktop Sideb
 45 columns re-laid the Mac's TUI out; unknown size ⇒ falls back to fitting. Only the visible tab keeps an XTerm
 (each holds a replayed 1 MiB ring — the iOS WebContent kill); an iPad
 gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the browser's own
-`localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's; read receipts (`burrow.seenAt`)
-are per device the same way.
+`localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's. Read receipts are shared via Go (`seen_receipts`, above).
 
 **Release channel is decided by the serving binary, not the bundle** (`src-wails/channel.go`): `buildChannel` is
 `dev` under `wails3 dev` (`channel_dev.go`, the `dev` build tag — Taskfile `build DEV=true` passes it) and `beta` via `just build-beta`'s

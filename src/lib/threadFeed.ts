@@ -6,6 +6,7 @@ import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { settledFor, useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { onSeenChanged } from "@/lib/seenSync";
 
 // The thread feed: every active thread of every project, grouped by what it
 // needs from you. One model for the tray panel (TrayPanel.vue) and the phone's
@@ -179,12 +180,14 @@ function createFeed() {
   const resync = window.setInterval(load, 15_000);
   window.addEventListener("focus", load);
   window.addEventListener("storage", tick);
+  const offSeen = onSeenChanged(tick);
   document.addEventListener("visibilitychange", load);
   void load();
   onScopeDispose(() => {
     clearInterval(resync);
     window.removeEventListener("focus", load);
     window.removeEventListener("storage", tick);
+    offSeen();
     document.removeEventListener("visibilitychange", load);
     void permsOff.then((f) => f());
     for (const off of phaseListeners.values()) void off.then((f) => f());

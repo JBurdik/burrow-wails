@@ -73,11 +73,25 @@ func (p *webPusher) claim(key string, now time.Time) bool {
 }
 
 // nativeNotifier posts an OS notification; set only by the external core
-// (plan 009), which owns native notifications there — nil in-process, where
-// the webview still posts its own.
-// once macOS authorized it — until then (or for good, if refused) the
-// webview keeps posting its own (notification.ts asks privacy_status).
+// (plan 009) once macOS authorized it — nil in-process. It is the fallback
+// for a tray toast (trayToast) that could not be shown.
 var nativeNotifier atomic.Pointer[func(title, body, url, tag string)]
+
+// trayToast is the "you are away" notice dropped from the tray icon
+// (desktop.go's traytoast window, macOS) instead of an OS banner. Route is a
+// main-window route ("/ws/3?chat=7"), opened by TrayOpen on click.
+type trayToast struct {
+	Key     string `json:"key"`
+	Title   string `json:"title"`
+	Body    string `json:"body"`
+	Project string `json:"project"`
+	Route   string `json:"route"`
+	Reason  string `json:"reason"`
+	Parent  string `json:"parent,omitempty"` // a sub-agent's parent thread title
+}
+
+// awayNotifier: something in this process tells a desktop user who is away.
+func awayNotifier() bool { return nativeNotifier.Load() != nil || trayToastReady() }
 
 // pushPhaseChanged runs under PhaseStore.emitMu: decide cheaply, send async.
 func (a *App) pushPhaseChanged(key string, prev, next agentphase.Phase) {
@@ -86,7 +100,7 @@ func (a *App) pushPhaseChanged(key string, prev, next agentphase.Phase) {
 	}
 	if reason := pushReason(key, prev.State, next.State); reason != "" {
 		go a.pushFor(key, reason, next, true)
-	} else if nativeNotifier.Load() != nil && strings.HasPrefix(key, "pty:") && next.State == agentphase.Done && prev.State != next.State {
+	} else if awayNotifier() && strings.HasPrefix(key, "pty:") && next.State == agentphase.Done && prev.State != next.State {
 		// A tab's finished turn: the desktop said so (Terminal.vue did), the
 		// phone deliberately does not (pushReason).
 		go a.pushFor(key, "done", next, false)
@@ -94,18 +108,24 @@ func (a *App) pushPhaseChanged(key string, prev, next agentphase.Phase) {
 }
 
 // claimNative is claim with its own rate memory (a native banner and a phone
-// push must not use up each other's slot) and a wider watch test: ANY chat
-// watched lately means a focused Burrow window, where the webview used to
-// skip its OS notification (document.hasFocus) and toasts in-app instead.
-// ponytail: a terminal-only view sends no chat_mark_active, so it still gets
-// banners; a real window-focus signal from the UI would fix that.
-func (p *webPusher) claimNative(key string, now time.Time) bool {
+// push must not use up each other's slot) and a focus test: a focused main
+// window toasts in-app instead. focusKnown (in-process: mainWindowFocused)
+// decides on its own; otherwise (external core, the window is another
+// process) ANY chat watched lately stands in for a focused window.
+// ponytail: there a terminal-only view sends no chat_mark_active, so it still
+// gets banners; a window-focus signal from the UI process would fix that.
+func (p *webPusher) claimNative(key string, now time.Time, focused, focusKnown bool) bool {
+	if focusKnown && focused {
+		return false
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var watched time.Time
-	for _, t := range p.watched {
-		if t.After(watched) {
-			watched = t
+	if !focusKnown {
+		for _, t := range p.watched {
+			if t.After(watched) {
+				watched = t
+			}
 		}
 	}
 	if !pushGate(watched, p.lastNative[key], now) {
@@ -128,19 +148,28 @@ func (a *App) pushFor(key, reason string, ph agentphase.Phase, phone bool) {
 		Tag   string `json:"tag"`
 	}{Tag: key}
 	kind, id, _ := strings.Cut(key, ":")
+	var ws, parent int64
+	var parentTitle string
 	switch kind {
 	case "chat":
-		var ws, parent, archived int64
+		var archived int64
 		err := a.db.QueryRow(`SELECT title, workspace_id, parent_chat_id, archived_at FROM chats WHERE id = ?`, id).
 			Scan(&msg.Title, &ws, &parent, &archived)
-		// A sub-agent's finished turn goes to its parent thread (sub-agent
-		// notices), not to the phone; its prompts still do.
-		if err != nil || archived != 0 || (parent != 0 && reason == "done") {
+		if err != nil || archived != 0 {
 			return
 		}
 		msg.URL = fmt.Sprintf("#/ws/%d?chat=%s", ws, id)
+		if parent != 0 {
+			// A sub-agent lives under its parent thread (Right Panel), so that is what opens.
+			_ = a.db.QueryRow(`SELECT title FROM chats WHERE id = ?`, parent).Scan(&parentTitle)
+			msg.URL = fmt.Sprintf("#/ws/%d?chat=%d", ws, parent)
+			// Its finished turn reaches the phone through the parent (sub-agent
+			// notices); the desktop still gets a tray toast.
+			if reason == "done" {
+				phone = false
+			}
+		}
 	case "pty":
-		var ws int64
 		var title sql.NullString
 		err := a.db.QueryRow(`SELECT workspace_id, COALESCE(NULLIF(title, ''), default_title) FROM terminal_tabs
 			WHERE pty_id = ? ORDER BY id DESC LIMIT 1`, id).Scan(&ws, &title)
@@ -172,8 +201,22 @@ func (a *App) pushFor(key, reason string, ph agentphase.Phase, phone bool) {
 		msg.Body = "Snooze ended"
 	}
 	now := time.Now()
-	if notify := nativeNotifier.Load(); notify != nil && a.push.claimNative(key, now) {
-		(*notify)(msg.Title, msg.Body, msg.URL, key)
+	focused, focusKnown := mainWindowFocused()
+	if !focusKnown {
+		// dev/beta: the window is another process — it reports its own focus.
+		focused, focusKnown = reportedFocus(now)
+	}
+	if awayNotifier() && a.push.claimNative(key, now, focused, focusKnown) {
+		t := trayToast{Key: key, Title: msg.Title, Body: msg.Body, Route: strings.TrimPrefix(msg.URL, "#"), Reason: reason, Parent: parentTitle}
+		if parent != 0 && parentTitle == "" {
+			t.Parent = "Sub-agent"
+		}
+		_ = a.db.QueryRow(`SELECT name FROM workspaces WHERE id = ?`, ws).Scan(&t.Project)
+		if !showTrayToast(t) {
+			if notify := nativeNotifier.Load(); notify != nil {
+				(*notify)(msg.Title, msg.Body, msg.URL, key)
+			}
+		}
 	}
 	if !phone || !a.push.claim(key, now) {
 		return

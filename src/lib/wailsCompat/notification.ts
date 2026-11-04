@@ -1,5 +1,5 @@
 import { isDesktop } from "./desktop";
-import { CoreNotifies } from "./bindings/burrow/desktopservice";
+import { CoreNotifies, TrayToasts } from "./bindings/burrow/desktopservice";
 import { invoke } from "./core";
 
 // Shim for "@tauri-apps/plugin-notification". Wails has no built-in native
@@ -19,6 +19,8 @@ export async function requestPermission(): Promise<"granted" | "denied" | "defau
 // itself once macOS authorized it, so a webview banner would be a duplicate;
 // until then — or for good, if macOS refuses the core — the webview keeps
 // posting them. Re-checked at most every 30 s. Toasts are unaffected.
+// On a Mac Go owns them in both roles: a toast under the tray icon
+// (src-wails/desktop.go "Tray toasts"), an OS notification only as its fallback.
 let coreCheckedAt = 0;
 let coreOwns = false;
 async function coreOwnsNotifications(): Promise<boolean> {
@@ -26,7 +28,7 @@ async function coreOwnsNotifications(): Promise<boolean> {
   if (Date.now() - coreCheckedAt < 30_000) return coreOwns;
   coreCheckedAt = Date.now();
   try {
-    coreOwns = (await CoreNotifies()) && (await invoke<{ notifications: string }>("privacy_status")).notifications === "granted";
+    coreOwns = (await TrayToasts()) || ((await CoreNotifies()) && (await invoke<{ notifications: string }>("privacy_status")).notifications === "granted");
   } catch {
     coreOwns = false;
   }

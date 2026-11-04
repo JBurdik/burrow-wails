@@ -245,6 +245,7 @@ import { useGitStore } from "@/stores/git";
 import { useFileViewerStore } from "@/stores/fileViewer";
 import { isTabSettled, settledTabKeys } from "@/lib/settledTabs";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { onSeenChanged, shareSeen } from "@/lib/seenSync";
 
 const props = defineProps<{ cwd: string; workspaceId: number }>();
 const wsStore = useWorkspaceStore();
@@ -700,8 +701,20 @@ function markLeafSeen(leafId: number) {
   doneTimers.delete(leafId);
   leafSeenAt.set(leafId, Math.max(leafSeenAt.get(leafId) ?? 0, phase.turn_ended_at, Date.now()));
   persistSeenAt();
+  shareSeen(String(leafId));
   applyPhase(leafId, phase); // recompute the dot with the new receipt
 }
+
+// A receipt from Go — this leaf was read on another device or window.
+const offSeen = onSeenChanged((key, at) => {
+  const leafId = Number(key);
+  const phase = leafPhases.get(leafId);
+  if (!phase || (leafSeenAt.get(leafId) ?? 0) === at) return;
+  if (at) leafSeenAt.set(leafId, at);
+  else leafSeenAt.delete(leafId);
+  applyPhase(leafId, phase);
+});
+onBeforeUnmount(offSeen);
 
 const flashingLeafs = ref(new Set<number>());
 // Log strip: last N entries per tab (keyed by tab.id, NOT leaf.id).

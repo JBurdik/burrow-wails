@@ -23,6 +23,8 @@ export type UnlistenFn = () => void;
  *   window-closed   desktop.go, a secondary window closed (popouts store)
  *   file-drop       main.go, files dropped from Finder onto this window (the
  *                   backend may be another process, plan 009)
+ *   tray-toast*     desktop.go, the tray toast window only (TrayToast.vue
+ *                   subscribes with Events.On)
  *   update:*        updater.go's progress (updater.ts subscribes with its own
  *                   Events.On today; listed so routing it through listen()
  *                   later cannot silently go quiet)
@@ -30,7 +32,7 @@ export type UnlistenFn = () => void;
  * If one of these ever becomes something a remote client needs, the fix is to
  * move its emitter to busEmit — not to add a second delivery path here.
  */
-const DESKTOP_ONLY_EVENT_PREFIXES = ["menu-", "float-", "update:", "window-closed", "file-drop"];
+const DESKTOP_ONLY_EVENT_PREFIXES = ["menu-", "float-", "update:", "window-closed", "file-drop", "tray-toast"];
 
 function isDesktopOnly(event: string): boolean {
   return DESKTOP_ONLY_EVENT_PREFIXES.some((prefix) => event.startsWith(prefix));

@@ -545,6 +545,17 @@ make that safe:
   close killed both. ⌘Q and the tray's Quit set `quitting` so the WindowClosing hook lets the window go.
 - **Floating vs. tiling.** Tiling window managers float a window with no enabled fullscreen button
   (AeroSpace `isDialogHeuristic`, like System Settings); `OpenWindow(…, floating)` uses that for Settings.
+- **Away notices drop from the tray, not from Notification Center** (macOS). `pushFor` (`pushtrigger.go`)
+  already decided what is worth telling an away user for the phone and the external core; the same
+  decision now feeds a **tray toast**: its own window (`traytoast`, `TrayToast.vue`), not the tray panel —
+  the panel hides on focus loss, sizes itself to its list and may be pinned elsewhere, and the two never
+  show together (the panel clears the toasts; a toast while the panel is up is dropped as shown). It is
+  the panel's NSPanel recipe but **never focused**: AeroSpace classifies it a popup on first sight and the
+  user's app keeps the keyboard, which is why its WKWebView is patched to take the first click in panels
+  (`acceptsFirstMouse`, `traypanel_darwin.go`). In-process the gate is the main window's real focus
+  (`mainWindowFocused`) instead of the core's "a chat was watched lately" guess. The webview stops posting
+  OS notifications on a Mac (`TrayToasts()` in `notification.ts`); an OS banner is only the fallback when
+  the toast window is not up yet, and only where a native poster exists (the external core).
 
 ### The shell stream: `seq`, the ring, resume (`src-wails/shellstream.go` + `shellsnapshot.go`)
 

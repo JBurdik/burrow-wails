@@ -63,3 +63,22 @@ func TestPushGate(t *testing.T) {
 		t.Fatal("a watched chat was pushed")
 	}
 }
+
+// A known focus decides alone: focused never notifies, unfocused ignores a
+// recent chat_mark_active (that heuristic is only for an unknown focus).
+func TestClaimNativeFocus(t *testing.T) {
+	now := time.Now()
+	p := &webPusher{watched: map[string]time.Time{"chat:2": now}, lastNative: map[string]time.Time{}}
+	if p.claimNative("chat:1", now, true, true) {
+		t.Fatal("focused main window must not get an away notice")
+	}
+	if !p.claimNative("chat:1", now, false, true) {
+		t.Fatal("unfocused main window: notify despite a recent watch ping")
+	}
+	if p.claimNative("chat:1", now.Add(time.Second), false, true) {
+		t.Fatal("rate limit still applies")
+	}
+	if p.claimNative("chat:3", now, false, false) {
+		t.Fatal("unknown focus: a recent watch ping still suppresses")
+	}
+}

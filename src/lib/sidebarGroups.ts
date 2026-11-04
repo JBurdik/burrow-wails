@@ -61,20 +61,24 @@ export function buildActivityRows(
 
 // ── sections (t3code's Sidebar.logic resolveSidebarThreadSection) ───────────
 
-export type SidebarSection = "snoozed" | "settled" | "pinned" | "working" | "active";
+export type SidebarSection = "snoozed" | "settled" | "pinned" | "working" | "unread" | "active";
 
-/** First match wins: snoozed > settled > pinned > working > active. A pin beats
- *  Working on purpose — a pinned thread never leaves its spot at the top. */
+/** First match wins: snoozed > settled > pinned > working > unread > active. A pin
+ *  beats Working on purpose — a pinned thread never leaves its spot at the top.
+ *  Unread (a finished turn nobody read) gets its own block at the top instead of
+ *  jumping up inside its project group. */
 export function resolveSidebarSection(f: {
   snoozed: boolean;
   settled: boolean;
   pinned: boolean;
   working: boolean;
+  unread?: boolean;
 }): SidebarSection {
   if (f.snoozed) return "snoozed";
   if (f.settled) return "settled";
   if (f.pinned) return "pinned";
   if (f.working) return "working";
+  if (f.unread) return "unread";
   return "active";
 }
 
@@ -107,17 +111,19 @@ export interface SectionInput {
 
 /** Split buildActivityRows' feed (live + settled, recency-ordered) into the sidebar's sections. */
 export function splitSections(rows: ActivityRow[], o: SectionInput): SidebarSections {
-  const out: SidebarSections = { snoozed: [], settled: [], pinned: [], working: [], active: [] };
+  const out: SidebarSections = { snoozed: [], settled: [], pinned: [], working: [], unread: [], active: [] };
+  // sort() is stable, so ties keep the feed's recency order.
+  const rank = (r: ActivityRow) => Math.min(attentionRank(r.tab.status, o.unseen(r)), o.heldRank?.(r) ?? Infinity);
   for (const row of rows) {
     out[resolveSidebarSection({
       snoozed: o.isSnoozed(row),
       settled: !!row.tab.settled,
       pinned: o.isPinned(row),
       working: o.inWorking(row),
+      // rank 3 = unread completion; the held rank keeps a just-clicked row here until left
+      unread: rank(row) === 3,
     })].push(row);
   }
-  // sort() is stable, so ties keep the feed's recency order.
-  const rank = (r: ActivityRow) => Math.min(attentionRank(r.tab.status, o.unseen(r)), o.heldRank?.(r) ?? Infinity);
   out.active.sort((a, b) => rank(a) - rank(b));
   out.working.sort((a, b) => o.startedAt(b) - o.startedAt(a));
   return out;

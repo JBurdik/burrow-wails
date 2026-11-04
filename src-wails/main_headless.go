@@ -59,6 +59,11 @@ func main() {
 func desktopEmit(string, ...any) {}
 func desktopQuit()               {}
 func desktopPhaseChanged(*App)   {}
+
+// No tray: away notices go to the phone only.
+func showTrayToast(trayToast) bool             { return false }
+func trayToastReady() bool                     { return false }
+func mainWindowFocused() (focused, known bool) { return false, false }
 func pickPaths(bool, bool, string, []string) ([]string, error) {
 	return nil, errors.New("no native dialogs in headless mode")
 }

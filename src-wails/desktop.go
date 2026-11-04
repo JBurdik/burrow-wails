@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -205,6 +206,7 @@ const trayOffset = 6
 // The panel is non-activating, so Show() is orderFrontRegardless (no key).
 // ponytail: 250 ms is a guess at AeroSpace's reaction time, not a contract.
 func showTrayPanel(underIcon bool) {
+	hideTrayToasts() // the panel lists the same threads, over the same spot
 	if underIcon {
 		_ = tray.PositionWindow(trayWin, trayOffset)
 	}
@@ -456,6 +458,9 @@ func setupTray(a *App) {
 		}
 	})
 	tray.AttachWindow(trayWin).WindowOffset(trayOffset)
+	if runtime.GOOS == "darwin" {
+		setupTrayToast()
+	}
 	// Unpinned: the stock toggle (re-positions under the icon). Pinned: toggle
 	// in place, so a panel the user dragged elsewhere stays there.
 	tray.OnClick(func() {
@@ -473,6 +478,9 @@ func setupTray(a *App) {
 			// The client may have restored a pin before this ran (TrayPanel's
 			// restoreGeometry): prepare's movable=NO must not undo it.
 			setTrayPanelMovable(trayWin, trayPinned.Load())
+			if toastWin != nil {
+				prepareTrayToast(toastWin)
+			}
 			registerTrayHotkey(a)
 		}()
 		go refreshTray(a)
@@ -549,3 +557,110 @@ func trayLabel(n int) string {
 }
 
 func desktopPhaseChanged(a *App) { go refreshTray(a) }
+
+// --- Tray toasts ---
+//
+// While the main window is not focused, pushFor (pushtrigger.go) drops a
+// toast from the tray icon instead of posting an OS notification. Its own
+// window (WindowApp kind "traytoast", TrayToast.vue), not part of the tray
+// panel: the panel hides on focus loss, sizes itself to its list and may be
+// pinned elsewhere — a toast has none of that, and the two never show at once.
+// Same NSPanel recipe as the panel (non-activating, pop-up level, all Spaces)
+// but it is NEVER focused: AeroSpace sees it unfocused, buttonless and
+// untitled, i.e. a popup it leaves alone, and the user's app keeps the keys.
+
+const trayToastWidth = 340
+
+var (
+	toastWin   *application.WebviewWindow
+	toastReady atomic.Bool // TrayToast.vue mounted and listening
+)
+
+func setupTrayToast() {
+	toastWin = wapp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "traytoast",
+		Title:            "",
+		Width:            trayToastWidth,
+		Height:           90,
+		Hidden:           true,
+		Frameless:        true,
+		DisableResize:    true,
+		URL:              "/#/window/traytoast",
+		BackgroundType:   application.BackgroundTypeTransparent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		Mac: application.MacWindow{
+			Backdrop:         application.MacBackdropTransparent,
+			WindowClass:      application.MacWindowClassPanel,
+			PanelPreferences: application.MacPanelPreferences{FloatingPanel: true, NonActivating: true},
+			WindowLevel:      application.MacWindowLevelPopUpMenu,
+			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
+				application.MacWindowCollectionBehaviorTransient |
+				application.MacWindowCollectionBehaviorFullScreenAuxiliary |
+				application.MacWindowCollectionBehaviorIgnoresCycle,
+		},
+	})
+	toastWin.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		if !quitting.Load() {
+			e.Cancel()
+			toastWin.Hide()
+		}
+	})
+}
+
+func trayToastReady() bool { return toastWin != nil && toastReady.Load() }
+
+// showTrayToast hands t to the toast window; false = could not (no window
+// yet, or not listening), so the caller falls back to an OS notification.
+// While the tray panel is up the toast is dropped but counts as shown: the
+// panel already lists that thread.
+func showTrayToast(t trayToast) bool {
+	if !trayToastReady() {
+		return false
+	}
+	if trayWin != nil && trayWin.IsVisible() {
+		return true
+	}
+	desktopEmit("tray-toast", t)
+	return true
+}
+
+func hideTrayToasts() {
+	if toastWin != nil && toastWin.IsVisible() {
+		desktopEmit("tray-toast-clear")
+		toastWin.Hide()
+	}
+}
+
+// mainWindowFocused: known only in-process; with an external core the window
+// belongs to another process.
+func mainWindowFocused() (focused, known bool) {
+	if mainWin == nil {
+		return false, false
+	}
+	return mainWin.IsFocused(), true
+}
+
+// TrayToastReady: TrayToast.vue is listening for tray-toast.
+func (s *DesktopService) TrayToastReady() { toastReady.Store(true) }
+
+// TrayToastLayout sizes the toast window to its stack (CSS px × zoom) and
+// shows it under the tray icon, without focus; 0 hides it.
+func (s *DesktopService) TrayToastLayout(height int) {
+	if toastWin == nil || tray == nil {
+		return
+	}
+	if height <= 0 {
+		toastWin.Hide()
+		return
+	}
+	toastWin.SetSize(trayToastWidth, height)
+	_ = tray.PositionWindow(toastWin, trayOffset)
+	if !toastWin.IsVisible() {
+		toastWin.Show() // non-activating panel: orderFrontRegardless, never key
+	}
+}
+
+// TrayToasts: Go tells an away user itself (tray toast, OS notification as
+// fallback), so the webview must not post its own OS notification.
+// Both roles: in the UI role the core (same Mac) owns the tray.
+func (s *DesktopService) TrayToasts() bool { return runtime.GOOS == "darwin" }

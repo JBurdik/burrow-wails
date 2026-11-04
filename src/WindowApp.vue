@@ -1,5 +1,6 @@
 <template>
   <TrayPanel v-if="kind === 'tray'" />
+  <TrayToast v-else-if="kind === 'traytoast'" />
   <div v-else class="window-app flex h-full flex-col bg-[var(--terminal-bg)]">
     <!-- Hidden-inset titlebar: the traffic lights sit over this strip, which is
          also what drags the window. -->
@@ -49,6 +50,7 @@ const AgentChat = defineAsyncComponent(() => import("@/components/AgentChat.vue"
 const GitWindow = defineAsyncComponent(() => import("@/components/git/GitWindow.vue"));
 const RightPanel = defineAsyncComponent(() => import("@/components/RightPanel.vue"));
 const TrayPanel = defineAsyncComponent(() => import("@/components/TrayPanel.vue"));
+const TrayToast = defineAsyncComponent(() => import("@/components/TrayToast.vue"));
 
 const [path, query = ""] = location.hash.slice(1).split("?");
 const parts = path.split("/").filter(Boolean); // ["window", kind, id?]

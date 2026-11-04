@@ -171,3 +171,27 @@ export function TraySetHotkey(spec: string): $CancellablePromise<string> {
 export function TraySetPinned(pinned: boolean): $CancellablePromise<void> {
     return $Call.ByID(2423678597, pinned);
 }
+
+/**
+ * TrayToastLayout sizes the toast window to its stack (CSS px × zoom) and
+ * shows it under the tray icon, without focus; 0 hides it.
+ */
+export function TrayToastLayout(height: number): $CancellablePromise<void> {
+    return $Call.ByID(4064602638, height);
+}
+
+/**
+ * TrayToastReady: TrayToast.vue is listening for tray-toast.
+ */
+export function TrayToastReady(): $CancellablePromise<void> {
+    return $Call.ByID(3424324591);
+}
+
+/**
+ * TrayToasts: Go tells an away user itself (tray toast, OS notification as
+ * fallback), so the webview must not post its own OS notification.
+ * Both roles: in the UI role the core (same Mac) owns the tray.
+ */
+export function TrayToasts(): $CancellablePromise<boolean> {
+    return $Call.ByID(2321226673);
+}

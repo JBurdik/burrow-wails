@@ -31,6 +31,7 @@ window.open = (url?: string | URL, ...rest) => {
 };
 
 async function boot() {
+  if (isDesktop()) void import("./lib/focusReport").then((m) => m.startFocusReport(location.hash.startsWith("#/window/") ? location.hash.slice(2) : "main"));
   // A secondary native window (src/lib/windows.ts): its own small root, never
   // App.vue — that one runs app-wide side effects exactly one window may own.
   if (location.hash.startsWith("#/window/")) {
