@@ -37,6 +37,9 @@ static void burrowLayout(UIViewController *self, SEL _cmd) {
     ((void (*)(id, SEL))wailsLayout)(self, _cmd);
     UIView *web = [self valueForKey:@"webView"];
     web.frame = self.view.bounds;
+    // Edge swipe = history back: the phone shell pushes a hash entry per
+    // detail screen (thread, project section), so this is its back gesture.
+    if ([web isKindOfClass:[WKWebView class]]) ((WKWebView *)web).allowsBackForwardNavigationGestures = YES;
 }
 static void fillScreen(void) {
     Class vc = NSClassFromString(@"WailsViewController");

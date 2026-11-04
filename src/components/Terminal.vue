@@ -44,6 +44,9 @@
       @error="onLeafError"
     />
 
+    <div v-if="!ready && !tabs.length" class="flex flex-1 items-center justify-center text-[13px] text-muted-foreground">
+      <span class="size-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-accent" />
+    </div>
     <div
       v-if="tabs.length > 0"
       class="terminal-body relative flex flex-1 overflow-hidden"
@@ -63,7 +66,7 @@
           v-for="pane in paneLayout(tab)"
           :key="pane.leaf.id"
           class="pane absolute flex flex-col overflow-hidden bg-[var(--terminal-bg)]"
-          :class="{ focused: focusedLeafId === pane.leaf.id && isTabSplit(tab) }"
+          :class="{ focused: focusedLeafId === pane.leaf.id && isTabSplit(tab), 'phone-solo': isTabSplit(tab), 'phone-off': isTabSplit(tab) && pane.leaf.id !== phoneLeafId(tab) }"
           :style="rectStyle(pane.rect)"
           :data-leaf-id="pane.leaf.id"
           @mousedown.capture="activateLeaf(pane.leaf.id)"
@@ -140,6 +143,7 @@
             @spawn="(req) => addTab(req.cmd, { cwd: req.cwd || undefined, resultToken: req.token || undefined })"
             @cwd="(p) => onLeafCwd(pane.leaf.id, p)"
           />
+          <PhoneKeys v-if="phone && (!pane.leaf.leafType || pane.leaf.leafType === 'terminal') && !popouts.isPopped(pane.leaf.id)" :pty-id="pane.leaf.id" />
           <!-- Popped out into its own window: the view above stays mounted
                (frozen, not resizing the PTY) so bringing it back re-attaches nothing. -->
           <div
@@ -198,6 +202,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import XTerm from "./XTerm.vue";
 import PtyPermissionBanner from "./PtyPermissionBanner.vue";
+import PhoneKeys from "./phone/PhoneKeys.vue";
+import { compact as phone } from "@/lib/viewport";
 import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
@@ -291,6 +297,8 @@ interface DaemonSession {
 }
 
 const tabs = ref<Tab[]>([]);
+/** Restore finished — until then an empty tab list means "still loading", not "no tabs". */
+const ready = ref(false);
 const activeTabId = ref(0);
 const focusedLeafId = ref(0);
 const splitWorkspace = ref(false);
@@ -1335,6 +1343,14 @@ async function closeTab(tabId: number) {
   }
 }
 
+// A phone shows one pane of a split tab, full size: the focused one if it is
+// in this tab, else the first. Hiding the rest gives their XTerms a zero box,
+// which their fit skips, so the PTY grid is left alone.
+function phoneLeafId(tab: Tab): number {
+  const leaves = getAllLeaves(tab.root);
+  return leaves.find((l) => l.id === focusedLeafId.value)?.id ?? leaves[0].id;
+}
+
 function isTabSplit(tab: Tab): boolean {
   return tab.root.type === 'split';
 }
@@ -1786,6 +1802,7 @@ onMounted(async () => {
   }
 
   restored = true;
+  ready.value = true;
   persist(); // the restore may have renumbered dead PTYs; save the ids we settled on
   syncStore();
   // Replay a request that landed while this Terminal was mounting/restoring —

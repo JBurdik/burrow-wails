@@ -299,6 +299,10 @@ body {
 .is-compact .chat-messages .md-body { min-width: 0; overflow-wrap: anywhere; }
 .is-compact .chat-message .bubble-user { max-width: 88%; }
 .is-compact .minimap-rail { display: none; }
+/* A split tab on a phone: one pane, full size (Terminal.vue phoneLeafId). */
+.is-compact .pane.phone-solo { left: 0 !important; top: 0 !important; width: 100% !important; height: 100% !important; }
+.is-compact .pane.phone-off,
+.is-compact .pane-titlebar { display: none !important; }
 .is-compact .catchup-btn { display: none; }
 /* Phone: a tapped file's diff opens full screen instead of a 220px strip
    below the commit box, i.e. off screen. */

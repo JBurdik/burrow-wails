@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from "vue";
 import { PhCaretLeft } from "@phosphor-icons/vue";
 import { router } from "@/router";
 import { backTarget } from "@/lib/phoneNav";
@@ -9,6 +10,29 @@ import StageBackdrop from "@/components/StageBackdrop.vue";
 // Root screens get a large title; details a compact bar with a back arrow.
 const props = defineProps<{ title: string; subtitle?: string; back?: boolean }>();
 const ui = useUIStore();
+
+// A Home Screen PWA has no browser back gesture (the iOS app gets WKWebView's,
+// src-ios/build/ios/main.m; Safari has its own): a swipe from the left edge
+// on a detail screen goes back. ponytail: no drag-follow animation.
+let start: { x: number; y: number } | null = null;
+const onStart = (e: TouchEvent) => { const t = e.touches[0]; start = t && t.clientX < 24 ? { x: t.clientX, y: t.clientY } : null; };
+const onEnd = (e: TouchEvent) => {
+  const t = e.changedTouches[0];
+  if (!start || !t) return;
+  const dx = t.clientX - start.x, dy = Math.abs(t.clientY - start.y);
+  start = null;
+  if (dx > 70 && dy < dx / 2) goBack();
+};
+const standalone = (navigator as { standalone?: boolean }).standalone === true;
+onMounted(() => {
+  if (!props.back || !standalone) return;
+  window.addEventListener("touchstart", onStart, { passive: true });
+  window.addEventListener("touchend", onEnd, { passive: true });
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("touchstart", onStart);
+  window.removeEventListener("touchend", onEnd);
+});
 
 function goBack() {
   // In-app history → a real back (keeps iOS swipe-back and this arrow in step);
