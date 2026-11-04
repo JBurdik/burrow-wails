@@ -37,19 +37,13 @@
     <!-- Phone shell (src/components/phone/, docs/superpowers/specs/2026-10-22-phone-shell-design.md):
          the same panels, one per screen, chosen by the route; headers sit here. -->
     <template v-if="compact">
-      <PhoneHeader v-if="phone === 'threads'" title="Threads">
-        <template #actions>
-          <button class="phone-icon-btn" aria-label="Search" @click="ui.openSpotlight()"><PhMagnifyingGlass :size="21" /></button>
-          <button class="phone-icon-btn" aria-label="New thread" @click="ui.openWelcome()"><PhPlus :size="22" /></button>
-        </template>
-      </PhoneHeader>
-      <ThreadHeader v-else-if="phone === 'thread'" />
+      <ThreadHeader v-if="phone === 'thread'" />
       <PhoneHeader v-else-if="phone === 'project-surface'" :title="surfaceTitle" :subtitle="ws.active?.name" back />
     </template>
     <div class="ide-body" :class="{ 'panels-swapped': ui.swapPanels }" :style="panelStyles">
       <!-- Wrapped: Sidebar has several root nodes (Teleports), so v-show/class on the
            component itself silently did nothing and the sidebar never hid. -->
-      <div v-show="compact ? phone === 'threads' : ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
+      <div v-show="!compact && ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
       <div v-show="!compact && ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
       <div v-show="!compact || phone === 'thread'" ref="mainEl" class="ide-main" :class="{ 'details-reserve': details?.kind === 'chat' && !details.overlay }" :style="{ '--details-inset': (detailsInset ?? 0) + 'px' }">
         <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
@@ -81,7 +75,7 @@
         </Transition>
         <Dashboard v-if="ui.mode === 'dashboard'" class="dashboard-main-panel" @new-workspace="openNewWorkspace" />
       </div>
-      <InboxScreen v-if="compact && phone === 'inbox'" />
+      <ThreadsScreen v-if="compact && phone === 'threads'" />
       <ProjectScreen v-else-if="compact && phone === 'project'" />
       <MoreScreen v-else-if="compact && phone === 'more'" />
       <div v-show="!compact && ui.rightPanelVisible && !rpPopped" class="resize-handle panel-resize-right" @mousedown="startResize('right', $event)" />
@@ -163,12 +157,12 @@ import { startCoreLink } from "@/lib/coreLink";
 import { ref, onMounted, onBeforeUnmount, computed, provide, watch, nextTick, useTemplateRef } from "vue";
 import { useRoute } from "vue-router";
 import { router, routeId } from "@/router";
-import { PhMagnifyingGlass, PhPlus, PhX } from "@phosphor-icons/vue";
+import { PhX } from "@phosphor-icons/vue";
 import TitleBar from "@/components/TitleBar.vue";
 import PhoneHeader from "@/components/phone/PhoneHeader.vue";
 import ThreadHeader from "@/components/phone/ThreadHeader.vue";
 import BottomNav from "@/components/phone/BottomNav.vue";
-import InboxScreen from "@/components/phone/InboxScreen.vue";
+import ThreadsScreen from "@/components/phone/ThreadsScreen.vue";
 import ProjectScreen from "@/components/phone/ProjectScreen.vue";
 import MoreScreen from "@/components/phone/MoreScreen.vue";
 import { isPhoneOnlyRoute, phoneScreen, showsBottomNav } from "@/lib/phoneNav";

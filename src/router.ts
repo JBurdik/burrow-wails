@@ -31,7 +31,7 @@ export const routes: RouteRecordRaw[] = [
   { path: "/dashboard", name: "dashboard", component: NONE },
   // Phone shell screens (src/components/phone/, src/lib/phoneNav.ts). On a
   // phone `/` is the thread list and the composer moves to `/new`.
-  { path: "/inbox", name: "inbox", component: NONE },
+  { path: "/inbox", redirect: "/" }, // the Inbox merged into the phone's Threads home
   { path: "/project", name: "project", component: NONE },
   { path: "/project/:surface(git|pull-requests|dev-servers|agents)", name: "project-surface", component: NONE },
   { path: "/more", name: "more", component: NONE },

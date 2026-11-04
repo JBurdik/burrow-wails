@@ -37,7 +37,8 @@
                 @click="openRow(row)"
               >
                 <span class="relative flex size-4 shrink-0 items-center justify-center">
-                  <component :is="row.kind === 'chat' ? PhChatCircle : PhTerminalWindow" :size="15" class="text-muted-foreground" />
+                  <img v-if="row.icon" :src="row.icon" class="size-4 rounded-[4px] object-cover" />
+                  <component :is="row.kind === 'chat' ? PhChatCircle : PhTerminalWindow" v-else :size="15" class="text-muted-foreground" />
                   <span v-if="row.status !== 'idle'" class="absolute -right-0.5 -top-0.5 size-[7px] rounded-full ring-2 ring-[var(--sidebar-bg)]" :class="[dotClass(row.status), row.status === 'running' && 'animate-pulse']" />
                 </span>
                 <span class="flex min-w-0 flex-1 flex-col">
@@ -163,58 +164,29 @@ import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@wailsio/runtime";
 import { PhArrowBendUpLeft, PhArrowSquareOut, PhCaretLeft, PhChatCircle, PhPlus, PhPushPin, PhTerminalWindow } from "@phosphor-icons/vue";
 import { TrayOpen, TraySetPinned } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
-import { displayStatus, type Phase } from "@/runtime/displayStatus";
-import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
-import { settledFor, useClaudeChatsStore } from "@/stores/claudeChats";
+import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { Select } from "@/components/ui/select";
 import { chatSession, TRANSCRIPT_PAGE, type ChatMessagesPage, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";
 import { useUIStore } from "@/stores/ui";
 import { smartTitle } from "@/lib/chatTitle";
+import { feedGroups, needsYou, permTarget, useThreadFeed, type FeedRow } from "@/lib/threadFeed";
 
 const AgentChat = defineAsyncComponent(() => import("@/components/AgentChat.vue"));
 
-interface Row {
-  key: string;
-  kind: "chat" | "tab";
-  id: number;
-  title: string;
-  workspace: string;
-  detail: string;
-  status: TermStatus;
-  route: string;
-  at: number;
-  recap?: string;
-}
-interface PermRequest {
-  id: string;
-  pty_id: string;
-  tool_name: string;
-  tool_input: Record<string, unknown> | null;
-}
 type View = { kind: "list" } | { kind: "chat"; chatId: number } | { kind: "compose" };
 
 const chats = useClaudeChatsStore();
 const workspaces = useWorkspaceStore();
 const ui = useUIStore();
-const snap = ref<ShellSnapshotData | null>(null);
-const perms = ref<PermRequest[]>([]);
-const now = ref(Date.now());
+const { rows, perms, now, answerPerm: answer, permsFor } = useThreadFeed();
 const view = ref<View>({ kind: "list" });
 const pinned = ref(false);
 const wsReady = ref(false);
 
 /** The panel fills the window (pinned, or showing a chat / composer); else it hugs the list. */
 const fill = computed(() => pinned.value || view.value.kind !== "list");
-
-function seenAt(): Record<string, number> {
-  try {
-    return JSON.parse(localStorage.getItem("burrow.seenAt") ?? "{}") as Record<string, number>;
-  } catch {
-    return {};
-  }
-}
 
 const chatRoute = (id: number) => {
   const c = chats.sessions.find((s) => s.id === id);
@@ -225,49 +197,8 @@ const chatWs = (id: number) => {
   return c ? workspaces.workspaces.find((w) => w.id === c.workspaceId) : undefined;
 };
 
-const rows = computed<Row[]>(() => {
-  const s = snap.value;
-  if (!s) return [];
-  const seen = seenAt();
-  const wsName = new Map(s.workspaces.map((w) => [w.id, w.name]));
-  const out: Row[] = [];
-  for (const c of chats.sessions) {
-    if (c.archivedAt || c.parentChatId || c.kind === "side") continue;
-    const phase = s.phases[`chat:${c.id}`];
-    const status = displayStatus(phase, seen[`chat:${c.id}`] ?? 0, false);
-    if (settledFor({ ...c, status }, now.value)) continue;
-    out.push({
-      key: `chat:${c.id}`, kind: "chat", id: c.id, title: c.title || `Chat ${c.id}`, workspace: wsName.get(c.workspaceId) ?? "",
-      detail: status === "permission" || status === "waiting" ? (phase?.detail ?? "") : "",
-      status, route: `/ws/${c.workspaceId}?chat=${c.id}`, recap: c.recap,
-      at: Math.max(c.lastActivityAt ?? 0, phase?.updated_at ?? 0),
-    });
-  }
-  for (const [ws, tabs] of Object.entries(s.tabs)) {
-    for (const t of tabs as { pty_id?: number | null; title?: string | null; default_title?: string | null }[]) {
-      if (!t.pty_id) continue;
-      const phase = s.phases[`pty:${t.pty_id}`];
-      if (!phase?.is_agent) continue;
-      out.push({
-        key: `pty:${t.pty_id}`, kind: "tab", id: t.pty_id, title: t.title || t.default_title || "Terminal", workspace: wsName.get(Number(ws)) ?? "",
-        detail: "", status: displayStatus(phase, seen[String(t.pty_id)] ?? 0, false),
-        route: `/ws/${ws}/tab/${t.pty_id}`, at: phase.updated_at ?? 0,
-      });
-    }
-  }
-  return out.sort((a, b) => b.at - a.at);
-});
-
-const needsYou = (st: TermStatus) => st === "permission" || st === "waiting" || st === "error";
-const unread = (st: TermStatus) => st === "review" || st === "done";
-
-const groups = computed(() => [
-  { label: "Needs you", rows: rows.value.filter((r) => needsYou(r.status)) },
-  { label: "Working", rows: rows.value.filter((r) => r.status === "running") },
-  { label: "Unread", rows: rows.value.filter((r) => unread(r.status)) },
-  // ponytail: idle threads capped at 5 — the panel is a glance, the Sidebar is the list.
-  { label: "Recent", rows: rows.value.filter((r) => r.status === "idle").slice(0, 5) },
-]);
+// ponytail: idle threads capped at 5 — the panel is a glance, the Sidebar is the list.
+const groups = computed(() => feedGroups(rows.value, 5));
 
 const summary = computed(() => {
   const parts: string[] = [];
@@ -294,7 +225,7 @@ function ago(ts: number): string {
   return `${Math.floor(s / 86400)}d`;
 }
 
-function rightLabel(row: Row): string {
+function rightLabel(row: FeedRow): string {
   switch (row.status) {
     case "permission": return "Needs input";
     case "waiting": return "Waiting";
@@ -318,19 +249,6 @@ function textClass(status: TermStatus): string {
 }
 
 // ── PTY permissions ─────────────────────────────────────────────────────────
-function permsFor(row: Row): PermRequest[] {
-  return row.kind === "tab" ? perms.value.filter((p) => p.pty_id === String(row.id)) : [];
-}
-function permTarget(req: PermRequest): string {
-  const i = req.tool_input ?? {};
-  return String(i.command ?? i.file_path ?? i.path ?? i.url ?? i.pattern ?? "").slice(0, 200);
-}
-async function answer(req: PermRequest, behavior: "allow" | "always" | "deny") {
-  perms.value = perms.value.filter((p) => p.id !== req.id);
-  await invoke("answer_pty_permission", { id: req.id, behavior, message: "" }).catch(() => {});
-  void load();
-}
-
 // ── Chat requests (permission / question / plan) ────────────────────────────
 // Only Go's phase knows a chat is blocked; the request itself lives in the
 // chat's session (chatSession.ts). For a row that needs the user the panel
@@ -371,7 +289,7 @@ watch(blockedChats, (ids) => {
   for (const id of want) void holdSession(id);
 }, { immediate: true });
 
-function chatPending(row: Row): readonly PendingRequest[] {
+function chatPending(row: FeedRow): readonly PendingRequest[] {
   if (row.kind !== "chat" || !answerable.value.has(row.id)) return [];
   return held.get(row.id)?.pendingRequests.value ?? [];
 }
@@ -386,12 +304,12 @@ async function answerChat(chatId: number, answer: PendingAnswer) {
 const replyTo = ref<number | null>(null);
 const replyText = ref("");
 const replyEl = ref<HTMLInputElement[] | null>(null);
-function toggleReply(row: Row) {
+function toggleReply(row: FeedRow) {
   replyTo.value = replyTo.value === row.id ? null : row.id;
   replyText.value = "";
   void nextTick(() => replyEl.value?.[0]?.focus());
 }
-async function sendReply(row: Row) {
+async function sendReply(row: FeedRow) {
   const text = replyText.value.trim();
   if (!text) return;
   replyText.value = "";
@@ -411,7 +329,7 @@ provide("openRightPanelSubagent", (chatId: number) => { view.value = { kind: "ch
 provide("openRightPanelSurface", () => { const v = view.value; if (v.kind === "chat") open(chatRoute(v.chatId)); });
 provide("openRightPanelGitTab", () => { const v = view.value; if (v.kind === "chat") open(chatRoute(v.chatId)); });
 
-function openRow(row: Row) {
+function openRow(row: FeedRow) {
   if (row.kind === "chat") view.value = { kind: "chat", chatId: row.id };
   else open(row.route);
 }
@@ -547,76 +465,28 @@ async function restoreGeometry() {
   if (g.x != null && g.y != null) await Window.SetPosition(g.x, g.y).catch(() => {});
 }
 
-// ── Live state ──────────────────────────────────────────────────────────────
-// One shell_snapshot for the first paint, then the phase events of exactly the
-// chats and agent tabs on the list, plus pty-permissions. A slow re-read only
-// catches what has no event of its own here (a tab opened, a workspace renamed).
-async function load() {
-  if (document.visibilityState === "hidden") return;
-  now.value = Date.now();
-  const [s, p] = await Promise.all([
-    invoke<ShellSnapshotData>("shell_snapshot").catch(() => snap.value),
-    invoke<PermRequest[]>("list_pty_permissions").catch(() => perms.value),
-  ]);
-  snap.value = s;
-  perms.value = p ?? [];
-}
-
-const phaseKeys = computed(() => {
-  const keys = chats.sessions.filter((c) => !c.archivedAt && !c.parentChatId && c.kind !== "side").map((c) => `chat:${c.id}`);
-  for (const tabs of Object.values(snap.value?.tabs ?? {})) {
-    for (const t of tabs as { pty_id?: number | null }[]) if (t.pty_id) keys.push(`pty:${t.pty_id}`);
-  }
-  return keys;
-});
-const phaseListeners = new Map<string, Promise<() => void>>();
-watch(phaseKeys, (keys) => {
-  const want = new Set(keys);
-  for (const [key, off] of phaseListeners) {
-    if (!want.has(key)) { void off.then((f) => f()); phaseListeners.delete(key); }
-  }
-  for (const key of want) {
-    if (phaseListeners.has(key)) continue;
-    phaseListeners.set(key, listen<Phase>(`phase-${key}`, (e) => {
-      if (!snap.value || !e.payload) return;
-      now.value = Date.now();
-      snap.value = { ...snap.value, phases: { ...snap.value.phases, [key]: e.payload } };
-    }));
-  }
-}, { immediate: true });
-
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape" || e.defaultPrevented) return;
   if (view.value.kind !== "list") view.value = { kind: "list" };
   else if (!pinned.value) void Window.Hide();
 }
-let resync: number | undefined;
 let geometryTimer: number | undefined;
 const unlisteners: (() => void)[] = [];
 onMounted(async () => {
   document.documentElement.style.background = "transparent";
   document.body.style.background = "transparent";
   void restoreGeometry();
-  void load();
-  resync = window.setInterval(load, 15_000);
   geometryTimer = window.setInterval(rememberGeometry, 2000);
-  window.addEventListener("focus", load);
   window.addEventListener("keydown", onKeydown);
   // ⌥Space (trayhotkey_darwin.go): straight to a new thread.
   unlisteners.push(await listen("menu-tray-compose", () => startCompose()));
-  unlisteners.push(await listen("pty-permissions", () => {
-    void invoke<PermRequest[]>("list_pty_permissions").then((p) => { perms.value = p ?? []; }).catch(() => {});
-  }));
   await workspaces.load().catch(() => {});
   wsReady.value = true;
 });
 onBeforeUnmount(() => {
-  clearInterval(resync);
   clearInterval(geometryTimer);
-  window.removeEventListener("focus", load);
   window.removeEventListener("keydown", onKeydown);
   unlisteners.forEach((f) => f());
-  for (const off of phaseListeners.values()) void off.then((f) => f());
   for (const id of [...held.keys()]) releaseSession(id);
 });
 </script>

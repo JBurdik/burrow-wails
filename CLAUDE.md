@@ -607,7 +607,9 @@ desktop app, else `ConnectView.vue`, the pairing screen; also a boot-error scree
 devtools) and `ConnectView.vue`.
 
 Phone width (`compact` in `src/lib/viewport.ts`, ≤ 767 px) switches `App.vue` to the phone shell
-(`src/components/phone/`: bottom nav, Inbox / Project / More screens, sidebar as the Threads screen); an iPad
+(`src/components/phone/`: bottom nav Threads / Project / More; Threads is `ThreadsScreen.vue` over `src/lib/threadFeed.ts` —
+the tray panel's feed: every project's active threads grouped Needs you / Working / Unread / Recent from Go's phases,
+not the mounted Terminals, since a phone mounts one workspace; the desktop Sidebar stays hidden there); an iPad
 gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the browser's own
 `localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's; read receipts (`burrow.seenAt`)
 are per device the same way.

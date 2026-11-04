@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import { PhChatsCircle, PhTray, PhGitBranch, PhDotsThreeOutline } from "@phosphor-icons/vue";
+import { PhChatsCircle, PhGitBranch, PhDotsThreeOutline } from "@phosphor-icons/vue";
 import { router } from "@/router";
 import { phoneScreen } from "@/lib/phoneNav";
-import { useInbox } from "./useInbox";
+import { needsYou, useThreadFeed } from "@/lib/threadFeed";
 
 const route = useRoute();
-const { needsCount } = useInbox();
+const { rows } = useThreadFeed();
+const needsCount = computed(() => rows.value.filter((r) => needsYou(r.status)).length);
 
 const items = [
   { screen: "threads", path: "/", label: "Threads", icon: PhChatsCircle },
-  { screen: "inbox", path: "/inbox", label: "Inbox", icon: PhTray },
   { screen: "project", path: "/project", label: "Project", icon: PhGitBranch },
   { screen: "more", path: "/more", label: "More", icon: PhDotsThreeOutline },
 ] as const;
@@ -34,7 +34,7 @@ const go = (path: string) => { if (route.path !== path) void router.replace(path
       <component :is="it.icon" :size="23" :weight="current === it.screen ? 'fill' : 'regular'" />
       {{ it.label }}
       <span
-        v-if="it.screen === 'inbox' && needsCount"
+        v-if="it.screen === 'threads' && needsCount"
         class="absolute left-1/2 top-1.5 ml-2 min-w-[17px] rounded-full bg-destructive px-1 text-center text-[10px] font-semibold leading-[17px] text-white"
       >{{ needsCount }}</span>
     </button>
