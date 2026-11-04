@@ -135,7 +135,7 @@
                still owing its first command mounts anyway — that mount is what
                spawns it. -->
           <XTerm
-            v-else-if="!phone || isTabVisible(tab) || pane.leaf.initialCmd"
+            v-else-if="(!pane.leaf.leafType || pane.leaf.leafType === 'terminal') && (!phone || isTabVisible(tab) || pane.leaf.initialCmd)"
             :pty-id="pane.leaf.id"
             :cwd="pane.leaf.cwd ?? cwd"
             :initial-cmd="pane.leaf.initialCmd"

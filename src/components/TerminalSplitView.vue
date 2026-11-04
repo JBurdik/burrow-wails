@@ -31,7 +31,7 @@
       class="min-w-0 flex-1"
     />
     <XTerm
-      v-else
+      v-else-if="!(node as Leaf).leafType || (node as Leaf).leafType === 'terminal'"
       :pty-id="(node as Leaf).id"
       :cwd="cwd"
       :initial-cmd="(node as Leaf).initialCmd"
