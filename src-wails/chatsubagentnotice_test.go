@@ -149,7 +149,7 @@ func TestSubagentBlockedNoticeOncePerEpisode(t *testing.T) {
 	if got := a.deliverSubagentNotices(time.Now(), s.send); len(got) != 1 {
 		t.Fatalf("delivered %v, want one blocked notice", got)
 	}
-	if !strings.Contains(s.text[0], "is blocked: Bash: rm -rf build") || !strings.Contains(s.text[0], "burrow chat-send --chat-id "+strconv.FormatInt(child.ID, 10)) {
+	if !strings.Contains(s.text[0], "is blocked: Bash: rm -rf build") || !strings.Contains(s.text[0], "burrow chat-answer --chat-id "+strconv.FormatInt(child.ID, 10)) {
 		t.Fatalf("text = %q", s.text[0])
 	}
 	if c, _ := a.chatByID(child.ID); c.CollectedAt != 0 {

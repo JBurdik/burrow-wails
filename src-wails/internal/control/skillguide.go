@@ -36,16 +36,18 @@ Choose deliberately for every delegation workflow. spawn --target chat creates a
 
 You only get that choice from a terminal tab. A spawn made FROM a chat thread is always a chat sub-agent belonging to that thread — target tab is ignored, and so is its result token, because the sub-agent lives in the Right Panel under its parent rather than as a tab of its own. Pass --detach to open a standalone top-level chat (--target chat) or terminal tab (--target tab) instead, e.g. when the user asks for a new chat of its own. Follow it up with chat_send, wait_result --chat-id and collect_results.
 
-A chat sub-agent's result now arrives by itself: when it finishes a turn, Burrow sends its final message into your chat as a new prompt ("Sub-agent <title> (#id) finished: ...") once your own turn has ended, and marks it collected. When it blocks on a question or permission you get one "Sub-agent <title> (#id) is blocked: ..." prompt — answer it with chat_send --chat-id <id> or ask the user. So after spawning, end your turn instead of polling; reach for wait_result / collect_results only for a truncated answer, a terminal-tab worker, or when the user turned this off (Settings → General).
+A chat sub-agent's result now arrives by itself: when it finishes a turn, Burrow sends its final message into your chat as a new prompt ("Sub-agent <title> (#id) finished: ...") once your own turn has ended, and marks it collected. When it blocks on a question or permission you get one "Sub-agent <title> (#id) is blocked: ..." prompt (wait_result also returns early with blocked=true and the pending request). Answer a question with chat_answer --chat-id <id> --answer "..." when the answer is yours to give, else ask the user; a tool approval or plan is always the user's — tell them. So after spawning, end your turn instead of polling; reach for wait_result / collect_results only for a truncated answer, a terminal-tab worker, or when the user turned this off (Settings → General).
 
 ### Both doors for each delegation verb
 
 - spawn: from a tab, choose target chat for a structured chat or target tab for a visible terminal; from a chat, the sub-agent is always a chat.
 - list_agents: call before spawn. Lists every configured agent with availability (and why not), models + efforts, permission modes, whether it takes a profile, which one spawn picks by default, and what a sub-agent inherits from you. --agent NAME gives one agent's full model list.
 - agent_status: reports both chat and tab agents; use its chat_id or pty_id with the matching follow-up verb.
-- tab_output: reads a tab by pty_id; for a chat, read its structured transcript or wait_result --chat-id instead.
+- tab_output: reads a tab by pty_id; for a chat use chat_read --chat-id (pass the returned next as --after to read only what is new; --activity adds tool calls).
 - send_to_tab: follows up with a tab by pty_id; use chat_send for the equivalent chat follow-up.
-- chat_send: follows up with a chat by chat_id; use send_to_tab for the equivalent tab follow-up.
+- chat_send: follows up with a chat by chat_id; --mode queue waits for the running turn to settle, --mode steer only joins a running turn. Use send_to_tab for the equivalent tab follow-up.
+- chat_interrupt: stops your sub-agent's running turn (--stop also ends its process); chat_send continues it later.
+- chat_answer: answers your sub-agent's pending question; never approvals or plans.
 - close_chat: deletes a chat by chat_id; close a terminal tab with tab_close and its pty_id instead.
 - wait_result: waits on a tab result token or on a chat_id, depending on the target the spawn actually produced.
 - collect_results: takes completed tab results and, when called from a chat parent, its completed chat-child results.
@@ -101,7 +103,7 @@ The live worktree and repository verbs are:
 var delegationVerbNames = map[string]bool{
 	"spawn": true, "list_agents": true, "agent_status": true, "tab_output": true,
 	"send_to_tab": true, "chat_send": true, "close_chat": true, "wait_result": true,
-	"collect_results": true,
+	"collect_results": true, "chat_read": true, "chat_answer": true, "chat_interrupt": true,
 }
 
 var worktreeVerbNames = map[string]bool{

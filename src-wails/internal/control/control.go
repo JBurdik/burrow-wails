@@ -244,6 +244,9 @@ type Deps struct {
 	ChatRuntime ChatRuntime
 	// Agents is optional: nil asks the UI (provider store) instead.
 	Agents AgentCatalog
+	// ChatControl backs chat_read / chat_answer / chat_interrupt and
+	// chat_send's queue / steer modes. nil = those refuse.
+	ChatControl ChatControl
 	// Schedules and ChatMover back the agent self-management verbs
 	// (verbs_self.go). nil = those verbs refuse.
 	Schedules Schedules
@@ -267,6 +270,7 @@ func New(deps Deps) *Core {
 	c.register(vcsVerbs(c)...)
 	c.register(orchVerbs(c)...)
 	c.register(selfVerbs(c)...)
+	c.register(chatVerbs(c)...)
 	return c
 }
 

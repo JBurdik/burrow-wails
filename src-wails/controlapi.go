@@ -210,6 +210,7 @@ func (a *App) initControl(dataDir string) {
 		ChatStopper:       a,
 		ChatRuntime:       chatRuntimeAdapter{a},
 		Agents:            chatRuntimeAdapter{a},
+		ChatControl:       chatControlAdapter{a},
 		Schedules:         scheduleAdapter{a},
 		ChatMover:         chatMoverAdapter{a},
 		PTYs:              a,

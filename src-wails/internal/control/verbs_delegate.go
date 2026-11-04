@@ -137,6 +137,7 @@ func delegationVerbs(c *Core) []Verb {
 		Args: []Arg{
 			{Name: "chat_id", Type: "integer", Desc: "Chat to send to — a sub-agent id from agent_status", Required: true},
 			{Name: "text", Type: "string", Desc: "Message to send", Required: true},
+			{Name: "mode", Type: "string", Desc: "auto (default: starts an idle chat, joins a running turn), queue (delivered as its own turn once the current one settles), or steer (into the running turn only; refused otherwise)"},
 		},
 		Scope: ScopeLocal,
 		Fn: func(ctx context.Context, p Params) (any, error) {
@@ -145,6 +146,24 @@ func delegationVerbs(c *Core) []Verb {
 			}
 			if strings.TrimSpace(p.Str("text")) == "" {
 				return nil, fmt.Errorf("chat_send needs text")
+			}
+			switch mode := p.Str("mode"); mode {
+			case "", "auto":
+			case "queue", "steer":
+				cc := c.deps.ChatControl
+				if cc == nil {
+					return nil, fmt.Errorf("chat_send: mode %s is not available in this host", mode)
+				}
+				send := cc.Queue
+				if mode == "steer" {
+					send = cc.Steer
+				}
+				if err := send(p.Int("chat_id"), p.Str("text")); err != nil {
+					return nil, err
+				}
+				return map[string]any{"chat_id": p.Int("chat_id"), "sent": true, "mode": mode}, nil
+			default:
+				return nil, fmt.Errorf("chat_send: mode must be auto, queue or steer, got %q", mode)
 			}
 			if rt := c.deps.ChatRuntime; rt != nil {
 				if err := rt.SendToChat(p.Int("chat_id"), p.Str("text")); err != nil {
@@ -165,11 +184,12 @@ func delegationVerbs(c *Core) []Verb {
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.closeChat(p) },
 	}, {
 		Name:    "wait_result",
-		Summary: "Block until a spawned agent finishes and return its final message",
+		Summary: "Block until a spawned agent finishes and return its final message. A chat that stops on a question or approval returns early with blocked=true and the pending request",
 		Args: []Arg{
 			{Name: "token", Type: "string", Desc: "Token returned by spawn"},
 			{Name: "chat_id", Type: "integer", Desc: "Chat sub-agent to wait on, instead of a token"},
 			{Name: "timeout", Type: "integer", Desc: "Seconds to wait (default 600)"},
+			{Name: "ignore_blocked", Type: "boolean", Desc: "Chat only: keep waiting while the chat is blocked on a question or approval, instead of returning blocked=true with what it is waiting for"},
 		},
 		Scope: ScopeLocal,
 		Fn:    func(ctx context.Context, p Params) (any, error) { return c.waitResult(ctx, p) },
@@ -434,8 +454,19 @@ func (c *Core) waitResult(ctx context.Context, p Params) (any, error) {
 			// completion signal, and it is derived with no client attached.
 			state, turnEndedAt := c.deps.Phases.Phase(fmt.Sprintf("chat:%d", chatID))
 			switch state {
-			case "running", "waiting_input", "waiting_approval":
+			case "running":
 				seenInFlight = true
+			case "waiting_input", "waiting_approval":
+				seenInFlight = true
+				// Blocked is not finished, but sitting out the timeout on a
+				// question only the caller (or its user) can answer is worse.
+				if cc := c.deps.ChatControl; cc != nil && !p.Bool("ignore_blocked") {
+					pending, _ := cc.Pending(chatID)
+					if pending == nil {
+						pending = []PendingRequest{}
+					}
+					return WaitBlocked{Token: fmt.Sprintf("chat:%d", chatID), Blocked: true, Phase: state, Pending: pending, Hint: blockedHint}, nil
+				}
 			case "stale":
 				// Dead process, not a turn boundary — chat_send can never
 				// move a dead pipe's phase to Running, so requiring an

@@ -212,8 +212,8 @@ func (a *App) noticeDeliveries(now time.Time, send chatSender, delivered *[]int6
 					drop() // answered before the parent got to it
 					return false
 				}
-				text = fmt.Sprintf("Sub-agent %s (#%d) is blocked: %s. Answer with `burrow chat-send --chat-id %d --text \"...\"` or tell the user.",
-					subagentName(child), child.ID, n.sum, child.ID)
+				text = fmt.Sprintf("Sub-agent %s (#%d) is blocked: %s. See what it asks with `burrow chat-read --chat-id %d`; answer a question with `burrow chat-answer --chat-id %d --answer \"...\"` or ask the user. A tool approval or plan is the user's — tell them.",
+					subagentName(child), child.ID, n.sum, child.ID, child.ID)
 			}
 			// Claim before sending: a crash or a failed mark after a successful
 			// send must not hand the same notice to the next sweep.
