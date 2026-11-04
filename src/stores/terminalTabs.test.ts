@@ -46,3 +46,16 @@ describe("stampKey", () => {
     expect(stampKey({ id: 7 })).not.toBe(stampKey({ id: 8 }));
   });
 });
+
+describe("chatIdOf", () => {
+  it("remembers a chat tab's thread after its workspace unmounts", async () => {
+    const { createPinia, setActivePinia } = await import("pinia");
+    const { useTerminalTabsStore } = await import("./terminalTabs");
+    setActivePinia(createPinia());
+    const s = useTerminalTabsStore();
+    s.setTabs(2, [{ id: 41, chatId: 7, status: "idle", title: "t" } as never]);
+    s.clear(2); // the phone switched projects: Terminal unmounted
+    expect(s.chatIdOf(41)).toBe(7);
+    expect(s.chatIdOf(42)).toBeUndefined();
+  });
+});

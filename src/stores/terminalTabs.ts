@@ -113,6 +113,7 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
   const request = ref<TabRequest | null>(null);
   let nonce = 0;
   // Resolvers for add() calls waiting on Terminal to report the new tab's id.
+  const chatIdByTab = new Map<number, number>();
   const pendingAdds = new Map<number, (ptyId: number | undefined) => void>();
 
   function setTabs(wsId: number, tabs: TabSummary[]) {
@@ -146,6 +147,17 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     saveActivity();
 
     tabsByWs.value[wsId] = tabs;
+    for (const t of tabs) if (t.chatId != null) chatIdByTab.set(t.id, t.chatId);
+  }
+  /**
+   * The thread a tab id named, even after its Terminal unmounted (`clear`) —
+   * a phone mounts only the active workspace, so a `/ws/B/tab/X` from history
+   * or the Inbox otherwise has no way back to the chat once X is re-minted.
+   * Tab ids come from one session-wide counter, so an old id never names
+   * another thread. ponytail: grows by one entry per chat tab per session.
+   */
+  function chatIdOf(tabId: number): number | undefined {
+    return chatIdByTab.get(tabId);
   }
   function setActive(wsId: number, tabId: number) {
     activeByWs.value[wsId] = tabId;
@@ -236,5 +248,5 @@ export const useTerminalTabsStore = defineStore("terminalTabs", () => {
     request.value = { wsId, action: "popout", tabId, nonce: ++nonce };
   }
 
-  return { tabsByWs, activeByWs, activityByWs, request, setTabs, setActive, clear, activityAt, isCompletionUnseen, activate, add, fulfillAdd, close, reorder, openChat, openGit, rename, popOut };
+  return { tabsByWs, activeByWs, activityByWs, request, setTabs, chatIdOf, setActive, clear, activityAt, isCompletionUnseen, activate, add, fulfillAdd, close, reorder, openChat, openGit, rename, popOut };
 });

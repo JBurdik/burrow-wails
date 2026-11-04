@@ -313,7 +313,7 @@ watch(
       // wrong thread once Terminal has restored/remounted since this route was
       // last visited. Pass the stable chatId too, when the mirror still knows
       // it, so Terminal can re-resolve the current tab for that thread.
-      const chatId = tabsStore.tabsByWs[wsId]?.find((t) => t.id === tabId)?.chatId;
+      const chatId = tabsStore.tabsByWs[wsId]?.find((t) => t.id === tabId)?.chatId ?? tabsStore.chatIdOf(tabId);
       tabsStore.activate(wsId, tabId, chatId);
     }
     // ?chat=<id> is a push notification's deep link (src-wails/pushtrigger.go):

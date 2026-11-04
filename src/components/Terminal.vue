@@ -972,13 +972,19 @@ function onConfirmKey(e: KeyboardEvent) {
 
 // ── tab management ──────────────────────────────────────────────────────────
 
+// Restore activates every chat it reopens. Routing each of those replaced the
+// URL the user had just navigated to (another project's thread on a phone,
+// which remounts that workspace) and the route watcher then overwrote the
+// pending activate with the restore's last chat. The URL is set once, after.
+let restoring = true;
+
 function activateTab(id: number) {
   activeTabId.value = id;
   const tab = tabs.value.find((t) => t.id === id);
   if (!tab) return;
   // The open tab is part of the address, so selecting one is a navigation.
   // `replace`, not `push`: clicking through tabs should not fill the back stack.
-  if (wsStore.active?.id === props.workspaceId && uiStore.viewingTabs) {
+  if (!restoring && wsStore.active?.id === props.workspaceId && uiStore.viewingTabs) {
     void router.replace(`/ws/${props.workspaceId}/tab/${id}`);
   }
   // User is now looking at this tab — clear any done/review badge.
@@ -1784,7 +1790,13 @@ onMounted(async () => {
   syncStore();
   // Replay a request that landed while this Terminal was mounting/restoring —
   // e.g. the sidebar clicking a tab of a workspace that wasn't open yet.
+  restoring = false;
   applyTabRequest(tabsStore.request);
+  // Then address what is actually on screen. A request naming a tab that no
+  // longer exists (closed, or re-minted with no known chat) never resolves, and
+  // the route kept pointing at it over an empty host — the phone's black screen.
+  const shown = tabs.value.find((t) => t.id === activeTabId.value) ?? tabs.value[0];
+  if (shown) activateTab(shown.id);
 });
 
 onBeforeUnmount(() => {

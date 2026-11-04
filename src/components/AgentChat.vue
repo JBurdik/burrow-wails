@@ -2816,7 +2816,9 @@ function onKeydown(e: KeyboardEvent) {
     void sendMessage().then((queued) => { if (queued) void S.steer(queued.id); });
     return;
   }
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  // On a phone the soft keyboard has no Shift+Enter, so Enter is a newline
+  // (ComposerTextInput inserts it) and the send button sends.
+  if (e.key === "Enter" && !e.shiftKey && !phone.value) { e.preventDefault(); sendMessage(); }
 }
 
 function onInput() {

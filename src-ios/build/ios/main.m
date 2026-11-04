@@ -8,6 +8,7 @@
 // the delegate still builds its window in didFinishLaunching, which runs before
 // a scene connects; this only attaches that window to the scene.
 #import <UIKit/UIKit.h>
+#import <WebKit/WebKit.h>
 #import <objc/runtime.h>
 #include <stdio.h>
 
@@ -43,9 +44,24 @@ static void fillScreen(void) {
     if (m) wailsLayout = method_setImplementation(m, (IMP)burrowLayout);
 }
 
+// iOS kills the WebContent process under memory pressure (switching projects
+// remounts a workspace's chats); WKWebView then shows only the window's
+// background — the "black screen". Wails' delegate doesn't handle it, so add
+// the WKNavigationDelegate method: log it (Console.app, filter "burrow") and
+// reload — the page reconnects and restores its route from the hash.
+static void burrowWebDied(UIViewController *self, SEL _cmd, WKWebView *webView) {
+    NSLog(@"burrow: WebContent process terminated, reloading");
+    [webView reload];
+}
+static void reloadOnCrash(void) {
+    Class vc = NSClassFromString(@"WailsViewController");
+    if (vc) class_addMethod(vc, @selector(webViewWebContentProcessDidTerminate:), (IMP)burrowWebDied, "v@:@");
+}
+
 int main(int argc, char * argv[]) {
     @autoreleasepool {
         fillScreen();
+        reloadOnCrash();
         setvbuf(stdout, NULL, _IONBF, 0);
         setvbuf(stderr, NULL, _IONBF, 0);
         // Start nothing else here: WailsAppDelegate starts the Go runtime from

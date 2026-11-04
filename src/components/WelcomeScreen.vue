@@ -180,6 +180,7 @@ import { getProjectSettings, worktreePath as projectWorktreePath } from "@/lib/p
 import { parsePrRef } from "@/lib/prLinkInput";
 import { openPrInWorktree } from "@/lib/prCheckout";
 import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
+import { compact } from "@/lib/viewport";
 
 const emit = defineEmits<{ (e: "open-folder"): void }>();
 
@@ -234,7 +235,7 @@ function onComposerKeydown(e: KeyboardEvent) {
   // Completion first: Enter picks the highlighted suggestion instead of sending.
   if (completion.handleKeydown(e)) return;
   if (isStashShortcut(e)) { e.preventDefault(); stashEl.value?.stash(); return; }
-  if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
+  if (e.key === "Enter" && !compact.value && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
     e.preventDefault();
     submit();
   }
