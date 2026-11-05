@@ -83,5 +83,5 @@ export function commitStash(next: StashEntry[]): boolean {
 }
 
 export function isStashShortcut(e: KeyboardEvent): boolean {
-  return (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "s";
+  return (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s";
 }

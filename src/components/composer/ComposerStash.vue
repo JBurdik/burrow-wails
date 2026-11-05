@@ -9,7 +9,7 @@
     <DropdownMenuContent side="top" align="start" class="composer-menu w-[340px]">
       <DropdownMenuItem class="composer-menu-item" :disabled="isEmptyContent({ text, images })" @select="stash">
         Stash current prompt
-        <span class="composer-menu-hint">⌘⇧S</span>
+        <span class="composer-menu-hint">⌘S</span>
       </DropdownMenuItem>
       <div v-if="!stashEntries.length" class="composer-stash-empty">Nothing stashed</div>
       <div v-else class="composer-stash-list">
@@ -55,7 +55,7 @@ import { timeAgo } from "@/components/phone/timeAgo";
 const text = defineModel<string>("text", { required: true });
 const images = defineModel<string[]>("images", { required: true });
 
-/** Park the composer's content and clear it. Bound to ⌘⇧S by the host's keydown. */
+/** Park the composer's content and clear it. Bound to ⌘S by the host's keydown. */
 function stash() {
   const current = { text: text.value, images: images.value };
   if (isEmptyContent(current)) return;
