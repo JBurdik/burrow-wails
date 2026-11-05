@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearClosedViews, popClosedView, pushClosedView } from "./closedViews";
+import { clearClosedViews, popClosedView, pushClosedView, pickReopen } from "./closedViews";
 
 describe("closedViews", () => {
   beforeEach(clearClosedViews);
@@ -7,8 +7,8 @@ describe("closedViews", () => {
   it("pops most recent first", () => {
     pushClosedView({ kind: "terminal", wsId: 1, cmd: "ls" });
     pushClosedView({ kind: "chat", wsId: 1, chatId: 7 });
-    expect(popClosedView()).toEqual({ kind: "chat", wsId: 1, chatId: 7 });
-    expect(popClosedView()).toEqual({ kind: "terminal", wsId: 1, cmd: "ls" });
+    expect(popClosedView()).toMatchObject({ kind: "chat", wsId: 1, chatId: 7 });
+    expect(popClosedView()).toMatchObject({ kind: "terminal", wsId: 1, cmd: "ls" });
     expect(popClosedView()).toBeUndefined();
   });
 
@@ -27,5 +27,15 @@ describe("closedViews", () => {
     expect(popClosedView()).toMatchObject({ chatId: 3 });
     expect(popClosedView()).toMatchObject({ kind: "terminal" });
     expect(popClosedView()).toBeUndefined();
+  });
+});
+
+describe("pickReopen", () => {
+  it("prefers whichever closed last: the stack or the newest archived thread", () => {
+    const top = { kind: "terminal" as const, wsId: 1, at: 100 };
+    expect(pickReopen(top, { id: 7, workspaceId: 2, archivedAt: 50 })).toEqual({ from: "stack" });
+    expect(pickReopen(top, { id: 7, workspaceId: 2, archivedAt: 150 })).toMatchObject({ from: "archive", view: { kind: "chat", chatId: 7, wsId: 2 } });
+    expect(pickReopen(undefined, { id: 7, workspaceId: 2, archivedAt: 1 })).toMatchObject({ from: "archive" });
+    expect(pickReopen(undefined, undefined)).toBeNull();
   });
 });

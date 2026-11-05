@@ -5,8 +5,8 @@
 // browser's does for a fresh window.
 
 export type ClosedView =
-  | { kind: "terminal"; wsId: number; cmd?: string; cwd?: string }
-  | { kind: "chat"; wsId: number; chatId: number };
+  | { kind: "terminal"; wsId: number; cmd?: string; cwd?: string; at?: number }
+  | { kind: "chat"; wsId: number; chatId: number; at?: number };
 
 const MAX = 20;
 const stack: ClosedView[] = [];
@@ -17,12 +17,29 @@ export function pushClosedView(v: ClosedView): void {
     const i = stack.findIndex((x) => x.kind === "chat" && x.chatId === v.chatId);
     if (i >= 0) stack.splice(i, 1);
   }
-  stack.push(v);
+  stack.push({ ...v, at: v.at ?? Date.now() });
   if (stack.length > MAX) stack.shift();
 }
 
 export function popClosedView(): ClosedView | undefined {
   return stack.pop();
+}
+
+export function peekClosedView(): ClosedView | undefined {
+  return stack[stack.length - 1];
+}
+
+/** What ⌘⇧T should reopen: the newest of the in-memory stack and the most
+ *  recently archived thread (archived from anywhere — the row menu, a delete
+ *  undo window, a previous run — the stack only sees tab/pane closes). */
+export function pickReopen(
+  top: ClosedView | undefined,
+  archived: { id: number; workspaceId: number; archivedAt: number } | undefined,
+): { from: "stack" } | { from: "archive"; view: ClosedView } | null {
+  if (archived && (!top || (top.at ?? 0) < archived.archivedAt)) {
+    return { from: "archive", view: { kind: "chat", wsId: archived.workspaceId, chatId: archived.id, at: archived.archivedAt } };
+  }
+  return top ? { from: "stack" } : null;
 }
 
 /** Test seam. */

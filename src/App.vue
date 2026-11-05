@@ -194,8 +194,8 @@ import { useProvidersStore } from "@/stores/providers";
 import { useUpdateStore } from "@/stores/update";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { matchesShortcut } from "@/lib/shortcuts";
-import { popClosedView } from "@/lib/closedViews";
-import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { peekClosedView, pickReopen, popClosedView } from "@/lib/closedViews";
+import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
@@ -889,12 +889,23 @@ const KEY_ACTIONS: Record<string, () => void> = {
 // Skips entries whose workspace or chat is gone — openChat on a deleted chat
 // would mint a fresh one.
 function reopenClosedView() {
-  for (let v = popClosedView(); v; v = popClosedView()) {
+  for (;;) {
+    const archived = chatsStore.sessions
+      .filter((s) => s.archivedAt && !s.parentChatId && s.kind !== "side")
+      .reduce<ClaudeSession | undefined>((a, s) => ((s.archivedAt ?? 0) > (a?.archivedAt ?? 0) ? s : a), undefined);
+    const pick = pickReopen(peekClosedView(), archived ? { id: archived.id, workspaceId: archived.workspaceId, archivedAt: archived.archivedAt ?? 0 } : undefined);
+    if (!pick) return;
+    const v = pick.from === "archive" ? pick.view : popClosedView()!;
     const wsId = v.wsId;
-    if (!ws.workspaces.some((w) => w.id === wsId)) continue;
+    if (!ws.workspaces.some((w) => w.id === wsId)) {
+      if (pick.from === "archive") return; // ponytail: an archived chat of a deleted project — stop, don't loop
+      continue;
+    }
     if (v.kind === "chat") {
       const chatId = v.chatId;
-      if (!chatsStore.sessions.some((s) => s.id === chatId)) continue;
+      const s = chatsStore.sessions.find((x) => x.id === chatId);
+      // Gone, or the stack's copy of a chat that is already back on screen.
+      if (!s || (pick.from === "stack" && !s.archivedAt && chatOnScreen(wsId, chatId))) continue;
     }
     // Navigating is how a workspace gets focus; the Terminal answers the
     // request even if it only mounts now (onMounted replays it).
@@ -903,6 +914,9 @@ function reopenClosedView() {
     else void tabsStore.add(v.wsId, v.cmd, { cwd: v.cwd });
     return;
   }
+}
+function chatOnScreen(wsId: number, chatId: number): boolean {
+  return (tabsStore.tabsByWs[wsId] ?? []).some((t) => t.chatId === chatId);
 }
 
 // ponytail: first visible composer in DOM order — the main pane's chat (or the
