@@ -798,6 +798,8 @@
               No workspaces yet. Open a folder first.
             </div>
           </div>
+
+          <SavedSecretsPanel />
         </section>
 
         <!-- Appearance -->
@@ -1327,6 +1329,7 @@ import { loadSystemFonts, isMonospace, toPreset } from "@/lib/systemFonts";
 import { useProvidersStore, transportLabel } from "@/stores/providers";
 import SubagentProfilesPanel from "@/components/agents/SubagentProfilesPanel.vue";
 import ScheduledTasksPanel from "@/components/ScheduledTasksPanel.vue";
+import SavedSecretsPanel from "@/components/SavedSecretsPanel.vue";
 import ProvidersPanel from "@/components/ProvidersPanel.vue";
 import Segmented from "@/components/ui/segmented/Segmented.vue";
 import { testNtfy } from "@/lib/ntfy";

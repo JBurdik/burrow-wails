@@ -94,6 +94,7 @@
             </button>
           </div>
           <PtyPermissionBanner v-if="!pane.leaf.leafType || pane.leaf.leafType === 'terminal'" :pty-id="pane.leaf.id" />
+          <SecretRequestCard v-if="!pane.leaf.leafType || pane.leaf.leafType === 'terminal'" banner :owner-key="`pty:${pane.leaf.id}`" />
           <DiffTab
             v-if="pane.leaf.leafType === 'diff'"
             :diff-file="pane.leaf.diffFile!"
@@ -206,6 +207,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import XTerm from "./XTerm.vue";
 import PtyPermissionBanner from "./PtyPermissionBanner.vue";
+import SecretRequestCard from "./SecretRequestCard.vue";
 import PhoneKeys from "./phone/PhoneKeys.vue";
 import { compact as phone } from "@/lib/viewport";
 import DiffTab from "./DiffTab.vue";

@@ -255,6 +255,8 @@ type Deps struct {
 	// nil means "no proof either way", so absence of the capability itself
 	// must never be read as absence of the process.
 	PTYs PTYLister
+	// Secrets backs secret_request. nil = it refuses.
+	Secrets Secrets
 }
 
 // Core is the verb registry plus the dependencies verbs run against.
@@ -271,6 +273,7 @@ func New(deps Deps) *Core {
 	c.register(orchVerbs(c)...)
 	c.register(selfVerbs(c)...)
 	c.register(chatVerbs(c)...)
+	c.register(secretVerbs(c)...)
 	return c
 }
 

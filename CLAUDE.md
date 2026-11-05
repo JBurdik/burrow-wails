@@ -717,6 +717,25 @@ leaving `waiting_approval` (`PhaseStore.onChange` → `permRegistry.phaseChanged
 ever observed only a turn end closes it, because the status hook races the approve hook), not by the
 disconnect.
 
+### Agent secret requests (`src-wails/secretrequests.go`, `internal/control/verbs_secret.go`)
+
+`burrow secret-request --name NAME --reason TEXT` (verb `secret_request`, **local only**, also an MCP tool) parks a
+request owned by the caller (`chat:<BURROW_CHAT_ID>`, else `pty:<BURROW_PTY_ID>` — the CLI / burrow-mcp send
+`caller_pty_id`) and blocks ≤ 15 min. Clients see it as state: `secret-requests` (whole list) / `list_secret_requests`
+— **name, reason, `hasSaved`, never a value**; answered by `answer_secret_request(id, value, useSaved, remember)` /
+`decline_secret_request` (operate — a paired phone answers too). `SecretRequestCard.vue`: above AgentChat's composer
+(so also the tray panel's inline chat and the phone), as a banner above a tab's xterm. While pending an **in-flight**
+owner is put in `waiting_input` (detail `Secret requested: NAME` → dots, tray count, toast, Web Push body), `Resume`d
+on answer/decline/timeout; an idle shell's request is not marked. The answer becomes a 0600 file
+`<app-data>/secrets/turn/<random>-<NAME>` (O_EXCL, dir 0700); the verb returns `{path, name}` only. The value is never
+logged, emitted, put in `chat_stream`/SQLite/config or a result; a chat gets a name-only `Secret NAME provided /
+declined` note. Files die when the owner's phase leaves flight (`onChange` → `phaseChanged`, which also fails the
+owner's pending requests), after 30 min (sweep), and at startup (`secrets/turn` wiped). **Remember for this project**
+(repo = root workspace, `parent_id ?? id`) stores `NAME="…"` (dotenv, escaped, temp+rename, 0600) in
+`secrets/project-<repoId>.env`, never wiped at startup; **Use saved** = `useSaved: true`, Go reads the file itself —
+the saved value never reaches a client and nothing is fulfilled without a click. Settings → Workspaces → Saved
+secrets: `list_saved_secrets(repoId)` (names + dates) / `delete_saved_secret`.
+
 ### Backend (`src-wails/*.go`, bound as `App` methods)
 
 One file per subsystem:

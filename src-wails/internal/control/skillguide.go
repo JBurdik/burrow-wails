@@ -63,6 +63,10 @@ From a chat, these act on the calling chat unless you pass --chat-id.
 
 Only when the user asks for a new project: workspace_create --path <name> --create [--git-init] makes the directory, optionally runs git init, and adds and opens it as a workspace; it returns workspace_id. A bare name lands under the user's default project folder (Settings > General), an absolute or ~/ path is used as is. --create refuses a directory that exists and is not empty — to add an existing project, call workspace_create --path <dir> without --create. Then start a top-level thread in it with spawn "<task>" --detach --target chat --workspace-id <id> --name "<title>"; the task is its first prompt. --workspace-id works for any spawn and wins over --cwd.
 
+## Secrets (API keys, tokens, passwords)
+
+Never ask the user to paste a secret into the chat or a terminal: it would land in the transcript. Run burrow secret-request --name STRIPE_API_KEY --reason "Run the payment integration tests" instead. It blocks until the user answers in Burrow and prints {"path": "...", "name": "..."} — only a file path, never the value. Use it as KEY=$(cat <path>) inside the command that needs it; never echo, log, commit or print the value, and never copy the file. The file is deleted when your turn ends, so request it again in a later turn. If the user declines, the command fails with that reason: do not retry, continue without it or ask what to do.
+
 ## Long-running processes
 
 Start a dev server, watcher or any process that does not exit with serve, never with background Bash, & or nohup. serve runs it in an interactive terminal in the user's Right Panel, so they can watch it and type into it, and returns its pty_id. Read the output with tab_output. Pass cwd to run it in a subdirectory. Calling serve again with the same command and cwd reuses that terminal and restarts the process if it was stopped. tab_close stops it; closing a terminal you started with serve needs no confirmation.

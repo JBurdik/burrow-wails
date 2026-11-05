@@ -17,6 +17,9 @@
 #   burrow agent-status                     What every agent in the app is doing.
 #   burrow tab-output <pty_id> [--lines N]  Read a running agent's output.
 #   burrow send-to-tab <pty_id> "<text>"    Send a follow-up into a running agent.
+#   burrow secret-request --name NAME --reason TEXT
+#       Ask the user for a secret; blocks, prints {"path":…} — read the file,
+#       never print the value. Deleted when the turn ends.
 #
 # Verb names may be written with dashes or underscores. Arguments are sent as
 # JSON, so quote anything containing spaces.
@@ -119,6 +122,10 @@ _call() {
   # has no BURROW_CHAT_ID, and the field is omitted rather than sent empty.
   if [ -n "$BURROW_CHAT_ID" ]; then
     json="$json,\"parent_chat_id\":\"$(_esc "$BURROW_CHAT_ID")\""
+  fi
+  # A tab's agent has no chat id; its PTY is who is asking (secret_request).
+  if [ -n "$BURROW_PTY_ID" ]; then
+    json="$json,\"caller_pty_id\":\"$(_esc "$BURROW_PTY_ID")\""
   fi
   positional=$(_primary "$verb")
 

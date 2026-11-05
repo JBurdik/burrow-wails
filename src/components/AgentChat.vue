@@ -476,6 +476,7 @@
         <button class="flex-shrink-0 font-medium text-foreground hover:underline disabled:opacity-50" :disabled="restoringBranch" @click="restoreBranch">{{ restoringBranch ? 'Restoring…' : 'Restore branch' }}</button>
         <button class="flex-shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss" @click="branchBannerDismissed = true"><PhX :size="11" weight="bold" /></button>
       </div>
+      <SecretRequestCard :owner-key="`chat:${chatId}`" />
       <div v-if="catchUp.open" class="catchup-card mb-2">
         <div class="flex items-center gap-2">
           <PhSparkle :size="14" class="text-foreground" />
@@ -855,6 +856,7 @@ import ComposerTextInput from "@/components/ComposerTextInput.vue";
 import { promptHistory, recalling, stepPromptHistory, type PromptHistoryPos } from "@/lib/composerPromptHistory";
 import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
+import SecretRequestCard from "@/components/SecretRequestCard.vue";
 import ThreadFindBar from "@/components/ThreadFindBar.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";

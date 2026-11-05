@@ -24,6 +24,7 @@ type App struct {
 	daemon  *DaemonClient
 	phases  *PhaseStore
 	perms   *permRegistry
+	secrets *secretRegistry
 	poller  *phasePoller
 	prompts *promptIndexer // nil until startup; refresh is nil-safe
 	push    *webPusher     // nil until startup (push.go)
@@ -231,8 +232,14 @@ func (a *App) startup(ctx context.Context) {
 	} else {
 		a.phases = ps
 		a.perms = newPermRegistry(ps)
+		a.secrets = newSecretRegistry(filepath.Join(dataDir, "secrets"), ps)
+		a.secrets.note = func(owner, text string) { // owner is always "chat:<id>" here
+			id, _ := strconv.ParseInt(owner[len("chat:"):], 10, 64)
+			a.publishSurfaceNote(id, "", text)
+		}
 		ps.onChange = func(id string, prev, next agentphase.Phase) {
 			a.perms.phaseChanged(id, next)
+			a.secrets.phaseChanged(id, prev, next)
 			a.pushPhaseChanged(id, prev, next)
 			desktopPhaseChanged(a)
 		}
@@ -281,6 +288,9 @@ func (a *App) startup(ctx context.Context) {
 	go ListFonts()
 
 	go a.chatSleepLoop()
+	if a.secrets != nil {
+		go a.secrets.sweepLoop()
+	}
 	go a.chatScheduleLoop()
 	go a.worktreeCleanupLoop()
 	a.startPromptIndex()

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -192,6 +193,13 @@ func (s *Server) callTool(req rpcRequest) *rpcResponse {
 	if _, ok := call.Arguments["parent_chat_id"]; !ok {
 		if id, err := strconv.ParseInt(strings.TrimSpace(s.chatID), 10, 64); err == nil && id > 0 {
 			call.Arguments["parent_chat_id"] = id
+		}
+	}
+
+	// A tab's agent (no chat id) is attributed by its PTY, e.g. secret_request.
+	if _, ok := call.Arguments["caller_pty_id"]; !ok {
+		if id, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("BURROW_PTY_ID")), 10, 64); err == nil && id > 0 {
+			call.Arguments["caller_pty_id"] = id
 		}
 	}
 

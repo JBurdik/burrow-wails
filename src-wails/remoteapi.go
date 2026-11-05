@@ -495,6 +495,13 @@ var remoteAllowed = map[string]remoteCmd{
 	"claude_respond_control": {Method: "ClaudeRespondControl", Args: []string{"id", "requestId", "response"}, Scope: scopeOrchOperate},
 	"list_pty_permissions":   {Method: "ListPtyPermissions", Args: []string{}, Scope: scopeOrchRead},
 	"answer_pty_permission":  {Method: "AnswerPtyPermission", Args: []string{"id", "behavior", "message"}, Scope: scopeOrchOperate},
+	// Secret requests (secretrequests.go): a paired phone answers them too. The
+	// list carries names only; a saved value is read by Go (useSaved).
+	"list_secret_requests":   {Method: "ListSecretRequests", Args: []string{}, Scope: scopeOrchRead},
+	"answer_secret_request":  {Method: "AnswerSecretRequest", Args: []string{"id", "value", "useSaved", "remember"}, Scope: scopeOrchOperate},
+	"decline_secret_request": {Method: "DeclineSecretRequest", Args: []string{"id"}, Scope: scopeOrchOperate},
+	"list_saved_secrets":     {Method: "ListSavedSecrets", Args: []string{"repoId"}, Scope: scopeOrchRead},
+	"delete_saved_secret":    {Method: "DeleteSavedSecret", Args: []string{"repoId", "name"}, Scope: scopeOrchOperate},
 	"acp_respond_permission": {Method: "AcpRespondPermission", Args: []string{"id", "rpcId", "optionId"}, Scope: scopeOrchOperate},
 	"acp_respond_user_input": {Method: "AcpRespondUserInput", Args: []string{"id", "rpcId", "answers"}, Scope: scopeOrchOperate},
 
@@ -600,6 +607,9 @@ var remoteAllowed = map[string]remoteCmd{
 // remoteDenied names the App methods that are deliberately NOT reachable over
 // the wire, each with the reason. An entry here is a decision, not a TODO.
 var remoteDenied = map[string]string{
+	// The agent side of a secret request: only the local secret_request verb
+	// (control token) may park one; a remote client only answers.
+	"RequestSecret": "agents ask through the local secret_request verb; clients only answer (answer_secret_request)",
 	// Superseded by chat_send: a client building its own start payload is how
 	// three copies of it drifted apart (docs/plans/006-chat-runtime.md).
 	"ClaudeStart":    "a chat's process is the chat runtime's to start, from the row's launch settings — use chat_send",

@@ -195,6 +195,9 @@ func (a *App) pushFor(key, reason string, ph agentphase.Phase, phone bool) {
 		}
 	case "waiting":
 		msg.Body = "Waiting for you"
+		if strings.HasPrefix(ph.Detail, "Secret requested: ") {
+			msg.Body = ph.Detail // the name only — a value never reaches a phase
+		}
 	case "done":
 		msg.Body = "Done"
 	case "snooze":
