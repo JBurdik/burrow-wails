@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { effectScope, nextTick, shallowRef } from "vue";
 import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
+import { insertQuote } from "@/lib/transcriptFeedback";
 
 describe("transcript feedback", () => {
   beforeEach(() => {
@@ -71,4 +72,16 @@ describe("transcript feedback", () => {
     scope.stop(); restoredScope.stop();
   });
 
+});
+
+describe("insertQuote", () => {
+  it("quotes into an empty composer, ask leaves an empty line", () => {
+    expect(insertQuote("", 0, "a\n\nb")).toEqual({ text: "> a\n>\n> b\n", caret: 10 });
+    expect(insertQuote("", 0, "a", true)).toEqual({ text: "> a\n\n", caret: 5 });
+  });
+  it("puts the quote on its own lines at the caret", () => {
+    const r = insertQuote("hi there", 2, "q");
+    expect(r.text).toBe("hi\n> q\n\n there");
+    expect(r.text.slice(0, r.caret)).toBe("hi\n> q\n");
+  });
 });

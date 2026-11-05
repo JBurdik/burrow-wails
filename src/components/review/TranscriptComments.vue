@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
-import { PhChatCircleText, PhX, PhArrowSquareOut } from "@phosphor-icons/vue";
+import { PhChatCircleText, PhX, PhArrowSquareOut, PhQuotes, PhQuestion } from "@phosphor-icons/vue";
 import { selectedTranscriptQuote, type TranscriptQuote, type TranscriptNote } from "@/lib/transcriptFeedback";
 
 const props = defineProps<{ messageId: number; text: string; partial?: boolean; notes: TranscriptNote[] }>();
@@ -9,12 +9,14 @@ const emit = defineEmits<{
   remove: [id: string];
   followUp: [delivery: string];
   resolve: [id: string, resolved: boolean];
+  quote: [text: string, ask: boolean];
 }>();
 const content = useTemplateRef<HTMLElement>("content");
 const input = useTemplateRef<HTMLTextAreaElement>("input");
 const selection = shallowRef<TranscriptQuote | null>(null);
 const editing = shallowRef(false);
 const body = shallowRef("");
+const actionClass = "flex items-center gap-1 rounded border border-border bg-hover px-2 py-1 text-[11px] text-secondary-foreground hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent";
 const hasSelection = computed(() => !!selection.value && !props.partial);
 
 function captureSelection() {
@@ -27,6 +29,13 @@ async function startComment() {
   editing.value = true;
   await nextTick();
   input.value?.focus();
+}
+
+function quote(ask: boolean) {
+  if (!selection.value) return;
+  emit("quote", selection.value.quote, ask);
+  selection.value = null;
+  window.getSelection()?.removeAllRanges();
 }
 
 function submit() {
@@ -45,9 +54,17 @@ function cancel() {
 <template>
   <div class="min-w-0">
     <div ref="content" tabindex="0" aria-label="Agent response, select text to comment" @mouseup="captureSelection" @keyup="captureSelection" @keydown.meta.alt.m.prevent="startComment" @keydown.ctrl.alt.m.prevent="startComment"><slot /></div>
-    <button v-if="hasSelection && !editing" type="button" class="mt-1 flex items-center gap-1 rounded border border-border bg-hover px-2 py-1 text-[11px] text-secondary-foreground hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent" title="Comment on selection (⌘⌥M / Ctrl+Alt+M)" @mousedown.prevent @click="startComment">
-      <PhChatCircleText :size="12" /> Comment on selection
-    </button>
+    <div v-if="selection && !editing" class="mt-1 flex flex-wrap items-center gap-1">
+      <button v-if="hasSelection" type="button" :class="actionClass" title="Comment on selection (⌘⌥M / Ctrl+Alt+M)" @mousedown.prevent @click="startComment">
+        <PhChatCircleText :size="12" /> Comment on selection
+      </button>
+      <button type="button" :class="actionClass" title="Insert the selection into the composer as a quote" @mousedown.prevent @click="quote(false)">
+        <PhQuotes :size="12" /> Quote
+      </button>
+      <button type="button" :class="actionClass" title="Quote the selection and start a question about it" @mousedown.prevent @click="quote(true)">
+        <PhQuestion :size="12" /> Ask about this
+      </button>
+    </div>
     <form v-if="editing" class="mt-2 grid gap-1.5 rounded border border-border bg-hover p-2" @submit.prevent="submit" @keydown.esc.stop="cancel">
       <blockquote class="m-0 max-h-20 overflow-auto whitespace-pre-wrap text-[11px] text-muted-foreground">{{ selection?.quote }}</blockquote>
       <textarea ref="input" v-model="body" rows="2" aria-label="Comment on selected passage" placeholder="Add a review comment…" class="w-full resize-y rounded border border-border bg-base px-2 py-1.5 text-xs text-foreground outline-none focus:border-accent" @keydown.meta.enter.prevent="submit" @keydown.ctrl.enter.prevent="submit" />
@@ -76,3 +93,4 @@ function cancel() {
     </div>
   </div>
 </template>
+

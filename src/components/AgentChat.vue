@@ -396,6 +396,7 @@
                 @remove="transcriptFeedback.remove"
                 @resolve="transcriptFeedback.setResolved"
                 @follow-up="jumpToFeedback"
+                @quote="quoteIntoComposer"
               >
                 <!-- eslint-disable-next-line vue/no-v-html -->
                 <div class="md-body" v-html="renderAssistantMd(msg)" @click="onRichBlockClick" />
@@ -888,6 +889,7 @@ import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 import TranscriptComments from "./review/TranscriptComments.vue";
 import TranscriptFeedbackBar from "./review/TranscriptFeedbackBar.vue";
 import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
+import { insertQuote } from "@/lib/transcriptFeedback";
 
 function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string);
@@ -2020,6 +2022,21 @@ const pendingImages = ref<string[]>([]); // data URIs
 const stashEl = ref<InstanceType<typeof ComposerStash> | null>(null);
 const scrollEl = ref<HTMLElement | null>(null);
 const inputEl = ref<InstanceType<typeof ComposerTextInput> | null>(null);
+// Last caret seen inside the composer: by the time a transcript selection's
+// Quote button is clicked, the window selection is in the transcript.
+const composerCaret = ref<number | null>(null);
+function trackComposerCaret() {
+  const el = inputEl.value?.element;
+  if (el && document.activeElement === el) composerCaret.value = inputEl.value!.caret();
+}
+document.addEventListener("selectionchange", trackComposerCaret);
+onBeforeUnmount(() => document.removeEventListener("selectionchange", trackComposerCaret));
+function quoteIntoComposer(quote: string, ask: boolean) {
+  const r = insertQuote(inputText.value, composerCaret.value ?? inputText.value.length, quote, ask);
+  inputText.value = r.text;
+  composerCaret.value = r.caret;
+  nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(r.caret); });
+}
 
 // @file / $skill / /command completion and the skill pills, shared with the
 // welcome composer (lib/composerCompletion.ts) so the two cannot drift.

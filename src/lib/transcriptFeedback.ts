@@ -46,3 +46,17 @@ export function selectedTranscriptQuote(container: HTMLElement, selection: Selec
   after.setStart(range.endContainer, range.endOffset);
   return { quote, before: before.toString().slice(-100), after: after.toString().slice(0, 100) };
 }
+
+/** Insert `quote` as a markdown blockquote into `text` at `caret`, on its own
+ *  lines. `ask` leaves an empty line after it for the question. Returns the new
+ *  text and where the caret goes (right after the quote / on the empty line). */
+export function insertQuote(text: string, caret: number, quote: string, ask = false): { text: string; caret: number } {
+  const at = Math.max(0, Math.min(caret, text.length));
+  const before = text.slice(0, at);
+  const after = text.slice(at);
+  const block = quote.trim().split("\n").map((line) => line.trim() ? `> ${line}` : ">").join("\n");
+  const head = before && !before.endsWith("\n") ? `${before}\n` : before;
+  const insert = `${block}\n${ask ? "\n" : ""}`;
+  const tail = after && !after.startsWith("\n") ? `\n${after}` : after;
+  return { text: head + insert + tail, caret: head.length + insert.length };
+}
