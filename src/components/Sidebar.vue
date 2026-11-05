@@ -798,9 +798,21 @@ function chatRowsFor(wsId: number): TabSummary[] {
 const visibleTabsByWs = computed(() => {
   const src: Record<number, TabSummary[]> = { ...termTabs.tabsByWs };
   if (isWeb) for (const w of store.workspaces) if (!src[w.id]) src[w.id] = chatRowsFor(w.id);
-  if (!pendingDeletes.hidden.size) return src;
+  // One row per chat: a chat with tabs in two Terminals (a stale one, a moved
+  // chat's old workspace) shows once — in the workspace that owns it, else the first.
+  const owner = (chatId: number) => chats.sessions.find((x) => x.id === chatId)?.workspaceId;
+  const homeOf = new Map<number, number>();
+  for (const [ws, tabs] of Object.entries(src)) {
+    for (const t of tabs) {
+      if (t.chatId == null) continue;
+      const cur = homeOf.get(t.chatId);
+      if (cur === undefined || (Number(ws) === owner(t.chatId) && cur !== owner(t.chatId))) homeOf.set(t.chatId, Number(ws));
+    }
+  }
   const out: Record<number, TabSummary[]> = {};
-  for (const [ws, tabs] of Object.entries(src)) out[Number(ws)] = tabs.filter((t) => !pendingDeletes.isHidden(t.chatId));
+  for (const [ws, tabs] of Object.entries(src)) {
+    out[Number(ws)] = tabs.filter((t) => t.chatId == null || (homeOf.get(t.chatId) === Number(ws) && !pendingDeletes.isHidden(t.chatId)));
+  }
   return out;
 });
 

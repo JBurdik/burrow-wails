@@ -131,6 +131,15 @@ export const useWorkspaceStore = defineStore("workspace", () => {
 
   async function load() {
     workspaces.value = await invoke<Workspace[]>("list_workspaces");
+    // A deleted workspace (worktree removed by a verb, the cleanup, another
+    // window) must also leave `opened`, or its Terminal stays mounted with
+    // stale tabs — a chat tab there showed up twice in the Sidebar.
+    const byId = new Map(workspaces.value.map((w) => [w.id, w]));
+    if (opened.value.some((w) => !byId.has(w.id))) {
+      opened.value = opened.value.filter((w) => byId.has(w.id));
+      if (active.value && !byId.has(active.value.id)) active.value = opened.value[opened.value.length - 1] ?? null;
+      saveSession();
+    }
     const migrated = await migrateLegacyLocalStorage();
     if (migrated) {
       workspaces.value = await invoke<Workspace[]>("list_workspaces"); // re-fetch with migrated values
