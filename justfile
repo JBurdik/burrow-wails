@@ -229,7 +229,7 @@ pack notes="": assert-signed
     tar -xzf "{{tarball}}" -C "$VERIFY_DIR"
     codesign --verify --deep --strict "$VERIFY_DIR/Burrow.app"
     SUM="$(shasum -a 256 "{{tarball}}" | awk '{print $1}')"
-    NOTES="{{notes}}"
+    NOTES={{quote(notes)}}
     [ -n "$NOTES" ] || NOTES="$(git log --pretty=format:'- %s' "$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD" 2>/dev/null | grep -v '^- release v' | head -30 || echo '- Maintenance release')"
     node -e '
       const fs = require("fs");
