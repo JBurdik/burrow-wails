@@ -12,7 +12,7 @@ info:
   description: "Multi-workspace IDE shell for AI coding agents"
   copyright: "© 2026 Jiří Burdych"
   comments: "Multi-workspace IDE shell for AI coding agents"
-  version: "1.0.1"
+  version: "1.1.0"
 
 dev_mode:
   root_path: .
