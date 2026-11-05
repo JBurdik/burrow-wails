@@ -194,6 +194,8 @@ import { useProvidersStore } from "@/stores/providers";
 import { useUpdateStore } from "@/stores/update";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { matchesShortcut } from "@/lib/shortcuts";
+import { popClosedView } from "@/lib/closedViews";
+import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
@@ -234,6 +236,7 @@ const providers = useProvidersStore();
 const keys = useKeybindingsStore();
 const update = useUpdateStore();
 const tabsStore = useTerminalTabsStore();
+const chatsStore = useClaudeChatsStore();
 // App-wide on purpose: every chat dot (Sidebar, tabs, Dashboard) reads
 // session.status, which this store derives from the Go phase.
 useChatAttentionStore();
@@ -879,7 +882,28 @@ const KEY_ACTIONS: Record<string, () => void> = {
   pickProject: () => ui.pickProjectThenWelcome(),
   switchProvider: () => welcomeEl.value?.cycleProvider?.(),
   unread: jumpToUnread,
+  reopenClosed: reopenClosedView,
 };
+
+// ⌘⇧T: newest closed terminal/chat (Terminal.vue records them on close).
+// Skips entries whose workspace or chat is gone — openChat on a deleted chat
+// would mint a fresh one.
+function reopenClosedView() {
+  for (let v = popClosedView(); v; v = popClosedView()) {
+    const wsId = v.wsId;
+    if (!ws.workspaces.some((w) => w.id === wsId)) continue;
+    if (v.kind === "chat") {
+      const chatId = v.chatId;
+      if (!chatsStore.sessions.some((s) => s.id === chatId)) continue;
+    }
+    // Navigating is how a workspace gets focus; the Terminal answers the
+    // request even if it only mounts now (onMounted replays it).
+    void router.push(`/ws/${v.wsId}`);
+    if (v.kind === "chat") tabsStore.openChat(v.wsId, v.chatId);
+    else void tabsStore.add(v.wsId, v.cmd, { cwd: v.cwd });
+    return;
+  }
+}
 
 // ponytail: first visible composer in DOM order — the main pane's chat (or the
 // welcome composer) precedes the Right Panel's sub-agent detail. A focused-pane
