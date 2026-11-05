@@ -373,25 +373,6 @@ function saveAcp(field: "mode" | "model" | "effort", value: string) {
   setLastAcpSetting(selectedAgentId.value, field, value);
 }
 
-// Codex's catalog arrives asynchronously. Until then ModelPicker can only
-// select its provider-default empty id, which used to leave the welcome
-// composer without a model-specific effort control even after the catalog was
-// ready. Resolve that empty/stale selection once real options arrive, preferring
-// the user's last Codex pick and otherwise the CLI-advertised default.
-const selectedAgentModels = computed(() => visibleModelsFor(selectedAgentId.value).filter((model) => model.id));
-watch([isCodex, () => isAcpGeneric.value, selectedAgentModels], () => {
-  if (!(isCodex.value || isAcpGeneric.value) || !selectedAgentModels.value.length) return;
-  const saved = lastAcp("model");
-  const adapterDefault = acpOption(acpCaps.value?.configOptions ?? [], "model")?.currentValue;
-  const next = selectedAgentModels.value.some((model) => model.id === selectedModel.value)
-    ? selectedModel.value
-    : selectedAgentModels.value.find((model) => model.id === saved)?.id
-      ?? selectedAgentModels.value.find((model) => model.id === adapterDefault)?.id
-      ?? selectedAgentModels.value[0].id;
-  if (selectedModel.value !== next) selectedModel.value = next;
-  if (saved !== next) saveAcp("model", next);
-}, { immediate: true });
-
 // Exposed so App.vue can point the titlebar/right-panel git surfaces at
 // whatever project this screen is targeting — picking a project here doesn't
 // touch ws.active (sending the first message does, via store.open() below),
@@ -516,6 +497,25 @@ function pickCodexPermMode(id: string) { saveAcp("mode", id); }
 // Picks go to "chatAcpLast" like Codex's, which restoreAcpSelections applies.
 const isAcpGeneric = computed(() => selectedAgent.value.transport === "acp" && selectedAgent.value.providerId !== "openai-compatible");
 const acpCaps = computed(() => (isAcpGeneric.value ? agentAcpCaps.value[selectedAgentId.value] : undefined));
+
+// Codex's catalog arrives asynchronously. Until then ModelPicker can only
+// select its provider-default empty id, which used to leave the welcome
+// composer without a model-specific effort control even after the catalog was
+// ready. Resolve that empty/stale selection once real options arrive, preferring
+// the user's last Codex pick and otherwise the CLI-advertised default.
+const selectedAgentModels = computed(() => visibleModelsFor(selectedAgentId.value).filter((model) => model.id));
+watch([isCodex, () => isAcpGeneric.value, selectedAgentModels], () => {
+  if (!(isCodex.value || isAcpGeneric.value) || !selectedAgentModels.value.length) return;
+  const saved = lastAcp("model");
+  const adapterDefault = acpOption(acpCaps.value?.configOptions ?? [], "model")?.currentValue;
+  const next = selectedAgentModels.value.some((model) => model.id === selectedModel.value)
+    ? selectedModel.value
+    : selectedAgentModels.value.find((model) => model.id === saved)?.id
+      ?? selectedAgentModels.value.find((model) => model.id === adapterDefault)?.id
+      ?? selectedAgentModels.value[0].id;
+  if (selectedModel.value !== next) selectedModel.value = next;
+  if (saved !== next) saveAcp("model", next);
+}, { immediate: true });
 const acpEffortOpt = computed(() => acpOption(acpCaps.value?.configOptions ?? [], "effort"));
 const acpEffortItems = computed<ComposerPillItem[]>(() => (acpEffortOpt.value?.options ?? []).map((o) => ({ id: o.value, label: o.name, title: o.description })));
 const acpEffort = computed(() => {

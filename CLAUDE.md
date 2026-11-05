@@ -488,8 +488,9 @@ opens in the bottom pane focused, the next press `hideBottom`s it); the per-thre
 have a hover arrow to move them to the other pane (the split), and drag-and-drop between panes; with no bottom pane on
 screen the top pane's lower part (below 55 %) is the drop zone that opens one (`splitHint`).
 
-**Close = hide**: the backend keeps serving the phone, schedules and running chats; ⌘Q / tray Quit really
-quit (`quitting` flag, `ShouldQuit`), the Dock icon reopens. The tray is a template icon
+**Two processes, every channel** (plan 009, stable since phase E): the backend is `Burrow --core` (no window,
+owns tray + notifications, idle-exits after 5 min without work unless "Start Burrow at login" is on), the window
+process is only a `/v2/ws` client. Closing the window / ⌘Q quits only the UI; ⌥⌘Q / tray Quit stop the core too. The tray is a template icon
 (`build/trayicon.png`, black + alpha, embedded; macOS tints it for the menu bar) with the count of phases in
 `waiting_*` beside it (none at 0), and the same count is the Dock badge (Wails' `services/dock`, removed at
 0) — `waitingCount`, recounted from `PhaseStore.All` on every change. The badge call `dispatch_sync`s onto the

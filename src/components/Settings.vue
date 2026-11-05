@@ -341,6 +341,17 @@
 
         </section>
 
+        <!-- Permissions -->
+        <section v-else-if="active === 'permissions'" class="flex flex-col gap-3.5">
+          <div class="flex items-baseline gap-2.5">
+            <h2 class="text-[15px] font-semibold text-foreground">Permissions</h2>
+            <span class="text-xs text-muted-foreground">What macOS lets Burrow do</span>
+          </div>
+          <div class="h-px bg-border" />
+          <span class="text-[11px] text-muted-foreground">Checked against the process macOS asks about: the background core for chats, burrow-daemon for terminals. Grants made in System Settings show up here within a few seconds.</span>
+          <PermissionsPanel />
+        </section>
+
         <!-- General -->
         <section v-else-if="active === 'general'" class="flex flex-col gap-3.5">
           <div class="flex items-center gap-2.5">
@@ -350,12 +361,6 @@
             </div>
           </div>
           <div class="h-px bg-border" />
-
-          <div v-if="isDesktop()" class="flex flex-col gap-2.5">
-            <span class="s-label">Permissions</span>
-            <span class="-mt-1 text-[11px] text-muted-foreground">What macOS lets Burrow do, checked against the process macOS asks about: the background core for chats, burrow-daemon for terminals.</span>
-            <PermissionsPanel />
-          </div>
 
           <div class="flex flex-col gap-2.5">
             <span class="s-label">Chat usage</span>
@@ -1301,7 +1306,7 @@
 import { ref, computed, onUnmounted, watch, type Component } from "vue";
 import {
   PhGearSix, PhCaretLeft, PhX, PhPlus, PhTrash, PhArrowCounterClockwise,
-  PhSlidersHorizontal, PhFolderOpen, PhRobot, PhPalette, PhKeyboard,
+  PhSlidersHorizontal, PhShieldCheck, PhFolderOpen, PhRobot, PhPalette, PhKeyboard,
   PhPuzzlePiece, PhInfo, PhSparkle, PhClock,
   PhFolder, PhPencilSimple, PhCheck, PhBell, PhPlay,
   PhArrowClockwise, PhDownloadSimple, PhTerminalWindow,
@@ -2161,6 +2166,8 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: "general", label: "General", icon: PhSlidersHorizontal },
+  // A phone/browser has no macOS grants of its own to show.
+  ...(isDesktop() ? [{ id: "permissions", label: "Permissions", icon: PhShieldCheck }] : []),
   { id: "workspaces", label: "Workspaces", icon: PhFolderOpen },
   { id: "providers", label: "Providers", icon: PhRobot },
   { id: "subagent-profiles", label: "Sub-agent profiles", icon: PhRobot },

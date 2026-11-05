@@ -455,6 +455,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// granted by LocalEndpoint / local-ticket alone), never a phone.
 	"privacy_status":        {Method: "PrivacyStatus", Args: nil, Scope: scopeUIAck},
 	"request_notifications": {Method: "RequestNotifications", Args: nil, Scope: scopeUIAck},
+	"request_privacy":       {Method: "RequestPrivacy", Args: []string{"kind"}, Scope: scopeUIAck},
 	"lsp_start":             {Method: "LspStart", Args: []string{"id", "command", "args", "cwd"}, Scope: scopeOrchOperate},
 	"lsp_send":              {Method: "LspSend", Args: []string{"id", "message"}, Scope: scopeOrchOperate},
 	"lsp_stop":              {Method: "LspStop", Args: []string{"id"}, Scope: scopeOrchOperate},

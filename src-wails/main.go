@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -18,13 +17,12 @@ var assets embed.FS
 
 func main() {
 	setupAppLog()
-	// Plan 009: dev/beta run the backend as `Burrow --core`; this process is
-	// then only the windows (ui = true) and never starts App.
-	if externalCore() && coreRoleRequested() {
+	// Plan 009: the backend runs as `Burrow --core`; this process is only
+	// the windows and never starts App.
+	if coreRoleRequested() {
 		runCore()
 		return
 	}
-	ui := externalCore()
 	app := NewApp()
 	dist, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
@@ -33,7 +31,7 @@ func main() {
 
 	wapp = application.New(application.Options{
 		Name:     "Burrow",
-		Services: []application.Service{application.NewService(&DesktopService{a: app, ui: ui})},
+		Services: []application.Service{application.NewService(&DesktopService{a: app, ui: true})},
 		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(dist)},
 		Mac:      application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		// ⌘Q never fires WindowClosing, so the geometry is saved here too.
@@ -42,13 +40,8 @@ func main() {
 			app.saveWindowState(mainWin)
 			return true
 		},
-		OnShutdown: func() {
-			if !ui { // the external core outlives this process
-				app.cleanupOnShutdown()
-			}
-		},
 	})
-	wapp.Menu.SetApplicationMenu(appMenu(ui))
+	wapp.Menu.SetApplicationMenu(appMenu())
 
 	mainWin = wapp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "burrow",
@@ -70,21 +63,16 @@ func main() {
 		}
 		desktopEmit("file-drop", map[string]any{"x": x, "y": y, "paths": e.Context().DroppedFiles()})
 	})
-	// In-process: close = hide; the backend keeps running for the phone and
-	// schedules. With an external core the backend is elsewhere, so closing
-	// the window quits this process (plan 009) — popouts go with it.
+	// The backend is the external core, so closing the window quits this
+	// process (plan 009) — popouts go with it.
 	mainWin.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		app.saveWindowState(mainWin)
 		if quitting.Load() {
 			return
 		}
 		e.Cancel()
-		if ui {
-			quitting.Store(true)
-			go wapp.Quit()
-			return
-		}
-		mainWin.Hide()
+		quitting.Store(true)
+		go wapp.Quit()
 	})
 	wapp.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
 		showMainWindow()
@@ -93,19 +81,14 @@ func main() {
 		app.restoreWindowState(mainWin)
 	})
 
-	if ui {
-		go watchUIBinary()
-		// Start (or find) the core now rather than on the webview's first
-		// ticket request, so a cold core boots while the window loads.
-		go func() {
-			if _, err := ensureCore(); err != nil {
-				log.Printf("ui: %v", err)
-			}
-		}()
-	} else {
-		app.startup(context.Background())
-		setupTray(app) // in-process only: on dev/beta the core owns the tray
-	}
+	go watchUIBinary()
+	// Start (or find) the core now rather than on the webview's first
+	// ticket request, so a cold core boots while the window loads.
+	go func() {
+		if _, err := ensureCore(); err != nil {
+			log.Printf("ui: %v", err)
+		}
+	}()
 
 	if err := wapp.Run(); err != nil {
 		log.Fatal(err)
@@ -121,7 +104,7 @@ func startURL() string {
 	return "/"
 }
 
-func appMenu(ui bool) *application.Menu {
+func appMenu() *application.Menu {
 	m := application.NewMenu()
 	// The first submenu is the macOS app menu; built by hand (not the AppMenu
 	// role) so "Check for Updates…" can sit under About.
@@ -150,15 +133,13 @@ func appMenu(ui bool) *application.Menu {
 		}
 		hold.press(time.Now())
 	})
-	if ui {
-		// ⌘Q quits only this window process; the core goes on while it has
-		// work (coreidle.go). This one stops the core too.
-		am.Add("Quit Burrow Completely").SetAccelerator("CmdOrCtrl+Alt+Q").OnClick(func(*application.Context) {
-			askCoreToQuit()
-			quitting.Store(true)
-			wapp.Quit()
-		})
-	}
+	// ⌘Q quits only this window process; the core goes on while it has
+	// work (coreidle.go). This one stops the core too.
+	am.Add("Quit Burrow Completely").SetAccelerator("CmdOrCtrl+Alt+Q").OnClick(func(*application.Context) {
+		askCoreToQuit()
+		quitting.Store(true)
+		wapp.Quit()
+	})
 	m.AddRole(application.EditMenu)
 	wm := m.AddSubmenu("Window")
 	wm.AddRole(application.Minimise)

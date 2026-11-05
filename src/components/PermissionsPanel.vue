@@ -6,7 +6,7 @@
 // opens System Settings with the icon floating beside it to drag in.
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { PhBell, PhCheckCircle, PhHardDrives, PhPower, PhTerminalWindow } from "@phosphor-icons/vue";
+import { PhBell, PhCheckCircle, PhCursorClick, PhHardDrives, PhMonitor, PhPower, PhTerminalWindow } from "@phosphor-icons/vue";
 import { useUIStore } from "@/stores/ui";
 import { isDesktop } from "@/lib/wailsCompat/desktop";
 import { CloseGrantHelper, CoreAtLogin, ExternalCore, OpenSystemSettings, ShowGrantHelper } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
@@ -18,6 +18,8 @@ type Status = {
   chats_path: string;
   terminals_fda: string;
   terminals_path: string;
+  screen_recording: string;
+  accessibility: string;
 };
 
 const FDA_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
@@ -95,6 +97,14 @@ function grant(which: "chats" | "terminals") {
   void ShowGrantHelper(path, FDA_PANE, "Full Disk Access", DRAG_HINT, grantTheme());
 }
 
+// The prompt adds Burrow to the list; once it has been asked, macOS only lets
+// it be switched on in System Settings, so open that pane too.
+async function allowPrivacy(kind: "screen_recording" | "accessibility", pane: string) {
+  await invoke("request_privacy", { kind }).catch(() => {});
+  await OpenSystemSettings(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+  await refresh();
+}
+
 async function setLogin(on: boolean) {
   login.value = await CoreAtLogin(on ? "on" : "off").catch((e: unknown) => `error: ${e}`);
   ui.coreAtLogin = on && (login.value === "on" || login.value === "needs-approval");
@@ -125,6 +135,28 @@ const rows = computed(() => {
     action: s.chats_fda === "granted" ? undefined : "Grant…",
     run: () => grant("chats"),
   });
+  if (s.screen_recording && s.screen_recording !== "unknown") {
+    out.push({
+      key: "screen",
+      icon: PhMonitor,
+      title: "Screen Recording for chats",
+      body: "Optional. Lets agents in chats take screenshots (screencapture) and show them in the chat.",
+      state: s.screen_recording,
+      action: s.screen_recording === "granted" ? undefined : "Grant…",
+      run: () => allowPrivacy("screen_recording", "Privacy_ScreenCapture"),
+    });
+  }
+  if (s.accessibility && s.accessibility !== "unknown") {
+    out.push({
+      key: "accessibility",
+      icon: PhCursorClick,
+      title: "Accessibility for chats",
+      body: "Optional. Lets agents in chats drive other apps' UI (clicks, typing, reading windows).",
+      state: s.accessibility,
+      action: s.accessibility === "granted" ? undefined : "Grant…",
+      run: () => allowPrivacy("accessibility", "Privacy_Accessibility"),
+    });
+  }
   out.push({
     key: "terminals",
     icon: PhTerminalWindow,

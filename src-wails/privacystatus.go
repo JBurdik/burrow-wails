@@ -25,6 +25,11 @@ type PrivacyStatus struct {
 	// Terminals run under burrow-daemon, its own responsible process.
 	TerminalsFDA  string `json:"terminals_fda"`
 	TerminalsPath string `json:"terminals_path"`
+	// Screen Recording / Accessibility of the core, i.e. for chats' tools
+	// (screencapture, UI scripting). ponytail: terminals (burrow-daemon) are not
+	// read; add a daemon "privacy" field when a tab agent needs them.
+	ScreenRecording string `json:"screen_recording"`
+	Accessibility   string `json:"accessibility"`
 }
 
 // nativeNotifyStatus / nativeNotifyRequest are set by the core role, which
@@ -35,7 +40,8 @@ var (
 )
 
 func (a *App) PrivacyStatus() PrivacyStatus {
-	st := PrivacyStatus{Notifications: "webview", ChatsFDA: privacy.FullDiskAccess(), TerminalsFDA: "unknown"}
+	st := PrivacyStatus{Notifications: "webview", ChatsFDA: privacy.FullDiskAccess(), TerminalsFDA: "unknown",
+		ScreenRecording: privacy.ScreenRecording(), Accessibility: privacy.Accessibility()}
 	if nativeNotifyStatus != nil {
 		st.Notifications = nativeNotifyStatus()
 	}
@@ -65,4 +71,16 @@ func (a *App) RequestNotifications() string {
 		return "webview"
 	}
 	return nativeNotifyRequest()
+}
+
+// RequestPrivacy shows macOS's prompt for "screen_recording" / "accessibility",
+// which also puts the core into that System Settings list to switch on.
+func (a *App) RequestPrivacy(kind string) string {
+	switch kind {
+	case "screen_recording":
+		return privacy.RequestScreenRecording()
+	case "accessibility":
+		return privacy.RequestAccessibility()
+	}
+	return "unknown"
 }

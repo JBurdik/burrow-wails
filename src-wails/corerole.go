@@ -24,12 +24,8 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
-// Plan 009: on dev and beta the backend (App) runs as its own process —
-// `Burrow --core` — and the window process is only a client of its /v2/ws,
-// like the phone. Stable keeps the in-process App until it switches over.
-
-// externalCore: every channel but stable ("") splits the backend out.
-func externalCore() bool { return buildChannel != "" }
+// Plan 009: the backend (App) runs as its own process — `Burrow --core` —
+// and the window process is only a client of its /v2/ws, like the phone.
 
 // coreDetachedEnv marks a core that was started through spawnDetached.
 const coreDetachedEnv = "BURROW_CORE_DETACHED"

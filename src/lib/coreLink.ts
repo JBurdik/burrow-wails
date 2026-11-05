@@ -6,7 +6,7 @@ import { QuitApp, SetDockBadge, ShowMain } from "@/lib/wailsCompat/bindings/burr
 
 /**
  * The main window's half of plan 009: when the backend is a separate core
- * process (dev/beta), the core owns the tray and tells this window what the
+ * process, the core owns the tray and tells this window what the
  * in-process tray used to do directly:
  *
  *   ui-open {route}   tray / notification click while this UI is up
@@ -14,9 +14,7 @@ import { QuitApp, SetDockBadge, ShowMain } from "@/lib/wailsCompat/bindings/burr
  *                     start a fresh core on the dropped socket
  *   waiting-count n   the Dock badge, which belongs to this process
  *
- * On stable (in-process) the core never emits these and SetDockBadge is a
- * no-op, so this is inert there. Desktop main window only: a phone gets the
- * same bus and must not act on it.
+ * Desktop main window only: a phone gets the same bus and must not act on it.
  */
 export async function startCoreLink(navigate: (route: string) => void): Promise<() => void> {
   if (!isDesktop()) return () => {};

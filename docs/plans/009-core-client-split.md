@@ -51,7 +51,7 @@ needs the same treatment.
 | Version skew | `welcome` carries the core version. After an update the core restarts once everything settled (max ~30 min) with a banner meanwhile; an incompatible protocol restarts at once |
 | Deep links | URL scheme `burrow://…` handled by the UI (Wails `common:ApplicationLaunchedWithUrl`); notifications / tray open the UI through it |
 | CLI | verbs auto-start the core and wait ≤ 5 s; `burrow hook` / `burrow approve` never do (fire-and-forget; TUI decides) |
-| Modes | **dev + beta: external core only. Stable: in-process until it switches, then the in-process path is deleted.** Selected by `buildChannel`, no user flag |
+| Modes | **External core only, every channel** (stable switched in phase E; the in-process path is deleted) |
 | Linux | `systemd --user`: `burrow-core.service` + separate `burrow-daemon.service`, linger, XDG paths, `burrow core install` |
 
 ## Target shape
@@ -212,7 +212,7 @@ for terminals (drag `burrow-daemon`) and the login item, re-reading every 2 s;
 Not verified: dragging into System Settings (no click automation); an old
 daemon reports terminals as unknown until it is restarted.
 
-### E — stable switch
+### E — stable switch (done 2026-11-05)
 
 Stable on external core; delete the in-process path, `quitting` /
 `ShouldQuit` / hide-on-close, `LocalEndpoint`'s in-process branch.
