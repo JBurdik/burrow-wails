@@ -153,6 +153,22 @@ export function renderMermaidPlaceholder(text: string): string {
     + `<div class="cm-diagram"><pre><code class="language-mermaid">${src}</code></pre></div></div>`;
 }
 
+// ── html preview ────────────────────────────────────────────────────────────
+
+/** ```html, or an unlabelled fence holding a whole document (`<!doctype html>` / `<html>`). */
+export function isHtmlBlock(lang: string, text: string): boolean {
+  if (!text.trim()) return false;
+  return lang.toLowerCase() === "html" || (!lang && /^\s*(<!doctype\s+html|<html[\s>])/i.test(text));
+}
+
+// The code block stays as is; the toolbar's Preview opens HtmlPageModal
+// (sandboxed iframe + pageSrcdoc's CSP). Source rides URI-encoded, as mermaid's.
+export function renderHtmlBlock(text: string): string {
+  return `<div class="cm-ok cm-html" data-html-src="${encodeURIComponent(text)}">`
+    + `<div class="cm-tools"><span class="cm-label">HTML</span><button type="button" data-ch-action="preview" title="Render in a sandboxed frame">Preview</button></div>`
+    + `<pre><code class="language-html">${escapeHtml(text)}</code></pre></div>`;
+}
+
 // A Vega-Lite subset: mark bar | line | area | point (circle, square) | arc,
 // channels x / y / color / theta, inline `data.values`.
 // ponytail: x is always ordinal (one band per distinct value, in data order),
@@ -325,6 +341,7 @@ const chatMarked = new Marked({
       if (lang === "visual") return renderVisual(token.text) ?? false;
       if (lang === "questions") return renderQuestions(token.text, answeredCtx) ?? false;
       if (lang === "mermaid" && token.text.trim() && fenceClosed(token.raw)) return renderMermaidPlaceholder(token.text);
+      if (isHtmlBlock(lang, token.text) && fenceClosed(token.raw)) return renderHtmlBlock(token.text);
       return false;
     },
   },

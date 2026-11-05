@@ -71,3 +71,14 @@ describe("mermaid and page blocks", () => {
     expect(pageSrcdoc("<p>hi</p>")).toMatch(/^<meta http-equiv="Content-Security-Policy"[^>]*><p>hi<\/p>$/);
   });
 });
+
+describe("html preview blocks", () => {
+  it("adds Preview to ```html and to a bare document fence, only once closed", () => {
+    const doc = "<!doctype html>\n<p>hi</p>";
+    expect(renderChatMd("```html\n<b>x</b>\n```")).toContain('data-html-src="' + encodeURIComponent("<b>x</b>") + '"');
+    expect(renderChatMd("```\n" + doc + "\n```")).toContain('class="cm-ok cm-html"');
+    expect(renderChatMd("```\n<div>no doc</div>\n```")).not.toContain("cm-html");
+    expect(renderChatMd("```html\n<b>x</b>")).not.toContain("cm-html");
+    expect(renderChatMd("```html\n<script>alert(1)</script>\n```")).toContain("&lt;script&gt;");
+  });
+});

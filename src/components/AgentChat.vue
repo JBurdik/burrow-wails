@@ -920,6 +920,11 @@ function onRichBlockClick(event: MouseEvent) {
     else void navigator.clipboard.writeText(src);
     return;
   }
+  const ch = target.closest<HTMLElement>("[data-ch-action]");
+  if (ch) {
+    pageView.value = { title: "HTML preview", path: "", html: decodeURIComponent(ch.closest<HTMLElement>(".cm-html")?.dataset.htmlSrc ?? "") };
+    return;
+  }
   const img = target.closest<HTMLImageElement>("img[data-cv-image]");
   if (img?.src) { showImage(img.src); return; }
   const page = target.closest<HTMLElement>("[data-cv-page]");
