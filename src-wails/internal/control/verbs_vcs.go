@@ -34,7 +34,7 @@ type Worktrees interface {
 func vcsVerbs(c *Core) []Verb {
 	return []Verb{{
 		Name:    "create_worktree",
-		Summary: "Create a git worktree of this repo and open it as a workspace",
+		Summary: "Create a git worktree of this repo and add it as a workspace (the user's view stays where it is)",
 		Args: []Arg{
 			{Name: "branch", Type: "string", Desc: "Branch to check out; created off base if new", Required: true},
 			{Name: "base", Type: "string", Desc: "Base ref for a new branch (default HEAD)"},

@@ -46,9 +46,12 @@ func (c *Core) createWorktree(ctx context.Context, p Params) (any, error) {
 	}
 	// Surface it immediately: the frontend has to reload its workspace list for
 	// the worktree to appear nested under its repo (and to be able to host tabs).
+	// Reload, never focus: an agent making a worktree must not yank the user's
+	// view onto an empty workspace (it flashed the welcome screen). A spawn or
+	// focus_workspace into it navigates when that is wanted.
 	// A UI that can't be reached is not fatal — the worktree exists either way.
 	uiErr := ""
-	if err := c.ui(ctx, "focus_workspace", map[string]any{"workspaceId": id}, nil); err != nil {
+	if err := c.ui(ctx, "workspaces_reload", nil, nil); err != nil {
 		uiErr = err.Error()
 	}
 	return map[string]any{"workspace_id": id, "path": path, "branch": branch, "ui_error": uiErr}, nil
