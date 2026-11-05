@@ -123,6 +123,20 @@
     <ProviderUpdateBanner v-if="!ui.sidebarVisible" />
     <DiagramModal v-if="diagramContent !== null" />
     <ImageLightbox v-if="lightboxSrc !== null" />
+    <!-- Right-click on a chat file link: pick the editor (becomes the project's Open-in choice). -->
+    <Teleport to="body">
+      <div v-if="fileMenu" class="fixed inset-0 z-[1000]" @click="fileMenu = null" @contextmenu.prevent="fileMenu = null">
+        <div class="fixed min-w-[200px] rounded-lg border border-border bg-[var(--bg-dropdown)] p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]" :style="{ left: `${fileMenu.x}px`, top: `${fileMenu.y}px` }" @click.stop>
+          <button v-for="t in openTargets" :key="t.id" class="flex w-full items-center gap-2 whitespace-nowrap rounded px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-[var(--bg-hover)] hover:text-foreground" :class="fileMenu.current === t.id && '!text-accent'" @click="openFileRefIn(t.id)">
+            <img v-if="t.icon" :src="t.icon" class="h-3.5 w-3.5 shrink-0" />
+            {{ t.id === "finder" ? "Reveal in Finder" : `Open in ${t.name}` }}
+          </button>
+          <div class="my-1 h-px bg-border" />
+          <button class="flex w-full items-center gap-2 whitespace-nowrap rounded px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-[var(--bg-hover)] hover:text-foreground" @click="openFileRefIn(null)">Open in panel</button>
+          <button class="flex w-full items-center gap-2 whitespace-nowrap rounded px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-[var(--bg-hover)] hover:text-foreground" @click="copyFileRefPath">Copy path</button>
+        </div>
+      </div>
+    </Teleport>
     <Teleport to="body"><PetOverlay v-if="ui.petsEnabled" /></Teleport>
 
     <!-- Keyboard cheatsheet overlay (⌘/) -->
@@ -201,7 +215,8 @@ import { useChatAttentionStore } from "@/stores/chatAttention";
 import { FIXED_SHORTCUTS } from "@/lib/keymap";
 import PathPicker from "@/components/PathPicker.vue";
 import { pickDir } from "@/lib/pickPath";
-import { dirOf, looksLikeMdPath, resolveLocalLink } from "@/lib/localLink";
+import { dirOf, looksLikeMdPath, resolveLocalLink, type LocalLink } from "@/lib/localLink";
+import { fileOpenTarget, lastOpenIn, loadOpenTargets, openPathIn, openTargets } from "@/lib/openIn";
 import { classifyChatLink, localUrl, prRef, repoKey } from "@/lib/chatLinks";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { installControlBridge } from "@/lib/controlBridge";
@@ -657,29 +672,66 @@ function openLocalFile(link: NonNullable<ReturnType<typeof resolveLocalLink>>) {
 // A file link in rendered markdown (chat, an open document): markdown opens
 // rendered in the panel, anything else in the editor. Without this a relative
 // href navigates the whole WKWebView away. External URLs are main.ts's job.
-function onLocalLinkClick(e: MouseEvent) {
+// ⌘-click opens it in the project's last-used Open-in editor (at the line).
+function localLinkAt(e: MouseEvent): { link: LocalLink; root: string; ref: boolean } | null {
   const target = e.target as Element | null;
   const scope = target?.closest?.(".md-body, [data-link-base]");
   const root = ws.active?.path;
-  if (!scope || !root) return;
+  if (!scope || !root) return null;
   const base = scope.closest("[data-link-base]")?.getAttribute("data-link-base") || root;
   const ref = target!.closest("[data-file-ref]");
   if (ref) {
-    // Linkified `path:line` text: no href, so there is nothing to cancel.
     const link = resolveLocalLink(ref.getAttribute("data-file-ref"), base);
-    if (!link) return;
-    e.stopPropagation();
-    void fileExists(link.path).then((ok) => { if (ok) openLocalFile(link); });
-    return;
+    return link && { link, root, ref: true };
   }
   const a = target!.closest("a[href]");
   const code = !a && target!.closest("code");
   const raw = a ? a.getAttribute("href") : code && !code.closest("pre") && looksLikeMdPath(code.textContent ?? "") ? code.textContent : null;
   const link = resolveLocalLink(raw, base);
-  if (!link) return;
-  e.preventDefault();
+  return link && { link, root, ref: false };
+}
+function onLocalLinkClick(e: MouseEvent) {
+  const hit = localLinkAt(e);
+  if (!hit) return;
+  // Linkified `path:line` text has no href, so there is nothing to cancel.
+  if (!hit.ref) e.preventDefault();
   e.stopPropagation();
-  openLocalFile(link);
+  const { link, root } = hit;
+  const open = e.metaKey ? () => openPathIn(link.path, fileOpenTarget(root), { line: link.line }) : () => openLocalFile(link);
+  if (hit.ref) void fileExists(link.path).then((ok) => { if (ok) void open(); });
+  else void open();
+}
+
+const fileMenu = ref<{ x: number; y: number; link: LocalLink; root: string; current: string } | null>(null);
+function onLocalLinkContextMenu(e: MouseEvent) {
+  const hit = localLinkAt(e);
+  if (!hit) return;
+  e.preventDefault();
+  void loadOpenTargets();
+  void fileExists(hit.link.path).then((ok) => {
+    if (!ok) return;
+    const x = Math.min(e.clientX, window.innerWidth - 220);
+    const y = Math.min(e.clientY, window.innerHeight - 40 - openTargets.value.length * 30);
+    fileMenu.value = { x, y, ...hit, current: fileOpenTarget(hit.root) };
+  });
+}
+function openFileRefIn(target: string | null) {
+  const m = fileMenu.value;
+  fileMenu.value = null;
+  if (!m) return;
+  if (target === null) openLocalFile(m.link);
+  else void openPathIn(m.link.path, target, { project: m.root, line: m.link.line });
+}
+function copyFileRefPath() {
+  const m = fileMenu.value;
+  fileMenu.value = null;
+  if (m) void navigator.clipboard.writeText(m.link.line ? `${m.link.path}:${m.link.line}` : m.link.path);
+}
+
+// ⌘O: the active project in its last-used Open-in target.
+function openProjectInLast() {
+  const path = ws.active?.path;
+  if (path) void openPathIn(path, lastOpenIn(path));
 }
 
 // A link in a chat transcript opens BESIDE the chat, like Claude Desktop: this
@@ -804,6 +856,7 @@ onMounted(async () => {
   playStartupChime();
   window.addEventListener("keydown", onKeydown);
   document.addEventListener("click", onLocalLinkClick, true);
+  document.addEventListener("contextmenu", onLocalLinkContextMenu, true);
   window.addEventListener("click", onChatLinkClick, true);
   window.addEventListener('mousemove', onResizeMove);
   window.addEventListener('mouseup', onResizeUp);
@@ -849,6 +902,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   document.removeEventListener("click", onLocalLinkClick, true);
+  document.removeEventListener("contextmenu", onLocalLinkContextMenu, true);
   window.removeEventListener("click", onChatLinkClick, true);
   window.removeEventListener('mousemove', onResizeMove);
   window.removeEventListener('mouseup', onResizeUp);
@@ -883,6 +937,7 @@ const KEY_ACTIONS: Record<string, () => void> = {
   switchProvider: () => welcomeEl.value?.cycleProvider?.(),
   unread: jumpToUnread,
   reopenClosed: reopenClosedView,
+  openInEditor: openProjectInLast,
 };
 
 // ⌘⇧T: newest closed terminal/chat (Terminal.vue records them on close).
@@ -972,7 +1027,10 @@ function onKeydown(e: KeyboardEvent) {
   }
   // ⌘1-9 jumps to the Nth visible thread row — Sidebar.vue owns it (t3code).
   if (e.key === "Escape") {
-    if (cheatsheetOpen.value) {
+    if (fileMenu.value) {
+      e.preventDefault();
+      fileMenu.value = null;
+    } else if (cheatsheetOpen.value) {
       e.preventDefault();
       cheatsheetOpen.value = false;
     } else if (ui.settingsOpen) {

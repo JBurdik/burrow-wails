@@ -387,7 +387,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"config_file_path":       {Method: "ConfigFilePath", Args: nil, Scope: scopeOrchRead},
 	"create_dir":             {Method: "CreateDir", Args: []string{"path"}, Scope: scopeOrchOperate},
 	"read_dir_shallow":       {Method: "ReadDirShallow", Args: []string{"path"}, Scope: scopeOrchRead},
-	"open_path_in":           {Method: "OpenPathIn", Args: []string{"path", "target"}, Scope: scopeOrchOperate},
+	"open_path_in":           {Method: "OpenPathIn", Args: []string{"path", "target", "line"}, Scope: scopeOrchOperate},
 	"list_open_targets":      {Method: "ListOpenTargets", Args: nil, Scope: scopeOrchRead},
 	"get_app_version":        {Method: "GetAppVersion", Args: nil, Scope: scopeOrchRead},
 	"set_sleep_inhibit":      {Method: "SetSleepInhibit", Args: []string{"active"}, Scope: scopeOrchOperate},

@@ -30,6 +30,7 @@ export const KEY_COMMANDS: KeyCommand[] = [
 
   // ── Projects ──
   { id: "newProject", label: "New project (browse / create folder)", group: "Projects", def: "⌘⇧N", scope: "app" },
+  { id: "openInEditor", label: "Open project in last-used editor", group: "Projects", def: "⌘O", scope: "app" },
   { id: "pickProject", label: "Pick project → new thread", group: "Projects", def: "⌘⇧O", scope: "app" },
   { id: "switchProvider", label: "Switch agent provider (Welcome)", group: "Projects", def: "⌘⇧A", scope: "app" },
 
