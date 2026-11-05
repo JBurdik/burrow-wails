@@ -412,6 +412,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_sleep":               {Method: "ChatSleep", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"ui_focus":                 {Method: "UiFocus", Args: []string{"window", "focused"}, Scope: scopeOrchOperate},
 	"seen_mark":                {Method: "SeenMark", Args: []string{"key"}, Scope: scopeOrchOperate},
+	"seen_mark_unread":         {Method: "SeenMarkUnread", Args: []string{"key"}, Scope: scopeOrchOperate},
 	"seen_list":                {Method: "SeenList", Args: []string{}, Scope: scopeOrchRead},
 	"chat_mark_active":         {Method: "ChatMarkActive", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_snooze":              {Method: "ChatSnooze", Args: []string{"chatId", "untilMs"}, Scope: scopeOrchOperate},

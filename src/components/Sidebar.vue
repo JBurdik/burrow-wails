@@ -83,6 +83,7 @@
               @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
               @mouseleave="cancelHoverCard"
             >
+              <kbd v-if="jumpHints && jumpIndex(row) >= 0" class="sb-jump-hint">⌘{{ jumpIndex(row) + 1 }}</kbd>
               <PhCrown v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" :size="14" weight="fill" class="shrink-0 text-[var(--yellow)]" />
               <PhGitBranch v-else-if="row.ws.parent_id" :size="14" class="shrink-0 text-muted-foreground" />
               <component v-else-if="row.tab.agentIcon" :is="agentIconComp(row.tab.agentIcon)" :size="14" class="shrink-0 text-[#E0876A]" />
@@ -423,6 +424,10 @@
         </button>
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
           {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
+        </button>
+        <!-- t3code's mark-unread: rewinds the shared receipt to just before the last turn ended. -->
+        <button v-if="rowMenu.tab.chatId != null && rowMenu.tab.status !== 'review' && rowMenu.tab.status !== 'running'" class="menu-item" @click="withMenu((_ws, tab) => void invoke('seen_mark_unread', { key: `chat:${tab!.chatId}` }).catch(() => {}))">
+          Mark unread
         </button>
         <template v-if="rowMenu.tab.isChat && rowMenu.tab.chatId != null">
           <button v-if="snoozedUntilOf(rowMenu.tab.chatId)" class="menu-item" @click="withMenu((_ws, tab) => chats.snooze(tab!.chatId!, 0))">
@@ -1487,13 +1492,44 @@ function runScript(sc: Script) {
   termTabs.add(ws.id, cmd);
 }
 
+// ⌘1-9 jumps to the Nth visible thread row (t3code); holding ⌘ alone for a
+// moment shows the numbers, so a quick ⌘C never flashes them.
+const JUMP_HINT_DELAY_MS = 450;
+const jumpHints = ref(false);
+let jumpTimer: number | undefined;
+const jumpRows = computed(() =>
+  topGroups.value.filter((g) => !collapsedGroups.has(g.repoId)).flatMap((g) => g.rows).slice(0, 9),
+);
+function jumpIndex(row: ActivityRow): number {
+  return jumpRows.value.indexOf(row);
+}
+function hideJumpHints() {
+  window.clearTimeout(jumpTimer);
+  jumpHints.value = false;
+}
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === "Escape" && gitDialogOpen.value) gitDialogOpen.value = false;
+  if (e.key === "Meta") {
+    if (!e.repeat) { window.clearTimeout(jumpTimer); jumpTimer = window.setTimeout(() => (jumpHints.value = true), JUMP_HINT_DELAY_MS); }
+    return;
+  }
+  if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+    const row = jumpRows.value[Number(e.code.slice(5)) - 1];
+    if (row) { e.preventDefault(); selectTab(row); }
+    return;
+  }
+  hideJumpHints(); // any other chord (⌘C, ⌘K…) is not a jump
+}
+function onKeyup(e: KeyboardEvent) {
+  if (e.key === "Meta") hideJumpHints();
 }
 
 onMounted(() => {
   document.addEventListener("click", onDocClick);
   document.addEventListener("keydown", onKeydown);
+  document.addEventListener("keyup", onKeyup);
+  window.addEventListener("blur", hideJumpHints);
   mountSections();
   refreshAllBranches();
   clock = window.setInterval(() => { now.value = Date.now(); }, 15_000);
@@ -1508,6 +1544,9 @@ onMounted(() => {
   }
 });
 onUnmounted(() => {
+  document.removeEventListener("keyup", onKeyup);
+  window.removeEventListener("blur", hideJumpHints);
+  hideJumpHints();
   if (prTimer) clearInterval(prTimer);
   if (clock) clearInterval(clock);
   if (hoverTimer) clearTimeout(hoverTimer);
@@ -1710,6 +1749,7 @@ async function confirmCreate() {
 }
 .sb-row:hover { background: var(--bg-hover); }
 /* t3code: a row that needs nothing from you recedes; hover / unread / blocked stay full. */
+.sb-jump-hint { flex-shrink: 0; min-width: 22px; padding: 0 4px; border-radius: 4px; font: 600 10px/16px var(--font-sans, inherit); text-align: center; color: var(--text-primary); background: var(--bg-selected); border: 1px solid color-mix(in srgb, var(--text-primary) 14%, transparent); }
 .sb-recede { opacity: .62; transition: opacity .12s, background-color .12s; }
 .sb-recede:hover { opacity: 1; }
 .sb-row-active { background: var(--bg-selected); border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }

@@ -121,6 +121,7 @@ interface Prefs {
   worktreeCleanupMerged: boolean; // remove worktrees whose branch merged (read by Go, src-wails/worktreecleanup.go)
   worktreeCleanupInactive: boolean; // remove idle worktrees with no chats/tabs (same)
   worktreeCleanupInactiveDays: number; // idle threshold for the rule above, 0 = off
+  holdToQuit: boolean; // ⌘Q must be held ~1 s to quit (read by Go, src-wails/quithold.go)
   floatPopouts: boolean; // popped-out terminal/chat windows open floating (no zoom button, tiling WMs float them)
   trayHotkey: string; // global shortcut for the tray panel, "⌥Space" style (src-wails/trayhotkey.go); "" = off
   coreAtLogin: boolean; // the external core stays up for good (read by Go, src-wails/coreidle.go; plan 009)
@@ -236,6 +237,7 @@ const DEFAULT_PREFS: Prefs = {
   subagentAutoDeliver: true,
   coreAtLogin: false,
   floatPopouts: false,
+  holdToQuit: true,
   trayHotkey: "⌥Space",
   worktreeCleanupMerged: false,
   worktreeCleanupInactive: false,
@@ -389,6 +391,7 @@ export const useUIStore = defineStore("ui", () => {
   const subagentAutoDeliver = ref<boolean>(loaded.subagentAutoDeliver ?? true);
   const coreAtLogin = ref<boolean>(loaded.coreAtLogin ?? false);
   const floatPopouts = ref<boolean>(loaded.floatPopouts ?? false);
+  const holdToQuit = ref<boolean>(loaded.holdToQuit ?? true);
   const trayHotkey = ref<string>(loaded.trayHotkey ?? "⌥Space");
   const worktreeCleanupMerged = ref<boolean>(loaded.worktreeCleanupMerged ?? false);
   const worktreeCleanupInactive = ref<boolean>(loaded.worktreeCleanupInactive ?? false);
@@ -464,6 +467,7 @@ export const useUIStore = defineStore("ui", () => {
     subagentAutoDeliver.value = p.subagentAutoDeliver ?? true;
     coreAtLogin.value = p.coreAtLogin ?? false;
     floatPopouts.value = p.floatPopouts ?? false;
+    holdToQuit.value = p.holdToQuit ?? true;
     trayHotkey.value = p.trayHotkey ?? "⌥Space";
     worktreeCleanupMerged.value = p.worktreeCleanupMerged ?? false;
     worktreeCleanupInactive.value = p.worktreeCleanupInactive ?? false;
@@ -663,6 +667,7 @@ export const useUIStore = defineStore("ui", () => {
         subagentAutoDeliver: subagentAutoDeliver.value,
         coreAtLogin: coreAtLogin.value,
         floatPopouts: floatPopouts.value,
+        holdToQuit: holdToQuit.value,
         trayHotkey: trayHotkey.value,
         worktreeCleanupMerged: worktreeCleanupMerged.value,
         worktreeCleanupInactive: worktreeCleanupInactive.value,
@@ -686,7 +691,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, coreAtLogin, floatPopouts, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, coreAtLogin, floatPopouts, holdToQuit, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -1005,6 +1010,7 @@ export const useUIStore = defineStore("ui", () => {
     subagentAutoDeliver,
     coreAtLogin,
     floatPopouts,
+    holdToQuit,
     trayHotkey,
     worktreeCleanupMerged,
     worktreeCleanupInactive,

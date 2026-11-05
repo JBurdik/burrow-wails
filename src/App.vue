@@ -913,7 +913,7 @@ function onKeydown(e: KeyboardEvent) {
   const typing =
     !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   // Agent launch shortcuts (user-configured per agent). Checked first so a
-  // bound combo wins; defaults use ⌘⇧1-5 to avoid the plain ⌘1-9 ws switch.
+  // bound combo wins; defaults use ⌘⇧1-5 to avoid the plain ⌘1-9 thread jump.
   if (!typing || e.metaKey || e.ctrlKey) {
     for (const a of providers.active) {
       if (a.terminalShortcut && matchesShortcut(e, a.terminalShortcut)) {
@@ -930,13 +930,7 @@ function onKeydown(e: KeyboardEvent) {
       return;
     }
   }
-  // ⌘1-9 project switch — a range, so not part of the rebindable registry.
-  if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
-    e.preventDefault();
-    const target = ws.workspaces[parseInt(e.key) - 1];
-    if (target) ws.open(target);
-    return;
-  }
+  // ⌘1-9 jumps to the Nth visible thread row — Sidebar.vue owns it (t3code).
   if (e.key === "Escape") {
     if (cheatsheetOpen.value) {
       e.preventDefault();

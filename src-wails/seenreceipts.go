@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Read receipts shared by every client (desktop windows, tray panel, phone,
 // PWA): reading a thread on one clears its unread dot on all of them.
@@ -70,4 +73,28 @@ func (a *App) seenClear(key string) {
 	if _, err := a.db.Exec(`DELETE FROM seen_receipts WHERE key = ?`, key); err == nil {
 		busEmit("seen-changed", seenReceipt{Key: key, At: 0})
 	}
+}
+
+// SeenMarkUnread rewinds a receipt to just before the latest finished turn
+// (t3code's mark-unread), so every client shows it unread again. The one
+// write that moves a receipt backwards — explicit, from the row menu.
+func (a *App) SeenMarkUnread(key string) error {
+	if key == "" || a.db == nil || a.phases == nil {
+		return nil
+	}
+	phaseKey := key
+	if !strings.HasPrefix(key, "chat:") {
+		phaseKey = "pty:" + key // receipts key a pty by its bare id
+	}
+	ended := a.phases.Get(phaseKey).TurnEndedAt
+	if ended <= 0 {
+		return nil // nothing finished: nothing to be unread
+	}
+	at := ended - 1
+	if _, err := a.db.Exec(`INSERT INTO seen_receipts(key, seen_at) VALUES(?, ?)
+		ON CONFLICT(key) DO UPDATE SET seen_at = excluded.seen_at`, key, at); err != nil {
+		return err
+	}
+	busEmit("seen-changed", seenReceipt{Key: key, At: at})
+	return nil
 }

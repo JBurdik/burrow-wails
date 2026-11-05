@@ -45,7 +45,7 @@ export const KEY_COMMANDS: KeyCommand[] = [
 // Ranges and per-agent bindings can't be expressed as one shortcut string, so
 // they stay hardcoded — listed here only so the cheatsheet stays honest.
 export const FIXED_SHORTCUTS: { keys: string; desc: string; group: string }[] = [
-  { keys: "⌘ 1-9", desc: "Switch project", group: "Projects" },
+  { keys: "⌘ 1-9", desc: "Jump to thread (hold ⌘ for numbers)", group: "Projects" },
   { keys: "⌃ 1-9", desc: "Switch tab", group: "Tabs & panes" },
   { keys: "⌘ ⇧ 1-5", desc: "Launch agent (Settings → Agents)", group: "Agents" },
   { keys: "⇧ ↵", desc: "Insert newline (agent multiline input)", group: "Terminal" },
