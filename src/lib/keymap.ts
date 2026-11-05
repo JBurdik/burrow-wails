@@ -26,6 +26,7 @@ export const KEY_COMMANDS: KeyCommand[] = [
   { id: "rightPanel", label: "Toggle right panel", group: "Global", def: "⌘⌥B", scope: "app" },
   { id: "focusComposer", label: "Focus chat composer", group: "Global", def: "⌘L", scope: "app" },
   { id: "unread", label: "Jump to first unread tab", group: "Global", def: "⌘⇧U", scope: "app" },
+  { id: "reopenClosed", label: "Reopen closed tab / thread", group: "Global", def: "⌘⇧T", scope: "app" },
 
   // ── Projects ──
   { id: "newProject", label: "New project (browse / create folder)", group: "Projects", def: "⌘⇧N", scope: "app" },

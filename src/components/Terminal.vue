@@ -246,6 +246,7 @@ import { useFileViewerStore } from "@/stores/fileViewer";
 import { isTabSettled, settledTabKeys } from "@/lib/settledTabs";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { onSeenChanged, shareSeen } from "@/lib/seenSync";
+import { pushClosedView } from "@/lib/closedViews";
 
 const props = defineProps<{ cwd: string; workspaceId: number }>();
 const wsStore = useWorkspaceStore();
@@ -1326,6 +1327,7 @@ async function closeTab(tabId: number) {
   // A leaf shown in its own window goes with the tab — the window would
   // otherwise keep showing a dead terminal or a stopped chat.
   leaves.forEach((l) => { if (popouts.isPopped(l.id)) popouts.bringBack(l.id); });
+  leaves.forEach(rememberClosed);
 
   // Explicitly kill PTYs so the daemon drops them (not a detach — user closed the
   // tab). Editor/diff leaves have no PTY — skip them. AWAIT each kill: fire-and-forget
@@ -1388,6 +1390,16 @@ function stopChatSession(leaf: Leaf) {
   chatsStore.archive(leaf.chatId);
 }
 
+// ⌘⇧T (App.vue) reopens these. Terminals and chats only — editor/diff/browser
+// leaves are reachable again from where they were opened.
+function rememberClosed(leaf: Leaf) {
+  if (leaf.leafType === "chat") {
+    if (leaf.chatId != null) pushClosedView({ kind: "chat", wsId: props.workspaceId, chatId: leaf.chatId });
+  } else if (!leaf.leafType || leaf.leafType === "terminal") {
+    pushClosedView({ kind: "terminal", wsId: props.workspaceId, cmd: leaf.initialCmd, cwd: leaf.cwd });
+  }
+}
+
 async function closePane(leafId: number) {
   const tab = tabs.value.find((t) => findLeaf(t.root, leafId));
   if (!tab) return;
@@ -1406,6 +1418,7 @@ async function closePane(leafId: number) {
     if (!ok) return;
   }
   if (popouts.isPopped(leafId)) popouts.bringBack(leafId);
+  if (leaf) rememberClosed(leaf);
   if (leaf?.leafType === "chat") {
     stopChatSession(leaf);
   } else if (leaf && leaf.leafType !== "editor" && leaf.leafType !== "diff") {
