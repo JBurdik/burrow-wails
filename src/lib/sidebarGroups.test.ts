@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { reorderProjects } from "./projectOrder";
 import {
   buildActivityRows, groupByRepo, groupDot, rowRecedes, parseShortstat, resolveSidebarSection, splitSections, stepWorkingShelf,
   routeRowOnly, EMPTY_WORKING_SHELF, WORKING_EXIT_GRACE_MS, type ActivityRow, type SectionInput,
@@ -220,5 +221,18 @@ describe("routeRowOnly", () => {
     const rows = [1, 2, 3].map((id) => ({ ws: repoA, tab: mkTab(id, "t"), ts: 0 }));
     expect(routeRowOnly(rows, (r) => r.tab.id === 2).map((r) => r.tab.id)).toEqual([2]);
     expect(routeRowOnly(rows, () => false)).toEqual([]);
+  });
+});
+
+describe("project order", () => {
+  it("ranks pinned, then the dragged order, then the rest in feed order", () => {
+    const r = (repo: number, title: string): ActivityRow => ({ ws: { id: repo, parent_id: null } as never, tab: mkTab(repo * 10, title), ts: 0 });
+    const groups = groupByRepo([r(1, "a"), r(2, "b"), r(3, "c"), r(4, "d")], [], [4], [3, 1]);
+    expect(groups.map((g) => g.repoId)).toEqual([4, 3, 1, 2]);
+  });
+  it("drops the dragged project before the target", () => {
+    expect(reorderProjects([1, 2, 3, 4], 4, 2)).toEqual([1, 4, 2, 3]);
+    expect(reorderProjects([1, 2, 3], 1, 3)).toEqual([2, 1, 3]);
+    expect(reorderProjects([1, 2], 1, 9)).toEqual([1, 2]); // unknown target: unchanged
   });
 });

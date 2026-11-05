@@ -874,7 +874,7 @@ import { editOf, fmtDuration, hunkLines, isProjectPath, mergeEdits, type FileEdi
 import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { escapeHtml, formatAnswers, renderChatMd } from "@/lib/chatBlocks";
+import { IMAGE_MIME, escapeHtml, formatAnswers, renderChatMd } from "@/lib/chatBlocks";
 import { linkifyFileRefs } from "@/lib/localLink";
 import { cachedMermaid, renderMermaid } from "@/lib/mermaidRender";
 import { useDiagram } from "@/composables/useDiagram";
@@ -920,6 +920,8 @@ function onRichBlockClick(event: MouseEvent) {
     else void navigator.clipboard.writeText(src);
     return;
   }
+  const img = target.closest<HTMLImageElement>("img[data-cv-image]");
+  if (img?.src) { showImage(img.src); return; }
   const page = target.closest<HTMLElement>("[data-cv-page]");
   if (page) { void openPage(page.dataset.cvPage ?? "", page.dataset.cvPageTitle ?? ""); return; }
   const opt = target.closest<HTMLButtonElement>(".cq-opt");
@@ -967,6 +969,27 @@ function hydrateMermaid() {
 }
 onMounted(hydrateMermaid);
 onUpdated(hydrateMermaid);
+
+// ```visual {"image": …} placeholders: read the file once per path (v-html
+// re-inserts the placeholder on every streamed token, so the cache is what
+// keeps this from re-reading it). A failed read stays cached too — a missing
+// file is still missing on the next token; reopening the chat retries.
+const imageCache = new Map<string, Promise<string>>();
+function hydrateImages() {
+  for (const el of scrollEl.value?.querySelectorAll<HTMLImageElement>("img[data-cv-image]:not([src])") ?? []) {
+    const path = el.dataset.cvImage ?? "";
+    const abs = path.startsWith("/") ? path : `${props.cwd}/${path}`;
+    let p = imageCache.get(abs);
+    if (!p) {
+      const mime = IMAGE_MIME[abs.split(".").pop()!.toLowerCase()];
+      p = invoke<string>("read_file_base64", { path: abs }).then((b64) => `data:${mime};base64,${b64}`);
+      imageCache.set(abs, p);
+    }
+    p.then((src) => (el.src = src), () => el.closest(".cv-image")?.classList.add("cv-image-gone"));
+  }
+}
+onMounted(hydrateImages);
+onUpdated(hydrateImages);
 // A theme switch doesn't re-run v-html; re-render the diagrams already shown.
 // (useUIStore() here: the `uiStore` const is declared further down.)
 watch(() => [useUIStore().theme, useUIStore().themeMode], () => nextTick(() => {
@@ -3505,6 +3528,8 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .md-body :deep(p) { margin: 0 0 10px; }
 .md-body :deep(p:last-child) { margin-bottom: 0; }
 .md-body :deep(ul), .md-body :deep(ol) { margin: 4px 0 10px; padding-left: 20px; }
+.md-body :deep(ul) { list-style: disc; }
+.md-body :deep(ol) { list-style: decimal; }
 .md-body :deep(li) { margin: 3px 0; }
 .md-body :deep(code) { font-family: var(--font-mono); font-size: 11px; background: color-mix(in srgb, var(--chat-accent) 14%, transparent); color: color-mix(in srgb, var(--chat-accent) 55%, var(--chat-text)); padding: 1px 5px; border-radius: 4px; }
 .md-body :deep(pre) { background: color-mix(in srgb, var(--chat-bg) 55%, black); border: 1px solid var(--chat-border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 8px 0; }

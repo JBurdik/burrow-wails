@@ -44,3 +44,9 @@ _Avoid_: phase
 **Read receipt**:
 The per-client, per-subject record of when the user last saw a PTY or chat, used to turn `done` into `review`.
 _Avoid_: seen flag, unread
+
+### Chat content
+
+**Visual block**:
+A fenced ```` ```visual ```` (or ```` ```questions ```` / ```` ```mermaid ````) block in an agent reply that the chat renders as a rich element — chart, stat tiles, table, image, page card, or question form — instead of code. Plain JSON, so it works for every provider; agents learn the format from the `burrow-visuals` skill. An image part holds a file path, not the bytes.
+_Avoid_: widget, artifact, rich block

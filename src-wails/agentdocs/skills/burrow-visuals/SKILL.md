@@ -1,6 +1,6 @@
 ---
 name: burrow-visuals
-description: Show charts, stat tiles, tables and mermaid diagrams inline in a Burrow chat (```visual / ```mermaid blocks), link an HTML page you wrote as an openable card, or ask the user several questions at once as a clickable form with a ```questions block. Use only inside a Burrow chat (the BURROW_CHAT_ID environment variable is set), when a chart, table or set of numbers says it better than prose, or when you need the user's decisions on two or more questions.
+description: Show charts, stat tiles, tables, screenshots/images and mermaid diagrams inline in a Burrow chat (```visual / ```mermaid blocks), link an HTML page you wrote as an openable card, or ask the user several questions at once as a clickable form with a ```questions block. Use only inside a Burrow chat (the BURROW_CHAT_ID environment variable is set), when a chart, table or set of numbers says it better than prose, or when you need the user's decisions on two or more questions.
 ---
 
 # burrow-visuals
@@ -31,6 +31,8 @@ The block is one of:
   - `{"columns": [part, …]}`: parts side by side
   - `{"page": {"title": "…", "path": "…", "description"?: "…"}}`: a card with
     an Open button for an HTML page you wrote (see below)
+  - `{"image": {"path": "…", "caption"?: "…"}}`: an image file shown inline
+    (see below)
 
 ### Chart subset
 
@@ -83,6 +85,18 @@ path is absolute or relative to the chat's working directory and must end in
 
 The page opens in a sandbox: scripts run, but it has **no network at all**
 (no fetch, no CDN scripts or fonts, no form posts) and no access to the app.
+
+## Images
+
+To show a screenshot (or any png / jpg / gif / webp you produced), save it
+to a file and reference it with an image part. The path is absolute or
+relative to the chat's working directory. The transcript stores **only the
+path**, so save the file somewhere that lasts: `$BURROW_SESSION_DIR` or the
+project, **not** `/tmp`. Put two images in `columns` for a before/after.
+
+```visual
+{"rows": [{"image": {"path": "/abs/path/after.png", "caption": "Settings after the fix"}}]}
+```
 
 ## ```questions
 

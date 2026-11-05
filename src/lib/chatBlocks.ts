@@ -5,6 +5,8 @@
 //   ```mermaid    a diagram card (rendered after insertion, see mermaidRender.ts)
 //   {"page": …}   inside ```visual: a card that opens an agent-written HTML file
 //                 in a sandboxed iframe — never inline in the transcript
+//   {"image": …}  inside ```visual: an image file (a screenshot) shown inline,
+//                 click = lightbox
 //
 // Both are plain JSON in the fence, so they work for every provider (Claude,
 // Codex, ACP) with no protocol support — the agent learns the format from the
@@ -60,7 +62,7 @@ export function renderVisual(text: string): string | null {
 }
 
 function isPart(p: Part): boolean {
-  return ["chart", "stats", "table", "text", "columns", "page"].some((k) => k in p);
+  return ["chart", "stats", "table", "text", "columns", "page", "image"].some((k) => k in p);
 }
 
 function renderPart(part: Part): string {
@@ -72,6 +74,7 @@ function renderPart(part: Part): string {
   else if (part.table && typeof part.table === "object") body = tablePart(part.table as Part);
   else if (typeof part.text === "string") body = `<div class="cv-text">${plainMarked.parse(part.text) as string}</div>`;
   else if (part.page && typeof part.page === "object") body = pagePart(part.page as Part);
+  else if (part.image && typeof part.image === "object") body = imagePart(part.image as Part);
   else if (Array.isArray(part.columns)) body = `<div class="cv-columns">${(part.columns as Part[]).map((c) => `<div class="cv-col">${renderPart(c)}</div>`).join("")}</div>`;
   return `<div class="cv-part">${title}${body}</div>`;
 }
@@ -105,6 +108,21 @@ function pagePart(page: Part): string {
   const desc = page.description ? `<div class="cv-page-desc">${escapeHtml(page.description)}</div>` : "";
   return `<div class="cv-page"><div class="cv-page-body"><div class="cv-page-title">${title}</div>${desc}</div>`
     + `<button type="button" class="cv-page-open" data-cv-page="${escapeHtml(path)}" data-cv-page-title="${title}">Open</button></div>`;
+}
+
+export const IMAGE_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+
+// A placeholder only: AgentChat (hydrateImages) reads the file through
+// read_file_base64 and sets the src. The transcript keeps the path, not the
+// bytes.
+// ponytail: a file deleted later (/tmp) shows as missing; copy it into app
+// data at render time if that starts to bite.
+function imagePart(image: Part): string {
+  const path = typeof image.path === "string" ? image.path.trim() : "";
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (!path || !IMAGE_MIME[ext]) return `<div class="cv-image-missing">Not an image: ${escapeHtml(path)}</div>`;
+  const caption = image.caption ? `<div class="cv-image-caption">${escapeHtml(image.caption)}</div>` : "";
+  return `<figure class="cv-image" data-path="${escapeHtml(path)}"><img class="cv-image-img" data-cv-image="${escapeHtml(path)}" alt="${escapeHtml(image.caption || path.split("/").pop())}">${caption}</figure>`;
 }
 
 // The CSP goes first so it is in force before any agent markup is parsed: no

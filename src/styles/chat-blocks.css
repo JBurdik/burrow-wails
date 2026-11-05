@@ -68,3 +68,10 @@
 .cv-page-desc { font-size: 12px; color: var(--chat-text-secondary); }
 .cv-page-open { font-size: 12px; font-weight: 600; padding: 5px 14px; border-radius: 8px; border: 1px solid var(--chat-border); background: color-mix(in srgb, var(--chat-text) 6%, transparent); color: var(--chat-text); cursor: pointer; }
 .cv-page-open:hover { background: color-mix(in srgb, var(--chat-text) 10%, transparent); }
+.cv-image { margin: 0; }
+.cv-image-img { display: block; max-width: 100%; max-height: 320px; border: 1px solid var(--chat-border); border-radius: 10px; cursor: zoom-in; }
+.cv-image-img:not([src]) { min-width: 160px; min-height: 90px; background: var(--chat-surface); }
+.cv-image-gone .cv-image-img { display: none; }
+.cv-image-gone::before { content: "Image file is missing: " attr(data-path); }
+.cv-image-gone::before, .cv-image-missing { display: block; font-size: 12px; color: var(--chat-text-secondary); border: 1px dashed var(--chat-border); border-radius: 10px; padding: 8px 12px; }
+.cv-image-caption { font-size: 12px; color: var(--chat-text-secondary); margin-top: 4px; }

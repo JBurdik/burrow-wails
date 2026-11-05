@@ -56,6 +56,16 @@ describe("mermaid and page blocks", () => {
     expect(renderVisual('{"rows":[{"page":{"path":"/etc/passwd"}}]}')).not.toContain("data-cv-page");
   });
 
+  it("renders an image placeholder for an image path only", () => {
+    const html = renderVisual('{"image":{"path":"shots/a b.png","caption":"<x>"}}')!;
+    expect(html).toContain('data-cv-image="shots/a b.png"');
+    expect(html).not.toContain("src=");
+    expect(html).toContain("&lt;x&gt;");
+    const bad = renderVisual('{"image":{"path":"/etc/passwd"}}')!;
+    expect(bad).not.toContain("data-cv-image");
+    expect(bad).toContain("cv-image-missing");
+  });
+
   it("puts the no-network CSP first, after any doctype", () => {
     expect(pageSrcdoc("<!DOCTYPE html><html><script>x</script>")).toMatch(/^<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="default-src 'none';/);
     expect(pageSrcdoc("<p>hi</p>")).toMatch(/^<meta http-equiv="Content-Security-Policy"[^>]*><p>hi<\/p>$/);

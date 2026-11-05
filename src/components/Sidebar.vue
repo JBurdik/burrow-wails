@@ -54,7 +54,17 @@
            sub-agents indented under it. Branch/model/PR live in the hover card. -->
       <div v-for="group in topGroups" :key="group.repoId" class="px-2 pt-1.5">
         <div v-if="group.repoId < 0" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">Pinned</div>
-        <div v-else class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover" @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
+        <div
+          v-else
+          class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover"
+          :class="[dropRepo === group.repoId && dragRepo !== group.repoId && 'sb-drop-before', dragRepo === group.repoId && 'opacity-40']"
+          :draggable="canDragRepo(group.repoId)"
+          @dragstart="onRepoDragStart($event, group.repoId)"
+          @dragover="onRepoDragOver($event, group.repoId)"
+          @dragleave="dropRepo === group.repoId && (dropRepo = null)"
+          @drop.prevent="onRepoDrop(group.repoId)"
+          @dragend="onRepoDragEnd"
+          @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
           <button class="flex min-w-0 flex-1 items-center gap-2 text-left" @click="toggleGroup(group.repoId)">
             <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground transition-transform" :class="collapsedGroups.has(group.repoId) && '-rotate-90'" />
             <img v-if="store.icons[group.repoId]" :src="store.icons[group.repoId]" class="h-[18px] w-[18px] shrink-0 rounded-[5px] object-cover" />
@@ -682,6 +692,7 @@ import {
 import { useGitStore, type PrInfo } from "@/stores/git";
 import { useNotificationsStore } from "@/stores/notifications";
 import { isPinned, pinnedIds, togglePin, unpin } from "@/lib/pinnedWorkspaces";
+import { moveProject, projectOrder } from "@/lib/projectOrder";
 import { isChatPinned, toggleChatPin, unpinChat } from "@/lib/pinnedChats";
 import { createPendingDeletes } from "@/lib/pendingDeletes";
 import { isArchived, toggleArchived, forgetArchived } from "@/lib/archivedWorkspaces";
@@ -889,8 +900,36 @@ const liveGroups = computed(() =>
     activeRepo.value ? [activeRepo.value.id] : [],
     // Archive only sinks a repo in the picker; a pin still wins here (the header shows its pin icon).
     pinnedIds.value.filter((id) => repoById(id)),
+    projectOrder.value,
   ),
 );
+
+// Drag a project header to reorder (t3code's manual project order). Pinned
+// projects keep their spot on top, so only the others drag.
+const dragRepo = ref<number | null>(null);
+const dropRepo = ref<number | null>(null);
+function canDragRepo(repoId: number): boolean {
+  return repoId > 0 && !isPinned(repoId);
+}
+function onRepoDragStart(e: DragEvent, repoId: number) {
+  dragRepo.value = repoId;
+  e.dataTransfer?.setData("text/plain", String(repoId)); // Safari/WebKit won't start a drag without data
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
+function onRepoDragOver(e: DragEvent, repoId: number) {
+  if (dragRepo.value == null || !canDragRepo(repoId)) return;
+  e.preventDefault();
+  dropRepo.value = repoId;
+}
+function onRepoDrop(repoId: number) {
+  const from = dragRepo.value;
+  dragRepo.value = dropRepo.value = null;
+  if (from == null || from === repoId || !canDragRepo(repoId)) return;
+  moveProject(liveGroups.value.map((g) => g.repoId).filter(canDragRepo), from, repoId);
+}
+function onRepoDragEnd() {
+  dragRepo.value = dropRepo.value = null;
+}
 /** Pinned rows sit above every repo group, as one pseudo-group under this id. */
 const PINNED = -1;
 const topGroups = computed(() =>
@@ -1750,6 +1789,7 @@ async function confirmCreate() {
 .sb-row:hover { background: var(--bg-hover); }
 /* t3code: a row that needs nothing from you recedes; hover / unread / blocked stay full. */
 .sb-jump-hint { flex-shrink: 0; min-width: 22px; padding: 0 4px; border-radius: 4px; font: 600 10px/16px var(--font-sans, inherit); text-align: center; color: var(--text-primary); background: var(--bg-selected); border: 1px solid color-mix(in srgb, var(--text-primary) 14%, transparent); }
+.sb-drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .sb-recede { opacity: .62; transition: opacity .12s, background-color .12s; }
 .sb-recede:hover { opacity: 1; }
 .sb-row-active { background: var(--bg-selected); border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
