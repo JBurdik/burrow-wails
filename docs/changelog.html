@@ -80,12 +80,81 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v1.1.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v1.1.0</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">listopad 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Sidebar a navigace</div>
+    <ul>
+      <li><strong>Stabilní pořadí vláken</strong> — řádky se při aktivitě nepřeskupují, starší vlákna vizuálně ustupují, projekt má barevnou tečku. Hlavičky projektů jdou přetáhnout a změnit tak jejich pořadí.</li>
+      <li><strong>Blok Unread a „označit jako nepřečtené“</strong> — nepřečtené odpovědi mají vlastní blok; účtenky o přečtení se sdílí mezi zařízeními (Go je razítkuje svými hodinami, takže telefon s posunutým časem nic „nepřečte“ dopředu).</li>
+      <li><strong><code>⌘1–9</code> skočí na vlákno</strong> — podržením se ukážou čísla u řádků.</li>
+      <li><strong><code>⌘⇧T</code> znovu otevře zavřený tab nebo vlákno</strong> — bez nedávno zavřeného vezme poslední archivované vlákno.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Chat a composer</div>
+    <ul>
+      <li><strong>Historie promptů šipkami</strong> — <code>↑</code>/<code>↓</code> v composeru listuje dřív odeslanými zprávami.</li>
+      <li><strong>Quote / Ask about this</strong> — označený text v odpovědi agenta jde citovat nebo se na něj rovnou zeptat.</li>
+      <li><strong>Preview u HTML bloků</strong> — HTML kód v odpovědi jde otevřít jako stránku.</li>
+      <li><strong>Odkazy na soubory do editoru</strong> — klik na soubor v chatu ho otevře v naposledy použitém editoru, <code>⌘O</code> otevře celý projekt.</li>
+      <li><strong>Stash na <code>⌘S</code></strong> — místo <code>⌘⇧S</code>.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Agenti a sub-agenti</div>
+    <ul>
+      <li><strong>Žádosti o secrets</strong> — agent si přes <code>burrow secret-request</code> řekne o API klíč apod.; Burrow ukáže kartu (v chatu, nad terminálem, na telefonu), hodnota skončí v souboru s právy 0600 a agent dostane jen cestu. Hodnota nikdy nejde do logu, transcriptu ani SQLite. Volitelně se uloží pro projekt (Settings → Workspaces → Saved secrets).</li>
+      <li><strong>Řízení chat sub-agentů z parent vlákna</strong> — nové verby pro čtení transcriptu, odpověď na blokovanou otázku, přerušení a různé režimy odeslání. <code>list_agents</code> hlásí, co který agent umí delegovat.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Desktop</div>
+    <ul>
+      <li><strong>Tray toasty</strong> — když okno nemá fokus, upozornění (oprávnění, čekání, hotový chat) vyjedou od ikony v tray místo systémové notifikace. Klik otevře vlákno, najetí myší pozastaví odpočet.</li>
+      <li><strong>Podrž <code>⌘Q</code> pro ukončení</strong> — omylem stisknuté <code>⌘Q</code> už aplikaci nezavře.</li>
+      <li><strong>Banner „aktualizace připravena“</strong> a krok s oprávněními (notifikace) v Settings → General.</li>
+      <li><strong>Revize protokolu</strong> — klient a jádro si při připojení porovnají verzi wire protokolu; nekompatibilní kombinace ukáže banner místo tichého rozbití.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Telefon</div>
+    <ul>
+      <li><strong>Jeden domov „Threads“ napříč projekty</strong> — Inbox je v něm sloučený, skupiny Needs you / Working / Unread / Recent podle fází z Go.</li>
+      <li><strong>Použitelné terminály</strong> — telefon terminál zrcadlí v mřížce, kterou mu dal Mac, a jen ho zmenší; dřív ho přeformátoval na 45 sloupců a rozbil TUI na Macu. Drží se jen viditelný terminál (iOS jinak zabíjel stránku). Swipe zpět, stav načítání.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Chat se v Sidebaru ukáže jen jednou</strong> a smazaný workspace zmizí i z otevřených.</li>
+      <li><strong><code>create_worktree</code> nepřepíná fokus</strong> — jen znovu načte seznam workspaces.</li>
+      <li><strong><code>spawn --cwd</code> u chat sub-agenta</strong> — cesta musí odpovídat workspace, dřív se tiše ignorovala.</li>
+      <li><strong>Chat listy nespouští PTY</strong> — zbytečný shell navíc pro každý chat.</li>
+      <li><strong>Démon se při startu jiné verze vymění</strong> — starý démon, který neznal dotaz <code>version</code>, nešel nahradit a nové taby adoptovaly jeho mrtvé session.</li>
+      <li><strong>Telefon bez černé obrazovky</strong> při přepínání vláken mezi projekty; rodič sub-agenta se otevře před sub-agentem.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
   <!-- v1.0.1 -->
 <div class="release">
   <div class="release-header">
     <span class="version">v1.0.1</span>
-    <span class="tag tag-latest">nejnovější</span>
-    <span class="date">listopad 2026</span>
+        <span class="date">listopad 2026</span>
   </div>
 
   <div class="section feat">
