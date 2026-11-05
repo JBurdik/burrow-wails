@@ -151,7 +151,7 @@ import { useScriptsStore, type Script } from "@/stores/scripts";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
 import { useUIStore } from "@/stores/ui";
-import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
+import { FINDER_TARGET, lastOpenIn as lastOpenInFor, loadOpenTargets, openPathIn, openTargets } from "@/lib/openIn";
 import { isWeb } from "@/lib/viewport";
 import { sideChatSelection } from "@/lib/sideChat";
 import { WHERE_ROWS, sumNumstat, visibleRows } from "@/lib/threadDetails";
@@ -198,39 +198,13 @@ watch(() => chat.value?.prNumber, async (n) => {
   if (p && p.number === chat.value?.prNumber) linkedPr.value = toPrInfo(p);
 }, { immediate: true });
 
-// ── Open in ▾ — targets are the installed apps Go finds (ListOpenTargets in fs.go).
-type OpenTarget = { id: string; name: string; icon: string };
-const FINDER_TARGET: OpenTarget = { id: "finder", name: "Finder", icon: "" };
-const openTargets = ref<OpenTarget[]>([FINDER_TARGET]);
-let openTargetsLoaded = false;
-async function loadOpenTargets() {
-  if (openTargetsLoaded) return;
-  openTargetsLoaded = true;
-  try {
-    openTargets.value = await invoke<OpenTarget[]>("list_open_targets", {});
-  } catch (e) {
-    console.error("list_open_targets failed", e);
-  }
-}
-// Last-used target is remembered per project (keyed by folder path), not globally.
-const LAST_OPEN_IN_LEGACY_KEY = "tb-last-open-in";
-const LAST_OPEN_IN_CONFIG_KEY = "titlebarLastOpenInByProject";
-const lastOpenInByProject = ref<Record<string, string>>({});
-configReady.then(() => {
-  migrateFromLocalStorage(LAST_OPEN_IN_LEGACY_KEY, LAST_OPEN_IN_CONFIG_KEY);
-  const stored = getConfig<Record<string, string> | string>(LAST_OPEN_IN_CONFIG_KEY, {});
-  lastOpenInByProject.value = typeof stored === "string" ? {} : stored;
-});
-const lastOpenIn = computed(() => lastOpenInByProject.value[path.value] || "finder");
+// ── Open in ▾ — targets + last choice per project live in lib/openIn.
+const lastOpenIn = computed(() => lastOpenInFor(path.value));
 const lastOpenTarget = computed(() => openTargets.value.find((t) => t.id === lastOpenIn.value) ?? FINDER_TARGET);
 
 async function openIn(target: string, remember = true) {
   menu.value = null;
-  if (remember) {
-    lastOpenInByProject.value = { ...lastOpenInByProject.value, [path.value]: target };
-    setConfig(LAST_OPEN_IN_CONFIG_KEY, lastOpenInByProject.value);
-  }
-  await invoke("open_path_in", { path: path.value, target }).catch((e) => console.error("open_path_in failed", e));
+  await openPathIn(path.value, target, remember ? { project: path.value } : {});
 }
 async function copyPath() {
   menu.value = null;

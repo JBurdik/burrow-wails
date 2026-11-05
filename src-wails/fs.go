@@ -57,21 +57,62 @@ func (a *App) ReadDirShallow(path string) ([]DirEntry, error) {
 
 // OpenPathIn opens path in Finder ("finder"/"" reveal), the default editor
 // ("editor"), Terminal.app ("terminal"), or any installed app bundle path
-// as returned by ListOpenTargets (e.g. "/Applications/Zed.app").
-func (a *App) OpenPathIn(path, target string) error {
+// as returned by ListOpenTargets (e.g. "/Applications/Zed.app"). line > 0
+// asks an editor that can take one to jump there (a chat's `file:line` link).
+func (a *App) OpenPathIn(path, target string, line int) error {
+	name, args := openInCommand(target, path, line)
+	if filepath.IsAbs(name) {
+		if _, err := os.Stat(name); err != nil {
+			name, args = openInCommand(target, path, 0)
+		}
+	}
+	return exec.Command(name, args...).Start()
+}
+
+// openInCommand is the launch for one target. Line support goes through each
+// editor's own CLI (bundled, so nothing has to be on PATH); a target without
+// one opens the file without the line.
+func openInCommand(target, path string, line int) (string, []string) {
 	switch target {
 	case "", "finder":
-		return exec.Command("open", "-R", path).Start()
+		return "open", []string{"-R", path}
 	case "editor":
-		return exec.Command("open", "-t", path).Start()
+		return "open", []string{"-t", path}
 	case "terminal":
-		return exec.Command("open", "-a", "Terminal", path).Start()
-	default:
-		if !strings.HasSuffix(target, ".app") {
-			return exec.Command("open", "-R", path).Start()
-		}
-		return exec.Command("open", "-a", target, path).Start()
+		return "open", []string{"-a", "Terminal", path}
 	}
+	if !strings.HasSuffix(target, ".app") {
+		return "open", []string{"-R", path}
+	}
+	if line > 0 {
+		at := path + ":" + strconv.Itoa(line)
+		app := filepath.Base(target)
+		switch {
+		case app == "Visual Studio Code.app":
+			return filepath.Join(target, "Contents/Resources/app/bin/code"), []string{"--goto", at}
+		case app == "Cursor.app", app == "Windsurf.app":
+			bin := strings.ToLower(strings.TrimSuffix(app, ".app"))
+			return filepath.Join(target, "Contents/Resources/app/bin", bin), []string{"--goto", at}
+		case app == "Zed.app":
+			return filepath.Join(target, "Contents/MacOS/cli"), []string{at}
+		case app == "Sublime Text.app":
+			return filepath.Join(target, "Contents/SharedSupport/bin/subl"), []string{at}
+		case app == "Xcode.app":
+			return "xed", []string{"-l", strconv.Itoa(line), path}
+		case isJetBrainsApp(app):
+			return "open", []string{"-na", target, "--args", "--line", strconv.Itoa(line), path}
+		}
+	}
+	return "open", []string{"-a", target, path}
+}
+
+func isJetBrainsApp(app string) bool {
+	for _, p := range []string{"WebStorm", "IntelliJ IDEA", "PyCharm", "Android Studio", "GoLand", "RustRover", "PhpStorm", "CLion", "Rider", "RubyMine"} {
+		if strings.HasPrefix(app, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // OpenTarget is one entry in the "Open in…" picker: Finder or an installed app.
@@ -96,6 +137,8 @@ var openTargetCandidates = []struct {
 	{[]string{"WebStorm.app"}, "WebStorm"},
 	{[]string{"IntelliJ IDEA.app", "IntelliJ IDEA CE.app"}, "IntelliJ IDEA"},
 	{[]string{"PyCharm.app", "PyCharm CE.app"}, "PyCharm"},
+	{[]string{"GoLand.app"}, "GoLand"},
+	{[]string{"RustRover.app"}, "RustRover"},
 	{[]string{"Xcode.app"}, "Xcode"},
 	{[]string{"Android Studio.app"}, "Android Studio"},
 	{[]string{"Warp.app"}, "Warp"},
