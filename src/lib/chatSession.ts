@@ -292,8 +292,6 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   recoverPendingRequests(): Promise<void>;
   /** Resolve image `i` of a message that arrived as a stub (`load_chat_image`); returns its data URL. */
   loadImage(message: ChatMessage, i: number): Promise<string>;
-  /** Take the last user message back out to edit it (↑ in an empty composer). */
-  recallLastUserMessage(): string | null;
 
   // ── lifecycle ──
   /** Point the session's hooks at this view. Replaces any previous view's. */
@@ -714,13 +712,6 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       }
       if (sessionId) s.sessionId.value = sessionId;
     },
-    recallLastUserMessage() {
-      const lastUser = [...s.messages.value].reverse().find((m) => m.role === "user");
-      if (!lastUser) return null;
-      s.messages.value = s.messages.value.filter((m) => m !== lastUser);
-      return lastUser.text;
-    },
-
     async enqueueMessage(text, images) {
       try {
         const item = await s.deps.invoke<GoQueueItem>("chat_queue_add", { chatId, text, images: images ?? [] });

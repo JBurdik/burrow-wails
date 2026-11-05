@@ -607,8 +607,6 @@ describe("process intents", () => {
     expect(s.busy.value).toBe(false);
     expect(s.messages.value.map((m) => [m.role, m.text])).toEqual([["user", "go"], ["assistant", "Error: pipe closed"]]);
     expect(s.messages.value[0].displayText).toBe("go!");
-    expect(s.recallLastUserMessage()).toBe("go");
-    expect(s.messages.value.map((m) => m.role)).toEqual(["assistant"]);
     dropChatSession(81);
   });
 

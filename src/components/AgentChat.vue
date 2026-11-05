@@ -851,6 +851,7 @@ import { agentIconComp } from "@/lib/agentIcons";
 import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } from "reka-ui";
 import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
+import { promptHistory, recalling, stepPromptHistory, type PromptHistoryPos } from "@/lib/composerPromptHistory";
 import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
 import ThreadFindBar from "@/components/ThreadFindBar.vue";
@@ -2798,18 +2799,10 @@ function onKeydown(e: KeyboardEvent) {
   if (busy.value && e.key === "Escape" && !pendingPermission.value && !pendingDiff.value) { e.preventDefault(); abortTurn(); nextTick(() => inputEl.value?.focus()); return; }
   if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); clearChat(); return; }
   if (isStashShortcut(e)) { e.preventDefault(); stashEl.value?.stash(); return; }
-  if (e.key === "ArrowUp" && inputText.value === "" && !busy.value) {
-    const recalled = S.recallLastUserMessage();
-    if (recalled !== null) {
-      e.preventDefault();
-      inputText.value = recalled;
-      nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(inputText.value.length); });
-      return;
-    }
-  }
   // Suggestion nav claims Arrow/Tab/Enter/Escape while the list is open, so it
-  // has to run before the Enter-sends check below.
+  // has to run before the Enter-sends check below (and before prompt recall).
   if (completion.handleKeydown(e)) return;
+  if (stepHistory(e)) return;
   // ⌘/Ctrl+Enter while busy: queue it, then steer it into the running turn.
   if (e.key === "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey) && steerable.value) {
     e.preventDefault();
@@ -2819,6 +2812,28 @@ function onKeydown(e: KeyboardEvent) {
   // On a phone the soft keyboard has no Shift+Enter, so Enter is a newline
   // (ComposerTextInput inserts it) and the send button sends.
   if (e.key === "Enter" && !e.shiftKey && !phone.value) { e.preventDefault(); sendMessage(); }
+}
+
+// ArrowUp at the start of the box (or in an empty one) recalls what the user
+// typed earlier in this thread; ArrowDown walks forward and back to the draft.
+// While a recall is on screen a single-line text steps from any caret
+// position; a multi-line one only from its first / last character.
+let historyPos: PromptHistoryPos | null = null;
+function stepHistory(e: KeyboardEvent): boolean {
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return false;
+  if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || e.isComposing) return false;
+  const text = inputText.value;
+  const caret = inputEl.value?.caret() ?? 0;
+  const oneLine = recalling(historyPos, text) && !text.includes("\n");
+  const back = e.key === "ArrowUp";
+  if (back ? !(text === "" || caret === 0 || oneLine) : !(caret >= text.length || oneLine)) return false;
+  const step = stepPromptHistory(promptHistory(messages.value), historyPos, text, back ? "back" : "forward");
+  if (!step) return false;
+  e.preventDefault();
+  historyPos = step.pos;
+  inputText.value = step.text;
+  nextTick(() => { inputEl.value?.focus(); inputEl.value?.setCaret(step.text.length); });
+  return true;
 }
 
 function onInput() {
