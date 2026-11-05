@@ -80,11 +80,43 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+  <!-- v1.2.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v1.2.0</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">listopad 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Backend jako samostatný proces</div>
+    <ul>
+      <li><strong>Stabilní verze běží na samostatném core</strong> — backend je teď i na stable vlastní proces <code>Burrow --core</code> bez okna (jako už dřív na betě). Okno je jen klient: jeho zavření nebo <code>⌘Q</code> zavře jen okno, chaty, plány a telefon běží dál. <code>⌥⌘Q</code> / Quit v trayi zastaví i core.</li>
+      <li><strong>Start Burrow at login</strong> — přepínač v nastavení je nově i na stable; core naběhne po přihlášení a chaty, plány i telefon fungují dřív, než otevřeš okno.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Oprávnění</div>
+    <ul>
+      <li><strong>Vlastní sekce Permissions v nastavení</strong> — přibyla oprávnění Screen Recording a Accessibility pro core, aby agenti v chatech mohli dělat screenshoty a ovládat UI; tlačítko vyvolá systémový dotaz macOS.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Splash ukazoval mobilní ikonu</strong> — <code>index.html</code> bral PWA ikonu s telefonem; nově desktopová ikona aplikace.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
   <!-- v1.1.0 -->
 <div class="release">
   <div class="release-header">
     <span class="version">v1.1.0</span>
-    <span class="tag tag-latest">nejnovější</span>
     <span class="date">listopad 2026</span>
   </div>
 
