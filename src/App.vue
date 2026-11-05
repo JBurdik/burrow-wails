@@ -119,6 +119,7 @@
     <PtyPermissionToasts />
     <!-- Docked in the sidebar while it shows; floating only when it is hidden (⌘B). -->
     <UpdateBanner v-if="!ui.sidebarVisible" />
+    <QuitHoldOverlay />
     <ProviderUpdateBanner v-if="!ui.sidebarVisible" />
     <DiagramModal v-if="diagramContent !== null" />
     <ImageLightbox v-if="lightboxSrc !== null" />
@@ -176,6 +177,7 @@ import Settings from "@/components/Settings.vue";
 import Spotlight from "@/components/Spotlight.vue";
 import FileDropOverlay from "@/components/FileDropOverlay.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
+import QuitHoldOverlay from "@/components/QuitHoldOverlay.vue";
 import ProviderUpdateBanner from "@/components/ProviderUpdateBanner.vue";
 import ToastStack from "@/components/ToastStack.vue";
 import PtyPermissionToasts from "@/components/PtyPermissionToasts.vue";
