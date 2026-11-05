@@ -163,6 +163,13 @@
               </div>
               <Switch :checked="ui.floatPopouts" @update:checked="(v: boolean) => ui.floatPopouts = v" />
             </div>
+            <div v-if="canOpenWindows()" class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Hold ⌘Q to quit</span>
+                <span class="text-[11px] text-muted-foreground">A single ⌘Q tap does nothing but show a hint; quitting stops every running chat. The tray's Quit still quits at once.</span>
+              </div>
+              <Switch :checked="ui.holdToQuit" @update:checked="(v: boolean) => ui.holdToQuit = v" />
+            </div>
             <div class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Text generation model</span>

@@ -7,6 +7,7 @@ import (
 	"embed"
 	"io/fs"
 	"log"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -134,7 +135,21 @@ func appMenu(ui bool) *application.Menu {
 	am.AddRole(application.HideOthers)
 	am.AddRole(application.UnHide)
 	am.AddSeparator()
-	am.AddRole(application.Quit)
+	// Not the Quit role: ⌘Q goes through hold-to-quit (quithold.go). The
+	// tray's Quit and ⌥⌘Q below still quit at once; the Dock's Quit and a
+	// logout reach ShouldQuit directly.
+	hold := &quitHold{
+		emit:  func(state string) { desktopEmit("menu-quit-hold", state) },
+		quit:  func() { wapp.Quit() },
+		after: func(d time.Duration, f func()) { time.AfterFunc(d, f) },
+	}
+	am.Add("Quit Burrow").SetAccelerator("CmdOrCtrl+Q").OnClick(func(*application.Context) {
+		if !holdToQuitPref() {
+			wapp.Quit()
+			return
+		}
+		hold.press(time.Now())
+	})
 	if ui {
 		// ⌘Q quits only this window process; the core goes on while it has
 		// work (coreidle.go). This one stops the core too.
