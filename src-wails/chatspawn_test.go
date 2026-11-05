@@ -117,3 +117,23 @@ func TestSurfaceNoteFoldsIntoRowWithSurface(t *testing.T) {
 		t.Fatalf("fold dropped the surface: %+v", got)
 	}
 }
+
+func TestWorkspaceForCwd(t *testing.T) {
+	paths := map[int64]string{1: "/r/app", 2: "/r/app/.wt/feat", 3: "/r/app-other"}
+	for _, c := range []struct {
+		cwd  string
+		want int64
+		ok   bool
+	}{
+		{"/r/app", 1, true},
+		{"/r/app/src/lib", 1, true},
+		{"/r/app/.wt/feat/src", 2, true}, // nested worktree beats its repo
+		{"/r/app-other/", 3, true},       // no false prefix match on "/r/app"
+		{"/r/elsewhere", 0, false},
+	} {
+		got, ok := workspaceForCwd(paths, c.cwd)
+		if got != c.want || ok != c.ok {
+			t.Errorf("workspaceForCwd(%q) = %d,%v want %d,%v", c.cwd, got, ok, c.want, c.ok)
+		}
+	}
+}

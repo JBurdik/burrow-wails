@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -202,14 +203,25 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		}
 	}
 
-	// Workspace: the one the caller's cwd names (a worktree spawn nests under
-	// the worktree), else the parent's.
+	// Workspace: the one the caller's cwd lies in (a worktree spawn nests under
+	// the worktree), else the parent's. A chat runs in its workspace's path, so a
+	// cwd that is no workspace at all must fail: silently falling back to the
+	// parent's ran the sub-agent in the wrong checkout.
 	wsID := parent.WorkspaceID
 	if req.Cwd != "" && a.db != nil {
-		var id int64
-		if a.db.QueryRow(`SELECT id FROM workspaces WHERE path = ?`, req.Cwd).Scan(&id) == nil {
-			wsID = id
+		ws, err := a.ListWorkspaces()
+		if err != nil {
+			return none, err
 		}
+		paths := make(map[int64]string, len(ws))
+		for _, w := range ws {
+			paths[w.ID] = w.Path
+		}
+		id, ok := workspaceForCwd(paths, req.Cwd)
+		if !ok {
+			return none, fmt.Errorf("%s is not inside any Burrow workspace — a chat runs in its workspace's folder. Create it with `burrow create-worktree` (or `workspace-create`) and pass that path, or pass --workspace-id.", req.Cwd)
+		}
+		wsID = id
 	}
 
 	row := Chat{
@@ -333,4 +345,22 @@ func permRank(mode string) int {
 		return 4
 	}
 	return -1
+}
+
+// workspaceForCwd: the workspace whose path is cwd or its nearest ancestor
+// (a worktree nested under its repo wins over the repo).
+func workspaceForCwd(paths map[int64]string, cwd string) (int64, bool) {
+	cwd = filepath.Clean(cwd)
+	var best int64
+	bestLen := -1
+	for id, p := range paths {
+		if p == "" {
+			continue
+		}
+		p = filepath.Clean(p)
+		if (cwd == p || strings.HasPrefix(cwd, p+string(filepath.Separator))) && len(p) > bestLen {
+			best, bestLen = id, len(p)
+		}
+	}
+	return best, bestLen >= 0
 }

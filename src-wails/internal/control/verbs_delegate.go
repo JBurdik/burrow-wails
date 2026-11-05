@@ -47,7 +47,7 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "model", Type: "string", Desc: "Model override for this task, e.g. claude-haiku-4-5-20251001 for mechanical work. list_agents lists each agent's models"},
 			{Name: "effort", Type: "string", Desc: "Chat sub-agent's reasoning effort (one the model lists in list_agents); defaults to the parent's when the sub-agent runs on the parent's runtime"},
 			{Name: "permission_mode", Type: "string", Desc: "Chat sub-agent's permission mode: plan, default, acceptEdits, auto, dontAsk or full-access; defaults to the profile's, else the parent thread's own. Never more permissive than the parent"},
-			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work; defaults to the caller's"},
+			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work (a chat sub-agent needs a Burrow workspace: make it with create_worktree first); defaults to the caller's"},
 			{Name: "workspace_id", Type: "integer", Desc: "Run in this workspace (its path wins over cwd), e.g. a project just made with workspace_create. With detach + target chat, starts a new top-level thread there with task as its first prompt"},
 			{Name: "target", Type: "string", Desc: "tab (default; live terminal, result capture) or chat (structured). Ignored when spawning from a chat thread — that sub-agent is always a chat — unless detach is set"},
 			{Name: "detach", Type: "boolean", Desc: "From a chat thread: open a standalone top-level chat or tab (honours target) instead of a sub-agent of this thread. Use when the user asks for a new chat/tab of its own"},
