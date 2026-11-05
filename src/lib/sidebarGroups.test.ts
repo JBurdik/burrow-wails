@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildActivityRows, groupByRepo, parseShortstat, resolveSidebarSection, splitSections, stepWorkingShelf,
+  buildActivityRows, groupByRepo, groupDot, rowRecedes, parseShortstat, resolveSidebarSection, splitSections, stepWorkingShelf,
   routeRowOnly, EMPTY_WORKING_SHELF, WORKING_EXIT_GRACE_MS, type ActivityRow, type SectionInput,
 } from "./sidebarGroups";
 import type { Workspace } from "@/stores/workspace";
@@ -130,7 +130,7 @@ describe("resolveSidebarSection", () => {
 describe("splitSections", () => {
   const row = (id: number, ts: number, extra?: Partial<TabSummary>): ActivityRow => ({ ws: repoA, tab: mkTab(id, `t${id}`, extra), ts });
   const base: SectionInput = {
-    isPinned: () => false, isSnoozed: () => false, unseen: () => false,
+    isPinned: () => false, isSnoozed: () => false,
     inWorking: (r) => r.tab.status === "running", startedAt: () => 0,
   };
 
@@ -153,26 +153,25 @@ describe("splitSections", () => {
     expect(s.settled).toEqual([]);
   });
 
-  it("orders Active by attention, then recency", () => {
-    const rows = [
-      row(1, 90),
-      row(2, 80, { status: "review" }),
-      row(3, 70, { status: "waiting" }),
-      row(4, 60, { status: "permission" }),
-      row(5, 50, { status: "done" }),
-      row(6, 40),
-    ];
-    const s = splitSections(rows, { ...base, unseen: (r) => r.tab.id === 2 || r.tab.id === 5 });
-    // unseen only counts on a `review` row: a done row is never "unread"
-    expect(s.unread.map((r) => r.tab.id)).toEqual([2]);
-    expect(s.active.map((r) => r.tab.id)).toEqual([4, 3, 1, 5, 6]);
+  it("keeps Active in feed order whatever the status (t3code: status never reorders)", () => {
+    const rows = [row(1, 90), row(2, 80, { status: "review" }), row(3, 70, { status: "permission" })];
+    expect(splitSections(rows, base).active.map((r) => r.tab.id)).toEqual([1, 2, 3]);
   });
+});
 
-  it("keeps a held row in Unread after it is marked seen", () => {
-    const rows = [row(1, 90), row(2, 80, { status: "review" })];
-    const s = splitSections(rows, { ...base, unseen: () => false, heldRank: (r) => (r.tab.id === 2 ? 3 : undefined) });
-    expect(s.unread.map((r) => r.tab.id)).toEqual([2]);
-    expect(s.active.map((r) => r.tab.id)).toEqual([1]);
+describe("groupDot / rowRecedes", () => {
+  it("shows the most urgent state of a project", () => {
+    expect(groupDot(["idle", "review", "waiting"])).toBe("attention");
+    expect(groupDot(["running", "error"])).toBe("failed");
+    expect(groupDot(["done", "review", "running"])).toBe("unread");
+    expect(groupDot(["running"])).toBe("working");
+    expect(groupDot(["idle", "done"])).toBeNull();
+  });
+  it("recedes rows that need nothing, never the active one", () => {
+    expect(rowRecedes("done", false)).toBe(true);
+    expect(rowRecedes("review", false)).toBe(false);
+    expect(rowRecedes("permission", false)).toBe(false);
+    expect(rowRecedes("idle", true)).toBe(false);
   });
 });
 

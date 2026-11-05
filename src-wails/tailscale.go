@@ -46,6 +46,16 @@ func tailscaleBin() string {
 // node, which is exactly what the Settings copy promises not to do.
 const tailscaleServePath = "/burrow"
 
+// tailscaleHTTPSPort is the tailnet HTTPS port Burrow publishes on. NOT 443:
+// tailscaled then owns *:443 on this machine and a local dev proxy (Caddy,
+// nginx) can no longer bind it.
+const tailscaleHTTPSPort = 8443
+
+// tailscaleAuthority is host:port/path of the published mount, no scheme.
+func tailscaleAuthority(dns string) string {
+	return fmt.Sprintf("%s:%d%s", dns, tailscaleHTTPSPort, tailscaleServePath)
+}
+
 func (a *App) TailscaleServe(port int) (string, error) {
 	bin := tailscaleBin()
 	if bin == "" {
@@ -53,6 +63,7 @@ func (a *App) TailscaleServe(port int) (string, error) {
 	}
 	target := fmt.Sprintf("http://127.0.0.1:%d", port)
 	out, err := exec.Command(bin, "serve", "--bg",
+		fmt.Sprintf("--https=%d", tailscaleHTTPSPort),
 		"--set-path="+tailscaleServePath, target).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("tailscale serve: %w: %s", err, out)
@@ -86,7 +97,11 @@ func (a *App) TailscaleServeStop() error {
 	}
 	// Scoped to our own path — a bare `serve off` would tear down every
 	// other handler on this node too.
-	return exec.Command(bin, "serve", "--https=443",
+	// Also drop the legacy :443 mount older builds created (error ignored: it
+	// is usually absent).
+	_ = exec.Command(bin, "serve", "--https=443",
+		"--set-path="+tailscaleServePath, "off").Run()
+	return exec.Command(bin, "serve", fmt.Sprintf("--https=%d", tailscaleHTTPSPort),
 		"--set-path="+tailscaleServePath, "off").Run()
 }
 
@@ -171,7 +186,12 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 		}
 		want := fmt.Sprintf("http://127.0.0.1:%d", httpServerPort())
 		if json.Unmarshal(serveOut, &serveStatus) == nil {
-			for _, host := range serveStatus.Web {
+			// Keys are "host:port"; only our port counts (a legacy :443 mount
+			// is not serving — toggling on re-publishes on the new port).
+			for key, host := range serveStatus.Web {
+				if !strings.HasSuffix(key, fmt.Sprintf(":%d", tailscaleHTTPSPort)) {
+					continue
+				}
 				if h, ok := host.Handlers[tailscaleServePath]; ok && h.Proxy == want {
 					status.Serving = true
 				}
@@ -181,7 +201,7 @@ func (a *App) GetTailscaleStatus() TailscaleStatus {
 	if status.Serving && status.DNSName != nil {
 		// Trailing slash matters: the bundle loads its assets relatively,
 		// so from ".../burrow" they would resolve against "/" and 404.
-		url := "https://" + *status.DNSName + tailscaleServePath + "/"
+		url := "https://" + tailscaleAuthority(*status.DNSName) + "/"
 		status.ServeURL = &url
 	}
 	return status

@@ -22,6 +22,8 @@ export interface ActivityInput {
   /** pinned rows float to the top of their own section; optional so callers
    *  that don't care about pins (tests, future surfaces) can omit it. */
   isPinned?: (tab: TabSummary) => boolean;
+  /** stable order stamp (newest first); defaults to the activity stamp */
+  anchorAt?: (row: ActivityRow) => number;
 }
 
 /**
@@ -54,45 +56,29 @@ export function buildActivityRows(
   // and inside the rest, ordering is untouched, so unpinning restores exactly
   // the order the row would have had.
   const pinned = input.isPinned ?? (() => false);
+  const at = input.anchorAt ?? ((r: ActivityRow) => r.ts);
   const order = (a: ActivityRow, b: ActivityRow) =>
-    Number(pinned(b.tab)) - Number(pinned(a.tab)) || b.ts - a.ts || b.tab.id - a.tab.id;
+    Number(pinned(b.tab)) - Number(pinned(a.tab)) || at(b) - at(a) || b.tab.id - a.tab.id;
   return { live: live.sort(order), settledChats: settledChats.sort(order) };
 }
 
 // ── sections (t3code's Sidebar.logic resolveSidebarThreadSection) ───────────
 
-export type SidebarSection = "snoozed" | "settled" | "pinned" | "working" | "unread" | "active";
+export type SidebarSection = "snoozed" | "settled" | "pinned" | "working" | "active";
 
-/** First match wins: snoozed > settled > pinned > working > unread > active. A pin
- *  beats Working on purpose — a pinned thread never leaves its spot at the top.
- *  Unread (a finished turn nobody read) gets its own block at the top instead of
- *  jumping up inside its project group. */
+/** First match wins: snoozed > settled > pinned > working > active. A pin beats
+ *  Working on purpose — a pinned thread never leaves its spot at the top. */
 export function resolveSidebarSection(f: {
   snoozed: boolean;
   settled: boolean;
   pinned: boolean;
   working: boolean;
-  unread?: boolean;
 }): SidebarSection {
   if (f.snoozed) return "snoozed";
   if (f.settled) return "settled";
   if (f.pinned) return "pinned";
   if (f.working) return "working";
-  if (f.unread) return "unread";
   return "active";
-}
-
-/** Active order: what needs the user first — permission > waiting > error >
- *  unread completion > the rest. */
-export function attentionRank(status: TermStatus, unseen: boolean): number {
-  if (status === "permission") return 0;
-  if (status === "waiting") return 1;
-  if (status === "error") return 2;
-  // `unseen` is only tracked for `review` (terminalTabs drops it for every other
-  // status), so on its own it is true for every done/idle row — and clicking one
-  // marked it seen for a beat, dropping the row below its peers.
-  if (status === "review" && unseen) return 3;
-  return 4;
 }
 
 export type SidebarSections = Record<SidebarSection, ActivityRow[]>;
@@ -102,31 +88,46 @@ export interface SectionInput {
   isSnoozed: (row: ActivityRow) => boolean;
   /** running now, or still inside the Working shelf's exit grace */
   inWorking: (row: ActivityRow) => boolean;
-  unseen: (row: ActivityRow) => boolean;
-  /** a rank the row may not fall below (the clicked row keeps its place until left) */
-  heldRank?: (row: ActivityRow) => number | undefined;
   /** when the row's current turn started (Working shelf order) */
   startedAt: (row: ActivityRow) => number;
 }
 
-/** Split buildActivityRows' feed (live + settled, recency-ordered) into the sidebar's sections. */
+/** Split buildActivityRows' feed into the sidebar's sections. Active keeps the
+ *  feed's (anchored, stable) order: status never reorders a row — t3code's
+ *  rule; attention shows on the row and its project header instead. */
 export function splitSections(rows: ActivityRow[], o: SectionInput): SidebarSections {
-  const out: SidebarSections = { snoozed: [], settled: [], pinned: [], working: [], unread: [], active: [] };
-  // sort() is stable, so ties keep the feed's recency order.
-  const rank = (r: ActivityRow) => Math.min(attentionRank(r.tab.status, o.unseen(r)), o.heldRank?.(r) ?? Infinity);
+  const out: SidebarSections = { snoozed: [], settled: [], pinned: [], working: [], active: [] };
   for (const row of rows) {
     out[resolveSidebarSection({
       snoozed: o.isSnoozed(row),
       settled: !!row.tab.settled,
       pinned: o.isPinned(row),
       working: o.inWorking(row),
-      // rank 3 = unread completion; the held rank keeps a just-clicked row here until left
-      unread: rank(row) === 3,
     })].push(row);
   }
-  out.active.sort((a, b) => rank(a) - rank(b));
   out.working.sort((a, b) => o.startedAt(b) - o.startedAt(a));
   return out;
+}
+
+// ── attention on rows / project headers (t3code's shouldRecedeSidebarThread,
+//    resolveSidebarFolderDot) ────────────────────────────────────────────────
+
+/** A row that needs nothing from the user is drawn quieter. `review` = an
+ *  unread completion; permission / waiting / error always stay loud. */
+export function rowRecedes(status: TermStatus, active: boolean): boolean {
+  if (active) return false;
+  return status === "idle" || status === "done" || status === "running";
+}
+
+export type GroupDot = "attention" | "failed" | "unread" | "working" | null;
+
+/** The most urgent state among a project's rows, for the dot on its header. */
+export function groupDot(statuses: TermStatus[]): GroupDot {
+  if (statuses.some((s) => s === "permission" || s === "waiting")) return "attention";
+  if (statuses.includes("error")) return "failed";
+  if (statuses.includes("review")) return "unread";
+  if (statuses.includes("running")) return "working";
+  return null;
 }
 
 // ── Working shelf: turn start + exit grace ───────────────────────────────────

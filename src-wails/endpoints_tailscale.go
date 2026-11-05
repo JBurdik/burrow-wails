@@ -23,7 +23,7 @@ func (p tailscaleProvider) Endpoints() []AdvertisedEndpoint {
 	}
 	// The path must match what TailscaleServe mounts; serving at "/" would
 	// clobber whatever else this node already publishes.
-	authority := *s.DNSName + tailscaleServePath
+	authority := tailscaleAuthority(*s.DNSName)
 	eps := []AdvertisedEndpoint{{
 		Kind:     "tailscale-magicdns",
 		HTTPBase: "https://" + authority,

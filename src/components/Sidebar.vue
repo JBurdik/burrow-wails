@@ -53,13 +53,14 @@
            its uncommitted diffstat, one compact line per thread, a thread's
            sub-agents indented under it. Branch/model/PR live in the hover card. -->
       <div v-for="group in topGroups" :key="group.repoId" class="px-2 pt-1.5">
-        <div v-if="group.repoId < 0" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">{{ group.repoId === PINNED ? "Pinned" : "Unread" }}</div>
+        <div v-if="group.repoId < 0" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">Pinned</div>
         <div v-else class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover" @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
           <button class="flex min-w-0 flex-1 items-center gap-2 text-left" @click="toggleGroup(group.repoId)">
             <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground transition-transform" :class="collapsedGroups.has(group.repoId) && '-rotate-90'" />
             <img v-if="store.icons[group.repoId]" :src="store.icons[group.repoId]" class="h-[18px] w-[18px] shrink-0 rounded-[5px] object-cover" />
             <span v-else class="sb-repo-tile" :style="{ background: repoColor(group.repoId) }">{{ (repoById(group.repoId)?.name ?? '?').slice(0, 1).toUpperCase() }}</span>
             <span class="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{{ repoById(group.repoId)?.name ?? '…' }}</span>
+            <span v-if="collapsedGroups.has(group.repoId) && groupDot(group.rows.map((r) => r.tab.status))" class="size-1.5 shrink-0 rounded-full" :class="GROUP_DOT[groupDot(group.rows.map((r) => r.tab.status))!]" />
             <PhPushPin v-if="isPinned(group.repoId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned project" />
           </button>
           <span v-if="repoDiff[group.repoId] && (repoDiff[group.repoId]!.added || repoDiff[group.repoId]!.removed)" class="shrink-0 text-[11.5px] tabular-nums group-hover/hdr:hidden" :title="'Uncommitted changes'">
@@ -72,7 +73,7 @@
           <div v-for="row in group.rows" :key="rowKey(row)">
             <div
               class="sb-row group relative mt-px flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[7px]"
-              :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`]"
+              :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`, rowRecedes(row.tab.status, isActiveRow(row)) && 'sb-recede']"
               @click="onRowClick(row)"
               @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
               @pointerdown="startLongPress(row, $event)"
@@ -684,7 +685,8 @@ import {
   groupByRepo,
   parseShortstat,
   splitSections,
-  attentionRank,
+  groupDot,
+  rowRecedes,
   stepWorkingShelf,
   routeRowOnly,
   EMPTY_WORKING_SHELF,
@@ -786,6 +788,22 @@ const visibleTabsByWs = computed(() => {
   return out;
 });
 
+// t3code's stable order: a row keeps the place it got when it entered the live
+// list; activity and status never move it. Leaving (settle / snooze) drops the
+// anchor, so coming back lands on top again (t3code's unsettledAt).
+// ponytail: in-memory — a reload re-anchors by recency, once.
+const anchors = new Map<string, number>();
+function anchorAt(row: ActivityRow): number {
+  const key = rowKey(row);
+  if (row.tab.settled || snoozedUntilOf(row.tab.chatId) > 0) {
+    anchors.delete(key);
+    return row.ts;
+  }
+  let at = anchors.get(key);
+  if (at === undefined) anchors.set(key, (at = row.ts));
+  return at;
+}
+
 const feed = computed(() =>
   buildActivityRows({
     openedWorkspaces: isWeb ? store.workspaces : store.opened,
@@ -801,6 +819,7 @@ const feed = computed(() =>
         : undefined) ?? termTabs.activityAt(wsId, tab),
     filterProjectId: filterProjectId.value,
     isPinned: (tab) => isChatPinned(tab.chatId),
+    anchorAt,
   }),
 );
 
@@ -828,22 +847,11 @@ function onShelfHover(e: PointerEvent, inside: boolean) {
   if (e.pointerType === "mouse") workingHover.value = inside;
 }
 
-// The clicked row's attention rank, held while it stays focused (onRowClick).
-// ponytail: released only once focus leaves the held row; a click whose
-// navigation never lands keeps holding until the next click.
-const heldRow = shallowRef<{ key: string; rank: number } | null>(null);
-const activeRow = computed(() => allRows.value.find(isActiveRow) ?? null);
-watch(() => (activeRow.value ? rowKey(activeRow.value) : null), (now, prev) => {
-  if (heldRow.value && prev === heldRow.value.key && now !== prev) heldRow.value = null;
-});
-
 const sections = computed(() =>
   splitSections(allRows.value, {
     isPinned: (r) => isChatPinned(r.tab.chatId),
     isSnoozed: (r) => snoozedUntilOf(r.tab.chatId) > 0,
     inWorking: (r) => shelf.value.shown.has(rowKey(r)),
-    unseen: (r) => termTabs.isCompletionUnseen(r.ws.id, r.tab.id),
-    heldRank: (r) => (heldRow.value?.key === rowKey(r) ? heldRow.value.rank : undefined),
     startedAt: (r) => shelf.value.startedAt.get(rowKey(r)) ?? r.ts,
   }),
 );
@@ -851,10 +859,10 @@ const filteredSettled = computed(() => sections.value.settled);
 
 const WORKING_EXPANDED_KEY = "burrow.sidebar.workingExpanded";
 const workingExpanded = ref(localStorage.getItem(WORKING_EXPANDED_KEY) !== "0");
-function shelfOpen(key: "working" | "snoozed" | "settled"): boolean {
+function shelfOpen(key: "working" | SectionKey): boolean {
   return key === "working" ? workingExpanded.value : !collapsed.value.includes(key);
 }
-function toggleShelf(key: "working" | "snoozed" | "settled") {
+function toggleShelf(key: "working" | SectionKey) {
   if (key !== "working") return toggleSection(key);
   workingExpanded.value = !workingExpanded.value;
   try { localStorage.setItem(WORKING_EXPANDED_KEY, workingExpanded.value ? "1" : "0"); } catch { /* private mode */ }
@@ -880,13 +888,9 @@ const liveGroups = computed(() =>
 );
 /** Pinned rows sit above every repo group, as one pseudo-group under this id. */
 const PINNED = -1;
-/** Unread completions, likewise one block on top (below Pinned). */
-const UNREAD = -2;
-const topGroups = computed(() => [
-  ...(sections.value.pinned.length ? [{ repoId: PINNED, rows: sections.value.pinned }] : []),
-  ...(sections.value.unread.length ? [{ repoId: UNREAD, rows: sections.value.unread }] : []),
-  ...liveGroups.value,
-]);
+const topGroups = computed(() =>
+  sections.value.pinned.length ? [{ repoId: PINNED, rows: sections.value.pinned }, ...liveGroups.value] : liveGroups.value,
+);
 
 const COLLAPSED_KEY = "burrow.sidebar.collapsedRepos";
 function loadCollapsed(): Set<number> {
@@ -898,6 +902,8 @@ function toggleGroup(repoId: number) {
   else collapsedGroups.add(repoId);
   try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedGroups])); } catch { /* private mode */ }
 }
+
+const GROUP_DOT = { attention: "bg-[var(--yellow)]", failed: "bg-[var(--red)]", unread: "bg-[var(--blue)]", working: "bg-accent" } as const;
 
 const REPO_TILE_COLORS = ["#7C6FF0", "#4C8B6A", "#C26A4A", "#3D7FB8", "#A0558C", "#8A7A3A"];
 function repoColor(repoId: number): string {
@@ -1322,7 +1328,6 @@ function onRowClick(row: ActivityRow) {
   if (swallowClick) { swallowClick = false; return; }
   // Opening a thread marks it read, which would drop it down the list right
   // under the cursor. Hold its pre-click rank until another row is focused.
-  heldRow.value = { key: rowKey(row), rank: attentionRank(row.tab.status, termTabs.isCompletionUnseen(row.ws.id, row.tab.id)) };
   selectTab(row);
 }
 /** Run an action against the menu's row, then close the menu. */
@@ -1704,6 +1709,9 @@ async function confirmCreate() {
   .sb-row { padding-top: 10px; padding-bottom: 10px; }
 }
 .sb-row:hover { background: var(--bg-hover); }
+/* t3code: a row that needs nothing from you recedes; hover / unread / blocked stay full. */
+.sb-recede { opacity: .62; transition: opacity .12s, background-color .12s; }
+.sb-recede:hover { opacity: 1; }
 .sb-row-active { background: var(--bg-selected); border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
 .sb-row-act { display: flex; padding: 3px; border-radius: 5px; color: var(--text-muted); }
 .sb-row-act:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }

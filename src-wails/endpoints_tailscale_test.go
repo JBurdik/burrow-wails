@@ -16,8 +16,15 @@ func TestTailscaleProviderAdvertisesMagicDNS(t *testing.T) {
 	if e.Kind != "tailscale-magicdns" {
 		t.Fatalf("bad kind: %q", e.Kind)
 	}
-	if e.WSBase != "wss://mac-mini.tail1234.ts.net/burrow" {
+	// Must not be :443 — that port is left to the user's local reverse proxy.
+	if tailscaleHTTPSPort == 443 {
+		t.Fatal("tailscale serve must not take :443")
+	}
+	if e.WSBase != "wss://mac-mini.tail1234.ts.net:8443/burrow" {
 		t.Fatalf("bad ws base: %q", e.WSBase)
+	}
+	if e.HTTPBase != "https://mac-mini.tail1234.ts.net:8443/burrow" {
+		t.Fatalf("bad http base: %q", e.HTTPBase)
 	}
 	if !e.HostedHTTPSCompatible {
 		t.Fatal("MagicDNS HTTPS must be hosted-compatible")
