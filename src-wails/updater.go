@@ -57,6 +57,11 @@ type latestJSON struct {
 }
 
 func (a *App) CheckUpdate() (UpdateInfo, error) {
+	// Beta/dev are local builds, never released: the stable manifest isn't
+	// theirs, and installing it would swap the beta bundle for stable.
+	if buildChannel != "" {
+		return UpdateInfo{CurrentVersion: appVersion}, nil
+	}
 	resp, err := http.Get(updateManifestURL)
 	if err != nil {
 		return UpdateInfo{}, err
@@ -91,6 +96,9 @@ func (a *App) CheckUpdate() (UpdateInfo, error) {
 // bundle for the new one and leaves the app ready to relaunch. Progress is
 // reported on the "update:progress" event as {received, total} byte counts.
 func (a *App) InstallUpdate(url, wantSum string) error {
+	if buildChannel != "" {
+		return fmt.Errorf("updates are disabled on the %s channel", buildChannel)
+	}
 	appBundle, err := runningAppBundle()
 	if err != nil {
 		return err
