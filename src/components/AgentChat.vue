@@ -443,13 +443,14 @@
         :class="{ 'is-current': p.id === minimapCurrent, 'is-hover': minimapHover?.id === p.id }"
         :style="{ width: p.width + 'px' }"
         :aria-label="`Jump to prompt ${i + 1}`"
-        @mouseenter="minimapHover = { ...p, index: i }"
+        @mouseenter="minimapHover = { ...p, index: i, top: ($event.currentTarget as HTMLElement).offsetTop }"
         @click="jumpToMessage(p.id)"
       />
-      <div v-if="minimapHover" class="minimap-preview">
-        <div class="mb-1 text-[11px] text-muted-foreground">Prompt {{ minimapHover.index + 1 }} of {{ minimapPrompts.length }}</div>
-        <div class="line-clamp-6 whitespace-pre-wrap text-[12.5px] leading-[1.5] text-foreground">{{ minimapHover.text }}</div>
-      </div>
+    </div>
+    <!-- Outside the rail: its overflow:hidden would clip a preview beside it. -->
+    <div v-if="minimapHover" class="minimap-preview" :style="{ top: 72 + minimapHover.top - 14 + 'px' }">
+      <div class="mb-1 text-[11px] text-muted-foreground">Prompt {{ minimapHover.index + 1 }} of {{ minimapPrompts.length }}</div>
+      <div class="line-clamp-6 whitespace-pre-wrap text-[12.5px] leading-[1.5] text-foreground">{{ minimapHover.text }}</div>
     </div>
     </div>
 
@@ -2418,7 +2419,7 @@ const minimapPrompts = computed(() =>
     .filter((m) => m.role === "user" && m.text?.trim())
     .map((m) => ({ id: m.id, text: m.text.slice(0, 480), width: m.text.length > 400 ? 24 : m.text.length > 150 ? 16 : m.text.length > 50 ? 11 : 8 })),
 );
-const minimapHover = ref<{ id: number; text: string; index: number } | null>(null);
+const minimapHover = ref<{ id: number; text: string; index: number; top: number } | null>(null);
 const minimapCurrent = ref<number | null>(null);
 /** The prompt whose message sits nearest the top of the viewport (last one above it). */
 function updateMinimapCurrent() {
@@ -3610,7 +3611,7 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .minimap-dash::before { content: ""; display: block; height: 10px; margin-top: -4px; }
 .minimap-dash.is-current { background: var(--chat-text); }
 .minimap-dash.is-hover { background: var(--chat-accent); width: 28px !important; }
-.minimap-preview { position: absolute; top: 0; right: 40px; width: 320px; padding: 10px 12px; border: 1px solid var(--chat-border); border-radius: 12px; background: var(--chat-surface); box-shadow: 0 12px 32px rgba(0,0,0,.35); pointer-events: none; }
+.minimap-preview { position: absolute; z-index: 6; right: 44px; max-height: calc(100% - 24px); width: 320px; padding: 10px 12px; border: 1px solid var(--chat-border); border-radius: 12px; background: var(--chat-surface); box-shadow: 0 12px 32px rgba(0,0,0,.35); pointer-events: none; }
 
 /* Catch me up: button in the empty composer, card above it. */
 .catchup-btn { position: absolute; top: 8px; right: 10px; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--chat-border); background: var(--chat-surface); color: var(--chat-text); font-size: 12px; cursor: pointer; }
