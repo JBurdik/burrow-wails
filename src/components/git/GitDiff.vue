@@ -1,56 +1,21 @@
 <template>
-  <div class="gd select-text font-mono text-[12px] leading-[20px]">
-    <div v-if="!files.length" class="grid min-h-24 place-items-center px-6 text-center text-[12.5px] text-muted-foreground">
-      {{ text.trim() ? "No content changes." : "Empty diff." }}
+  <div class="gd select-text">
+    <div v-if="message" class="grid min-h-16 place-items-center px-6 text-center text-[12.5px] text-muted-foreground">{{ message }}</div>
+    <div v-else-if="held" class="flex items-center justify-center gap-2 py-3 text-[12.5px] text-muted-foreground">
+      Large diff · {{ lineCount }} lines
+      <button class="gd-btn" @click="showAll()">Show</button>
     </div>
-    <div v-for="(f, fi) in files" :key="fi" class="mb-3 last:mb-0">
-      <div v-if="files.length > 1 || (!path && f.path)" class="mb-1.5 flex items-center gap-2 font-sans text-[12px]">
-        <span class="truncate text-foreground" :title="f.path">{{ f.path }}</span>
-        <span class="tabular-nums"><span class="gd-add-fg">+{{ f.adds }}</span><span class="gd-del-fg ml-1.5">−{{ f.dels }}</span></span>
-      </div>
-      <div v-if="f.binary" class="px-2 py-3 font-sans text-[12.5px] text-muted-foreground">Binary file, no preview.</div>
-      <div v-else-if="!f.hunks.length" class="px-2 py-3 font-sans text-[12.5px] text-muted-foreground">
-        {{ f.renamed ? "Renamed only, content unchanged." : "No content changes." }}
-      </div>
-      <template v-for="h in f.hunks" :key="h.index">
-        <div v-if="!capped || h.start < LINE_CAP" class="gd-hunk mb-3 overflow-hidden rounded-lg border">
-          <div class="gd-hunk-head flex h-8 items-center gap-2 border-b pl-3 pr-1.5 font-sans">
-            <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{{ h.title }}</span>
-            <template v-if="hunkActions">
-              <button v-if="staged" class="gd-btn" @click="emit('unstage-hunk', h.index)"><PhMinus :size="12" /> Unstage hunk</button>
-              <template v-else>
-                <button class="gd-btn" @click="emit('discard-hunk', h.index)"><PhArrowCounterClockwise :size="12" /> Discard</button>
-                <button class="gd-btn" @click="emit('stage-hunk', h.index)"><PhPlus :size="12" /> Stage hunk</button>
-              </template>
-            </template>
-          </div>
-          <table class="w-full border-collapse">
-            <tbody>
-              <tr v-for="(l, li) in h.lines" :key="li" :class="l.kind === 'add' ? 'gd-add' : l.kind === 'del' ? 'gd-del' : ''">
-                <td class="gd-no">{{ l.oldNo ?? "" }}</td>
-                <td class="gd-no">{{ l.newNo ?? "" }}</td>
-                <td class="w-4 select-none text-center" :class="l.kind === 'add' ? 'gd-add-fg' : l.kind === 'del' ? 'gd-del-fg' : 'text-transparent'">
-                  {{ l.kind === "add" ? "+" : l.kind === "del" ? "−" : " " }}
-                </td>
-                <td class="whitespace-pre-wrap break-all pr-4" :class="l.kind === 'meta' ? 'italic text-muted-foreground' : 'text-foreground'">{{ l.text || "​" }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </template>
-    </div>
-    <div v-if="capped" class="flex justify-center py-3 font-sans">
-      <button class="gd-btn" @click="showAll = true">Show all {{ total }} lines</button>
-    </div>
+    <div v-show="!message && !held" ref="host" />
   </div>
 </template>
 
 <script setup lang="ts">
-// Unified diff text → GitPaw-style rendering. Hunk indices are global and in
-// order of `@@` headers, so for a one-file diff they line up with
-// `splitHunks(text)[i]` from @/lib/gitHunks.
-import { computed, ref, watch } from "vue";
-import { PhArrowCounterClockwise, PhMinus, PhPlus } from "@phosphor-icons/vue";
+// Unified diff text → @pierre/diffs (Shiki-highlighted, rendered outside Vue). Hunk indices are
+// in order of `@@` headers, so for a one-file diff they line up with `splitHunks(text)[i]`
+// from @/lib/gitHunks — the per-hunk actions ride on a line annotation under each hunk's last line.
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { DIFFS_TAG_NAME, FileDiff, parsePatchFiles, type DiffLineAnnotation, type FileDiffMetadata } from "@pierre/diffs";
+import { useUIStore } from "@/stores/ui";
 
 const props = defineProps<{
   text: string;
@@ -65,88 +30,102 @@ const emit = defineEmits<{
   "discard-hunk": [i: number];
 }>();
 
-interface Line { kind: "add" | "del" | "ctx" | "meta"; text: string; oldNo?: number; newNo?: number }
-interface Hunk { index: number; title: string; lines: Line[]; /** running line count before this hunk (cap) */ start: number }
-interface FileDiff { path: string; hunks: Hunk[]; binary: boolean; renamed: boolean; adds: number; dels: number }
+const ui = useUIStore();
+const host = ref<HTMLElement | null>(null);
+const message = ref("");
+// ponytail: a diff over LINE_CAP lines waits for a click instead of rendering; VirtualizedFileDiff if huge single files matter
+const LINE_CAP = 3000;
+const held = ref(false);
+let released = false;
+const lineCount = ref(0);
+let instances: FileDiff<number>[] = [];
 
-const LINE_CAP = 4000;
-const showAll = ref(false);
-watch(() => props.text, () => (showAll.value = false));
+function cleanUp() {
+  for (const inst of instances) inst.cleanUp();
+  instances = [];
+  if (host.value) host.value.textContent = "";
+}
 
-const unquote = (p: string) => p.replace(/^"(.*)"$/, "$1").replace(/^[ab]\//, "");
+/** one annotation per hunk, under its last line; metadata = global hunk index */
+function hunkAnnotations(f: FileDiffMetadata, offset: number): DiffLineAnnotation<number>[] {
+  return f.hunks.map((h, i) =>
+    h.additionCount > 0
+      ? { side: "additions", lineNumber: h.additionStart + h.additionCount - 1, metadata: offset + i }
+      : { side: "deletions", lineNumber: h.deletionStart + h.deletionCount - 1, metadata: offset + i });
+}
 
-// Port of GitPaw's lib/diff.ts parseDiff (incl. combined `diff --cc` for conflicts).
-const files = computed<FileDiff[]>(() => {
-  const out: FileDiff[] = [];
-  let file: FileDiff | null = null;
-  let hunk: Hunk | null = null;
-  let inHeader = false;
-  let prefix = 1;
-  let oldNo = 0;
-  let newNo = 0;
-  let hunkIdx = 0;
-  let lineCount = 0;
-  const newFile = (path: string): FileDiff => {
-    const f = { path, hunks: [], binary: false, renamed: false, adds: 0, dels: 0 };
-    out.push(f);
-    return f;
-  };
-  for (const line of props.text.split("\n")) {
-    if (line.startsWith("diff --git ") || line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
-      const m = line.match(/^diff --git (?:"?a\/)?(.+?)"? (?:"?b\/)?(.+?)"?$/);
-      file = newFile(m ? m[2] : line.replace(/^diff --\w+ /, ""));
-      hunk = null;
-      inHeader = true;
-      continue;
-    }
-    if (line.startsWith("@@")) {
-      file ??= newFile(props.path ?? "");
-      prefix = line.match(/^@+/)![0].length - 1;
-      oldNo = Number(line.match(/ -(\d+)/)?.[1] ?? 0);
-      newNo = Number(line.match(/ \+(\d+)/)?.[1] ?? 0);
-      hunk = { index: hunkIdx++, title: line.replace(/^@@[^@]*@@+\s?/, "") || line, lines: [], start: lineCount };
-      file.hunks.push(hunk);
-      inHeader = false;
-      continue;
-    }
-    if (!file) continue;
-    if (inHeader) {
-      if (line.startsWith("rename from ")) file.renamed = true;
-      else if (line.startsWith("rename to ")) file.path = line.slice(10);
-      else if (line.startsWith("Binary files")) file.binary = true;
-      else if (line.startsWith("+++ ") && line !== "+++ /dev/null") file.path = unquote(line.slice(4));
-      continue;
-    }
-    if (!hunk || line.length === 0) continue;
-    lineCount++;
-    if (line[0] === "\\") { hunk.lines.push({ kind: "meta", text: line }); continue; }
-    const pre = line.slice(0, prefix);
-    const text = line.slice(prefix);
-    if (pre.includes("+")) { hunk.lines.push({ kind: "add", text, newNo: newNo++ }); file.adds++; }
-    else if (pre.includes("-")) { hunk.lines.push({ kind: "del", text, oldNo: prefix === 1 ? oldNo++ : undefined }); file.dels++; }
-    else hunk.lines.push({ kind: "ctx", text, oldNo: prefix === 1 ? oldNo++ : undefined, newNo: newNo++ });
+function button(label: string, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = label;
+  b.className = "gd-btn";
+  b.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
+  return b;
+}
+
+function renderHunkActions(a: DiffLineAnnotation<number>): HTMLElement {
+  const i = a.metadata!;
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;justify-content:flex-end;gap:6px;padding:4px 8px;font-family:var(--font-sans,system-ui)";
+  if (props.staged) bar.append(button("− Unstage hunk", () => emit("unstage-hunk", i)));
+  else bar.append(button("↺ Discard", () => emit("discard-hunk", i)), button("+ Stage hunk", () => emit("stage-hunk", i)));
+  return bar;
+}
+
+function render() {
+  cleanUp();
+  message.value = "";
+  if (!host.value) return;
+  if (!props.text.trim()) { message.value = "Empty diff."; return; }
+
+  let files: FileDiffMetadata[];
+  try {
+    files = parsePatchFiles(props.text, `gitdiff-${props.path ?? "multi"}`).flatMap((p) => p.files);
+  } catch {
+    message.value = "Could not parse diff.";
+    return;
   }
-  return out;
-});
+  if (!files.length || files.every((f) => !f.hunks.length)) {
+    message.value = /^Binary files /m.test(props.text) ? "Binary file, no preview."
+      : files[0]?.prevName ? "Renamed only, content unchanged." : "No content changes.";
+    return;
+  }
 
-const total = computed(() => files.value.reduce((n, f) => n + f.hunks.reduce((m, h) => m + h.lines.length, 0), 0));
-// ponytail: caps whole hunks past LINE_CAP lines; virtualize if 4k-line hunks matter
-const capped = computed(() => !showAll.value && total.value > LINE_CAP);
+  lineCount.value = files.reduce((n, f) => n + f.hunks.reduce((m, h) => m + h.unifiedLineCount, 0), 0);
+  held.value = !released && lineCount.value > LINE_CAP;
+  if (held.value) return;
+
+  let offset = 0;
+  for (const fileDiff of files) {
+    const fileContainer = document.createElement(DIFFS_TAG_NAME);
+    host.value.appendChild(fileContainer);
+    const inst = new FileDiff<number>({
+      theme: ui.activeTheme.shiki,
+      diffStyle: "unified",
+      overflow: "wrap",
+      expansionLineCount: 10,
+      // minified bundles: skip highlighting absurd lines instead of stalling Shiki
+      tokenizeMaxLineLength: 1000,
+      disableFileHeader: files.length === 1 && !!props.path,
+      renderAnnotation: props.hunkActions ? renderHunkActions : undefined,
+    });
+    inst.render({ fileDiff, fileContainer, lineAnnotations: props.hunkActions ? hunkAnnotations(fileDiff, offset) : [] });
+    instances.push(inst);
+    offset += fileDiff.hunks.length;
+  }
+}
+
+function showAll() { released = true; render(); }
+onMounted(render);
+watch(() => props.path, () => (released = false));
+watch(() => [props.text, ui.activeTheme.shiki, props.staged, props.hunkActions], render, { flush: "post" });
+onBeforeUnmount(cleanUp);
 </script>
 
-<style scoped>
-.gd-hunk { border-color: color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, var(--bg-base) 40%, transparent); }
-.gd-hunk-head { border-color: color-mix(in srgb, var(--border) 60%, transparent); background: color-mix(in srgb, var(--border) 18%, transparent); }
-.gd-add { background: color-mix(in srgb, var(--green) 11%, transparent); }
-.gd-del { background: color-mix(in srgb, var(--red) 11%, transparent); }
-.gd-add-fg { color: var(--green); }
-.gd-del-fg { color: var(--red); }
-.gd-no {
-  width: 1%; padding: 0 8px; text-align: right; white-space: nowrap; user-select: none;
-  font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-muted); opacity: 0.7;
-}
+<style>
+/* not scoped: the hunk buttons are created imperatively inside the diff element */
 .gd-btn {
-  display: inline-flex; align-items: center; gap: 4px; height: 24px; flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; flex-shrink: 0; cursor: pointer;
   border-radius: 6px; padding: 0 8px; font-size: 11.5px; color: var(--text-secondary);
   background: color-mix(in srgb, var(--border) 30%, transparent);
 }

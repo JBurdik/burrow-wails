@@ -1,25 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { DETAILS_CARD_GAP, DETAILS_CARD_WIDTH, detailsLaneInset, sumNumstat, visibleRows, type DetailsContext } from "./threadDetails";
+import { DETAILS_CARD_GAP, DETAILS_CARD_WIDTH, detailsLaneInset, parseNumstat, visibleRows, type DetailsContext } from "./threadDetails";
 
-const base: DetailsContext = { kind: "chat", desktop: true, branch: "main", hasPr: false, added: 0, removed: 0, servers: 0, scheduled: 0, lineage: 0 };
+const base: DetailsContext = { kind: "chat", branch: "main", hasPr: false, changedFiles: 0, running: 0, scheduled: 0, lineage: 0 };
 
 describe("visibleRows", () => {
   it("shows the always-on rows and hides the empty ones", () => {
-    expect(visibleRows(base)).toEqual(["workspace", "openIn", "scripts", "branch", "pr", "commit"]);
-    expect(visibleRows({ ...base, kind: "tab" })).toEqual(["workspace", "openIn", "scripts", "branch", "commit"]);
+    expect(visibleRows(base)).toEqual(["workspace", "scripts", "branch", "pr", "commit"]);
+    expect(visibleRows({ ...base, kind: "tab" })).toEqual(["workspace", "scripts", "branch", "commit"]);
   });
 
   it("keeps a chat's linked PR even without a branch", () => {
     expect(visibleRows({ ...base, branch: "", hasLinkedPr: true })).toContain("pr");
   });
 
-  it("drops every git row outside a repo and Open in on the web", () => {
-    expect(visibleRows({ ...base, branch: "", hasPr: true, desktop: false })).toEqual(["workspace", "scripts"]);
+  it("drops every git row outside a repo", () => {
+    expect(visibleRows({ ...base, branch: "", hasPr: true, changedFiles: 2 })).toEqual(["workspace", "scripts"]);
   });
 
   it("shows rows that have something to show", () => {
-    const rows = visibleRows({ ...base, hasPr: true, added: 3, servers: 1, scheduled: 2, lineage: 1 });
-    expect(rows).toEqual(["workspace", "openIn", "scripts", "branch", "pr", "commit", "changes", "servers", "scheduled", "lineage"]);
+    const rows = visibleRows({ ...base, hasPr: true, changedFiles: 3, running: 1, scheduled: 2, lineage: 1 });
+    expect(rows).toEqual(["workspace", "scripts", "branch", "pr", "commit", "changes", "running", "scheduled", "lineage"]);
   });
 
   it("keeps chat-only rows to chats", () => {
@@ -31,10 +31,13 @@ describe("visibleRows", () => {
   });
 });
 
-describe("sumNumstat", () => {
-  it("totals lines and skips binary files", () => {
-    expect(sumNumstat("3\t1\ta.ts\n-\t-\timg.png\n10\t0\tb.ts\n")).toEqual({ added: 13, removed: 1 });
-    expect(sumNumstat("")).toEqual({ added: 0, removed: 0 });
+describe("parseNumstat", () => {
+  it("one row per file, binary files count as nothing", () => {
+    expect(parseNumstat("3\t1\ta.ts\n-\t-\timg.png\n")).toEqual([
+      { path: "a.ts", added: 3, removed: 1 },
+      { path: "img.png", added: 0, removed: 0 },
+    ]);
+    expect(parseNumstat("")).toEqual([]);
   });
 });
 

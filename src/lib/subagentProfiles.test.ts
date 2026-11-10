@@ -13,9 +13,9 @@ describe("sub-agent role profiles", () => {
   it("keeps safe defaults for older or malformed configurations", () => {
     const roles = normalizeSubagentProfiles([{ id: "scout", instructions: "Find the entry point", permissionMode: "bypassPermissions" }]);
     expect(roles).toHaveLength(3);
-    expect(roles[0].permissionMode).toBe("plan");
+    expect(roles[0].permissionMode).toBe("auto");
     expect(roles[0].instructions).toBe("Find the entry point");
-    expect(roles[1].permissionMode).toBe("default");
+    expect(roles[1].permissionMode).toBe("auto");
     expect(profileTask(roles[0], "Investigate login")).toContain("Find the entry point\n\nTask:\nInvestigate login");
   });
   it("seeds child settings without changing another chat or global defaults", async () => {

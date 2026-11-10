@@ -21,9 +21,9 @@ export const PROFILE_PERMISSION_LABELS: Record<ProfilePermission, string> = {
 };
 export function defaultSubagentProfiles(): SubagentProfile[] {
   return [
-    { id: "scout", name: "Scout", agentId: "", model: "", permissionMode: "plan", instructions: "Investigate the task and locate relevant code. Do not change files. Report concrete findings, file paths, and a suggested approach to the parent agent." },
-    { id: "worker", name: "Worker", agentId: "", model: "", permissionMode: "default", instructions: "Implement the assigned task within its stated scope. Respect repository instructions and other agents' work. Run appropriate checks and report the changes, validation, and any remaining issues." },
-    { id: "reviewer", name: "Reviewer", agentId: "", model: "", permissionMode: "plan", instructions: "Review the assigned changes for bugs, regressions, and missing validation. Do not change files. Report actionable findings ordered by severity, with file paths, evidence, and suggested fixes. Say explicitly when no findings remain." },
+    { id: "scout", name: "Scout", agentId: "", model: "", permissionMode: "auto", instructions: "Investigate the task and locate relevant code. Do not change files. Report concrete findings, file paths, and a suggested approach to the parent agent." },
+    { id: "worker", name: "Worker", agentId: "", model: "", permissionMode: "auto", instructions: "Implement the assigned task within its stated scope. Respect repository instructions and other agents' work. Run appropriate checks and report the changes, validation, and any remaining issues." },
+    { id: "reviewer", name: "Reviewer", agentId: "", model: "", permissionMode: "auto", instructions: "Review the assigned changes for bugs, regressions, and missing validation. Do not change files. Report actionable findings ordered by severity, with file paths, evidence, and suggested fixes. Say explicitly when no findings remain." },
   ];
 }
 export function normalizeSubagentProfiles(value: unknown): SubagentProfile[] {

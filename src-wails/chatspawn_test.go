@@ -53,6 +53,17 @@ func TestSpawnSubagentRunsInGo(t *testing.T) {
 	if child, _ = a.chatByID(got.ChatID); child.PermissionMode != "default" {
 		t.Fatalf("explicit mode not applied: %+v", child)
 	}
+	// Built-in profiles run in auto, capped at the parent's mode.
+	for parentMode, want := range map[string]string{"auto": "auto", "default": "default", "plan": "plan"} {
+		p, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli", AgentKind: "claude", PermissionMode: parentMode})
+		got, err := a.spawnSubagent(control.SpawnRequest{Task: "x", Profile: "reviewer", ParentChatID: p.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if child, _ := a.chatByID(got.ChatID); child.PermissionMode != want {
+			t.Fatalf("reviewer under %s parent: %q, want %q", parentMode, child.PermissionMode, want)
+		}
+	}
 	for _, mode := range []string{"full-access", "dontAsk", "yolo"} {
 		if _, err := a.spawnSubagent(control.SpawnRequest{Task: "x", PermissionMode: mode, ParentChatID: parent.ID}); err == nil {
 			t.Fatalf("mode %q must be refused under an acceptEdits parent", mode)

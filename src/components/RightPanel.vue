@@ -328,7 +328,7 @@
                 <PhX :size="11" />
               </button>
             </div>
-            <DiffView :diff="git.diff" :diff-key="git.diffFile" />
+            <div class="min-h-0 flex-1 overflow-auto"><GitDiff :text="git.diff" :path="git.diffFile" /></div>
           </div>
 
           <!-- History -->
@@ -739,7 +739,7 @@ import { PhChatsCircle } from "@phosphor-icons/vue";
 import MarkdownDocSurface from "./MarkdownDocSurface.vue";
 import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
-import DiffView from "./DiffView.vue";
+import GitDiff from "./git/GitDiff.vue";
 import { compact } from "@/lib/viewport";
 import { useUIStore } from "@/stores/ui";
 import SubagentProfilePicker from "@/components/agents/SubagentProfilePicker.vue";

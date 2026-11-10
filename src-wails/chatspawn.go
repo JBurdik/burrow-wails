@@ -35,9 +35,9 @@ type subagentProfile struct {
 // keeps the two copies of the instructions in step.
 func defaultSubagentProfiles() []subagentProfile {
 	return []subagentProfile{
-		{ID: "scout", Name: "Scout", PermissionMode: "plan", Instructions: "Investigate the task and locate relevant code. Do not change files. Report concrete findings, file paths, and a suggested approach to the parent agent."},
-		{ID: "worker", Name: "Worker", PermissionMode: "default", Instructions: "Implement the assigned task within its stated scope. Respect repository instructions and other agents' work. Run appropriate checks and report the changes, validation, and any remaining issues."},
-		{ID: "reviewer", Name: "Reviewer", PermissionMode: "plan", Instructions: "Review the assigned changes for bugs, regressions, and missing validation. Do not change files. Report actionable findings ordered by severity, with file paths, evidence, and suggested fixes. Say explicitly when no findings remain."},
+		{ID: "scout", Name: "Scout", PermissionMode: "auto", Instructions: "Investigate the task and locate relevant code. Do not change files. Report concrete findings, file paths, and a suggested approach to the parent agent."},
+		{ID: "worker", Name: "Worker", PermissionMode: "auto", Instructions: "Implement the assigned task within its stated scope. Respect repository instructions and other agents' work. Run appropriate checks and report the changes, validation, and any remaining issues."},
+		{ID: "reviewer", Name: "Reviewer", PermissionMode: "auto", Instructions: "Review the assigned changes for bugs, regressions, and missing validation. Do not change files. Report actionable findings ordered by severity, with file paths, evidence, and suggested fixes. Say explicitly when no findings remain."},
 	}
 }
 
@@ -224,6 +224,13 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		wsID = id
 	}
 
+	// A profile's mode is a default, not a grant: one more permissive than the
+	// parent (built-ins run in auto) falls back to the parent's own.
+	profileMode := profileField(profile, func(p *subagentProfile) string { return p.PermissionMode })
+	if permRank(profileMode) > permRank(parent.PermissionMode) {
+		profileMode = ""
+	}
+
 	row := Chat{
 		WorkspaceID:    wsID,
 		ParentChatID:   parent.ID,
@@ -232,7 +239,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		Transport:      transport,
 		Model:          firstNonEmpty(req.Model, profileField(profile, func(p *subagentProfile) string { return p.Model }), inherit.Model),
 		Effort:         firstNonEmpty(req.Effort, inherit.Effort),
-		PermissionMode: firstNonEmpty(req.PermissionMode, profileField(profile, func(p *subagentProfile) string { return p.PermissionMode }), inherit.PermissionMode),
+		PermissionMode: firstNonEmpty(req.PermissionMode, profileMode, inherit.PermissionMode),
 		ProfileID:      inst.ID,
 		LastActivityAt: time.Now().UnixMilli(),
 	}

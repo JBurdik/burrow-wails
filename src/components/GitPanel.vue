@@ -348,23 +348,17 @@
             <span class="shrink-0 rounded px-1.5 text-[10px]" :class="git.diffStaged ? 'bg-success/15 text-success' : 'bg-foreground/[0.06] text-muted-foreground'">{{ git.diffStaged ? "staged" : "unstaged" }}</span>
             <button class="gp-icon-btn" @click="git.clearDiff(); activeDiff = null" title="Close diff"><PhX :size="12" /></button>
           </div>
-          <div v-if="hunks.length" class="min-h-0 flex-1 overflow-auto p-2">
-            <div v-for="(h, i) in hunks" :key="git.diffFile + ':' + i + ':' + h.header" class="gp-hunk">
-              <div class="gp-hunk-head">
-                <span class="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground" :title="h.header">{{ hunkTitle(h.header) }}</span>
-                <span class="shrink-0 text-[10.5px] tabular-nums"><span class="text-success">+{{ h.adds }}</span> <span class="ml-1 text-destructive">−{{ h.dels }}</span></span>
-                <template v-if="git.diffStaged">
-                  <button class="gp-btn-sm" @click="git.unstageHunk(h.patch)"><PhMinus :size="11" /> Unstage</button>
-                </template>
-                <template v-else>
-                  <button class="gp-btn-sm hover:!text-destructive" @click="askDiscardHunk(h.patch)"><PhArrowCounterClockwise :size="11" /> Discard</button>
-                  <button class="gp-btn-sm" @click="git.stageHunk(h.patch)"><PhPlus :size="11" /> Stage</button>
-                </template>
-              </div>
-              <DiffView :diff="h.patch" :diff-key="git.diffFile + ':' + i" no-header />
-            </div>
+          <div class="min-h-0 flex-1 overflow-auto p-2">
+            <GitDiff
+              :text="git.diff"
+              :path="git.diffFile"
+              :hunk-actions="hunks.length > 0"
+              :staged="git.diffStaged"
+              @stage-hunk="(i) => hunks[i] && git.stageHunk(hunks[i].patch)"
+              @unstage-hunk="(i) => hunks[i] && git.unstageHunk(hunks[i].patch)"
+              @discard-hunk="(i) => hunks[i] && askDiscardHunk(hunks[i].patch)"
+            />
           </div>
-          <DiffView v-else :diff="git.diff" :diff-key="git.diffFile" />
         </div>
 
         <!-- Diff view: commit diff -->
@@ -373,7 +367,9 @@
             <span class="gp-path text-[12px]" :title="commitDiff.subject"><span class="text-foreground">{{ baseName(commitDiff.subject) }}</span><span v-if="dirName(commitDiff.subject)" class="ml-1.5 text-muted-foreground">{{ dirName(commitDiff.subject) }}</span></span>
             <button class="gp-icon-btn" @click="commitDiff = null" title="Close diff"><PhX :size="12" /></button>
           </div>
-          <DiffView :diff="commitDiff.text" :diff-key="commitDiff.hash + (commitDiff.filePath ?? '')" />
+          <div class="min-h-0 flex-1 overflow-auto p-2">
+            <GitDiff :text="commitDiff.text" :path="commitDiff.filePath" />
+          </div>
         </div>
 
         <div v-else class="flex flex-1 items-center justify-center px-6 text-center text-[12px] text-muted-foreground">
@@ -515,7 +511,7 @@ import { layoutGraph } from "@/lib/gitGraph";
 import { splitHunks } from "@/lib/gitHunks";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { canOpenWindows, isSecondaryWindow, openWindow } from "@/lib/windows";
-import DiffView from "./DiffView.vue";
+import GitDiff from "./git/GitDiff.vue";
 import { Select } from "@/components/ui/select";
 
 // "lg" is the full-screen Git dialog; the default is the narrow right panel.
@@ -819,7 +815,6 @@ const badge = (s: string) => { const [label, cls] = BADGES[s] ?? [s, "text-muted
 // GitPaw's FilePath: file name first, its directory dimmed after it
 const baseName = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 const dirName = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
-const hunkTitle = (h: string) => h.replace(/^@@[^@]*@@\s?/, "") || h;
 </script>
 
 <style>
@@ -933,17 +928,6 @@ body {
   display: flex; flex-shrink: 0; align-items: center; gap: 8px; height: 34px; padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--border);
 }
-.gp-hunk {
-  margin-bottom: 8px; overflow: hidden; border-radius: 8px;
-  border: 1px solid color-mix(in oklab, var(--text-primary) 6%, transparent);
-  background: color-mix(in oklab, black 15%, transparent);
-}
-.gp-hunk-head {
-  position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px 0 10px;
-  border-bottom: 1px solid color-mix(in oklab, var(--text-primary) 5%, transparent);
-  background: color-mix(in oklab, var(--text-primary) 2.5%, var(--bg-base));
-}
-
 .gp-menu {
   border-radius: 8px; padding: 4px; border: 1px solid color-mix(in oklab, var(--text-primary) 7%, transparent);
   background: color-mix(in oklab, var(--bg-dropdown) 95%, transparent); backdrop-filter: blur(20px);

@@ -28,9 +28,21 @@
       </div>
     </div>
 
+    <div class="px-2.5">
+      <div class="relative">
+        <PhMagnifyingGlass :size="12" class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          v-model="query"
+          class="h-[26px] w-full rounded-md border border-border bg-base pl-6 pr-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-accent"
+          placeholder="Filter branches"
+          spellcheck="false"
+          @keydown.esc="query = ''"
+        />
+      </div>
+    </div>
     <div class="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
       <!-- Branches -->
-      <Section title="Branches" :count="local.length">
+      <Section title="Branches" :count="local.length" :force="!!q">
         <template #action>
           <button class="rounded p-0.5 text-muted-foreground hover:text-foreground" title="New branch (⌘⇧B)" aria-label="New branch" @click="startNewBranch()">
             <PhPlus :size="13" />
@@ -46,14 +58,17 @@
             @blur="newBranch.open = false"
           />
         </form>
-        <ContextMenuRoot v-for="b in local" :key="b.full">
+        <div v-if="q && !localRows.length" class="px-2 py-1 text-[12px] text-muted-foreground">No match.</div>
+        <template v-for="row in localRows" :key="row.key">
+        <Folder v-if="row.kind === 'folder'" :row="row" @toggle="toggle('local:' + row.key)" />
+        <template v-else><ContextMenuRoot v-for="b in [row.item]" :key="b.full">
           <ContextMenuTrigger as-child>
-            <Row :active="b.isHead" @dblclick="wtOf.has(b.name) ? openPath(wtOf.get(b.name)!) : !b.isHead && checkout(b.name)">
+            <Row :active="b.isHead" :depth="row.depth" :title="b.name" @dblclick="wtOf.has(b.name) ? openPath(wtOf.get(b.name)!) : !b.isHead && checkout(b.name)">
               <span class="grid size-3.5 shrink-0 place-items-center">
                 <span v-if="b.isHead" class="size-2 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" />
                 <PhGitBranch v-else :size="12" class="text-muted-foreground" />
               </span>
-              <span class="min-w-0 flex-1 truncate" :class="b.isHead && 'font-semibold text-foreground'">{{ b.name }}</span>
+              <span class="min-w-0 flex-1 truncate" :class="b.isHead && 'font-semibold text-foreground'">{{ row.label }}</span>
               <PhTreeStructure v-if="wtOf.has(b.name)" :size="11" class="shrink-0 text-muted-foreground" :title="`Checked out in worktree ${home(wtOf.get(b.name)!)}`" />
               <span v-if="b.track === '[gone]'" class="text-[10.5px] text-muted-foreground" title="Upstream branch is gone">gone</span>
               <span v-else-if="b.track" class="flex shrink-0 gap-1 text-[10.5px] tabular-nums">
@@ -71,7 +86,8 @@
             <Item @select="startNewBranch(b.hash)">New branch from here…</Item>
             <Item danger :disabled="b.isHead" @select="git.deleteBranch(b.name, b.track === '[gone]')">Delete</Item>
           </Menu>
-        </ContextMenuRoot>
+        </ContextMenuRoot></template>
+        </template>
       </Section>
 
       <!-- Worktrees -->
@@ -100,13 +116,15 @@
       </Section>
 
       <!-- Remotes -->
-      <Section v-for="(branches, remote) in remoteGroups" :key="remote" :title="String(remote)" :count="branches.length" collapsed>
+      <Section v-for="(branches, remote) in remoteGroups" :key="remote" :title="String(remote)" :count="branches.length" collapsed :force="!!q">
         <template #icon><PhCloud :size="11" /></template>
-        <ContextMenuRoot v-for="b in branches" :key="b.full">
+        <template v-for="row in remoteRows(String(remote), branches)" :key="row.key">
+        <Folder v-if="row.kind === 'folder'" :row="row" @toggle="toggle(remote + ':' + row.key)" />
+        <template v-else><ContextMenuRoot v-for="b in [row.item]" :key="b.full">
           <ContextMenuTrigger as-child>
-            <Row @dblclick="checkoutRemote(b.name)">
+            <Row :depth="row.depth" :title="b.name" @dblclick="checkoutRemote(b.name)">
               <PhGitBranch :size="12" class="shrink-0 text-muted-foreground" />
-              <span class="truncate">{{ b.name.slice(String(remote).length + 1) }}</span>
+              <span class="truncate">{{ row.label }}</span>
             </Row>
           </ContextMenuTrigger>
           <Menu>
@@ -114,7 +132,8 @@
             <Item @select="git.mergeBranch(b.name)">Merge into current</Item>
             <Item @select="git.rebaseOnto(b.name)">Rebase current onto {{ b.name }}</Item>
           </Menu>
-        </ContextMenuRoot>
+        </ContextMenuRoot></template>
+        </template>
       </Section>
 
       <!-- Stashes -->
@@ -189,12 +208,13 @@ import {
   ContextMenuContent, ContextMenuItem, ContextMenuPortal, ContextMenuRoot, ContextMenuSeparator, ContextMenuTrigger,
 } from "reka-ui";
 import {
-  PhArchiveBox, PhCaretDown, PhCaretRight, PhCloud, PhFolderSimple, PhGitBranch, PhPlus, PhTag, PhTreeStructure,
+  PhArchiveBox, PhCaretDown, PhCaretRight, PhCloud, PhFolderSimple, PhGitBranch, PhMagnifyingGlass, PhPlus, PhTag, PhTreeStructure,
 } from "@phosphor-icons/vue";
 import { useGitStore } from "@/stores/git";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
+import { branchTreeRows, type BranchRow } from "@/lib/branchTree";
 
 /** The selected workspace id; GitWindow owns it. */
 const wsId = defineModel<number | null>("wsId", { required: true });
@@ -227,11 +247,21 @@ function wsLabel(w: Workspace) {
   return `${parent?.name ?? ""} / ${w.worktree_branch || w.name}`;
 }
 
+// ── branch filter + `/` tree (collapsed folders keyed `local:JB/fix` / `origin:JB/fix`, session-only) ──
+const query = ref("");
+const q = computed(() => query.value.trim().toLowerCase());
+const matches = (r: Ref) => !q.value || r.name.toLowerCase().includes(q.value);
+const collapsed = reactive(new Set<string>());
+const toggle = (k: string) => (collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k));
+
 const local = computed(() => refs.value.filter((r) => r.kind === "local"));
+const localRows = computed(() => branchTreeRows(local.value.filter(matches), (b) => b.name, (k) => collapsed.has("local:" + k), !!q.value));
+const remoteRows = (remote: string, branches: Ref[]) =>
+  branchTreeRows(branches, (b) => b.name.slice(remote.length + 1), (k) => collapsed.has(`${remote}:${k}`), !!q.value);
 const tags = computed(() => refs.value.filter((r) => r.kind === "tag").reverse());
 const remoteGroups = computed(() => {
   const g: Record<string, Ref[]> = {};
-  for (const r of refs.value) if (r.kind === "remote") (g[r.name.split("/")[0]] ??= []).push(r);
+  for (const r of refs.value) if (r.kind === "remote" && matches(r)) (g[r.name.split("/")[0]] ??= []).push(r);
   return g;
 });
 // branch -> path of the *other* worktree that has it checked out
@@ -340,7 +370,7 @@ defineExpose({ startNewBranch });
 
 // ── small local pieces (GitPaw's Section / Row / Menu) ──
 const Section = defineComponent({
-  props: { title: { type: String, required: true }, count: Number, collapsed: Boolean },
+  props: { title: { type: String, required: true }, count: Number, collapsed: Boolean, force: Boolean },
   setup(p, { slots }) {
     const open = ref(!p.collapsed);
     return () => h("div", { class: "mt-3" }, [
@@ -349,27 +379,40 @@ const Section = defineComponent({
           class: "flex min-w-0 flex-1 items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground hover:text-secondary-foreground",
           onClick: () => (open.value = !open.value),
         }, [
-          h(open.value ? PhCaretDown : PhCaretRight, { size: 12 }),
+          h(open.value || p.force ? PhCaretDown : PhCaretRight, { size: 12 }),
           slots.icon?.(),
           h("span", { class: "truncate" }, p.title),
           p.count !== undefined ? h("span", { class: "tabular-nums opacity-70" }, String(p.count)) : null,
         ]),
         slots.action?.(),
       ]),
-      open.value ? h("div", { class: "mt-0.5" }, slots.default?.()) : null,
+      open.value || p.force ? h("div", { class: "mt-0.5" }, slots.default?.()) : null,
     ]);
   },
 });
 
 const Row = defineComponent({
-  props: { active: Boolean },
+  props: { active: Boolean, depth: { type: Number, default: 0 } },
   setup(p, { slots }) {
     return () => h("div", {
+      style: p.depth ? { paddingLeft: `${8 + p.depth * 14}px` } : undefined,
       class: [
         "flex h-[26px] cursor-default select-none items-center gap-2 rounded-md px-2 text-[12.5px]",
         p.active ? "bg-accent/15 text-foreground" : "text-secondary-foreground hover:bg-hover hover:text-foreground",
       ],
     }, slots.default?.());
+  },
+});
+
+const Folder = defineComponent({
+  props: { row: { type: Object as () => Extract<BranchRow<Ref>, { kind: "folder" }>, required: true } },
+  emits: ["toggle"],
+  setup(p, { emit }) {
+    return () => h(Row, { depth: p.row.depth, title: p.row.key, onClick: () => emit("toggle") }, () => [
+      h(p.row.open ? PhCaretDown : PhCaretRight, { size: 12, class: "shrink-0 text-muted-foreground" }),
+      h("span", { class: "min-w-0 flex-1 truncate" }, p.row.label),
+      h("span", { class: "text-[10.5px] tabular-nums text-muted-foreground" }, String(p.row.count)),
+    ]);
   },
 });
 

@@ -116,8 +116,9 @@
           <span class="flex-1 text-[12.5px] text-secondary-foreground">{{ entries.length }} changed {{ entries.length === 1 ? "file" : "files" }}</span>
         </div>
         <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto">
-          <!-- ponytail: one git diff per file, capped at 150; virtualize if huge changesets matter -->
-          <div v-for="e in entries.slice(0, 150)" :key="e.key" :data-diff="e.key" class="border-b border-border">
+          <!-- ponytail: a file's diff is fetched + rendered only once it nears the viewport (vNear), and
+               content-visibility skips layout of loaded ones offscreen; full virtualization if 1000s of files matter -->
+          <div v-for="e in entries" :key="cwd + e.key" v-near="e.key" :data-diff="e.key" class="gc-file border-b border-border">
             <div class="gc-sticky sticky top-0 z-10 flex h-10 items-center gap-2 border-b px-4">
               <span class="w-3 shrink-0 text-center font-mono text-[11px] font-semibold" :class="badge(e).cls">{{ badge(e).label }}</span>
               <span v-if="e.kind === 'staged'" class="gc-staged-tag rounded px-1.5 text-[10.5px]">staged</span>
@@ -126,8 +127,14 @@
               </span>
             </div>
             <div class="p-3">
+              <div v-if="diffs[e.key] == null" class="h-24" />
+              <div v-else-if="isDir(e)" class="font-mono text-[12px] leading-[20px] text-secondary-foreground">
+                <div class="mb-1 font-sans text-[12.5px] text-muted-foreground">Untracked folder · {{ dirFiles(e).length }} {{ dirFiles(e).length === 1 ? "file" : "files" }}</div>
+                <div v-for="f in dirFiles(e).slice(0, 200)" :key="f" class="truncate" :title="f">{{ f.slice(e.path.length) }}</div>
+                <div v-if="dirFiles(e).length > 200" class="font-sans text-muted-foreground">… {{ dirFiles(e).length - 200 }} more</div>
+              </div>
               <GitDiff
-                v-if="diffs[e.key] != null"
+                v-else
                 :text="diffs[e.key]"
                 :path="e.path"
                 :hunk-actions="e.kind === 'staged' || e.kind === 'unstaged'"
@@ -157,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   PhArrowCounterClockwise, PhArrowUp, PhCaretDoubleDown, PhCaretDoubleUp, PhCheck, PhCheckCircle,
@@ -188,8 +195,12 @@ const BADGES: Record<string, [string, string]> = {
   R: ["R", "gc-blue"], C: ["C", "gc-blue"], T: ["T", "gc-blue"], U: ["!", "text-destructive"],
 };
 const badge = (e: Entry) => { const [label, cls] = BADGES[e.code] ?? [e.code, "text-secondary-foreground"]; return { label, cls }; };
-const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
-const dir = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
+// porcelain collapses an untracked folder to one `dir/` entry
+const isDir = (e: Entry) => e.path.endsWith("/");
+const dirFiles = (e: Entry) => (diffs.value[e.key] ?? "").split("\n").filter(Boolean);
+const trim = (p: string) => p.replace(/\/$/, "");
+const base = (p: string) => trim(p).slice(trim(p).lastIndexOf("/") + 1);
+const dir = (p: string) => trim(p).slice(0, Math.max(0, trim(p).lastIndexOf("/")));
 
 // ── selection: picking a file scrolls its diff into view ──
 const sel = ref<string | null>(null);
@@ -199,27 +210,46 @@ function select(key: string) {
   nextTick(() => scroller.value?.querySelector(`[data-diff="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "start" }));
 }
 
-// ── diffs: refetched whenever the store's status lists change ──
+// ── diffs: fetched lazily per file once it nears the viewport; the near ones refetch on every status change ──
 const diffs = ref<Record<string, string>>({});
+const near = new Set<string>();
 function diffArgs(e: Entry): string[] {
   if (e.kind === "staged") return ["diff", "--cached", "--", e.path];
+  if (isDir(e)) return ["ls-files", "--others", "--exclude-standard", "--", e.path];
   if (e.kind === "untracked") return ["diff", "--no-index", "--", "/dev/null", e.path];
   return ["diff", "--", e.path];
 }
 let loadGen = 0;
-async function loadDiffs() {
-  const g = ++loadGen;
+async function loadDiffs(list: Entry[]) {
+  const g = loadGen;
   const dirAtStart = props.cwd;
-  const list = entries.value.slice(0, 150);
-  const texts = await Promise.all(list.map((e) =>
+  await Promise.all(list.map(async (e) => {
     // run_git directly: `diff --no-index` exits 1 when files differ, which runGit would treat as an error
-    invoke<{ stdout: string }>("run_git", { cwd: dirAtStart, args: diffArgs(e) }).then((o) => o.stdout, () => ""),
-  ));
-  if (g !== loadGen || dirAtStart !== props.cwd) return;
-  diffs.value = Object.fromEntries(list.map((e, i) => [e.key, texts[i]]));
+    const text = await invoke<{ stdout: string }>("run_git", { cwd: dirAtStart, args: diffArgs(e) }).then((o) => o.stdout, () => "");
+    // unchanged text → no write, so GitDiff doesn't re-parse / re-render
+    if (g === loadGen && dirAtStart === props.cwd && diffs.value[e.key] !== text) diffs.value[e.key] = text;
+  }));
 }
-watch(() => [props.cwd, git.staged, git.unstaged, git.untracked, git.conflicted], loadDiffs, { immediate: true });
-watch(() => props.cwd, () => (sel.value = null));
+watch(() => [git.staged, git.unstaged, git.untracked, git.conflicted], () => loadDiffs(entries.value.filter((e) => near.has(e.key))));
+watch(() => props.cwd, () => { loadGen++; sel.value = null; near.clear(); diffs.value = {}; });
+
+let io: IntersectionObserver | null = null;
+const vNear = {
+  mounted(el: HTMLElement, b: { value: string }) {
+    if (io?.root !== el.parentElement) {
+      io?.disconnect();
+      io = new IntersectionObserver((hits) => {
+        const fresh = hits.filter((h) => h.isIntersecting).map((h) => (h.target as HTMLElement).dataset.diff!).filter((k) => !near.has(k));
+        fresh.forEach((k) => near.add(k));
+        if (fresh.length) loadDiffs(entries.value.filter((e) => fresh.includes(e.key)));
+      }, { root: el.parentElement, rootMargin: "800px 0px" });
+    }
+    el.dataset.diff = b.value;
+    io.observe(el);
+  },
+  unmounted(el: HTMLElement) { io?.unobserve(el); },
+};
+onBeforeUnmount(() => io?.disconnect());
 
 // ── hunks: GitDiff's index i == splitHunks(text)[i] for a one-file diff ──
 function hunkOp(e: Entry, i: number, run: (patch: string) => unknown) {
@@ -239,7 +269,7 @@ const askDiscardFile = (e: Entry) =>
     run: () => (e.kind === "untracked" ? cleanFile(e.path) : git.discardFile(e.path)),
   });
 async function cleanFile(path: string) {
-  await invoke("run_git", { cwd: props.cwd, args: ["clean", "-f", "-q", "--", path] }).catch(() => {});
+  await invoke("run_git", { cwd: props.cwd, args: ["clean", "-fd", "-q", "--", path] }).catch(() => {});
   await git.refresh(true);
 }
 const vFocus = { mounted: (el: HTMLElement) => el.focus() };
@@ -295,6 +325,7 @@ const opLabel = computed(() => ({ merge: "Merge", rebase: "Rebase", "cherry-pick
 }
 .gc-banner-alarm { border-color: color-mix(in srgb, var(--red) 30%, transparent); background: color-mix(in srgb, var(--red) 10%, transparent); }
 .gc-banner-warn { border-color: color-mix(in srgb, var(--yellow) 25%, transparent); background: color-mix(in srgb, var(--yellow) 10%, transparent); }
+.gc-file { content-visibility: auto; contain-intrinsic-size: auto 400px; }
 .gc-sticky { background: var(--bg-base); border-color: color-mix(in srgb, var(--border) 60%, transparent); }
 .gc-staged-tag { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
 </style>

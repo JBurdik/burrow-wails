@@ -5,43 +5,34 @@
     <template v-for="row in rows" :key="row">
       <div v-if="row === firstGitRow" class="my-1 h-px bg-border" />
 
-      <!-- Workspace / worktree -->
+      <!-- Workspace / worktree: open in the last app; ▾ = other apps, path, worktree -->
       <div v-if="row === 'workspace'" class="dc-row">
         <component :is="workspace.parent_id ? PhGitFork : PhFolder" :size="14" class="dc-icon" />
         <span class="min-w-0 flex-1 truncate text-foreground" :title="workspace.path">{{ workspace.name }}</span>
-        <button v-if="!isWeb" class="dc-btn" title="Reveal in Finder" @click="openIn('finder', false)"><PhFolderOpen :size="13" /></button>
-        <div v-if="chat" class="relative">
-          <button class="dc-btn" title="Worktree" @click.stop="toggle('ws')"><PhCaretDown :size="10" /></button>
+        <button v-if="!isWeb" class="dc-btn" :title="lastOpenTarget.id === 'finder' ? 'Reveal in Finder' : `Open in ${lastOpenTarget.name}`" @click="openIn(lastOpenTarget.id)">
+          <img v-if="lastOpenTarget.icon" :src="lastOpenTarget.icon" class="h-3.5 w-3.5 shrink-0" />
+          <PhFolderOpen v-else :size="13" />
+        </button>
+        <div class="relative">
+          <button class="dc-btn" title="Open in…" @click.stop="toggle('ws')"><PhCaretDown :size="10" /></button>
           <div v-if="menu === 'ws'" class="dc-menu" @click.stop>
-            <form v-if="!workspace.parent_id" class="flex flex-col gap-1 p-1" @submit.prevent="moveToWorktree">
-              <span class="px-1 text-[11px] text-muted-foreground">Move to worktree…</span>
-              <input v-model="moveBranch" class="dc-input" placeholder="Branch name" autofocus />
-            </form>
-            <button v-else class="dc-menu-item" :disabled="busy" @click="leaveWorktree"><PhArrowUUpLeft :size="13" />Leave worktree</button>
-            <div v-if="moveError" class="px-2 pb-1 text-[11px] text-destructive">{{ moveError }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Open in ▾ (was in the TitleBar) -->
-      <div v-else-if="row === 'openIn'" class="dc-row">
-        <PhAppWindow :size="14" class="dc-icon" />
-        <span class="flex-1 text-muted-foreground">Open in</span>
-        <div class="relative flex">
-          <button class="dc-btn" :title="lastOpenTarget.id === 'finder' ? 'Reveal in Finder' : `Open in ${lastOpenTarget.name}`" @click="openIn(lastOpenTarget.id)">
-            <img v-if="lastOpenTarget.icon" :src="lastOpenTarget.icon" class="h-3.5 w-3.5 shrink-0" />
-            <PhFolderOpen v-else :size="13" />
-            {{ lastOpenTarget.name }}
-          </button>
-          <button class="dc-btn" title="Open folder in…" @click.stop="toggle('open')"><PhCaretDown :size="10" /></button>
-          <div v-if="menu === 'open'" class="dc-menu" @click.stop>
-            <button v-for="t in openTargets" :key="t.id" class="dc-menu-item" :class="lastOpenIn === t.id && '!text-accent'" @click="openIn(t.id)">
-              <img v-if="t.icon" :src="t.icon" class="h-3.5 w-3.5 shrink-0" />
-              <PhFolderNotchOpen v-else :size="13" />
-              {{ t.id === "finder" ? "Reveal in Finder" : `Open in ${t.name}` }}
-            </button>
-            <div class="my-1 h-px bg-border" />
+            <template v-if="!isWeb">
+              <button v-for="t in openTargets" :key="t.id" class="dc-menu-item" :class="lastOpenIn === t.id && '!text-accent'" @click="openIn(t.id)">
+                <img v-if="t.icon" :src="t.icon" class="h-3.5 w-3.5 shrink-0" />
+                <PhFolderNotchOpen v-else :size="13" />
+                {{ t.id === "finder" ? "Reveal in Finder" : `Open in ${t.name}` }}
+              </button>
+            </template>
             <button class="dc-menu-item" @click="copyPath"><PhCopy :size="13" />Copy Path</button>
+            <template v-if="chat">
+              <div class="my-1 h-px bg-border" />
+              <form v-if="!workspace.parent_id" class="flex flex-col gap-1 p-1" @submit.prevent="moveToWorktree">
+                <span class="px-1 text-[11px] text-muted-foreground">Move to worktree…</span>
+                <input v-model="moveBranch" class="dc-input" placeholder="Branch name" />
+              </form>
+              <button v-else class="dc-menu-item" :disabled="busy" @click="leaveWorktree"><PhArrowUUpLeft :size="13" />Leave worktree</button>
+              <div v-if="moveError" class="px-2 pb-1 text-[11px] text-destructive">{{ moveError }}</div>
+            </template>
           </div>
         </div>
       </div>
@@ -56,8 +47,10 @@
       <!-- Branch ▾ -->
       <div v-else-if="row === 'branch'" class="dc-row">
         <PhGitBranch :size="14" class="dc-icon" />
-        <span class="min-w-0 flex-1 truncate text-foreground">{{ branch }}</span>
-        <div class="relative">
+        <span class="min-w-0 flex-1 truncate text-foreground" :title="branch">{{ branch }}</span>
+        <span v-if="gi.upstream && (gi.ahead || gi.behind)" class="shrink-0 text-muted-foreground" title="Ahead / behind upstream">↑{{ gi.ahead }} ↓{{ gi.behind }}</span>
+        <span v-else-if="!gi.upstream" class="shrink-0 text-muted-foreground">not pushed</span>
+        <div v-if="storeHere" class="relative">
           <button class="dc-btn" title="Switch branch" @click.stop="toggle('branch')"><PhCaretDown :size="10" /></button>
           <div v-if="menu === 'branch'" class="dc-menu max-h-[260px] overflow-y-auto" @click.stop>
             <button v-for="b in git.branches" :key="b" class="dc-menu-item" :class="b === branch && '!text-accent'" @click="switchBranch(b)">{{ b }}</button>
@@ -93,25 +86,53 @@
       <!-- Commit / push ▾ (was in the TitleBar) -->
       <div v-else-if="row === 'commit'" class="dc-row">
         <PhGitCommit :size="14" class="dc-icon" />
-        <span class="flex-1 text-muted-foreground">Git</span>
-        <CommitPushMenu />
+        <span v-if="gi.last" class="min-w-0 flex-1 truncate text-muted-foreground" :title="`${gi.last.shortHash} ${gi.last.subject} — ${gi.last.author}`">
+          <span class="text-foreground">{{ gi.last.subject }}</span> · {{ gi.last.relTime }}
+        </span>
+        <span v-else class="flex-1 text-muted-foreground">Git</span>
+        <CommitPushMenu v-if="storeHere" />
       </div>
 
-      <!-- Changes -->
-      <button v-else-if="row === 'changes'" class="dc-row dc-click" title="Open the diff" @click="openSurface('diff')">
-        <PhFileCode :size="14" class="dc-icon" />
-        <span class="flex-1 text-left text-muted-foreground">Changes</span>
-        <span class="text-success">+{{ changes.added }}</span>
-        <span class="text-destructive">−{{ changes.removed }}</span>
-      </button>
-
-      <!-- Dev servers -->
-      <template v-else-if="row === 'servers'">
-        <button v-for="s in servers" :key="s.pid" class="dc-row dc-click" :title="s.command" @click="openSurface('dev-servers')">
-          <PhPlugsConnected :size="14" class="dc-icon text-success" />
-          <span class="min-w-0 flex-1 truncate text-left text-foreground">{{ s.command.split(" ")[0].split("/").pop() }}</span>
-          <span class="text-muted-foreground">:{{ s.port }}</span>
+      <!-- Changes (collapsible) -->
+      <template v-else-if="row === 'changes'">
+        <button class="dc-row dc-click" @click="toggleOpen('changes')">
+          <component :is="open.changes ? PhCaretDown : PhCaretRight" :size="10" class="dc-caret" />
+          <PhFileCode :size="14" class="dc-icon" />
+          <span class="flex-1 text-left text-muted-foreground">Changes <span class="opacity-70">· {{ changedFiles.length }} {{ changedFiles.length === 1 ? "file" : "files" }}</span></span>
+          <span class="text-success">+{{ totals.added }}</span>
+          <span class="text-destructive">−{{ totals.removed }}</span>
         </button>
+        <div v-if="open.changes" class="dc-list">
+          <button v-for="f in changedFiles" :key="f.path" class="dc-sub dc-click" :title="f.path" @click="openSurface('diff')">
+            <span class="min-w-0 flex-1 truncate text-left"><span class="text-foreground">{{ baseName(f.path) }}</span> <span class="text-muted-foreground">{{ dirName(f.path) }}</span></span>
+            <span v-if="f.untracked" class="shrink-0 text-success">new</span>
+            <template v-else>
+              <span v-if="f.added" class="shrink-0 text-success">+{{ f.added }}</span>
+              <span v-if="f.removed" class="shrink-0 text-destructive">−{{ f.removed }}</span>
+            </template>
+          </button>
+        </div>
+      </template>
+
+      <!-- Running: dev servers + the chat's background tasks (collapsible) -->
+      <template v-else-if="row === 'running'">
+        <button class="dc-row dc-click" @click="toggleOpen('running')">
+          <component :is="open.running ? PhCaretDown : PhCaretRight" :size="10" class="dc-caret" />
+          <PhPlugsConnected :size="14" class="dc-icon text-success" />
+          <span class="flex-1 text-left text-muted-foreground">Running</span>
+          <span class="text-muted-foreground">{{ runningLabel }}</span>
+        </button>
+        <div v-if="open.running" class="dc-list">
+          <button v-for="s in servers" :key="s.pid" class="dc-sub dc-click" :title="s.command" @click="openSurface('dev-servers')">
+            <PhGlobe :size="12" class="dc-icon" />
+            <span class="min-w-0 flex-1 truncate text-left text-foreground">{{ s.command.split(" ")[0].split("/").pop() }}</span>
+            <span class="shrink-0 text-muted-foreground">:{{ s.port }}</span>
+          </button>
+          <button v-for="t in runningTasks" :key="t.id" class="dc-sub dc-click" :title="t.command" @click="openSurface('background')">
+            <PhTerminalWindow :size="12" class="dc-icon" />
+            <span class="min-w-0 flex-1 truncate text-left text-foreground">{{ t.description || t.command }}</span>
+          </button>
+        </div>
       </template>
 
       <!-- Scheduled prompts (chat) -->
@@ -140,7 +161,7 @@
 import { ref, computed, watch, inject, onMounted, onBeforeUnmount } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  PhFolder, PhFolderOpen, PhFolderNotchOpen, PhGitFork, PhCaretDown, PhAppWindow, PhCopy, PhPlay, PhPlus, PhGitBranch,
+  PhFolder, PhFolderOpen, PhFolderNotchOpen, PhGitFork, PhCaretDown, PhCaretRight, PhCopy, PhGlobe, PhTerminalWindow, PhPlay, PhPlus, PhGitBranch,
   PhGitPullRequest, PhGitCommit, PhFileCode, PhPlugsConnected, PhClock, PhX, PhArrowBendLeftUp, PhChatsCircle, PhRobot, PhArrowUUpLeft, PhLinkBreak,
 } from "@phosphor-icons/vue";
 import CommitPushMenu from "./CommitPushMenu.vue";
@@ -154,7 +175,8 @@ import { useUIStore } from "@/stores/ui";
 import { FINDER_TARGET, lastOpenIn as lastOpenInFor, loadOpenTargets, openPathIn, openTargets } from "@/lib/openIn";
 import { isWeb } from "@/lib/viewport";
 import { sideChatSelection } from "@/lib/sideChat";
-import { WHERE_ROWS, sumNumstat, visibleRows } from "@/lib/threadDetails";
+import { WHERE_ROWS, parseNumstat, visibleRows, type FileStat } from "@/lib/threadDetails";
+import { applyBgTaskLine, emptyBgTaskState, listBgTasks, unwrapShellCommand, type BgTask, type CodexBgTerminal } from "@/lib/backgroundTasks";
 import { router } from "@/router";
 
 const props = defineProps<{ workspace: Workspace; kind: "chat" | "tab" | "workspace"; chatId?: number }>();
@@ -170,17 +192,59 @@ const openRightPanelSubagent = inject<(chatId: number, wsId: number) => void>("o
 const activeTerm = inject<() => { openClaudeChat(id: number): void } | undefined>("activeTerm")!;
 
 const rootEl = ref<HTMLElement | null>(null);
-const menu = ref<null | "ws" | "open" | "branch" | "pr">(null);
+const menu = ref<null | "ws" | "branch" | "pr">(null);
 const busy = ref(false);
 function toggle(m: NonNullable<typeof menu.value>) {
   menu.value = menu.value === m ? null : m;
-  if (menu.value === "open") loadOpenTargets();
+  if (menu.value === "ws") loadOpenTargets();
   if (menu.value === "branch") void git.fetchBranches();
 }
 
 const path = computed(() => props.workspace.path);
+// What the card SHOWS is read here for this card's path. The git store holds a
+// single cwd several surfaces set (Right Panel, Git panel, welcome, pulse), so
+// reading it hid every git row whenever it pointed elsewhere. Its actions
+// (switch branch, commit/push) act on that cwd, so they show only when it's ours.
+const storeHere = computed(() => git.cwd === path.value);
+interface GitInfo {
+  branch: string;
+  upstream: boolean;
+  ahead: number;
+  behind: number;
+  last: { shortHash: string; subject: string; author: string; relTime: string } | null;
+  files: (FileStat & { untracked?: boolean })[];
+}
+const NO_GIT: GitInfo = { branch: "", upstream: false, ahead: 0, behind: 0, last: null, files: [] };
+const gi = ref<GitInfo>(NO_GIT);
+type GitOut = { code: number; stdout: string };
+async function refreshGit() {
+  const p = path.value;
+  if (props.workspace.is_git === false) return void (gi.value = NO_GIT);
+  const run = (args: string[]) => invoke<GitOut>("run_git", { cwd: p, args }).catch(() => null);
+  const [head, ab, log, diff, status] = await Promise.all([
+    run(["branch", "--show-current"]),
+    run(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]),
+    run(["log", "-1", "--pretty=format:%h%x1f%s%x1f%an%x1f%cr"]),
+    run(["diff", "HEAD", "--numstat"]),
+    run(["status", "--porcelain"]),
+  ]);
+  if (p !== path.value) return;
+  if (head?.code !== 0) return void (gi.value = NO_GIT);
+  const [behind, ahead] = ab?.code === 0 ? ab.stdout.trim().split(/\s+/).map((n) => parseInt(n, 10) || 0) : [0, 0];
+  const [shortHash, subject, author, relTime] = log?.code === 0 && log.stdout ? log.stdout.split("\x1f") : [];
+  const untracked = status?.code === 0
+    ? status.stdout.split("\n").filter((l) => l.startsWith("?? ")).map((l) => ({ path: l.slice(3), added: 0, removed: 0, untracked: true }))
+    : [];
+  gi.value = {
+    branch: head.stdout.trim() || "detached HEAD",
+    upstream: ab?.code === 0,
+    ahead, behind,
+    last: subject ? { shortHash, subject, author, relTime } : null,
+    files: [...(diff?.code === 0 ? parseNumstat(diff.stdout) : []), ...untracked],
+  };
+}
 // The git store follows the active workspace; anything else would be a stale read.
-const branch = computed(() => (props.workspace.is_git !== false && git.cwd === path.value ? git.branch : ""));
+const branch = computed(() => gi.value.branch);
 const chat = computed(() => (props.kind === "chat" ? chats.sessions.find((c) => c.id === props.chatId) : undefined));
 // The linked PR, re-read (state + checks) whenever the card opens on it.
 const linkedPr = ref<PrInfo | null>(null);
@@ -290,22 +354,55 @@ function openSurface(id: string) {
 }
 
 // ── Polled rows: changes, dev servers, schedules. Only while the card is up.
-const changes = ref({ added: 0, removed: 0 });
+const changedFiles = computed(() => gi.value.files);
+const totals = computed(() => changedFiles.value.reduce((t, f) => ({ added: t.added + f.added, removed: t.removed + f.removed }), { added: 0, removed: 0 }));
+const baseName = (p: string) => p.split("/").pop() ?? p;
+const dirName = (p: string) => p.split("/").slice(0, -1).join("/");
+
+// Collapsed/expanded per section, one setting for every project.
+const OPEN_KEY = "burrow.detailsOpen";
+const open = ref<{ changes: boolean; running: boolean }>({ changes: false, running: false, ...JSON.parse(localStorage.getItem(OPEN_KEY) ?? "{}") });
+function toggleOpen(k: "changes" | "running") {
+  open.value[k] = !open.value[k];
+  localStorage.setItem(OPEN_KEY, JSON.stringify(open.value));
+}
 interface DevServer { pid: number; port: number; command: string }
 const servers = ref<DevServer[]>([]);
 interface Scheduled { id: number; text: string; due_at: string; recurs: string; paused: boolean; rule?: { kind: string } }
 const schedules = ref<Scheduled[]>([]);
 
-async function refreshChanges() {
-  if (!branch.value) return void (changes.value = { added: 0, removed: 0 });
-  const out = await invoke<{ code: number; stdout: string }>("run_git", { cwd: path.value, args: ["diff", "HEAD", "--numstat"] }).catch(() => null);
-  changes.value = out?.code === 0 ? sumNumstat(out.stdout) : { added: 0, removed: 0 };
+// The chat's background tasks, folded incrementally from its stream like the
+// Right Panel's Background surface (BackgroundTasksSurface.vue); only running ones show.
+let bgState = emptyBgTaskState();
+let bgChat: number | undefined;
+const runningTasks = ref<BgTask[]>([]);
+async function refreshTasks(id: number) {
+  if (bgChat !== id) { bgChat = id; bgState = emptyBgTaskState(); }
+  const [lines, live] = await Promise.all([
+    invoke<{ ord: number; line: string }[]>("load_chat_task_lines_since", { chatId: id, since: bgState.lastOrd + 1 }).catch(() => []),
+    invoke<CodexBgTerminal[]>("chat_list_bg_terminals", { chatId: id }).catch(() => []),
+  ]);
+  if (bgChat !== id) return;
+  for (const l of lines) applyBgTaskLine(bgState, l.line, l.ord);
+  runningTasks.value = [
+    ...listBgTasks(bgState).filter((t) => t.status === "running"),
+    ...live.map((t) => ({ id: t.processId, description: "", command: unwrapShellCommand(t.command) } as BgTask)),
+  ];
 }
+const runningLabel = computed(() => [
+  servers.value.length && `${servers.value.length} ${servers.value.length === 1 ? "server" : "servers"}`,
+  runningTasks.value.length && `${runningTasks.value.length} ${runningTasks.value.length === 1 ? "task" : "tasks"}`,
+].filter(Boolean).join(" · "));
+
 async function refreshPolled() {
   const p = path.value;
+  const id = chat.value?.id;
+  void refreshGit();
+  if (id) void refreshTasks(id);
+  else runningTasks.value = [];
   const [srv, sched] = await Promise.all([
     invoke<DevServer[]>("list_dev_servers", { workspacePath: p }).catch(() => []),
-    chat.value ? invoke<Scheduled[]>("chat_schedule_list", { chatId: chat.value.id }).catch(() => []) : [],
+    id ? invoke<Scheduled[]>("chat_schedule_list", { chatId: id }).catch(() => []) : [],
   ]);
   if (p !== path.value) return;
   servers.value = srv;
@@ -323,7 +420,8 @@ function dueLabel(iso: string): string {
 }
 
 // The git store's lists change whenever it re-reads status: recount then.
-watch(() => [branch.value, git.staged, git.unstaged, git.untracked], refreshChanges, { immediate: true });
+// Re-read on open, every poll, and whenever the store re-reads status for this path (a commit, a stage).
+watch(() => [path.value, storeHere.value && [git.branch, git.staged, git.unstaged, git.untracked, git.ahead]], refreshGit, { immediate: true });
 watch(() => [path.value, props.chatId], refreshPolled, { immediate: true });
 let timer: number | undefined;
 onMounted(() => { timer = window.setInterval(refreshPolled, 5000); });
@@ -354,13 +452,11 @@ function openLineage(l: { rel: Rel; chat: ClaudeSession }) {
 
 const rows = computed(() => visibleRows({
   kind: props.kind,
-  desktop: !isWeb,
   branch: branch.value,
   hasPr: !!pr.value,
   hasLinkedPr: !!chat.value?.prNumber,
-  added: changes.value.added,
-  removed: changes.value.removed,
-  servers: servers.value.length,
+  changedFiles: changedFiles.value.length,
+  running: servers.value.length + runningTasks.value.length,
   scheduled: schedules.value.length,
   lineage: lineage.value.length,
 }));
@@ -404,6 +500,17 @@ onBeforeUnmount(() => {
 .dc-click { cursor: pointer; }
 .dc-click:hover { background: var(--bg-hover); }
 .dc-icon { flex-shrink: 0; color: var(--text-muted); }
+.dc-caret { flex-shrink: 0; margin-left: -6px; margin-right: -2px; color: var(--text-muted); }
+.dc-list { max-height: 180px; overflow-y: auto; }
+.dc-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 24px;
+  padding: 1px 8px 1px 30px;
+  font-size: 11.5px;
+}
 .dc-btn {
   display: flex;
   align-items: center;
