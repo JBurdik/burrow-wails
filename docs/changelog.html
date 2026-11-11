@@ -80,11 +80,46 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+<!-- v1.3.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v1.3.0</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">listopad 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Git</div>
+    <ul>
+      <li><strong>Řešení merge konfliktů přímo v Git panelu</strong> — konfliktní soubor místo diffu ukáže jednotlivé konflikty (aktuální / příchozí / společný předek) s akcemi Accept Current, Accept Incoming, Accept Both a Both (incoming first). Nezměněné řádky se sbalí; jakmile nezbývají žádné markery, soubor jde jedním klikem označit jako vyřešený.</li>
+      <li><strong>Jeden diff všude</strong> — Git panel, Right Panel i náhled commitu kreslí diff stejnou komponentou <code>GitDiff</code>; stará <code>DiffView</code> je pryč.</li>
+      <li><strong>Rychlejší seznam změn</strong> — diffy jednotlivých souborů se načítají líně, až když se blíží k viewportu; nesledované složky se zobrazí jako skupina.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Detail threadu</div>
+    <ul>
+      <li><strong>Stav gitu v ThreadDetailsCard</strong> — větev s ahead/behind, poslední commit, sbalitelný seznam změněných souborů a běžící servery/úlohy; akce „otevřít v“ a worktree jsou sloučené.</li>
+      <li><strong>Vestavěné profily sub-agentů běží v auto módu</strong> — strop je permission mode rodiče, sub-agent tedy nikdy nedostane víc než thread, který ho spustil.</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Beta a dev se přepisovaly stabilní verzí</strong> — self-update stahoval stable <code>latest.json</code> i na betě a dev buildu; updater je teď mimo stable kanál vypnutý.</li>
+      <li><strong>Náhled minimapy v chatu</strong> — náhled po najetí se ukazuje vedle čárky, na které je kurzor, ne jinde.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
   <!-- v1.2.0 -->
 <div class="release">
   <div class="release-header">
     <span class="version">v1.2.0</span>
-    <span class="tag tag-latest">nejnovější</span>
     <span class="date">listopad 2026</span>
   </div>
 

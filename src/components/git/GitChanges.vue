@@ -133,6 +133,7 @@
                 <div v-for="f in dirFiles(e).slice(0, 200)" :key="f" class="truncate" :title="f">{{ f.slice(e.path.length) }}</div>
                 <div v-if="dirFiles(e).length > 200" class="font-sans text-muted-foreground">… {{ dirFiles(e).length - 200 }} more</div>
               </div>
+              <ConflictResolver v-else-if="e.kind === 'conflicted'" :cwd="cwd" :path="e.path" />
               <GitDiff
                 v-else
                 :text="diffs[e.key]"
@@ -173,6 +174,7 @@ import {
 import { useGitStore } from "@/stores/git";
 import { splitHunks } from "@/lib/gitHunks";
 import GitDiff from "./GitDiff.vue";
+import ConflictResolver from "./ConflictResolver.vue";
 
 const props = defineProps<{ cwd: string }>();
 const git = useGitStore();
