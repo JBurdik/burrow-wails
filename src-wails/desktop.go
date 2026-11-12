@@ -297,6 +297,18 @@ func (s *DesktopService) CloseWindow(key string) {
 	}
 }
 
+// openMiniChat opens (or brings forward) the mini chat window from Go — the
+// core's tray menu. The UI process asks the same thing over the wire
+// (mini_chat) and opens the window itself (src/lib/miniChat.ts).
+func openMiniChat(a *App, fresh bool) {
+	m, err := a.MiniChat(fresh)
+	if err != nil {
+		log.Printf("mini chat: %v", err)
+		return
+	}
+	new(DesktopService).OpenWindow(miniChatWinKey, m["route"].(string), miniChatTitle, 420, 600, true)
+}
+
 // toggleKeepOnTop backs Window → Keep on Top for whichever window is focused.
 func toggleKeepOnTop() {
 	w, ok := wapp.Window.Current().(*application.WebviewWindow)
@@ -412,6 +424,7 @@ func setupTray(a *App) {
 	tray.SetTemplateIcon(trayIcon)
 	m := application.NewMenu()
 	m.Add("Open Burrow").OnClick(func(*application.Context) { showMainWindow() })
+	m.Add("Mini Chat").OnClick(func(*application.Context) { go openMiniChat(a, false) })
 	m.AddSeparator()
 	m.Add("Quit Burrow").OnClick(func(*application.Context) { quitApp(a) })
 	tray.SetMenu(m) // right click; left click toggles the panel below

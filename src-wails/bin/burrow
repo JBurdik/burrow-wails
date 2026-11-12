@@ -173,6 +173,14 @@ _call() {
   }
   body=$(_post)
   code=$(printf '%s' "$body" | tail -n1)
+  # Nobody on the file's port, but this shell was started by a backend whose
+  # port it carries: another instance (stable vs beta share hook.port) may have
+  # rewritten the file and quit. Try ours before starting a core.
+  if [ "$code" = "000" ] && [ -n "$BURROW_HOOK_PORT" ] && [ "$BURROW_HOOK_PORT" != "$port" ]; then
+    port="$BURROW_HOOK_PORT"
+    body=$(_post)
+    code=$(printf '%s' "$body" | tail -n1)
+  fi
   if [ "$code" = "000" ] && _start_core; then # nobody listening: an idle core quit
     port=$(_port)
     body=$(_post)
@@ -184,6 +192,7 @@ _call() {
     200) printf '%s\n' "$payload" ;;
     404) echo "burrow: unknown verb '$verb' — run 'burrow help' for the list" >&2; exit 1 ;;
     401) echo "burrow: control token rejected — restart Burrow to reissue it" >&2; exit 1 ;;
+    000) echo "burrow: no Burrow is listening on port $port (hook.port in $BURROW_HOME_DIR) — is the app running?" >&2; exit 1 ;;
     *)   printf '%s\n' "$payload" >&2; exit 1 ;;
   esac
 }

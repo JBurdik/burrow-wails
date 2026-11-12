@@ -320,6 +320,7 @@ func (a *App) startup(ctx context.Context) {
 	if err := os.WriteFile(filepath.Join(dataDir, "hook.port"), []byte(fmt.Sprintf("%d", hookSrv.port)), 0o644); err != nil {
 		log.Printf("write hook.port: %v", err)
 	}
+	go keepHookPort(ctx, filepath.Join(dataDir, "hook.port"), hookSrv.port)
 
 	// Restore remote access if it was left on. Without this the Settings
 	// toggle silently reset to off on every launch.

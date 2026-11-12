@@ -113,6 +113,9 @@
         <button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground" @click="startCompose">
           <PhPlus :size="13" /> New thread
         </button>
+        <button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground" @click="openMiniChat()">
+          <PhChatCircle :size="13" /> Mini chat
+        </button>
         <button type="button" class="rounded-lg px-2 py-1 text-[12px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground" @click="open('')">Open Burrow</button>
       </div>
     </template>
@@ -166,6 +169,7 @@ import { PhArrowBendUpLeft, PhArrowSquareOut, PhCaretLeft, PhChatCircle, PhPlus,
 import { TrayOpen, TraySetPinned } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { openMiniChat } from "@/lib/miniChat";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { Select } from "@/components/ui/select";
 import { chatSession, TRANSCRIPT_PAGE, type ChatMessagesPage, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";

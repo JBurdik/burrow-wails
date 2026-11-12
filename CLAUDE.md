@@ -466,6 +466,12 @@ paired browser / phone keeps the overlay; `windowed` prop = own drag strip, no �
 button so tiling WMs (AeroSpace's `isDialogHeuristic`) float it — Settings always, popped-out tabs when `uiPrefs.floatPopouts` (Settings → General). ⌘W / Esc are handled in
 WindowApp, **not** as native accelerators (that would eat ⌘W = close pane in the main window).
 
+**Mini chat** (`minichat.go`, `src/lib/miniChat.ts`): a project-less chat in a 420×600 floating `chat`-kind window
+(`mini=1` adds a keep-on-top pin, persisted in `burrow.miniChatOnTop`, and a New button). Doors: tray right-click menu
+(core opens it in Go), tray panel footer, Window → Mini Chat ⌘⌥M. It lives in an ordinary **Scratch** workspace on
+`<app-data>/scratch` (created on demand), so the main window lists it like any project — no `workspace_id = 0` case.
+`mini_chat(fresh)` reuses the latest unarchived top-level chat there unless `fresh`.
+
 **A popped-out leaf stays owned by the main window** (`usePopoutsStore`): its Sidebar row stays, the pane
 shows a Bring-back placeholder, and its `XTerm` stays mounted with **`frozen`** — no `resize_pty`, since two
 views fighting over one PTY grid garble a TUI. Unfreezing forces one resize (the TUI redraws); nothing is

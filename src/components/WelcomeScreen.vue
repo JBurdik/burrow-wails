@@ -13,9 +13,8 @@
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="center" class="max-h-[300px] min-w-[200px] overflow-y-auto hide-scrollbar">
+            <template v-for="repo in store.topLevel" :key="repo.id">
             <DropdownMenuItem
-              v-for="repo in store.topLevel"
-              :key="repo.id"
               class="text-[11.5px]"
               :class="{ 'text-foreground bg-accent/10': repo.id === target.id }"
               @select="pick(repo)"
@@ -24,6 +23,17 @@
               <PhFolder v-else :size="12" weight="fill" class="mr-1.5 shrink-0 text-accent" />
               {{ repo.name }}
             </DropdownMenuItem>
+            <DropdownMenuItem
+              v-for="wt in store.worktreesByParent[repo.id] || []"
+              :key="wt.id"
+              class="pl-6 text-[11.5px]"
+              :class="{ 'text-foreground bg-accent/10': wt.id === target.id }"
+              @select="pick(wt)"
+            >
+              <PhGitBranch :size="12" class="mr-1.5 shrink-0 text-muted-foreground" />
+              {{ wt.worktree_branch || wt.name }}
+            </DropdownMenuItem>
+            </template>
           </DropdownMenuContent>
         </DropdownMenuRoot>?
       </h1>
@@ -152,7 +162,7 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch, nextTick, onMounted } from "vue";
-import { PhFolder, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhSparkle, PhPencilSimple, PhListChecks, PhFastForward, PhShieldWarning } from "@phosphor-icons/vue";
+import { PhFolder, PhGitBranch, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhSparkle, PhPencilSimple, PhListChecks, PhFastForward, PhShieldWarning } from "@phosphor-icons/vue";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";

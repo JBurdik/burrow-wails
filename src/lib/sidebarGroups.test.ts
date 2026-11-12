@@ -101,7 +101,11 @@ describe("groupByRepo", () => {
     ({ ws: { id: wsId, parent_id: parent }, tab: { id: tabId }, ts: 0 }) as unknown as ActivityRow;
   it("folds worktrees into their repo, keeps feed order, adds empty always-shown repos", () => {
     const groups = groupByRepo([row(1, null, "a"), row(5, 2, "b"), row(1, null, "c"), row(2, null, "d")], [2, 9]);
-    expect(groups.map((g) => [g.repoId, g.rows.map((r) => r.tab.id)])).toEqual([[1, ["a", "c"]], [2, ["b", "d"]], [9, []]]);
+    expect(groups.map((g) => [g.repoId, g.rows.map((r) => r.tab.id)])).toEqual([[1, ["a", "c"]], [2, ["d", "b"]], [9, []]]);
+  });
+  it("puts the repo's own rows first, then each worktree's rows as one block", () => {
+    const groups = groupByRepo([row(5, 1, "a"), row(1, null, "b"), row(6, 1, "c"), row(5, 1, "d"), row(1, null, "e")]);
+    expect(groups[0].rows.map((r) => r.tab.id)).toEqual(["b", "e", "a", "d", "c"]);
   });
   it("puts pinned repos first in pin order, with a header even when empty", () => {
     const groups = groupByRepo([row(1, null, "a"), row(5, 2, "b"), row(3, null, "c")], [], [3, 7]);

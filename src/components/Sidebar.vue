@@ -80,7 +80,16 @@
           <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!, false)"><PhPlus :size="13" /></button>
         </div>
         <div v-if="!collapsedGroups.has(group.repoId)">
-          <div v-for="row in group.rows" :key="rowKey(row)">
+          <div v-for="(row, i) in group.rows" :key="rowKey(row)">
+            <div
+              v-if="group.repoId !== PINNED && row.ws.parent_id && row.ws.id !== group.rows[i - 1]?.ws.id"
+              class="group/wt mt-1.5 flex min-w-0 items-center gap-1.5 px-2.5 pb-0.5 text-[11px] text-muted-foreground"
+              :title="row.ws.path"
+            >
+              <PhGitBranch :size="11" class="shrink-0" />
+              <span class="min-w-0 flex-1 truncate">{{ row.ws.worktree_branch || row.ws.name }}</span>
+              <button class="hidden shrink-0 rounded p-0.5 hover:text-foreground group-hover/wt:block" title="New thread in this worktree" @click.stop="pickProject(row.ws, false)"><PhPlus :size="12" /></button>
+            </div>
             <div
               class="sb-row group relative mt-px flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[7px]"
               :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`, rowRecedes(row.tab.status, isActiveRow(row)) && 'sb-recede']"

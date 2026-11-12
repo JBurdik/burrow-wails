@@ -223,7 +223,8 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { installControlBridge } from "@/lib/controlBridge";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { openWindow } from "@/lib/windows";
+import { canOpenWindows, openWindow } from "@/lib/windows";
+import { openMiniChat } from "@/lib/miniChat";
 import { RP_WINDOW_KEY, publishFollow, remotePanel } from "@/lib/rpWindow";
 import { installPanelTerminals } from "@/lib/rpTerminals";
 import { activeChatIdFor } from "@/stores/chatTree";
@@ -808,6 +809,7 @@ let unlistenMenuOnboarding: UnlistenFn | null = null;
 let unlistenMenuWhatsNew: UnlistenFn | null = null;
 let unlistenMenuShortcuts: UnlistenFn | null = null;
 let unlistenMenuNavigate: UnlistenFn | null = null;
+let unlistenMenuMiniChat: UnlistenFn | null = null;
 let stopCoreLink: (() => void) | null = null;
 let unlistenControl: (() => void) | undefined;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
@@ -876,6 +878,7 @@ onMounted(async () => {
   unlistenMenuShortcuts = await listen("menu-show-shortcuts", () => { cheatsheetOpen.value = true; });
   // The tray panel opened a thread/tab (desktop.go TrayOpen).
   unlistenMenuNavigate = await listen<string>("menu-navigate", (e) => { if (e.payload) void router.push(e.payload); });
+  unlistenMenuMiniChat = await listen("menu-mini-chat", () => { if (canOpenWindows()) void openMiniChat(); });
   // The same from the external core's tray (plan 009), + its quit and Dock count.
   stopCoreLink = await startCoreLink((route) => void router.push(route));
 
@@ -914,6 +917,7 @@ onBeforeUnmount(() => {
   unlistenMenuWhatsNew?.();
   unlistenMenuShortcuts?.();
   unlistenMenuNavigate?.();
+  unlistenMenuMiniChat?.();
   stopCoreLink?.();
   unlistenWorkspacesChanged?.();
   unlistenWorktreesCleaned?.();

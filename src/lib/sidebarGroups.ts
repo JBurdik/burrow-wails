@@ -208,6 +208,14 @@ export function groupByRepo(rows: ActivityRow[], alwaysShow: number[] = [], pinn
     if (!group) byRepo.set(repoId, (group = { repoId, rows: [] }));
     group.rows.push(row);
   }
+  // Repo's own rows first, then each worktree's rows as one block (first-seen
+  // order) so the Sidebar can put the worktree's name above its block.
+  for (const group of byRepo.values()) {
+    const first = new Map<number, number>();
+    group.rows.forEach((r, i) => { if (!first.has(r.ws.id)) first.set(r.ws.id, i); });
+    const key = (r: ActivityRow) => (r.ws.parent_id == null ? -1 : first.get(r.ws.id)!);
+    group.rows.sort((a, b) => key(a) - key(b)); // stable: feed order within a block
+  }
   for (const id of [...alwaysShow, ...pinned]) if (!byRepo.has(id)) byRepo.set(id, { repoId: id, rows: [] });
   // Pinned first, then the manual (dragged) order, then the rest in feed order.
   const rank = (id: number) =>

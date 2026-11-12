@@ -557,6 +557,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"remote_sync_chat":      {Method: "RemoteSyncChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
 	"remote_list_chats":     {Method: "RemoteListChats", Args: nil, Scope: scopeOrchRead},
 	"remote_create_chat":    {Method: "RemoteCreateChat", Args: []string{"workspaceId", "agentKind", "model", "effort", "permissionMode"}, Scope: scopeOrchOperate},
+	"mini_chat":             {Method: "MiniChat", Args: []string{"fresh"}, Scope: scopeOrchOperate},
 	"remote_set_chat_title": {Method: "RemoteSetChatTitle", Args: []string{"id", "title", "expectTitle"}, Scope: scopeOrchOperate},
 
 	// The frontend's answer to a control:action event (controlapi.go's
