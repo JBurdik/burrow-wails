@@ -46,10 +46,10 @@
       <div v-show="!compact && ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
       <div v-show="!compact && ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
       <div v-show="!compact || phone === 'thread'" ref="mainEl" class="ide-main" :class="{ 'details-reserve': details?.kind === 'chat' && !details.overlay }" :style="{ '--details-inset': (detailsInset ?? 0) + 'px' }">
-        <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
-             them on a mode switch ran XTerm.onBeforeUnmount → detach_pty + dispose;
-             returning replayed the daemon ring-buffer into a fresh fit → scrambled
-             buffer. Keeping them mounted avoids the detach/reattach entirely. -->
+        <!-- Terminals stay MOUNTED across every mode (v-show, not v-if): a fresh
+             xterm on a ring-only daemon starts blank. With an emulator daemon
+             (beta/dev, plan 010) Terminal.vue unmounts the xterms that are not on
+             screen (`shown`) and a remount rebuilds them from pty_attach. -->
         <div v-show="ui.mode === 'terminal'" class="terminal-host">
           <WelcomeScreen ref="welcomeEl" v-show="showWelcome" @open-folder="openNewWorkspace" />
           <Terminal
@@ -58,6 +58,7 @@
             :key="w.id"
             :workspace-id="w.id"
             :cwd="w.path"
+            :shown="ui.mode === 'terminal' && !!ws.active && w.id === ws.active.id && !showWelcome"
             :ref="(el) => setTermRef(w.id, el)"
           />
         </div>

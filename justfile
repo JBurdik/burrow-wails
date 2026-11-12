@@ -63,6 +63,27 @@ dev:
 dev-mcp:
     WAILS_MCP=1 just dev
 
+# Build the pinned libghostty-vt static lib for burrow-daemon's `vt` tag
+# (docs/plans/010-server-side-vt.md) into src-wails/third_party/ (gitignored).
+# Needs zig 0.17+ (ZIG=/path/to/zig to override) and cmake. Once per bump.
+libghostty:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    zig="${ZIG:-zig}"
+    "$zig" version | grep -qE '^0\.(1[7-9]|[2-9][0-9])' || { echo "need zig >= 0.17 (got $("$zig" version)); set ZIG=" >&2; exit 1; }
+    src="${XDG_CACHE_HOME:-$HOME/.cache}/burrow-vt/go-libghostty"
+    [ -d "$src" ] || git clone -q https://tangled.org/mitchellh.com/go-libghostty "$src"
+    # Pin = the go.mod pseudo-version's commit; bump both together.
+    git -C "$src" fetch -q origin && git -C "$src" checkout -q df1957cbff56
+    PATH="$(dirname "$(command -v "$zig")"):$PATH" cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release >/dev/null
+    PATH="$(dirname "$(command -v "$zig")"):$PATH" cmake --build "$src/build"
+    out="$PWD/src-wails/third_party/libghostty-vt/aarch64-macos"
+    rm -rf "$out" && mkdir -p "$out"
+    cp -R "$src/build/_deps/ghostty-src/zig-out/"{include,lib,share} "$out/"
+    rm -f "$out"/lib/*.dylib
+    sed -i '' "s|^prefix=.*|prefix=$out|" "$out"/share/pkgconfig/*.pc
+    echo "libghostty-vt → $out"
+
 # Frontend only, in the browser (no Wails backend)
 web:
     pnpm dev

@@ -42,6 +42,12 @@ func coreRoleRequested() bool {
 // runCore is the backend with no window: what main_headless.go does, minus
 // forcing remote access on (the desktop's Settings owns that toggle).
 func runCore() {
+	// An `mcp` build (just dev-mcp) starts Wails' MCP server in the UI AND here,
+	// and a taken port is fatal: the UI holds 9099, so the core takes any free
+	// one instead of exiting before it ever serves the UI.
+	if os.Getenv("WAILS_MCP_PORT") == "" {
+		os.Setenv("WAILS_MCP_PORT", "0")
+	}
 	dataDir, err := appDataDir()
 	if err != nil {
 		log.Fatalf("core: app data dir: %v", err)

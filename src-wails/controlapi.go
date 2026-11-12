@@ -65,6 +65,12 @@ func (execRunner) RunProgram(prog, cwd string, args []string) (string, string, i
 
 type ptyWriter struct{ app *App }
 
+// ScreenText backs tab_output from the daemon's emulator (control.PTYScreen).
+// Not an App method on purpose: tab_output's verb scope already governs it.
+func (p ptyWriter) ScreenText(ptyID string, lines int) (string, error) {
+	return p.app.daemon.ScreenText(ptyID, lines)
+}
+
 // WritePty converts text to the []int byte list the daemon protocol carries.
 func (p ptyWriter) WritePty(ptyID, text string) error {
 	data := make([]int, 0, len(text))
@@ -214,6 +220,7 @@ func (a *App) initControl(dataDir string) {
 		Schedules:         scheduleAdapter{a},
 		ChatMover:         chatMoverAdapter{a},
 		PTYs:              a,
+		Screen:            ptyWriter{a},
 		Secrets:           a,
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")

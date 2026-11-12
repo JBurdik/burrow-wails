@@ -136,6 +136,13 @@ type PTYWriter interface {
 	WritePty(ptyID string, text string) error
 }
 
+// PTYScreen reads a terminal's screen as plain text in the backend (the
+// daemon's emulator), so tab_output works with no window open. Optional: nil
+// or any error = ask the UI instead (a daemon built without the emulator).
+type PTYScreen interface {
+	ScreenText(ptyID string, lines int) (string, error)
+}
+
 // PTYLister reports which PTY ids the daemon currently knows about — positive
 // proof for the "PTY gone from the daemon" half of dispatch liveness, distinct
 // from the phase's own absence-based `stale` inference (phasepoll.go's
@@ -255,6 +262,8 @@ type Deps struct {
 	// nil means "no proof either way", so absence of the capability itself
 	// must never be read as absence of the process.
 	PTYs PTYLister
+	// Screen is optional: nil = tab_output always reads the mounted xterm.
+	Screen PTYScreen
 	// Secrets backs secret_request. nil = it refuses.
 	Secrets Secrets
 }

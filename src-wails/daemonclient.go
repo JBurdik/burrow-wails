@@ -168,9 +168,16 @@ func (d *DaemonClient) spawn() error {
 		return err
 	}
 	if _, err := os.Stat(daemonPath); err != nil {
-		// Dev fallback: run from the module's cmd/ dir via `go run`.
-		cmd := exec.Command("go", "run", "./cmd/burrow-daemon")
-		cmd.Env = append(os.Environ(), "BURROW_DAEMON_SOCK="+d.sockPath)
+		// Dev fallback: run from the module's cmd/ dir via `go run`, with the
+		// libghostty emulator when `just libghostty` built it (plan 010).
+		args, env := []string{"run"}, append(os.Environ(), "BURROW_DAEMON_SOCK="+d.sockPath)
+		vt := filepath.Join("third_party", "libghostty-vt", "aarch64-macos")
+		if _, err := os.Stat(filepath.Join(vt, "lib", "libghostty-vt.a")); err == nil {
+			abs, _ := filepath.Abs(filepath.Join(vt, "share", "pkgconfig"))
+			args, env = append(args, "-tags", "vt"), append(env, "PKG_CONFIG_PATH="+abs)
+		}
+		cmd := exec.Command("go", append(args, "./cmd/burrow-daemon")...)
+		cmd.Env = env
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Start()
@@ -301,6 +308,8 @@ func (d *DaemonClient) readLoop(conn net.Conn) {
 					d.tap(f.ID, nil)
 				}
 				busEmit("pty-exit-"+f.ID, nil)
+			case "pty-resync":
+				busEmit("pty-resync-"+f.ID, nil)
 			}
 		}
 	}
@@ -381,6 +390,17 @@ func (d *DaemonClient) ForegroundPid(id string) int {
 	return resp.Pid
 }
 
+// ForegroundScreen: the PTY's alt screen is up / its cursor is at a marked
+// shell prompt (daemon emulator, plan 010 Phase 4). false/false from a daemon
+// without one, which is exactly the poll's behaviour before it existed.
+func (d *DaemonClient) ForegroundScreen(id string) (alt, atPrompt bool) {
+	resp, err := d.call(daemonproto.Request{Kind: "foreground", ID: id})
+	if err != nil {
+		return false, false
+	}
+	return resp.Alt, resp.AtPrompt
+}
+
 // ptyChunk is the pty-data-<id> payload: Data starts at byte Off of the PTY's
 // whole output. Off is null from a daemon that predates it.
 type ptyChunk struct {
@@ -400,6 +420,42 @@ func (d *DaemonClient) Since(id string, from uint64) (ptyChunk, error) {
 		data = []int{}
 	}
 	return ptyChunk{Off: &resp.Off, Data: data}, nil
+}
+
+// Emulator: the running daemon keeps a terminal emulator per PTY, so a view can
+// be unmounted and re-attached with its screen (plan 010 Phase 3). false from a
+// ring-only daemon, an older one, or an unreachable one.
+func (d *DaemonClient) Emulator() bool {
+	resp, err := d.call(daemonproto.Request{Kind: "version"})
+	return err == nil && resp.Emulator
+}
+
+// ptySnapshot is pty_attach's reply: VT bytes (base64 on the wire) that rebuild
+// the PTY's screen in a fresh xterm, cut at byte Off of its output.
+type ptySnapshot struct {
+	Off  uint64 `json:"off"`
+	VT   []byte `json:"vt"`
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+	Alt  bool   `json:"alt"`
+}
+
+func (d *DaemonClient) Attach(id string) (ptySnapshot, error) {
+	resp, err := d.call(daemonproto.Request{Kind: "attach", ID: id})
+	if err != nil {
+		return ptySnapshot{}, err
+	}
+	return ptySnapshot{Off: resp.Off, VT: resp.VT, Cols: resp.Cols, Rows: resp.Rows, Alt: resp.Alt}, nil
+}
+
+// ScreenText is the tail of the PTY's screen as plain text, read by the
+// daemon's own emulator — no UI needed. Errors from a daemon without one.
+func (d *DaemonClient) ScreenText(id string, lines int) (string, error) {
+	resp, err := d.call(daemonproto.Request{Kind: "screen_text", ID: id, Lines: lines})
+	if err != nil {
+		return "", err
+	}
+	return resp.Text, nil
 }
 
 func (d *DaemonClient) List() ([]string, error) {

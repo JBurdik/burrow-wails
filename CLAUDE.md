@@ -578,6 +578,19 @@ unknown event names are ignored on purpose.
 
 **Binary PTY frames are deferred on purpose** — a bandwidth optimization, not a prerequisite.
 
+**Server-side terminal emulator** (`internal/ptycore/vt.go`, build tag `vt`, plan `docs/plans/010-server-side-vt.md`):
+burrow-daemon feeds every PTY's bytes through libghostty-vt as well, under the same lock as the byte ring, so
+`pty_attach` returns VT bytes that rebuild the screen + history in a fresh xterm, cut at byte `off` of the stream
+(`ptyStream.attach` continues exactly there), and `tab_output` reads `screen_text` with no window open. A daemon
+without the tag answers `pty screen unsupported` and everything falls back (UI read / start from live output).
+While a TUI holds the alt screen the primary is unreachable, so a write that leaves it emits `pty-resync-<id>` and
+a view that attached during the TUI re-attaches. The `foreground` reply also carries `alt` / `atPrompt` (OSC 133):
+the phase poll's unknown-process branch treats a marked prompt as a shell and an alt-screen TUI (vim, less) as
+`PollInteractive` — idle, never running, no review dot. **Beta/dev only:** when `pty_emulator` is true
+(`src/lib/ptyEmulator.ts`), `Terminal.vue` unmounts the XTerm of a hidden tab (the phone's rule) and a remount
+rebuilds it via `pty_attach`; stable keeps every terminal mounted. Lib: `just libghostty` (zig 0.17+) → `src-wails/third_party/`;
+beta/dev bundles only until the plan's Phase 3.
+
 ### Pairing and device tokens (`src-wails/remoteauth.go` + `remotedevices.go` + `remoteguard.go`)
 
 ```

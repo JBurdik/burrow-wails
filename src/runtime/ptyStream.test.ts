@@ -95,3 +95,36 @@ describe("ptyStream", () => {
     expect(out.map(text).join("")).toBe("aa");
   });
 });
+
+describe("ptyStream.attach", () => {
+  it("paints the snapshot and continues exactly at its offset, holding live chunks meanwhile", async () => {
+    const t = setup("0123456789");
+    type Snap = { off: number; vt: string };
+    let release!: (v: Snap) => void;
+    const painted: string[] = [];
+    const done = t.s.attach<Snap>(
+      () => new Promise<Snap>((r) => (release = r)),
+      (snap) => painted.push(snap.vt),
+    );
+    // Live output keeps streaming while the snapshot is in flight.
+    t.s.push(t.chunk(4, 7));
+    t.s.push(t.chunk(7, 10));
+    expect(t.rendered()).toBe("");
+    release({ off: 6, vt: "<screen up to 6>" });
+    expect(await done).toBe(true);
+    expect(painted).toEqual(["<screen up to 6>"]);
+    expect(t.rendered()).toBe("6789"); // nothing before 6 twice, nothing after 6 lost
+    expect(t.fetches()).toBe(0);
+  });
+
+  it("a daemon without an emulator leaves the stream as before", async () => {
+    const t = setup("abcdef");
+    const done = t.s.attach(() => Promise.reject(new Error("pty screen unsupported")), () => {
+      throw new Error("must not paint");
+    });
+    t.s.push(t.chunk(2, 4));
+    expect(await done).toBe(false);
+    t.s.push(t.chunk(4, 6));
+    expect(t.rendered()).toBe("cdef");
+  });
+});

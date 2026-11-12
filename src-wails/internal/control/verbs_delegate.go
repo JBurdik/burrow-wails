@@ -118,8 +118,11 @@ func delegationVerbs(c *Core) []Verb {
 			if lines > 500 {
 				lines = 500
 			}
-			var out any
-			return out, c.ui(ctx, "tab_output", map[string]any{"ptyId": p.Int("pty_id"), "lines": lines}, &out)
+			text, err := c.tabText(ctx, p.Int("pty_id"), lines)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"pty_id": p.Int("pty_id"), "text": text}, nil
 		},
 	}, {
 		Name:    "send_to_tab",
@@ -297,20 +300,18 @@ func (c *Core) waitForTabTail(ctx context.Context, id int64, changedFrom string)
 			}
 		}
 		if !blocked {
-			var tail struct {
-				Text string `json:"text"`
-			}
-			if err := c.ui(ctx, "tab_output", map[string]any{"ptyId": id, "lines": 12}, &tail); err != nil {
+			tail, err := c.tabText(ctx, id, 12)
+			if err != nil {
 				return "", fmt.Errorf("send_to_tab: read terminal: %w", err)
 			}
-			if strings.TrimSpace(tail.Text) != "" && tail.Text != changedFrom {
-				if tail.Text == previous {
+			if strings.TrimSpace(tail) != "" && tail != changedFrom {
+				if tail == previous {
 					stable++
 				} else {
-					previous, stable = tail.Text, 1
+					previous, stable = tail, 1
 				}
 				if stable >= 3 {
-					return tail.Text, nil
+					return tail, nil
 				}
 			} else {
 				previous, stable = "", 0
@@ -595,4 +596,20 @@ func (c *Core) takeResult(token string) (string, bool) {
 	_ = os.Remove(base + ".done")
 	_ = os.Remove(base + ".result")
 	return strings.TrimSpace(string(text)), true
+}
+
+// tabText is the tail of a tab's terminal as plain text: from the daemon's
+// emulator when it has one (works with no window open), else from the mounted
+// xterm through the UI — same text contract either way.
+func (c *Core) tabText(ctx context.Context, ptyID, lines int64) (string, error) {
+	if c.deps.Screen != nil {
+		if text, err := c.deps.Screen.ScreenText(fmt.Sprint(ptyID), int(lines)); err == nil {
+			return text, nil
+		}
+	}
+	var out struct {
+		Text string `json:"text"`
+	}
+	err := c.ui(ctx, "tab_output", map[string]any{"ptyId": ptyID, "lines": lines}, &out)
+	return out.Text, err
 }

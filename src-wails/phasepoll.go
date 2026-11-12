@@ -45,6 +45,10 @@ type phasePoller struct {
 	// file is only applied on a CHANGE: re-applying `busy` every tick would
 	// stomp a hook's waiting_approval for the 2 s until the file catches up.
 	lastFile map[string]string
+
+	// screen reports the daemon emulator's alt-screen / marked-prompt flags
+	// (plan 010 Phase 4). nil = no emulator: the name alone decides, as before.
+	screen func(string) (alt, atPrompt bool)
 }
 
 func newPhasePoller(ps *PhaseStore, list func() ([]string, error), fg func(string) string) *phasePoller {
@@ -170,13 +174,7 @@ func (p *phasePoller) pollOne(id string, alive bool) {
 			p.applyClaudeFile(id, key)
 		}
 	case shellRE.MatchString(name):
-		// Back at the prompt: whatever ran is over. This also rescues an agent
-		// the user Ctrl+C'd, which fires no Stop hook.
-		p.mu.Lock()
-		delete(p.lastFile, id) // the next claude here is a new process
-		p.mu.Unlock()
-		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollAgent, Bool: false})
-		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollNotBusy})
+		p.atShellPrompt(id, key)
 	default:
 		// A non-shell child INSIDE a live agent session — the agent opened a
 		// pager, ran git, spawned node. Only the shell branch may clear the
@@ -188,9 +186,35 @@ func (p *phasePoller) pollOne(id string, alive bool) {
 		if p.phases.Get(key).IsAgent {
 			return
 		}
+		if p.screen != nil {
+			alt, atPrompt := p.screen(id)
+			if atPrompt {
+				// A shell shellRE does not know (nu, xonsh, pwsh) that marked its
+				// own prompt: it is a shell at its prompt, not a busy command —
+				// before this it sat `running` forever.
+				p.atShellPrompt(id, key)
+				return
+			}
+			if alt {
+				// vim / less / top: interactive, never a running turn.
+				p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollAgent, Bool: false})
+				p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollInteractive})
+				return
+			}
+		}
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollAgent, Bool: false})
 		p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollBusy})
 	}
+}
+
+// atShellPrompt: back at the prompt, whatever ran is over. This also rescues an
+// agent the user Ctrl+C'd, which fires no Stop hook.
+func (p *phasePoller) atShellPrompt(id, key string) {
+	p.mu.Lock()
+	delete(p.lastFile, id) // the next claude here is a new process
+	p.mu.Unlock()
+	p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollAgent, Bool: false})
+	p.phases.Apply(key, agentphase.Event{Kind: agentphase.PollNotBusy})
 }
 
 func cutPtyKey(key string) (string, bool) {
@@ -204,9 +228,9 @@ func cutPtyKey(key string) (string, bool) {
 // startPhasePoll runs the poll for the life of the app. It lives on the server
 // side because the phase must be derivable with no client attached. It returns
 // the poller so CreatePty can clear a reused id's watchdog counter.
-func startPhasePoll(ctx context.Context, ps *PhaseStore, list func() ([]string, error), fg func(string) string, fgPid func(string) int) *phasePoller {
+func startPhasePoll(ctx context.Context, ps *PhaseStore, list func() ([]string, error), fg func(string) string, fgPid func(string) int, screen func(string) (bool, bool)) *phasePoller {
 	p := newPhasePoller(ps, list, fg)
-	p.fgPid, p.sessionsDir = fgPid, claudeSessionsDir()
+	p.fgPid, p.sessionsDir, p.screen = fgPid, claudeSessionsDir(), screen
 	go func() {
 		t := time.NewTicker(2 * time.Second)
 		defer t.Stop()

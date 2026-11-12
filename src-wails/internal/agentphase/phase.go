@@ -58,7 +58,13 @@ const (
 	PollBusy       Kind = "poll_busy"
 	PollNotBusy    Kind = "poll_not_busy"
 	PollNeedsInput Kind = "poll_needs_input"
-	PollGotInput   Kind = "poll_got_input"
+	// PollInteractive: a non-agent foreground program holds the alt screen
+	// (vim, less, top — the daemon's emulator says so). Interactive, not busy:
+	// a `running` the first poll gave it before the TUI drew goes back to idle,
+	// and — unlike PollNotBusy — mints no Done, so quitting vim leaves no
+	// review dot for a "turn" that never was.
+	PollInteractive Kind = "poll_interactive"
+	PollGotInput    Kind = "poll_got_input"
 
 	// StatusIdle: Claude's own status file says idle. Settles an in-flight turn
 	// to Done (a lost Stop hook), and is a no-op on anything that already ended —
@@ -180,6 +186,11 @@ func Next(cur Phase, ev Event, now int64) Phase {
 		if !cur.IsAgent && cur.InFlight() {
 			next.State = Done
 			next.TurnEndedAt = now
+		}
+	case PollInteractive:
+		if !cur.IsAgent && cur.State == Running {
+			next.State = Idle
+			next.Detail = ""
 		}
 	case PollNeedsInput:
 		if !cur.IsAgent && cur.State == Running {

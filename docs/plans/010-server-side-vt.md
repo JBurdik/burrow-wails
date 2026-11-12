@@ -1,6 +1,6 @@
 # 010 — A terminal emulator per PTY on the server (go-libghostty)
 
-Status: **proposed** (2026-11-04, branch `v3/core-client-split`). Nothing built yet.
+Status: **Phases 0–2 and 4 built** (2026-11-12, branch `v3/server-side-vt`), exercised in a `just dev-mcp` instance — see "Implementation notes". Phase 3 started beta-only (hidden tabs unmount when the daemon has the emulator). Proposed 2026-11-04.
 Builds on 009 (core / daemon split). Change a decision only on purpose.
 
 ## Why
@@ -52,16 +52,96 @@ Cloned from `https://tangled.org/mitchellh.com/go-libghostty`. Same commit Rex s
 | Cross / universal | zig targets `aarch64-macos`, `x86_64-macos` (+ linux/windows). Universal = build both, `lipo -create` — what Rex does |
 | Binary size | **not measured** (needs the build, see blocker). libc-only static lib; expect single-digit MB. Phase 0 measures |
 
-Not yet verified (Phase 0 must answer):
-1. Does `Formatter` on the primary screen include **scrollback history**, or only the viewport rows?
-2. While the alt screen is active, can the primary screen (+ history) be formatted at all?
-   The formatter takes "the active screen" and no screen argument.
+## Implementation notes (Phases 1–2, 2026-11-11)
 
-### Blocker on this machine
+What was built, and where it departs from the plan below:
 
-`zig version` = **0.16.0**; go-libghostty requires **0.17.0+**. `cmake` and
-`pkg-config` are present, `nix` is not. Nothing was built. Fix: install zig 0.17
-(tarball from ziglang.org, or `brew upgrade zig` once it lands) — Phase 0 step 1.
+- **Code:** `internal/ptycore/vt.go` (all libghostty use, `vt` tag) / `vt_off.go` (stubs → `ErrUnsupported`);
+  `session.vtMu` covers ring write + `VTWrite`; `Resize` resizes both; 30 s incremental `Compress` loop.
+  Daemon ops `screen_text {id, lines}` and `attach {id}` (`VT` is `[]byte` → base64 on the wire, not an int array);
+  frame `pty-resync` → bus `pty-resync-<id>` when a write leaves the alt screen (`Events.OnAltExit`).
+  Core: `pty_attach` (`scopeTerminal`, `App.PtyAttach`); `tab_output` + `send_to_tab`'s tail read go through
+  `control.Deps.Screen` (`ptyWriter.ScreenText`, not an `App` method) and fall back to the UI on **any** error.
+  Client: `ptyStream.attach(fetch, paint)` holds live chunks while the snapshot is in flight, then continues at
+  `off`; `XTerm.vue` attaches after `create_pty`, re-attaches on `onLost` and — only if it attached during a
+  TUI — on `pty-resync-<id>`.
+- **No 2 000-line cut.** Attach sends the whole history: `Format(VT)` of the full 8 MiB cap is 3.4 ms / 1.2 MB,
+  which is what today's cold path already shipped as a 1 MiB ring (as a JSON int array, ~4×). Revisit if a phone
+  attach is slow.
+- **There was no cold replay to replace.** `create_pty` on a live id is a no-op in the daemon and nothing called
+  `pty_since` at mount, so a re-mounted view (window reopened, phone) started **blank** until the next output —
+  the "ring replay" comments in `XTerm.vue` / `Terminal.vue` described a path that no longer existed. Attach is
+  the first thing that rebuilds such a view.
+- **Build gating:** `just libghostty` (zig 0.17+, `ZIG=` to override) → `src-wails/third_party/` (gitignored).
+  `Taskfile.yml` adds `-tags vt` to burrow-daemon only when the lib exists **and** `CHANNEL` is set (beta/dev);
+  stable stays ring-only until Phase 3. The dev `go run` daemon fallback (`daemonclient.go`) uses the tag when the
+  lib exists.
+- **Verified:** `go test -race -tags vt ./internal/ptycore` (clean text, resize, alt + one resync, snapshot offset
+  is a chunk boundary mid-flood); tab_output fallback tests; `ptyStream.attach` tests; real `burrow-daemon` over its
+  socket + `@xterm/headless`: a view attached mid-flood and one attached during `top` then re-attached on
+  `pty-resync` both match a view fed the whole stream (screen, cursor, all 2 000 history rows).
+- **GUI check (`just dev-mcp`, driven over Wails MCP + the dev control API):** `location.reload()` (= a fresh frontend
+  against live PTYs) restored 3 000 history rows with no duplicates; a reload during `top` showed `top`, and `q` →
+  `pty-resync` brought the 3 000 rows back; a reload mid-`seq 1 20000` ended contiguous at line 20000.
+- **Not verified:** a real window close/reopen, the phone.
+- **Dev fixes found on the way** (pre-existing since plan 009): `just dev-mcp` killed the core (UI and core both start
+  Wails' MCP server on 9099 and a taken port is fatal — the core now defaults `WAILS_MCP_PORT=0`), and the dev core
+  (launchd, cwd `/`) could not `go run` the daemon — `Taskfile.yml`'s `run` now builds it into `Burrow.dev.app`.
+
+## Phase 3, first step as built (2026-11-12): unmount hidden tabs — beta/dev only
+
+Gated on the **daemon's capability**, not the channel name: `pty_emulator` (`App.PtyEmulator` → daemon `version`
+reply `emulator`, `ptycore.Emulator()`) is true only for a `vt` daemon, i.e. beta/dev builds. `src/lib/ptyEmulator.ts`
+asks once per window (retries for a minute — a window can boot before its core) and `Terminal.vue` applies the
+phone's existing rule on the desktop too: an `XTerm` is mounted only for a visible tab (or one still owing its first
+command). A stable app reads false and keeps every terminal mounted, exactly as before. `Terminal` also gets
+`shown` from App.vue (its workspace is the one on screen, not welcome / dashboard / another workspace), so a hidden
+workspace's xterms go too. Still mounted: RP terminals, and a leaf whose XTerm has a job left:
+- `ptyReady` unset — the PTY does not exist yet (mounting is what runs `create_pty`), e.g. `new_tab` into a
+  workspace not on screen; set by XTerm's `pty-ready`, and at restore/adopt for a PTY the daemon already has;
+- `initialCmd` not yet typed — `cmdSent` (XTerm's `cmd-sent`) ends that, so a spawned agent tab can unmount and a
+  remount never types `claude …` again. `initialCmd` itself stays (agent icon, `claude --resume` on restore).
+
+- **Fixed on the way (all channels):** `safeFit` sent the FitAddon's 2×1 floor to the PTY when a view mounted into
+  a pane not laid out yet — the shell/TUI redrew at 2 columns for ~150 ms (measured with a `pty_size` poll), leaving
+  chopped lines in the scrollback. A 2×1 proposal is now "not measured yet", not a size.
+- **Verified live (`just dev-mcp`):** a hidden tab has no xterm; back on it: 3 000 history rows + 500 rows printed
+  while hidden, both contiguous, no 2-column lines; `top` started then hidden shows `top` on return and `q` brings the
+  3 000 rows back.
+- **Known gap (beta):** a hidden tab gets no OSC title and no foreground-name auto-title until shown (both come
+  from the mounted XTerm); the phase title from hooks still applies (`Terminal.vue`). Same trade-off the phone has.
+- **Verified live too:** a spawned tab (`new_tab --cmd`) hidden and re-shown twice ran its command once; welcome /
+  dashboard unmount the workspace's xterms and the route back restores them; `new_tab` on the welcome screen gets a
+  PTY at once (`send_to_tab` works) and its xterm unmounts after.
+- **Not done yet (rest of Phase 3):** deleting `frozen` / the float `SerializeAddon` relay / `sanitizeTitle`'s mid-OSC
+  case — they still serve stable, which keeps everything mounted; they go when the `vt` tag is dropped for stable.
+
+## Phase 4 as built (2026-11-12)
+
+The daemon's `foreground` reply carries `alt` / `atPrompt` (`Manager.ScreenFlags`; OSC 133 via `CursorAtPrompt`).
+The poll asks (`DaemonClient.ForegroundScreen`) only in its "unknown foreground, not an agent" branch:
+`atPrompt` ⇒ treated as a shell at its prompt (nu / xonsh / pwsh used to sit `running` forever); `alt` ⇒ new
+`agentphase.PollInteractive` (running → idle, **no** Done, so quitting vim leaves no review dot). Never above hooks,
+`claudestatus.go` or an `IsAgent` leaf. Title: not carried — nothing needed it. Verified live: a `vim` tab stays
+idle and ends idle with `turn_ended_at = 0`; `sleep 20` next to it goes running → done as before.
+
+## Phase 0 results (2026-11-11, zig 0.17.1, arm64, M-series)
+
+Spike programs lived outside the repo (throwaway); the numbers:
+
+| Question / metric | Answer |
+|---|---|
+| Q1 — Plain/VT formatter includes scrollback? | **Yes**, the whole history of the active screen |
+| Q2 — primary readable while alt screen is up? | **No.** The formatter sees only the alt screen; after `?1049l` the primary (+ history) is back. ⇒ `pty-resync-<id>` on alt-screen exit **is needed** (Phase 2 step 3) |
+| `libghostty-vt.a` build | ~1.5 min cold (`just libghostty`), 12 MB `.a` |
+| burrow-daemon size (`-s -w`) | 3.3 MB → **5.7 MB** (+2.4 MB), libc/system frameworks only |
+| Throughput | today's pump (ring + JSON int array) **94 MB/s**; `VTWrite` alone 442 MB/s (SGR-heavy) / 124 MB/s (`yes`); pump + emulator ≈ **78 MB/s = 83 %** of today. The JSON int-array wire is the real ceiling, not the emulator |
+| Memory at the cap (7.5k rows, 8 MiB) | 8.8 MB resident → **1.6 MB** after `Compress(Full)` |
+| `Format(VT)` time | 3.4 ms for the **whole** 7.5k-row history (1.2 MB), 2.1 ms Plain ⇒ under the 5 ms lock budget without the 2 000-line cut |
+| Default scrollback cap | libghostty's default **byte** cap is small (677 rows of a git log); `WithMaxScrollbackBytes` must always be set |
+| xterm round trip (shell, `git log --color`, vim, top, claude; `@xterm/headless` raw vs. VT snapshot, 120×40) | **text, cursor, buffer type, modes identical** in all five. Known diffs: (1) Ghostty re-encodes 16-colour SGR as `38;5;N` — same palette index, but xterm's default `drawBoldTextInBrightColors` brightens only the 16-colour form, so **bold + basic colour renders a shade darker** after attach; (2) a lone invalid UTF-8 byte shows as U+FFFD instead of nothing; (3) soft-wrap flags on a few alt-screen rows (copy/selection only) |
+
+Exit criteria met (size < 20 MB, throughput > 50 %, round trip identical).
 
 ## Decisions
 

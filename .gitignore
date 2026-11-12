@@ -23,3 +23,6 @@ src-server/target
 # subagent-driven-development scratch workspace
 .superpowers/
 .env
+
+# libghostty-vt static lib (`just libghostty`, docs/plans/010-server-side-vt.md)
+src-wails/third_party/

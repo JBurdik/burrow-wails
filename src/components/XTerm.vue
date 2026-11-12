@@ -41,7 +41,7 @@ const props = defineProps<{ ptyId: number; cwd: string; initialCmd?: string; res
 // No status emits: the agent's phase is derived in Go and reaches Terminal.vue
 // on `phase-pty:{id}`. What is left here is what only the view can know — the
 // title, an OSC 7 cwd, and a spawn request.
-const emit = defineEmits<{ title: [t: string]; spawn: [req: { cmd: string; token: string; cwd: string }]; cwd: [p: string] }>();
+const emit = defineEmits<{ title: [t: string]; spawn: [req: { cmd: string; token: string; cwd: string }]; cwd: [p: string]; "cmd-sent": []; "pty-ready": [] }>();
 
 const ui = useUIStore();
 
@@ -141,6 +141,7 @@ let unlistenExit: UnlistenFn | null = null;
 let unlistenState: (() => void) | null = null;
 let unlistenSnapReq: UnlistenFn | null = null;
 let unlistenWrite: UnlistenFn | null = null;
+let unlistenResync: UnlistenFn | null = null;
 let resizeObserver: ResizeObserver;
 let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 let pollTimer: ReturnType<typeof setInterval>;
@@ -248,6 +249,8 @@ let lastPtyRows = 0;
 // `mirrorPending` holds every resize until that size is known; an unknown size
 // (no desktop has fitted it since the core started) falls back to fitting.
 type Grid = { cols: number; rows: number };
+/** pty_attach's reply: `vt` is base64, cut at byte `off` of the PTY's output. */
+type PtySnapshot = { off: number; vt: string; cols: number; rows: number; alt: boolean };
 const mirror = ref<Grid | null>(null);
 let mirrorPending = phone.value;
 let unlistenSize: UnlistenFn | null = null;
@@ -292,6 +295,12 @@ function safeFit(): boolean {
     return changed;
   }
   if (mirrorPending) return false;
+  // FitAddon clamps to 2×1 when the layout has no measurable size yet (a view
+  // mounting into a pane that is still being laid out). Sending that to the
+  // PTY made the shell / TUI redraw at 2 columns for a moment on every mount —
+  // garbage lines in the scrollback. No real terminal is 2 columns wide.
+  const dims = fitAddon.proposeDimensions();
+  if (!dims || dims.cols <= 2 || dims.rows <= 1) return false;
   const stick = isAtBottom();
   fitAddon.fit();
   // A fit re-wraps scrollback (esp. when a hidden tab gets its real size on
@@ -381,7 +390,7 @@ onMounted(async () => {
   if (phone.value) void startMirror();
   safeFit();
   deferredFit();
-  // Ring-buffer replay from the daemon streams in after the rAF-deferred fit.
+  // The daemon's screen snapshot (pty_attach) lands after the rAF-deferred fit.
   // A further delayed repaint clears any stale atlas glyphs without a SIGWINCH.
   setTimeout(() => forceRepaint(), 350);
 
@@ -510,10 +519,36 @@ onMounted(async () => {
 
     lastDataAt = performance.now();
   };
+  // Start from the daemon's screen instead of mid-stream (plan 010): its
+  // emulator hands back VT bytes that rebuild the screen, history, modes and
+  // cursor, cut at the byte offset the live stream continues from. Not through
+  // renderBytes — a snapshot must not re-fire spawn requests or OSC 7. A daemon
+  // without the emulator refuses, and the view starts blank as it always did.
+  let attachedInAlt = false;
+  const attach = () => ptyStream.attach(
+    () => invoke<PtySnapshot>("pty_attach", { id: props.ptyId }),
+    (snap) => {
+      const resized = snap.cols > 0 && snap.rows > 0 && (snap.cols !== term.cols || snap.rows !== term.rows);
+      term.reset();
+      // The bytes are laid out for the PTY's grid; write them at that size,
+      // then fit back to this view (both emulators reflow on the resize_pty).
+      if (resized) term.resize(snap.cols, snap.rows);
+      term.write(Uint8Array.from(atob(snap.vt ?? ""), (c) => c.charCodeAt(0)), () => {
+        term.scrollToBottom();
+        if (resized) { lastPtyCols = lastPtyRows = -1; safeFit(); }
+      });
+      attachedInAlt = snap.alt;
+    },
+  );
   const ptyStream = createPtyStream({
     write: renderBytes,
     fetchSince: (since) => invoke<PtyChunk>("pty_since", { id: props.ptyId, since }),
-    onLost: (n) => console.warn(`[xterm ${props.ptyId}] ${n} bytes of output fell out of the daemon ring during a disconnect`),
+    // A disconnect outran the daemon's byte ring: repaint from its screen
+    // rather than live on with a hole.
+    onLost: (n) => {
+      console.warn(`[xterm ${props.ptyId}] ${n} bytes of output fell out of the daemon ring during a disconnect — re-attaching`);
+      queueMicrotask(() => void attach());
+    },
   });
   // The socket came back: fetch what was streamed while it was down.
   try {
@@ -524,7 +559,7 @@ onMounted(async () => {
     });
   } catch { /* no endpoint (browser-only dev) — nothing to reconnect */ }
 
-  [unlisten, unlistenExit, unlistenWrite, unlistenSnapReq] = await Promise.all([
+  [unlisten, unlistenExit, unlistenWrite, unlistenSnapReq, unlistenResync] = await Promise.all([
     // Stream output from Rust → xterm
     listen<PtyChunk>(`pty-data-${props.ptyId}`, (event) => ptyStream.push(event.payload)),
     // A new PTY under this id numbers its output from 0 again.
@@ -553,6 +588,13 @@ onMounted(async () => {
         });
       } catch { /* float falls back to live-only after its timeout */ }
     }),
+    // The PTY left the alt screen. Only a view that attached while a TUI was up
+    // needs this: it never had the primary screen, which is back now.
+    listen(`pty-resync-${props.ptyId}`, () => {
+      if (!attachedInAlt) return;
+      attachedInAlt = false;
+      void attach();
+    }),
   ]);
 
   // Create PTY. A failure must NOT abort onMounted: everything below it —
@@ -567,13 +609,16 @@ onMounted(async () => {
   });
   try {
     await createPty();
+    emit("pty-ready");
   } catch {
     try {
       await createPty();
+      emit("pty-ready");
     } catch (e) {
       term.writeln(`\r\n\x1b[31mburrow: could not start this terminal — ${e}\x1b[0m`);
     }
   }
+  await attach();
 
   // Send initial command once the shell is actually ready (inject --settings for
   // claude). A fixed timeout raced slow startups (a login shell sourcing
@@ -601,6 +646,7 @@ onMounted(async () => {
         pendingOscTitle = null;
         const bytes = Array.from(new TextEncoder().encode(cmd + "\n"));
         invoke("write_pty", { id: props.ptyId, data: bytes });
+        emit("cmd-sent");
       } else {
         setTimeout(trySend, 100);
       }
@@ -794,6 +840,7 @@ onBeforeUnmount(async () => {
   unlistenExit?.();
   unlistenState?.();
   unlistenSnapReq?.();
+  unlistenResync?.();
   unlistenWrite?.();
   unlistenDrop?.();
   unlistenSize?.();

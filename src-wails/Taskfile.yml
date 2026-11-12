@@ -10,6 +10,13 @@ vars:
     sh: "sed -n 's/^  version: \"\\(.*\\)\".*/\\1/p' build/config.yml"
   # Release channel baked into the binary (channel.go); "" = stable.
   CHANNEL: '{{.CHANNEL | default ""}}'
+  # burrow-daemon gets the libghostty terminal emulator (`vt` tag, plan 010) on
+  # beta/dev builds when `just libghostty` has built the static lib; stable stays
+  # ring-only until the emulator has had its beta week (plan 010, Phase 1 → 3).
+  VT_PC: '{{.ROOT_DIR}}/third_party/libghostty-vt/aarch64-macos/share/pkgconfig'
+  VT_LIB:
+    sh: test -f third_party/libghostty-vt/aarch64-macos/lib/libghostty-vt.a && echo vt || true
+  VT_TAG: '{{if .CHANNEL}}{{.VT_LIB}}{{end}}'
 
 env:
   CGO_ENABLED: 1
@@ -46,7 +53,7 @@ tasks:
       - /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString {{.VERSION}}" -c "Set :CFBundleVersion {{.VERSION}}" "{{.APP}}/Contents/Info.plist"
       - mkdir -p "{{.APP}}/Contents/Library/LaunchAgents"
       - sed "s/LABEL/com.agenticide.wails{{if .CHANNEL}}.{{.CHANNEL}}{{end}}.core/" build/darwin/core.plist > "{{.APP}}/Contents/Library/LaunchAgents/core.plist"
-      - go build -o "{{.APP}}/Contents/MacOS/burrow-daemon" ./cmd/burrow-daemon
+      - PKG_CONFIG_PATH="{{.VT_PC}}" go build -tags "{{.VT_TAG}}" -o "{{.APP}}/Contents/MacOS/burrow-daemon" ./cmd/burrow-daemon
       - go build -ldflags "-X main.buildVersion={{.VERSION}}" -o "{{.APP}}/Contents/MacOS/burrow-mcp" ./cmd/burrow-mcp
 
   run:
@@ -56,6 +63,9 @@ tasks:
       - mkdir -p "{{.BIN}}/Burrow.dev.app/Contents/MacOS"
       - cp {{.BIN}}/Burrow "{{.BIN}}/Burrow.dev.app/Contents/MacOS/"
       - cp build/darwin/Info.dev.plist "{{.BIN}}/Burrow.dev.app/Contents/Info.plist"
+      # The daemon next to the binary, where the core looks first: the core is
+      # started by launchd with cwd /, where the `go run` fallback finds no go.mod.
+      - PKG_CONFIG_PATH="{{.VT_PC}}" go build -tags "{{.VT_LIB}}" -o "{{.BIN}}/Burrow.dev.app/Contents/MacOS/burrow-daemon" ./cmd/burrow-daemon
       - codesign --force --sign - "{{.BIN}}/Burrow.dev.app"
       - '"{{.BIN}}/Burrow.dev.app/Contents/MacOS/Burrow"'
 

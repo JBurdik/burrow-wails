@@ -151,6 +151,8 @@ var remoteAllowed = map[string]remoteCmd{
 	"resize_pty":         {Method: "ResizePty", Args: []string{"id", "cols", "rows"}, Scope: scopeTerminal},
 	"kill_pty":           {Method: "KillPty", Args: []string{"id"}, Scope: scopeTerminal},
 	"pty_since":          {Method: "PtySince", Args: []string{"id", "since"}, Scope: scopeTerminal},
+	"pty_attach":         {Method: "PtyAttach", Args: []string{"id"}, Scope: scopeTerminal},
+	"pty_emulator":       {Method: "PtyEmulator", Args: nil, Scope: scopeTerminal},
 	"pty_size":           {Method: "PtySize", Args: []string{"id"}, Scope: scopeTerminal},
 	"get_pty_foreground": {Method: "GetPtyForeground", Args: []string{"id"}, Scope: scopeOrchRead},
 	"list_pty_sessions":  {Method: "ListPtySessions", Args: nil, Scope: scopeOrchRead},

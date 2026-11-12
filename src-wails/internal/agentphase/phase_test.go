@@ -281,3 +281,19 @@ func TestStatusIdleSettlesOnlyInFlightTurns(t *testing.T) {
 		}
 	}
 }
+
+// A TUI on the alt screen (vim) is interactive, not a running turn: the first
+// poll's PollBusy is undone without a Done, so quitting it leaves no review dot.
+func TestInteractiveIsNotATurn(t *testing.T) {
+	p := apply(Phase{}, Event{Kind: PollBusy}, Event{Kind: PollInteractive})
+	if p.State != Idle || p.TurnEndedAt != 0 {
+		t.Fatalf("want idle with no turn end, got %+v", p)
+	}
+	if got := apply(p, Event{Kind: PollNotBusy}); got.State != Idle || got.TurnEndedAt != 0 {
+		t.Fatalf("back at the shell must not mint a done: %+v", got)
+	}
+	agent := apply(Phase{}, Event{Kind: HookRunning})
+	if got := apply(agent, Event{Kind: PollInteractive}); got.State != Running {
+		t.Fatalf("an agent's turn is the hooks' to end, got %q", got.State)
+	}
+}

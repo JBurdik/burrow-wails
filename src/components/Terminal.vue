@@ -131,15 +131,16 @@
             :initial-url="pane.leaf.browserUrl"
           />
           <GitPanel v-else-if="pane.leaf.leafType === 'git'" class="min-w-0 flex-1" />
-          <!-- Phone: only the tab on screen keeps an xterm (+ its replayed 1 MiB
-               ring); a hidden one is detached and re-attached when shown. A leaf
-               still owing its first command mounts anyway — that mount is what
-               spawns it. -->
+          <!-- Phone, and any app whose daemon keeps an emulator (beta/dev, plan
+               010): only the tab on screen keeps an xterm; a hidden one is
+               detached and rebuilt from pty_attach when shown. A leaf whose PTY
+               does not exist yet, or that still owes its first command, mounts
+               anyway — that mount is what spawns it (create_pty) and types it. -->
           <XTerm
-            v-else-if="(!pane.leaf.leafType || pane.leaf.leafType === 'terminal') && (!phone || isTabVisible(tab) || pane.leaf.initialCmd)"
+            v-else-if="(!pane.leaf.leafType || pane.leaf.leafType === 'terminal') && (!(phone || ptyEmulator) || (props.shown && isTabVisible(tab)) || !pane.leaf.ptyReady || (pane.leaf.initialCmd && !pane.leaf.cmdSent))"
             :pty-id="pane.leaf.id"
             :cwd="pane.leaf.cwd ?? cwd"
-            :initial-cmd="pane.leaf.initialCmd"
+            :initial-cmd="pane.leaf.cmdSent ? undefined : pane.leaf.initialCmd"
             :result-token="pane.leaf.resultToken"
             :initially-titled="!isDefaultTitle(pane.leaf.title)"
             :frozen="popouts.isPopped(pane.leaf.id)"
@@ -147,6 +148,8 @@
             @title="(t) => onLeafTitle(pane.leaf.id, t)"
             @spawn="(req) => addTab(req.cmd, { cwd: req.cwd || undefined, resultToken: req.token || undefined })"
             @cwd="(p) => onLeafCwd(pane.leaf.id, p)"
+            @cmd-sent="pane.leaf.cmdSent = true"
+            @pty-ready="pane.leaf.ptyReady = true"
           />
           <PhoneKeys v-if="phone && (!pane.leaf.leafType || pane.leaf.leafType === 'terminal') && !popouts.isPopped(pane.leaf.id)" :pty-id="pane.leaf.id" />
           <!-- Popped out into its own window: the view above stays mounted
@@ -210,6 +213,8 @@ import PtyPermissionBanner from "./PtyPermissionBanner.vue";
 import SecretRequestCard from "./SecretRequestCard.vue";
 import PhoneKeys from "./phone/PhoneKeys.vue";
 import { compact as phone } from "@/lib/viewport";
+import { ptyEmulator, loadPtyEmulator } from "@/lib/ptyEmulator";
+loadPtyEmulator();
 import DiffTab from "./DiffTab.vue";
 import CodeEditor from "./CodeEditor.vue";
 import AgentChat from "./AgentChat.vue";
@@ -250,7 +255,10 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { onSeenChanged, shareSeen } from "@/lib/seenSync";
 import { pushClosedView } from "@/lib/closedViews";
 
-const props = defineProps<{ cwd: string; workspaceId: number }>();
+// shown: this workspace is what the main pane displays (not another workspace,
+// the welcome composer or the dashboard). Only gates unmounting hidden xterms
+// on an emulator daemon (plan 010); everything else here ignores it.
+const props = withDefaults(defineProps<{ cwd: string; workspaceId: number; shown?: boolean }>(), { shown: true });
 const wsStore = useWorkspaceStore();
 const uiStore = useUIStore();
 const chatsStore = useClaudeChatsStore();
@@ -1149,6 +1157,7 @@ function adoptPty(opts: { ptyId: number; cwd: string; title: string; sessionId?:
     if (existing) { focusLeaf(opts.ptyId); return existing; }
   }
   const leaf = makeLeaf(undefined, { cwd: opts.cwd, id: opts.ptyId });
+  leaf.ptyReady = true; // adopting a live daemon PTY
   leaf.isAgent = true;
   leaf.title = opts.title;
   leaf.defaultTitle = opts.title;
@@ -1796,6 +1805,8 @@ onMounted(async () => {
         cwd: s.cwd ?? undefined,
         id: useSavedId ? s.pty_id! : undefined,
       });
+      // Alive in the daemon: nothing to spawn, so a hidden one needs no mount.
+      leaf.ptyReady = useSavedId;
       // Restore the "Terminal N" base title (defaultTitle), then the live title.
       // Old rows with no default_title fall back to the auto-generated counter name.
       leaf.defaultTitle = s.default_title || leaf.defaultTitle;
