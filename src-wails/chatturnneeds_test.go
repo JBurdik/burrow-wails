@@ -77,11 +77,14 @@ func TestTurnNeedsSurvivesMidTurnPhases(t *testing.T) {
 	if got.TurnNeeds == "" {
 		t.Fatal("turn_needs cleared inside its own turn")
 	}
+	// HookDone settles the turn audit on a goroutine; let it land before the
+	// TempDir is removed (a late write recreated the WAL mid-cleanup).
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChatRunAskRunsStoredCommandOnce(t *testing.T) {
-	a := newTestApp(t)
-	c, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "t"})
+	a, _, wsID, _ := runtimeApp(t)
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Title: "t"})
 	ran := make(chan string, 2)
 	prev := runAskShell
 	runAskShell = func(_ context.Context, _ string, cmd string) (string, int) {
@@ -149,5 +152,36 @@ func TestEndTurnGate(t *testing.T) {
 	_ = a.SetTurnNeeds(c.ID, control.TurnNeeds{Needs: "nothing"})
 	if p, _ := a.TurnNeedsPending(c.ID); p {
 		t.Fatal("end_turn called: not pending")
+	}
+}
+
+func TestRunAskRefusesArchivedAndResetsInterrupted(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Title: "t"})
+	needs := control.TurnNeeds{Needs: "you", Asks: []control.TurnAsk{{Question: "Deploy?", Suggested: -1, Run: &control.TurnRun{Command: "make deploy", State: "running"}}}}
+	_ = a.SetTurnNeeds(c.ID, needs)
+	a.resetInterruptedRuns()
+	row, _ := a.chatByID(c.ID)
+	if !strings.Contains(row.TurnNeeds, `"interrupted":true`) || strings.Contains(row.TurnNeeds, `"state":"running"`) {
+		t.Fatalf("a run cut by a restart must become runnable again: %s", row.TurnNeeds)
+	}
+	_, _ = a.db.Exec(`UPDATE chats SET archived_at = 1 WHERE id = ?`, c.ID)
+	if err := a.ChatRunAsk(c.ID, 0); err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("archived thread must refuse, got %v", err)
+	}
+}
+
+func TestRunAskShellKillsTheWholeGroup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	// A grandchild holding the output pipe used to keep the read open past
+	// the deadline.
+	out, code := runAskShell(ctx, t.TempDir(), "sleep 30 & sleep 30")
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("took %s: the group was not killed", time.Since(start))
+	}
+	if code == 0 || !strings.Contains(out, "time limit") {
+		t.Fatalf("out=%q code=%d", out, code)
 	}
 }

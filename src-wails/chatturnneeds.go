@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"burrow/internal/agentphase"
@@ -88,6 +90,7 @@ type looseEndFacts struct {
 	PrState     string
 	Children    []looseChild
 	Schedules   int
+	SharedWith  int // other open threads in the same (non-worktree) folder
 }
 
 type looseChild struct {
@@ -106,7 +109,11 @@ func plural(n int, one, many string) string {
 func looseEnds(f looseEndFacts) []LooseEnd {
 	out := []LooseEnd{}
 	if f.Uncommitted > 0 {
-		out = append(out, LooseEnd{Kind: "uncommitted", Text: plural(f.Uncommitted, "uncommitted file", "uncommitted files")})
+		text := plural(f.Uncommitted, "uncommitted file", "uncommitted files")
+		if f.SharedWith > 0 {
+			text += " in this folder (shared with " + plural(f.SharedWith, "other thread", "other threads") + ")"
+		}
+		out = append(out, LooseEnd{Kind: "uncommitted", Text: text})
 	}
 	if f.Unpushed > 0 {
 		out = append(out, LooseEnd{Kind: "unpushed", Text: plural(f.Unpushed, "commit not pushed", "commits not pushed")})
@@ -145,13 +152,20 @@ func (a *App) ChatLooseEnds(chatID int64) ([]LooseEnd, error) {
 	}
 	f := looseEndFacts{Unpushed: -1, PrNumber: c.PrNumber, PrState: c.PrState}
 	if cwd := a.chatCwd(c); cwd != "" {
-		if out := runCmd("git", cwd, []string{"status", "--porcelain"}); out.Success {
-			f.Uncommitted = countLines(out.Stdout)
-			if r := runCmd("git", cwd, []string{"remote"}); r.Success && strings.TrimSpace(r.Stdout) != "" {
-				if n := runCmd("git", cwd, []string{"rev-list", "--count", "HEAD", "--not", "--remotes"}); n.Success {
-					f.Unpushed, _ = strconv.Atoi(strings.TrimSpace(n.Stdout))
+		if out, ok := untrustedGit(cwd, "status", "--porcelain", "--untracked-files=all"); ok {
+			f.Uncommitted = countLines(out)
+			if r, ok := untrustedGit(cwd, "remote"); ok && strings.TrimSpace(r) != "" {
+				if n, ok := untrustedGit(cwd, "rev-list", "--count", "HEAD", "--not", "--remotes"); ok {
+					f.Unpushed, _ = strconv.Atoi(strings.TrimSpace(n))
 				}
 			}
+		}
+		// A repo's own checkout can hold other threads' work too: say so
+		// rather than pin every change on this one (a worktree is the thread's).
+		var parent sql.NullInt64
+		_ = a.db.QueryRow(`SELECT parent_id FROM workspaces WHERE id = ?`, c.WorkspaceID).Scan(&parent)
+		if !parent.Valid || parent.Int64 == 0 {
+			_ = a.db.QueryRow(`SELECT COUNT(*) FROM chats WHERE workspace_id = ? AND id != ? AND archived_at = 0 AND parent_chat_id = 0`, c.WorkspaceID, chatID).Scan(&f.SharedWith)
 		}
 	}
 	rows, err := a.db.Query(`SELECT id, title FROM chats WHERE parent_chat_id = ? AND archived_at = 0 AND kind != 'side'`, chatID)
@@ -191,12 +205,18 @@ const (
 	runAskOutputCap = 16 << 10
 )
 
-// runAskShell is what executes a pressed command; a var for tests.
+// runAskShell is what executes a pressed command or a schedule check; a var
+// for tests. The command gets its own process group and the deadline kills
+// the whole group: killing only `sh` left a child holding the output pipe,
+// and the read hung past the limit. No stdin: a command that asks "are you
+// sure?" fails rather than hangs.
 var runAskShell = func(ctx context.Context, cwd, cmd string) (string, int) {
 	c := exec.CommandContext(ctx, "/bin/sh", "-c", cmd)
 	c.Dir = cwd
 	c.Env = append(os.Environ(), "PATH="+augmentedPath(cwd))
-	// No stdin: a command that asks "are you sure?" fails rather than hangs.
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
+	c.WaitDelay = 2 * time.Second
 	out, err := c.CombinedOutput()
 	code := 0
 	if err != nil {
@@ -206,10 +226,31 @@ var runAskShell = func(ctx context.Context, cwd, cmd string) (string, int) {
 			code = ee.ExitCode()
 		}
 		if ctx.Err() != nil {
-			out = append(out, []byte("\n[stopped after 10 minutes]")...)
+			out = append(out, []byte("\n[stopped: it ran past its time limit]")...)
 		}
 	}
-	return string(out), code
+	return strings.ToValidUTF8(string(out), "\uFFFD"), code
+}
+
+// untrustedGit reads a thread's folder without running anything the folder
+// itself names (threadbear's safe-git): a repo's .git/config can set
+// core.fsmonitor to a program git starts on `status`, and a hook path, and a
+// lazy fetch through a planted transport. -c beats the repo's config; the
+// environment drops every GIT_ variable, which could come after the -c.
+func untrustedGit(cwd string, args ...string) (string, bool) {
+	full := append([]string{"-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+		"-c", "core.hooksPath=/dev/null", "-c", "protocol.allow=never"}, args...)
+	c := exec.Command("git", full...)
+	c.Dir = cwd
+	env := []string{"GIT_NO_LAZY_FETCH=1", "GIT_TERMINAL_PROMPT=0"}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	c.Env = env
+	out, err := c.Output()
+	return string(out), err == nil
 }
 
 // ChatRunAsk presses ask `index`'s Run. It returns once the command has
@@ -231,11 +272,18 @@ func (a *App) ChatRunAsk(chatID int64, index64 int64) error {
 	if run.State != "" {
 		return fmt.Errorf("already run")
 	}
+	if c.ArchivedAt != 0 {
+		return fmt.Errorf("this thread is archived — unarchive it to run its command")
+	}
+	cwd := a.chatCwd(c)
+	if st, err := os.Stat(cwd); cwd == "" || err != nil || !st.IsDir() {
+		return fmt.Errorf("the thread's folder is gone (%s)", cwd)
+	}
 	run.State = "running"
 	if !a.swapTurnNeeds(chatID, c.TurnNeeds, n) {
 		return fmt.Errorf("the card changed — look again")
 	}
-	cwd, cmd := a.chatCwd(c), run.Command
+	cmd := run.Command
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), runAskTimeout)
 		defer cancel()
@@ -282,9 +330,9 @@ func (a *App) finishRunAsk(chatID int64, index int, cmd string, code int) {
 
 func runAskReply(cmd, cwd, out string, code int) string {
 	if len(out) > runAskOutputCap {
-		out = "…(earlier output cut)\n" + out[len(out)-runAskOutputCap:]
+		out = "…(earlier output cut)\n" + strings.ToValidUTF8(out[len(out)-runAskOutputCap:], "")
 	}
-	out = strings.TrimRight(out, "\n")
+	out = strings.ReplaceAll(strings.TrimRight(out, "\n"), "```", "ˋˋˋ") // a fence in the output would end ours
 	if out == "" {
 		out = "(no output)"
 	}
@@ -302,3 +350,41 @@ func endTurnGateSettings(burrowBin string) string {
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// resetInterruptedRuns: a restart while a card's command ran left it
+// "running" for good — the card spun and Run refused ("already run"). At
+// startup nothing of ours is running, so such a run is marked interrupted and
+// can be pressed again.
+func (a *App) resetInterruptedRuns() {
+	if a.db == nil {
+		return
+	}
+	rows, err := a.db.Query(`SELECT id, turn_needs FROM chats WHERE turn_needs LIKE '%"state":"running"%'`)
+	if err != nil {
+		return
+	}
+	type row struct {
+		id  int64
+		raw string
+	}
+	var hits []row
+	for rows.Next() {
+		var r row
+		if rows.Scan(&r.id, &r.raw) == nil {
+			hits = append(hits, r)
+		}
+	}
+	rows.Close()
+	for _, r := range hits {
+		var n control.TurnNeeds
+		if json.Unmarshal([]byte(r.raw), &n) != nil {
+			continue
+		}
+		for _, ask := range n.Asks {
+			if ask.Run != nil && ask.Run.State == "running" {
+				ask.Run.State, ask.Run.Interrupted = "", true
+			}
+		}
+		a.swapTurnNeeds(r.id, r.raw, n)
+	}
+}

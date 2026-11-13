@@ -48,6 +48,8 @@ type TurnRun struct {
 	// "" (not run) | running | done
 	State string `json:"state,omitempty"`
 	Exit  int    `json:"exit,omitempty"`
+	// Interrupted: a restart cut the last run short; it may be run again.
+	Interrupted bool `json:"interrupted,omitempty"`
 }
 
 // MaxRunCommand caps an ask's command: past it, a script is the honest form.

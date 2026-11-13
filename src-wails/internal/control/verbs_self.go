@@ -47,6 +47,10 @@ type ScheduledPrompt struct {
 	// along in the message. Only the local schedule verb sets it (an agent / the
 	// CLI); the wire's schedule_save never writes it.
 	Check string `json:"check,omitempty"`
+	// CheckSig / CheckOutput: the app's own bookkeeping (chatschedule.go),
+	// never set from outside.
+	CheckSig    string `json:"-"`
+	CheckOutput string `json:"-"`
 }
 
 // Schedules persists scheduled prompts; the host's sweep delivers them through

@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -70,18 +74,22 @@ func chatSchedulesAlters() []string {
 		`ALTER TABLE chat_schedules ADD COLUMN last_run_at INTEGER NOT NULL DEFAULT 0`,
 		// Pre-run check command (scheduleCheck below); set by the schedule verb only.
 		`ALTER TABLE chat_schedules ADD COLUMN check_cmd TEXT NOT NULL DEFAULT ''`,
+		// What the check is bound to (checkSignature) and output a check found
+		// that hasn't been sent yet (so a failed send doesn't run it again).
+		`ALTER TABLE chat_schedules ADD COLUMN check_sig TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE chat_schedules ADD COLUMN check_output TEXT NOT NULL DEFAULT ''`,
 	}
 }
 
 const scheduleCols = `id, chat_id, name, text, due_at, created_at, attempts, last_error,
-	kind, every_min, weekdays, time_of_day, new_chat, workspace_id, agent, paused, last_run_at, check_cmd`
+	kind, every_min, weekdays, time_of_day, new_chat, workspace_id, agent, paused, last_run_at, check_cmd, check_sig, check_output`
 
 func scanSchedule(row interface{ Scan(...any) error }) (control.ScheduledPrompt, error) {
 	var p control.ScheduledPrompt
 	var due, created, lastRun int64
 	var days string
 	err := row.Scan(&p.ID, &p.ChatID, &p.Name, &p.Text, &due, &created, &p.Attempts, &p.LastError,
-		&p.Rule.Kind, &p.Rule.EveryMin, &days, &p.Rule.TimeOfDay, &p.NewChat, &p.WorkspaceID, &p.Agent, &p.Paused, &lastRun, &p.Check)
+		&p.Rule.Kind, &p.Rule.EveryMin, &days, &p.Rule.TimeOfDay, &p.NewChat, &p.WorkspaceID, &p.Agent, &p.Paused, &lastRun, &p.Check, &p.CheckSig, &p.CheckOutput)
 	if err != nil {
 		return p, err
 	}
@@ -178,11 +186,20 @@ func (s scheduleAdapter) save(p control.ScheduledPrompt) (control.ScheduledPromp
 		if err != nil {
 			return none, err
 		}
+		// A check was approved for one folder: an edit that moves the
+		// schedule to another chat / project drops it rather than run it there.
+		if old.Check != "" && (old.ChatID != p.ChatID || old.WorkspaceID != p.WorkspaceID || old.NewChat != p.NewChat) {
+			_, _ = a.db.Exec(`UPDATE chat_schedules SET check_cmd = '', check_sig = '', check_output = '' WHERE id = ?`, p.ID)
+		}
 		return s.get(p.ID)
 	}
+	sig := ""
+	if p.Check != "" {
+		sig = checkSignature(a.scheduleCwd(p), p.Check)
+	}
 	res, err := a.db.Exec(`INSERT INTO chat_schedules (chat_id, name, text, due_at, kind, every_min, weekdays, time_of_day,
-		new_chat, workspace_id, agent, paused, created_at, check_cmd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		append(vals, now.UnixMilli(), p.Check)...)
+		new_chat, workspace_id, agent, paused, created_at, check_cmd, check_sig) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		append(vals, now.UnixMilli(), p.Check, sig)...)
 	if err != nil {
 		return none, err
 	}
@@ -353,8 +370,14 @@ func (a *App) scheduleDeliveries(now time.Time, send chatSender, fired *[]int64)
 				_, _ = a.db.Exec(`DELETE FROM chat_schedules WHERE id = ?`, it.ID)
 				return
 			}
-			_, _ = a.db.Exec(`UPDATE chat_schedules SET due_at = ?, last_run_at = ?, attempts = 0, last_error = ? WHERE id = ?`,
+			_, _ = a.db.Exec(`UPDATE chat_schedules SET due_at = ?, last_run_at = ?, attempts = 0, last_error = ?, check_output = '' WHERE id = ?`,
 				next.UnixMilli(), now.UnixMilli(), errText, it.ID)
+		}
+		// hold: the check can't run as set (folder gone, scripts changed) —
+		// no run, try again later, the reason in last_error for Settings.
+		hold := func(reason string) {
+			_, _ = a.db.Exec(`UPDATE chat_schedules SET due_at = ?, last_error = ? WHERE id = ?`,
+				now.Add(chatScheduleRetryDelay).UnixMilli(), reason, it.ID)
 		}
 		out = append(out, pendingDelivery{ChatID: key, Source: deliverSchedule, Pos: it.DueAt.UnixMilli(), CreatedAt: it.ID, deliver: func() bool {
 			var err error
@@ -365,11 +388,32 @@ func (a *App) scheduleDeliveries(now time.Time, send chatSender, fired *[]int64)
 				if it.Check == "" {
 					return true
 				}
+				// Output found earlier and not sent yet (the send failed): send
+				// that, don't run the check again — a "what's new" check would
+				// find nothing the second time and the news would be lost.
+				if it.CheckOutput != "" {
+					text += it.CheckOutput
+					return true
+				}
+				if st, err := os.Stat(cwd); cwd == "" || err != nil || !st.IsDir() {
+					hold("check: its folder is gone (" + cwd + ")")
+					return false
+				}
+				sig := checkSignature(cwd, it.Check)
+				if it.CheckSig == "" { // set before checks were signed: adopt it
+					_, _ = a.db.Exec(`UPDATE chat_schedules SET check_sig = ? WHERE id = ?`, sig, it.ID)
+					it.CheckSig = sig
+				}
+				if sig != it.CheckSig {
+					hold("check: its folder or a script it runs changed since it was set — set it again with schedule --check")
+					return false
+				}
 				extra, run := scheduleCheck(cwd, it.Check)
 				if !run {
 					done("check: nothing new")
 					return false
 				}
+				_, _ = a.db.Exec(`UPDATE chat_schedules SET check_output = ? WHERE id = ?`, extra, it.ID)
 				text += extra
 				return true
 			}
@@ -444,11 +488,54 @@ func scheduleCheck(cwd, cmd string) (extra string, run bool) {
 	if code == 0 && out == "" {
 		return "", false
 	}
-	if len(out) > 8<<10 {
-		out = out[:8<<10] + "\n…(cut)"
+	if len(out) > 8<<10 { // keep the end: the newest lines are the news
+		out = "…(cut)\n" + strings.ToValidUTF8(out[len(out)-8<<10:], "")
 	}
+	out = strings.ReplaceAll(out, "```", "ˋˋˋ") // a fence in the output would end ours
 	if code != 0 {
 		return fmt.Sprintf("\n\nThe schedule's check failed (exit %d):\n```\n$ %s\n%s\n```", code, cmd, out), true
 	}
 	return fmt.Sprintf("\n\nThe schedule's check found:\n```\n$ %s\n%s\n```", cmd, out), true
+}
+
+// checkSignature binds a check to what it runs (threadbear hashes the scripts
+// a check reaches): the command, the folder, and the bytes of every token in
+// the command that names a file there (./check.sh, scripts/new-issues.py). A
+// pull or another agent's edit changes it, and the check is held until it is
+// set again. ponytail: covers files named in the command, not what they call
+// in turn; threadbear follows those too.
+func checkSignature(cwd, cmd string) string {
+	h := sha256.New()
+	h.Write([]byte(cmd + "\x00" + cwd + "\x00"))
+	for _, tok := range strings.Fields(cmd) {
+		tok = strings.Trim(tok, `"'`)
+		if tok == "" || strings.HasPrefix(tok, "-") {
+			continue
+		}
+		path := tok
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, tok)
+		}
+		if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() && st.Size() < 4<<20 {
+			if b, err := os.ReadFile(path); err == nil {
+				h.Write([]byte(tok + "\x00"))
+				h.Write(b)
+			}
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// scheduleCwd is where a schedule's runs (and its check) happen.
+func (a *App) scheduleCwd(p control.ScheduledPrompt) string {
+	if p.NewChat {
+		var path string
+		_ = a.db.QueryRow(`SELECT path FROM workspaces WHERE id = ?`, p.WorkspaceID).Scan(&path)
+		return path
+	}
+	c, err := a.chatByID(p.ChatID)
+	if err != nil {
+		return ""
+	}
+	return a.chatCwd(c)
 }
