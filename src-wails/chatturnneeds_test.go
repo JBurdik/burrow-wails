@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"burrow/internal/agentphase"
 	"burrow/internal/control"
@@ -72,5 +75,52 @@ func TestTurnNeedsSurvivesMidTurnPhases(t *testing.T) {
 	got, _ := a.chatByID(c.ID)
 	if got.TurnNeeds == "" {
 		t.Fatal("turn_needs cleared inside its own turn")
+	}
+}
+
+func TestChatRunAskRunsStoredCommandOnce(t *testing.T) {
+	a := newTestApp(t)
+	c, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "t"})
+	ran := make(chan string, 2)
+	prev := runAskShell
+	runAskShell = func(_ context.Context, _ string, cmd string) (string, int) {
+		ran <- cmd
+		return "migrated 3 tables\n", 0
+	}
+	t.Cleanup(func() { runAskShell = prev })
+
+	needs := control.TurnNeeds{Needs: "you", Asks: []control.TurnAsk{
+		{Question: "Run the prod migration?", Suggested: -1, Run: &control.TurnRun{Command: "make migrate-prod"}},
+		{Question: "No command here", Suggested: -1},
+	}}
+	if err := a.SetTurnNeeds(c.ID, needs); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ChatRunAsk(c.ID, 1); err == nil {
+		t.Fatal("an ask without a command must refuse")
+	}
+	if err := a.ChatRunAsk(c.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ChatRunAsk(c.ID, 0); err == nil {
+		t.Fatal("a second press must refuse")
+	}
+	if got := <-ran; got != "make migrate-prod" {
+		t.Fatalf("ran %q", got)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		row, _ := a.chatByID(c.ID)
+		if strings.Contains(row.TurnNeeds, `"state":"done"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("card never marked done: %s", row.TurnNeeds)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	items, err := a.ChatQueueList(c.ID)
+	if err != nil || len(items) != 1 || !strings.Contains(items[0].Text, "migrated 3 tables") || !strings.Contains(items[0].Text, "exit 0") {
+		t.Fatalf("queued reply: %+v %v", items, err)
 	}
 }

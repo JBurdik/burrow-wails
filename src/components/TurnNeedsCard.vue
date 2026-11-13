@@ -23,6 +23,18 @@
       <!-- Needs you: one ask at a time -->
       <div v-if="isYou && ask" class="needs-body">
         <p class="whitespace-pre-wrap text-[13px] leading-[1.5] text-foreground">{{ ask.question }}</p>
+        <div v-if="ask.run" class="needs-run mt-2">
+          <div class="flex items-center gap-2 px-2.5 pt-1.5 text-[11px] text-muted-foreground">
+            <PhTerminalWindow :size="12" class="shrink-0" />
+            <span class="min-w-0 flex-1 truncate font-mono" :title="cwd">{{ cwd || "chat folder" }}</span>
+            <span v-if="ask.run.state === 'done'" :class="ask.run.exit ? 'text-[var(--red)]' : 'text-[var(--chat-success)]'">exit {{ ask.run.exit ?? 0 }} · result sent</span>
+            <button v-else class="needs-btn is-primary !h-6" :disabled="ask.run.state === 'running' || running" @click="runIt">
+              <PhPlay :size="11" weight="fill" /> {{ ask.run.state === "running" || running ? "Running…" : "Run" }}
+            </button>
+          </div>
+          <pre class="needs-run-cmd">{{ ask.run.command }}</pre>
+          <p v-if="runError" class="px-2.5 pb-1.5 text-[11.5px] text-[var(--red)]">{{ runError }}</p>
+        </div>
         <div v-if="ask.options?.length" class="mt-2 flex flex-wrap gap-1.5">
           <button
             v-for="(o, i) in ask.options"
@@ -90,11 +102,11 @@ import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   PhArchive, PhCaretDown, PhCaretLeft, PhCaretRight, PhCheckCircle, PhCheckSquare, PhClock, PhDotOutline,
-  PhGitBranch, PhGitPullRequest, PhHandPalm, PhPencilSimple, PhSquare, PhStar, PhUsersThree,
+  PhGitBranch, PhGitPullRequest, PhHandPalm, PhPencilSimple, PhPlay, PhSquare, PhStar, PhTerminalWindow, PhUsersThree,
 } from "@phosphor-icons/vue";
 import { composeAnswers, composeNext, type LooseEnd, type TurnNeeds } from "@/lib/turnNeeds";
 
-const props = defineProps<{ needs: TurnNeeds; chatId: number; archived: boolean; composerText: string }>();
+const props = defineProps<{ needs: TurnNeeds; chatId: number; archived: boolean; composerText: string; cwd?: string }>();
 const emit = defineEmits<{ send: [text: string]; archive: []; openChat: [id: number] }>();
 
 const LOOSE_ICONS: Record<string, unknown> = {
@@ -121,6 +133,8 @@ const otherOpen = ref<boolean[]>([]);
 const otherEl = ref<HTMLInputElement | null>(null);
 const picked = ref<boolean[]>([]);
 const loose = ref<LooseEnd[] | null>(null);
+const running = ref(false);
+const runError = ref("");
 
 const ask = computed(() => asks.value[current.value]);
 const answeredCount = computed(() => answers.value.filter((a) => a?.trim()).length);
@@ -137,6 +151,8 @@ watch(
     otherOpen.value = [];
     picked.value = [];
     loose.value = null;
+    running.value = false;
+    runError.value = "";
     if (!isYou.value) void loadLoose();
   },
   { immediate: true },
@@ -178,6 +194,20 @@ function commitOther() {
   advance();
 }
 
+// Go runs the command stored on the card (not this text) once, in the chat's
+// folder, and queues its output back to the agent; the card shows the exit.
+async function runIt() {
+  running.value = true;
+  runError.value = "";
+  try {
+    await invoke("chat_run_ask", { chatId: props.chatId, index: current.value });
+  } catch (e) {
+    runError.value = String(e);
+  } finally {
+    running.value = false;
+  }
+}
+
 function send() {
   if (!answeredCount.value) return;
   emit("send", composeAnswers(asks.value, answers.value, props.composerText));
@@ -210,6 +240,8 @@ function sendNext() {
 .needs-input:focus { border-color: var(--chat-info); }
 .needs-next { display: flex; width: 100%; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 12.5px; line-height: 1.45; color: var(--chat-text-secondary); }
 .needs-next:hover, .needs-next.picked { color: var(--chat-text); }
+.needs-run { border: 1px solid var(--chat-border); border-radius: 10px; background: var(--chat-bg); overflow: hidden; }
+.needs-run-cmd { margin: 0; padding: 6px 10px 8px; max-height: 160px; overflow: auto; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--chat-text); }
 .needs-loose { display: flex; width: 100%; align-items: center; gap: 7px; padding: 2px 0; font-size: 12.5px; color: var(--chat-text); text-align: left; }
 .needs-loose.is-link:hover { text-decoration: underline; }
 </style>

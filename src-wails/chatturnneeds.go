@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"burrow/internal/agentphase"
 	"burrow/internal/control"
@@ -163,4 +168,112 @@ func countLines(s string) int {
 		}
 	}
 	return n
+}
+
+// Run on the card: an end_turn ask may carry a command that is the user's to
+// run. ChatRunAsk runs the STORED command (never one a client sends) once, in
+// the chat's folder, and queues its output to the chat as the user's reply.
+const (
+	runAskTimeout   = 10 * time.Minute
+	runAskOutputCap = 16 << 10
+)
+
+// runAskShell is what executes a pressed command; a var for tests.
+var runAskShell = func(ctx context.Context, cwd, cmd string) (string, int) {
+	c := exec.CommandContext(ctx, "/bin/sh", "-c", cmd)
+	c.Dir = cwd
+	c.Env = append(os.Environ(), "PATH="+augmentedPath(cwd))
+	// No stdin: a command that asks "are you sure?" fails rather than hangs.
+	out, err := c.CombinedOutput()
+	code := 0
+	if err != nil {
+		code = -1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			code = ee.ExitCode()
+		}
+		if ctx.Err() != nil {
+			out = append(out, []byte("\n[stopped after 10 minutes]")...)
+		}
+	}
+	return string(out), code
+}
+
+// ChatRunAsk presses ask `index`'s Run. It returns once the command has
+// started; the result arrives as a queued message (and the card's state).
+func (a *App) ChatRunAsk(chatID int64, index64 int64) error {
+	index := int(index64)
+	c, err := a.chatByID(chatID)
+	if err != nil {
+		return err
+	}
+	var n control.TurnNeeds
+	if c.TurnNeeds == "" || json.Unmarshal([]byte(c.TurnNeeds), &n) != nil {
+		return fmt.Errorf("nothing to run: the turn's asks are gone")
+	}
+	if index < 0 || index >= len(n.Asks) || n.Asks[index].Run == nil {
+		return fmt.Errorf("ask %d has no command", index)
+	}
+	run := n.Asks[index].Run
+	if run.State != "" {
+		return fmt.Errorf("already run")
+	}
+	run.State = "running"
+	if !a.swapTurnNeeds(chatID, c.TurnNeeds, n) {
+		return fmt.Errorf("the card changed — look again")
+	}
+	cwd, cmd := a.chatCwd(c), run.Command
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), runAskTimeout)
+		defer cancel()
+		out, code := runAskShell(ctx, cwd, cmd)
+		a.finishRunAsk(chatID, index, cmd, code)
+		if _, err := a.ChatQueueAdd(chatID, runAskReply(cmd, cwd, out, code), nil); err != nil {
+			log.Printf("chat %d: queue run result: %v", chatID, err)
+		}
+	}()
+	return nil
+}
+
+// swapTurnNeeds writes n only if the row still holds `was` (a new turn may
+// have cleared it, or another click got there first).
+func (a *App) swapTurnNeeds(chatID int64, was string, n control.TurnNeeds) bool {
+	raw, err := json.Marshal(n)
+	if err != nil {
+		return false
+	}
+	res, err := a.db.Exec(`UPDATE chats SET turn_needs = ? WHERE id = ? AND turn_needs = ?`, string(raw), chatID, was)
+	if err != nil {
+		return false
+	}
+	if k, _ := res.RowsAffected(); k == 0 {
+		return false
+	}
+	busEmit("chats-changed", nil)
+	return true
+}
+
+// finishRunAsk marks the ask done on the card, if the card is still that one.
+func (a *App) finishRunAsk(chatID int64, index int, cmd string, code int) {
+	c, err := a.chatByID(chatID)
+	if err != nil {
+		return
+	}
+	var n control.TurnNeeds
+	if json.Unmarshal([]byte(c.TurnNeeds), &n) != nil || index >= len(n.Asks) || n.Asks[index].Run == nil || n.Asks[index].Run.Command != cmd {
+		return
+	}
+	n.Asks[index].Run.State, n.Asks[index].Run.Exit = "done", code
+	a.swapTurnNeeds(chatID, c.TurnNeeds, n)
+}
+
+func runAskReply(cmd, cwd, out string, code int) string {
+	if len(out) > runAskOutputCap {
+		out = "…(earlier output cut)\n" + out[len(out)-runAskOutputCap:]
+	}
+	out = strings.TrimRight(out, "\n")
+	if out == "" {
+		out = "(no output)"
+	}
+	return fmt.Sprintf("I ran your command from the card in `%s` — exit %d:\n\n```\n$ %s\n%s\n```", cwd, code, cmd, out)
 }

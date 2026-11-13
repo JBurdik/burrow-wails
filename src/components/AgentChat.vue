@@ -484,6 +484,7 @@
         :chat-id="chatId"
         :archived="!!activeSession?.archivedAt"
         :composer-text="inputText"
+        :cwd="cwd"
         @send="sendTurnAnswer"
         @archive="archiveFromCard"
         @open-chat="openSubagentFromTranscript"

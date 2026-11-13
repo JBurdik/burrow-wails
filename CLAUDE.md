@@ -134,7 +134,12 @@ follow-ups). `applyChatPhase` clears it on the **transition into flight** (not o
 mid-turn). AgentChat shows the card only while not busy: Needs you = buttons / Something else, one ask at a time, sent
 as one message with the composer text (`composeAnswers`); Done = Archive + follow-ups + **loose ends**
 (`chat_loose_ends`: uncommitted files, commits on no remote, open PR, sub-agents in flight, pending check-ins — Go's own
-checks, never the agent's word). The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. `Arg.Schema`
+checks, never the agent's word). **Run on the card:** an ask's `run` (checked by `control.RunCommandProblem`: no
+control / bidi / zero-width chars, ≤ 8000) gets a Run button; `chat_run_ask(chatId, index)` runs the **stored** command
+(never client text) once (`state` running → done + `exit` in the JSON, CAS on the row) via `/bin/sh -c` in the chat's
+cwd, no stdin, 10 min, and `ChatQueueAdd`s the output as the user's reply. **Quiet inbox:** `subagentArchivable`
+archives a collected, done, non-side child whose end_turn said `nothing` with no `next` at once (no receipt, no 30 min).
+The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. `Arg.Schema`
 gives a verb arg a full JSON schema for MCP (the CLI passes it as a JSON string; `Params.JSON` reads both).
 
 **PR → worktree + chat** (`ForgePrCheckout`, `src/lib/prCheckout.ts`): optional `forge.HeadFetcher` (`FetchRef(n)` —

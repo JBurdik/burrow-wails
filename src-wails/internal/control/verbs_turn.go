@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -29,6 +30,43 @@ type TurnAsk struct {
 	Options  []string `json:"options,omitempty"`
 	// Index into Options of the answer the agent would pick; -1 = none.
 	Suggested int `json:"suggested"`
+	// Run, when set, is a command that is the user's to run (a deploy, a
+	// production migration): the card shows it with a Run button, it runs once
+	// in the chat's folder and its output goes back to the agent.
+	Run *TurnRun `json:"run,omitempty"`
+}
+
+// TurnRun is an ask's command and, once pressed, how it went. State and Exit
+// are the app's (chatturnneeds.go), never the agent's.
+type TurnRun struct {
+	Command string `json:"command"`
+	// "" (not run) | running | done
+	State string `json:"state,omitempty"`
+	Exit  int    `json:"exit,omitempty"`
+}
+
+// MaxRunCommand caps an ask's command: past it, a script is the honest form.
+const MaxRunCommand = 8000
+
+// RunCommandProblem says why a command can't go on a card, if it can't. What
+// the card shows is what the user agrees to, so it must be what runs: control,
+// bidi, zero-width and other invisible characters could show something else.
+func RunCommandProblem(cmd string) string {
+	if strings.TrimSpace(cmd) == "" {
+		return "run is empty"
+	}
+	if len(cmd) > MaxRunCommand {
+		return fmt.Sprintf("run is over %d characters: put it in a script and run that", MaxRunCommand)
+	}
+	for _, r := range cmd {
+		if r == '\n' || r == '\t' {
+			continue
+		}
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp, unicode.Co, unicode.Cs) {
+			return "run has control or invisible characters in it, so the card could show something other than what runs: take them out"
+		}
+	}
+	return ""
 }
 
 // TurnNeedsStore persists a chat's end_turn. nil = the verb refuses.
@@ -55,6 +93,7 @@ var turnAsksSchema = map[string]any{
 			"question":  map[string]any{"type": "string", "description": "One decision or action, self-contained (the user may answer without reading the reply)"},
 			"options":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "2-6 short answers shown as buttons; omit for a free-text answer"},
 			"suggested": map[string]any{"type": "integer", "description": "Index into options of the answer you would pick"},
+			"run":       map[string]any{"type": "string", "description": "A shell command that is the user's to run, not yours (a production deploy or migration, something needing their machine/credentials). Shown with a Run button; runs once in this chat's folder with no stdin (no prompts), 10 min max, and its output comes back to you as their reply"},
 		},
 		"required": []string{"question"},
 	},
@@ -105,6 +144,7 @@ func ParseTurnNeeds(p Params) (TurnNeeds, error) {
 		Question  string   `json:"question"`
 		Options   []string `json:"options"`
 		Suggested *int     `json:"suggested"`
+		Run       string   `json:"run"`
 	}
 	if err := p.JSON("asks", &asks); err != nil {
 		return n, fmt.Errorf("asks: %w", err)
@@ -130,6 +170,12 @@ func ParseTurnNeeds(p Params) (TurnNeeds, error) {
 		}
 		if a.Suggested != nil && *a.Suggested >= 0 && *a.Suggested < len(ask.Options) {
 			ask.Suggested = *a.Suggested
+		}
+		if a.Run != "" {
+			if problem := RunCommandProblem(a.Run); problem != "" {
+				return n, fmt.Errorf("%s", problem)
+			}
+			ask.Run = &TurnRun{Command: a.Run}
 		}
 		if len(n.Asks) < maxTurnAsks {
 			n.Asks = append(n.Asks, ask)

@@ -41,3 +41,21 @@ func TestParseTurnNeeds(t *testing.T) {
 		t.Fatalf("out-of-range suggested should be dropped: %+v", n.Asks[1])
 	}
 }
+
+func TestRunCommandProblem(t *testing.T) {
+	if RunCommandProblem("npm run deploy -- --prod") != "" || RunCommandProblem("for f in *; do\n\techo $f\ndone") != "" {
+		t.Fatal("plain commands must pass")
+	}
+	for _, bad := range []string{"", "  ", "ls‮", "echo a​", "echo \x1b[2J"} {
+		if RunCommandProblem(bad) == "" {
+			t.Fatalf("%q should be refused", bad)
+		}
+	}
+	if _, err := ParseTurnNeeds(Params{"asks": `[{"question":"Deploy?","run":"rm x‮"}]`}); err == nil {
+		t.Fatal("end_turn must refuse a hidden-character command")
+	}
+	n, err := ParseTurnNeeds(Params{"asks": `[{"question":"Deploy?","run":"make deploy"}]`})
+	if err != nil || n.Asks[0].Run == nil || n.Asks[0].Run.Command != "make deploy" || n.Asks[0].Run.State != "" {
+		t.Fatalf("run not kept: %+v %v", n, err)
+	}
+}
