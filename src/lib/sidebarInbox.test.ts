@@ -22,3 +22,20 @@ describe("sidebar inbox", () => {
     expect(nextNeedsYou(["a", "B"], needs, (r) => r === "B")).toBeNull();
   });
 });
+
+import { liftInbox } from "./sidebarGroups";
+
+describe("global inbox", () => {
+  const g = (repoId: number, rows: string[]) => ({ repoId, rows });
+  // N* = needs you, U* = unread, lower case = neither
+  const needs = (r: string) => r.startsWith("N");
+  const unread = (r: string) => r.startsWith("U");
+
+  it("lifts needs-you first, then unread, out of project groups", () => {
+    const out = liftInbox([g(-1, ["Npin"]), g(1, ["a", "U1", "N1"]), g(2, ["N2"]), g(3, [])], needs, unread, (id) => id < 0);
+    expect(out.inbox).toEqual(["N1", "N2", "U1"]);
+    expect(out.needs).toBe(2);
+    // Pinned keeps its row; repo 2 emptied by the lift goes; repo 3 was empty and stays.
+    expect(out.groups).toEqual([g(-1, ["Npin"]), g(1, ["a"]), g(3, [])]);
+  });
+});

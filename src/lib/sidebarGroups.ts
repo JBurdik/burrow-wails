@@ -251,3 +251,25 @@ export function nextNeedsYou<T>(rows: T[], needsYou: (row: T) => boolean, isActi
   if (at < 0) return waiting[0];
   return rows.slice(at + 1).find(needsYou) ?? (waiting[0] === rows[at] ? null : waiting[0]);
 }
+
+/**
+ * The global Inbox (threadbear): rows that need you, then unread ones, lifted
+ * out of their project groups (never out of `keep`, e.g. Pinned) in feed
+ * order. A group left empty by the lift goes; one that was already empty
+ * (the active project, a pinned one) stays.
+ */
+export function liftInbox<T, G extends { repoId: number; rows: T[] }>(
+  groups: G[],
+  needsYou: (row: T) => boolean,
+  unread: (row: T) => boolean,
+  keep: (repoId: number) => boolean,
+): { inbox: T[]; needs: number; groups: G[] } {
+  const lifted = (r: T) => needsYou(r) || unread(r);
+  const pool = groups.filter((g) => !keep(g.repoId)).flatMap((g) => g.rows);
+  const needs = pool.filter(needsYou);
+  const inbox = [...needs, ...pool.filter((r) => !needsYou(r) && unread(r))];
+  const rest = groups
+    .map((g) => (keep(g.repoId) ? g : { ...g, rows: g.rows.filter((r) => !lifted(r)) }))
+    .filter((g, i) => g.rows.length > 0 || groups[i].rows.length === 0);
+  return { inbox, needs: needs.length, groups: rest };
+}

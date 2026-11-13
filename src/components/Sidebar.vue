@@ -53,7 +53,10 @@
            its uncommitted diffstat, one compact line per thread, a thread's
            sub-agents indented under it. Branch/model/PR live in the hover card. -->
       <div v-for="group in inboxGroups" :key="group.repoId" class="px-2 pt-1.5">
-        <div v-if="group.repoId < 0" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">Pinned</div>
+        <div v-if="group.repoId < 0" class="flex items-center gap-1.5 px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">
+          <template v-if="group.repoId === INBOX"><PhTray :size="12" class="shrink-0" />Inbox<span class="opacity-60">{{ group.rows.length }}</span></template>
+          <template v-else>Pinned</template>
+        </div>
         <div
           v-else
           class="group/hdr flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-hover"
@@ -82,9 +85,10 @@
         <div v-if="!collapsedGroups.has(group.repoId)">
           <div v-for="(row, i) in group.rows" :key="rowKey(row)">
             <div v-if="group.needs && i === 0" class="sb-inbox-label">Needs you</div>
+            <div v-else-if="group.needs && i === group.needs && group.repoId === INBOX" class="sb-inbox-label !text-[var(--blue)]">Unread</div>
             <div v-else-if="group.needs && i === group.needs" class="sb-inbox-sep" />
             <div
-              v-if="group.repoId !== PINNED && i >= group.needs && row.ws.parent_id && (i === group.needs || row.ws.id !== group.rows[i - 1]?.ws.id)"
+              v-if="group.repoId >= 0 && i >= group.needs && row.ws.parent_id && (i === group.needs || row.ws.id !== group.rows[i - 1]?.ws.id)"
               class="group/wt mt-1.5 flex min-w-0 items-center gap-1.5 px-2.5 pb-0.5 text-[11px] text-muted-foreground"
               :title="row.ws.path"
             >
@@ -122,6 +126,7 @@
                 @click.stop
               />
               <span v-else class="min-w-0 flex-1 truncate text-[13.5px]" :class="isActiveRow(row) ? 'font-medium text-foreground' : 'text-foreground/90'" @dblclick.stop="startTabRename(row.ws.id, row.tab)">{{ row.tab.title }}</span>
+              <span v-if="group.repoId === INBOX" class="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground group-hover:hidden">{{ repoById(row.ws.parent_id ?? row.ws.id)?.name }}</span>
               <span v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="flex shrink-0 items-center gap-0.5 text-[11.5px] text-secondary-foreground group-hover:hidden"><PhUsersThree :size="12" />{{ childrenOfChat(row.tab.chatId).length }}</span>
               <span class="flex shrink-0 items-center gap-1 text-[11.5px] tabular-nums group-hover:hidden" :class="statusClass(row.tab.status)">
                 <PhWarningCircle v-if="attentionState(row) === 'needs-input'" :size="11" weight="fill" class="text-[var(--yellow)]" />
@@ -679,6 +684,7 @@ import {
   PhDotsThree,
   PhAlarm,
   PhCaretRight,
+  PhTray,
 } from "@phosphor-icons/vue";
 import GitPanel from "./GitPanel.vue";
 import UpdateBanner from "./UpdateBanner.vue";
@@ -720,6 +726,7 @@ import {
   type ActivityRow,
   needsYouFirst,
   nextNeedsYou,
+  liftInbox,
 } from "@/lib/sidebarGroups";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { childrenOf, activeChatIdFor } from "@/stores/chatTree";
@@ -971,7 +978,20 @@ function needsYou(row: ActivityRow): boolean {
   if (row.tab.chatId == null || row.tab.status === "running") return false;
   return chats.sessions.find((s) => s.id === row.tab.chatId)?.turnNeeds?.needs === "you";
 }
-const inboxGroups = computed(() => topGroups.value.map((g) => ({ ...g, ...needsYouFirst(g.rows, needsYou) })));
+// Global Inbox (Settings → General, uiPrefs.sidebarInbox): needs-you + unread
+// rows from every project lifted into one group on top (Pinned stays put);
+// off = each project leads with its own "Needs you".
+const INBOX = -2;
+// Opening an unread row reads it; it stays in the Inbox while it's the open
+// one, so it doesn't jump away under the cursor.
+const inboxSticky = ref<string | null>(null);
+const inboxUnread = (r: ActivityRow) => attentionState(r) === "done-unread" || (inboxSticky.value === rowKey(r) && isActiveRow(r));
+const inboxGroups = computed(() => {
+  if (!ui.sidebarInbox) return topGroups.value.map((g) => ({ ...g, ...needsYouFirst(g.rows, needsYou) }));
+  const { inbox, needs, groups } = liftInbox(topGroups.value, needsYou, inboxUnread, (id) => id === PINNED);
+  const rest = groups.map((g) => ({ ...g, needs: 0 }));
+  return inbox.length ? [{ repoId: INBOX, rows: inbox, needs }, ...rest] : rest;
+});
 
 // ⌥⌘↓ (keymap "nextInbox"): the next thread waiting on you, across projects.
 function goNextInbox(): boolean {
@@ -1339,6 +1359,8 @@ function selectWs(ws: Workspace) {
 }
 
 function selectTab(row: ActivityRow) {
+  const top = inboxGroups.value[0];
+  inboxSticky.value = top?.repoId === INBOX && top.rows.includes(row) ? rowKey(row) : null;
   // Navigate only. Opening the workspace here first would set `ws.active`
   // synchronously while the route still named the OLD workspace, and App.vue's
   // `ws.active` watcher reads that as a stale URL and replaces it with a bare

@@ -156,6 +156,13 @@
               </div>
               <Switch :checked="ui.subagentAutoDeliver" @update:checked="(v: boolean) => ui.subagentAutoDeliver = v" />
             </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Inbox in the sidebar</span>
+                <span class="text-[11px] text-muted-foreground">Threads that need you or have an unread reply, from every project, in one Inbox at the top. Off: each project lists its own "Needs you" first.</span>
+              </div>
+              <Switch :checked="ui.sidebarInbox" @update:checked="(v: boolean) => ui.sidebarInbox = v" />
+            </div>
             <div v-if="canOpenWindows()" class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Float popped-out windows</span>
