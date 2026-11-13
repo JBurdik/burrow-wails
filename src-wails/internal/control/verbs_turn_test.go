@@ -59,3 +59,22 @@ func TestRunCommandProblem(t *testing.T) {
 		t.Fatalf("run not kept: %+v %v", n, err)
 	}
 }
+
+func TestTurnOptionDetails(t *testing.T) {
+	n, err := ParseTurnNeeds(Params{"asks": []any{map[string]any{"question": "Next?", "options": []any{
+		map[string]any{"label": "Highlights", "description": "RP panel with what the thread made"},
+		"Review",
+		map[string]any{"label": "", "description": "dropped: no label"},
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := n.Asks[0]
+	if len(a.Options) != 2 || len(a.Details) != 2 || a.Details[0] != "RP panel with what the thread made" || a.Details[1] != "" {
+		t.Fatalf("options %q details %q", a.Options, a.Details)
+	}
+	n, _ = ParseTurnNeeds(Params{"asks": `[{"question":"Q","options":["a","b"]}]`})
+	if n.Asks[0].Details != nil {
+		t.Fatalf("plain options must carry no details: %q", n.Asks[0].Details)
+	}
+}

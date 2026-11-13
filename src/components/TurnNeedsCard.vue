@@ -35,17 +35,23 @@
           <pre class="needs-run-cmd">{{ ask.run.command }}</pre>
           <p v-if="runError" class="px-2.5 pb-1.5 text-[11.5px] text-[var(--red)]">{{ runError }}</p>
         </div>
-        <div v-if="ask.options?.length" class="mt-2 flex flex-wrap gap-1.5">
+        <!-- With descriptions the options stack as rows (label + what it leads to);
+             bare labels stay compact buttons. -->
+        <div v-if="ask.options?.length" class="mt-2 flex gap-1.5" :class="ask.details?.length ? 'flex-col' : 'flex-wrap'">
           <button
             v-for="(o, i) in ask.options"
             :key="i"
             class="needs-option"
-            :class="{ picked: answers[current] === o }"
+            :class="{ picked: answers[current] === o, 'is-row': !!ask.details?.length }"
             :title="i === ask.suggested ? 'Recommended' : undefined"
             @click="pick(o)"
           >
-            <PhStar v-if="i === ask.suggested" :size="11" weight="fill" class="shrink-0 text-[var(--chat-warn)]" />
-            {{ o }}
+            <span class="flex min-w-0 items-center gap-1.5">
+              <PhStar v-if="i === ask.suggested" :size="11" weight="fill" class="shrink-0 text-[var(--chat-warn)]" />
+              <span :class="ask.details?.length ? 'font-medium' : ''">{{ o }}</span>
+              <span v-if="i === ask.suggested && ask.details?.length" class="needs-rec">Recommended</span>
+            </span>
+            <span v-if="ask.details?.[i]" class="needs-detail">{{ ask.details[i] }}</span>
           </button>
           <button v-if="!otherOpen[current]" class="needs-option is-other" @click="openOther">Something else…</button>
         </div>
@@ -236,6 +242,10 @@ function sendNext() {
 .needs-option:hover { border-color: color-mix(in srgb, var(--chat-text) 35%, var(--chat-border)); }
 .needs-option.picked { border-color: var(--chat-info); background: color-mix(in srgb, var(--chat-info) 14%, var(--chat-bg)); }
 .needs-option.is-other { color: var(--chat-text-secondary); border-style: dashed; }
+.needs-option.is-row { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 7px 11px; width: 100%; }
+.needs-option.is-other:only-child, .flex-col > .needs-option.is-other { align-self: flex-start; }
+.needs-detail { font-size: 12px; line-height: 1.4; color: var(--chat-text-secondary); }
+.needs-rec { padding: 0 6px; border-radius: 5px; font-size: 10.5px; font-weight: 500; color: var(--chat-warn); background: color-mix(in srgb, var(--chat-warn) 14%, transparent); }
 .needs-input { width: 100%; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; color: var(--chat-text); border: 1px solid var(--chat-border); background: var(--chat-bg); outline: none; }
 .needs-input:focus { border-color: var(--chat-info); }
 .needs-next { display: flex; width: 100%; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 12.5px; line-height: 1.45; color: var(--chat-text-secondary); }

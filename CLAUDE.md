@@ -129,7 +129,7 @@ card opens, `chat_prs_refresh(cwd)` after a push from `git.push`; Sidebar rows s
 
 **End of turn** (`chatturnneeds.go`, `internal/control/verbs_turn.go`, `TurnNeedsCard.vue`, from threadbear's `end_turn`): the
 `end_turn` verb/MCP tool (local, caller chat) stores what the turn needs as JSON in `chats.turn_needs` (read-only on the
-wire, `remoteDenied` for the setter) — `needs` you|nothing, `asks` (question + ≤ 6 options + `suggested`), `next` (≤ 3
+wire, `remoteDenied` for the setter) — `needs` you|nothing, `asks` (question + ≤ 6 options, each `{label, description}` or a bare string — stored as `options` + parallel `details` + `suggested`), `next` (≤ 3
 follow-ups). `applyChatPhase` clears it on the **transition into flight** (not on every Running line: the call is made
 mid-turn). AgentChat shows the card only while not busy: Needs you = buttons / Something else, one ask at a time, sent
 as one message with the composer text (`composeAnswers`); Done = Archive + follow-ups + **loose ends**

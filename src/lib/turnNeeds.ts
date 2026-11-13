@@ -4,6 +4,8 @@
 export interface TurnAsk {
   question: string;
   options?: string[];
+  /** details[i]: one line on what picking options[i] leads to. */
+  details?: string[];
   /** Index into options the agent would pick; -1 = none. */
   suggested: number;
   /** A command that is the user's to run (Run on the card); state is Go's. */

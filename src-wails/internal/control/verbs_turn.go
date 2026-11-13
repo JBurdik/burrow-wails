@@ -28,6 +28,9 @@ type TurnNeeds struct {
 type TurnAsk struct {
 	Question string   `json:"question"`
 	Options  []string `json:"options,omitempty"`
+	// Details[i] is one line on what picking Options[i] leads to ("" = none);
+	// same length as Options whenever set.
+	Details []string `json:"details,omitempty"`
 	// Index into Options of the answer the agent would pick; -1 = none.
 	Suggested int `json:"suggested"`
 	// Run, when set, is a command that is the user's to run (a deploy, a
@@ -81,6 +84,7 @@ type TurnNeedsStore interface {
 const (
 	maxTurnAsks    = 6
 	maxTurnOptions = 6
+	maxDetailLen   = 200
 	maxTurnNext    = 3
 	maxQuestionLen = 500
 	maxOptionLen   = 120
@@ -92,8 +96,12 @@ var turnAsksSchema = map[string]any{
 	"items": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"question":  map[string]any{"type": "string", "description": "One decision or action, self-contained (the user may answer without reading the reply)"},
-			"options":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "2-6 short answers shown as buttons; omit for a free-text answer"},
+			"question": map[string]any{"type": "string", "description": "One decision or action, self-contained (the user may answer without reading the reply)"},
+			"options": map[string]any{"type": "array", "description": "2-6 answers shown as buttons; omit for a free-text answer. Give each a description: what picking it leads to (the user decides from the card, not from your reply)",
+				"items": map[string]any{"type": "object", "properties": map[string]any{
+					"label":       map[string]any{"type": "string", "description": "Short button text"},
+					"description": map[string]any{"type": "string", "description": "One line: what happens if picked — scope, cost, trade-off"},
+				}, "required": []string{"label"}}},
 			"suggested": map[string]any{"type": "integer", "description": "Index into options of the answer you would pick"},
 			"run":       map[string]any{"type": "string", "description": "A shell command that is the user's to run, not yours (a production deploy or migration, something needing their machine/credentials). Shown with a Run button; runs once in this chat's folder with no stdin (no prompts), 10 min max, and its output comes back to you as their reply"},
 		},
@@ -160,10 +168,10 @@ func (c *Core) endTurn(p Params) (any, error) {
 func ParseTurnNeeds(p Params) (TurnNeeds, error) {
 	var n TurnNeeds
 	var asks []struct {
-		Question  string   `json:"question"`
-		Options   []string `json:"options"`
-		Suggested *int     `json:"suggested"`
-		Run       string   `json:"run"`
+		Question  string       `json:"question"`
+		Options   []turnOption `json:"options"`
+		Suggested *int         `json:"suggested"`
+		Run       string       `json:"run"`
 	}
 	if err := p.JSON("asks", &asks); err != nil {
 		return n, fmt.Errorf("asks: %w", err)
@@ -178,14 +186,21 @@ func ParseTurnNeeds(p Params) (TurnNeeds, error) {
 			continue
 		}
 		ask := TurnAsk{Question: q, Suggested: -1}
+		described := false
 		for _, o := range a.Options {
-			if o = clip(o, maxOptionLen); o != "" && len(ask.Options) < maxTurnOptions {
-				ask.Options = append(ask.Options, o)
+			if l := clip(o.Label, maxOptionLen); l != "" && len(ask.Options) < maxTurnOptions {
+				d := clip(o.Description, maxDetailLen)
+				ask.Options = append(ask.Options, l)
+				ask.Details = append(ask.Details, d)
+				described = described || d != ""
 			}
+		}
+		if !described {
+			ask.Details = nil
 		}
 		// One option is not a choice: it's a question with a hint.
 		if len(ask.Options) == 1 {
-			ask.Options = nil
+			ask.Options, ask.Details = nil, nil
 		}
 		if a.Suggested != nil && *a.Suggested >= 0 && *a.Suggested < len(ask.Options) {
 			ask.Suggested = *a.Suggested
@@ -255,4 +270,21 @@ func clip(s string, max int) string {
 	}
 	r := []rune(s)
 	return strings.TrimSpace(string(r[:max-1])) + "…"
+}
+
+// turnOption is one end_turn option as sent: a plain string (older form) or
+// {label, description}.
+type turnOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+func (o *turnOption) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		o.Label = s
+		return nil
+	}
+	type plain turnOption
+	return json.Unmarshal(b, (*plain)(o))
 }
