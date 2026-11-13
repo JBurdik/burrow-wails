@@ -24,6 +24,11 @@ export function subagentArchivable(
   // A side chat has no result to collect: settled + seen is enough.
   if (!session.collectedAt && session.kind !== "side") return false;
   if (!phase || !["done", "failed", "idle"].includes(phase.state)) return false;
+  // Quiet inbox (threadbear): a collected child whose end_turn said it is done
+  // and suggested nothing more has nothing left for anyone to read — the
+  // parent took its result. It goes at once, unseen.
+  const n = session.turnNeeds;
+  if (session.kind !== "side" && phase.state === "done" && n?.needs === "nothing" && !n.next?.length) return true;
   if (!seenAt || seenAt < phase.turn_ended_at) return false;
   return now - Math.max(seenAt, phase.updated_at) >= delayMs;
 }

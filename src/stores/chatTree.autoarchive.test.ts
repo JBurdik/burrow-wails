@@ -49,4 +49,13 @@ describe("subagentArchivable", () => {
     expect(subagentArchivable(child({ archivedAt: 1 }), phase(), SEEN, false, LATER)).toBe(false);
     expect(subagentArchivable(child(), undefined, SEEN, false, LATER)).toBe(false);
   });
+
+  it("archives a quiet child at once: collected, done, end_turn needs nothing, no follow-ups", () => {
+    const quiet = { needs: "nothing" as const };
+    expect(subagentArchivable(child({ turnNeeds: quiet }), phase(), 0, false, ENDED)).toBe(true);
+    expect(subagentArchivable(child({ turnNeeds: { needs: "nothing", next: ["more"] } }), phase(), 0, false, ENDED)).toBe(false);
+    expect(subagentArchivable(child({ turnNeeds: quiet }), phase({ state: "failed" }), 0, false, ENDED)).toBe(false);
+    expect(subagentArchivable(child({ turnNeeds: quiet, collectedAt: undefined }), phase(), 0, false, ENDED)).toBe(false);
+    expect(subagentArchivable(child({ turnNeeds: quiet }), phase(), 0, true, ENDED)).toBe(false);
+  });
 });
