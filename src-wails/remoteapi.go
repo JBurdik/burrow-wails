@@ -618,7 +618,8 @@ var remoteDenied = map[string]string{
 	// (control token) may park one; a remote client only answers.
 	"RequestSecret": "agents ask through the local secret_request verb; clients only answer (answer_secret_request)",
 	// The agent side of end_turn: only the calling chat says what its turn needs.
-	"SetTurnNeeds": "agents set it through the local end_turn verb; clients read chats.turn_needs",
+	"SetTurnNeeds":     "agents set it through the local end_turn verb; clients read chats.turn_needs",
+	"TurnNeedsPending": "only a chat's Stop hook asks, through the local end_turn_pending verb",
 	// Superseded by chat_send: a client building its own start payload is how
 	// three copies of it drifted apart (docs/plans/006-chat-runtime.md).
 	"ClaudeStart":    "a chat's process is the chat runtime's to start, from the row's launch settings — use chat_send",

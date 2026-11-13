@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -122,5 +123,31 @@ func TestChatRunAskRunsStoredCommandOnce(t *testing.T) {
 	items, err := a.ChatQueueList(c.ID)
 	if err != nil || len(items) != 1 || !strings.Contains(items[0].Text, "migrated 3 tables") || !strings.Contains(items[0].Text, "exit 0") {
 		t.Fatalf("queued reply: %+v %v", items, err)
+	}
+}
+
+func TestEndTurnGate(t *testing.T) {
+	var s struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Type, Command string
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(endTurnGateSettings("/app/My Burrow/bin/burrow")), &s); err != nil {
+		t.Fatal(err)
+	}
+	if h := s.Hooks["Stop"]; len(h) != 1 || len(h[0].Hooks) != 1 || h[0].Hooks[0].Command != "'/app/My Burrow/bin/burrow' end-turn-gate" {
+		t.Fatalf("stop hook: %+v", s)
+	}
+
+	a := newTestApp(t)
+	c, _ := a.CreateChat(Chat{WorkspaceID: 1, Title: "t"})
+	if p, _ := a.TurnNeedsPending(c.ID); !p {
+		t.Fatal("a turn without end_turn is pending")
+	}
+	_ = a.SetTurnNeeds(c.ID, control.TurnNeeds{Needs: "nothing"})
+	if p, _ := a.TurnNeedsPending(c.ID); p {
+		t.Fatal("end_turn called: not pending")
 	}
 }

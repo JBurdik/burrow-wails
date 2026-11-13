@@ -179,6 +179,10 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 		sys += "\n\n" + s
 	}
 	args = append(args, "--append-system-prompt", sys)
+	// A turn that ends without end_turn is sent back once to make the call
+	// (bin/burrow end-turn-gate): the rule alone loses to a task that says
+	// "do nothing else", and to a turn that asked via AskUserQuestion.
+	args = append(args, "--settings", endTurnGateSettings(filepath.Join(a.burrowBinDir, "burrow")))
 	// Allowlisted so the model id can't smuggle extra argv.
 	if strings.HasPrefix(l.Model, "claude-") {
 		args = append(args, "--model", l.Model)

@@ -72,6 +72,8 @@ func RunCommandProblem(cmd string) string {
 // TurnNeedsStore persists a chat's end_turn. nil = the verb refuses.
 type TurnNeedsStore interface {
 	SetTurnNeeds(chatID int64, n TurnNeeds) error
+	// TurnNeedsPending: the chat's current turn has not called end_turn yet.
+	TurnNeedsPending(chatID int64) (bool, error)
 }
 
 // Limits: a card is something to read at a glance. Past these an agent is
@@ -115,6 +117,23 @@ func turnVerbs(c *Core) []Verb {
 		},
 		Scope: ScopeLocal,
 		Fn:    func(_ context.Context, p Params) (any, error) { return c.endTurn(p) },
+	}, {
+		// The chat's Stop hook (`burrow end-turn-gate`) asks this: a turn about
+		// to end without end_turn is sent back once to call it.
+		Name:    "end_turn_pending",
+		Summary: "Internal (a Burrow chat's Stop hook): whether the calling chat's turn has not called end_turn yet",
+		Scope:   ScopeLocal,
+		Fn: func(_ context.Context, p Params) (any, error) {
+			if c.deps.TurnNeeds == nil {
+				return map[string]bool{"pending": false}, nil
+			}
+			id := p.Int("parent_chat_id")
+			if id <= 0 {
+				return map[string]bool{"pending": false}, nil
+			}
+			pending, err := c.deps.TurnNeeds.TurnNeedsPending(id)
+			return map[string]bool{"pending": pending}, err
+		},
 	}}
 }
 

@@ -514,6 +514,26 @@ except: pass
     exit 0
     ;;
 
+  end-turn-gate)
+    # burrow end-turn-gate   (internal — a Burrow chat's Claude Stop hook)
+    # A turn about to end without the end_turn tool call is sent back ONCE to
+    # make it. The second stop (stop_hook_active) always goes through, and so
+    # does every error path: this must never trap a turn. stdin = the Stop JSON.
+    [ -n "$BURROW_CHAT_ID" ] || exit 0
+    json=$(cat)
+    case "$json" in *'"stop_hook_active":true'*|*'"stop_hook_active": true'*) exit 0 ;; esac
+    port=$(_port); token=$(_token)
+    [ -n "$port" ] && [ -n "$token" ] || exit 0
+    out=$(curl -sf --max-time 5 -X POST "http://127.0.0.1:$port/v1/end_turn_pending" \
+      -H 'Content-Type: application/json' -H "Authorization: Bearer $token" \
+      -d "{\"parent_chat_id\":\"$(_esc "$BURROW_CHAT_ID")\"}" 2>/dev/null) || exit 0
+    case "$out" in
+      *'"pending":true'*)
+        printf '%s' '{"decision":"block","reason":"Burrow: finish this turn by calling the end_turn tool (burrow MCP) — needs \"you\" with asks if the user must decide or do something, else needs \"nothing\" (optionally next). Write no more text: make only that call."}' ;;
+    esac
+    exit 0
+    ;;
+
   notify)
     # burrow notify '<json>'   (internal — invoked by Codex's `notify` program)
     # Codex passes a single JSON arg describing a lifecycle event. Map its "type"

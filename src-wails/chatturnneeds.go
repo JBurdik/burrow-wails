@@ -43,6 +43,19 @@ func (a *App) SetTurnNeeds(chatID int64, n control.TurnNeeds) error {
 	return nil
 }
 
+// TurnNeedsPending implements control.TurnNeedsStore: no end_turn stored for
+// the current turn (applyChatPhase clears it when a turn starts).
+func (a *App) TurnNeedsPending(chatID int64) (bool, error) {
+	if a.db == nil {
+		return false, fmt.Errorf("no database")
+	}
+	var raw string
+	if err := a.db.QueryRow(`SELECT turn_needs FROM chats WHERE id = ?`, chatID).Scan(&raw); err != nil {
+		return false, err
+	}
+	return raw == "", nil
+}
+
 func (a *App) clearTurnNeeds(chatID string) {
 	if a.db == nil {
 		return
@@ -277,3 +290,15 @@ func runAskReply(cmd, cwd, out string, code int) string {
 	}
 	return fmt.Sprintf("I ran your command from the card in `%s` — exit %d:\n\n```\n$ %s\n%s\n```", cwd, code, cmd, out)
 }
+
+// endTurnGateSettings is the --settings layer a Claude chat starts with: one
+// Stop hook running `burrow end-turn-gate`. Merged with the user's own
+// settings by the CLI, not replacing them.
+func endTurnGateSettings(burrowBin string) string {
+	raw, _ := json.Marshal(map[string]any{"hooks": map[string]any{"Stop": []any{
+		map[string]any{"hooks": []any{map[string]any{"type": "command", "command": shellQuote(burrowBin) + " end-turn-gate", "timeout": 15}}},
+	}}})
+	return string(raw)
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
