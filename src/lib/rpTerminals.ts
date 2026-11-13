@@ -46,6 +46,12 @@ export interface PanelTerminals {
   serve(req: ServeRequest): Promise<ServeResult>;
   /** Close a panel terminal by pty id; false when no panel terminal has it. */
   close(ptyId: number): boolean;
+  /**
+   * Open the Terminal surface and type `text` at its prompt as a bracketed
+   * paste — never Return. false (nothing typed) when the shell is busy, not a
+   * shell, or this panel can't (a popped-out panel answers through serve only).
+   */
+  typeInto?(text: string): Promise<boolean>;
 }
 
 // One RightPanel instance exists app-wide; it installs itself here on mount.

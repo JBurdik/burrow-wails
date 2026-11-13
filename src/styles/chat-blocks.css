@@ -76,3 +76,8 @@
 .cv-image-gone::before { content: "Image file is missing: " attr(data-path); }
 .cv-image-gone::before, .cv-image-missing { display: block; font-size: 12px; color: var(--chat-text-secondary); border: 1px dashed var(--chat-border); border-radius: 10px; padding: 8px 12px; }
 .cv-image-caption { font-size: 12px; color: var(--chat-text-secondary); margin-top: 4px; }
+
+/* ```bash blocks with Run in terminal / Copy (chatBlocks.ts renderShellBlock). */
+.cm-shell { margin: 0.6em 0; border: 1px solid var(--chat-border); border-radius: 10px; overflow: hidden; }
+.cm-shell pre { margin: 0 !important; border: 0 !important; border-radius: 0 !important; }
+.cm-shell [data-sh-action="run"] { color: var(--chat-text); }

@@ -869,6 +869,7 @@ import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/co
 import PasteChip from "@/components/composer/PasteChip.vue";
 import SecretRequestCard from "@/components/SecretRequestCard.vue";
 import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
+import { panelTerminals } from "@/lib/rpTerminals";
 import { useNotificationsStore } from "@/stores/notifications";
 import ThreadFindBar from "@/components/ThreadFindBar.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
@@ -937,6 +938,8 @@ function onRichBlockClick(event: MouseEvent) {
     else void navigator.clipboard.writeText(src);
     return;
   }
+  const sh = target.closest<HTMLElement>("[data-sh-action]");
+  if (sh) { void runShellBlock(sh); return; }
   const ch = target.closest<HTMLElement>("[data-ch-action]");
   if (ch) {
     pageView.value = { title: "HTML preview", path: "", html: decodeURIComponent(ch.closest<HTMLElement>(".cm-html")?.dataset.htmlSrc ?? "") };
@@ -966,6 +969,20 @@ function onRichBlockClick(event: MouseEvent) {
   const notes = skip ? "" : form.querySelector<HTMLTextAreaElement>(".cq-notes")?.value ?? "";
   form.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea").forEach((el) => (el.disabled = true));
   void sendMessage(formatAnswers(answers, notes));
+}
+
+// ▶ Run in terminal on a ```bash block: typed at the Right Panel terminal's
+// prompt, never run — the user presses Return. A busy shell (or a panel that
+// can't type, e.g. popped out) gets it on the clipboard instead.
+async function runShellBlock(btn: HTMLElement) {
+  const src = decodeURIComponent(btn.closest<HTMLElement>(".cm-shell")?.dataset.shellSrc ?? "");
+  if (!src) return;
+  const typed = btn.dataset.shAction === "run" ? await panelTerminals()?.typeInto?.(src).catch(() => false) : false;
+  if (typed) return;
+  await navigator.clipboard.writeText(src).catch(() => {});
+  const label = btn.textContent;
+  btn.textContent = btn.dataset.shAction === "run" ? "Terminal busy — copied" : "Copied";
+  setTimeout(() => (btn.textContent = label), 1600);
 }
 
 // ```mermaid blocks arrive as placeholders (a plain code block carrying the

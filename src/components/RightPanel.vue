@@ -1339,7 +1339,7 @@ function closePanelTerminal(ptyId: number): boolean {
 // it forwards it here (rpWindow.ts).
 let panelOpsOff: (() => void) | null = null;
 onMounted(() => {
-  installPanelTerminals({ serve, close: closePanelTerminal });
+  installPanelTerminals({ serve, close: closePanelTerminal, typeInto: typeIntoTerminal });
   if (inWindow) panelOpsOff = answerPanelOps();
 });
 onBeforeUnmount(() => {
@@ -1436,6 +1436,33 @@ async function toggleTerminal() {
     const visible = [...(host?.querySelectorAll<HTMLTextAreaElement>(".xterm-helper-textarea") ?? [])].find((t) => t.offsetParent !== null);
     visible?.focus();
   });
+}
+
+// A chat's ▶ Run in terminal: the command lands at the prompt, the user presses
+// Return. Bracketed paste so a multi-line command waits too; only into a shell
+// that is at rest (a running program would read it as input).
+async function typeIntoTerminal(text: string): Promise<boolean> {
+  const l = layout.value;
+  if (!(props.open && isShown(l, "terminal"))) await openSurface("terminal", paneOf(l, "terminal") === 0 ? 0 : 1);
+  await termsRestored;
+  const s = termsByWs[wsKey.value];
+  const id = s?.active ?? s?.terms[0]?.id;
+  if (!id) return false;
+  // A terminal opened just now has no shell for a beat: give it a second.
+  let atRest = false;
+  for (let i = 0; i < 10 && !atRest; i++) {
+    atRest = onlyShell(await invoke<string>("get_pty_foreground", { id }).catch(() => "?"));
+    if (!atRest) await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!atRest) return false;
+  const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+  await invoke("write_pty", { id, data: Array.from(new TextEncoder().encode("\x1b[200~" + clean + "\x1b[201~")) });
+  await nextTick();
+  requestAnimationFrame(() => {
+    const host = hostSlot(wsKey.value, "terminal");
+    [...(host?.querySelectorAll<HTMLTextAreaElement>(".xterm-helper-textarea") ?? [])].find((t) => t.offsetParent !== null)?.focus();
+  });
+  return true;
 }
 
 defineExpose({ openGitTab, openSubagent, openPanelSurface, openBrowserUrl, openPullRequest, openDoc, openFile, toggleTerminal });

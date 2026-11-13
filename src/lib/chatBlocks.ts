@@ -153,6 +153,30 @@ export function renderMermaidPlaceholder(text: string): string {
     + `<div class="cm-diagram"><pre><code class="language-mermaid">${src}</code></pre></div></div>`;
 }
 
+// ── shell blocks ────────────────────────────────────────────────────────────
+
+const SHELL_LANGS = new Set(["bash", "sh", "zsh", "shell", "console", "fish"]);
+
+/**
+ * True when a command carries characters that could make what is shown differ
+ * from what runs: control chars (bar tab/newline), bidi overrides, zero-width
+ * and other format chars, line/paragraph separators. Such a block gets no ▶.
+ */
+export function hasHiddenChars(cmd: string): boolean {
+  return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}]/u.test(cmd.replace(/[\n\t]/g, ""));
+}
+
+/** A ```bash block with Run-in-terminal (types it at the prompt, no Enter) and Copy. */
+export function renderShellBlock(lang: string, text: string): string {
+  const cmd = text.replace(/\n+$/, "");
+  const run = hasHiddenChars(cmd)
+    ? ""
+    : `<button type="button" data-sh-action="run" title="Type it at the prompt of the Right Panel terminal — you press Return">▶ Run in terminal</button>`;
+  return `<div class="cm-shell" data-shell-src="${encodeURIComponent(cmd)}">`
+    + `<div class="cm-tools"><span class="cm-label">${escapeHtml(lang)}</span>${run}<button type="button" data-sh-action="copy" title="Copy command">Copy</button></div>`
+    + `<pre><code class="language-${escapeHtml(lang)}">${escapeHtml(cmd)}</code></pre></div>`;
+}
+
 // ── html preview ────────────────────────────────────────────────────────────
 
 /** ```html, or an unlabelled fence holding a whole document (`<!doctype html>` / `<html>`). */
@@ -342,6 +366,7 @@ const chatMarked = new Marked({
       if (lang === "questions") return renderQuestions(token.text, answeredCtx) ?? false;
       if (lang === "mermaid" && token.text.trim() && fenceClosed(token.raw)) return renderMermaidPlaceholder(token.text);
       if (isHtmlBlock(lang, token.text) && fenceClosed(token.raw)) return renderHtmlBlock(token.text);
+      if (SHELL_LANGS.has(lang) && token.text.trim() && fenceClosed(token.raw)) return renderShellBlock(lang, token.text);
       return false;
     },
   },
