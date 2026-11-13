@@ -502,11 +502,15 @@ function startResize(side: 'left' | 'right', e: MouseEvent) {
   resizing = side;
   resizeStartX = e.clientX;
   resizeStartWidth = side === 'left' ? ui.sidebarWidth : ui.rightPanelWidth;
+  // An iframe under the pointer (HTML preview, Browser) swallows mousemove /
+  // mouseup, so the drag never ended and the panel kept following the mouse.
+  document.body.classList.add('panel-resizing');
   e.preventDefault();
 }
 
 function onResizeMove(e: MouseEvent) {
   if (!resizing) return;
+  if (!(e.buttons & 1)) return onResizeUp(); // the mouseup went somewhere else
   const delta = e.clientX - resizeStartX;
   if (!ui.swapPanels) {
     if (resizing === 'left') {
@@ -525,6 +529,7 @@ function onResizeMove(e: MouseEvent) {
 
 function onResizeUp() {
   resizing = null;
+  document.body.classList.remove('panel-resizing');
 }
 
 // Sync OS window title: "<tab title> — <workspace>" so macOS Mission Control /

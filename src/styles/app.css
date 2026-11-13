@@ -408,3 +408,6 @@ body {
   align-items: center;
   gap: 6px;
 }
+
+/* While a side panel is being resized, iframes must not eat the drag (App.vue startResize). */
+body.panel-resizing iframe { pointer-events: none; }
