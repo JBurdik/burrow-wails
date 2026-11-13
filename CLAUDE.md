@@ -139,6 +139,8 @@ control / bidi / zero-width chars, ≤ 8000) gets a Run button; `chat_run_ask(ch
 (never client text) once (`state` running → done + `exit` in the JSON, CAS on the row) via `/bin/sh -c` in the chat's
 cwd, no stdin, 10 min, and `ChatQueueAdd`s the output as the user's reply. **Quiet inbox:** `subagentArchivable`
 archives a collected, done, non-side child whose end_turn said `nothing` with no `next` at once (no receipt, no 30 min).
+**Decisions** (`DecisionsList.vue`): every unarchived thread whose turn_needs is `you`, as its card, on top of the tray
+panel's list and the phone's Threads screen (project chip filters it); an answer is `chat_queue_add` to that thread.
 The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. **Stop gate** (Claude chats only): every
 chat starts with `--settings` holding one Stop hook, `burrow end-turn-gate` (`endTurnGateSettings`): a turn ending with
 `turn_needs` still empty (`end_turn_pending` verb) is sent back **once** to call `end_turn`; `stop_hook_active` and every

@@ -5,6 +5,7 @@ import { router } from "@/router";
 import { useUIStore } from "@/stores/ui";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { feedGroups, needsYou, permTarget, useThreadFeed, type FeedRow } from "@/lib/threadFeed";
+import DecisionsList from "@/components/DecisionsList.vue";
 import type { TermStatus } from "@/lib/terminalStatus";
 import PhoneHeader from "./PhoneHeader.vue";
 import { timeAgo } from "./timeAgo";
@@ -73,6 +74,7 @@ const subtitle = (r: FeedRow) => [activeFilter.value == null ? r.workspace : "",
         No active threads.
         <button class="mt-3 block w-full text-accent" @click="ui.openSpotlight()">Search older threads</button>
       </div>
+      <DecisionsList class="px-2" :repo-id="activeFilter" @open="(s) => router.push(`/ws/${s.workspaceId}?chat=${s.id}`)" />
       <section v-for="g in groups" :key="g.key">
         <h2 class="px-4 pb-1 pt-4 text-[12px] font-semibold text-muted-foreground">{{ g.label }}</h2>
         <div v-for="r in g.rows" :key="r.key" class="border-b border-border/60">

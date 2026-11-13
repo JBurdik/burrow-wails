@@ -25,6 +25,8 @@
     <!-- Thread list -->
     <template v-if="view.kind === 'list'">
       <div ref="list" class="min-h-0 overflow-y-auto px-1.5 pb-1.5" :class="fill ? 'flex-1' : 'shrink'">
+        <!-- Open questions from every thread, answerable right here. -->
+        <DecisionsList @open="(s) => (view = { kind: 'chat', chatId: s.id })" />
         <p v-if="!rows.length" class="px-2 py-8 text-center text-[12px] text-muted-foreground">No active threads.</p>
         <template v-for="group in groups" :key="group.label">
           <template v-if="group.rows.length">
@@ -169,6 +171,7 @@ import { PhArrowBendUpLeft, PhArrowSquareOut, PhCaretLeft, PhChatCircle, PhPlus,
 import { TrayOpen, TraySetPinned } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import DecisionsList from "@/components/DecisionsList.vue";
 import { openMiniChat } from "@/lib/miniChat";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { Select } from "@/components/ui/select";
