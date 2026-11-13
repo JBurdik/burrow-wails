@@ -853,7 +853,7 @@ import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdate
 import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode, PhWifiSlash } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
-import { compact as phone } from "@/lib/viewport";
+import { compact as phone, isWeb } from "@/lib/viewport";
 import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
 import { chatAsleep, useClaudeChatsStore } from "@/stores/claudeChats";
@@ -2947,8 +2947,9 @@ function onKeydown(e: KeyboardEvent) {
     return;
   }
   // On a phone the soft keyboard has no Shift+Enter, so Enter is a newline
-  // (ComposerTextInput inserts it) and the send button sends.
-  if (e.key === "Enter" && !e.shiftKey && !phone.value) { e.preventDefault(); sendMessage(); }
+  // (ComposerTextInput inserts it) and the send button sends. Only a browser:
+  // a narrow desktop window (mini chat, tray panel) still has a keyboard.
+  if (e.key === "Enter" && !e.shiftKey && !(phone.value && isWeb)) { e.preventDefault(); sendMessage(); }
 }
 
 // ArrowUp at the start of the box (or in an empty one) recalls what the user
