@@ -24,13 +24,20 @@ export function subagentArchivable(
   // A side chat has no result to collect: settled + seen is enough.
   if (!session.collectedAt && session.kind !== "side") return false;
   if (!phase || !["done", "failed", "idle"].includes(phase.state)) return false;
-  // Quiet inbox (threadbear): a collected child whose end_turn said it is done
-  // and suggested nothing more has nothing left for anyone to read — the
-  // parent took its result. It goes at once, unseen.
-  const n = session.turnNeeds;
-  if (session.kind !== "side" && phase.state === "done" && n?.needs === "nothing" && !n.next?.length) return true;
   if (!seenAt || seenAt < phase.turn_ended_at) return false;
   return now - Math.max(seenAt, phase.updated_at) >= delayMs;
+}
+
+/** Quiet inbox (threadbear): a collected child whose end_turn said it is done
+ *  and suggested nothing more MAY go at once, unseen — the parent took its
+ *  result. Only a candidate: the sweep asks Go (`chat_quiet_archivable`) that
+ *  it has no loose ends (uncommitted / unpushed work, open PR, children,
+ *  check-ins) and that nobody wrote to it after its task. */
+export function subagentQuietCandidate(session: ClaudeSession, phase: Phase | undefined, watching: boolean): boolean {
+  if (!session.parentChatId || session.archivedAt || session.busy || watching || session.kind === "side") return false;
+  if (!session.collectedAt || phase?.state !== "done") return false;
+  const n = session.turnNeeds;
+  return n?.needs === "nothing" && !n.next?.length;
 }
 
 /** Sub-agents of one thread, oldest first, for DISPLAY (the Right Panel's

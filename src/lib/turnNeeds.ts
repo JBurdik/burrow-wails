@@ -9,7 +9,7 @@ export interface TurnAsk {
   /** Index into options the agent would pick; -1 = none. */
   suggested: number;
   /** A command that is the user's to run (Run on the card); state is Go's. */
-  run?: { command: string; state?: "running" | "done"; exit?: number };
+  run?: { command: string; state?: "running" | "done"; exit?: number; interrupted?: boolean };
 }
 
 export interface TurnNeeds {

@@ -10,6 +10,10 @@
 export interface TermHandle {
   /** Last `lines` non-empty rows of the buffer, oldest first. */
   readOutput(lines: number): string;
+  /** The program asked for bracketed paste (a line editor that waits for Return on a paste). */
+  bracketedPaste?(): boolean;
+  /** The text of the row the cursor is on. */
+  cursorLine?(): string;
 }
 
 /** A PTY foreground (get_pty_foreground) that is just the user's shell. */
@@ -27,4 +31,11 @@ export function unregisterTerm(ptyId: number) {
 
 export function readTermOutput(ptyId: number, lines: number): string | undefined {
   return handles.get(ptyId)?.readOutput(lines);
+}
+
+/** What a ▶ Run needs to know before typing into a terminal; undefined = no live view. */
+export function termInputState(ptyId: number): { bracketed: boolean; line: string } | undefined {
+  const h = handles.get(ptyId);
+  if (!h?.bracketedPaste || !h.cursorLine) return undefined;
+  return { bracketed: h.bracketedPaste(), line: h.cursorLine() };
 }

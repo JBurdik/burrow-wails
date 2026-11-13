@@ -388,3 +388,25 @@ func (a *App) resetInterruptedRuns() {
 		a.swapTurnNeeds(r.id, r.raw, n)
 	}
 }
+
+// ChatQuietArchivable: may a finished sub-agent leave the list at once
+// (quiet inbox)? Only when it has nothing open — uncommitted or unpushed
+// work, an open PR, children in flight, a booked check-in — and nobody wrote
+// to it after its task (one prompt in its transcript). Threadbear's rule:
+// archiving a worktree with work in it, or a thread someone was talking to,
+// would lose it. Otherwise the ordinary 30-minute rule applies.
+func (a *App) ChatQuietArchivable(chatID int64) (bool, error) {
+	c, err := a.chatByID(chatID)
+	if err != nil || c.ParentChatID == 0 || c.Kind == "side" || c.ArchivedAt != 0 {
+		return false, err
+	}
+	ends, err := a.ChatLooseEnds(chatID)
+	if err != nil || len(ends) > 0 {
+		return false, err
+	}
+	var folded, stored, unfolded int
+	_ = a.db.QueryRow(`SELECT COALESCE(folded_ord, 0) FROM chat_stream_state WHERE chat_id = ?`, chatID).Scan(&folded)
+	_ = a.db.QueryRow(`SELECT COUNT(*) FROM chat_messages WHERE chat_id = ? AND json_extract(payload_json, '$.role') = 'user'`, chatID).Scan(&stored)
+	_ = a.db.QueryRow(`SELECT COUNT(*) FROM chat_stream WHERE chat_id = ? AND kind = ? AND ord >= ?`, chatID, chatUserKind, folded).Scan(&unfolded)
+	return stored+unfolded <= 1, nil
+}

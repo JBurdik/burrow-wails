@@ -763,6 +763,7 @@ import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
 import ExtensionNativeSurface from "./ExtensionNativeSurface.vue";
 import { initPtyCounter, nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
+import { termInputState } from "@/lib/termRegistry";
 import { addTerm, findServed, installPanelTerminals, keepLive, loadTerms, onlyShell, removeTerm, saveTerms, type RpTerm, type RpTerms, type ServeRequest, type ServeResult } from "@/lib/rpTerminals";
 
 const props = withDefaults(defineProps<{
@@ -1459,6 +1460,7 @@ async function toggleTerminal() {
 // A chat's ▶ Run in terminal: the command lands at the prompt, the user presses
 // Return. Bracketed paste so a multi-line command waits too; only into a shell
 // that is at rest (a running program would read it as input).
+const lastTyped = new Map<number, string>();
 async function typeIntoTerminal(text: string): Promise<boolean> {
   const l = layout.value;
   if (!(props.open && isShown(l, "terminal"))) await openSurface("terminal", paneOf(l, "terminal") === 0 ? 0 : 1);
@@ -1473,8 +1475,18 @@ async function typeIntoTerminal(text: string): Promise<boolean> {
     if (!atRest) await new Promise((r) => setTimeout(r, 100));
   }
   if (!atRest) return false;
+  // Type only into a line editor that asked for bracketed paste: without it
+  // (sh, dash, macOS's bash 3.2, a `read`) each newline in a pasted block
+  // runs the line before it, unasked. Threadbear's rule; else the caller copies.
+  const input = termInputState(id);
+  if (!input?.bracketed) return false;
+  // A command typed earlier still waiting at the prompt: appending another
+  // would make a third one nobody wrote.
+  const pending = lastTyped.get(id);
+  if (pending && input.line.includes(pending)) return false;
   const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
   await invoke("write_pty", { id, data: Array.from(new TextEncoder().encode("\x1b[200~" + clean + "\x1b[201~")) });
+  lastTyped.set(id, clean.split("\n")[0].trim().slice(0, 60));
   await nextTick();
   requestAnimationFrame(() => {
     const host = hostSlot(wsKey.value, "terminal");

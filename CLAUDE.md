@@ -137,8 +137,15 @@ as one message with the composer text (`composeAnswers`); Done = Archive + follo
 checks, never the agent's word). **Run on the card:** an ask's `run` (checked by `control.RunCommandProblem`: no
 control / bidi / zero-width chars, ≤ 8000) gets a Run button; `chat_run_ask(chatId, index)` runs the **stored** command
 (never client text) once (`state` running → done + `exit` in the JSON, CAS on the row) via `/bin/sh -c` in the chat's
-cwd, no stdin, 10 min, and `ChatQueueAdd`s the output as the user's reply. **Quiet inbox:** `subagentArchivable`
-archives a collected, done, non-side child whose end_turn said `nothing` with no `next` at once (no receipt, no 30 min).
+cwd, no stdin, 10 min, and `ChatQueueAdd`s the output as the user's reply. `runAskShell` (also schedule checks) runs
+in its **own process group** and the deadline kills the group (+ `WaitDelay`) — killing only `sh` hung on a child holding
+the pipe. Refused on an archived thread / missing folder; `resetInterruptedRuns` (startup) turns a `running` left by a
+restart into `interrupted`, runnable again. **Quiet inbox:** `subagentArchivable`
+archives a collected, done, non-side child whose end_turn said `nothing` with no `next` at once (no receipt, no 30 min)
+— `subagentQuietCandidate` picks it, `chat_quiet_archivable` (Go) confirms no loose ends and ≤ 1 user message (nobody
+wrote to it after its task). Loose ends' git is `untrustedGit` (fsmonitor/untracked cache/hooks off, no transport, no
+`GIT_*` env, as threadbear's safe-git). ▶ on shell blocks types only into a terminal in **bracketed paste mode** whose
+prompt doesn't still hold the last typed command (`termInputState`), else copies; no `console` blocks, ≤ 8000.
 **Decisions** (`DecisionsList.vue`): every unarchived thread whose turn_needs is `you`, as its card, on top of the tray
 panel's list and the phone's Threads screen (project chip filters it); an answer is `chat_queue_add` to that thread.
 The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. **Stop gate** (Claude chats only): every
@@ -296,7 +303,9 @@ next slot. Resume skips slots missed while paused; run-now = `due_at = now` + a 
 **Check** (`check_cmd`, `scheduleCheck`): `schedule --check CMD` (verb only — `ScheduleSave` zeroes it, an edit keeps
 it; `RunCommandProblem` applies) runs CMD in the chat's cwd (≤ 1 min, in the delivery pass, once the chat is settled)
 before a run: empty output + exit 0 skips the run (last_error "check: nothing new"), output is appended to the
-message, a failing check still runs with the error. Verbs: `schedule --every / --weekly / --new-chat`, `schedule_pause` / `_resume` / `_run_now`; wire:
+message, a failing check still runs with the error. Output found is kept in `check_output` until a run carrying it is
+sent; `check_sig` (command + folder + bytes of files the command names) must match or the check is **held** (also when the
+folder is gone); a Settings edit that moves the schedule drops the check. Verbs: `schedule --every / --weekly / --new-chat`, `schedule_pause` / `_resume` / `_run_now`; wire:
 `schedule_list_all` / `schedule_save` / `schedule_set_paused` / `schedule_run_now` (Settings → Scheduled,
 `ScheduledTasksPanel.vue`).
 

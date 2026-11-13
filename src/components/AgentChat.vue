@@ -982,7 +982,7 @@ async function runShellBlock(btn: HTMLElement) {
   if (typed) return;
   await navigator.clipboard.writeText(src).catch(() => {});
   const label = btn.textContent;
-  btn.textContent = btn.dataset.shAction === "run" ? "Terminal busy — copied" : "Copied";
+  btn.textContent = btn.dataset.shAction === "run" ? "Copied — paste it in a terminal" : "Copied";
   setTimeout(() => (btn.textContent = label), 1600);
 }
 

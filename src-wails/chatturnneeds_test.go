@@ -185,3 +185,28 @@ func TestRunAskShellKillsTheWholeGroup(t *testing.T) {
 		t.Fatalf("out=%q code=%d", out, code)
 	}
 }
+
+func TestChatQuietArchivable(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
+	parent, _ := a.CreateChat(Chat{WorkspaceID: wsID, Title: "p"})
+	child, _ := a.CreateChat(Chat{WorkspaceID: wsID, Title: "c", ParentChatID: parent.ID})
+	cid := strconv.FormatInt(child.ID, 10)
+	a.emitChatLine(cid, chatUserKind, "the task")
+	drainChatStream(t, a, cid)
+	if ok, _ := a.ChatQuietArchivable(child.ID); !ok {
+		t.Fatal("a child with only its task and nothing open is quiet")
+	}
+	a.emitChatLine(cid, chatUserKind, "wait, also check X")
+	drainChatStream(t, a, cid)
+	if ok, _ := a.ChatQuietArchivable(child.ID); ok {
+		t.Fatal("someone wrote to it after the task: not quiet")
+	}
+	other, _ := a.CreateChat(Chat{WorkspaceID: wsID, Title: "c2", ParentChatID: parent.ID})
+	_, _ = scheduleAdapter{a}.Add(control.ScheduledPrompt{ChatID: other.ID, Text: "later", DueAt: time.Now().Add(time.Hour)})
+	if ok, _ := a.ChatQuietArchivable(other.ID); ok {
+		t.Fatal("a booked check-in is a loose end: not quiet")
+	}
+	if ok, _ := a.ChatQuietArchivable(parent.ID); ok {
+		t.Fatal("only sub-agents are quiet-archived")
+	}
+}

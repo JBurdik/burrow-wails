@@ -811,7 +811,14 @@ onMounted(async () => {
   // Let the control API read this tab's output (`burrow tab-output`), which is
   // how an orchestrating thread checks on an agent mid-task instead of waiting
   // for its result.
-  registerTerm(props.ptyId, { readOutput });
+  registerTerm(props.ptyId, {
+    readOutput,
+    bracketedPaste: () => !!term?.modes.bracketedPasteMode,
+    cursorLine: () => {
+      const b = term?.buffer.active;
+      return b ? b.getLine(b.baseY + b.cursorY)?.translateToString(true).replace(/\s+$/, "") ?? "" : "";
+    },
+  });
 });
 
 /**

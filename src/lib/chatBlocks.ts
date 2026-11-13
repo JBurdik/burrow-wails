@@ -155,7 +155,9 @@ export function renderMermaidPlaceholder(text: string): string {
 
 // ── shell blocks ────────────────────────────────────────────────────────────
 
-const SHELL_LANGS = new Set(["bash", "sh", "zsh", "shell", "console", "fish"]);
+// Not `console`: those blocks mix commands with their output.
+const SHELL_LANGS = new Set(["bash", "sh", "zsh", "shell", "fish"]);
+const MAX_SHELL_RUN = 8000;
 
 /**
  * True when a command carries characters that could make what is shown differ
@@ -168,8 +170,11 @@ export function hasHiddenChars(cmd: string): boolean {
 
 /** A ```bash block with Run-in-terminal (types it at the prompt, no Enter) and Copy. */
 export function renderShellBlock(lang: string, text: string): string {
-  const cmd = text.replace(/\n+$/, "");
-  const run = hasHiddenChars(cmd)
+  let cmd = text.replace(/\n+$/, "");
+  // A transcript-style "$ cmd" block: drop the prompt only when every line has one.
+  const lines = cmd.split("\n").filter((l) => l.trim());
+  if (lines.length && lines.every((l) => /^\s*\$ /.test(l))) cmd = cmd.replace(/^(\s*)\$ /gm, "$1");
+  const run = hasHiddenChars(cmd) || cmd.length > MAX_SHELL_RUN
     ? ""
     : `<button type="button" data-sh-action="run" title="Type it at the prompt of the Right Panel terminal — you press Return">▶ Run in terminal</button>`;
   return `<div class="cm-shell" data-shell-src="${encodeURIComponent(cmd)}">`

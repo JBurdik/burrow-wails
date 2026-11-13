@@ -27,6 +27,7 @@
           <div class="flex items-center gap-2 px-2.5 pt-1.5 text-[11px] text-muted-foreground">
             <PhTerminalWindow :size="12" class="shrink-0" />
             <span class="min-w-0 flex-1 truncate font-mono" :title="cwd">{{ cwd || "chat folder" }}</span>
+            <span v-if="ask.run.interrupted && !ask.run.state" class="text-[var(--chat-warn)]">Interrupted by a restart</span>
             <span v-if="ask.run.state === 'done'" :class="ask.run.exit ? 'text-[var(--red)]' : 'text-[var(--chat-success)]'">exit {{ ask.run.exit ?? 0 }} · result sent</span>
             <button v-else class="needs-btn is-primary !h-6" :disabled="ask.run.state === 'running' || running" @click="runIt">
               <PhPlay :size="11" weight="fill" /> {{ ask.run.state === "running" || running ? "Running…" : "Run" }}

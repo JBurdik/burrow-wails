@@ -22,4 +22,18 @@ describe("shell blocks", () => {
     expect(html).not.toContain('data-sh-action="run"');
     expect(html).toContain('data-sh-action="copy"');
   });
+
+  it("leaves console blocks (output mixed in) without Run", () => {
+    expect(renderChatMd("```console\n$ ls\nfile.txt\n```\n")).not.toContain("data-sh-action");
+  });
+
+  it("drops a $ prompt only when every line has one", () => {
+    expect(renderChatMd("```bash\n$ npm i\n$ npm test\n```\n")).toContain(`data-shell-src="${encodeURIComponent("npm i\nnpm test")}"`);
+    expect(renderChatMd("```bash\n$ echo a\necho b\n```\n")).toContain(encodeURIComponent("$ echo a"));
+  });
+
+  it("offers no Run for a huge block", () => {
+    const html = renderChatMd("```bash\n" + "echo x\n".repeat(1500) + "```\n");
+    expect(html).not.toContain('data-sh-action="run"');
+  });
 });

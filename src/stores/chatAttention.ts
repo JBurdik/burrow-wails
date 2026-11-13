@@ -6,7 +6,7 @@ import { DONE_AUTOCLEAR_MS, displayStatus, shouldMarkSeen, type Phase } from "@/
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
-import { subagentArchivable } from "@/stores/chatTree";
+import { subagentArchivable, subagentQuietCandidate } from "@/stores/chatTree";
 import { liveChatSessionIds } from "@/lib/chatSession";
 import { appChatHost, notifyWoke } from "@/lib/chatHost";
 import { onSeenChanged, shareSeen } from "@/lib/seenSync";
@@ -260,11 +260,19 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
   // ponytail: 1-minute poll; a per-chat timer only matters if 30 min ± 1 does.
   // The main window sweeps; a secondary one (popped chat, tray panel) would
   // archive the same rows a second time.
+  const quietAsking = new Set<number>();
   if (typeof location === "undefined" || !location.hash.startsWith("#/window/")) setInterval(() => {
     const now = Date.now();
     for (const session of chats.sessions) {
-      if (subagentArchivable(session, phases.get(session.id), seenAt.get(session.id) ?? 0, (watchers.get(session.id) ?? 0) > 0, now)) {
+      const watching = (watchers.get(session.id) ?? 0) > 0;
+      if (subagentArchivable(session, phases.get(session.id), seenAt.get(session.id) ?? 0, watching, now)) {
         void chats.archive(session.id);
+      } else if (subagentQuietCandidate(session, phases.get(session.id), watching) && !quietAsking.has(session.id)) {
+        quietAsking.add(session.id);
+        void invoke<boolean>("chat_quiet_archivable", { chatId: session.id })
+          .then((ok) => { if (ok) return chats.archive(session.id); })
+          .catch(() => {})
+          .finally(() => quietAsking.delete(session.id));
       }
     }
   }, 60_000);
