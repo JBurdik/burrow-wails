@@ -167,7 +167,11 @@ of what the open thread made — its open asks (local ticks only), **pins** (`pi
 resolved against `cwd` or an http(s) URL + note; table `chat_pins`, re-pin updates, ≤ 20, `chat-pins-changed`; wire
 `chat_pins_list` / `chat_pin_remove`; DeleteChat drops them), files its tools wrote/edited and links in its replies
 (pure projections of the **loaded** transcript window), a Changes row → Diff surface, and its sub-agents. Sections fold
-(`burrow.highlights.folded`, global). Links: localhost → Browser surface, else the system browser.
+(`burrow.highlights.folded`, global). Links: localhost → Browser surface, else the system browser. Files/links come from
+the whole stored transcript (`load_chat_messages`, once per thread) merged with the live tail. `pin --show` emits
+`chat-pin-show`: the RP opens it now if that thread is on screen, else when it next is (pending in memory). An `.html` file
+opens drawn in the RP (`HtmlFileSurface`: `read_text_file` → `pageSrcdoc`, scripts in an opaque origin, no-network CSP;
+Source flips to the editor, Preview back) — like `.md` files (`MarkdownDocSurface`).
 
 **Threads already on it** (`chatsamework.go`, threadbear's sameWork): a top-level thread's **first** Claude prompt is
 compared (word overlap, `sameWorkTokens` / `sameWorkScore`, no model) with open top-level threads' title + recap + first

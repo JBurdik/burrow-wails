@@ -391,7 +391,23 @@
       @edit="mdEditing[act(pi)!] = true"
     />
 
+    <HtmlFileSurface
+      v-else-if="act(pi)?.startsWith(FILE_PREFIX) && isHtmlFile(act(pi)!) && !htmlSource[act(pi)!]"
+      :path="act(pi)!.slice(FILE_PREFIX.length)"
+      :cwd="props.cwd"
+      @source="htmlSource[act(pi)!] = true"
+    />
+
     <div v-else-if="act(pi)?.startsWith(FILE_PREFIX)" class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      <button
+        v-if="isHtmlFile(act(pi)!)"
+        class="absolute right-3 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-[var(--radius-nav)] bg-panel text-muted-foreground hover:bg-hover hover:text-foreground"
+        title="Preview"
+        aria-label="Preview"
+        @click="htmlSource[act(pi)!] = false"
+      >
+        <PhEye :size="13" />
+      </button>
       <button
         v-if="isMarkdown(act(pi)!)"
         class="absolute right-3 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-[var(--radius-nav)] bg-panel text-muted-foreground hover:bg-hover hover:text-foreground"
@@ -747,6 +763,7 @@ import BackgroundTasksSurface from "./BackgroundTasksSurface.vue";
 import { PhTerminalWindow } from "@phosphor-icons/vue";
 import ProgressSurface from "./ProgressSurface.vue";
 import HighlightsSurface from "./HighlightsSurface.vue";
+import HtmlFileSurface from "./HtmlFileSurface.vue";
 import SideChatSurface from "./SideChatSurface.vue";
 import { PhChatsCircle } from "@phosphor-icons/vue";
 import MarkdownDocSurface from "./MarkdownDocSurface.vue";
@@ -803,6 +820,9 @@ function storedDoc(id: number): string {
 const docPath = computed(() => wsUi(wsKey.value).docPath);
 // Files opened from the explorer: one surface per file, id `file:<path>`.
 const FILE_PREFIX = "file:";
+// .html files open drawn (HtmlFileSurface); Source flips a tab to the editor.
+const htmlSource = reactive<Record<string, boolean>>({});
+const isHtmlFile = (id: string) => /\.html?$/i.test(id);
 const FILES_KEY = "burrow.rpFiles";
 const isMarkdown = (id: string) => /\.(md|markdown|mdx)$/i.test(id);
 /** Markdown file tabs open rendered; true = switched to the editor. Per surface id, not persisted. */
