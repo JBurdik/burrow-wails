@@ -242,6 +242,12 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 // ClaudeSend wraps the prompt in the stream-json `user` envelope the CLI reads
 // on stdin. Images are data URIs ("data:<mime>;base64,<data>").
 func (a *App) ClaudeSend(id, text, sessionID string, images []string) error {
+	return a.claudeSend(id, text, sessionID, images, "")
+}
+
+// claudeSend is ClaudeSend plus `hidden`: an extra text block the agent reads
+// with this prompt but the transcript never shows (chatsamework.go).
+func (a *App) claudeSend(id, text, sessionID string, images []string, hidden string) error {
 	content := []any{}
 	for _, uri := range images {
 		rest, ok := strings.CutPrefix(uri, "data:")
@@ -262,6 +268,9 @@ func (a *App) ClaudeSend(id, text, sessionID string, images []string) error {
 		})
 	}
 	content = append(content, map[string]any{"type": "text", "text": text})
+	if hidden != "" {
+		content = append(content, map[string]any{"type": "text", "text": hidden})
+	}
 
 	msg, err := json.Marshal(map[string]any{
 		"type":       "user",

@@ -145,6 +145,11 @@ chat starts with `--settings` holding one Stop hook, `burrow end-turn-gate` (`en
 error let it stop. Tested: without it Haiku skipped `end_turn` after AskUserQuestion and under "do nothing else" tasks. `Arg.Schema`
 gives a verb arg a full JSON schema for MCP (the CLI passes it as a JSON string; `Params.JSON` reads both).
 
+**Threads already on it** (`chatsamework.go`, threadbear's sameWork): a top-level thread's **first** Claude prompt is
+compared (word overlap, `sameWorkTokens` / `sameWorkScore`, no model) with open top-level threads' title + recap + first
+prompt, same repo boosted; ≤ 3 hits ride as a **hidden** extra text block on that prompt (`claudeSend(..., hidden)` —
+never in `chat_stream`) telling the agent to `chat_read` them first, and a note row names them. Codex/ACP: not yet.
+
 **PR → worktree + chat** (`ForgePrCheckout`, `src/lib/prCheckout.ts`): optional `forge.HeadFetcher` (`FetchRef(n)` —
 GitHub/Gitea `pull/N/head`, GitLab `merge-requests/N/head`; Azure has none, `ForgeStatus.canCheckout` hides the action).
 `forge_pr_checkout` fetches it from origin and passes the `FETCH_HEAD` sha to `CreateWorktree` (setup scripts run;

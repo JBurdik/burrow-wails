@@ -181,7 +181,24 @@ func (a *App) chatSendLocked(c Chat, id, text string, images []string) error {
 		return fmt.Errorf("start claude: %w", err)
 	}
 	a.markChatAwake(chatID)
-	return a.ClaudeSend(id, text, c.ClaudeSessionID, images)
+	// A new thread's first prompt: point its agent at open threads that look
+	// like the same work (chatsamework.go). Threads only — a sub-agent or a
+	// side chat was started on purpose.
+	var hits []sameWorkHit
+	if c.ParentChatID == 0 && c.Kind != "side" && a.firstUserSend(chatID) {
+		hits = a.findSameWork(chatID, text)
+	}
+	hidden := ""
+	if len(hits) > 0 {
+		hidden = sameWorkContext(hits)
+	}
+	if err := a.claudeSend(id, text, c.ClaudeSessionID, images, hidden); err != nil {
+		return err
+	}
+	if len(hits) > 0 {
+		a.publishSurfaceNote(chatID, "", sameWorkNote(hits))
+	}
+	return nil
 }
 
 // stopProcess stops whichever runtime holds the chat id. By id, not by the
