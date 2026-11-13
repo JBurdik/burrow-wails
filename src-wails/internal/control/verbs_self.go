@@ -42,6 +42,11 @@ type ScheduledPrompt struct {
 	// stays queued and is retried by the sweep, a few times.
 	Attempts  int    `json:"attempts,omitempty"`
 	LastError string `json:"last_error,omitempty"`
+	// Check, when set, is a shell command run in the chat's folder before each
+	// run: empty output skips the run (no agent starts), anything else rides
+	// along in the message. Only the local schedule verb sets it (an agent / the
+	// CLI); the wire's schedule_save never writes it.
+	Check string `json:"check,omitempty"`
 }
 
 // Schedules persists scheduled prompts; the host's sweep delivers them through
@@ -83,6 +88,7 @@ func selfVerbs(c *Core) []Verb {
 			{Name: "workspace_id", Type: "integer", Desc: "With new_chat: the workspace to start it in (default: this chat's)"},
 			{Name: "agent", Type: "string", Desc: "With new_chat: agent id or name (default: the default chat agent)"},
 			{Name: "name", Type: "string", Desc: "Task name (default: the start of text)"},
+			{Name: "check", Type: "string", Desc: "Shell command run in the chat's folder before each run (≤ 1 min): prints nothing = skip this run (no tokens spent), else its output is appended to the message — e.g. a script that lists new Sentry issues or failed CI runs"},
 			chatArg,
 		},
 		Scope: ScopeLocal,
@@ -228,8 +234,14 @@ func (c *Core) schedule(p Params) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("schedule: %w", err)
 	}
+	check := p.Str("check")
+	if check != "" {
+		if problem := RunCommandProblem(check); problem != "" {
+			return nil, fmt.Errorf("schedule: check %s", strings.TrimPrefix(problem, "run "))
+		}
+	}
 	return c.deps.Schedules.Add(ScheduledPrompt{ChatID: chatID, Name: p.Str("name"), Text: text, DueAt: due, Rule: rule,
-		NewChat: p.Bool("new_chat"), WorkspaceID: p.Int("workspace_id"), Agent: p.Str("agent")})
+		NewChat: p.Bool("new_chat"), WorkspaceID: p.Int("workspace_id"), Agent: p.Str("agent"), Check: check})
 }
 
 func (c *Core) scheduleOp(verb string, p Params, pause bool) (any, error) {

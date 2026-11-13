@@ -276,7 +276,10 @@ rule — `kind` once | interval (`every_min` ≥ 15) | weekly (`weekdays` + loca
 `control.NextDue(rule, now, loc)` (table-tested: DST, weekday wrap) — computed from the run, **not** the missed slot,
 so an app closed through N slots fires once on launch; a one-shot is deleted as before; 5 failed attempts skip to the
 next slot. Resume skips slots missed while paused; run-now = `due_at = now` + a delivery kick (refused while paused).
-Verbs: `schedule --every / --weekly / --new-chat`, `schedule_pause` / `_resume` / `_run_now`; wire:
+**Check** (`check_cmd`, `scheduleCheck`): `schedule --check CMD` (verb only — `ScheduleSave` zeroes it, an edit keeps
+it; `RunCommandProblem` applies) runs CMD in the chat's cwd (≤ 1 min, in the delivery pass, once the chat is settled)
+before a run: empty output + exit 0 skips the run (last_error "check: nothing new"), output is appended to the
+message, a failing check still runs with the error. Verbs: `schedule --every / --weekly / --new-chat`, `schedule_pause` / `_resume` / `_run_now`; wire:
 `schedule_list_all` / `schedule_save` / `schedule_set_paused` / `schedule_run_now` (Settings → Scheduled,
 `ScheduledTasksPanel.vue`).
 

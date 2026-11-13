@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -252,3 +253,48 @@ func TestClaudeProjectSlug(t *testing.T) {
 }
 
 func chatKey(id int64) string { return "chat:" + strconv.FormatInt(id, 10) }
+
+// A check that prints nothing skips the run (no send, one-shot gone); one that
+// prints rides along; a failing one still runs, with the error.
+func TestScheduleCheck(t *testing.T) {
+	a, _, wsID, _ := runtimeApp(t)
+	store, _ := NewPhaseStore(a.db)
+	a.phases = store
+	sched := scheduleAdapter{a}
+	prev := runAskShell
+	t.Cleanup(func() { runAskShell = prev })
+	runAskShell = func(_ context.Context, _ string, cmd string) (string, int) {
+		switch cmd {
+		case "quiet":
+			return "\n", 0
+		case "news":
+			return "2 new issues\n", 0
+		}
+		return "boom", 2
+	}
+	now := time.Now()
+	var got []string
+	send := func(_ int64, text string) error { got = append(got, text); return nil }
+	for _, check := range []string{"quiet", "news", "broken"} {
+		c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
+		if _, err := sched.Add(control.ScheduledPrompt{ChatID: c.ID, Text: "look " + check, DueAt: now.Add(-time.Minute), Check: check}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.fireDueSchedules(now, send)
+	if len(got) != 2 || !strings.Contains(got[0], "look news") || !strings.Contains(got[0], "2 new issues") ||
+		!strings.Contains(got[1], "failed (exit 2)") || !strings.Contains(got[1], "boom") {
+		t.Fatalf("sent %q", got)
+	}
+	var left int
+	_ = a.db.QueryRow(`SELECT COUNT(*) FROM chat_schedules`).Scan(&left)
+	if left != 0 {
+		t.Fatalf("one-shots should be done (skipped or sent), %d left", left)
+	}
+	// The wire can't set a check.
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
+	p, err := a.ScheduleSave(control.ScheduledPrompt{ChatID: c.ID, Text: "x", DueAt: now.Add(time.Hour), Check: "rm -rf ~"})
+	if err != nil || p.Check != "" {
+		t.Fatalf("schedule_save stored a check: %+v %v", p, err)
+	}
+}

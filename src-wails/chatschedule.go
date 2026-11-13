@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -67,18 +68,20 @@ func chatSchedulesAlters() []string {
 		`ALTER TABLE chat_schedules ADD COLUMN agent TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE chat_schedules ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE chat_schedules ADD COLUMN last_run_at INTEGER NOT NULL DEFAULT 0`,
+		// Pre-run check command (scheduleCheck below); set by the schedule verb only.
+		`ALTER TABLE chat_schedules ADD COLUMN check_cmd TEXT NOT NULL DEFAULT ''`,
 	}
 }
 
 const scheduleCols = `id, chat_id, name, text, due_at, created_at, attempts, last_error,
-	kind, every_min, weekdays, time_of_day, new_chat, workspace_id, agent, paused, last_run_at`
+	kind, every_min, weekdays, time_of_day, new_chat, workspace_id, agent, paused, last_run_at, check_cmd`
 
 func scanSchedule(row interface{ Scan(...any) error }) (control.ScheduledPrompt, error) {
 	var p control.ScheduledPrompt
 	var due, created, lastRun int64
 	var days string
 	err := row.Scan(&p.ID, &p.ChatID, &p.Name, &p.Text, &due, &created, &p.Attempts, &p.LastError,
-		&p.Rule.Kind, &p.Rule.EveryMin, &days, &p.Rule.TimeOfDay, &p.NewChat, &p.WorkspaceID, &p.Agent, &p.Paused, &lastRun)
+		&p.Rule.Kind, &p.Rule.EveryMin, &days, &p.Rule.TimeOfDay, &p.NewChat, &p.WorkspaceID, &p.Agent, &p.Paused, &lastRun, &p.Check)
 	if err != nil {
 		return p, err
 	}
@@ -178,8 +181,8 @@ func (s scheduleAdapter) save(p control.ScheduledPrompt) (control.ScheduledPromp
 		return s.get(p.ID)
 	}
 	res, err := a.db.Exec(`INSERT INTO chat_schedules (chat_id, name, text, due_at, kind, every_min, weekdays, time_of_day,
-		new_chat, workspace_id, agent, paused, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		append(vals, now.UnixMilli())...)
+		new_chat, workspace_id, agent, paused, created_at, check_cmd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		append(vals, now.UnixMilli(), p.Check)...)
 	if err != nil {
 		return none, err
 	}
@@ -355,10 +358,30 @@ func (a *App) scheduleDeliveries(now time.Time, send chatSender, fired *[]int64)
 		}
 		out = append(out, pendingDelivery{ChatID: key, Source: deliverSchedule, Pos: it.DueAt.UnixMilli(), CreatedAt: it.ID, deliver: func() bool {
 			var err error
+			// The check runs only once the run could actually go (chat settled
+			// below), so a busy chat doesn't run it every sweep.
+			text := it.Text
+			runCheck := func(cwd string) bool {
+				if it.Check == "" {
+					return true
+				}
+				extra, run := scheduleCheck(cwd, it.Check)
+				if !run {
+					done("check: nothing new")
+					return false
+				}
+				text += extra
+				return true
+			}
 			if it.NewChat {
+				var path string
+				_ = a.db.QueryRow(`SELECT path FROM workspaces WHERE id = ?`, it.WorkspaceID).Scan(&path)
+				if !runCheck(path) {
+					return true
+				}
 				var c Chat
 				if c, err = a.startScheduledChat(it, now); err == nil {
-					if err = send(c.ID, it.Text, nil); err != nil {
+					if err = send(c.ID, text, nil); err != nil {
 						_ = a.DeleteChat(c.ID) // a row whose process never started
 					}
 				}
@@ -370,7 +393,11 @@ func (a *App) scheduleDeliveries(now time.Time, send chatSender, fired *[]int64)
 				if !a.chatSettled(strconv.FormatInt(it.ChatID, 10)) {
 					return false // a turn is open: wait for it to settle
 				}
-				err = send(it.ChatID, it.Text, nil)
+				c, _ := a.chatByID(it.ChatID)
+				if !runCheck(a.chatCwd(c)) {
+					return true
+				}
+				err = send(it.ChatID, text, nil)
 			}
 			if err != nil {
 				if errors.Is(err, errChatBusy) {
@@ -400,4 +427,28 @@ func (a *App) chatScheduleLoop() {
 		a.deliverPending(time.Now(), a.chatSendSettled) // notices, queue, schedules (chatdelivery.go)
 		a.wakeSnoozedChats(time.Now())
 	}
+}
+
+// scheduleCheck runs a schedule's pre-run check. run=false: it printed
+// nothing and exited 0, so this run is skipped (no agent, no tokens). A
+// failing check still runs, with the error, so a broken check is heard about.
+// ponytail: runs inside the delivery pass, so a slow check (≤ 1 min) holds
+// that pass up; move it to its own goroutine if checks get slow.
+var scheduleCheckTimeout = time.Minute
+
+func scheduleCheck(cwd, cmd string) (extra string, run bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), scheduleCheckTimeout)
+	defer cancel()
+	out, code := runAskShell(ctx, cwd, cmd)
+	out = strings.TrimSpace(out)
+	if code == 0 && out == "" {
+		return "", false
+	}
+	if len(out) > 8<<10 {
+		out = out[:8<<10] + "\n…(cut)"
+	}
+	if code != 0 {
+		return fmt.Sprintf("\n\nThe schedule's check failed (exit %d):\n```\n$ %s\n%s\n```", code, cmd, out), true
+	}
+	return fmt.Sprintf("\n\nThe schedule's check found:\n```\n$ %s\n%s\n```", cmd, out), true
 }
