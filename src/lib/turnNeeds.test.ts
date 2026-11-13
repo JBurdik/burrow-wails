@@ -26,4 +26,12 @@ describe("turnNeeds", () => {
     expect(composeNext(["Open PR"])).toBe("Open PR");
     expect(composeNext(["A", "B"], "thanks")).toBe("- A\n- B\n\nthanks");
   });
+
+  it("sends a run result kept on the card as that ask's answer", () => {
+    const asks = [
+      { question: "Ship?", options: ["Yes", "No"], suggested: -1 },
+      { question: "Run the migration", suggested: -1, run: { command: "make migrate", state: "done" as const, exit: 0, reply: "migrated 3" } },
+    ];
+    expect(composeAnswers(asks, ["Yes", undefined])).toBe("> Ship?\nYes\n\n> Run the migration\nmigrated 3");
+  });
 });

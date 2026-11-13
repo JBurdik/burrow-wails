@@ -288,8 +288,14 @@ func (a *App) ChatRunAsk(chatID int64, index64 int64) error {
 		ctx, cancel := context.WithTimeout(context.Background(), runAskTimeout)
 		defer cancel()
 		out, code := runAskShell(ctx, cwd, cmd)
-		a.finishRunAsk(chatID, index, cmd, code)
-		if _, err := a.ChatQueueAdd(chatID, runAskReply(cmd, cwd, out, code), nil); err != nil {
+		reply := runAskReply(cmd, cwd, out, code)
+		// The only ask: its result is the reply. With other asks on the card
+		// the result waits on it and goes with the user's answers — a message
+		// of its own would start a turn and clear the asks not answered yet.
+		if kept := a.finishRunAsk(chatID, index, cmd, code, reply, len(n.Asks) > 1); kept {
+			return
+		}
+		if _, err := a.ChatQueueAdd(chatID, reply, nil); err != nil {
 			log.Printf("chat %d: queue run result: %v", chatID, err)
 		}
 	}()
@@ -315,17 +321,23 @@ func (a *App) swapTurnNeeds(chatID int64, was string, n control.TurnNeeds) bool 
 }
 
 // finishRunAsk marks the ask done on the card, if the card is still that one.
-func (a *App) finishRunAsk(chatID int64, index int, cmd string, code int) {
+// finishRunAsk marks the ask done on the card, if the card is still that one.
+// keep: store the reply on the card for the client to send with the answers;
+// returns whether it was kept (false = the caller queues it itself).
+func (a *App) finishRunAsk(chatID int64, index int, cmd string, code int, reply string, keep bool) bool {
 	c, err := a.chatByID(chatID)
 	if err != nil {
-		return
+		return false
 	}
 	var n control.TurnNeeds
 	if json.Unmarshal([]byte(c.TurnNeeds), &n) != nil || index >= len(n.Asks) || n.Asks[index].Run == nil || n.Asks[index].Run.Command != cmd {
-		return
+		return false // the card moved on: the result is a message of its own
 	}
 	n.Asks[index].Run.State, n.Asks[index].Run.Exit = "done", code
-	a.swapTurnNeeds(chatID, c.TurnNeeds, n)
+	if keep {
+		n.Asks[index].Run.Reply = reply
+	}
+	return a.swapTurnNeeds(chatID, c.TurnNeeds, n) && keep
 }
 
 func runAskReply(cmd, cwd, out string, code int) string {

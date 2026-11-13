@@ -28,7 +28,7 @@
             <PhTerminalWindow :size="12" class="shrink-0" />
             <span class="min-w-0 flex-1 truncate font-mono" :title="cwd">{{ cwd || "chat folder" }}</span>
             <span v-if="ask.run.interrupted && !ask.run.state" class="text-[var(--chat-warn)]">Interrupted by a restart</span>
-            <span v-if="ask.run.state === 'done'" :class="ask.run.exit ? 'text-[var(--red)]' : 'text-[var(--chat-success)]'">exit {{ ask.run.exit ?? 0 }} · result sent</span>
+            <span v-if="ask.run.state === 'done'" :class="ask.run.exit ? 'text-[var(--red)]' : 'text-[var(--chat-success)]'">exit {{ ask.run.exit ?? 0 }} · {{ ask.run.reply ? "goes with your answers" : "result sent" }}</span>
             <button v-else class="needs-btn is-primary !h-6" :disabled="ask.run.state === 'running' || running" @click="runIt">
               <PhPlay :size="11" weight="fill" /> {{ ask.run.state === "running" || running ? "Running…" : "Run" }}
             </button>
@@ -144,12 +144,15 @@ const running = ref(false);
 const runError = ref("");
 
 const ask = computed(() => asks.value[current.value]);
-const answeredCount = computed(() => answers.value.filter((a) => a?.trim()).length);
+// A run whose result waits on the card counts as answered: it goes with the rest.
+const answeredCount = computed(() => asks.value.filter((a, i) => answers.value[i]?.trim() || a.run?.reply).length);
 const pickedNext = computed(() => next.value.filter((_, i) => picked.value[i]));
 
-// A new end_turn (or another chat) starts clean.
+// A new end_turn (or another chat) starts clean. Keyed on the questions, not
+// the whole card: a run finishing rewrites the card's JSON (state, exit,
+// reply) and must not throw away the answers already picked.
 watch(
-  () => [props.chatId, JSON.stringify(props.needs)],
+  () => [props.chatId, props.needs.needs, JSON.stringify((props.needs.asks ?? []).map((a) => [a.question, a.options])), JSON.stringify(props.needs.next ?? [])],
   () => {
     collapsed.value = false;
     current.value = 0;

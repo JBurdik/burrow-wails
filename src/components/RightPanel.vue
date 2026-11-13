@@ -55,6 +55,7 @@
               <span class="absolute inset-0 hidden items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground group-hover:flex" role="button" :aria-label="`Close ${tab.label}`" @click.stop="closeSurface(tab.id)"><PhX :size="12" /></span>
             </span>
             <span class="font-medium">{{ tab.label }}</span>
+            <span v-if="tab.id === 'highlights' && newPins" class="size-1.5 shrink-0 rounded-full bg-[var(--blue)]" title="New pins" />
             <span v-if="surfaceCount(tab.id)" class="tabular-nums text-muted-foreground">{{ surfaceCount(tab.id) }}</span>
             <!-- Move to the other pane — the visible door to the split (drag and right-click do the same). -->
             <span
@@ -65,7 +66,7 @@
               @click.stop="moveSurface(tab.id, pi === 0 ? 1 : 0)"
             ><component :is="pi === 0 ? PhArrowDown : PhArrowUp" :size="11" /></span>
           </button>
-          <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="layout.panes[pi].active = null"><PhPlus :size="15" /></button>
+          <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="layout.panes[pi].active = null"><span class="relative flex"><PhPlus :size="15" /><span v-if="pi === 0 && newPins && !highlightsInTabs" class="absolute -right-1 -top-1 size-1.5 rounded-full bg-[var(--blue)]" title="This thread pinned something — open Highlights" /></span></button>
         </div>
         <button v-if="pi === 0 && !layout.bottomOpen" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Split the panel" aria-label="Split the panel" @click="openBottom(layout)"><PhRows :size="14" /></button>
         <button v-if="layout.bottomOpen" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" :title="layout.maximized === pi ? 'Restore' : 'Maximize'" :aria-label="layout.maximized === pi ? 'Restore pane' : 'Maximize pane'" @click="toggleMaximize(layout, pi)"><component :is="layout.maximized === pi ? PhArrowsInSimple : PhArrowsOutSimple" :size="13" /></button>
@@ -707,6 +708,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, inject, provide, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
@@ -982,6 +984,34 @@ function openBrowserUrl(url: string, workspaceId: number) {
   ensureBrowserPane(workspaceId);
   browserNav[workspaceId] = { url, n: (browserNav[workspaceId]?.n ?? 0) + 1 };
 }
+// New pins → a dot on the Highlights tab (or on "+" when it isn't open), until
+// Highlights is on screen. Per thread: the count it has, the count seen.
+const pinCount = ref(0);
+const PINS_SEEN_KEY = "burrow.highlights.seenPins";
+const seenPins = reactive<Record<number, number>>(JSON.parse(localStorage.getItem(PINS_SEEN_KEY) || "{}"));
+async function loadPinCount() {
+  const id = activeChatId.value;
+  if (!id) { pinCount.value = 0; return; }
+  const list = await invoke<unknown[]>("chat_pins_list", { chatId: id }).catch(() => []);
+  if (id === activeChatId.value) pinCount.value = list?.length ?? 0;
+}
+watch(activeChatId, () => void loadPinCount(), { immediate: true });
+let offPins: (() => void) | undefined;
+void listen<{ chat_id: number }>("chat-pins-changed", (e) => { if (e.payload?.chat_id === activeChatId.value) void loadPinCount(); }).then((u) => (offPins = u));
+onBeforeUnmount(() => offPins?.());
+const highlightsInTabs = computed(() => layout.value.panes.some((p) => p.tabs.includes("highlights")));
+const highlightsOnScreen = computed(() => props.open && isShown(layout.value, "highlights"));
+watch([pinCount, highlightsOnScreen, activeChatId], () => {
+  const id = activeChatId.value;
+  if (!id) return;
+  // Seen once Highlights shows; an unpin lowers the mark so the next pin shows again.
+  if (highlightsOnScreen.value || pinCount.value < (seenPins[id] ?? 0)) {
+    seenPins[id] = pinCount.value;
+    localStorage.setItem(PINS_SEEN_KEY, JSON.stringify(seenPins));
+  }
+});
+const newPins = computed(() => !!activeChatId.value && pinCount.value > (seenPins[activeChatId.value] ?? 0) && !highlightsOnScreen.value);
+
 /** A Highlights link: a local dev server previews in the Browser surface,
  *  anything else opens in the system browser. */
 function openHighlightUrl(url: string) {

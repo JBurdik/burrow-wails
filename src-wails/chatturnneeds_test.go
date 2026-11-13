@@ -123,9 +123,33 @@ func TestChatRunAskRunsStoredCommandOnce(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	items, err := a.ChatQueueList(c.ID)
-	if err != nil || len(items) != 1 || !strings.Contains(items[0].Text, "migrated 3 tables") || !strings.Contains(items[0].Text, "exit 0") {
-		t.Fatalf("queued reply: %+v %v", items, err)
+	// Two asks on the card: the result waits on it (goes with the answers),
+	// nothing is queued that would start a turn and clear the other ask.
+	row, _ := a.chatByID(c.ID)
+	if !strings.Contains(row.TurnNeeds, "migrated 3 tables") {
+		t.Fatalf("result not kept on the card: %s", row.TurnNeeds)
+	}
+	if items, _ := a.ChatQueueList(c.ID); len(items) != 0 {
+		t.Fatalf("a multi-ask card must not queue the result: %+v", items)
+	}
+
+	// The only ask: its result is the reply, queued at once.
+	solo := control.TurnNeeds{Needs: "you", Asks: []control.TurnAsk{{Question: "Deploy", Suggested: -1, Run: &control.TurnRun{Command: "make deploy"}}}}
+	_ = a.SetTurnNeeds(c.ID, solo)
+	if err := a.ChatRunAsk(c.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	<-ran
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		items, _ := a.ChatQueueList(c.ID)
+		if len(items) == 1 && strings.Contains(items[0].Text, "migrated 3 tables") && strings.Contains(items[0].Text, "exit 0") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("solo run result not queued: %+v", items)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

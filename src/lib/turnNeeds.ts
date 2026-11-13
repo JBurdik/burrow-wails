@@ -9,7 +9,8 @@ export interface TurnAsk {
   /** Index into options the agent would pick; -1 = none. */
   suggested: number;
   /** A command that is the user's to run (Run on the card); state is Go's. */
-  run?: { command: string; state?: "running" | "done"; exit?: number; interrupted?: boolean };
+  /** reply: the result kept on a multi-ask card, sent with the other answers. */
+  run?: { command: string; state?: "running" | "done"; exit?: number; interrupted?: boolean; reply?: string };
 }
 
 export interface TurnNeeds {
@@ -41,8 +42,9 @@ export function parseTurnNeeds(raw: string | undefined | null): TurnNeeds | unde
  * A single ask answered alone is sent as just the answer.
  */
 export function composeAnswers(asks: TurnAsk[], answers: (string | undefined)[], extra = ""): string {
+  // A run ask whose result was kept on the card answers itself with it.
   const answered = asks
-    .map((a, i) => ({ q: a.question, a: answers[i]?.trim() }))
+    .map((a, i) => ({ q: a.question, a: answers[i]?.trim() || a.run?.reply?.trim() }))
     .filter((x): x is { q: string; a: string } => !!x.a);
   const tail = extra.trim();
   if (asks.length === 1 && answered.length === 1) return [answered[0].a, tail].filter(Boolean).join("\n\n");

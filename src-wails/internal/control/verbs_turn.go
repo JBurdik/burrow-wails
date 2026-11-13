@@ -50,6 +50,10 @@ type TurnRun struct {
 	Exit  int    `json:"exit,omitempty"`
 	// Interrupted: a restart cut the last run short; it may be run again.
 	Interrupted bool `json:"interrupted,omitempty"`
+	// Reply: on a card with other asks, the run's result is kept here and goes
+	// with the user's answers (the client sends it), instead of a message of
+	// its own that would start a turn and clear the unanswered asks.
+	Reply string `json:"reply,omitempty"`
 }
 
 // MaxRunCommand caps an ask's command: past it, a script is the honest form.

@@ -109,7 +109,12 @@
               @mouseleave="cancelHoverCard"
             >
               <kbd v-if="jumpHints && jumpIndex(row) >= 0" class="sb-jump-hint">⌘{{ jumpIndex(row) + 1 }}</kbd>
-              <PhCrown v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" :size="14" weight="fill" class="shrink-0 text-[var(--yellow)]" />
+              <!-- In the Inbox the row stands for its project (the group header is gone): its icon / tile. -->
+              <template v-if="group.repoId === INBOX">
+                <img v-if="store.icons[row.ws.parent_id ?? row.ws.id]" :src="store.icons[row.ws.parent_id ?? row.ws.id]" class="h-[16px] w-[16px] shrink-0 rounded-[4px] object-cover" />
+                <span v-else class="sb-repo-tile !h-[16px] !w-[16px] !text-[9px]" :style="{ background: repoColor(row.ws.parent_id ?? row.ws.id) }">{{ (repoById(row.ws.parent_id ?? row.ws.id)?.name ?? '?').slice(0, 1).toUpperCase() }}</span>
+              </template>
+              <PhCrown v-else-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" :size="14" weight="fill" class="shrink-0 text-[var(--yellow)]" />
               <PhGitBranch v-else-if="row.ws.parent_id" :size="14" class="shrink-0 text-muted-foreground" />
               <component v-else-if="row.tab.agentIcon" :is="agentIconComp(row.tab.agentIcon)" :size="14" class="shrink-0 text-[#E0876A]" />
               <PhChatCenteredText v-else-if="row.tab.isChat" :size="14" class="shrink-0 text-muted-foreground" />
