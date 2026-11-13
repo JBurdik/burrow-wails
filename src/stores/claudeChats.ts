@@ -105,6 +105,8 @@ export function settledFor(s: ClaudeSession | undefined, now: number): boolean {
   if ((s.snoozedUntil ?? 0) > now) return true;
   if (s.settledOverride === "settled") return true;
   if (s.settledOverride === "active") return false;
+  // A turn that ended asking the user (end_turn) waits for them, however old.
+  if (s.turnNeeds?.needs === "you") return false;
   return now - (s.lastActivityAt ?? 0) >= AUTO_SETTLE_AFTER_DAYS * DAY_MS;
 }
 

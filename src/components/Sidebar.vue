@@ -52,7 +52,7 @@
       <!-- Live feed, grouped by project (Ghostex-style): a header per repo with
            its uncommitted diffstat, one compact line per thread, a thread's
            sub-agents indented under it. Branch/model/PR live in the hover card. -->
-      <div v-for="group in topGroups" :key="group.repoId" class="px-2 pt-1.5">
+      <div v-for="group in inboxGroups" :key="group.repoId" class="px-2 pt-1.5">
         <div v-if="group.repoId < 0" class="px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">Pinned</div>
         <div
           v-else
@@ -81,8 +81,10 @@
         </div>
         <div v-if="!collapsedGroups.has(group.repoId)">
           <div v-for="(row, i) in group.rows" :key="rowKey(row)">
+            <div v-if="group.needs && i === 0" class="sb-inbox-label">Needs you</div>
+            <div v-else-if="group.needs && i === group.needs" class="sb-inbox-sep" />
             <div
-              v-if="group.repoId !== PINNED && row.ws.parent_id && row.ws.id !== group.rows[i - 1]?.ws.id"
+              v-if="group.repoId !== PINNED && i >= group.needs && row.ws.parent_id && (i === group.needs || row.ws.id !== group.rows[i - 1]?.ws.id)"
               class="group/wt mt-1.5 flex min-w-0 items-center gap-1.5 px-2.5 pb-0.5 text-[11px] text-muted-foreground"
               :title="row.ws.path"
             >
@@ -716,7 +718,10 @@ import {
   routeRowOnly,
   EMPTY_WORKING_SHELF,
   type ActivityRow,
+  needsYouFirst,
+  nextNeedsYou,
 } from "@/lib/sidebarGroups";
+import { useKeybindingsStore } from "@/stores/keybindings";
 import { childrenOf, activeChatIdFor } from "@/stores/chatTree";
 import { toggleTabSettled } from "@/lib/settledTabs";
 import { formatWakeTime, snoozePresets } from "@/lib/snoozePresets";
@@ -748,6 +753,7 @@ const chatRecapOf = (chatId: number | null | undefined) => (chatId != null && ui
 const ui = useUIStore();
 const git = useGitStore();
 const notif = useNotificationsStore();
+const keys = useKeybindingsStore();
 const scriptsStore = useScriptsStore();
 
 const active = computed(() => store.active);
@@ -956,6 +962,25 @@ const PINNED = -1;
 const topGroups = computed(() =>
   sections.value.pinned.length ? [{ repoId: PINNED, rows: sections.value.pinned }, ...liveGroups.value] : liveGroups.value,
 );
+
+// Per-project inbox (threadbear): rows waiting on the user lead their group —
+// a permission / input prompt, or a finished turn whose end_turn asked
+// something. Running rows already sit in the Working shelf.
+function needsYou(row: ActivityRow): boolean {
+  if (attentionState(row) === "needs-input") return true;
+  if (row.tab.chatId == null || row.tab.status === "running") return false;
+  return chats.sessions.find((s) => s.id === row.tab.chatId)?.turnNeeds?.needs === "you";
+}
+const inboxGroups = computed(() => topGroups.value.map((g) => ({ ...g, ...needsYouFirst(g.rows, needsYou) })));
+
+// ⌥⌘↓ (keymap "nextInbox"): the next thread waiting on you, across projects.
+function goNextInbox(): boolean {
+  const rows = inboxGroups.value.flatMap((g) => g.rows);
+  const row = nextNeedsYou(rows, needsYou, isActiveRow);
+  if (row) selectTab(row);
+  else notif.push({ type: "info", title: "All caught up — nothing waits on you", duration: 2500 });
+  return true;
+}
 
 const COLLAPSED_KEY = "burrow.sidebar.collapsedRepos";
 function loadCollapsed(): Set<number> {
@@ -1558,7 +1583,7 @@ const JUMP_HINT_DELAY_MS = 450;
 const jumpHints = ref(false);
 let jumpTimer: number | undefined;
 const jumpRows = computed(() =>
-  topGroups.value.filter((g) => !collapsedGroups.has(g.repoId)).flatMap((g) => g.rows).slice(0, 9),
+  inboxGroups.value.filter((g) => !collapsedGroups.has(g.repoId)).flatMap((g) => g.rows).slice(0, 9),
 );
 function jumpIndex(row: ActivityRow): number {
   return jumpRows.value.indexOf(row);
@@ -1572,6 +1597,11 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === "Escape" && gitDialogOpen.value) gitDialogOpen.value = false;
   if (e.key === "Meta") {
     if (!e.repeat) { window.clearTimeout(jumpTimer); jumpTimer = window.setTimeout(() => (jumpHints.value = true), JUMP_HINT_DELAY_MS); }
+    return;
+  }
+  if (keys.matches(e, "nextInbox")) {
+    e.preventDefault();
+    goNextInbox();
     return;
   }
   if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
@@ -1766,6 +1796,8 @@ async function confirmCreate() {
   transition: color .12s, background .12s;
 }
 .section-header:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.sb-inbox-label { padding: 6px 10px 2px; font-size: 11px; font-weight: 600; color: var(--yellow); }
+.sb-inbox-sep { margin: 6px 10px; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
 
 .menu-item {
   display: flex;

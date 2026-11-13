@@ -228,3 +228,26 @@ export function parseShortstat(out: string): { added: number; removed: number } 
   const num = (re: RegExp) => Number(out.match(re)?.[1] ?? 0);
   return { added: num(/(\d+) insertions?\(\+\)/), removed: num(/(\d+) deletions?\(-\)/) };
 }
+
+/**
+ * A project's rows with the ones waiting on the user first (threadbear's inbox,
+ * per project): `needs` is how many lead. The rest keep their order, so the
+ * worktree blocks below stay intact.
+ */
+export function needsYouFirst<T>(rows: T[], needsYou: (row: T) => boolean): { rows: T[]; needs: number } {
+  const needs = rows.filter(needsYou);
+  if (!needs.length) return { rows, needs: 0 };
+  return { rows: [...needs, ...rows.filter((r) => !needsYou(r))], needs: needs.length };
+}
+
+/**
+ * ⌥⌘↓: the next row waiting on the user after the one on screen, wrapping;
+ * from anywhere else, the first. null = nothing waits (caught up).
+ */
+export function nextNeedsYou<T>(rows: T[], needsYou: (row: T) => boolean, isActive: (row: T) => boolean): T | null {
+  const waiting = rows.filter(needsYou);
+  if (!waiting.length) return null;
+  const at = rows.findIndex(isActive);
+  if (at < 0) return waiting[0];
+  return rows.slice(at + 1).find(needsYou) ?? (waiting[0] === rows[at] ? null : waiting[0]);
+}
