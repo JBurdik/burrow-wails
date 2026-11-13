@@ -12,6 +12,7 @@ import { appTransport } from "@/lib/wailsCompat/core";
 import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
 import { childrenOf as childrenOfSessions, allChildrenOf as allChildrenOfSessions } from "@/stores/chatTree";
+import { parseTurnNeeds, type TurnNeeds } from "@/lib/turnNeeds";
 
 export interface ClaudeSession {
   id: number;
@@ -77,6 +78,9 @@ export interface ClaudeSession {
   prNumber?: number;
   prUrl?: string;
   prState?: "open" | "draft" | "merged" | "closed";
+  // The last turn's end_turn (src-wails/chatturnneeds.go): what it needs from
+  // the user. Server-owned like collectedAt; cleared when the next turn starts.
+  turnNeeds?: TurnNeeds;
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -150,6 +154,7 @@ interface ChatRow {
   pr_number?: number;
   pr_url?: string;
   pr_state?: string;
+  turn_needs?: string;
 }
 
 /**
@@ -193,6 +198,7 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     prNumber: r.pr_number || undefined,
     prUrl: r.pr_url || undefined,
     prState: (r.pr_state || undefined) as ClaudeSession["prState"],
+    turnNeeds: parseTurnNeeds(r.turn_needs),
     busy: false,
   };
 }

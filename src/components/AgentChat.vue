@@ -478,6 +478,16 @@
         <button class="flex-shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss" @click="branchBannerDismissed = true"><PhX :size="11" weight="bold" /></button>
       </div>
       <SecretRequestCard :owner-key="`chat:${chatId}`" />
+      <TurnNeedsCard
+        v-if="turnNeeds"
+        :needs="turnNeeds"
+        :chat-id="chatId"
+        :archived="!!activeSession?.archivedAt"
+        :composer-text="inputText"
+        @send="sendTurnAnswer"
+        @archive="chats.archive(chatId)"
+        @open-chat="openSubagentFromTranscript"
+      />
       <div v-if="catchUp.open" class="catchup-card mb-2">
         <div class="flex items-center gap-2">
           <PhSparkle :size="14" class="text-foreground" />
@@ -858,6 +868,7 @@ import { promptHistory, recalling, stepPromptHistory, type PromptHistoryPos } fr
 import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
 import SecretRequestCard from "@/components/SecretRequestCard.vue";
+import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
 import ThreadFindBar from "@/components/ThreadFindBar.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
@@ -1165,6 +1176,9 @@ const chatBranch = computed(() => chatWorkspace.value?.worktree_branch || git.br
 // Branch-changed banner: the branch a chat was created on (session.branch,
 // a one-time snapshot) vs. the workspace's current branch.
 const activeSession = computed(() => chats.sessions.find((s) => s.id === props.chatId));
+// The last turn's end_turn, shown once the turn has settled (a running turn's
+// call is for the answer it is still writing).
+const turnNeeds = computed(() => (busy.value ? undefined : activeSession.value?.turnNeeds));
 const branchChanged = computed(() => {
   const created = activeSession.value?.branch;
   return !!created && created !== chatBranch.value;
@@ -2649,6 +2663,13 @@ async function copyMessage(msg: ChatMessage) {
 async function sendInitialPrompt(prompt: string, images?: string[]) {
   emit("prompt-sent");
   await sendMessage(prompt, images);
+}
+
+// A Needs-you / Done card answer: the card already folded the composer's text
+// into it, so the composer empties as for a normal send.
+function sendTurnAnswer(text: string) {
+  inputText.value = "";
+  void sendMessage(text);
 }
 
 async function sendMessage(forcedText?: string, extraImages?: string[]): Promise<{ id: number; text: string } | null> {

@@ -692,7 +692,11 @@ func (a *App) applyChatPhase(chatID string, event agentphase.Event) {
 		if (event.Kind == agentphase.HookDone || event.Kind == agentphase.HookError) && a.phases.Get(key).State == agentphase.Idle {
 			return
 		}
+		wasInFlight := a.phases.Get(key).InFlight()
 		a.phases.Apply(key, event)
+		if !wasInFlight && a.phases.Get(key).InFlight() {
+			a.clearTurnNeeds(chatID) // a new turn: the last one's end_turn is answered or moot
+		}
 	}
 	if event.Kind == agentphase.Interrupt {
 		go func() { _, _ = a.SettleTurnAudit("chat:"+chatID, string(event.Kind)) }()

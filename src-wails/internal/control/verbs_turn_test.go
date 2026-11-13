@@ -1,0 +1,43 @@
+package control
+
+import "testing"
+
+func TestParseTurnNeeds(t *testing.T) {
+	two := 1
+	cases := []struct {
+		name    string
+		p       Params
+		needs   string
+		asks    int
+		next    int
+		wantErr bool
+	}{
+		{"asks imply you", Params{"asks": []any{map[string]any{"question": "Ship?", "options": []any{"Yes", "No"}, "suggested": float64(two)}}}, "you", 1, 0, false},
+		{"CLI JSON string", Params{"needs": "you", "asks": `[{"question":"Which DB?"}]`}, "you", 1, 0, false},
+		{"done with next", Params{"needs": "nothing", "next": []any{"Write tests", "", "Open PR", "Deploy", "Extra"}}, "nothing", 0, 3, false},
+		{"done drops asks", Params{"needs": "nothing", "asks": `[{"question":"x"}]`}, "nothing", 0, 0, false},
+		{"empty is done", Params{}, "nothing", 0, 0, false},
+		{"you without asks", Params{"needs": "you"}, "", 0, 0, true},
+		{"bad needs", Params{"needs": "maybe"}, "", 0, 0, true},
+		{"bad json", Params{"asks": "[{"}, "", 0, 0, true},
+	}
+	for _, c := range cases {
+		n, err := ParseTurnNeeds(c.p)
+		if (err != nil) != c.wantErr {
+			t.Fatalf("%s: err = %v", c.name, err)
+		}
+		if err != nil {
+			continue
+		}
+		if n.Needs != c.needs || len(n.Asks) != c.asks || len(n.Next) != c.next {
+			t.Fatalf("%s: got %+v", c.name, n)
+		}
+	}
+	n, _ := ParseTurnNeeds(Params{"asks": `[{"question":"A","options":["only"],"suggested":0},{"question":"B","options":["x","y"],"suggested":5}]`})
+	if n.Asks[0].Options != nil || n.Asks[0].Suggested != -1 {
+		t.Fatalf("single option should become free text: %+v", n.Asks[0])
+	}
+	if n.Asks[1].Suggested != -1 {
+		t.Fatalf("out-of-range suggested should be dropped: %+v", n.Asks[1])
+	}
+}

@@ -41,9 +41,13 @@ func (s Scope) Has(want Scope) bool { return s&want != 0 }
 // the CLI's `--help`, and argument validation, so a verb documents itself once.
 type Arg struct {
 	Name     string
-	Type     string // "string" | "integer" | "boolean"
+	Type     string // "string" | "integer" | "boolean" | "array"
 	Desc     string
 	Required bool
+	// Schema, when set, is the argument's full JSON schema for MCP (an array of
+	// objects can't be said with Type alone). The CLI passes such an arg as a
+	// JSON string; Params.JSON reads both.
+	Schema any
 }
 
 // Verb is a single callable app action.
@@ -266,6 +270,8 @@ type Deps struct {
 	Screen PTYScreen
 	// Secrets backs secret_request. nil = it refuses.
 	Secrets Secrets
+	// TurnNeeds backs end_turn. nil = it refuses.
+	TurnNeeds TurnNeedsStore
 }
 
 // Core is the verb registry plus the dependencies verbs run against.
@@ -283,6 +289,7 @@ func New(deps Deps) *Core {
 	c.register(selfVerbs(c)...)
 	c.register(chatVerbs(c)...)
 	c.register(secretVerbs(c)...)
+	c.register(turnVerbs(c)...)
 	return c
 }
 

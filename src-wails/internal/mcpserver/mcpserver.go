@@ -51,10 +51,11 @@ type verb struct {
 	Name    string `json:"name"`
 	Summary string `json:"summary"`
 	Args    []struct {
-		Name     string `json:"name"`
-		Type     string `json:"type"`
-		Desc     string `json:"desc"`
-		Required bool   `json:"required"`
+		Name     string         `json:"name"`
+		Type     string         `json:"type"`
+		Desc     string         `json:"desc"`
+		Required bool           `json:"required"`
+		Schema   map[string]any `json:"schema"`
 	} `json:"args"`
 }
 
@@ -154,7 +155,14 @@ func (s *Server) listTools() ([]Tool, error) {
 			if t == "" {
 				t = "string"
 			}
-			props[a.Name] = map[string]any{"type": t, "description": a.Desc}
+			prop := map[string]any{"type": t, "description": a.Desc}
+			if a.Schema != nil {
+				prop = map[string]any{"description": a.Desc}
+				for k, v := range a.Schema {
+					prop[k] = v
+				}
+			}
+			props[a.Name] = prop
 			if a.Required {
 				required = append(required, a.Name)
 			}

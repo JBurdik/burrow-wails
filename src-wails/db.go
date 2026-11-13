@@ -218,6 +218,8 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE chats ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE chats ADD COLUMN pr_url TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE chats ADD COLUMN pr_state TEXT NOT NULL DEFAULT ''`,
+		// end_turn's needs (chatturnneeds.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN turn_needs TEXT NOT NULL DEFAULT ''`,
 	}
 	alters = append(alters, chatSchedulesAlters()...)
 	for _, s := range alters {

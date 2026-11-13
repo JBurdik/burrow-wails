@@ -127,6 +127,16 @@ wire; the forge is the workspace's). `forgePrCreate` auto-links a created PR to 
 `chat_pr_dismissed` tombstone that auto-link respects and a manual link clears. No polling: `chat_pr_refresh` when the
 card opens, `chat_prs_refresh(cwd)` after a push from `git.push`; Sidebar rows show the state glyph.
 
+**End of turn** (`chatturnneeds.go`, `internal/control/verbs_turn.go`, `TurnNeedsCard.vue`, from threadbear's `end_turn`): the
+`end_turn` verb/MCP tool (local, caller chat) stores what the turn needs as JSON in `chats.turn_needs` (read-only on the
+wire, `remoteDenied` for the setter) — `needs` you|nothing, `asks` (question + ≤ 6 options + `suggested`), `next` (≤ 3
+follow-ups). `applyChatPhase` clears it on the **transition into flight** (not on every Running line: the call is made
+mid-turn). AgentChat shows the card only while not busy: Needs you = buttons / Something else, one ask at a time, sent
+as one message with the composer text (`composeAnswers`); Done = Archive + follow-ups + **loose ends**
+(`chat_loose_ends`: uncommitted files, commits on no remote, open PR, sub-agents in flight, pending check-ins — Go's own
+checks, never the agent's word). The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. `Arg.Schema`
+gives a verb arg a full JSON schema for MCP (the CLI passes it as a JSON string; `Params.JSON` reads both).
+
 **PR → worktree + chat** (`ForgePrCheckout`, `src/lib/prCheckout.ts`): optional `forge.HeadFetcher` (`FetchRef(n)` —
 GitHub/Gitea `pull/N/head`, GitLab `merge-requests/N/head`; Azure has none, `ForgeStatus.canCheckout` hides the action).
 `forge_pr_checkout` fetches it from origin and passes the `FETCH_HEAD` sha to `CreateWorktree` (setup scripts run;

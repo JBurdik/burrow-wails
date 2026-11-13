@@ -101,6 +101,9 @@ type Chat struct {
 	PrNumber int64  `json:"pr_number"`
 	PrURL    string `json:"pr_url"`
 	PrState  string `json:"pr_state"`
+	// Read-only on the wire: the last turn's end_turn as JSON (chatturnneeds.go),
+	// "" = none. Cleared when the next turn starts.
+	TurnNeeds string `json:"turn_needs"`
 }
 
 func chatsSchema() []string {
@@ -137,7 +140,8 @@ func chatsSchema() []string {
 			limit_resumed_key TEXT    NOT NULL DEFAULT '',
 			pr_number         INTEGER NOT NULL DEFAULT 0,
 			pr_url            TEXT    NOT NULL DEFAULT '',
-			pr_state          TEXT    NOT NULL DEFAULT ''
+			pr_state          TEXT    NOT NULL DEFAULT '',
+			turn_needs        TEXT    NOT NULL DEFAULT ''
 		)`,
 		// A PR the user unlinked from a chat: auto-linking never re-adds it.
 		`CREATE TABLE IF NOT EXISTS chat_pr_dismissed (
@@ -176,7 +180,7 @@ const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
 	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind, snoozed_until,
 	limit_reset_at, limit_resume_at,
-	pr_number, pr_url, pr_state`
+	pr_number, pr_url, pr_state, turn_needs`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
@@ -185,7 +189,7 @@ func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
 		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind, &c.SnoozedUntil,
 		&c.LimitResetAt, &c.LimitResumeAt,
-		&c.PrNumber, &c.PrURL, &c.PrState)
+		&c.PrNumber, &c.PrURL, &c.PrState, &c.TurnNeeds)
 	return c, err
 }
 

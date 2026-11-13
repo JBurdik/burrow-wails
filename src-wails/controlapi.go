@@ -222,6 +222,7 @@ func (a *App) initControl(dataDir string) {
 		PTYs:              a,
 		Screen:            ptyWriter{a},
 		Secrets:           a,
+		TurnNeeds:         a,
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")
 }
@@ -251,6 +252,7 @@ type ControlVerbArg struct {
 	Type     string `json:"type"`
 	Desc     string `json:"desc"`
 	Required bool   `json:"required"`
+	Schema   any    `json:"schema,omitempty"`
 }
 
 func (a *App) ControlVerbs() []ControlVerb {
@@ -261,7 +263,7 @@ func (a *App) ControlVerbs() []ControlVerb {
 	for _, v := range a.control.Verbs() {
 		cv := ControlVerb{Name: v.Name, Summary: v.Summary, Args: []ControlVerbArg{}}
 		for _, arg := range v.Args {
-			cv.Args = append(cv.Args, ControlVerbArg{Name: arg.Name, Type: arg.Type, Desc: arg.Desc, Required: arg.Required})
+			cv.Args = append(cv.Args, ControlVerbArg{Name: arg.Name, Type: arg.Type, Desc: arg.Desc, Required: arg.Required, Schema: arg.Schema})
 		}
 		out = append(out, cv)
 	}
