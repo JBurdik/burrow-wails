@@ -144,8 +144,17 @@ panel's list and the phone's Threads screen (project chip filters it); an answer
 The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. **Stop gate** (Claude chats only): every
 chat starts with `--settings` holding one Stop hook, `burrow end-turn-gate` (`endTurnGateSettings`): a turn ending with
 `turn_needs` still empty (`end_turn_pending` verb) is sent back **once** to call `end_turn`; `stop_hook_active` and every
-error let it stop. Tested: without it Haiku skipped `end_turn` after AskUserQuestion and under "do nothing else" tasks. `Arg.Schema`
+error let it stop. Tested: without it Haiku skipped `end_turn` after AskUserQuestion and under "do nothing else" tasks.
+**Order: `end_turn` first, the reply after it** (as threadbear does): told "reply, then end_turn", Opus wrote the reply
+into its thinking, called the tool and showed only "Done." — the user never saw the answer. `Arg.Schema`
 gives a verb arg a full JSON schema for MCP (the CLI passes it as a JSON string; `Params.JSON` reads both).
+
+**Highlights** (`HighlightsSurface.vue`, RP surface `highlights`, `src/lib/chatHighlights.ts`, `chatpins.go`): one view
+of what the open thread made — its open asks (local ticks only), **pins** (`pin` verb, local, caller chat: a path
+resolved against `cwd` or an http(s) URL + note; table `chat_pins`, re-pin updates, ≤ 20, `chat-pins-changed`; wire
+`chat_pins_list` / `chat_pin_remove`; DeleteChat drops them), files its tools wrote/edited and links in its replies
+(pure projections of the **loaded** transcript window), a Changes row → Diff surface, and its sub-agents. Sections fold
+(`burrow.highlights.folded`, global). Links: localhost → Browser surface, else the system browser.
 
 **Threads already on it** (`chatsamework.go`, threadbear's sameWork): a top-level thread's **first** Claude prompt is
 compared (word overlap, `sameWorkTokens` / `sameWorkScore`, no model) with open top-level threads' title + recap + first

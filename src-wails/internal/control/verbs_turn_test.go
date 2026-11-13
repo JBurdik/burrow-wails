@@ -1,6 +1,9 @@
 package control
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestParseTurnNeeds(t *testing.T) {
 	two := 1
@@ -76,5 +79,33 @@ func TestTurnOptionDetails(t *testing.T) {
 	n, _ = ParseTurnNeeds(Params{"asks": `[{"question":"Q","options":["a","b"]}]`})
 	if n.Asks[0].Details != nil {
 		t.Fatalf("plain options must carry no details: %q", n.Asks[0].Details)
+	}
+}
+
+type fakePins struct {
+	chat         int64
+	target, note string
+}
+
+func (f *fakePins) AddPin(chatID int64, target, note string) (any, error) {
+	f.chat, f.target, f.note = chatID, target, note
+	return nil, nil
+}
+
+func TestPinVerbResolvesPaths(t *testing.T) {
+	f := &fakePins{}
+	c := New(Deps{Pins: f})
+	if _, err := c.Call(context.Background(), ScopeLocal, "pin", Params{"parent_chat_id": float64(7), "target": "out/mock.html", "cwd": "/repo", "note": "look"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.chat != 7 || f.target != "/repo/out/mock.html" || f.note != "look" {
+		t.Fatalf("%+v", f)
+	}
+	_, _ = c.Call(context.Background(), ScopeLocal, "pin", Params{"parent_chat_id": float64(7), "target": "https://x.dev/a"})
+	if f.target != "https://x.dev/a" {
+		t.Fatalf("url changed: %q", f.target)
+	}
+	if _, err := c.Call(context.Background(), ScopeLocal, "pin", Params{"target": "/a"}); err == nil {
+		t.Fatal("pin outside a chat must refuse")
 	}
 }

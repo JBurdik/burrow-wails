@@ -272,6 +272,8 @@ type Deps struct {
 	Secrets Secrets
 	// TurnNeeds backs end_turn. nil = it refuses.
 	TurnNeeds TurnNeedsStore
+	// Pins backs pin. nil = it refuses.
+	Pins Pins
 }
 
 // Core is the verb registry plus the dependencies verbs run against.

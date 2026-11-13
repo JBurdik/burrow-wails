@@ -146,6 +146,7 @@ func migrate(db *sql.DB) error {
 	stmts = append(stmts, orchSchema()...)
 	stmts = append(stmts, turnAuditSchema()...)
 	stmts = append(stmts, chatSchedulesSchema()...)
+	stmts = append(stmts, chatPinsSchema()...)
 	stmts = append(stmts, subagentNoticesSchema()...)
 	stmts = append(stmts, chatQueueSchema()...)
 	stmts = append(stmts, seenReceiptsSchema()...)

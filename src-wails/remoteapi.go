@@ -422,6 +422,8 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_unlink_pr":   {Method: "ChatUnlinkPr", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_pr_refresh":  {Method: "ChatPrRefresh", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"chat_loose_ends":  {Method: "ChatLooseEnds", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_pins_list":   {Method: "ChatPinsList", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_pin_remove":  {Method: "ChatPinRemove", Args: []string{"id"}, Scope: scopeOrchOperate},
 	// Runs the command stored on the card (never one sent here), once.
 	"chat_run_ask":             {Method: "ChatRunAsk", Args: []string{"chatId", "index"}, Scope: scopeOrchOperate},
 	"chat_prs_refresh":         {Method: "ChatPrsRefresh", Args: []string{"cwd"}, Scope: scopeOrchRead},
@@ -620,6 +622,7 @@ var remoteDenied = map[string]string{
 	// The agent side of end_turn: only the calling chat says what its turn needs.
 	"SetTurnNeeds":     "agents set it through the local end_turn verb; clients read chats.turn_needs",
 	"TurnNeedsPending": "only a chat's Stop hook asks, through the local end_turn_pending verb",
+	"AddPin":           "agents pin through the local pin verb; clients list (chat_pins_list) and remove",
 	// Superseded by chat_send: a client building its own start payload is how
 	// three copies of it drifted apart (docs/plans/006-chat-runtime.md).
 	"ClaudeStart":    "a chat's process is the chat runtime's to start, from the row's launch settings — use chat_send",

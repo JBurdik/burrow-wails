@@ -368,6 +368,16 @@
 
     <ProgressSurface v-else-if="act(pi) === 'progress'" :chat-id="activeChatId" />
 
+    <HighlightsSurface
+      v-else-if="act(pi) === 'highlights'"
+      :chat-id="activeChatId"
+      :cwd="props.cwd"
+      @open-file="openFile"
+      @open-url="openHighlightUrl"
+      @open-surface="(id) => props.workspaceId && openPanelSurface(id, props.workspaceId)"
+      @open-subagent="openSubagentChat"
+    />
+
     <SideChatSurface v-else-if="act(pi) === 'side-chat'" :chat-id="activeChatId" :cwd="props.cwd" />
 
     <MarkdownDocSurface v-else-if="act(pi) === 'doc' && docPath" :path="docPath" :cwd="props.cwd" />
@@ -734,6 +744,7 @@ import DevServersSurface from "./DevServersSurface.vue";
 import BackgroundTasksSurface from "./BackgroundTasksSurface.vue";
 import { PhTerminalWindow } from "@phosphor-icons/vue";
 import ProgressSurface from "./ProgressSurface.vue";
+import HighlightsSurface from "./HighlightsSurface.vue";
 import SideChatSurface from "./SideChatSurface.vue";
 import { PhChatsCircle } from "@phosphor-icons/vue";
 import MarkdownDocSurface from "./MarkdownDocSurface.vue";
@@ -970,6 +981,12 @@ function openBrowserUrl(url: string, workspaceId: number) {
   ensureBrowserPane(workspaceId);
   browserNav[workspaceId] = { url, n: (browserNav[workspaceId]?.n ?? 0) + 1 };
 }
+/** A Highlights link: a local dev server previews in the Browser surface,
+ *  anything else opens in the system browser. */
+function openHighlightUrl(url: string) {
+  if (props.workspaceId && /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/.test(url)) openBrowserUrl(url, props.workspaceId);
+  else void import("@/lib/wailsCompat/shell").then((m) => m.open(url));
+}
 /** A chat link to one of this repo's pull requests: the PRs surface, on its detail. */
 const prOpen = reactive<Record<number, { number: number; url: string; n: number }>>({});
 function openPullRequest(number: number, url: string, workspaceId: number) {
@@ -1168,6 +1185,7 @@ const tabs = computed(() => {
     { id: "pull-requests", label: "PRs", icon: PhGitBranch, description: "Check pull requests for this workspace." },
     { id: "explorer", label: "Files", icon: PhFiles, description: "Browse the current workspace." },
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review changes by turn, branch or worktree; restore a checkpoint." },
+    { id: "highlights", label: "Highlights", icon: PhSparkle, description: "What the active chat made, pinned and asks of you, in one place." },
     { id: "agents", label: "Agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
     { id: "progress", label: "Progress", icon: PhListChecks, description: "The active chat's live todo list." },
     { id: "side-chat", label: "Side chat", icon: PhChatsCircle, description: "Ask a quick question about the active chat without disturbing it." },

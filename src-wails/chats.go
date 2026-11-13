@@ -328,6 +328,7 @@ func (a *App) DeleteChat(id int64) error {
 			return err
 		}
 		_, _ = a.db.Exec(`DELETE FROM chat_pr_dismissed WHERE chat_id = ?`, c)
+		_, _ = a.db.Exec(`DELETE FROM chat_pins WHERE chat_id = ?`, c)
 		if _, err := a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, c); err != nil {
 			return err
 		}

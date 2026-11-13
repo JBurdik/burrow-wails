@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -112,9 +114,9 @@ var turnAsksSchema = map[string]any{
 var turnNextSchema = map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 
 func turnVerbs(c *Core) []Verb {
-	return []Verb{{
+	return []Verb{pinVerb(c), {
 		Name: "end_turn",
-		Summary: "Call as the LAST thing in every turn of a Burrow chat, after your final reply text. Says whether the user must act: " +
+		Summary: "Call at the end of every turn of a Burrow chat, once the work is done — then write your final reply AFTER this call as your last message (not in thinking). Says whether the user must act: " +
 			"needs=\"you\" with asks (each a question, optionally with 2-6 options shown as buttons) when you are blocked on a decision, approval, " +
 			"key or test only they can do; needs=\"nothing\" when done (optionally next: up to 3 short follow-ups the user can pick). " +
 			"Don't repeat the asks in prose as a list — the UI draws them",
@@ -287,4 +289,50 @@ func (o *turnOption) UnmarshalJSON(b []byte) error {
 	}
 	type plain turnOption
 	return json.Unmarshal(b, (*plain)(o))
+}
+
+// Pins stores a thread's pins (the Highlights surface). nil = pin refuses.
+type Pins interface {
+	AddPin(chatID int64, target, note string) (any, error)
+}
+
+func pinVerb(c *Core) Verb {
+	return Verb{
+		Name: "pin",
+		Summary: "Pin something the user should look at to this thread's Highlights (Right Panel): a file you made for them to check (mockup, report, screenshot), " +
+			"a preview URL, a pull request. With a one-line note on why. Files you write and links you mention show up there by themselves — pin only the few that matter most",
+		Args: []Arg{
+			{Name: "target", Type: "string", Desc: "A file path (relative to your working directory, or absolute) or an http(s) URL", Required: true},
+			{Name: "note", Type: "string", Desc: "One line: why the user should look at it"},
+		},
+		Scope: ScopeLocal,
+		Fn: func(_ context.Context, p Params) (any, error) {
+			if c.deps.Pins == nil {
+				return nil, fmt.Errorf("pin: not available")
+			}
+			chatID := p.Int("parent_chat_id")
+			if chatID <= 0 {
+				return nil, fmt.Errorf("pin: only for a Burrow chat (no BURROW_CHAT_ID)")
+			}
+			target := p.Str("target")
+			if target == "" {
+				return nil, fmt.Errorf("pin needs a target")
+			}
+			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+				if strings.HasPrefix(target, "~/") {
+					if home, err := os.UserHomeDir(); err == nil {
+						target = filepath.Join(home, target[2:])
+					}
+				} else if !filepath.IsAbs(target) {
+					cwd := p.Str("cwd")
+					if cwd == "" {
+						return nil, fmt.Errorf("pin: a relative path needs a working directory — pass an absolute path")
+					}
+					target = filepath.Join(cwd, target)
+				}
+				target = filepath.Clean(target)
+			}
+			return c.deps.Pins.AddPin(chatID, target, clip(p.Str("note"), 200))
+		},
+	}
 }

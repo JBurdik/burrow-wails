@@ -223,6 +223,7 @@ func (a *App) initControl(dataDir string) {
 		Screen:            ptyWriter{a},
 		Secrets:           a,
 		TurnNeeds:         a,
+		Pins:              a,
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")
 }

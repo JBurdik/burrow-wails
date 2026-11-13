@@ -529,7 +529,7 @@ except: pass
       -d "{\"parent_chat_id\":\"$(_esc "$BURROW_CHAT_ID")\"}" 2>/dev/null) || exit 0
     case "$out" in
       *'"pending":true'*)
-        printf '%s' '{"decision":"block","reason":"Burrow: finish this turn by calling the end_turn tool (burrow MCP) — needs \"you\" with asks if the user must decide or do something, else needs \"nothing\" (optionally next). Write no more text: make only that call."}' ;;
+        printf '%s' '{"decision":"block","reason":"Burrow: finish this turn by calling the end_turn tool (burrow MCP) — needs \"you\" with asks if the user must decide or do something, else needs \"nothing\" (optionally next). Then write your final reply to the user after the call (not in thinking)."}' ;;
     esac
     exit 0
     ;;
