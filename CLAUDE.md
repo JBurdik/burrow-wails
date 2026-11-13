@@ -421,7 +421,11 @@ via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
 list, distinguished only by icon. **States lead, projects fold:** Inbox (needs you + unread, project icon per row) and
 **Working** (was the docked shelf) sit on top as pseudo-groups; project groups start **folded** with a row count
 (`burrow.sidebar.expandedRepos`; the group holding the thread on screen opens by itself); rows are one line (recap in the
-tooltip, sub-agents as a clickable count). Snoozed / Settled stay docked at the foot.
+tooltip, sub-agents as a clickable count). Cross-project groups (Inbox, Working, Pinned) show the project icon on each row;
+a finished unread turn whose end_turn said `nothing` gets a green **tick**, the blue dot means a reply to read. Docked at the
+foot: Snoozed, and **Archived** = settled + archived threads of every project in one list (newest first, project icon,
+Bring back / Delete with Undo; "Archive" replaced "Settle" in the UI — a settled thread keeps its tab, an archived one
+reopens through `/ws/<ws>?chat=<id>`).
 
 ### Control API + `burrow` CLI (`src-wails/internal/control`, `src-wails/bin/burrow`)
 

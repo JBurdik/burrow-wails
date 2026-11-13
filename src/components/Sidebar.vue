@@ -122,7 +122,7 @@
             >
               <kbd v-if="jumpHints && jumpIndex(row) >= 0" class="sb-jump-hint">⌘{{ jumpIndex(row) + 1 }}</kbd>
               <!-- In the Inbox the row stands for its project (the group header is gone): its icon / tile. -->
-              <template v-if="group.repoId === INBOX">
+              <template v-if="group.repoId < 0">
                 <img v-if="store.icons[row.ws.parent_id ?? row.ws.id]" :src="store.icons[row.ws.parent_id ?? row.ws.id]" class="h-[16px] w-[16px] shrink-0 rounded-[4px] object-cover" />
                 <span v-else class="sb-repo-tile !h-[16px] !w-[16px] !text-[9px]" :style="{ background: repoColor(row.ws.parent_id ?? row.ws.id) }">{{ (repoById(row.ws.parent_id ?? row.ws.id)?.name ?? '?').slice(0, 1).toUpperCase() }}</span>
               </template>
@@ -143,16 +143,17 @@
                 @click.stop
               />
               <span v-else class="min-w-0 flex-1 truncate text-[13.5px]" :class="isActiveRow(row) ? 'font-medium text-foreground' : 'text-foreground/90'" @dblclick.stop="startTabRename(row.ws.id, row.tab)">{{ row.tab.title }}</span>
-              <span v-if="group.repoId === INBOX" class="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground group-hover:hidden">{{ repoById(row.ws.parent_id ?? row.ws.id)?.name }}</span>
+              <span v-if="group.repoId < 0" class="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground group-hover:hidden">{{ repoById(row.ws.parent_id ?? row.ws.id)?.name }}</span>
               <span v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="flex shrink-0 cursor-pointer items-center gap-0.5 rounded px-0.5 text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground" :title="`${childrenOfChat(row.tab.chatId).length} sub-agents — open in the Right Panel`" @click.stop="openSubagent(childrenOfChat(row.tab.chatId)[0].id, row)"><PhUsersThree :size="12" />{{ childrenOfChat(row.tab.chatId).length }}</span>
               <span class="flex shrink-0 items-center gap-1 text-[11.5px] tabular-nums group-hover:hidden" :class="statusClass(row.tab.status)">
                 <PhWarningCircle v-if="attentionState(row) === 'needs-input'" :size="11" weight="fill" class="text-[var(--yellow)]" />
-                <span v-else-if="attentionState(row) === 'done-unread'" class="h-[7px] w-[7px] rounded-full bg-[var(--blue)]" title="Unread completion" />
+                <PhCheck v-else-if="attentionState(row) === 'done-unread' && saidDone(row)" :size="12" weight="bold" class="text-[var(--green)]" title="Done — nothing needed from you" />
+                <span v-else-if="attentionState(row) === 'done-unread'" class="h-[7px] w-[7px] rounded-full bg-[var(--blue)]" title="Unread reply" />
                 <span v-else-if="row.tab.status === 'running'" class="sb-spark">{{ spinnerFrame }}</span>
                 <span v-if="row.tab.status !== 'running' && attentionState(row) !== 'done-unread'">{{ statusText(row) }}</span>
               </span>
               <span class="sb-hover-acts hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                <button class="sb-row-act" title="Settle" @click.stop="toggleSettled(row.tab, row.ws.id)"><PhCheck :size="12" weight="bold" /></button>
+                <button class="sb-row-act" title="Archive" @click.stop="toggleSettled(row.tab, row.ws.id)"><PhArchive :size="12" /></button>
                 <button class="sb-row-act hover:!text-destructive" title="Delete thread" @click.stop="deleteThread(row.ws.id, row.tab)"><PhX :size="11" weight="bold" /></button>
               </span>
               <!-- Touch has no hover and no right click: this opens the same menu. -->
@@ -170,48 +171,11 @@
         <template v-else>Nothing open.<br />Pick a project up top.</template>
       </div>
 
-      <!-- Archived: the current workspace's chats closed by the user — no open
-           tab, process stopped, reversible by clicking to reopen. -->
-      <template v-if="active && archivedChats.length">
-        <button class="section-header" @click="toggleSection('archived')">
-          <PhCaretDown :size="9" weight="bold" class="shrink-0 transition-transform" :class="collapsed.includes('archived') && '-rotate-90'" />
-          Archived
-          <span class="opacity-60">{{ archivedChats.length }}</span>
-        </button>
-        <template v-if="!collapsed.includes('archived')">
-          <div
-            v-for="s in archivedChats"
-            :key="s.id"
-            class="group cursor-pointer px-2.5 py-[5px] text-muted-foreground opacity-60 transition-opacity hover:rounded-lg hover:bg-hover hover:opacity-100"
-            @click="unarchiveAndOpen(s.id)"
-            @mouseenter="active && scheduleHoverCard(hoverInfoFromArchived(s, active), $event)"
-            @mouseleave="cancelHoverCard"
-          >
-            <div class="flex items-center gap-1.5">
-              <PhChatCenteredText :size="10" class="shrink-0" />
-              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ s.title }}</span>
-              <span class="shrink-0 text-[10px] tabular-nums">{{ ago(s.archivedAt!) }}</span>
-              <PhTrash
-                :size="10"
-                class="shrink-0 rounded-sm p-px opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:!text-destructive"
-                title="Delete permanently"
-                @click.stop="deletePermanently(s.id)"
-              />
-            </div>
-            <div v-if="active" class="mt-[2px] flex items-center gap-1.5 pl-[15px]">
-              <img v-if="repoIcon(active)" :src="repoIcon(active)!" class="h-2.5 w-2.5 shrink-0 rounded-[2px] object-cover" />
-              <PhFolder v-else :size="9" weight="fill" class="shrink-0 text-accent/80" />
-              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] opacity-70" :title="active.name">{{ repoName(active) }}</span>
-            </div>
-          </div>
-        </template>
-      </template>
 
     </div>
 
-    <!-- Docked shelf (t3code): Working, then Snoozed and Settled. Working is
-         open by default; collapsed it still shows the thread on screen. -->
-    <div v-if="dockedSections.length" class="flex max-h-[45%] shrink-0 flex-col overflow-y-auto border-t border-border px-2 pb-1.5 pt-0.5" @scroll="cancelHoverCard">
+    <!-- Docked at the foot: Snoozed, then Archived (Working moved up top). -->
+    <div v-if="dockedSections.length || archiveItems.length" class="flex max-h-[45%] shrink-0 flex-col overflow-y-auto border-t border-border px-2 pb-1.5 pt-0.5" @scroll="cancelHoverCard">
       <div
         v-for="sec in dockedSections"
         :key="sec.key"
@@ -220,15 +184,6 @@
           {{ sec.label }}
           <span class="opacity-60">{{ sec.count }}</span>
           <PhCaretRight :size="9" weight="bold" class="shrink-0 transition-transform" :class="shelfOpen(sec.key) && 'rotate-90'" />
-          <span
-            v-if="sec.key === 'settled'"
-            role="button"
-            class="ml-auto rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground"
-            title="Delete all settled threads (pinned ones are kept)"
-            @click.stop="deleteAllSettled"
-          >
-            <PhTrash :size="10" />
-          </span>
         </button>
         <div>
           <div
@@ -254,7 +209,6 @@
               </span>
               <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
               <span class="grid shrink-0 justify-items-end">
-                <span v-if="sec.key === 'settled'" class="sb-ago [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
                 <button
                   class="sb-unsettle invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
                   :title="sec.key === 'snoozed' ? 'Unsnooze' : 'Move back to active'"
@@ -272,14 +226,50 @@
             </div>
           </div>
         </div>
-        <button
-          v-if="sec.key === 'settled' && shelfOpen('settled') && filteredSettled.length > settledChatsLimit"
-          class="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
-          @click="settledChatsLimit += 25"
-        >
-          <PhPlus :size="10" />
-          Show {{ filteredSettled.length - settledChatsLimit }} more
+      </div>
+      <!-- Archived: settled + archived threads of every project, newest first. -->
+      <div v-if="archiveItems.length">
+        <button class="section-header !mx-0 !w-full" @click="toggleShelf('settled')">
+          Archived
+          <span class="opacity-60">{{ archiveItems.length }}</span>
+          <PhCaretRight :size="9" weight="bold" class="shrink-0 transition-transform" :class="shelfOpen('settled') && 'rotate-90'" />
+          <span
+            role="button"
+            class="ml-auto rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground"
+            title="Delete all archived threads (pinned ones are kept; Undo for 8 s)"
+            @click.stop="deleteAllSettled"
+          >
+            <PhTrash :size="10" />
+          </span>
         </button>
+        <template v-if="shelfOpen('settled')">
+          <div
+            v-for="it in archiveVisible"
+            :key="it.key"
+            class="sb-row group flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[5px] text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
+            :class="it.row && isActiveRow(it.row) && 'sb-row-active'"
+            :title="`${it.title} — ${repoName(it.ws)}`"
+            @click="openArchived(it)"
+            @contextmenu.prevent.stop="it.row && openRowMenu(it.row.ws, it.row.tab, $event)"
+          >
+            <img v-if="repoIcon(it.ws)" :src="repoIcon(it.ws)!" class="h-[14px] w-[14px] shrink-0 rounded-[3px] object-cover" />
+            <span v-else class="sb-repo-tile !h-[14px] !w-[14px] !text-[8px]" :style="{ background: repoColor(it.ws.parent_id ?? it.ws.id) }">{{ repoName(it.ws).slice(0, 1).toUpperCase() }}</span>
+            <span class="min-w-0 flex-1 truncate text-[12px]">{{ it.title }}</span>
+            <span class="shrink-0 text-[10px] tabular-nums group-hover:hidden">{{ ago(it.ts) }}</span>
+            <span class="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+              <button class="rounded p-0.5 hover:bg-hover hover:text-foreground" title="Bring back" @click.stop="restoreArchived(it)"><PhArrowCounterClockwise :size="11" weight="bold" /></button>
+              <button class="rounded p-0.5 hover:bg-hover hover:!text-destructive" title="Delete (Undo for 8 s)" @click.stop="deleteArchived(it)"><PhTrash :size="11" /></button>
+            </span>
+          </div>
+          <button
+            v-if="archiveItems.length > settledChatsLimit"
+            class="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
+            @click="settledChatsLimit += 25"
+          >
+            <PhPlus :size="10" />
+            Show {{ archiveItems.length - settledChatsLimit }} more
+          </button>
+        </template>
       </div>
     </div>
 
@@ -445,7 +435,7 @@
           {{ isChatPinned(rowMenu.tab.chatId) ? "Unpin thread" : "Pin thread to top" }}
         </button>
         <button class="menu-item" @click="withMenu((ws, tab) => toggleSettled(tab!, ws.id))">
-          {{ rowMenu.tab.settled ? "Mark active" : "Settle now" }}
+          {{ rowMenu.tab.settled ? "Bring back" : "Archive" }}
         </button>
         <!-- t3code's mark-unread: rewinds the shared receipt to just before the last turn ended. -->
         <button v-if="rowMenu.tab.chatId != null && rowMenu.tab.status !== 'review' && rowMenu.tab.status !== 'running'" class="menu-item" @click="withMenu((_ws, tab) => void invoke('seen_mark_unread', { key: `chat:${tab!.chatId}` }).catch(() => {}))">
@@ -668,8 +658,8 @@ import {
   PhSquaresFour,
   PhPlayCircle,
   PhTrash,
-  PhCheck,
   PhArchive,
+  PhCheck,
   PhPushPin,
   PhWarningCircle,
   PhFolders,
@@ -922,7 +912,35 @@ const shelfSections = computed(() => {
   ].filter((sec) => sec.count);
 });
 
-const dockedSections = computed(() => shelfSections.value.filter((sec) => sec.key !== "working"));
+const dockedSections = computed(() => shelfSections.value.filter((sec) => sec.key === "snoozed"));
+
+// Archived (threadbear): one list for everything put away — settled threads
+// (process asleep, tab kept) and archived ones (tab closed) — across every
+// project, newest first, each with its project's icon.
+interface ArchiveItem { key: string; title: string; ts: number; ws: Workspace; row?: ActivityRow; chatId?: number }
+const archiveItems = computed<ArchiveItem[]>(() => {
+  const items: ArchiveItem[] = filteredSettled.value.map((row) => ({ key: "s" + rowKey(row), title: row.tab.title, ts: row.ts, ws: row.ws, row, chatId: row.tab.chatId ?? undefined }));
+  const listed = new Set(items.map((i) => i.chatId).filter((id) => id != null));
+  for (const c of chats.sessions) {
+    if (!c.archivedAt || c.parentChatId || c.kind === "side" || listed.has(c.id) || pendingDeletes.isHidden(c.id)) continue;
+    const ws = store.workspaces.find((w) => w.id === c.workspaceId);
+    if (ws) items.push({ key: "a" + c.id, title: c.title, ts: c.archivedAt, ws, chatId: c.id });
+  }
+  return items.sort((x, y) => y.ts - x.ts);
+});
+const archiveVisible = computed(() => archiveItems.value.slice(0, settledChatsLimit.value));
+function openArchived(it: ArchiveItem) {
+  if (it.row) return onRowClick(it.row);
+  void router.push(`/ws/${it.ws.id}?chat=${it.chatId}`); // opening an archived chat unarchives it
+}
+function restoreArchived(it: ArchiveItem) {
+  if (it.row) return toggleSettled(it.row.tab, it.row.ws.id);
+  void router.push(`/ws/${it.ws.id}?chat=${it.chatId}`);
+}
+function deleteArchived(it: ArchiveItem) {
+  if (it.row) return deleteThread(it.row.ws.id, it.row.tab);
+  deleteChatsWithUndo([{ wsId: it.ws.id, chatId: it.chatId! }], `Deleted “${it.title}”`);
+}
 
 // ── project groups (Ghostex-style feed) ─────────────────────────────────────
 const liveGroups = computed(() =>
@@ -970,6 +988,10 @@ const topGroups = computed(() =>
 // Per-project inbox (threadbear): rows waiting on the user lead their group —
 // a permission / input prompt, or a finished turn whose end_turn asked
 // something. Running rows already sit in the Working shelf.
+// Threadbear's tick: a finished turn whose end_turn said nothing is needed.
+function saidDone(row: ActivityRow): boolean {
+  return row.tab.chatId != null && chats.sessions.find((s) => s.id === row.tab.chatId)?.turnNeeds?.needs === "nothing";
+}
 function needsYou(row: ActivityRow): boolean {
   if (attentionState(row) === "needs-input") return true;
   if (row.tab.chatId == null || row.tab.status === "running") return false;
@@ -1080,15 +1102,7 @@ function openSubagent(chatId: number, row: ActivityRow) {
 
 const settledChatsLimit = ref(12);
 const settledChatsVisible = computed(() => filteredSettled.value.slice(0, settledChatsLimit.value));
-const archivedChats = computed(() => {
-  const all = active.value ? chats.archivedSessionsForWs(active.value.id) : [];
-  return all.filter((s) => !pendingDeletes.isHidden(s.id));
-});
 
-function unarchiveAndOpen(chatId: number) {
-  if (!active.value) return;
-  termTabs.openChat(active.value.id, chatId);
-}
 // Confirm dialogs focus their action, so Enter confirms and Esc (bubbling to
 // the overlay) cancels without reaching for the mouse.
 const vFocus = { mounted: (el: HTMLElement) => el.focus() };
@@ -1115,22 +1129,19 @@ function deleteChatsWithUndo(items: { wsId: number; tabId?: number; chatId: numb
   });
   notif.push({ type: "info", title, duration: 8000, action: { label: "Undo", run: undo } });
 }
-function deletePermanently(chatId: number) {
-  const title = chats.sessions.find((s) => s.id === chatId)?.title ?? "chat";
-  deleteChatsWithUndo([{ wsId: active.value?.id ?? 0, chatId }], `Deleted “${title}”`);
-}
 function deleteAllSettled() {
   const rows = filteredSettled.value.filter((r) => !(r.tab.isChat && isChatPinned(r.tab.chatId)));
   const chatRows = rows.filter((r) => r.tab.isChat && r.tab.chatId != null);
   const ptyRows = rows.filter((r) => !chatRows.includes(r));
+  // The Archived list also holds closed (archived) chats: they go too, Undo included.
+  const closed = archiveItems.value.filter((it) => !it.row && it.chatId != null && !isChatPinned(it.chatId));
   const run = () => {
     for (const r of ptyRows) termTabs.close(r.ws.id, r.tab.id);
-    if (chatRows.length) {
-      deleteChatsWithUndo(
-        chatRows.map((r) => ({ wsId: r.ws.id, tabId: r.tab.id, chatId: r.tab.chatId! })),
-        chatRows.length === 1 ? `Deleted “${chatRows[0].tab.title}”` : `Deleted ${chatRows.length} threads`,
-      );
-    }
+    const items = [
+      ...chatRows.map((r) => ({ wsId: r.ws.id, tabId: r.tab.id, chatId: r.tab.chatId! })),
+      ...closed.map((it) => ({ wsId: it.ws.id, chatId: it.chatId! })),
+    ];
+    if (items.length) deleteChatsWithUndo(items, items.length === 1 ? "Deleted 1 thread" : `Deleted ${items.length} threads`);
   };
   if (!ptyRows.length) return run();
   confirmDialog.value = {
@@ -1229,17 +1240,6 @@ function hoverInfoFromRow(row: ActivityRow): HoverInfo {
   };
 }
 
-function hoverInfoFromArchived(s: ClaudeSession, ws: Workspace): HoverInfo {
-  return {
-    title: s.title,
-    ws,
-    model: s.model,
-    round: s.messageCount,
-    sessionId: s.claudeSessionId,
-    debugId: `chat ${s.id}`,
-    ts: s.archivedAt ?? Date.now(),
-  };
-}
 
 function statusLabel(status: TermStatus): string {
   switch (status) {
