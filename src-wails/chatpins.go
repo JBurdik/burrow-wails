@@ -36,7 +36,7 @@ const maxPinsPerChat = 20
 
 // AddPin implements control.Pins. Pinning the same target again updates its
 // note instead of adding a twin.
-func (a *App) AddPin(chatID int64, target, note string) (any, error) {
+func (a *App) AddPin(chatID int64, target, note string, show bool) (any, error) {
 	if a.db == nil {
 		return nil, fmt.Errorf("no database")
 	}
@@ -62,6 +62,11 @@ func (a *App) AddPin(chatID int64, target, note string) (any, error) {
 		}
 	}
 	busEmit("chat-pins-changed", map[string]int64{"chat_id": chatID})
+	if show {
+		// The Right Panel opens it now if the thread is on screen, else when
+		// it next is (HighlightsSurface's host keeps the pending one).
+		busEmit("chat-pin-show", map[string]any{"chat_id": chatID, "target": target})
+	}
 	return map[string]any{"ok": true, "target": target}, nil
 }
 

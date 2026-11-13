@@ -1453,6 +1453,25 @@ function seedLaunchRow() {
   if (!row.profileId && selectedProfileId.value) patch.profile_id = selectedProfileId.value;
   if (Object.keys(patch).length > 1) void persistLaunch(patch);
 }
+// Codex / ACP twin: the welcome composer keeps its picks in chatAcpLast, but Go
+// (ensureRPC) starts the process from the ROW — empty, so the first turn ran on
+// the CLI's default model and restoreAcpSelections switched only after it.
+// Pinned on a fresh chat (no session yet) and awaited before the first send.
+// Mode only for Codex: its ids are fixed, and a mode that fails to apply
+// refuses the start (fails closed) — a stale generic-ACP mode would brick it.
+async function seedRpcLaunchRow() {
+  const row = chatRow();
+  if (!row || row.claudeSessionId) return;
+  const last = (f: "model" | "effort" | "mode") => getLastAcpSetting(agentKind.value, f);
+  const patch: LaunchSettingsPatch = { row_only: true };
+  // last() first: welcome writes it on every pick, while its selectedModel can
+  // still hold a Claude id before the Codex catalog lands.
+  const model = row.model || last("model") || props.defaultModel;
+  if (!row.model && model) patch.model = model;
+  if (!row.effort && last("effort")) patch.effort = last("effort");
+  if (!row.permissionMode && currentAgent.value?.kind === "codex" && last("mode")) patch.permission_mode = last("mode");
+  if (Object.keys(patch).length > 1) await persistLaunch(patch);
+}
 
 // Profile switcher — the Claude provider instances (each one is a config dir).
 const claudeProfiles = computed(() => chatAgents.active.filter((a) => a.providerId === "claude"));
@@ -3179,6 +3198,7 @@ onMounted(async () => {
   // first mount: the row is what Go starts the process with, and it must not
   // start a different model than the picker shows.
   if (!usesRpcRuntime.value) seedLaunchRow();
+  else await seedRpcLaunchRow();
 
   // Mounted normally means visible (Terminal.isChatVisible), but a chat spawned
   // with a prompt can mount unwatched — marking that one seen would clear a dot

@@ -1526,6 +1526,30 @@ watch([pinCount, highlightsOnScreen, activeChatId], () => {
 });
 const newPins = computed(() => !!activeChatId.value && pinCount.value > (seenPins[activeChatId.value] ?? 0) && !highlightsOnScreen.value);
 
+// pin --show: open the pinned thing now when its thread is on screen, else
+// when that thread is next opened (threadbear's requestPanel).
+// ponytail: the pending one lives in memory; a restart drops it (the pin stays).
+const pendingShow = new Map<number, string>();
+function showPinned(target: string) {
+  if (!props.open) emit("openPanel");
+  if (/^https?:\/\//.test(target)) openHighlightUrl(target);
+  else openFile(target);
+}
+let offPinShow: (() => void) | undefined;
+void listen<{ chat_id: number; target: string }>("chat-pin-show", (e) => {
+  const p = e.payload;
+  if (!p?.target) return;
+  if (p.chat_id === activeChatId.value) showPinned(p.target);
+  else pendingShow.set(p.chat_id, p.target);
+}).then((u) => (offPinShow = u));
+onBeforeUnmount(() => offPinShow?.());
+watch(activeChatId, (id) => {
+  const target = id ? pendingShow.get(id) : undefined;
+  if (!id || !target) return;
+  pendingShow.delete(id);
+  showPinned(target);
+});
+
 defineExpose({ openGitTab, openSubagent, openPanelSurface, openBrowserUrl, openPullRequest, openDoc, openFile, toggleTerminal });
 
 // Phone shell (/project/:surface): one surface, full screen, no tab strip or

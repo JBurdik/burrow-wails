@@ -91,7 +91,7 @@ type fakePins struct {
 	target, note string
 }
 
-func (f *fakePins) AddPin(chatID int64, target, note string) (any, error) {
+func (f *fakePins) AddPin(chatID int64, target, note string, _ bool) (any, error) {
 	f.chat, f.target, f.note = chatID, target, note
 	return nil, nil
 }

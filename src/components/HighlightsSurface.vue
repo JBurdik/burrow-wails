@@ -7,6 +7,7 @@ import {
   PhSparkle, PhUsersThree, PhX,
 } from "@phosphor-icons/vue";
 import { chatSession } from "@/lib/chatSession";
+import type { ChatMessage } from "@/lib/chatTypes";
 import { highlightFiles, highlightLinks, isReviewFile, shortPath } from "@/lib/chatHighlights";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { childrenOf } from "@/stores/chatTree";
@@ -22,7 +23,21 @@ interface Pin { id: number; target: string; note: string }
 
 const chats = useClaudeChatsStore();
 const session = computed(() => (props.chatId ? chats.sessions.find((s) => s.id === props.chatId) : undefined));
-const messages = computed(() => (props.chatId ? chatSession(props.chatId).messages.value : []));
+const live = computed(() => (props.chatId ? chatSession(props.chatId).messages.value : []));
+// The session holds only the transcript's tail (a long chat opens windowed),
+// so the whole stored transcript is read once per thread and merged with the
+// live tail — files and links from the start of a long thread stay listed.
+// ponytail: one full read when Highlights opens / the thread changes; a Go-side
+// index is the upgrade if a huge transcript makes that slow.
+const stored = ref<ChatMessage[]>([]);
+async function loadStored() {
+  const id = props.chatId;
+  if (!id) { stored.value = []; return; }
+  const raw = await invoke<string | ChatMessage[]>("load_chat_messages", { chatId: id }).catch(() => "[]");
+  if (id !== props.chatId) return;
+  try { stored.value = (typeof raw === "string" ? JSON.parse(raw || "[]") : raw) ?? []; } catch { stored.value = []; }
+}
+const messages = computed(() => [...stored.value, ...live.value]);
 const asks = computed(() => (session.value?.turnNeeds?.needs === "you" ? session.value.turnNeeds.asks ?? [] : []));
 // Files = things to look at (docs, pages, pictures); every edit counts in Changes.
 const allFiles = computed(() => highlightFiles(messages.value));
@@ -48,7 +63,7 @@ async function loadPins() {
   const list = await invoke<Pin[]>("chat_pins_list", { chatId: id }).catch(() => []);
   if (id === props.chatId) pins.value = list ?? [];
 }
-watch(() => props.chatId, () => { ticked.clear(); void loadPins(); }, { immediate: true });
+watch(() => props.chatId, () => { ticked.clear(); void loadPins(); void loadStored(); }, { immediate: true });
 let off: (() => void) | undefined;
 void listen<{ chat_id: number }>("chat-pins-changed", (e) => { if (e.payload?.chat_id === props.chatId) void loadPins(); }).then((u) => (off = u));
 onBeforeUnmount(() => off?.());

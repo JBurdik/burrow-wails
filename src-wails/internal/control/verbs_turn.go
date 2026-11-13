@@ -314,7 +314,7 @@ func (o *turnOption) UnmarshalJSON(b []byte) error {
 
 // Pins stores a thread's pins (the Highlights surface). nil = pin refuses.
 type Pins interface {
-	AddPin(chatID int64, target, note string) (any, error)
+	AddPin(chatID int64, target, note string, show bool) (any, error)
 }
 
 func pinVerb(c *Core) Verb {
@@ -325,6 +325,7 @@ func pinVerb(c *Core) Verb {
 		Args: []Arg{
 			{Name: "target", Type: "string", Desc: "A file path (relative to your working directory, or absolute) or an http(s) URL", Required: true},
 			{Name: "note", Type: "string", Desc: "One line: why the user should look at it"},
+			{Name: "show", Type: "boolean", Desc: "Also open it in the Right Panel now (or when the user next opens this thread) — for the one thing they should look at right away"},
 		},
 		Scope: ScopeLocal,
 		Fn: func(_ context.Context, p Params) (any, error) {
@@ -359,7 +360,7 @@ func pinVerb(c *Core) Verb {
 					return nil, fmt.Errorf("pin: no such file %s — write it first, or pin its URL", target)
 				}
 			}
-			return c.deps.Pins.AddPin(chatID, target, clip(p.Str("note"), 200))
+			return c.deps.Pins.AddPin(chatID, target, clip(p.Str("note"), 200), p.Bool("show"))
 		},
 	}
 }
