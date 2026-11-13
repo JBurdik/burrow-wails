@@ -35,6 +35,8 @@ type TurnAsk struct {
 	Details []string `json:"details,omitempty"`
 	// Index into Options of the answer the agent would pick; -1 = none.
 	Suggested int `json:"suggested"`
+	// Multi: the user may pick several options (checkboxes, not buttons).
+	Multi bool `json:"multi,omitempty"`
 	// Run, when set, is a command that is the user's to run (a deploy, a
 	// production migration): the card shows it with a Run button, it runs once
 	// in the chat's folder and its output goes back to the agent.
@@ -111,6 +113,7 @@ var turnAsksSchema = map[string]any{
 					"description": map[string]any{"type": "string", "description": "One line: what happens if picked — scope, cost, trade-off"},
 				}, "required": []string{"label"}}},
 			"suggested": map[string]any{"type": "integer", "description": "Index into options of the answer you would pick"},
+			"multi":     map[string]any{"type": "boolean", "description": "The user may pick several options (e.g. which of these to do); default one"},
 			"run":       map[string]any{"type": "string", "description": "A shell command that is the user's to run, not yours (a production deploy or migration, something needing their machine/credentials). Shown with a Run button; runs once in this chat's folder with no stdin (no prompts), 10 min max, and its output comes back to you as their reply"},
 		},
 		"required": []string{"question"},
@@ -165,10 +168,21 @@ func (c *Core) endTurn(p Params) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("end_turn: %w", err)
 	}
+	// One end_turn per turn (threadbear's ALREADY_ENDED): turn_needs is
+	// cleared when a turn starts, so anything stored is this turn's call.
+	if pending, err := c.deps.TurnNeeds.TurnNeedsPending(chatID); err == nil && !pending {
+		return nil, fmt.Errorf("end_turn: already recorded for this turn — don't call it again; write your reply to the user now")
+	}
 	if err := c.deps.TurnNeeds.SetTurnNeeds(chatID, n); err != nil {
 		return nil, fmt.Errorf("end_turn: %w", err)
 	}
-	return map[string]any{"ok": true, "needs": n.Needs, "asks": len(n.Asks)}, nil
+	// The result is an instruction, not just "ok" (threadbear's
+	// oneReplyAccepted): after this call comes the reply, once, visibly.
+	next := "Recorded. Now write your final reply to the user as your last message — after this call, not in your thinking. Nothing after it."
+	if n.Needs == "you" {
+		next = "Recorded: the card shows your asks as buttons. Now write your reply to the user — what you did and what you need — without listing the asks again. Nothing after it."
+	}
+	return map[string]any{"ok": true, "needs": n.Needs, "asks": len(n.Asks), "next_step": next}, nil
 }
 
 // ParseTurnNeeds checks end_turn's arguments. asks/next arrive decoded from MCP
@@ -179,6 +193,7 @@ func ParseTurnNeeds(p Params) (TurnNeeds, error) {
 		Question  string       `json:"question"`
 		Options   []turnOption `json:"options"`
 		Suggested *int         `json:"suggested"`
+		Multi     bool         `json:"multi"`
 		Run       string       `json:"run"`
 	}
 	if err := p.JSON("asks", &asks); err != nil {
@@ -193,7 +208,7 @@ func ParseTurnNeeds(p Params) (TurnNeeds, error) {
 		if q == "" {
 			continue
 		}
-		ask := TurnAsk{Question: q, Suggested: -1}
+		ask := TurnAsk{Question: q, Suggested: -1, Multi: a.Multi}
 		described := false
 		for _, o := range a.Options {
 			if l := clip(o.Label, maxOptionLen); l != "" && len(ask.Options) < maxTurnOptions {
@@ -324,6 +339,9 @@ func pinVerb(c *Core) Verb {
 			if target == "" {
 				return nil, fmt.Errorf("pin needs a target")
 			}
+			if strings.Contains(target, "://") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+				return nil, fmt.Errorf("pin: a target is a file path or an http(s) URL, not %q", target)
+			}
 			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 				if strings.HasPrefix(target, "~/") {
 					if home, err := os.UserHomeDir(); err == nil {
@@ -337,6 +355,9 @@ func pinVerb(c *Core) Verb {
 					target = filepath.Join(cwd, target)
 				}
 				target = filepath.Clean(target)
+				if _, err := os.Stat(target); err != nil {
+					return nil, fmt.Errorf("pin: no such file %s — write it first, or pin its URL", target)
+				}
 			}
 			return c.deps.Pins.AddPin(chatID, target, clip(p.Str("note"), 200))
 		},

@@ -2,6 +2,10 @@ package control
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -95,10 +99,13 @@ func (f *fakePins) AddPin(chatID int64, target, note string) (any, error) {
 func TestPinVerbResolvesPaths(t *testing.T) {
 	f := &fakePins{}
 	c := New(Deps{Pins: f})
-	if _, err := c.Call(context.Background(), ScopeLocal, "pin", Params{"parent_chat_id": float64(7), "target": "out/mock.html", "cwd": "/repo", "note": "look"}); err != nil {
+	repo := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(repo, "out"), 0o755)
+	_ = os.WriteFile(filepath.Join(repo, "out", "mock.html"), []byte("<p>"), 0o644)
+	if _, err := c.Call(context.Background(), ScopeLocal, "pin", Params{"parent_chat_id": float64(7), "target": "out/mock.html", "cwd": repo, "note": "look"}); err != nil {
 		t.Fatal(err)
 	}
-	if f.chat != 7 || f.target != "/repo/out/mock.html" || f.note != "look" {
+	if f.chat != 7 || f.target != filepath.Join(repo, "out", "mock.html") || f.note != "look" {
 		t.Fatalf("%+v", f)
 	}
 	_, _ = c.Call(context.Background(), ScopeLocal, "pin", Params{"parent_chat_id": float64(7), "target": "https://x.dev/a"})
@@ -107,5 +114,38 @@ func TestPinVerbResolvesPaths(t *testing.T) {
 	}
 	if _, err := c.Call(context.Background(), ScopeLocal, "pin", Params{"target": "/a"}); err == nil {
 		t.Fatal("pin outside a chat must refuse")
+	}
+}
+
+type fakeNeeds struct{ stored string }
+
+func (f *fakeNeeds) SetTurnNeeds(_ int64, n TurnNeeds) error { f.stored = n.Needs; return nil }
+func (f *fakeNeeds) TurnNeedsPending(int64) (bool, error)    { return f.stored == "", nil }
+
+func TestEndTurnOncePerTurnAndInstructs(t *testing.T) {
+	f := &fakeNeeds{}
+	c := New(Deps{TurnNeeds: f})
+	out, err := c.Call(context.Background(), ScopeLocal, "end_turn", Params{"parent_chat_id": float64(3), "needs": "nothing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := out.(map[string]any); !strings.Contains(fmt.Sprint(m["next_step"]), "write your final reply") {
+		t.Fatalf("result must tell the agent to write its reply next: %v", out)
+	}
+	if _, err := c.Call(context.Background(), ScopeLocal, "end_turn", Params{"parent_chat_id": float64(3), "needs": "nothing"}); err == nil {
+		t.Fatal("a second end_turn in the same turn must be refused")
+	}
+	n, _ := ParseTurnNeeds(Params{"asks": `[{"question":"Which?","options":["a","b","c"],"multi":true}]`})
+	if !n.Asks[0].Multi {
+		t.Fatal("multi not kept")
+	}
+}
+
+func TestPinRefusesMissingFilesAndOtherSchemes(t *testing.T) {
+	c := New(Deps{Pins: &fakePins{}})
+	for _, target := range []string{"file:///etc/passwd", "/definitely/not/here.html"} {
+		if _, err := c.Call(context.Background(), ScopeLocal, "pin", Params{"parent_chat_id": float64(7), "target": target}); err == nil {
+			t.Fatalf("%q must be refused", target)
+		}
 	}
 }

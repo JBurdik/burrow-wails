@@ -9,6 +9,10 @@ describe("isPlumbingTool", () => {
     expect(isPlumbingTool(tool("mcp__burrow__end_turn"))).toBe(true);
     expect(isPlumbingTool(tool("ToolSearch"))).toBe(true);
   });
+  it("hides Codex/ACP's titled end_turn too", () => {
+    expect(isPlumbingTool(tool("burrow: end_turn", { toolRawName: false }))).toBe(true);
+    expect(isPlumbingTool(tool("burrow: pin", { toolRawName: false }))).toBe(false);
+  });
   it("keeps real work, failures and calls still running", () => {
     expect(isPlumbingTool(tool("Bash"))).toBe(false);
     expect(isPlumbingTool(tool("mcp__burrow__pin"))).toBe(false);

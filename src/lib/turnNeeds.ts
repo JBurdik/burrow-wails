@@ -8,6 +8,8 @@ export interface TurnAsk {
   details?: string[];
   /** Index into options the agent would pick; -1 = none. */
   suggested: number;
+  /** Several options may be picked (checkboxes); the answer joins them. */
+  multi?: boolean;
   /** A command that is the user's to run (Run on the card); state is Go's. */
   /** reply: the result kept on a multi-ask card, sent with the other answers. */
   run?: { command: string; state?: "running" | "done"; exit?: number; interrupted?: boolean; reply?: string };

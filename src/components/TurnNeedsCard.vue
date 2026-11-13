@@ -23,6 +23,7 @@
       <!-- Needs you: one ask at a time -->
       <div v-if="isYou && ask" class="needs-body">
         <p class="whitespace-pre-wrap text-[13px] leading-[1.5] text-foreground">{{ ask.question }}</p>
+        <p v-if="ask.multi" class="mt-0.5 text-[11.5px] text-muted-foreground">Pick any that apply.</p>
         <div v-if="ask.run" class="needs-run mt-2">
           <div class="flex items-center gap-2 px-2.5 pt-1.5 text-[11px] text-muted-foreground">
             <PhTerminalWindow :size="12" class="shrink-0" />
@@ -43,11 +44,12 @@
             v-for="(o, i) in ask.options"
             :key="i"
             class="needs-option"
-            :class="{ picked: answers[current] === o, 'is-row': !!ask.details?.length }"
+            :class="{ picked: isPicked(o), 'is-row': !!ask.details?.length }"
             :title="i === ask.suggested ? 'Recommended' : undefined"
             @click="pick(o)"
           >
             <span class="flex min-w-0 items-center gap-1.5">
+              <component :is="isPicked(o) ? PhCheckSquare : PhSquare" v-if="ask.multi" :size="13" class="shrink-0" />
               <PhStar v-if="i === ask.suggested" :size="11" weight="fill" class="shrink-0 text-[var(--chat-warn)]" />
               <span :class="ask.details?.length ? 'font-medium' : ''">{{ o }}</span>
               <span v-if="i === ask.suggested && ask.details?.length" class="needs-rec">Recommended</span>
@@ -184,7 +186,21 @@ function advance() {
   if (anyOpen >= 0) current.value = anyOpen;
 }
 
+function isPicked(o: string): boolean {
+  const a = answers.value[current.value];
+  return ask.value?.multi ? (a ?? "").split(", ").includes(o) : a === o;
+}
+
 function pick(o: string) {
+  if (ask.value?.multi) {
+    // Several may be picked: toggle this one, stay on the question.
+    const picked = new Set((answers.value[current.value] ?? "").split(", ").filter(Boolean));
+    if (picked.has(o)) picked.delete(o);
+    else picked.add(o);
+    const order = ask.value.options ?? [];
+    answers.value[current.value] = order.filter((x) => picked.has(x)).join(", ") || undefined;
+    return;
+  }
   answers.value[current.value] = answers.value[current.value] === o ? undefined : o;
   otherOpen.value[current.value] = false;
   if (answers.value[current.value]) advance();

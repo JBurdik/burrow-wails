@@ -153,7 +153,12 @@ chat starts with `--settings` holding one Stop hook, `burrow end-turn-gate` (`en
 `turn_needs` still empty (`end_turn_pending` verb) is sent back **once** to call `end_turn`; `stop_hook_active` and every
 error let it stop. Tested: without it Haiku skipped `end_turn` after AskUserQuestion and under "do nothing else" tasks.
 The transcript hides plumbing calls (`isPlumbingTool`, `chatPlumbing.ts`): a taken `end_turn` / `end_turn_pending` and
-`ToolSearch` — the card says what end_turn said; a failed one stays. **Order: `end_turn` first, the reply after it** (as threadbear does): told "reply, then end_turn", Opus wrote the reply
+`ToolSearch` (Codex/ACP's titled `burrow: end_turn` too) — the card says what end_turn said; a failed one stays.
+end_turn is **once per turn** (a stored `turn_needs` = already called → refused) and its result carries `next_step`, an
+instruction to write the reply now, after the call; an ask may be `multi` (checkboxes, answers joined with ", "); Codex
+gets the rule in its AGENTS.md block (`codex-agents.md`). `pin` refuses a missing file and non-http(s) schemes;
+Highlights' Files lists only review kinds (docs, pages, pictures, data — `isReviewFile`), every edit counts in Changes,
+and Links skip code blocks and host-less URLs. **Order: `end_turn` first, the reply after it** (as threadbear does): told "reply, then end_turn", Opus wrote the reply
 into its thinking, called the tool and showed only "Done." — the user never saw the answer. `Arg.Schema`
 gives a verb arg a full JSON schema for MCP (the CLI passes it as a JSON string; `Params.JSON` reads both).
 

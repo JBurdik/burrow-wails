@@ -17,6 +17,13 @@ export interface HighlightLink {
 const WRITE_TOOLS = new Set(["Write", "NotebookEdit"]);
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit"]);
 
+// Files worth opening to look at (threadbear's "review" kinds): documents,
+// pages, pictures, video, data. Source edits are Changes, not Files.
+const REVIEW_EXT = /\.(md|markdown|html?|pdf|png|jpe?g|gif|webp|svg|mp4|mov|webm|csv|txt|json)$/i;
+export function isReviewFile(path: string): boolean {
+  return REVIEW_EXT.test(path);
+}
+
 /** Files written/edited by tool calls, newest first, one row per path ("wrote" wins). */
 export function highlightFiles(messages: readonly ChatMessage[]): HighlightFile[] {
   const seen = new Map<string, HighlightFile>();
@@ -43,9 +50,11 @@ export function highlightLinks(messages: readonly ChatMessage[]): HighlightLink[
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== "assistant") continue;
-    for (const hit of m.text.match(URL_RE) ?? []) {
+    // A URL inside a code block is an example or a command, not a link to open.
+    const prose = m.text.replace(/```[\s\S]*?(```|$)/g, " ").replace(/`[^`\n]*`/g, " ");
+    for (const hit of prose.match(URL_RE) ?? []) {
       const url = hit.replace(/[.,;:!?)*_]+$/, "");
-      if (seen.has(url)) continue;
+      if (seen.has(url) || url.length > 2000 || !/^https?:\/\/([^/:]+\.[^/:]+|localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(url)) continue;
       seen.add(url);
       out.push({ url, pr: /\/(pull|merge_requests|pullrequest)\/\d+/.test(url) });
     }

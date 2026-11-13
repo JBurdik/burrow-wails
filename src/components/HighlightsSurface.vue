@@ -7,7 +7,7 @@ import {
   PhSparkle, PhUsersThree, PhX,
 } from "@phosphor-icons/vue";
 import { chatSession } from "@/lib/chatSession";
-import { highlightFiles, highlightLinks, shortPath } from "@/lib/chatHighlights";
+import { highlightFiles, highlightLinks, isReviewFile, shortPath } from "@/lib/chatHighlights";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { childrenOf } from "@/stores/chatTree";
 
@@ -24,7 +24,9 @@ const chats = useClaudeChatsStore();
 const session = computed(() => (props.chatId ? chats.sessions.find((s) => s.id === props.chatId) : undefined));
 const messages = computed(() => (props.chatId ? chatSession(props.chatId).messages.value : []));
 const asks = computed(() => (session.value?.turnNeeds?.needs === "you" ? session.value.turnNeeds.asks ?? [] : []));
-const files = computed(() => highlightFiles(messages.value));
+// Files = things to look at (docs, pages, pictures); every edit counts in Changes.
+const allFiles = computed(() => highlightFiles(messages.value));
+const files = computed(() => allFiles.value.filter((f) => isReviewFile(f.path)));
 const links = computed(() => highlightLinks(messages.value));
 const children = computed(() => (props.chatId ? childrenOf(chats.sessions, props.chatId) : []));
 const pins = ref<Pin[]>([]);
@@ -69,7 +71,7 @@ function childLabel(status?: string): string {
   return "idle";
 }
 
-const empty = computed(() => !asks.value.length && !pins.value.length && !files.value.length && !links.value.length && !children.value.length);
+const empty = computed(() => !asks.value.length && !pins.value.length && !allFiles.value.length && !links.value.length && !children.value.length);
 </script>
 
 <template>
@@ -144,13 +146,13 @@ const empty = computed(() => !asks.value.length && !pins.value.length && !files.
       </template>
 
       <!-- Changes -->
-      <template v-if="files.length">
+      <template v-if="allFiles.length">
         <button class="hl-head" @click="toggleFold('changes')">
           <PhGitCommit :size="12" /> Changes
           <PhCaretDown :size="10" class="ml-auto transition-transform" :class="folded.has('changes') && '-rotate-90'" />
         </button>
         <button v-if="!folded.has('changes')" class="hl-row" @click="emit('openSurface', 'diff')">
-          <span class="flex-1 text-left text-foreground">{{ files.length }} {{ files.length === 1 ? "file" : "files" }} changed</span>
+          <span class="flex-1 text-left text-foreground">{{ allFiles.length }} {{ allFiles.length === 1 ? "file" : "files" }} changed</span>
           <span class="shrink-0 text-[11px] text-muted-foreground">Open diff</span>
         </button>
       </template>
