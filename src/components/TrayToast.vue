@@ -5,10 +5,13 @@
     <div
       v-for="t in toasts"
       :key="t.key"
-      class="tray-toast group relative flex cursor-pointer items-start gap-2.5 rounded-xl border border-border px-3 py-2.5 text-foreground"
+      class="tray-toast group relative flex cursor-pointer items-start gap-2.5 overflow-hidden rounded-xl border border-border px-3 py-2.5 text-foreground"
       :class="t.parent && 'tray-toast-sub'"
+      :style="{ '--tint': t.reason === 'done' || t.reason === 'snooze' ? 'var(--blue)' : 'var(--yellow)' }"
       @click="open(t)"
     >
+      <!-- Countdown: drains right-to-left behind the content; freezes on hover. -->
+      <span class="tray-toast-progress" :style="{ transform: `scaleX(${t.left / LIFETIME_MS})` }" />
       <PhRobot v-if="t.parent" :size="14" weight="fill" class="mt-[2px] shrink-0" :class="t.reason === 'done' ? 'text-[var(--accent)]' : 'text-[var(--yellow)]'" />
       <span v-else class="mt-[5px] size-2 shrink-0 rounded-full" :class="t.reason === 'done' || t.reason === 'snooze' ? 'bg-[var(--blue)]' : 'bg-[var(--yellow)]'" />
       <span class="flex min-w-0 flex-1 flex-col">
@@ -90,8 +93,7 @@ async function layout() {
 
 const offs: (() => void)[] = [];
 onMounted(() => {
-  document.documentElement.style.background = "transparent";
-  document.body.style.background = "transparent";
+  document.documentElement.classList.add("tray-toast-window");
   offs.push(Events.On("tray-toast", (ev) => add(ev.data as Toast)));
   offs.push(Events.On("tray-toast-clear", () => { toasts.value = []; paused = false; }));
   void TrayToastReady();
@@ -104,8 +106,18 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .tray-toast {
+  isolation: isolate; /* progress (z -1) paints over the card bg, under the content */
   background: color-mix(in srgb, var(--sidebar-bg) 96%, transparent);
   box-shadow: 0 4px 14px rgb(0 0 0 / 0.28);
+}
+.tray-toast-progress {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  transform-origin: left;
+  background: color-mix(in srgb, var(--tint) 16%, transparent);
+  transition: transform 250ms linear; /* matches the 250 ms tick */
 }
 .tray-toast-sub {
   border-left: 2px solid var(--accent);
@@ -125,5 +137,14 @@ onBeforeUnmount(() => {
 .tray-toast-x:hover {
   background: var(--hover);
   color: var(--foreground);
+}
+</style>
+
+<style>
+/* Only the cards are visible: theme / wallpaper / glow never paint the window. */
+html.tray-toast-window,
+html.tray-toast-window body,
+html.tray-toast-window #app {
+  background: transparent !important;
 }
 </style>
