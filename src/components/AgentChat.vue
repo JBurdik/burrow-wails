@@ -485,7 +485,7 @@
         :archived="!!activeSession?.archivedAt"
         :composer-text="inputText"
         @send="sendTurnAnswer"
-        @archive="chats.archive(chatId)"
+        @archive="archiveFromCard"
         @open-chat="openSubagentFromTranscript"
       />
       <div v-if="catchUp.open" class="catchup-card mb-2">
@@ -869,6 +869,7 @@ import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/co
 import PasteChip from "@/components/composer/PasteChip.vue";
 import SecretRequestCard from "@/components/SecretRequestCard.vue";
 import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
+import { useNotificationsStore } from "@/stores/notifications";
 import ThreadFindBar from "@/components/ThreadFindBar.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
@@ -2670,6 +2671,28 @@ async function sendInitialPrompt(prompt: string, images?: string[]) {
 function sendTurnAnswer(text: string) {
   inputText.value = "";
   void sendMessage(text);
+}
+
+// The Done card's Archive. A chat that is an open tab is archived by closing
+// the tab (Terminal's stopChatSession), like the Sidebar's ×; archiving only
+// the row left the tab — and the card — on screen. Elsewhere (tray panel, a
+// popped-out window, a sub-agent in the RP) there is no tab to close.
+function archiveFromCard() {
+  const wsId = props.workspaceId;
+  const tab = wsId != null ? termTabs.tabsByWs[wsId]?.find((t) => t.chatId === props.chatId) : undefined;
+  const title = activeSession.value?.title ?? "chat";
+  if (!tab || wsId == null) {
+    void chats.archive(props.chatId);
+    return;
+  }
+  const chatId = props.chatId;
+  termTabs.close(wsId, tab.id);
+  useNotificationsStore().push({
+    type: "info",
+    title: `Archived “${title}”`,
+    duration: 8000,
+    action: { label: "Undo", run: () => termTabs.openChat(wsId, chatId) },
+  });
 }
 
 async function sendMessage(forcedText?: string, extraImages?: string[]): Promise<{ id: number; text: string } | null> {
