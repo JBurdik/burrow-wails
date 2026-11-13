@@ -20,6 +20,7 @@ type deliverySource int
 const (
 	deliverNotice      deliverySource = iota // a sub-agent finished / blocked: the thread acts on it first
 	deliverLimitResume                       // "Continue where you left off." after a usage limit (chatlimit.go)
+	deliverNetResume                         // continue after a network drop / a restart cut a turn (chatnetresume.go)
 	deliverQueue                             // the user's queued follow-ups, head first
 	deliverSchedule                          // scheduled prompts / wake-ups, by due time
 )
@@ -75,6 +76,7 @@ func (a *App) deliverPending(now time.Time, send chatSender) {
 	var items []pendingDelivery
 	items = append(items, a.noticeDeliveries(now, send, nil)...)
 	items = append(items, a.limitResumeDeliveries(now, send, nil)...)
+	items = append(items, a.netResumeDeliveries(now, send, nil)...)
 	items = append(items, a.queueDeliveries(send, nil)...)
 	items = append(items, a.scheduleDeliveries(now, send, nil)...)
 	// A chat still on a usage limit gets nothing: each send would fail on it.

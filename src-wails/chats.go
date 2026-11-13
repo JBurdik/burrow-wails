@@ -104,6 +104,10 @@ type Chat struct {
 	// Read-only on the wire: the last turn's end_turn as JSON (chatturnneeds.go),
 	// "" = none. Cleared when the next turn starts.
 	TurnNeeds string `json:"turn_needs"`
+	// Read-only on the wire (chatnetresume.go): a turn cut by the network or a
+	// restart waits to carry on by itself; reason network | restart.
+	NetWaitAt     int64  `json:"net_wait_at"`
+	NetWaitReason string `json:"net_wait_reason"`
 }
 
 func chatsSchema() []string {
@@ -141,7 +145,10 @@ func chatsSchema() []string {
 			pr_number         INTEGER NOT NULL DEFAULT 0,
 			pr_url            TEXT    NOT NULL DEFAULT '',
 			pr_state          TEXT    NOT NULL DEFAULT '',
-			turn_needs        TEXT    NOT NULL DEFAULT ''
+			turn_needs        TEXT    NOT NULL DEFAULT '',
+			net_wait_at       INTEGER NOT NULL DEFAULT 0,
+			net_wait_reason   TEXT    NOT NULL DEFAULT '',
+			net_resume_tries  INTEGER NOT NULL DEFAULT 0
 		)`,
 		// A PR the user unlinked from a chat: auto-linking never re-adds it.
 		`CREATE TABLE IF NOT EXISTS chat_pr_dismissed (
@@ -180,7 +187,7 @@ const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
 	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind, snoozed_until,
 	limit_reset_at, limit_resume_at,
-	pr_number, pr_url, pr_state, turn_needs`
+	pr_number, pr_url, pr_state, turn_needs, net_wait_at, net_wait_reason`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
@@ -189,7 +196,7 @@ func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
 		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind, &c.SnoozedUntil,
 		&c.LimitResetAt, &c.LimitResumeAt,
-		&c.PrNumber, &c.PrURL, &c.PrState, &c.TurnNeeds)
+		&c.PrNumber, &c.PrURL, &c.PrState, &c.TurnNeeds, &c.NetWaitAt, &c.NetWaitReason)
 	return c, err
 }
 

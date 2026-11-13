@@ -81,6 +81,10 @@ export interface ClaudeSession {
   // The last turn's end_turn (src-wails/chatturnneeds.go): what it needs from
   // the user. Server-owned like collectedAt; cleared when the next turn starts.
   turnNeeds?: TurnNeeds;
+  // A turn cut by the network or a restart, carrying on by itself once back
+  // (src-wails/chatnetresume.go). Server-owned like collectedAt.
+  netWaitAt?: number;
+  netWaitReason?: "network" | "restart";
 }
 
 /** t3code's own default for "Days of inactivity before auto-settle"
@@ -157,6 +161,8 @@ interface ChatRow {
   pr_url?: string;
   pr_state?: string;
   turn_needs?: string;
+  net_wait_at?: number;
+  net_wait_reason?: string;
 }
 
 /**
@@ -201,6 +207,8 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     prUrl: r.pr_url || undefined,
     prState: (r.pr_state || undefined) as ClaudeSession["prState"],
     turnNeeds: parseTurnNeeds(r.turn_needs),
+    netWaitAt: r.net_wait_at || undefined,
+    netWaitReason: (r.net_wait_reason || undefined) as ClaudeSession["netWaitReason"],
     busy: false,
   };
 }

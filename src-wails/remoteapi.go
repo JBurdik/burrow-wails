@@ -422,6 +422,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_unlink_pr":        {Method: "ChatUnlinkPr", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_pr_refresh":       {Method: "ChatPrRefresh", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"chat_loose_ends":       {Method: "ChatLooseEnds", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_net_dismiss":      {Method: "ChatNetDismiss", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_quiet_archivable": {Method: "ChatQuietArchivable", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"chat_pins_list":        {Method: "ChatPinsList", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"chat_pin_remove":       {Method: "ChatPinRemove", Args: []string{"id"}, Scope: scopeOrchOperate},

@@ -223,6 +223,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE chats ADD COLUMN turn_needs TEXT NOT NULL DEFAULT ''`,
 	}
 	alters = append(alters, chatSchedulesAlters()...)
+	alters = append(alters, chatNetResumeAlters()...)
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
 			return fmt.Errorf("%s: %w", s, err)

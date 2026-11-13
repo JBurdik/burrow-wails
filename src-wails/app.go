@@ -256,6 +256,7 @@ func (a *App) startup(ctx context.Context) {
 	// otherwise come back as ordinary chats.
 	a.archiveLegacyManagerChats()
 	a.resetInterruptedRuns()
+	a.markRestartCutTurns()
 	// DeleteChat used to leave the raw stream behind; drop what it orphaned.
 	a.pruneOrphanChatStreams()
 	// Per-chat launch settings move from config.json onto the rows, once.

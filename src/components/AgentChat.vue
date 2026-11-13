@@ -431,6 +431,15 @@
         <button v-if="!usageLimit.armed" class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_arm')">Resume automatically</button>
         <button class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_dismiss')">{{ usageLimit.armed ? 'Cancel' : 'Dismiss' }}</button>
       </div>
+      <!-- Waiting for connection (src-wails/chatnetresume.go): the network or a
+           restart cut the last turn; it carries on by itself once back. -->
+      <div v-if="activeSession?.netWaitAt && !busy" class="mx-4 my-2 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
+        <PhWifiSlash :size="13" weight="bold" class="flex-shrink-0" />
+        <span class="flex-1 truncate">
+          {{ activeSession.netWaitReason === 'restart' ? 'Burrow restarted mid-turn' : 'Waiting for connection' }} — carries on by itself
+        </span>
+        <button class="flex-shrink-0 font-medium text-foreground hover:underline" @click="netDismiss">Don't</button>
+      </div>
       </div>
     </div>
     <!-- Minimap (after Ghostex): one dash per prompt you sent, longer for
@@ -841,7 +850,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode, PhWifiSlash } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { compact as phone } from "@/lib/viewport";
@@ -1213,6 +1222,10 @@ const usageLimit = computed(() => {
   const label = d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
   return { label, armed: !!activeSession.value?.limitResumeAt };
 });
+async function netDismiss() {
+  await invoke("chat_net_dismiss", { chatId: props.chatId }).catch((e) => S.notice(`Could not cancel: ${e}`));
+  await chats.reload();
+}
 async function limitAction(cmd: "chat_limit_arm" | "chat_limit_dismiss") {
   try {
     await invoke(cmd, { chatId: props.chatId });

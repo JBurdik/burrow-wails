@@ -286,6 +286,14 @@ settled (`deliverLimitResume`, after notices, before the queue), claiming the ro
 `limit_resumed_key` = chat:failedAt:resetAt so an episode resumes once; a still-limited chat gets **no**
 deliveries at all (each would fail on the limit).
 
+**Waiting for connection** (`chatnetresume.go`, threadbear): a `turn.failed` whose message is the network's fault
+(`isNetworkFailure`: connection error/reset, ENOTFOUND, fetch failed, stream disconnected, …; never a usage limit), and
+at startup every chat phase still `running` (`markRestartCutTurns`: interrupt + mark, the process died with the core),
+set `chats.net_wait_at` / `net_wait_reason` network|restart (read-only on the wire). The delivery pass
+(`deliverNetResume`, after the limit resume) sends one "Continue where you left off…" once the chat is settled **and**
+`netReachable` (cached TCP probe), counting `net_resume_tries` (5 → give up); any running turn clears it; AgentChat's
+banner offers Don't (`chat_net_dismiss`).
+
 **Self-management verbs** (`internal/control/verbs_self.go`, local-only, default to the caller's chat):
 `schedule` / `schedule_list` / `schedule_cancel` (`chatschedule.go`) — SQLite `chat_schedules`, a 15 s sweep
 delivers due items via `ChatSend` **only once the chat has settled** (`chatSettled`: phase not in flight, no

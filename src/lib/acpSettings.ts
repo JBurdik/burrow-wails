@@ -4,6 +4,7 @@
 
 import { getConfig, setConfig } from "@/lib/config";
 import type { AcpConfigOption, AcpModes } from "@/lib/chatTypes";
+import type { LaunchSettingsPatch } from "@/lib/chatRuntime";
 
 export type AcpSetting = "mode" | "model" | "effort";
 export type AcpChatSettings = Partial<Record<AcpSetting, string>>;
@@ -55,4 +56,30 @@ export function setAcpCapabilities(chatId: number, capabilities: AcpCapabilities
   const all = { ...getConfig<Record<string, AcpCapabilities>>(CAPABILITIES_KEY, {}) };
   all[String(chatId)] = capabilities;
   setConfig(CAPABILITIES_KEY, all);
+}
+
+/**
+ * What a fresh Codex / ACP chat's row must hold before its first send. Go
+ * (ensureRPC) starts the process from the ROW, while the welcome composer keeps
+ * its picks in chatAcpLast — an empty row ran the first turn on the CLI's
+ * default model. Null when there is nothing to seed (resumed chat, row full).
+ * `last` first for the model: welcome writes it on every pick, while its
+ * selectedModel can still hold a Claude id before the Codex catalog lands.
+ * Mode only for Codex: its ids are fixed, and a mode that fails to apply
+ * refuses the start (fails closed) — a stale generic-ACP mode would brick it.
+ */
+export function rpcLaunchSeed(
+  row: { model?: string; effort?: string; permissionMode?: string; claudeSessionId?: string },
+  agentId: string,
+  isCodex: boolean,
+  defaultModel?: string,
+): LaunchSettingsPatch | null {
+  if (row.claudeSessionId) return null;
+  const last = (f: AcpSetting) => getLastAcpSetting(agentId, f);
+  const patch: LaunchSettingsPatch = { row_only: true };
+  const model = last("model") || defaultModel;
+  if (!row.model && model) patch.model = model;
+  if (!row.effort && last("effort")) patch.effort = last("effort");
+  if (!row.permissionMode && isCodex && last("mode")) patch.permission_mode = last("mode");
+  return Object.keys(patch).length > 1 ? patch : null;
 }
