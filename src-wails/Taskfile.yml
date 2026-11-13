@@ -66,6 +66,8 @@ tasks:
       # The daemon next to the binary, where the core looks first: the core is
       # started by launchd with cwd /, where the `go run` fallback finds no go.mod.
       - PKG_CONFIG_PATH="{{.VT_PC}}" go build -tags "{{.VT_LIB}}" -o "{{.BIN}}/Burrow.dev.app/Contents/MacOS/burrow-daemon" ./cmd/burrow-daemon
+      # burrow-mcp too, or dev chats get no burrow MCP tools (spawn, end_turn, …).
+      - go build -o "{{.BIN}}/Burrow.dev.app/Contents/MacOS/burrow-mcp" ./cmd/burrow-mcp
       - codesign --force --sign - "{{.BIN}}/Burrow.dev.app"
       - '"{{.BIN}}/Burrow.dev.app/Contents/MacOS/Burrow"'
 
