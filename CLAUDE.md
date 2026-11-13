@@ -418,7 +418,10 @@ has focus. There is no chat state machine any more. **Receipts are shared across
 phone can't pre-read a turn; MAX, never backwards), `seen-changed` folds it into chatAttention, Terminal.vue and
 threadFeed everywhere; `seen_list` merges on boot; a snooze wake deletes the row. A permission request fires a toast + (unfocused) a native notification
 via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
-list, distinguished only by icon.
+list, distinguished only by icon. **States lead, projects fold:** Inbox (needs you + unread, project icon per row) and
+**Working** (was the docked shelf) sit on top as pseudo-groups; project groups start **folded** with a row count
+(`burrow.sidebar.expandedRepos`; the group holding the thread on screen opens by itself); rows are one line (recap in the
+tooltip, sub-agents as a clickable count). Snoozed / Settled stay docked at the foot.
 
 ### Control API + `burrow` CLI (`src-wails/internal/control`, `src-wails/bin/burrow`)
 

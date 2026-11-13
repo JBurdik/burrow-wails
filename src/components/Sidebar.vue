@@ -52,9 +52,19 @@
       <!-- Live feed, grouped by project (Ghostex-style): a header per repo with
            its uncommitted diffstat, one compact line per thread, a thread's
            sub-agents indented under it. Branch/model/PR live in the hover card. -->
-      <div v-for="group in inboxGroups" :key="group.repoId" class="px-2 pt-1.5">
+      <div
+        v-for="group in inboxGroups"
+        :key="group.repoId"
+        class="px-2 pt-1.5"
+        @pointerenter="group.repoId === WORKING && onShelfHover($event, true)"
+        @pointerleave="group.repoId === WORKING && onShelfHover($event, false)"
+      >
         <div v-if="group.repoId < 0" class="flex items-center gap-1.5 px-1.5 pb-0.5 pt-1 text-[11.5px] font-medium text-muted-foreground">
           <template v-if="group.repoId === INBOX"><PhTray :size="12" class="shrink-0" />Inbox<span class="opacity-60">{{ group.rows.length }}</span></template>
+          <template v-else-if="group.repoId === WORKING">
+            <span class="sb-spark text-[11px]">{{ spinnerFrame }}</span>Working<span class="opacity-60">{{ shelfSections.find((x) => x.key === 'working')?.count }}</span>
+            <PhCaretRight :size="9" weight="bold" class="cursor-pointer transition-transform" :class="workingExpanded && 'rotate-90'" @click="toggleShelf('working')" />
+          </template>
           <template v-else>Pinned</template>
         </div>
         <div
@@ -69,11 +79,12 @@
           @dragend="onRepoDragEnd"
           @contextmenu.prevent.stop="repoById(group.repoId) && openRowMenu(repoById(group.repoId)!, null, $event)">
           <button class="flex min-w-0 flex-1 items-center gap-2 text-left" @click="toggleGroup(group.repoId)">
-            <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground transition-transform" :class="collapsedGroups.has(group.repoId) && '-rotate-90'" />
+            <PhCaretDown :size="11" weight="bold" class="shrink-0 text-muted-foreground transition-transform" :class="isCollapsed(group) && '-rotate-90'" />
             <img v-if="store.icons[group.repoId]" :src="store.icons[group.repoId]" class="h-[18px] w-[18px] shrink-0 rounded-[5px] object-cover" />
             <span v-else class="sb-repo-tile" :style="{ background: repoColor(group.repoId) }">{{ (repoById(group.repoId)?.name ?? '?').slice(0, 1).toUpperCase() }}</span>
             <span class="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{{ repoById(group.repoId)?.name ?? '…' }}</span>
-            <span v-if="collapsedGroups.has(group.repoId) && groupDot(group.rows.map((r) => r.tab.status))" class="size-1.5 shrink-0 rounded-full" :class="GROUP_DOT[groupDot(group.rows.map((r) => r.tab.status))!]" />
+            <span v-if="isCollapsed(group) && group.rows.length" class="shrink-0 text-[11px] tabular-nums text-muted-foreground">{{ group.rows.length }}</span>
+            <span v-if="isCollapsed(group) && groupDot(group.rows.map((r) => r.tab.status))" class="size-1.5 shrink-0 rounded-full" :class="GROUP_DOT[groupDot(group.rows.map((r) => r.tab.status))!]" />
             <PhPushPin v-if="isPinned(group.repoId)" :size="11" weight="fill" class="shrink-0 text-muted-foreground" title="Pinned project" />
           </button>
           <span v-if="repoDiff[group.repoId] && (repoDiff[group.repoId]!.added || repoDiff[group.repoId]!.removed)" class="shrink-0 text-[11.5px] tabular-nums group-hover/hdr:hidden" :title="'Uncommitted changes'">
@@ -82,7 +93,7 @@
           </span>
           <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!, false)"><PhPlus :size="13" /></button>
         </div>
-        <div v-if="!collapsedGroups.has(group.repoId)">
+        <div v-if="!isCollapsed(group)">
           <div v-for="(row, i) in group.rows" :key="rowKey(row)">
             <div v-if="group.needs && i === 0" class="sb-inbox-label">Needs you</div>
             <div v-else-if="group.needs && i === group.needs && group.repoId === INBOX" class="sb-inbox-label !text-[var(--blue)]">Unread</div>
@@ -105,6 +116,7 @@
               @pointermove="moveLongPress"
               @pointerup="cancelLongPress"
               @pointercancel="cancelLongPress"
+              :title="chatRecapOf(row.tab.chatId) || undefined"
               @mouseenter="scheduleHoverCard(hoverInfoFromRow(row), $event)"
               @mouseleave="cancelHoverCard"
             >
@@ -132,7 +144,7 @@
               />
               <span v-else class="min-w-0 flex-1 truncate text-[13.5px]" :class="isActiveRow(row) ? 'font-medium text-foreground' : 'text-foreground/90'" @dblclick.stop="startTabRename(row.ws.id, row.tab)">{{ row.tab.title }}</span>
               <span v-if="group.repoId === INBOX" class="max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground group-hover:hidden">{{ repoById(row.ws.parent_id ?? row.ws.id)?.name }}</span>
-              <span v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="flex shrink-0 items-center gap-0.5 text-[11.5px] text-secondary-foreground group-hover:hidden"><PhUsersThree :size="12" />{{ childrenOfChat(row.tab.chatId).length }}</span>
+              <span v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="flex shrink-0 cursor-pointer items-center gap-0.5 rounded px-0.5 text-[11.5px] text-secondary-foreground hover:bg-hover hover:text-foreground" :title="`${childrenOfChat(row.tab.chatId).length} sub-agents — open in the Right Panel`" @click.stop="openSubagent(childrenOfChat(row.tab.chatId)[0].id, row)"><PhUsersThree :size="12" />{{ childrenOfChat(row.tab.chatId).length }}</span>
               <span class="flex shrink-0 items-center gap-1 text-[11.5px] tabular-nums group-hover:hidden" :class="statusClass(row.tab.status)">
                 <PhWarningCircle v-if="attentionState(row) === 'needs-input'" :size="11" weight="fill" class="text-[var(--yellow)]" />
                 <span v-else-if="attentionState(row) === 'done-unread'" class="h-[7px] w-[7px] rounded-full bg-[var(--blue)]" title="Unread completion" />
@@ -146,21 +158,8 @@
               <!-- Touch has no hover and no right click: this opens the same menu. -->
               <button class="sb-row-more sb-row-act" title="More" aria-label="Thread actions" @click.stop="openRowMenu(row.ws, row.tab, $event)"><PhDotsThree :size="16" weight="bold" /></button>
             </div>
-            <div v-if="chatRecapOf(row.tab.chatId)" class="ml-[22px] truncate px-2.5 pb-1 text-[11px] leading-tight text-muted-foreground" :title="chatRecapOf(row.tab.chatId)">{{ chatRecapOf(row.tab.chatId) }}</div>
-            <div v-if="row.tab.chatId != null && childrenOfChat(row.tab.chatId).length" class="ml-[22px]">
-              <button
-                v-for="c in childrenOfChat(row.tab.chatId)"
-                :key="c.id"
-                class="sb-row flex w-full items-center gap-2 rounded-lg px-2.5 py-[6px] text-left"
-                :title="c.title"
-                @click="openSubagent(c.id, row)"
-              >
-                <PhAsterisk :size="13" weight="bold" class="shrink-0" :class="c.status === 'idle' || !c.status ? 'text-muted-foreground' : 'text-[#E0876A]'" />
-                <span class="min-w-0 flex-1 truncate text-[13px] text-foreground/85">{{ c.title }}</span>
-                <span v-if="c.status && c.status !== 'idle'" class="status-dot" :class="`status-${c.status}`" />
-                <span v-else class="text-[11px] text-muted-foreground">{{ ago(c.lastActivityAt ?? 0) }}</span>
-              </button>
-            </div>
+            <!-- Recap and sub-agents live in the hover card and the Right Panel's
+                 Agents; the row keeps one line (the sub-agent count chip stays). -->
           </div>
         </div>
       </div>
@@ -212,12 +211,10 @@
 
     <!-- Docked shelf (t3code): Working, then Snoozed and Settled. Working is
          open by default; collapsed it still shows the thread on screen. -->
-    <div v-if="shelfSections.length" class="flex max-h-[45%] shrink-0 flex-col overflow-y-auto border-t border-border px-2 pb-1.5 pt-0.5" @scroll="cancelHoverCard">
+    <div v-if="dockedSections.length" class="flex max-h-[45%] shrink-0 flex-col overflow-y-auto border-t border-border px-2 pb-1.5 pt-0.5" @scroll="cancelHoverCard">
       <div
-        v-for="sec in shelfSections"
+        v-for="sec in dockedSections"
         :key="sec.key"
-        @pointerenter="sec.key === 'working' && onShelfHover($event, true)"
-        @pointerleave="sec.key === 'working' && onShelfHover($event, false)"
       >
         <button class="section-header !mx-0 !w-full" @click="toggleShelf(sec.key)">
           {{ sec.label }}
@@ -238,7 +235,7 @@
             v-for="row in sec.rows"
             :key="rowKey(row)"
             class="sb-row group cursor-pointer rounded-lg px-2.5 py-[5px]"
-            :class="[isActiveRow(row) && 'sb-row-active', sec.key !== 'working' && 'text-muted-foreground opacity-60 transition-opacity hover:opacity-100']"
+            :class="[isActiveRow(row) && 'sb-row-active', 'text-muted-foreground opacity-60 transition-opacity hover:opacity-100']"
             @click="onRowClick(row)"
             @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
             @pointerdown="startLongPress(row, $event)"
@@ -250,28 +247,22 @@
           >
             <div class="flex items-center gap-1.5">
               <component :is="row.tab.agentIcon ? agentIconComp(row.tab.agentIcon) : row.tab.isChat ? PhChatCenteredText : PhTerminal" :size="10" class="shrink-0" />
-              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]" :class="sec.key === 'working' && 'text-foreground/90'">{{ row.tab.title }}</span>
+              <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px]">{{ row.tab.title }}</span>
               <component :is="prGlyphOf(row.tab.chatId)!.icon" v-if="prGlyphOf(row.tab.chatId)" :size="10" class="shrink-0" :class="prGlyphOf(row.tab.chatId)!.cls" :title="prGlyphOf(row.tab.chatId)!.title" />
-              <template v-if="sec.key === 'working'">
-                <span v-if="row.tab.status === 'running'" class="sb-spark shrink-0 text-[11px]">{{ spinnerFrame }}</span>
-                <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground">{{ ago(shelf.startedAt.get(rowKey(row)) ?? row.ts) }}</span>
-              </template>
-              <template v-else>
-                <span v-if="snoozedUntilOf(row.tab.chatId)" class="flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums" :title="`Snoozed until ${new Date(snoozedUntilOf(row.tab.chatId)).toLocaleString()}`">
-                  <PhAlarm :size="10" />{{ formatWakeTime(snoozedUntilOf(row.tab.chatId), Date.now()) }}
-                </span>
-                <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
-                <span class="grid shrink-0 justify-items-end">
-                  <span v-if="sec.key === 'settled'" class="sb-ago [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
-                  <button
-                    class="sb-unsettle invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
-                    :title="sec.key === 'snoozed' ? 'Unsnooze' : 'Move back to active'"
-                    @click.stop="sec.key === 'snoozed' ? chats.snooze(row.tab.chatId!, 0) : toggleSettled(row.tab, row.ws.id)"
-                  >
-                    <PhArrowCounterClockwise :size="11" weight="bold" />
-                  </button>
-                </span>
-              </template>
+              <span v-if="snoozedUntilOf(row.tab.chatId)" class="flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums" :title="`Snoozed until ${new Date(snoozedUntilOf(row.tab.chatId)).toLocaleString()}`">
+                <PhAlarm :size="10" />{{ formatWakeTime(snoozedUntilOf(row.tab.chatId), Date.now()) }}
+              </span>
+              <!-- Same visibility-in-one-grid-cell trick as the live rows: no hover jump. -->
+              <span class="grid shrink-0 justify-items-end">
+                <span v-if="sec.key === 'settled'" class="sb-ago [grid-area:1/1] text-[10px] tabular-nums group-hover:invisible">{{ ago(row.ts) }}</span>
+                <button
+                  class="sb-unsettle invisible flex items-center self-center rounded p-0.5 text-muted-foreground transition-colors [grid-area:1/1] hover:bg-hover hover:text-foreground group-hover:visible"
+                  :title="sec.key === 'snoozed' ? 'Unsnooze' : 'Move back to active'"
+                  @click.stop="sec.key === 'snoozed' ? chats.snooze(row.tab.chatId!, 0) : toggleSettled(row.tab, row.ws.id)"
+                >
+                  <PhArrowCounterClockwise :size="11" weight="bold" />
+                </button>
+              </span>
             </div>
             <div class="mt-[2px] flex items-center gap-1.5 pl-[15px]">
               <img v-if="repoIcon(row.ws)" :src="repoIcon(row.ws)!" class="h-2.5 w-2.5 shrink-0 rounded-[2px] object-cover" />
@@ -684,7 +675,6 @@ import {
   PhFolders,
   PhCrown,
   PhUsersThree,
-  PhAsterisk,
   PhMoon,
   PhDotsThree,
   PhAlarm,
@@ -932,6 +922,8 @@ const shelfSections = computed(() => {
   ].filter((sec) => sec.count);
 });
 
+const dockedSections = computed(() => shelfSections.value.filter((sec) => sec.key !== "working"));
+
 // ── project groups (Ghostex-style feed) ─────────────────────────────────────
 const liveGroups = computed(() =>
   groupByRepo(
@@ -992,11 +984,19 @@ const INBOX = -2;
 const inboxSticky = ref<string | null>(null);
 const inboxUnread = (r: ActivityRow) => attentionState(r) === "done-unread" || (inboxSticky.value === rowKey(r) && isActiveRow(r));
 const inboxGroups = computed(() => {
-  if (!ui.sidebarInbox) return topGroups.value.map((g) => ({ ...g, ...needsYouFirst(g.rows, needsYou) }));
+  if (!ui.sidebarInbox) return withWorking(topGroups.value.map((g) => ({ ...g, ...needsYouFirst(g.rows, needsYou) })));
   const { inbox, needs, groups } = liftInbox(topGroups.value, needsYou, inboxUnread, (id) => id === PINNED);
   const rest = groups.map((g) => ({ ...g, needs: 0 }));
-  return inbox.length ? [{ repoId: INBOX, rows: inbox, needs }, ...rest] : rest;
+  return withWorking(inbox.length ? [{ repoId: INBOX, rows: inbox, needs }, ...rest] : rest);
 });
+// Working leads too, under the Inbox (it used to be a shelf docked at the foot).
+const WORKING = -3;
+function withWorking<G extends { repoId: number; rows: ActivityRow[]; needs: number }>(groups: G[]): G[] {
+  const working = shelfSections.value.find((sec) => sec.key === "working");
+  if (!working?.count) return groups;
+  const at = groups[0]?.repoId === INBOX ? 1 : 0;
+  return [...groups.slice(0, at), { repoId: WORKING, rows: working.rows, needs: 0 } as G, ...groups.slice(at)];
+}
 
 // ⌥⌘↓ (keymap "nextInbox"): the next thread waiting on you, across projects.
 function goNextInbox(): boolean {
@@ -1007,15 +1007,21 @@ function goNextInbox(): boolean {
   return true;
 }
 
-const COLLAPSED_KEY = "burrow.sidebar.collapsedRepos";
-function loadCollapsed(): Set<number> {
-  try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]")); } catch { return new Set(); }
+// Projects start folded (states lead on top: Inbox, Working): a project opens
+// when you open it, and the one holding the thread on screen opens by itself.
+const EXPANDED_KEY = "burrow.sidebar.expandedRepos";
+function loadExpanded(): Set<number> {
+  try { return new Set(JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? "[]")); } catch { return new Set(); }
 }
-const collapsedGroups = reactive(loadCollapsed());
+const expandedGroups = reactive(loadExpanded());
+function isCollapsed(group: { repoId: number; rows: ActivityRow[] }): boolean {
+  if (group.repoId < 0) return false; // Inbox / Working / Pinned never fold
+  return !expandedGroups.has(group.repoId) && !group.rows.some(isActiveRow);
+}
 function toggleGroup(repoId: number) {
-  if (collapsedGroups.has(repoId)) collapsedGroups.delete(repoId);
-  else collapsedGroups.add(repoId);
-  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedGroups])); } catch { /* private mode */ }
+  if (expandedGroups.has(repoId)) expandedGroups.delete(repoId);
+  else expandedGroups.add(repoId);
+  try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expandedGroups])); } catch { /* private mode */ }
 }
 
 const GROUP_DOT = { attention: "bg-[var(--yellow)]", failed: "bg-[var(--red)]", unread: "bg-[var(--blue)]", working: "bg-accent" } as const;
@@ -1610,7 +1616,7 @@ const JUMP_HINT_DELAY_MS = 450;
 const jumpHints = ref(false);
 let jumpTimer: number | undefined;
 const jumpRows = computed(() =>
-  inboxGroups.value.filter((g) => !collapsedGroups.has(g.repoId)).flatMap((g) => g.rows).slice(0, 9),
+  inboxGroups.value.filter((g) => !isCollapsed(g)).flatMap((g) => g.rows).slice(0, 9),
 );
 function jumpIndex(row: ActivityRow): number {
   return jumpRows.value.indexOf(row);

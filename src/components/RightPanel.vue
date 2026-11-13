@@ -984,34 +984,6 @@ function openBrowserUrl(url: string, workspaceId: number) {
   ensureBrowserPane(workspaceId);
   browserNav[workspaceId] = { url, n: (browserNav[workspaceId]?.n ?? 0) + 1 };
 }
-// New pins → a dot on the Highlights tab (or on "+" when it isn't open), until
-// Highlights is on screen. Per thread: the count it has, the count seen.
-const pinCount = ref(0);
-const PINS_SEEN_KEY = "burrow.highlights.seenPins";
-const seenPins = reactive<Record<number, number>>(JSON.parse(localStorage.getItem(PINS_SEEN_KEY) || "{}"));
-async function loadPinCount() {
-  const id = activeChatId.value;
-  if (!id) { pinCount.value = 0; return; }
-  const list = await invoke<unknown[]>("chat_pins_list", { chatId: id }).catch(() => []);
-  if (id === activeChatId.value) pinCount.value = list?.length ?? 0;
-}
-watch(activeChatId, () => void loadPinCount(), { immediate: true });
-let offPins: (() => void) | undefined;
-void listen<{ chat_id: number }>("chat-pins-changed", (e) => { if (e.payload?.chat_id === activeChatId.value) void loadPinCount(); }).then((u) => (offPins = u));
-onBeforeUnmount(() => offPins?.());
-const highlightsInTabs = computed(() => layout.value.panes.some((p) => p.tabs.includes("highlights")));
-const highlightsOnScreen = computed(() => props.open && isShown(layout.value, "highlights"));
-watch([pinCount, highlightsOnScreen, activeChatId], () => {
-  const id = activeChatId.value;
-  if (!id) return;
-  // Seen once Highlights shows; an unpin lowers the mark so the next pin shows again.
-  if (highlightsOnScreen.value || pinCount.value < (seenPins[id] ?? 0)) {
-    seenPins[id] = pinCount.value;
-    localStorage.setItem(PINS_SEEN_KEY, JSON.stringify(seenPins));
-  }
-});
-const newPins = computed(() => !!activeChatId.value && pinCount.value > (seenPins[activeChatId.value] ?? 0) && !highlightsOnScreen.value);
-
 /** A Highlights link: a local dev server previews in the Browser surface,
  *  anything else opens in the system browser. */
 function openHighlightUrl(url: string) {
@@ -1524,6 +1496,35 @@ async function typeIntoTerminal(text: string): Promise<boolean> {
   });
   return true;
 }
+
+// (Here, after layout / activeChatId exist: the watch reads both at once.)
+// New pins → a dot on the Highlights tab (or on "+" when it isn't open), until
+// Highlights is on screen. Per thread: the count it has, the count seen.
+const pinCount = ref(0);
+const PINS_SEEN_KEY = "burrow.highlights.seenPins";
+const seenPins = reactive<Record<number, number>>(JSON.parse(localStorage.getItem(PINS_SEEN_KEY) || "{}"));
+async function loadPinCount() {
+  const id = activeChatId.value;
+  if (!id) { pinCount.value = 0; return; }
+  const list = await invoke<unknown[]>("chat_pins_list", { chatId: id }).catch(() => []);
+  if (id === activeChatId.value) pinCount.value = list?.length ?? 0;
+}
+watch(activeChatId, () => void loadPinCount(), { immediate: true });
+let offPins: (() => void) | undefined;
+void listen<{ chat_id: number }>("chat-pins-changed", (e) => { if (e.payload?.chat_id === activeChatId.value) void loadPinCount(); }).then((u) => (offPins = u));
+onBeforeUnmount(() => offPins?.());
+const highlightsInTabs = computed(() => layout.value.panes.some((p) => p.tabs.includes("highlights")));
+const highlightsOnScreen = computed(() => props.open && isShown(layout.value, "highlights"));
+watch([pinCount, highlightsOnScreen, activeChatId], () => {
+  const id = activeChatId.value;
+  if (!id) return;
+  // Seen once Highlights shows; an unpin lowers the mark so the next pin shows again.
+  if (highlightsOnScreen.value || pinCount.value < (seenPins[id] ?? 0)) {
+    seenPins[id] = pinCount.value;
+    localStorage.setItem(PINS_SEEN_KEY, JSON.stringify(seenPins));
+  }
+});
+const newPins = computed(() => !!activeChatId.value && pinCount.value > (seenPins[activeChatId.value] ?? 0) && !highlightsOnScreen.value);
 
 defineExpose({ openGitTab, openSubagent, openPanelSurface, openBrowserUrl, openPullRequest, openDoc, openFile, toggleTerminal });
 
