@@ -590,27 +590,26 @@
         </div>
         <!-- AskUserQuestion: one question at a time, stepped, above the textarea -->
         <div v-if="pendingQuestion && activeQuestion" class="question-panel perm-slide-in border-b border-border bg-[color-mix(in_srgb,var(--chat-info)_4%,transparent)] px-3.5 py-3">
-          <div class="mb-2 flex items-center gap-2">
-            <span v-if="activeQuestion.header" class="rounded bg-[color-mix(in_srgb,var(--chat-info)_22%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.04em] text-[var(--chat-info)]">{{ activeQuestion.header }}</span>
-            <span v-if="questionSpecs.length > 1" class="ml-auto flex h-5 flex-shrink-0 items-center rounded-md bg-hover px-1.5 text-[10px] font-medium tabular-nums text-secondary-foreground">{{ activeQuestionIndex + 1 }}/{{ questionSpecs.length }}</span>
+          <div class="cq-title mb-1">
+            <span v-if="activeQuestion.header" class="cq-header">{{ activeQuestion.header }}</span>
+            <span class="min-w-0 flex-1">{{ activeQuestion.question }}</span>
+            <span v-if="questionSpecs.length > 1" class="flex h-5 flex-shrink-0 items-center rounded-md bg-hover px-1.5 text-[10px] font-medium tabular-nums text-secondary-foreground">{{ activeQuestionIndex + 1 }}/{{ questionSpecs.length }}</span>
           </div>
-          <p class="mb-1 text-[13px] font-semibold text-foreground">{{ activeQuestion.question }}</p>
           <p v-if="activeQuestion.multiSelect" class="mb-1.5 text-[10.5px] text-secondary-foreground/70">Select one or more options.</p>
           <div class="mt-1.5 flex flex-col gap-1.5">
+            <!-- Same option cards as the in-transcript ```questions form (chat-blocks.css) -->
             <button
               v-for="(opt, oi) in activeQuestion.options"
               :key="oi"
               type="button"
-              class="question-opt flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-[7px] text-left transition-colors"
-              :class="isPicked(activeQuestion.question, opt.label)
-                ? 'border-[var(--chat-info)] bg-[color-mix(in_srgb,var(--chat-info)_16%,var(--bg-base))]'
-                : 'border-border bg-base hover:border-[color-mix(in_srgb,var(--chat-info)_55%,transparent)]'"
+              class="cq-opt question-opt !flex-row items-center gap-2"
+              :aria-pressed="isPicked(activeQuestion.question, opt.label)"
               :disabled="nativeControlResponsePending"
               @click="selectQuestionOption(opt.label)"
             >
               <span class="flex min-w-0 flex-1 flex-col gap-px">
-                <span class="text-xs font-semibold text-foreground">{{ opt.label }}</span>
-                <span v-if="opt.description" class="text-[10px] text-secondary-foreground">{{ opt.description }}</span>
+                <span class="cq-label">{{ optionLabel(opt.label).text }}<span v-if="optionLabel(opt.label).recommended" class="cq-rec">Recommended</span></span>
+                <span v-if="opt.description" class="cq-desc">{{ opt.description }}</span>
               </span>
               <PhCheck v-if="isPicked(activeQuestion.question, opt.label)" :size="13" weight="bold" class="flex-shrink-0 text-[var(--chat-info)]" />
               <kbd v-else-if="oi < 9" class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-border text-[10px] text-secondary-foreground/60">{{ oi + 1 }}</kbd>
@@ -2806,6 +2805,12 @@ function toggleOption(question: string, label: string, multi: boolean) {
   } else {
     questionAnswers.value[question] = cur.includes(label) ? [] : [label];
   }
+}
+// Claude marks the suggested AskUserQuestion option with a "(Recommended)" label
+// suffix; show it as the form's badge. The answer still sends the raw label.
+function optionLabel(label: string) {
+  const text = label.replace(/\s*\(recommended\)\s*$/i, "");
+  return { text, recommended: text !== label };
 }
 function isPicked(question: string, label: string) {
   return (questionAnswers.value[question] ?? []).includes(label);

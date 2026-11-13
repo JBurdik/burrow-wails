@@ -39,24 +39,23 @@ function submit() {
 <template>
   <div class="question-panel perm-slide-in border-b border-border bg-[color-mix(in_srgb,var(--chat-info)_4%,transparent)] px-3.5 py-3">
     <div v-for="question in questions" :key="question.id" class="mb-4 last:mb-0">
-      <span v-if="question.header" class="rounded bg-[color-mix(in_srgb,var(--chat-info)_22%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.04em] text-[var(--chat-info)]">{{ question.header }}</span>
-      <p class="mb-1 mt-2 text-[13px] font-semibold text-foreground">{{ question.question }}</p>
+      <div class="cq-title mb-1">
+        <span v-if="question.header" class="cq-header">{{ question.header }}</span>
+        <span>{{ question.question }}</span>
+      </div>
       <div class="mt-1.5 flex flex-col gap-1.5">
+        <!-- Same option cards as the in-transcript ```questions form (chat-blocks.css) -->
         <button
           v-for="option in question.options"
           :key="option.label"
           type="button"
-          class="question-opt flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-[7px] text-left transition-colors"
-          :class="choices[question.id] === option.label
-            ? 'border-[var(--chat-info)] bg-[color-mix(in_srgb,var(--chat-info)_16%,var(--bg-base))]'
-            : 'border-border bg-base hover:border-[color-mix(in_srgb,var(--chat-info)_55%,transparent)]'"
+          class="cq-opt question-opt"
+          :aria-pressed="choices[question.id] === option.label"
           :disabled="submitting"
           @click="choose(question.id, option.label)"
         >
-          <span class="flex min-w-0 flex-1 flex-col gap-px">
-            <span class="text-xs font-semibold text-foreground">{{ option.label }}</span>
-            <span v-if="option.description" class="text-[10px] text-secondary-foreground">{{ option.description }}</span>
-          </span>
+          <span class="cq-label">{{ option.label }}</span>
+          <span v-if="option.description" class="cq-desc">{{ option.description }}</span>
         </button>
         <input
           v-if="question.isOther || question.options.length === 0"
