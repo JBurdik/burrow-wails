@@ -145,7 +145,8 @@ The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. **S
 chat starts with `--settings` holding one Stop hook, `burrow end-turn-gate` (`endTurnGateSettings`): a turn ending with
 `turn_needs` still empty (`end_turn_pending` verb) is sent back **once** to call `end_turn`; `stop_hook_active` and every
 error let it stop. Tested: without it Haiku skipped `end_turn` after AskUserQuestion and under "do nothing else" tasks.
-**Order: `end_turn` first, the reply after it** (as threadbear does): told "reply, then end_turn", Opus wrote the reply
+The transcript hides plumbing calls (`isPlumbingTool`, `chatPlumbing.ts`): a taken `end_turn` / `end_turn_pending` and
+`ToolSearch` — the card says what end_turn said; a failed one stays. **Order: `end_turn` first, the reply after it** (as threadbear does): told "reply, then end_turn", Opus wrote the reply
 into its thinking, called the tool and showed only "Done." — the user never saw the answer. `Arg.Schema`
 gives a verb arg a full JSON schema for MCP (the CLI passes it as a JSON string; `Params.JSON` reads both).
 

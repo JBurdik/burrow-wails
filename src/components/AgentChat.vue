@@ -869,6 +869,7 @@ import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/co
 import PasteChip from "@/components/composer/PasteChip.vue";
 import SecretRequestCard from "@/components/SecretRequestCard.vue";
 import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
+import { isPlumbingTool } from "@/lib/chatPlumbing";
 import { panelTerminals } from "@/lib/rpTerminals";
 import { useNotificationsStore } from "@/stores/notifications";
 import ThreadFindBar from "@/components/ThreadFindBar.vue";
@@ -1811,7 +1812,8 @@ const grouping = computed(() => {
   const groupsById = new Map<string, ToolGroupHeader>();
   // Queued follow-ups render pinned below the live turn (like Claude desktop),
   // not at their array position — streamed output lands after them.
-  const msgs = messages.value.filter((m) => m.role !== "queued");
+  // Plumbing tool calls (a taken end_turn, ToolSearch) aren't work: hidden.
+  const msgs = messages.value.filter((m) => m.role !== "queued" && !isPlumbingTool(m));
   let i = 0;
   while (i < msgs.length) {
     const m = msgs[i];
