@@ -25,7 +25,8 @@ struct Message: Identifiable, Hashable {
 struct ChatView: View {
     let chatId: Int
     @Environment(AppModel.self) private var model
-    @State private var messages: [Message] = []
+    /// Unfiltered newest window of the transcript; raw[0] is transcript index `earlier`.
+    @State private var raw: [Message] = []
     @State private var earlier = 0
     @State private var older: [Message] = []
     @State private var olderStart = 0
@@ -163,8 +164,9 @@ struct ChatView: View {
             // Own subscription, not the single chatListeners slot: two views of the
             // same chat (split view, a sub-agent pushed in a sheet) used to clear
             // each other's listener on disappear, and the chat stopped updating.
-            eventToken = model.subscribe { name, _ in
-                if name == "chat-event-\(chatId)" { scheduleReload() }
+            eventToken = model.subscribe { name, payload in
+                if name == "chat-messages-changed-\(chatId)" { applySplice(payload) }
+                else if name == "chat-event-\(chatId)", Self.endsTurn(payload) { scheduleReload() }
             }
         }
         .onDisappear {
@@ -173,6 +175,8 @@ struct ChatView: View {
         }
         .onChange(of: model.connected) { _, c in if c { Task { await load() } } }
     }
+
+    private var messages: [Message] { Self.visible(raw) }
 
     /// Older pages loaded on demand + the live newest page, deduped by id.
     private var shown: [Message] {
@@ -188,8 +192,8 @@ struct ChatView: View {
         guard let page = try? await model.client?.call("load_chat_messages_page",
                                                        ["chatId": chatId, "before": before, "limit": 100]) as? [String: Any] else { return }
         let start = int(page["start"])
-        let raw = page["messages"] as? [[String: Any]] ?? []
-        older = Self.visible(raw.enumerated().map { Message($1, index: start + $0) }) + older
+        let rows = page["messages"] as? [[String: Any]] ?? []
+        older = Self.visible(rows.enumerated().map { Message($1, index: start + $0) }) + older
         olderStart = start
     }
 
@@ -205,15 +209,42 @@ struct ChatView: View {
         }
     }
 
-    // ponytail: re-reads the newest page instead of folding chat-event deltas in
-    // Swift. The core already folds the stream (chattranscript.go); a client
-    // projection is only worth it if this shows up as lag or data use.
+    /// Full read of the newest page: first open, reconnect, a hole in the
+    /// splices, a reset, and once per turn end (restores image stubs, which the
+    /// splice doesn't apply).
     private func load() async {
         guard let page = try? await model.client?.call("load_chat_messages_page",
                                                        ["chatId": chatId, "before": -1, "limit": 150]) as? [String: Any] else { return }
-        let raw = page["messages"] as? [[String: Any]] ?? []
+        let rows = page["messages"] as? [[String: Any]] ?? []
         earlier = int(page["start"])
-        messages = Self.visible(raw.enumerated().map { Message($1, index: earlier + $0) })
+        raw = rows.enumerated().map { Message($1, index: earlier + $0) }
+    }
+
+    /// While a turn streams, Go's fold (chattranscript.go) emits the changed tail
+    /// as `chat-messages-changed-<id>` {fromIndex, messages}; splicing it is the
+    /// increment, so no client-side projection of chat-event deltas is needed.
+    private func applySplice(_ payload: Any?) {
+        guard let d = payload as? [String: Any], let from = (d["fromIndex"] as? NSNumber)?.intValue,
+              let rows = d["messages"] as? [[String: Any]],
+              let next = Self.splice(raw, start: earlier, from: from,
+                                     rows.enumerated().map { Message($1, index: from + $0) })
+        else { scheduleReload(); return }
+        raw = next
+    }
+
+    /// `raw` starts at transcript index `start`; replace everything from `from`
+    /// on with `new`. nil = a hole (a splice was missed), caller reloads.
+    /// A splice reaching back past the window keeps only the part inside it.
+    static func splice(_ raw: [Message], start: Int, from: Int, _ new: [Message]) -> [Message]? {
+        if from > start + raw.count { return nil }
+        if from < start { return Array(new.dropFirst(start - from)) }
+        return Array(raw.prefix(from - start)) + new
+    }
+
+    /// A chat-event batch that closes the turn or resets the session.
+    static func endsTurn(_ payload: Any?) -> Bool {
+        let events = (payload as? [String: Any])?["events"] as? [[String: Any]] ?? []
+        return events.contains { ["turn.completed", "turn.failed", "session.reset", "session.exited"].contains($0["type"] as? String ?? "") }
     }
 
     private func send(_ raw: String) async {
