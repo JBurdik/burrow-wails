@@ -5,6 +5,8 @@ import SwiftUI
 /// changes, pins / files / links, loose ends and scheduled prompts.
 struct ThreadDetailsView: View {
     let chatId: Int
+    /// Inside the Right Panel sheet: no own NavigationStack / Done.
+    var embedded = false
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -31,7 +33,10 @@ struct ThreadDetailsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        if embedded { content } else { NavigationStack { content } }
+    }
+
+    private var content: some View {
             List {
                 overview
                 if !subagents.isEmpty {
@@ -95,9 +100,8 @@ struct ThreadDetailsView: View {
             }
             .navigationTitle("Details")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { if !embedded { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } } }
             .refreshable { await load() }
-        }
         .task {
             await load()
             Task { await refreshPr() }
@@ -186,23 +190,24 @@ struct ThreadDetailsView: View {
                     let p = pins[i]
                     let target = p["target"] as? String ?? ""
                     let web = target.hasPrefix("http://") || target.hasPrefix("https://")
-                    Button { if web, let u = URL(string: target) { openURL(u) } } label: {
-                        Label {
-                            VStack(alignment: .leading) {
-                                Text(web ? target : shortPath(target)).lineLimit(1).foregroundStyle(.primary)
-                                if let note = p["note"] as? String, !note.isEmpty { Text(note).font(.caption).foregroundStyle(.secondary) }
-                            }
-                        } icon: { Image(systemName: "pin") }
+                    let label = Label {
+                        VStack(alignment: .leading) {
+                            Text(web ? target : shortPath(target)).lineLimit(1).foregroundStyle(.primary)
+                            if let note = p["note"] as? String, !note.isEmpty { Text(note).font(.caption).foregroundStyle(.secondary) }
+                        }
+                    } icon: { Image(systemName: "pin") }
+                    Group {
+                        if web { Button { if let u = URL(string: target) { openURL(u) } } label: { label } }
+                        else { NavigationLink { FileViewer(path: target) } label: { label } }
                     }
-                    .disabled(!web)
                     .swipeActions {
                         Button("Remove", role: .destructive) { Task { await removePin(int(p["id"])) } }
                     }
                 }
                 ForEach(written, id: \.path) { f in
-                    Label {
+                    NavigationLink { FileViewer(path: f.path) } label: { Label {
                         HStack { Text(shortPath(f.path)).lineLimit(1); Spacer(); Text(f.op).font(.caption).foregroundStyle(.secondary) }
-                    } icon: { Image(systemName: "doc") }
+                    } icon: { Image(systemName: "doc") } }
                 }
                 ForEach(links, id: \.self) { l in
                     Button { if let u = URL(string: l) { openURL(u) } } label: {

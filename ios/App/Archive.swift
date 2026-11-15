@@ -26,7 +26,7 @@ struct ArchivedView: View {
             ForEach(rows) { chat in
                 NavigationLink(value: chat.id) {
                     HStack(spacing: 10) {
-                        ProjectBadge(name: model.projectName(chat))
+                        ProjectBadge(name: model.projectName(chat), workspaceId: chat.workspaceId)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(chat.displayTitle).lineLimit(1)
                             HStack(spacing: 4) {

@@ -8,7 +8,23 @@ struct Workspace: Identifiable, Hashable {
     var id: Int
     var name: String
     var parentId: Int?
+    var path: String = ""
+    /// Project icon as the desktop stores it: an image data URL (set_workspace_icon).
+    var icon: String?
     var repoId: Int { parentId ?? id }
+}
+
+/// Decoded project icons, keyed by the data URL itself (it changes when the icon does).
+enum IconCache {
+    private static let cache = NSCache<NSString, UIImage>()
+    static func image(_ dataURL: String?) -> UIImage? {
+        guard let dataURL, let comma = dataURL.firstIndex(of: ",") else { return nil }
+        if let hit = cache.object(forKey: dataURL as NSString) { return hit }
+        guard let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...]), options: .ignoreUnknownCharacters),
+              let img = UIImage(data: data) else { return nil }
+        cache.setObject(img, forKey: dataURL as NSString)
+        return img
+    }
 }
 
 struct TurnAsk: Hashable {
@@ -187,7 +203,8 @@ final class AppModel {
         guard let client, let snap = try? await client.call("shell_snapshot") as? [String: Any] else { return }
         client.noteSeq((snap["seq"] as? NSNumber)?.int64Value ?? 0)
         workspaces = (snap["workspaces"] as? [[String: Any]] ?? []).map {
-            Workspace(id: int($0["id"]), name: $0["name"] as? String ?? "", parentId: ($0["parent_id"] as? NSNumber)?.intValue)
+            Workspace(id: int($0["id"]), name: $0["name"] as? String ?? "", parentId: ($0["parent_id"] as? NSNumber)?.intValue,
+                      path: $0["path"] as? String ?? "", icon: $0["icon"] as? String)
         }
         CachedWorkspace.save(workspaces.filter { $0.parentId == nil }.map { CachedWorkspace(id: $0.id, name: $0.name) })
         var ph: [Int: Phase] = [:]
@@ -215,6 +232,11 @@ final class AppModel {
     func phase(_ id: Int) -> Phase { phases[id] ?? Phase() }
     func chat(_ id: Int) -> Chat? { chats.first { $0.id == id } }
     func workspace(_ id: Int) -> Workspace? { workspaces.first { $0.id == id } }
+    func projectIcon(_ workspaceId: Int) -> UIImage? {
+        guard let w = workspace(workspaceId) else { return nil }
+        return IconCache.image(workspace(w.repoId)?.icon ?? w.icon)
+    }
+
     func projectName(_ chat: Chat) -> String {
         guard let w = workspace(chat.workspaceId) else { return "" }
         return workspace(w.repoId)?.name ?? w.name

@@ -33,6 +33,10 @@ struct ChatView: View {
     @State private var error: String?
     @State private var reloadTask: Task<Void, Never>?
     @State private var showDetails = false
+    @State private var showPanel = false
+    @State private var atBottom = true
+    @State private var bottomBeforeKeyboard = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var chat: Chat? { model.chat(chatId) }
     private var phase: Phase { model.phase(chatId) }
@@ -72,12 +76,46 @@ struct ChatView: View {
                         TurnNeedsCard(needs: needs) { text in Task { await send(text) } }
                     }
                     Color.clear.frame(height: 1).id("bottom")
+                        .onAppear { atBottom = true }
+                        .onDisappear { atBottom = false }
                 }
                 .padding()
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: messages.last) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            // Follow new output only while already at the bottom; reading back
+            // up the transcript must not be yanked down by every streamed line.
+            .onChange(of: messages.last) { _, _ in if atBottom { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } }
+            .overlay(alignment: .bottomTrailing) {
+                if !atBottom {
+                    Button { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } label: {
+                        Image(systemName: "arrow.down").font(.body.weight(.semibold))
+                            .frame(width: 40, height: 40)
+                            .background(.regularMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(Color(.separator).opacity(0.4), lineWidth: 0.5))
+                            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(16)
+                    .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel("Scroll to last message")
+                }
+            }
+            .animation(.snappy, value: atBottom)
+            // The keyboard shrinks the viewport from below, which leaves the
+            // transcript scrolled to the middle. Remember whether we were at the
+            // end when it starts to show, and go back there once it has.
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+                bottomBeforeKeyboard = atBottom
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                if bottomBeforeKeyboard { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in
+                if atBottom || bottomBeforeKeyboard {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+            }
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
@@ -99,6 +137,7 @@ struct ChatView: View {
                 if let chat {
                     Menu {
                         Button { showDetails = true } label: { Label("Details", systemImage: "info.circle") }
+                        Button { showPanel.toggle() } label: { Label("Panel", systemImage: "sidebar.right") }
                         Button { model.startActivity(chat) } label: { Label("Follow on Lock Screen", systemImage: "lock.iphone") }
                         ThreadMenuItems(chat: chat)
                     } label: { Image(systemName: "ellipsis.circle") }
@@ -106,6 +145,19 @@ struct ChatView: View {
             }
         }
         .sheet(isPresented: $showDetails) { ThreadDetailsView(chatId: chatId) }
+        // iPad: the panel sits beside the chat like the desktop RP; iPhone: a sheet.
+        .inspector(isPresented: sizeClass == .regular ? $showPanel : .constant(false)) {
+            RightPanelView(chatId: chatId).inspectorColumnWidth(min: 320, ideal: 420, max: 560)
+        }
+        .sheet(isPresented: sizeClass == .regular ? .constant(false) : $showPanel) { RightPanelView(chatId: chatId) }
+        // Swipe in from the right edge opens the panel (the RP lives on the right).
+        .overlay(alignment: .trailing) {
+            Color.clear.frame(width: 18).contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 15).onEnded { g in
+                    if g.translation.width < -50, abs(g.translation.height) < 80 { showPanel = true }
+                })
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: showPanel) { _, new in new }
         .task { await load() }
         .onAppear {
             model.viewing = chatId

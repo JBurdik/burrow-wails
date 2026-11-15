@@ -38,7 +38,7 @@ struct ThreadsView: View {
                             ForEach(g.chats) { row($0, showProject: false) }
                         } label: {
                             HStack {
-                                ProjectBadge(name: project.name)
+                                ProjectBadge(name: project.name, workspaceId: project.id)
                                 Text(project.name).font(.subheadline.weight(.semibold))
                                 Spacer()
                                 Text("\(g.chats.count)").font(.caption).foregroundStyle(.secondary)
@@ -159,6 +159,9 @@ struct ThreadRow: View {
         HStack(alignment: .top, spacing: 10) {
             StatusMark(status: status, quietDone: quietDone, needsYou: needsYou)
                 .frame(width: 16, height: 18)
+            if let project {
+                ProjectBadge(name: project, workspaceId: chat.workspaceId, size: 18).padding(.top, 1)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(chat.displayTitle)
@@ -213,13 +216,28 @@ struct StatusMark: View {
 
 struct ProjectBadge: View {
     let name: String
+    var workspaceId: Int? = nil
+    var size: CGFloat = 20
+    @Environment(AppModel.self) private var model
+
     var body: some View {
+        if let id = workspaceId, let img = model.projectIcon(id) {
+            Image(uiImage: img).resizable().scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size / 4, style: .continuous))
+        } else {
+            letter
+        }
+    }
+
+    @ViewBuilder
+    private var letter: some View {
         // stable across launches (hashValue is seeded per process)
         let hue = Double(name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 360 }) / 360
         Text(name.prefix(1).uppercased())
-            .font(.caption2.bold()).foregroundStyle(.white)
-            .frame(width: 20, height: 20)
-            .background(Color(hue: hue, saturation: 0.45, brightness: 0.75), in: RoundedRectangle(cornerRadius: 5))
+            .font(.system(size: size * 0.55, weight: .bold)).foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Color(hue: hue, saturation: 0.45, brightness: 0.75), in: RoundedRectangle(cornerRadius: size / 4, style: .continuous))
     }
 }
 
