@@ -104,6 +104,11 @@ check:
     pnpm test
     cd src-wails && go vet ./... && go build ./... && go test ./...
 
+# End-to-end smoke of the phone's remote path over loopback: pair → ticket →
+# /v2/ws → calls → events + resume → revoke.
+smoke-remote:
+    cd src-wails && go test -race -count=1 -run '^TestRemoteSmoke$' .
+
 # ── beta (local-only, never signed/notarized/released) ─────────────────────────
 
 # Build a local beta bundle: purple title bar + purple icon, own bundle id so
