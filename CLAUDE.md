@@ -266,8 +266,18 @@ blocked episode) — recorded in `emitChatLine` on the phase transition, deliver
 marks the child collected unless cut at 4000 chars. A notice goes ahead of the user's queued follow-ups
 (`deliveryOrder`, below). Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
 
+**Submit door** (`chatsubmit.go`, ADR 0001 phase A): every client sends a typed message with
+`chat_submit(chatId, text, images, clientId)` → `{sent, item?}` — Go decides **under the chat lock**: settled and an
+empty queue → sent now (`chatSendLocked`), else queued + delivery kick. No client picks `chat_send` vs `chat_queue_add`
+from its phase any more (both stay on the wire, additive). Steer stays explicit (`chat_steer`, optional `clientId`). The
+`chat-user` stream line is JSON `{text, images, clientId}` (`encodeUserLine`; `decodeUserLine` still reads old plain-text
+lines — a JSON-looking prompt without `"text"` stays a prompt); the fold puts `clientId` / images on the user row
+(`ChatMessage.clientId`), and the client's **echo** is matched by it (desktop `chatProjection` adopts Go's id onto the
+echo row; iOS `settleEchoes`, text only for rows without one). The id reaches the transport's user line through
+`withSendingClientID` (held under the chat lock); `chat_queue.client_id` carries it to a delivered item.
+
 **Queued follow-ups are Go's** (`chatqueue.go`, `chatdelivery.go`): a message typed while a turn runs goes to
-SQLite `chat_queue` via `chat_queue_add` (`_list` / `_update` / `_remove` / `_reorder`; event
+SQLite `chat_queue` via `chat_submit` (or `chat_queue_add`) (`_list` / `_update` / `_remove` / `_reorder`; event
 `chat-queue-changed` = the chat's whole queue). `chatSession` only mirrors it — **no client drain**, so it
 drains with the desktop closed or the phone asleep; legacy `queued` transcript rows are migrated through
 `chat_queue_add` on hydrate. Every Go-initiated send (notices, queue, schedules) goes through one pass,
@@ -276,10 +286,11 @@ run by the 15 s sweep **and** kicked 300 ms after a turn settles (`emitChatLine`
 settled chat. Production send is `chatSendSettled` — re-checks `chatSettled` **under the chat lock**, so a
 drain racing the user's own mid-start `ChatSend` returns `errChatBusy` instead of steering. An item is claimed
 by being **deleted in the read's transaction**; a failed send re-inserts it at the head under its old id
-(5 failures park the head until edited). **`clientId`** (optional last arg of `chat_send` / `chat_queue_add`,
-`chatclientid.go`): an id already accepted for the chat (by either call, only after success; a duplicate in flight waits
-for the first) is a no-op success — `chat_queue_add` returns the earlier item. In memory, 1 h TTL / 500 per chat, so a
-core restart forgets them. Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
+(5 failures park the head until edited). **`clientId`** (optional last arg of `chat_submit` / `chat_steer` / `chat_send` /
+`chat_queue_add`, `chatclientid.go` + `claimClientID`): an id already accepted for the chat (by any of them, only after
+success; a duplicate in flight waits for the first) is a no-op success with the earlier outcome — a queued one returns the
+earlier item. In memory (1 h TTL / 500 per chat), and on a miss Go checks the chat's `chat_queue` rows, last 200
+`chat-user` lines and last 200 transcript rows, so a retry across a core restart is still deduped. Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
 
 **Usage-limit resume** (`chatlimit.go`): the normalizer marks a turn that failed on a usage / rate limit
 (`turn.failed{usageLimit}` — Claude's `is_error` result with the limit text or a 429, which used to read as
@@ -726,14 +737,14 @@ gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the
 
 **Offline on a paired device** (remote transport only; `remoteActive()` in `core.ts`, inert on the desktop's own backend):
 `LinkStatus.vue` (phone header, Sidebar foot) shows Reconnecting after 1.5 s down and Offline after 3 s (pure
-`src/runtime/linkStatus.ts`), tap = `wake()`. A message sent while the socket is down (or whose `chat_send` /
-`chat_queue_add` fails with disconnected / transport unreachable) is **held** in localStorage `burrow.outbox.<envId>`
+`src/runtime/linkStatus.ts`), tap = `wake()`. A message sent while the socket is down (or whose `chat_submit`
+fails with disconnected / transport unreachable) is **held** in localStorage `burrow.outbox.<envId>`
 (`src/lib/offline.ts`, session intents `hold` / `held` / `dropHeld`), shown in the composer as "Waiting for connection",
-and on reconnect handed to Go via `chat_queue_add` oldest first (`drainOutbox` in `src/runtime/remoteCache.ts`): removed
+and on reconnect retried through `chat_submit` with the same `clientId`, oldest first (`drainOutbox` in `src/runtime/remoteCache.ts`): removed
 only after success; a non-network refusal marks it and blocks only that chat. **Idempotent:** every typed message gets a
-`clientId` (`newClientId`), reused by `chat_send`, the hold (= the held id) and the drain's `chat_queue_add`, so a
+`clientId` (`newClientId`), reused by `chat_submit`, the hold (= the held id) and the drain, so a
 "disconnected" call that already reached Go is safe to retry; while a chat has anything held, a new message for it is held
-behind (and the drain kicked) instead of overtaking via `chat_send`. A transport that **recovers from unreachable** fires
+behind (and the drain kicked) instead of overtaking it. A transport that **recovers from unreachable** fires
 its resync handlers (boot loads failed fast: chats, config, workspaces re-read; App.vue's `ws.load()` failure no longer
 aborts startup); `dropSocket` detaches the dead socket's handlers. **Read cache**: `invoke` tees
 `shell_snapshot` / `list_chats` / `list_workspaces` into `burrow.cache.<envId>.<cmd>`; threadFeed and the workspace /
@@ -751,7 +762,7 @@ wildcard dev profile (no Xcode account needed), which can't carry App Groups. `j
 (`iosinstall.go`; behind a `tailscale serve` path mount the page passes its prefix as `?p=`). **Offline** (`Offline.swift`):
 a per-machine folder `<Application Support>/burrow/<sha256(baseURL)>/` holds the **outbox** (sends while the socket is
 down, sends whose reply a drop lost, and anything for a chat that already has items there — never overtaken; shown in
-the chat's QueuePanel as "Waiting for connection", delivered in order via `chat_queue_add` on each `open` (not after the
+the chat's QueuePanel as "Waiting for connection", delivered in order via `chat_submit` on each `open` (not after the
 snapshot), removed only after success, deletable; a refusal holds back only that chat's later items). Every user send
 carries a `clientId` (UUID; an outbox item's id), reused by every retry, so Go's dedupe makes the retry safe and the **launch cache** (snapshot + `list_chats` rows, written after a snapshot
 and on background; ≤ 20 chats × 150 messages of `load_chat_messages_page`, kept in memory per load, written on
