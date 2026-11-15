@@ -114,13 +114,21 @@ function seenAt(): Record<string, number> {
   }
 }
 
+// The feed is torn down when its last reader unmounts (the phone's Threads
+// screen leaves the DOM while a chat is open). Keeping the last picture here
+// lets coming back paint at once instead of empty until shell_snapshot answers.
+let lastSnap: ShellSnapshotData | null = null;
+let lastPerms: PtyPermRequest[] = [];
+
 function createFeed() {
   const chats = useClaudeChatsStore();
   const workspaces = useWorkspaceStore();
   // First paint from the last snapshot this paired device saw (never noteSeq'd:
   // it is only a picture until load() replaces it).
-  const snap = ref<ShellSnapshotData | null>(cachedRead<ShellSnapshotData>("shell_snapshot"));
-  const perms = ref<PtyPermRequest[]>([]);
+  const snap = ref<ShellSnapshotData | null>(lastSnap ?? cachedRead<ShellSnapshotData>("shell_snapshot"));
+  const perms = ref<PtyPermRequest[]>(lastPerms);
+  watch(snap, (v) => { if (v) lastSnap = v; });
+  watch(perms, (v) => { lastPerms = v; });
   const now = ref(Date.now());
 
   // One shell_snapshot for the first paint, then the phase events of exactly
