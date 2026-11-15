@@ -35,6 +35,7 @@ struct ChatView: View {
     @State private var showDetails = false
     @State private var showPanel = false
     @State private var atBottom = true
+    @State private var eventToken: UUID?
     @State private var bottomBeforeKeyboard = false
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -159,11 +160,16 @@ struct ChatView: View {
         .onAppear {
             model.viewing = chatId
             model.markSeen(chatId)
-            model.chatListeners[chatId] = { scheduleReload() }
+            // Own subscription, not the single chatListeners slot: two views of the
+            // same chat (split view, a sub-agent pushed in a sheet) used to clear
+            // each other's listener on disappear, and the chat stopped updating.
+            eventToken = model.subscribe { name, _ in
+                if name == "chat-event-\(chatId)" { scheduleReload() }
+            }
         }
         .onDisappear {
             if model.viewing == chatId { model.viewing = nil }
-            model.chatListeners[chatId] = nil
+            model.unsubscribe(eventToken)
         }
         .onChange(of: model.connected) { _, c in if c { Task { await load() } } }
     }

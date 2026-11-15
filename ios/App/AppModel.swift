@@ -169,11 +169,18 @@ final class AppModel {
         c.start()
     }
 
-    func foreground() { if creds != nil, client?.isOpen != true { connect() } }
+    /// Back from the background: the socket may be dead without knowing it.
+    func foreground() {
+        guard creds != nil else { return }
+        guard let client, client.isOpen else { connect(); return }
+        Task { if await !client.ping() { client.reconnect() } }
+    }
 
     private func event(_ name: String, _ payload: Any?) {
         for h in subscribers.values { h(name, payload) }
         switch name {
+        case "close":
+            connected = false
         case "open":
             connected = true
             Task { await loadSnapshot() }
@@ -300,7 +307,15 @@ final class AppModel {
         // Into a running turn chat_send would steer; queue it instead, like the desktop composer.
         let cmd = phase(chat).inFlight ? "chat_queue_add" : "chat_send"
         try await client?.call(cmd, ["chatId": chat, "text": text, "images": [String]()])
+        nudgeChat(chat)
         if let c = self.chat(chat) { startActivity(c) }
+    }
+
+    /// Re-read an open chat now, without waiting for its stream: the user's own
+    /// message must show the moment it is sent.
+    func nudgeChat(_ chat: Int) {
+        event("chat-event-\(chat)", nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.event("chat-event-\(chat)", nil) }
     }
 
     func interrupt(_ chat: Int) async { _ = try? await client?.call("chat_interrupt", ["chatId": chat]) }

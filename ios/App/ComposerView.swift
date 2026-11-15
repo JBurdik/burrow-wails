@@ -363,6 +363,7 @@ extension AppModel {
             try await client.call("chat_queue_add", args)
             if steer { notice = "Waiting on you, not running — queued instead." }
         }
+        nudgeChat(chat)
         return notice
     }
 

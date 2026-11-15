@@ -148,6 +148,7 @@ final class BurrowClient: NSObject, @unchecked Sendable {
                 DispatchQueue.main.async { self.onRevoked?() }
                 return
             } catch {}
+            if isOpen { emit("close", nil) }
             isOpen = false
             failPending()
             if stopped { return }
@@ -206,6 +207,20 @@ final class BurrowClient: NSObject, @unchecked Sendable {
         DispatchQueue.main.async { self.onEvent?(name, payload) }
     }
 
+    /// A dead socket after the app was suspended often still reads `.running`;
+    /// a ping with a deadline is the only honest check.
+    func ping(timeout: TimeInterval = 3) async -> Bool {
+        guard let task, isOpen else { return false }
+        return await withCheckedContinuation { c in
+            let once = OnceFlag()
+            task.sendPing { err in if once.take() { c.resume(returning: err == nil) } }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { if once.take() { c.resume(returning: false) } }
+        }
+    }
+
+    /// Drops the current socket so connectLoop reconnects (and resumes by seq).
+    func reconnect() { task?.cancel(with: .goingAway, reason: nil) }
+
     func noteSeq(_ seq: Int64) { if seq > lastSeq { lastSeq = seq } }
 
     private func send(_ obj: [String: Any]) async throws {
@@ -263,4 +278,10 @@ struct CachedWorkspace: Codable, Identifiable, Hashable {
     static let key = "workspaces"
     static func load() -> [CachedWorkspace] { SharedStore.get(key, [CachedWorkspace].self) ?? [] }
     static func save(_ ws: [CachedWorkspace]) { SharedStore.put(key, ws) }
+}
+
+final class OnceFlag: @unchecked Sendable {
+    private var done = false
+    private let lock = NSLock()
+    func take() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
 }
