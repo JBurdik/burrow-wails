@@ -45,6 +45,30 @@ _Avoid_: phase
 The per-client, per-subject record of when the user last saw a PTY or chat, used to turn `done` into `review`.
 _Avoid_: seen flag, unread
 
+**Transcript**:
+A chat's rendered history (user rows, replies, tool calls, thinking, notes). Go folds the agent stream into it and is its only writer (ADR 0001); clients only apply splices.
+_Avoid_: messages (the DB table), chat log
+
+**Splice**:
+A change to the transcript sent to clients: `{rev, fromIndex, rows}` = "from this index on, the transcript is these rows". Applied only when its revision is newer than the client's.
+_Avoid_: delta, patch
+
+**Splice revision**:
+The chat's `folded_ord`: the stream position the transcript was folded up to. Grows for the life of the chat; `chat_clear` does not reset it.
+_Avoid_: version, seq (that is the shell stream's)
+
+**Submit door**:
+`chat_submit`: the one way a client sends a user message. Go decides under the chat lock: a settled chat gets it now, anything else queues it. Steer is a separate, explicit intent.
+_Avoid_: send (when the choice send-vs-queue is meant)
+
+**Client id**:
+The id a client gives a user message when it is typed; reused by every retry and stored on the user row, so a retry is deduplicated and the client's echo is matched to its row.
+_Avoid_: request id, nonce
+
+**Echo**:
+The client's own copy of a just-submitted message, shown until the transcript row with the same client id arrives.
+_Avoid_: optimistic message, pending bubble
+
 ### Chat content
 
 **Visual block**:
