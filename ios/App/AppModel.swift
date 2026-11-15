@@ -131,6 +131,8 @@ final class AppModel {
     var openChat: Int?
     /// Chat on screen: its finished turns are read as they land.
     var viewing: Int?
+    /// APNs device token (hex), from PushDelegate; sent on every socket open.
+    @ObservationIgnored var apnsToken: String? { didSet { if apnsToken != oldValue { sendPushToken() } } }
 
     @ObservationIgnored private(set) var client: BurrowClient?
     @ObservationIgnored var chatListeners: [Int: () -> Void] = [:]
@@ -153,7 +155,11 @@ final class AppModel {
     }
 
     func unpair() {
-        client?.stop(); client = nil
+        // Best effort: a revoke already dropped the token server-side.
+        if let old = client, let t = apnsToken {
+            Task { _ = try? await old.call("push_unsubscribe_apns", ["token": t]); old.stop() }
+        } else { client?.stop() }
+        client = nil
         CredentialStore.clear()
         creds = nil
         chats = []; workspaces = []; phases = [:]; seen = [:]
@@ -167,6 +173,12 @@ final class AppModel {
         c.onRevoked = { [weak self] in self?.unpair(); self?.error = BurrowError.revoked.localizedDescription }
         client = c
         c.start()
+        PushDelegate.register()
+    }
+
+    private func sendPushToken() {
+        guard let client, client.isOpen, let t = apnsToken else { return }
+        Task { _ = try? await client.call("push_subscribe_apns", ["token": t, "sandbox": PushDelegate.sandbox]) }
     }
 
     /// Back from the background: the socket may be dead without knowing it.
@@ -183,6 +195,7 @@ final class AppModel {
             connected = false
         case "open":
             connected = true
+            sendPushToken()
             Task { await loadSnapshot() }
         case "resync":
             Task { await loadSnapshot() }
@@ -334,6 +347,11 @@ final class AppModel {
                                                                "model": model, "effort": effort, "permissionMode": permission]) as? [String: Any]
         let id = int(row?["id"])
         guard id > 0 else { throw BurrowError.server("Could not create the thread.") }
+        if let client {
+            let current = row?["title"] as? String ?? ""
+            let cwd = self.workspace(workspace)?.path ?? ""
+            Task { await client.nameThread(chatId: id, current: current, cwd: cwd, text: text) }
+        }
         await loadChats()
         try await send(id, text)
         return id

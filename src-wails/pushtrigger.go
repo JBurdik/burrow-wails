@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -141,12 +140,7 @@ func (a *App) pushFor(key, reason string, ph agentphase.Phase, phone bool) {
 	if a.push == nil || a.db == nil {
 		return
 	}
-	msg := struct {
-		Title string `json:"title"`
-		Body  string `json:"body"`
-		URL   string `json:"url"`
-		Tag   string `json:"tag"`
-	}{Tag: key}
+	msg := pushMsg{Tag: key}
 	kind, id, _ := strings.Cut(key, ":")
 	var ws, parent int64
 	var parentTitle string
@@ -224,10 +218,9 @@ func (a *App) pushFor(key, reason string, ph agentphase.Phase, phone bool) {
 	if !phone || !a.push.claim(key, now) {
 		return
 	}
-	payload, _ := json.Marshal(msg)
-	// Topic: the push service keeps only the newest queued message per
-	// chat/tab (url-safe alphabet, so "chat-12", not "chat:12").
-	a.pushToAll(payload, kind+"-"+id)
+	// Topic / apns-collapse-id: the push service keeps only the newest queued
+	// message per chat/tab (url-safe alphabet, so "chat-12", not "chat:12").
+	a.pushToAll(msg, kind+"-"+id)
 }
 
 func (a *App) pushChat(chatID int64, reason string) {

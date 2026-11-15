@@ -227,6 +227,11 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.db = db
 	a.push = newWebPusher(filepath.Join(dataDir, "vapid.pem"))
+	if s, err := loadAPNs(dataDir, a.push.client); err != nil {
+		log.Printf("apns: off: %v", err)
+	} else {
+		a.push.apns = s
+	}
 	if ps, err := NewPhaseStore(db); err != nil {
 		log.Printf("phase store: %v", err)
 	} else {

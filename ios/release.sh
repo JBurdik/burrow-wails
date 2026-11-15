@@ -9,6 +9,11 @@ TEAM=${TEAM:-9QY36KZ8JP}
 # Jakub Gál's Apple Development cert + the team's wildcard profile (same pair `just ios` uses).
 IDENTITY=${IDENTITY:-DF4CCBA4F69D30AC9FB6A092DB5AB32217DEFDF7}
 PROFILE=${PROFILE:-"$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/676ff5a2-9942-40d8-95ed-5dcfbdb5f1d4.mobileprovision"}
+# Push (APNs): the wildcard profile cannot carry aps-environment. Set APP_PROFILE
+# to a development profile for the explicit App ID com.agenticide.burrow.ios
+# (Push Notifications capability on) and the app is signed with it + the
+# entitlement; extensions stay on the wildcard. Unset = no push, as before.
+APP_PROFILE=${APP_PROFILE:-}
 OUT="$HOME/Library/Application Support/burrow-wails${BURROW_DATA_SUFFIX:+-$BURROW_DATA_SUFFIX}/ios"
 BUILD=$(date +%Y%m%d%H%M)
 TMP=build/release
@@ -23,7 +28,7 @@ cp -R $TMP/dd/Build/Products/Release-iphoneos/Burrow.app $APP
 # Sign inside-out: extensions, then the app. Entitlements spelled out, since
 # the unsigned build left $(AppIdentifierPrefix) unexpanded.
 sign() {
-	local bundle=$1 id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$1/Info.plist")
+	local bundle=$1 profile=${2:-$PROFILE} aps=${3:-} id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$1/Info.plist")
 	cat > $TMP/ent.plist <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -32,13 +37,14 @@ sign() {
 <key>com.apple.developer.team-identifier</key><string>$TEAM</string>
 <key>get-task-allow</key><true/>
 <key>keychain-access-groups</key><array><string>$TEAM.com.agenticide.burrow.shared</string></array>
+${aps:+<key>aps-environment</key><string>development</string>}
 </dict></plist>
 PL
-	cp "$PROFILE" "$bundle/embedded.mobileprovision"
+	cp "$profile" "$bundle/embedded.mobileprovision"
 	codesign --force --timestamp=none --sign "$IDENTITY" --entitlements $TMP/ent.plist "$bundle"
 }
 for ext in $APP/PlugIns/*.appex; do sign "$ext"; done
-sign $APP
+if [[ -n $APP_PROFILE ]]; then sign $APP "$APP_PROFILE" 1; else sign $APP; fi
 codesign --verify --deep --strict $APP
 (cd $TMP/ipa && zip -qry Burrow.ipa Payload)
 cp $TMP/ipa/Burrow.ipa "$OUT/Burrow.ipa"

@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct BurrowApp: App {
+    @UIApplicationDelegateAdaptor private var push: PushDelegate
     @State private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -13,6 +14,7 @@ struct BurrowApp: App {
             .environment(model)
             // iOS 26 draws bordered buttons as capsules; keep rounded rects app-wide.
             .buttonBorderShape(.roundedRectangle(radius: 10))
+            .onAppear { push.model = model }
             .onChange(of: scenePhase) { _, p in if p == .active { model.foreground() } }
             .onOpenURL { url in
                 // burrow://chat/<id> from the widget / Live Activity

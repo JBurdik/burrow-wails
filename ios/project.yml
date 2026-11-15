@@ -38,6 +38,8 @@ targets:
       path: App/Burrow.entitlements
       properties:
         keychain-access-groups: [$(AppIdentifierPrefix)com.agenticide.burrow.shared]
+        # APNs (Push.swift). Needs the explicit App ID's profile, see release.sh.
+        aps-environment: development
     dependencies:
       - target: BurrowWidgets
       - target: BurrowShare

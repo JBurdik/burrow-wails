@@ -138,6 +138,7 @@ func migrate(db *sql.DB) error {
 	stmts = append(stmts, chatStreamSchema()...)
 	stmts = append(stmts, remoteDevicesSchema()...)
 	stmts = append(stmts, pushSchema()...)
+	stmts = append(stmts, apnsSchema()...)
 	stmts = append(stmts, chatsSchema()...)
 	stmts = append(stmts, `CREATE TRIGGER IF NOT EXISTS openai_session_delete AFTER DELETE ON chats
         BEGIN DELETE FROM openai_sessions WHERE chat_id = CAST(old.id AS TEXT); END`)

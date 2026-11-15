@@ -728,7 +728,10 @@ extension (`Share/`) share data through a **Keychain access group, not an App Gr
 wildcard dev profile (no Xcode account needed), which can't carry App Groups. `just ios-native` = unsigned build +
 `codesign` → `<app-data>/ios/Burrow.ipa`; the core serves an `itms-services` install page at `/ios`
 (`iosinstall.go`; behind a `tailscale serve` path mount the page passes its prefix as `?p=`). Live Activity / widget
-update only while the app holds the socket (no APNs).
+update only while the app holds the socket (no Live Activity pushes). **Push** (`Push.swift`): asks permission, registers,
+sends the token on every socket open; sandbox = the embedded profile's `aps-environment`; a tap opens `chat=<id>` of the
+payload's `url`. Needs `APP_PROFILE=<explicit App ID profile with Push>` for `release.sh` — the wildcard profile can't
+carry `aps-environment`, so without it the build has no push.
 
 **Release channel is decided by the serving binary, not the bundle** (`src-wails/channel.go`): `buildChannel` is
 `dev` under `wails3 dev` (`channel_dev.go`, the `dev` build tag — Taskfile `build DEV=true` passes it) and `beta` via `just build-beta`'s
@@ -768,6 +771,11 @@ row. Decided in Go on `PhaseStore.onChange` (now `prev, next`): chats + PTY tabs
 `waiting_approval`/`waiting_input`, a chat's `done` (not sub-agents, not archived), snooze wake. `pushGate`:
 none while `chat_mark_active` < 90 s ago, ≤ 1 per key per 30 s; tag/Topic per chat/tab. Chat deep link is
 `#/ws/<ws>?chat=<id>` (chat tab ids are client-side). Phone toggle: More screen. PTY tabs have no watch signal.
+**APNs** (`apns.go`) is the second delivery kind in `pushToAll`, same decisions: HTTP/2 + ES256 provider JWT (reused 50 min)
+from `<app-data>/apns.p8` + `apns.json {keyId, teamId, topic}`, read at startup, either absent = off. `apns_tokens`
+(token, device_id, sandbox) via `push_subscribe_apns(token, sandbox)` / `push_unsubscribe_apns` (calling device, `deviceArg`);
+revoke deletes them; 410 / `BadDeviceToken` / `Unregistered` / `DeviceTokenNotForTopic` delete the row. Payload: alert,
+`thread-id` = phase key, `url` = the hash route. Never logs the key or a token (transport errors drop the URL).
 
 **No manual GUI verification of any of this has been done.** Try first: pair a phone; kill the socket
 mid-turn; revoke a device; heavy terminal output; ESC mid-turn.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/ecdsa"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -33,6 +34,7 @@ func pushSchema() []string {
 type webPusher struct {
 	keyPath string
 	client  *http.Client
+	apns    *apnsSender // nil = APNs off (apns.go)
 
 	keyMu sync.Mutex
 	key   *ecdsa.PrivateKey
@@ -109,11 +111,13 @@ func (a *App) PushUnsubscribe(deviceID, endpoint string) error {
 	return err
 }
 
-// pushToAll sends one message to every subscription; a 404/410 forgets it.
-func (a *App) pushToAll(payload []byte, topic string) {
+// pushToAll sends one message to every Web Push subscription and APNs token;
+// a dead one (404/410, APNs Unregistered/BadDeviceToken) is forgotten.
+func (a *App) pushToAll(msg pushMsg, topic string) {
 	if a.push == nil || a.db == nil {
 		return
 	}
+	a.apnsToAll(msg, topic)
 	rows, err := a.db.Query(`SELECT endpoint, p256dh, auth FROM push_subscriptions`)
 	if err != nil {
 		return
@@ -134,12 +138,44 @@ func (a *App) pushToAll(payload []byte, topic string) {
 		log.Printf("push: vapid key: %v", err)
 		return
 	}
+	payload, _ := json.Marshal(msg)
 	for _, s := range subs {
 		err := sendWebPush(a.push.client, k, s, payload, topic)
 		if errors.Is(err, errPushGone) {
 			_, _ = a.db.Exec(`DELETE FROM push_subscriptions WHERE endpoint = ?`, s.Endpoint)
 		} else if err != nil {
 			log.Printf("push: %v", err)
+		}
+	}
+}
+
+func (a *App) apnsToAll(msg pushMsg, collapseID string) {
+	if a.push.apns == nil {
+		return
+	}
+	rows, err := a.db.Query(`SELECT token, sandbox FROM apns_tokens`)
+	if err != nil {
+		return
+	}
+	type tok struct {
+		token   string
+		sandbox bool
+	}
+	var toks []tok
+	for rows.Next() {
+		var t tok
+		if rows.Scan(&t.token, &t.sandbox) == nil {
+			toks = append(toks, t)
+		}
+	}
+	rows.Close()
+	payload := apnsPayload(msg)
+	for _, t := range toks {
+		err := a.push.apns.send(t.token, t.sandbox, payload, collapseID)
+		if errors.Is(err, errAPNsGone) {
+			_, _ = a.db.Exec(`DELETE FROM apns_tokens WHERE token = ?`, t.token)
+		} else if err != nil {
+			log.Printf("push: %v", err) // never the token
 		}
 	}
 }

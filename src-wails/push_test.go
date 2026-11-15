@@ -105,7 +105,7 @@ func TestPushGoneSubscriptionIsDeleted(t *testing.T) {
 	_ = a.PushSubscribe(dev.ID, testSubscription(t, srv.URL+"/gone"))
 	_ = a.PushSubscribe(dev.ID, testSubscription(t, srv.URL+"/live"))
 
-	a.pushToAll([]byte(`{"title":"t"}`), "chat-1")
+	a.pushToAll(pushMsg{Title: "t"}, "chat-1")
 	if hits.Load() != 2 {
 		t.Fatalf("push service saw %d requests, want 2", hits.Load())
 	}

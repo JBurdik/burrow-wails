@@ -190,6 +190,9 @@ var remoteAllowed = map[string]remoteCmd{
 	"push_vapid_public_key": {Method: "PushVapidPublicKey", Args: nil, Scope: scopeOrchRead},
 	"push_subscribe":        {Method: "PushSubscribe", Args: []string{deviceArg, "subscription"}, Scope: scopeOrchOperate},
 	"push_unsubscribe":      {Method: "PushUnsubscribe", Args: []string{deviceArg, "endpoint"}, Scope: scopeOrchOperate},
+	// APNs (apns.go), the native iOS app: same calling-device rule.
+	"push_subscribe_apns":   {Method: "PushSubscribeAPNs", Args: []string{deviceArg, "token", "sandbox"}, Scope: scopeOrchOperate},
+	"push_unsubscribe_apns": {Method: "PushUnsubscribeAPNs", Args: []string{deviceArg, "token"}, Scope: scopeOrchOperate},
 
 	// Pairing, desktop side. Both at access:write, including the read: the
 	// pairing code IS the credential, so handing it out is handing out the
