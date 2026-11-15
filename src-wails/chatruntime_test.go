@@ -199,10 +199,10 @@ func TestChatSendStartsLazilyWithRowSettings(t *testing.T) {
 	if fake.startCount() != 0 {
 		t.Fatal("creating a chat must not start a process")
 	}
-	if err := a.ChatSend(c.ID, "hello", nil); err != nil {
+	if err := a.ChatSend(c.ID, "hello", nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ChatSend(c.ID, "again", nil); err != nil {
+	if err := a.ChatSend(c.ID, "again", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if fake.startCount() != 1 {
@@ -231,7 +231,7 @@ func TestChatSendFallsBackToProjectConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
-	if err := a.ChatSend(c.ID, "hi", nil); err != nil {
+	if err := a.ChatSend(c.ID, "hi", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if s := fake.lastStart(); !slices.Contains(s.env, "CLAUDE_CONFIG_DIR=/cfg/project") || slices.Contains(s.args, "--resume") {
@@ -243,13 +243,13 @@ func TestChatSendStartsAgainAfterReap(t *testing.T) {
 	a, fake, wsID, _ := runtimeApp(t)
 	writeConfig(t, map[string]any{"providers": []any{claudeAt("claude", "")}})
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
-	if err := a.ChatSend(c.ID, "one", nil); err != nil {
+	if err := a.ChatSend(c.ID, "one", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	// The CLI reports its session; the runtime records it on the row.
 	fake.onLine["1"](`{"type":"system","subtype":"init","session_id":"sess-9"}`)
 	_ = fake.Stop("1") // auto-sleep
-	if err := a.ChatSend(c.ID, "two", nil); err != nil {
+	if err := a.ChatSend(c.ID, "two", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if fake.startCount() != 2 || !hasArgPair(fake.lastStart().args, "--resume", "sess-9") {
@@ -265,10 +265,10 @@ func TestChatSendStartsCodexFromRow(t *testing.T) {
 	}}})
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "codex-app-server", AgentKind: "codex-work",
 		ClaudeSessionID: "thr-0", Model: "gpt-x", Effort: "high", PermissionMode: "plan"})
-	if err := a.ChatSend(c.ID, "hello", nil); err != nil {
+	if err := a.ChatSend(c.ID, "hello", nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ChatSend(c.ID, "again", nil); err != nil {
+	if err := a.ChatSend(c.ID, "again", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(fake.rpc.starts) != 1 || fake.rpc.transports[0] != "codex-app-server" {
@@ -298,7 +298,7 @@ func TestChatSendStartsAcpFromRow(t *testing.T) {
 	}
 	_ = os.WriteFile(filepath.Join(ws, ".burrow", "config.toml"), []byte("[settings]\nenv_file = \".env.local\"\nclaude_config_dir = \"/cfg\"\n"), 0o644)
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "acp", AgentKind: "gem", Model: "m1"})
-	if err := a.ChatSend(c.ID, "hi", nil); err != nil {
+	if err := a.ChatSend(c.ID, "hi", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	o := fake.rpc.starts[0]
@@ -313,7 +313,7 @@ func TestChatSendStartsAcpFromRow(t *testing.T) {
 func TestChatSendRefusesUnknownAcpProvider(t *testing.T) {
 	a, fake, wsID, _ := runtimeApp(t)
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "acp", AgentKind: "nope"})
-	if err := a.ChatSend(c.ID, "hi", nil); err == nil || len(fake.rpc.starts) != 0 {
+	if err := a.ChatSend(c.ID, "hi", nil, ""); err == nil || len(fake.rpc.starts) != 0 {
 		t.Fatalf("want an error and no start, err=%v starts=%d", err, len(fake.rpc.starts))
 	}
 }
@@ -321,7 +321,7 @@ func TestChatSendRefusesUnknownAcpProvider(t *testing.T) {
 func TestCodexPermissionModeFailsClosed(t *testing.T) {
 	a, _, wsID, _ := runtimeApp(t)
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "codex-app-server", AgentKind: "codex", PermissionMode: "bogus"})
-	if err := a.ChatSend(c.ID, "hi", nil); err == nil {
+	if err := a.ChatSend(c.ID, "hi", nil, ""); err == nil {
 		t.Fatal("an unappliable mode must refuse the send")
 	}
 	if _, live := a.acpReg().get("1"); live {
@@ -335,7 +335,7 @@ func TestRPCRestartClearAndInterrupt(t *testing.T) {
 	events := chatEvents(t, "1")
 	live := func() bool { _, ok := a.acpReg().get("1"); return ok }
 
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	if err := a.ChatRestart(c.ID); err != nil || live() {
 		t.Fatalf("restart must stop the session: err=%v live=%v", err, live())
 	}
@@ -344,7 +344,7 @@ func TestRPCRestartClearAndInterrupt(t *testing.T) {
 	}
 
 	// No addressable turn: the interrupt falls back to a restart.
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	sess, _ := a.acpReg().get("1")
 	sess.mu.Lock()
 	sess.turnID = ""
@@ -357,7 +357,7 @@ func TestRPCRestartClearAndInterrupt(t *testing.T) {
 	old := codexInterruptGrace
 	codexInterruptGrace = 10 * time.Millisecond
 	t.Cleanup(func() { codexInterruptGrace = old })
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	sess, _ = a.acpReg().get("1")
 	sess.mu.Lock()
 	sess.turnID = "turn-1"
@@ -374,11 +374,11 @@ func TestRPCRestartClearAndInterrupt(t *testing.T) {
 	}
 
 	// Clear forgets the thread: the next start does not resume it.
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	if err := a.ChatClear(c.ID); err != nil || live() {
 		t.Fatalf("clear: err=%v live=%v", err, live())
 	}
-	_ = a.ChatSend(c.ID, "fresh", nil)
+	_ = a.ChatSend(c.ID, "fresh", nil, "")
 	if o := fake.rpc.starts[len(fake.rpc.starts)-1]; o.ResumeSessionID != "" {
 		t.Fatalf("cleared chat resumed %q", o.ResumeSessionID)
 	}
@@ -388,7 +388,7 @@ func TestRPCLaunchSettingsApplyLive(t *testing.T) {
 	a, _, wsID, _ := runtimeApp(t)
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "codex-app-server", AgentKind: "codex"})
 	str := func(s string) *string { return &s }
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	if err := a.ChatSetLaunchSettings(c.ID, LaunchSettingsPatch{Model: str("gpt-y"), Effort: str("low"), PermissionMode: str("auto")}); err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestChatRestartStopsAndEmitsReset(t *testing.T) {
 	writeConfig(t, map[string]any{"providers": []any{claudeAt("claude", "")}})
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
 	events := chatEvents(t, "1")
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	if err := a.ChatRestart(c.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestChatClearWipesTranscriptAndSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := chatEvents(t, "1")
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	if err := a.ChatClear(c.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func TestChatClearWipesTranscriptAndSession(t *testing.T) {
 		t.Fatalf("want session.reset{cleared}, got %+v", got)
 	}
 	// The next send starts fresh — no resume of the forgotten session.
-	_ = a.ChatSend(c.ID, "new", nil)
+	_ = a.ChatSend(c.ID, "new", nil, "")
 	if slices.Contains(fake.lastStart().args, "--resume") {
 		t.Fatalf("cleared chat resumed: %v", fake.lastStart().args)
 	}
@@ -495,7 +495,7 @@ func TestChatSetLaunchSettings(t *testing.T) {
 
 	// Live model change, confirmed by the CLI: process stays.
 	fake.ctrlReply = "success"
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	if err := a.ChatSetLaunchSettings(c.ID, LaunchSettingsPatch{Model: str("claude-sonnet-x")}); err != nil {
 		t.Fatal(err)
 	}
@@ -513,11 +513,11 @@ func TestChatSetLaunchSettings(t *testing.T) {
 	}
 
 	// Effort has no live control: restart, and the next start uses it.
-	_ = a.ChatSend(c.ID, "again", nil)
+	_ = a.ChatSend(c.ID, "again", nil, "")
 	if err := a.ChatSetLaunchSettings(c.ID, LaunchSettingsPatch{Effort: str("high")}); err != nil {
 		t.Fatal(err)
 	}
-	_ = a.ChatSend(c.ID, "third", nil)
+	_ = a.ChatSend(c.ID, "third", nil, "")
 	s := fake.lastStart()
 	if !hasArgPair(s.args, "--effort", "high") || !hasArgPair(s.args, "--model", "claude-sonnet-x") || !hasArgPair(s.args, "--permission-mode", "default") {
 		t.Fatalf("restart did not pick up the row: %v", s.args)
@@ -528,7 +528,7 @@ func TestChatInterruptKeepsProcessWhenClaudeConfirms(t *testing.T) {
 	a, fake, wsID, _ := runtimeApp(t)
 	writeConfig(t, map[string]any{"providers": []any{claudeAt("claude", "")}})
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 	fake.ctrlReply = "success"
 	if err := a.ChatInterrupt(c.ID); err != nil {
 		t.Fatal(err)

@@ -187,7 +187,7 @@ func TestOpenAIFullCodingTurnApprovalAndResume(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	if err := a.ChatSend(chat.ID, "Create hello.txt", nil); err != nil {
+	if err := a.ChatSend(chat.ID, "Create hello.txt", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	openAITestWait(t, sess.native)
@@ -198,7 +198,7 @@ func TestOpenAIFullCodingTurnApprovalAndResume(t *testing.T) {
 	if err := a.ChatRestart(chat.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ChatSend(chat.ID, "What did you change?", nil); err != nil {
+	if err := a.ChatSend(chat.ID, "What did you change?", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	resumed, _ := a.acpReg().get(id)

@@ -154,15 +154,23 @@ func (a *App) ensureRPC(c Chat, transport string) error {
 
 // ChatSend is the one door for a prompt, whatever the transport: it starts the
 // process if there is none (resuming the row's session — also what makes a
-// send after auto-sleep work, chatsleep.go) and then sends.
-func (a *App) ChatSend(chatID int64, text string, images []string) error {
+// send after auto-sleep work, chatsleep.go) and then sends. A non-empty
+// clientID already accepted for this chat returns nil without sending again
+// (chatclientid.go) — a client's retry after a dropped socket.
+func (a *App) ChatSend(chatID int64, text string, images []string, clientID string) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
 		return err
 	}
+	_, finish, dup := a.clientIDs.claim(chatID, clientID)
+	if dup {
+		return nil
+	}
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
-	return a.chatSendLocked(c, id, text, images)
+	err = a.chatSendLocked(c, id, text, images)
+	finish(err == nil, nil)
+	return err
 }
 
 // chatSendLocked is ChatSend's body; the caller holds the chat lock.

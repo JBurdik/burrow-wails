@@ -139,7 +139,7 @@ func (a *App) ReviewChanges(workspaceID, parentChatID int64, base string) (map[s
 	if native {
 		err = a.codexReview(c, base)
 	} else {
-		err = a.ChatSend(c.ID, reviewPrompt(base), nil)
+		err = a.ChatSend(c.ID, reviewPrompt(base), nil, "")
 	}
 	if err != nil {
 		_ = a.DeleteChat(c.ID) // a row whose process never started is unreachable

@@ -117,7 +117,7 @@ func (r chatRuntimeAdapter) SpawnSubagent(req control.SpawnRequest) (control.Spa
 }
 
 func (r chatRuntimeAdapter) SendToChat(chatID int64, text string) error {
-	return r.a.ChatSend(chatID, text, nil)
+	return r.a.ChatSend(chatID, text, nil, "")
 }
 
 // pickSpawnAgent is spawn's agent choice, shared with list_agents so the
@@ -247,7 +247,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 	if err != nil {
 		return none, err
 	}
-	if err := a.ChatSend(c.ID, task, nil); err != nil {
+	if err := a.ChatSend(c.ID, task, nil, ""); err != nil {
 		// A row whose process never started is a sub-agent nobody can reach.
 		_ = a.DeleteChat(c.ID)
 		return none, err

@@ -24,6 +24,8 @@ type App struct {
 	daemon  *DaemonClient
 	phases  *PhaseStore
 	perms   *permRegistry
+	// clientIds already accepted by chat_send / chat_queue_add (chatclientid.go).
+	clientIDs clientIDs
 	secrets *secretRegistry
 	poller  *phasePoller
 	prompts *promptIndexer // nil until startup; refresh is nil-safe

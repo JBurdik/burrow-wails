@@ -103,11 +103,32 @@ func (a *App) emitQueueChanged(chatID int64) {
 
 // ChatQueueAdd appends a follow-up at the tail. A chat that has already
 // settled (the client thought it busy, the turn ended meanwhile) is drained
-// right away instead of on the next sweep.
-func (a *App) ChatQueueAdd(chatID int64, text string, images []string) (ChatQueueItem, error) {
+// right away instead of on the next sweep. A non-empty clientID already
+// accepted for this chat (by this or chat_send) returns the earlier item
+// without inserting (chatclientid.go).
+func (a *App) ChatQueueAdd(chatID int64, text string, images []string, clientID string) (ChatQueueItem, error) {
 	if _, err := a.chatByID(chatID); err != nil {
 		return ChatQueueItem{}, err
 	}
+	prev, finish, dup := a.clientIDs.claim(chatID, clientID)
+	if dup {
+		if prev.item != nil {
+			return *prev.item, nil
+		}
+		return ChatQueueItem{ChatID: chatID, Text: text, Attachments: []string{}}, nil
+	}
+	it, err := a.chatQueueInsert(chatID, text, images)
+	if err != nil {
+		finish(false, nil)
+		return ChatQueueItem{}, err
+	}
+	finish(true, &it)
+	a.emitQueueChanged(chatID)
+	a.kickChatDelivery()
+	return it, nil
+}
+
+func (a *App) chatQueueInsert(chatID int64, text string, images []string) (ChatQueueItem, error) {
 	if images == nil {
 		images = []string{}
 	}
@@ -120,13 +141,7 @@ func (a *App) ChatQueueAdd(chatID int64, text string, images []string) (ChatQueu
 		return ChatQueueItem{}, err
 	}
 	id, _ := res.LastInsertId()
-	it, err := scanQueueItem(a.db.QueryRow(`SELECT `+chatQueueColumns+` FROM chat_queue WHERE id = ?`, id))
-	if err != nil {
-		return ChatQueueItem{}, err
-	}
-	a.emitQueueChanged(chatID)
-	a.kickChatDelivery()
-	return it, nil
+	return scanQueueItem(a.db.QueryRow(`SELECT `+chatQueueColumns+` FROM chat_queue WHERE id = ?`, id))
 }
 
 var errNotQueued = errors.New("not in the queue (already sent or removed)")

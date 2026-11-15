@@ -46,7 +46,7 @@ func TestChatSteerClaudeWritesIntoRunningTurn(t *testing.T) {
 	if err := a.ChatSteer(c.ID, "early", nil); !errors.Is(err, errNoTurnToSteer) {
 		t.Fatalf("no process yet: want errNoTurnToSteer, got %v", err)
 	}
-	if err := a.ChatSend(c.ID, "go", nil); err != nil {
+	if err := a.ChatSend(c.ID, "go", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	turn := openTurnOf(a, "1")

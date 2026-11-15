@@ -295,7 +295,7 @@ func (a *App) ChatRunAsk(chatID int64, index64 int64) error {
 		if kept := a.finishRunAsk(chatID, index, cmd, code, reply, len(n.Asks) > 1); kept {
 			return
 		}
-		if _, err := a.ChatQueueAdd(chatID, reply, nil); err != nil {
+		if _, err := a.ChatQueueAdd(chatID, reply, nil, ""); err != nil {
 			log.Printf("chat %d: queue run result: %v", chatID, err)
 		}
 	}()

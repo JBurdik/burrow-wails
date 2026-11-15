@@ -31,7 +31,7 @@ func (r chatControlAdapter) Steer(chatID int64, text string) error {
 	return r.a.ChatSteer(chatID, text, nil)
 }
 func (r chatControlAdapter) Queue(chatID int64, text string) error {
-	_, err := r.a.ChatQueueAdd(chatID, text, nil)
+	_, err := r.a.ChatQueueAdd(chatID, text, nil, "")
 	return err
 }
 func (r chatControlAdapter) Pending(chatID int64) ([]control.PendingRequest, error) {

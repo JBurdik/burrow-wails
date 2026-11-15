@@ -55,7 +55,7 @@ func TestSleepIdleChatsSweep(t *testing.T) {
 	settled, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
 	blocked, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
 	for _, c := range []Chat{settled, blocked} {
-		if err := a.ChatSend(c.ID, "hi", nil); err != nil {
+		if err := a.ChatSend(c.ID, "hi", nil, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -94,7 +94,7 @@ func TestSleepIdleChatsSweep(t *testing.T) {
 	}
 
 	// Sending wakes it: a resumed start, stamp cleared.
-	if err := a.ChatSend(settled.ID, "again", nil); err != nil {
+	if err := a.ChatSend(settled.ID, "again", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !hasArgPair(fake.lastStart().args, "--resume", "sess-1") {
@@ -118,7 +118,7 @@ func TestChatSleepManual(t *testing.T) {
 	settled, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
 	running, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
 	for _, c := range []Chat{settled, running} {
-		if err := a.ChatSend(c.ID, "hi", nil); err != nil {
+		if err := a.ChatSend(c.ID, "hi", nil, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -226,7 +226,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"schedule_run_now":     {Method: "ScheduleRunNow", Args: []string{"id"}, Scope: scopeOrchOperate},
 	// The user's queued follow-ups (chatqueue.go), drained by Go.
 	"chat_queue_list":    {Method: "ChatQueueList", Args: []string{"chatId"}, Scope: scopeOrchRead},
-	"chat_queue_add":     {Method: "ChatQueueAdd", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_queue_add":     {Method: "ChatQueueAdd", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
 	"chat_queue_update":  {Method: "ChatQueueUpdate", Args: []string{"id", "text"}, Scope: scopeOrchOperate},
 	"chat_queue_remove":  {Method: "ChatQueueRemove", Args: []string{"id"}, Scope: scopeOrchOperate},
 	"chat_queue_reorder": {Method: "ChatQueueReorder", Args: []string{"chatId", "ids"}, Scope: scopeOrchOperate},
@@ -411,7 +411,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// The chat runtime (chatruntime.go): every client starts, sends to,
 	// restarts and reconfigures a chat through these, by chat id. The process
 	// is Go's to start — claude_start/claude_send are in remoteDenied.
-	"chat_send":             {Method: "ChatSend", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_send":             {Method: "ChatSend", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
 	"chat_restart":          {Method: "ChatRestart", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_clear":            {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_sleep":            {Method: "ChatSleep", Args: []string{"chatId"}, Scope: scopeOrchOperate},

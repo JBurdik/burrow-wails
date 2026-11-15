@@ -192,7 +192,7 @@ func TestMoveChatRestartsInNewCwdOnSettledSend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "sess-1.jsonl"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ChatSend(c.ID, "hi", nil); err != nil {
+	if err := a.ChatSend(c.ID, "hi", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	key := chatKey(c.ID)
@@ -219,21 +219,21 @@ func TestMoveChatRestartsInNewCwdOnSettledSend(t *testing.T) {
 		t.Fatal("SaveChats reverted the move")
 	}
 
-	if err := a.ChatSend(c.ID, "steer", nil); err != nil {
+	if err := a.ChatSend(c.ID, "steer", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if fake.startCount() != 1 {
 		t.Fatal("restarted mid-turn")
 	}
 	a.phases.Apply(key, agentphase.Event{Kind: agentphase.HookDone})
-	if err := a.ChatSend(c.ID, "next", nil); err != nil {
+	if err := a.ChatSend(c.ID, "next", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	s := fake.lastStart()
 	if fake.startCount() != 2 || s.cwd != wt || !hasArgPair(s.args, "--resume", "sess-1") {
 		t.Fatalf("want a resumed start in %s, got #%d cwd=%s args=%v", wt, fake.startCount(), s.cwd, s.args)
 	}
-	if err := a.ChatSend(c.ID, "again", nil); err != nil || fake.startCount() != 2 {
+	if err := a.ChatSend(c.ID, "again", nil, ""); err != nil || fake.startCount() != 2 {
 		t.Fatalf("restarted twice: %d %v", fake.startCount(), err)
 	}
 }
