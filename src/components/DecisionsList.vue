@@ -1,7 +1,7 @@
 <template>
   <!-- Every thread waiting on an answer (end_turn needs "you"), as its card:
        answer here and it goes to that thread exactly as if typed there —
-       chat_submit, sent at once since the turn has settled. Nothing runs or is relayed besides that one message. -->
+       chat_answer_turn (Go composes the message, then the submit door). Nothing runs or is relayed besides that one message. -->
   <section v-if="items.length" class="decisions">
     <div class="decisions-head">
       <PhHandPalm :size="12" weight="fill" class="text-[var(--chat-warn)]" />
@@ -20,7 +20,7 @@
         :chat-id="s.id"
         :archived="false"
         composer-text=""
-        @send="(text) => answer(s.id, text)"
+        @sent="answered(s.id)"
         @open-chat="(id) => emit('open', s, id)"
       />
     </div>
@@ -29,8 +29,6 @@
 
 <script setup lang="ts">
 import { computed, reactive } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import { newClientId } from "@/lib/offline";
 import { PhArrowSquareOut, PhHandPalm } from "@phosphor-icons/vue";
 import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
 import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
@@ -59,16 +57,10 @@ function wsName(wsId: number): string {
   return ws.workspaces.find((x) => x.id === wsId)?.name ?? "";
 }
 
-async function answer(chatId: number, text: string) {
+// The card sent its answer (chat_answer_turn, Go composes it). The new turn
+// clears turn_needs and the card drops out; until then "Sending…" holds its place.
+function answered(chatId: number) {
   sending.add(chatId);
-  try {
-    await invoke("chat_submit", { chatId, text, images: [], clientId: newClientId() });
-  } catch {
-    sending.delete(chatId); // the card comes back to retry
-    return;
-  }
-  // The new turn clears turn_needs (Go) and the card drops out; until then
-  // "Sending…" holds its place.
   setTimeout(() => sending.delete(chatId), 15_000);
 }
 </script>

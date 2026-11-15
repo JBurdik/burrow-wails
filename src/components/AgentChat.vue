@@ -494,7 +494,7 @@
         :archived="!!activeSession?.archivedAt"
         :composer-text="inputText"
         :cwd="cwd"
-        @send="sendTurnAnswer"
+        @sent="inputText = ''"
         @archive="archiveFromCard"
         @open-chat="openSubagentFromTranscript"
       />
@@ -2691,13 +2691,6 @@ async function copyMessage(msg: ChatMessage) {
 async function sendInitialPrompt(prompt: string, images?: string[]) {
   emit("prompt-sent");
   await sendMessage(prompt, images);
-}
-
-// A Needs-you / Done card answer: the card already folded the composer's text
-// into it, so the composer empties as for a normal send.
-function sendTurnAnswer(text: string) {
-  inputText.value = "";
-  void sendMessage(text);
 }
 
 // The Done card's Archive. A chat that is an open tab is archived by closing

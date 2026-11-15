@@ -38,25 +38,23 @@ export function parseTurnNeeds(raw: string | undefined | null): TurnNeeds | unde
   }
 }
 
-/**
- * One message answering the asks: each answered question quoted with its
- * answer, unanswered ones left out, then anything typed in the composer.
- * A single ask answered alone is sent as just the answer.
- */
-export function composeAnswers(asks: TurnAsk[], answers: (string | undefined)[], extra = ""): string {
-  // A run ask whose result was kept on the card answers itself with it.
-  const answered = asks
-    .map((a, i) => ({ q: a.question, a: answers[i]?.trim() || a.run?.reply?.trim() }))
-    .filter((x): x is { q: string; a: string } => !!x.a);
-  const tail = extra.trim();
-  if (asks.length === 1 && answered.length === 1) return [answered[0].a, tail].filter(Boolean).join("\n\n");
-  const body = answered.map((x) => `> ${x.q.replace(/\n/g, "\n> ")}\n${x.a}`).join("\n\n");
-  return [body, tail].filter(Boolean).join("\n\n");
+/** One ask's answer for chat_answer_turn: picked option labels, else free text. */
+export interface TurnPick {
+  index: number;
+  options?: string[];
+  text?: string;
 }
 
-/** The follow-ups the user ticked on the Done card, as one message. */
-export function composeNext(picked: string[], extra = ""): string {
-  const tail = extra.trim();
-  const body = picked.length === 1 ? picked[0] : picked.map((p) => `- ${p}`).join("\n");
-  return [body, tail].filter(Boolean).join("\n\n");
+/**
+ * What the card sends to chat_answer_turn (Go composes the message):
+ * answers[i] is the picked option ("A, B" for a multi ask) or, with
+ * typed[i], the user's own words. Unanswered asks are left out.
+ */
+export function turnPicks(asks: TurnAsk[], answers: (string | undefined)[], typed: boolean[]): TurnPick[] {
+  return asks.flatMap((a, i): TurnPick[] => {
+    const v = answers[i]?.trim();
+    if (!v) return [];
+    if (typed[i] || !a.options?.length) return [{ index: i, text: v }];
+    return [{ index: i, options: a.multi ? a.options.filter((o) => v.split(", ").includes(o)) : [v] }];
+  });
 }

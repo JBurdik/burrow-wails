@@ -69,8 +69,9 @@
         />
         <div class="mt-2 flex items-center gap-2">
           <span class="text-[11.5px] text-muted-foreground">{{ answeredCount }} of {{ asks.length }} answered<template v-if="composerText.trim()"> · your message goes with it</template></span>
-          <button class="needs-btn is-primary ml-auto" :disabled="!answeredCount" @click="send">Send {{ asks.length > 1 ? 'answers' : 'answer' }}</button>
+          <button class="needs-btn is-primary ml-auto" :disabled="!answeredCount || sending" @click="send">Send {{ asks.length > 1 ? 'answers' : 'answer' }}</button>
         </div>
+        <p v-if="sendError" class="mt-1 text-[11.5px] text-[var(--red)]">{{ sendError }}</p>
       </div>
 
       <!-- Done: follow-ups + loose ends -->
@@ -82,8 +83,9 @@
             <span class="text-left">{{ s }}</span>
           </button>
           <div v-if="pickedNext.length" class="mt-1.5 flex justify-end">
-            <button class="needs-btn is-primary" @click="sendNext">Send {{ pickedNext.length > 1 ? `${pickedNext.length} follow-ups` : 'follow-up' }}</button>
+            <button class="needs-btn is-primary" :disabled="sending" @click="sendNext">Send {{ pickedNext.length > 1 ? `${pickedNext.length} follow-ups` : 'follow-up' }}</button>
           </div>
+          <p v-if="sendError" class="mt-1 text-[11.5px] text-[var(--red)]">{{ sendError }}</p>
         </template>
         <div class="needs-label" :class="{ 'mt-2': next.length }">Still open</div>
         <p v-if="loose === null" class="text-[12px] text-muted-foreground">Checking…</p>
@@ -113,10 +115,12 @@ import {
   PhArchive, PhCaretDown, PhCaretLeft, PhCaretRight, PhCheckCircle, PhCheckSquare, PhClock, PhDotOutline,
   PhGitBranch, PhGitPullRequest, PhHandPalm, PhPencilSimple, PhPlay, PhSquare, PhStar, PhTerminalWindow, PhUsersThree,
 } from "@phosphor-icons/vue";
-import { composeAnswers, composeNext, type LooseEnd, type TurnNeeds } from "@/lib/turnNeeds";
+import { newClientId } from "@/lib/offline";
+import { turnPicks, type LooseEnd, type TurnNeeds, type TurnPick } from "@/lib/turnNeeds";
 
 const props = defineProps<{ needs: TurnNeeds; chatId: number; archived: boolean; composerText: string; cwd?: string }>();
-const emit = defineEmits<{ send: [text: string]; archive: []; openChat: [id: number] }>();
+/** sent: Go took the answer (chat_answer_turn) — the composer text went with it. */
+const emit = defineEmits<{ sent: []; archive: []; openChat: [id: number] }>();
 
 const LOOSE_ICONS: Record<string, unknown> = {
   uncommitted: PhPencilSimple,
@@ -144,6 +148,8 @@ const picked = ref<boolean[]>([]);
 const loose = ref<LooseEnd[] | null>(null);
 const running = ref(false);
 const runError = ref("");
+const sending = ref(false);
+const sendError = ref("");
 
 const ask = computed(() => asks.value[current.value]);
 // A run whose result waits on the card counts as answered: it goes with the rest.
@@ -165,6 +171,7 @@ watch(
     loose.value = null;
     running.value = false;
     runError.value = "";
+    sendError.value = "";
     if (!isYou.value) void loadLoose();
   },
   { immediate: true },
@@ -199,6 +206,7 @@ function pick(o: string) {
     else picked.add(o);
     const order = ask.value.options ?? [];
     answers.value[current.value] = order.filter((x) => picked.has(x)).join(", ") || undefined;
+    otherOpen.value[current.value] = false;
     return;
   }
   answers.value[current.value] = answers.value[current.value] === o ? undefined : o;
@@ -234,13 +242,28 @@ async function runIt() {
   }
 }
 
+// Go composes the message from the stored card (chat_answer_turn); the card
+// sends only what was picked, plus the composer text.
+async function submit(picks: TurnPick[]) {
+  if (sending.value) return;
+  sending.value = true;
+  sendError.value = "";
+  try {
+    await invoke("chat_answer_turn", { chatId: props.chatId, picks, extra: props.composerText, clientId: newClientId() });
+    emit("sent");
+  } catch (e) {
+    sendError.value = String(e);
+  } finally {
+    sending.value = false;
+  }
+}
+
 function send() {
-  if (!answeredCount.value) return;
-  emit("send", composeAnswers(asks.value, answers.value, props.composerText));
+  if (answeredCount.value) void submit(turnPicks(asks.value, answers.value, otherOpen.value));
 }
 
 function sendNext() {
-  if (pickedNext.value.length) emit("send", composeNext(pickedNext.value, props.composerText));
+  if (pickedNext.value.length) void submit([{ index: 0, options: pickedNext.value }]);
 }
 </script>
 
