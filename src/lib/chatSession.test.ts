@@ -916,8 +916,8 @@ describe("clientId + outbox ordering", () => {
 describe("submit door", () => {
   it("a queued submit drops the guessed bubble and mirrors the queue item", async () => {
     const f = fakeDeps();
-    f.invoke.mockImplementation(async (cmd: string, args: { clientId?: string }) => {
-      if (cmd === "chat_submit") return { sent: false, item: { id: 7, chatId: 96, text: "later", attachments: [], clientId: args.clientId } };
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_submit") return { sent: false, item: { id: 7, chatId: 96, text: "later", attachments: [] } };
       return undefined;
     });
     const s = chatSession(96, f.deps);
