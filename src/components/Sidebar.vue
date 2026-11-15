@@ -245,17 +245,26 @@
           </span>
         </button>
         <template v-if="shelfOpen('settled')">
+          <template v-for="g in archiveGroups" :key="g.repoId">
+          <button
+            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-[5px] text-muted-foreground hover:bg-hover hover:text-foreground"
+            @click="toggleArchiveGroup(g.repoId)"
+          >
+            <img v-if="repoIcon(g.ws)" :src="repoIcon(g.ws)!" class="h-[14px] w-[14px] shrink-0 rounded-[3px] object-cover" />
+            <span v-else class="sb-repo-tile !h-[14px] !w-[14px] !text-[8px]" :style="{ background: repoColor(g.repoId) }">{{ repoName(g.ws).slice(0, 1).toUpperCase() }}</span>
+            <span class="min-w-0 truncate text-[12px]">{{ repoName(g.ws) }}</span>
+            <span class="text-[10px] tabular-nums opacity-60">{{ g.items.length }}</span>
+            <PhCaretRight :size="9" weight="bold" class="ml-auto shrink-0 transition-transform" :class="archiveGroupOpen(g) && 'rotate-90'" />
+          </button>
           <div
-            v-for="it in archiveVisible"
+            v-for="it in archiveGroupOpen(g) ? g.items : []"
             :key="it.key"
-            class="sb-row group flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[5px] text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
+            class="sb-row group flex cursor-pointer items-center gap-2 rounded-lg py-[5px] pl-[30px] pr-2.5 text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
             :class="it.row && isActiveRow(it.row) && 'sb-row-active'"
-            :title="`${it.title} — ${repoName(it.ws)}`"
+            :title="it.title"
             @click="openArchived(it)"
             @contextmenu.prevent.stop="it.row && openRowMenu(it.row.ws, it.row.tab, $event)"
           >
-            <img v-if="repoIcon(it.ws)" :src="repoIcon(it.ws)!" class="h-[14px] w-[14px] shrink-0 rounded-[3px] object-cover" />
-            <span v-else class="sb-repo-tile !h-[14px] !w-[14px] !text-[8px]" :style="{ background: repoColor(it.ws.parent_id ?? it.ws.id) }">{{ repoName(it.ws).slice(0, 1).toUpperCase() }}</span>
             <span class="min-w-0 flex-1 truncate text-[12px]">{{ it.title }}</span>
             <span class="shrink-0 text-[10px] tabular-nums group-hover:hidden">{{ ago(it.ts) }}</span>
             <span class="hidden shrink-0 items-center gap-0.5 group-hover:flex">
@@ -263,14 +272,7 @@
               <button class="rounded p-0.5 hover:bg-hover hover:!text-destructive" title="Delete (Undo for 8 s)" @click.stop="deleteArchived(it)"><PhTrash :size="11" /></button>
             </span>
           </div>
-          <button
-            v-if="archiveItems.length > settledChatsLimit"
-            class="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-hover hover:text-foreground"
-            @click="settledChatsLimit += 25"
-          >
-            <PhPlus :size="10" />
-            Show {{ archiveItems.length - settledChatsLimit }} more
-          </button>
+          </template>
         </template>
       </div>
     </div>
@@ -931,7 +933,27 @@ const archiveItems = computed<ArchiveItem[]>(() => {
   }
   return items.sort((x, y) => y.ts - x.ts);
 });
-const archiveVisible = computed(() => archiveItems.value.slice(0, settledChatsLimit.value));
+// One sub-group per project (newest project first), folded until opened — a
+// flat newest-first list buried a quiet project's threads under "Show more".
+interface ArchiveGroup { repoId: number; ws: Workspace; items: ArchiveItem[] }
+const archiveGroups = computed<ArchiveGroup[]>(() => {
+  const byRepo = new Map<number, ArchiveGroup>();
+  for (const it of archiveItems.value) {
+    const repoId = it.ws.parent_id ?? it.ws.id;
+    let g = byRepo.get(repoId);
+    if (!g) byRepo.set(repoId, (g = { repoId, ws: it.ws, items: [] }));
+    g.items.push(it);
+  }
+  return [...byRepo.values()]; // items are newest first, so groups are too
+});
+const openArchiveRepos = reactive(new Set<number>()); // ponytail: not persisted, add if folding back every launch annoys
+function archiveGroupOpen(g: ArchiveGroup): boolean {
+  return openArchiveRepos.has(g.repoId) || g.items.some((it) => it.row && isActiveRow(it.row));
+}
+function toggleArchiveGroup(repoId: number) {
+  if (openArchiveRepos.has(repoId)) openArchiveRepos.delete(repoId);
+  else openArchiveRepos.add(repoId);
+}
 function openArchived(it: ArchiveItem) {
   if (it.row) return onRowClick(it.row);
   void router.push(`/ws/${it.ws.id}?chat=${it.chatId}`); // opening an archived chat unarchives it

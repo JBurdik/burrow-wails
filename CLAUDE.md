@@ -454,7 +454,7 @@ list, distinguished only by icon. **States lead, projects fold:** Inbox (needs y
 (`burrow.sidebar.expandedRepos`; the group holding the thread on screen opens by itself); rows are one line (recap in the
 tooltip, sub-agents as a clickable count). Cross-project groups (Inbox, Working, Pinned) show the project icon on each row;
 a finished unread turn whose end_turn said `nothing` gets a green **tick**, the blue dot means a reply to read. Docked at the
-foot: Snoozed, and **Archived** = settled + archived threads of every project in one list (newest first, project icon,
+foot: Snoozed, and **Archived** = settled + archived threads of every project, one folded sub-group per project (newest first,
 Bring back / Delete with Undo; "Archive" replaced "Settle" in the UI — a settled thread keeps its tab, an archived one
 reopens through `/ws/<ws>?chat=<id>`).
 
