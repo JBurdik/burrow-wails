@@ -351,7 +351,8 @@ extension AppModel {
         let p = phase(chat)
         var notice: String?
         if !p.inFlight {
-            try await client.call("chat_send", args)
+            localSend(chat, text)
+            do { try await client.call("chat_send", args) } catch { localSend(chat, nil); throw error }
             if let c = self.chat(chat) { startActivity(c) }
         } else if steer && p.state == "running" {
             do {

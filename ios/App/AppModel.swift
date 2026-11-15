@@ -331,6 +331,10 @@ final class AppModel {
 
     /// Re-read an open chat now, without waiting for its stream: the user's own
     /// message must show the moment it is sent.
+    /// The composer's own send, echoed to the open ChatView before the core has
+    /// it (waking a slept chat takes seconds). nil text = the send failed.
+    func localSend(_ chat: Int, _ text: String?) { event("chat-local-send-\(chat)", text) }
+
     func nudgeChat(_ chat: Int) {
         event("chat-event-\(chat)", nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.event("chat-event-\(chat)", nil) }

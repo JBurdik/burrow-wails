@@ -37,6 +37,11 @@ struct ChatView: View {
     @State private var showPanel = false
     @State private var atBottom = true
     @State private var eventToken: UUID?
+    /// Own sends not yet in the transcript (shown greyed until Go's copy lands).
+    @State private var echoes: [Message] = []
+    /// Set by an own send: the next transcript change scrolls down whatever
+    /// atBottom says (the composer / keyboard often hide the bottom marker).
+    @State private var pinBottom = false
     @State private var bottomBeforeKeyboard = false
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -61,6 +66,7 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity)
                     }
                     ForEach(shown) { MessageRow(message: $0) }
+                    ForEach(echoes) { MessageRow(message: $0).opacity(0.6) }
                     if phase.state == "running" {
                         HStack(spacing: 8) {
                             Image(systemName: "ellipsis").symbolEffect(.variableColor.iterative, options: .repeating)
@@ -88,7 +94,12 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             // Follow new output only while already at the bottom; reading back
             // up the transcript must not be yanked down by every streamed line.
-            .onChange(of: messages.last) { _, _ in if atBottom { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } }
+            .onChange(of: messages.last) { _, _ in
+                if atBottom || pinBottom { pinBottom = false; withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+            .onChange(of: echoes.count) { old, new in
+                if new > old { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if !atBottom {
                     Button { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } label: {
@@ -165,7 +176,8 @@ struct ChatView: View {
             // same chat (split view, a sub-agent pushed in a sheet) used to clear
             // each other's listener on disappear, and the chat stopped updating.
             eventToken = model.subscribe { name, payload in
-                if name == "chat-messages-changed-\(chatId)" { applySplice(payload) }
+                if name == "chat-local-send-\(chatId)" { localEcho(payload as? String) }
+                else if name == "chat-messages-changed-\(chatId)" { applySplice(payload) }
                 // nil payload = AppModel.nudgeChat after a send / outbox delivery: the
                 // user's own message may arrive with no splice, so re-read the page.
                 else if name == "chat-event-\(chatId)", payload == nil || Self.endsTurn(payload) { scheduleReload() }
@@ -179,6 +191,21 @@ struct ChatView: View {
     }
 
     private var messages: [Message] { Self.visible(raw) }
+
+    private func localEcho(_ text: String?) {
+        guard let text else { echoes.removeAll(); return }
+        var m = Message(["role": "user", "text": text], index: 0)
+        m.id = -1 - echoes.count // never a transcript id
+        echoes.append(m)
+        pinBottom = true
+    }
+
+    /// Drop the echoes Go's transcript now carries (matched by text, in order).
+    private func settleEchoes() {
+        guard !echoes.isEmpty else { return }
+        let landed = raw.suffix(20).filter { $0.role == "user" }.map(\.text)
+        echoes.removeAll { e in landed.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == e.text } }
+    }
 
     /// Older pages loaded on demand + the live newest page, deduped by id.
     private var shown: [Message] {
@@ -223,6 +250,10 @@ struct ChatView: View {
         let rows = page["messages"] as? [[String: Any]] ?? []
         earlier = int(page["start"])
         raw = rows.enumerated().map { Message($1, index: earlier + $0) }
+        settleEchoes()
+        // A settled chat's page is complete: an echo still unmatched (text
+        // reshaped on the way) would otherwise linger as a duplicate.
+        if live != nil, !phase.inFlight { echoes.removeAll() }
     }
 
     /// While a turn streams, Go's fold (chattranscript.go) emits the changed tail
@@ -235,6 +266,7 @@ struct ChatView: View {
                                      rows.enumerated().map { Message($1, index: from + $0) })
         else { scheduleReload(); return }
         raw = next
+        settleEchoes()
     }
 
     /// `raw` starts at transcript index `start`; replace everything from `from`
