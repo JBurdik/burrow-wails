@@ -775,7 +775,7 @@ none while `chat_mark_active` < 90 s ago, ≤ 1 per key per 30 s; tag/Topic per 
 from `<app-data>/apns.p8` + `apns.json {keyId, teamId, topic}`, read at startup, either absent = off. `apns_tokens`
 (token, device_id, sandbox) via `push_subscribe_apns(token, sandbox)` / `push_unsubscribe_apns` (calling device, `deviceArg`);
 revoke deletes them; 410 / `BadDeviceToken` / `Unregistered` / `DeviceTokenNotForTopic` delete the row. Payload: alert,
-`thread-id` = phase key, `url` = the hash route. Never logs the key or a token (transport errors drop the URL).
+`thread-id` = phase key, `url` = the hash route. Never logs the key or a token (transport errors drop the URL). **Currently off on iOS** (`PushDelegate.enabled = false`, no `aps-environment`): no Apple key / explicit App ID yet.
 
 **No manual GUI verification of any of this has been done.** Try first: pair a phone; kill the socket
 mid-turn; revoke a device; heavy terminal output; ESC mid-turn.

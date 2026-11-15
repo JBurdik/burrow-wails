@@ -14,8 +14,14 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
         return true
     }
 
+    /// Off until the Apple portal side exists (APNs key, explicit App ID with
+    /// Push, its profile — see release.sh APP_PROFILE). Off = no permission
+    /// prompt, no token; the core's APNs stays off anyway without apns.p8.
+    static let enabled = false
+
     /// Asks once (iOS remembers the answer), then registers on every launch.
     static func register() {
+        guard enabled else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             if granted { DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() } }
         }
