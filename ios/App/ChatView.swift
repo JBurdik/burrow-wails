@@ -166,7 +166,9 @@ struct ChatView: View {
             // each other's listener on disappear, and the chat stopped updating.
             eventToken = model.subscribe { name, payload in
                 if name == "chat-messages-changed-\(chatId)" { applySplice(payload) }
-                else if name == "chat-event-\(chatId)", Self.endsTurn(payload) { scheduleReload() }
+                // nil payload = AppModel.nudgeChat after a send / outbox delivery: the
+                // user's own message may arrive with no splice, so re-read the page.
+                else if name == "chat-event-\(chatId)", payload == nil || Self.endsTurn(payload) { scheduleReload() }
             }
         }
         .onDisappear {
