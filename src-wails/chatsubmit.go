@@ -23,6 +23,13 @@ type ChatSubmitResult struct {
 // clientID already accepted for the chat — by any door, also before a core
 // restart (claimClientID) — is a no-op success with the earlier outcome.
 func (a *App) ChatSubmit(chatID int64, text string, images []string, clientID string) (ChatSubmitResult, error) {
+	return a.submit(chatID, images, clientID, func(Chat) (string, error) { return text, nil })
+}
+
+// submit is ChatSubmit with the text made from the chat row — after the
+// clientID check, so a retry of a message whose source has since gone (an
+// answered end_turn card) is still the earlier outcome, not an error.
+func (a *App) submit(chatID int64, images []string, clientID string, compose func(Chat) (string, error)) (ChatSubmitResult, error) {
 	c, err := a.chatByID(chatID)
 	if err != nil {
 		return ChatSubmitResult{}, err
@@ -30,6 +37,11 @@ func (a *App) ChatSubmit(chatID int64, text string, images []string, clientID st
 	prev, finish, dup := a.claimClientID(chatID, clientID)
 	if dup {
 		return ChatSubmitResult{Sent: prev.item == nil, Item: prev.item}, nil
+	}
+	text, err := compose(c)
+	if err != nil {
+		finish(false, nil)
+		return ChatSubmitResult{}, err
 	}
 	id := strconv.FormatInt(chatID, 10)
 	unlock := a.chatRT.lock(id)

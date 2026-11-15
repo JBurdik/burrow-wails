@@ -413,6 +413,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// is Go's to start — claude_start/claude_send are in remoteDenied.
 	"chat_send":             {Method: "ChatSend", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
 	"chat_submit":           {Method: "ChatSubmit", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
+	"chat_answer_turn":      {Method: "ChatAnswerTurn", Args: []string{"chatId", "picks", "extra", "clientId"}, Scope: scopeOrchOperate},
 	"chat_restart":          {Method: "ChatRestart", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_clear":            {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_sleep":            {Method: "ChatSleep", Args: []string{"chatId"}, Scope: scopeOrchOperate},
