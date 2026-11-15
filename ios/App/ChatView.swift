@@ -51,7 +51,11 @@ struct ChatView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // Not Lazy: a LazyVStack under scrollTo + changing content (sends,
+                // keyboard frame changes) rendered blank until scrolled by hand.
+                // ponytail: renders the whole loaded window (≤ 150 rows + older
+                // pages); go back to Lazy only with a fix for the blank render.
+                VStack(alignment: .leading, spacing: 14) {
                     if let error { Text(error).font(.caption).foregroundStyle(.red) }
                     if remaining > 0 {
                         Button { Task { await loadOlder() } } label: {
