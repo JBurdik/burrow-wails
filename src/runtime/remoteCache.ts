@@ -7,7 +7,7 @@
  *    ever a first paint: nothing here touches the transport's seq — resume
  *    still comes from live data only.
  *  - outbox: chat messages typed while the socket was down, delivered in order
- *    via `chat_queue_add` once it is back. Removed only after a success.
+ *    via `chat_submit` (same client id) once it is back. Removed only after a success.
  *
  * Pure over an injected Storage (localStorage by default); every write is
  * best effort except the outbox, whose failure the caller must see.

@@ -1308,7 +1308,7 @@ const {
   nativeControlResponsePending,
   contextTokens, contextWindow, contextSplit, contextReport, contextReportPending,
   claudeGeneratedTitle,
-  enqueueMessage, removeQueuedMessage, editQueuedMessage, clearQueuedMessages, moveQueuedMessage,
+  removeQueuedMessage, editQueuedMessage, clearQueuedMessages, moveQueuedMessage,
   held,
 } = S;
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
@@ -2748,7 +2748,7 @@ function archiveFromCard() {
   });
 }
 
-async function sendMessage(forcedText?: string, extraImages?: string[]): Promise<{ id: number; text: string } | null> {
+async function sendMessage(forcedText?: string, extraImages?: string[]): Promise<{ id: number; text: string; queued: boolean } | null> {
   const feedbackBatch = forcedText === undefined && !busy.value ? [...transcriptFeedback.pending.value] : [];
   const sendingChatId = props.chatId;
   const raw = forcedText ?? inputText.value;
@@ -2791,18 +2791,17 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     inputText.value = "";
     return null;
   }
-  // A follow-up is always a separate turn.  In particular, do not rely on an
-  // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
-  // as steering, and generic adapters have no negotiated queue capability.
+  // A follow-up is always a separate turn, queued in Go behind the running one
+  // (chat_submit decides). `busy` here only skips the new-turn bookkeeping.
   if (busy.value) {
-    const queued = await enqueueMessage(text, images);
-    if (!queued) return null;
+    const res = await S.submit({ text, images: images.length ? images : undefined });
+    if (!res) return null;
     acceptFeedback();
     pendingImages.value = [];
     inputText.value = "";
     await nextTick();
     scrollToBottom(true);
-    return { id: queued.id, text };
+    return { id: res.id, text, queued: res.queued };
   }
   if (!forcedText) {
     inputText.value = "";
@@ -2832,11 +2831,11 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
 
   pendingImages.value = [];
   syncStore();
-  const sentId = await S.send({ text, images: msgImages, displayText });
-  if (sentId === null) return null;
+  const res = await S.submit({ text, images: msgImages, displayText });
+  if (res === null) return null;
   visitSeenAt.value = null;
   acceptFeedback();
-  return { id: sentId, text };
+  return { id: res.id, text, queued: res.queued };
 }
 
 
@@ -2970,7 +2969,7 @@ function onKeydown(e: KeyboardEvent) {
   // ⌘/Ctrl+Enter while busy: queue it, then steer it into the running turn.
   if (e.key === "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey) && steerable.value) {
     e.preventDefault();
-    void sendMessage().then((queued) => { if (queued) void S.steer(queued.id); });
+    void sendMessage().then((r) => { if (r?.queued) void S.steer(r.id); });
     return;
   }
   // On a phone the soft keyboard has no Shift+Enter, so Enter is a newline

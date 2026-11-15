@@ -58,7 +58,7 @@
               >
                 <PhArrowBendUpLeft :size="14" />
               </button>
-              <!-- Quick reply: queued in Go (chat_queue_add), delivered once the turn settles. -->
+              <!-- Quick reply: chat_submit — Go sends it now or queues it behind the running turn. -->
               <div v-if="replyTo === row.id" class="mx-2 mb-1.5 ml-[34px] flex items-center gap-1.5">
                 <input
                   ref="replyEl"
@@ -178,6 +178,7 @@ import { Select } from "@/components/ui/select";
 import { chatSession, TRANSCRIPT_PAGE, type ChatMessagesPage, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";
 import { useUIStore } from "@/stores/ui";
 import { smartTitle } from "@/lib/chatTitle";
+import { newClientId } from "@/lib/offline";
 import { feedGroups, needsYou, permTarget, useThreadFeed, type FeedRow } from "@/lib/threadFeed";
 
 const AgentChat = defineAsyncComponent(() => import("@/components/AgentChat.vue"));
@@ -321,9 +322,8 @@ async function sendReply(row: FeedRow) {
   if (!text) return;
   replyText.value = "";
   replyTo.value = null;
-  // Always the queue: a running turn gets it when it settles, a settled chat
-  // within ~300 ms (chatdelivery.go kicks a pass on every add).
-  await invoke("chat_queue_add", { chatId: row.id, text, images: [] }).catch(() => {});
+  // Go decides: a running turn gets it when it settles, a settled chat now.
+  await invoke("chat_submit", { chatId: row.id, text, images: [], clientId: newClientId() }).catch(() => {});
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ async function sendCompose() {
       workspaceId: Number(composeWs.value), agentKind: "claude", model: "", effort: "", permissionMode: "",
     });
     await chats.reload();
-    await invoke("chat_send", { chatId: row.id, text, images: [] });
+    await invoke("chat_submit", { chatId: row.id, text, images: [], clientId: newClientId() });
     nameThread(row.id, Number(composeWs.value), text);
     composeText.value = "";
     view.value = { kind: "chat", chatId: row.id };

@@ -1,8 +1,7 @@
 <template>
   <!-- Every thread waiting on an answer (end_turn needs "you"), as its card:
        answer here and it goes to that thread exactly as if typed there —
-       queued in Go (chat_queue_add), delivered at once since the turn has
-       settled. Nothing runs or is relayed besides that one message. -->
+       chat_submit, sent at once since the turn has settled. Nothing runs or is relayed besides that one message. -->
   <section v-if="items.length" class="decisions">
     <div class="decisions-head">
       <PhHandPalm :size="12" weight="fill" class="text-[var(--chat-warn)]" />
@@ -31,6 +30,7 @@
 <script setup lang="ts">
 import { computed, reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { newClientId } from "@/lib/offline";
 import { PhArrowSquareOut, PhHandPalm } from "@phosphor-icons/vue";
 import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
 import { useClaudeChatsStore, type ClaudeSession } from "@/stores/claudeChats";
@@ -62,7 +62,7 @@ function wsName(wsId: number): string {
 async function answer(chatId: number, text: string) {
   sending.add(chatId);
   try {
-    await invoke("chat_queue_add", { chatId, text, images: [] });
+    await invoke("chat_submit", { chatId, text, images: [], clientId: newClientId() });
   } catch {
     sending.delete(chatId); // the card comes back to retry
     return;

@@ -206,7 +206,12 @@ export interface UserPrompt {
   images?: string[];
   /** What the bubble shows when it differs from what was sent (paste chips). */
   displayText?: string;
+  /** The submit client id; the echo is matched to Go's row by it. */
+  clientId?: string;
 }
+
+/** What `submit` did: `queued` = Go put it in the queue and `id` is the queue item's id. */
+export interface SubmitOutcome { id: number; queued: boolean }
 
 /**
  * A chat's live session, as everything outside this module sees it: read-only
@@ -269,11 +274,14 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   /** The send failed: report it and leave the turn. */
   failTurn(error: unknown): void;
   /**
-   * Send a prompt as its own turn — the one door for every transport: show
-   * the bubble, mark busy, `chat_send` (the Go chat runtime starts the process
-   * if there is none). Resolves the bubble's id, or null when the send failed
-   * (already reported in the transcript).
+   * Submit a prompt — the one door for every transport (`chat_submit`, ADR
+   * 0001): Go sends it now if the chat is settled, else queues it. A settled
+   * chat shows the bubble (the echo) at once; Go's row with the same client id
+   * takes its place. Resolves what happened, or null when it failed (already
+   * reported) or was held offline.
    */
+  submit(prompt: UserPrompt): Promise<SubmitOutcome | null>;
+  /** `submit`, resolving the bubble's (or queue item's) id. */
   send(prompt: UserPrompt): Promise<number | null>;
   /**
    * Deliver queued follow-up `queuedId` INTO the running turn now (`chat_steer`)
@@ -380,8 +388,8 @@ interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionS
   /** Go's queue as last seen (`chat-queue-changed` / `chat_queue_list`). */
   queue: Ref<QueuedChatMessage[]>;
   queueUL: UnlistenFn | null;
-  /** A prompt this client is about to send — drop its echo when Go publishes it. */
-  expectEcho(text: string): void;
+  /** A prompt this client is about to send (its client id, else its text) — drop its echo when Go publishes it. */
+  expectEcho(key: string): void;
   /** Settle partial rows and stuck tool spinners (a turn ended somehow). */
   settleTranscript(failedTools?: boolean): void;
   /** Remove a system-info marker row by id. */
@@ -553,12 +561,15 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     notice(text) {
       pushRow(s, "assistant", text);
     },
-    postUserMessage({ text, images, displayText }) {
+    postUserMessage({ text, images, displayText, clientId }) {
       const id = s.nextMsgId++;
-      s.messages.value.push({ id, role: "user", text, ...(images?.length ? { images } : {}), ...(displayText ? { displayText } : {}) });
+      s.messages.value.push({
+        id, role: "user", text,
+        ...(images?.length ? { images } : {}), ...(displayText ? { displayText } : {}), ...(clientId ? { clientId } : {}),
+      });
       // Claim the echo before the send goes out — a loopback round trip can
       // land user.delta before the caller's next line runs.
-      s.expectEcho(text);
+      s.expectEcho(clientId ?? text);
       return id;
     },
     startTurn() {
@@ -569,36 +580,52 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.busy.value = false;
       s.sync();
     },
-    async send(prompt) {
+    async submit(prompt) {
       const clientId = newClientId();
       // Messages already held for this chat go first: this one waits behind
-      // them in the outbox instead of overtaking them through chat_send.
+      // them in the outbox instead of overtaking them.
       if (s.deps.outbox?.list(chatId).length && s.deps.outbox.hold(chatId, prompt.text, prompt.images, clientId)) return null;
-      const id = s.postUserMessage(prompt);
-      s.startTurn();
-      s.save();
-      s.sync();
-      s.view?.scrollToBottom(true);
+      // Only a guess for the echo — Go decides send vs queue under the chat lock.
+      const id = s.busy.value ? null : s.postUserMessage({ ...prompt, clientId });
+      const dropEcho = () => {
+        if (id === null) return;
+        s.pendingSends.delete(clientId);
+        s.messages.value = s.messages.value.filter((m) => !(m.id === id && m.role === "user"));
+        s.busy.value = false;
+        s.save();
+        s.sync();
+      };
+      if (id !== null) {
+        s.startTurn();
+        s.save();
+        s.sync();
+        s.view?.scrollToBottom(true);
+      }
       try {
-        await s.deps.invoke("chat_send", { chatId, text: prompt.text, images: prompt.images ?? [], clientId });
-        return id;
+        const res = await s.deps.invoke<{ sent: boolean; item?: GoQueueItem }>("chat_submit", {
+          chatId, text: prompt.text, images: prompt.images ?? [], clientId,
+        });
+        if (res?.sent || !res?.item) return { id: id ?? -1, queued: false };
+        // Queued (a turn in flight, or a queue ahead of it): no bubble yet —
+        // Go's row arrives when the queue delivers it.
+        dropEcho();
+        const entry = fromGo(res.item);
+        if (!s.queue.value.some((q) => q.id === entry.id)) s.queue.value = [...s.queue.value, entry];
+        return { id: entry.id, queued: true };
       } catch (e) {
-        // The socket dropped under the send: take the bubble back and hold the
-        // message for the reconnect instead of reporting a failed turn. Safe
-        // even if the send reached Go: the retry carries the same clientId.
+        // The socket dropped under the call: hold the message for the
+        // reconnect. Safe even if it reached Go: the retry carries the same clientId.
         if (isOfflineError(e) && s.deps.outbox?.hold(chatId, prompt.text, prompt.images, clientId)) {
-          // The held text comes back as a user.delta once Go's queue sends it;
-          // a claim left here would swallow it (and pin applyPhase's busy).
-          s.pendingSends.delete(prompt.text);
-          s.messages.value = s.messages.value.filter((m) => m.id !== id);
-          s.busy.value = false;
-          s.save();
-          s.sync();
+          dropEcho();
           return null;
         }
-        s.failTurn(e);
+        if (id !== null) s.failTurn(e);
+        else s.notice(`Could not send the message: ${e}`);
         return null;
       }
+    },
+    async send(prompt) {
+      return (await s.submit(prompt))?.id ?? null;
     },
     async steer(queuedId) {
       const index = s.queue.value.findIndex((q) => q.id === queuedId);
@@ -612,18 +639,18 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         return false;
       }
       s.queue.value = s.queue.value.filter((q) => q.id !== queuedId);
-      const prompt = { text: entry.text, images: entry.images };
+      const prompt = { text: entry.text, images: entry.images, clientId: newClientId() };
       const id = s.postUserMessage(prompt);
       s.save();
       s.sync();
       s.view?.scrollToBottom(true);
       try {
-        await s.deps.invoke("chat_steer", { chatId, text: prompt.text, images: prompt.images ?? [] });
+        await s.deps.invoke("chat_steer", { chatId, text: prompt.text, images: prompt.images ?? [], clientId: prompt.clientId });
         return true;
       } catch (e) {
         // Nothing was sent or recorded: un-claim the echo and put the entry
         // back where it was (Go drains it once the turn settles).
-        s.pendingSends.delete(prompt.text);
+        s.pendingSends.delete(prompt.clientId);
         s.messages.value = s.messages.value.filter((m) => !(m.id === id && m.role === "user"));
         s.save();
         console.warn("[chat] steer refused, left queued:", e);
@@ -811,8 +838,8 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     attachView(view) {
       s.view = view;
     },
-    expectEcho(text) {
-      s.pendingSends.add(text);
+    expectEcho(key) {
+      s.pendingSends.add(key);
     },
     save() {
       // A window is not the transcript: save_chat_messages replaces the whole
@@ -1091,7 +1118,14 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
   for (const event of batch.events) {
     // Our own prompt coming back. Consumed before the projection sees it, so
     // it neither duplicates the bubble nor counts as agent activity.
-    if (event.type === "user.delta" && s.pendingSends.delete(event.text ?? "")) continue;
+    // Matched by client id: the projection hands Go's identity to the echo row.
+    if (event.type === "user.delta") {
+      if (event.clientId && s.pendingSends.delete(event.clientId)) {
+        applyChatEvent(projectionOf(s), event);
+        continue;
+      }
+      if (s.pendingSends.delete(event.text ?? "")) continue;
+    }
     // The /context report the card asked for, lifted out of the stream before
     // the projection can turn it into a wall of a message.
     if (s.awaitingContextReport.value && event.type === "text.delta") {

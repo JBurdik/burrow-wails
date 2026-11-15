@@ -1021,14 +1021,13 @@ const activeChatAgentName = computed(() => {
   return chat ? providers.resolve(chat.agentKind)?.name : undefined;
 });
 /** The Browser surface's "Nothing listening" button: ask the chat on screen,
- *  through the same doors as its composer — queued behind a running turn, else sent. */
+ *  through the composer's door (chat_submit: Go queues it behind a running turn, else sends). */
 function askToStartServer(port: number) {
   const id = activeChatId.value;
   if (!id) return;
   const text = `Start the dev server on port ${port} so I can preview it at http://localhost:${port}.`;
   const session = chatSession(id);
-  if (session.busy.value) void session.enqueueMessage(text);
-  else void session.send({ text });
+  void session.submit({ text });
 }
 /** Open a surface (Background, Progress, Outputs, …) in a workspace's panel
  *  from outside it — a transcript row that names one. The caller shows the panel. */

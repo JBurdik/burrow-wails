@@ -56,8 +56,9 @@ function commit(next: HeldMessage[]): boolean {
   return true;
 }
 
-/** A typed message's idempotency key: chat_send / chat_queue_add take it as
- *  `clientId`, and Go accepts each id once (src-wails/chatclientid.go). */
+/** A typed message's client id: chat_submit / chat_steer (and the older
+ *  chat_send / chat_queue_add) take it as `clientId`, and Go accepts each id
+ *  once (src-wails/chatsubmit.go), also after a core restart. */
 export function newClientId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -81,7 +82,7 @@ export function dropHeld(id: string): void {
 
 let draining: Promise<number> | null = null;
 let again = false;
-/** Deliver everything held, in order, through Go's queue (it sends once the chat settles). */
+/** Deliver everything held, in order, through chat_submit with the held id (Go sends or queues it). */
 export function deliverHeld(): Promise<number> {
   if (!started || !env) return Promise.resolve(0);
   if (draining) {
@@ -92,7 +93,7 @@ export function deliverHeld(): Promise<number> {
   again = false;
   draining = drainOutbox({
     read: () => outboxRead(env),
-    send: async (m) => { await invoke("chat_queue_add", { chatId: m.chatId, text: m.text, images: m.images ?? [], clientId: m.id }); },
+    send: async (m) => { await invoke("chat_submit", { chatId: m.chatId, text: m.text, images: m.images ?? [], clientId: m.id }); },
     remove: (id) => { commit(outboxRemove(outboxRead(env), id)); },
     fail: (id, error) => { commit(outboxRead(env).map((m) => (m.id === id ? { ...m, error } : m))); },
   }).finally(() => {

@@ -585,21 +585,21 @@ describe("stream reducers", () => {
 
 // The process intents forward to the Go chat runtime, whatever the transport.
 describe("process intents", () => {
-  it("sends through chat_send: bubble, busy, the wire call", async () => {
+  it("submits through chat_submit: bubble, busy, the wire call", async () => {
     const f = fakeDeps();
     const s = chatSession(80, f.deps);
     const id = await s.send({ text: "go", images: ["data:x"] });
     expect(id).not.toBeNull();
     expect(s.busy.value).toBe(true);
     expect(s.messages.value.map((m) => [m.role, m.text])).toEqual([["user", "go"]]);
-    expect(f.invoke).toHaveBeenCalledWith("chat_send", { chatId: 80, text: "go", images: ["data:x"], clientId: expect.any(String) });
+    expect(f.invoke).toHaveBeenCalledWith("chat_submit", { chatId: 80, text: "go", images: ["data:x"], clientId: expect.any(String) });
     dropChatSession(80);
   });
 
   it("a failed send reports itself and leaves the turn", async () => {
     const f = fakeDeps();
     f.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "chat_send") throw "pipe closed";
+      if (cmd === "chat_submit") throw "pipe closed";
       return undefined;
     });
     const s = chatSession(81, f.deps);
@@ -815,13 +815,14 @@ describe("steer", () => {
     const b = (await s.enqueueMessage("steer me", ["data:image/png;base64,AA=="]))!;
     expect(await s.steer(b.id)).toBe(true);
     expect(f.invoke).toHaveBeenCalledWith("chat_queue_remove", { id: b.id });
-    expect(f.invoke).toHaveBeenCalledWith("chat_steer", { chatId: 71, text: "steer me", images: ["data:image/png;base64,AA=="] });
-    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_send");
+    expect(f.invoke).toHaveBeenCalledWith("chat_steer", { chatId: 71, text: "steer me", images: ["data:image/png;base64,AA=="], clientId: expect.any(String) });
+    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_submit");
+    const steerId = (f.invoke.mock.calls.find((c) => c[0] === "chat_steer")![1] as { clientId: string }).clientId;
     expect(s.messageQueue.value.map((e) => e.id)).toEqual([a.id]);
     expect(s.messages.value.filter((m) => m.role === "user").map((m) => m.text)).toEqual(["steer me"]);
     expect(s.busy.value).toBe(true);
     // Go's echo of the steered prompt is ours: no second bubble.
-    f.emit("chat-event-71", { ord: 5, events: [{ type: "user.delta", messageId: "u5", text: "steer me" }] });
+    f.emit("chat-event-71", { ord: 5, events: [{ type: "user.delta", messageId: "acp:user:5", text: "steer me", clientId: steerId }] });
     expect(s.messages.value.filter((m) => m.role === "user").length).toBe(1);
     dropChatSession(71);
   });
@@ -861,7 +862,7 @@ describe("send held offline", () => {
     const hold = vi.fn(() => true);
     (f.deps as ChatSessionDeps).outbox = { list: () => [], hold, drop: vi.fn() };
     f.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "chat_send") throw new Error("disconnected");
+      if (cmd === "chat_submit") throw new Error("disconnected");
       return undefined;
     });
     const s = chatSession(91, f.deps);
@@ -884,12 +885,12 @@ describe("clientId + outbox ordering", () => {
     const hold = vi.fn(() => true);
     (f.deps as ChatSessionDeps).outbox = { list: () => [], hold, drop: vi.fn() };
     f.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "chat_send") throw new Error("disconnected");
+      if (cmd === "chat_submit") throw new Error("disconnected");
       return undefined;
     });
     const s = chatSession(93, f.deps);
     await s.send({ text: "hi" });
-    const sent = f.invoke.mock.calls.find((c) => c[0] === "chat_send")![1] as { clientId: string };
+    const sent = f.invoke.mock.calls.find((c) => c[0] === "chat_submit")![1] as { clientId: string };
     expect(sent.clientId).toBeTruthy();
     expect(hold).toHaveBeenCalledWith(93, "hi", undefined, sent.clientId);
     dropChatSession(93);
@@ -903,10 +904,46 @@ describe("clientId + outbox ordering", () => {
     const s = chatSession(94, f.deps);
     expect(await s.send({ text: "later" })).toBeNull();
     expect(await s.enqueueMessage("later2")).toMatchObject({ id: -1, text: "later2" });
-    expect(f.invoke).not.toHaveBeenCalledWith("chat_send", expect.anything());
+    expect(f.invoke).not.toHaveBeenCalledWith("chat_submit", expect.anything());
     expect(f.invoke).not.toHaveBeenCalledWith("chat_queue_add", expect.anything());
     expect(hold.mock.calls.map((c) => (c as unknown[])[1])).toEqual(["later", "later2"]);
     expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
     dropChatSession(94);
+  });
+});
+
+// chat_submit: Go decides send vs queue; the echo is matched by client id.
+describe("submit door", () => {
+  it("a queued submit drops the guessed bubble and mirrors the queue item", async () => {
+    const f = fakeDeps();
+    f.invoke.mockImplementation(async (cmd: string, args: { clientId?: string }) => {
+      if (cmd === "chat_submit") return { sent: false, item: { id: 7, chatId: 96, text: "later", attachments: [], clientId: args.clientId } };
+      return undefined;
+    });
+    const s = chatSession(96, f.deps);
+    expect(await s.submit({ text: "later" })).toEqual({ id: 7, queued: true });
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    expect(s.busy.value).toBe(false);
+    expect(s.messageQueue.value.map((q) => q.id)).toEqual([7]);
+    dropChatSession(96);
+  });
+
+  it("Go's user row with the client id replaces the echo, also on a replay", async () => {
+    const f = fakeDeps();
+    const s = chatSession(97, f.deps);
+    await s.listenEvents();
+    await s.submit({ text: "same" });
+    const clientId = (f.invoke.mock.calls.find((c) => c[0] === "chat_submit")![1] as { clientId: string }).clientId;
+    expect(s.messages.value[0].clientId).toBe(clientId);
+    const echo = { type: "user.delta", messageId: "acp:user:3", text: "same", clientId };
+    f.emit("chat-event-97", { ord: 3, events: [echo] });
+    f.emit("chat-event-97", { ord: 3, events: [echo] }); // a replay of the same row
+    const users = s.messages.value.filter((m) => m.role === "user");
+    expect(users.length).toBe(1);
+    expect(users[0]._acpMsgId).toBe("acp:user:3");
+    // Same text, another client id (typed twice): a second bubble.
+    f.emit("chat-event-97", { ord: 4, events: [{ type: "user.delta", messageId: "acp:user:4", text: "same", clientId: "other" }] });
+    expect(s.messages.value.filter((m) => m.role === "user").length).toBe(2);
+    dropChatSession(97);
   });
 });

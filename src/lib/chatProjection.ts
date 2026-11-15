@@ -43,6 +43,8 @@ export interface ChatEvent {
   /** message.note: a row Burrow authored (e.g. "spawned a sub-agent"). */
   role?: ChatMessage["role"];
   images?: string[];
+  /** user.delta: the client id the submitting client gave the message (chat_submit). */
+  clientId?: string;
   subagentChatId?: number;
   subagentAgent?: string;
   surface?: string;
@@ -75,9 +77,17 @@ export function applyChatEvent(state: ChatProjectionState, event: ChatEvent): bo
       return appendChunk(state, "assistant", event, true);
     case "thinking.delta":
       return appendChunk(state, "thinking", event, true);
-    case "user.delta":
+    case "user.delta": {
+      // The client's own echo (or a replay of a row it already has): the row
+      // with the same client id takes Go's identity instead of a second bubble.
+      const echo = event.clientId ? state.messages.find((m) => m.role === "user" && m.clientId === event.clientId) : undefined;
+      if (echo) {
+        if (event.messageId?.startsWith("acp:")) echo._acpMsgId = event.messageId;
+        return false;
+      }
       // A replayed user turn is never "partial" — it finished long ago.
       return appendChunk(state, "user", event, false);
+    }
 
     case "tool.started": {
       if (!event.toolCallId) return false;
@@ -163,6 +173,8 @@ function appendChunk(
     ...(partial ? { partial: true } : {}),
     ...(acpId ? { _acpMsgId: acpId } : {}),
     ...(event.uuid ? { uuid: event.uuid } : {}),
+    ...(role === "user" && event.clientId ? { clientId: event.clientId } : {}),
+    ...(role === "user" && event.images?.length ? { images: event.images } : {}),
   });
   return true;
 }
