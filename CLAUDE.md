@@ -154,8 +154,9 @@ The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. **S
 chat starts with `--settings` holding one Stop hook, `burrow end-turn-gate` (`endTurnGateSettings`): a turn ending with
 `turn_needs` still empty (`end_turn_pending` verb) is sent back **once** to call `end_turn`; `stop_hook_active` and every
 error let it stop. Tested: without it Haiku skipped `end_turn` after AskUserQuestion and under "do nothing else" tasks.
-The transcript hides plumbing calls (`isPlumbingTool`, `chatPlumbing.ts`): a taken `end_turn` / `end_turn_pending` and
-`ToolSearch` (Codex/ACP's titled `burrow: end_turn` too) — the card says what end_turn said; a failed one stays.
+The transcript hides plumbing calls — Go's fold sets `plumbing: true` on the row (`isPlumbingCall`, `chatfold.go`): a taken
+`end_turn` / `end_turn_pending` and `ToolSearch` (Codex/ACP's titled `burrow: end_turn` too) — the card says what end_turn
+said; a failed one stays. Rows folded before the flag are caught by the same rule in `transcriptRows.ts` / `Transcript.swift`.
 end_turn is **once per turn** (a stored `turn_needs` = already called → refused) and its result carries `next_step`, an
 instruction to write the reply now, after the call; an ask may be `multi` (checkboxes, answers joined with ", "); Codex
 gets the rule in its AGENTS.md block (`codex-agents.md`). `pin` refuses a missing file and non-http(s) schemes;
@@ -369,7 +370,10 @@ just-submitted prompt (gone when a splice carries a user row with its `clientId`
 `chat_submit` → `sent:false` drops it and the QueuePanel shows the item), pending-request markers and error
 notices. `loadTranscript()` = page (its `rev`) then `chat_subscribe(sinceRev)` (closes the race); a splice whose
 `baseRev` isn't the held rev, and every socket reconnect (`onReconnect`, chat channels aren't ringed), catch up the
-same way. Go's legacy `queued` rows and the `/context` report row are hidden (the report is the card). A component
+same way. Go's legacy `queued` rows are hidden; the `/context` answer never becomes a row (the fold drops it, the card reads the
+live `text.delta`). **What the transcript draws** (message / "Ran N commands" tool group / settled turn's "Worked" fold) is
+one pure rule, `src/lib/transcriptRows.ts` = `ios/App/Transcript.swift`, pinned for both by `fixtures/transcript-rows.json`
+(vitest + XCTest); AgentChat adds only the changed-files card and labels. A component
 `attachView(ChatViewHooks)`s on mount — scroll, question/plan draft resets, ACP selector restore, `send`
 for the drain — and `release()`s on unmount; the last view's hooks stay installed. A session is only torn
 down when **idle** (`pendingRequests` — a typed `PendingRequest` union — empty and not busy; every answer
@@ -390,11 +394,12 @@ Stream `ord` never resets (`chat_clear` is a cut to nothing; `loadMaxOrdLocked` 
 text growth of the streaming row is **not** a splice: `chat-tail-<id>` `{rev, index, offset, append, kind}` (offset =
 UTF-16 length before the append), ≤ 1 per 100 ms per chat, never rev'd / ringed (`notRingable`), dropped first under
 `/v2/ws` backpressure; the next splice reaches back over every row tails touched. `chat_subscribe(chatId, sinceRev)` →
-`{rev, splices, inProgress}` from a 64-splice in-memory ring per chat, else one authoritative splice of the newest 60
+`{rev, splices, inProgress}` from a 64-splice (≤ 2 MB encoded) in-memory ring per chat, else one authoritative splice of the newest 60
 rows. `load_chat_messages_page` carries `rev`. **Images by reference** (`chatimages.go`): a user line's / note's data
 URLs go to `chat_images(chat_id, hash)` when recorded; lines and `chat_messages` hold `burrow-img:<sha256>`, splices /
 pages / `load_chat_messages` send `burrow-image://<index>/<n>` (`load_chat_image` resolves); the CLI still gets the full
-data; `chat-event` user.delta is still re-inflated, though no client folds it any more. Go stamps `turnMs` on a turn's
+data; `chat-event` user.delta carries the stored refs; `load_chat_stream_since` stores + refs an old chat-user / chat-note line's
+inline images on the way out (provider raw lines still replay inline). Go stamps `turnMs` on a turn's
 user row at turn end and writes permission receipts (`chatreceipts.go`) on `claude_respond_control` /
 `acp_respond_permission`.
 
