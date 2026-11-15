@@ -285,6 +285,11 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 	for _, s := range scopes {
 		granted[s] = true
 	}
+	// The desktop UI (the only ticket with ui:ack) is on loopback: compressing
+	// its frames costs CPU and saves nothing.
+	if granted[scopeUIAck] {
+		conn.EnableWriteCompression(false)
+	}
 
 	// One outbound queue, one writer. Two goroutines must never write the
 	// same websocket, and a single queue is also what makes ordering hold:

@@ -634,3 +634,49 @@ func isTimeout(err error) bool {
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
 }
+
+// A remote client that offers permessage-deflate gets it, and PTY bytes ride
+// as base64 (protocol rev 2), not a JSON number array.
+func TestWSCompressesAndSendsPtyBytesAsBase64(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	shellStreamReset()
+	tickets := newTicketStore()
+	mux := http.NewServeMux()
+	newRemoteWS(&App{}, tickets).register(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	tok := tickets.issue([]remoteScope{scopeOrchRead, scopeTerminal})
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/v2/ws?ticket=" + tok
+	conn, resp, err := (&websocket.Dialer{EnableCompression: true}).Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if ext := resp.Header.Get("Sec-Websocket-Extensions"); !strings.Contains(ext, "permessage-deflate") {
+		t.Fatalf("compression not negotiated: %q", ext)
+	}
+	var f serverFrame
+	_ = conn.ReadJSON(&f) // welcome
+
+	off := uint64(3)
+	var raw struct {
+		T       string          `json:"t"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	overall := time.Now().Add(2 * time.Second)
+	for {
+		busEmit("pty-data-7", ptyChunk{Off: &off, Data: ptyBytes([]int{104, 105, 233})})
+		_ = conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		if err := conn.ReadJSON(&raw); err == nil && raw.T == "event" {
+			break
+		}
+		if time.Now().After(overall) {
+			t.Fatal("no pty-data frame")
+		}
+	}
+	if got := string(raw.Payload); got != `{"off":3,"data":"aGnp"}` {
+		t.Fatalf("payload = %s", got)
+	}
+}

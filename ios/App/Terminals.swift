@@ -250,7 +250,7 @@ final class TermSession {
         switch name {
         case "pty-data-\(id)":
             guard let d = payload as? [String: Any] else { return }
-            let bytes = (d["data"] as? [NSNumber] ?? []).map { UInt8(truncatingIfNeeded: $0.intValue) }
+            let bytes = ptyBytes(d["data"])
             push((d["off"] as? NSNumber)?.intValue, bytes)
         case "open": Task { if next == nil { await attach() } else { await catchUp() } }
         case "pty-resync-\(id)": Task { await attach() }
@@ -284,7 +284,7 @@ final class TermSession {
         catching = true
         if let got = try? await client.call("pty_since", ["id": String(id), "since": from]) as? [String: Any],
            let off = (got["off"] as? NSNumber)?.intValue {
-            let data = (got["data"] as? [NSNumber] ?? []).map { UInt8(truncatingIfNeeded: $0.intValue) }
+            let data = ptyBytes(got["data"])
             if off > from || (off < from && data.isEmpty) { next = off }
             apply(off, data)
         } else {
@@ -309,7 +309,7 @@ final class TermSession {
             next = off
         } else if let ring = try? await client.call("pty_since", ["id": String(id), "since": 0]) as? [String: Any],
                   let off = (ring["off"] as? NSNumber)?.intValue {
-            let data = (ring["data"] as? [NSNumber] ?? []).map { UInt8(truncatingIfNeeded: $0.intValue) }
+            let data = ptyBytes(ring["data"])
             term.reset()
             write(data)
             next = off + data.count
@@ -682,4 +682,11 @@ final class TextTerm {
     private func blank(_ r: Int, upTo c: Int) {
         for i in 0..<min(c + 1, lines[r].count) { lines[r][i] = " " }
     }
+}
+
+/// pty-data / pty_since bytes: base64 since protocol rev 2, a number array
+/// from an older core.
+func ptyBytes(_ v: Any?) -> [UInt8] {
+    if let s = v as? String { return [UInt8](Data(base64Encoded: s) ?? Data()) }
+    return (v as? [NSNumber] ?? []).map { UInt8(truncatingIfNeeded: $0.intValue) }
 }

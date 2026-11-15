@@ -302,7 +302,7 @@ func (d *DaemonClient) readLoop(conn net.Conn) {
 				if d.tap != nil {
 					d.tap(f.ID, f.Data)
 				}
-				busEmit("pty-data-"+f.ID, ptyChunk{Off: f.Off, Data: f.Data})
+				busEmit("pty-data-"+f.ID, ptyChunk{Off: f.Off, Data: ptyBytes(f.Data)})
 			case "pty-exit":
 				if d.tap != nil {
 					d.tap(f.ID, nil)
@@ -402,10 +402,21 @@ func (d *DaemonClient) ForegroundScreen(id string) (alt, atPrompt bool) {
 }
 
 // ptyChunk is the pty-data-<id> payload: Data starts at byte Off of the PTY's
-// whole output. Off is null from a daemon that predates it.
+// whole output. Off is null from a daemon that predates it. Data is base64 on
+// the wire (protocol rev 2): a JSON array of numbers was ~3.5x the bytes.
 type ptyChunk struct {
 	Off  *uint64 `json:"off"`
-	Data []int   `json:"data"`
+	Data []byte  `json:"data"`
+}
+
+// ptyBytes turns the daemon's []int bytes into []byte, never nil (nil would
+// marshal as null, not "").
+func ptyBytes(in []int) []byte {
+	out := make([]byte, len(in))
+	for i, b := range in {
+		out[i] = byte(b)
+	}
+	return out
 }
 
 // Since is the PTY's output from offset `from` on, from the daemon's ring. The
@@ -415,11 +426,7 @@ func (d *DaemonClient) Since(id string, from uint64) (ptyChunk, error) {
 	if err != nil {
 		return ptyChunk{}, err
 	}
-	data := resp.Data
-	if data == nil {
-		data = []int{}
-	}
-	return ptyChunk{Off: &resp.Off, Data: data}, nil
+	return ptyChunk{Off: &resp.Off, Data: ptyBytes(resp.Data)}, nil
 }
 
 // Emulator: the running daemon keeps a terminal emulator per PTY, so a view can

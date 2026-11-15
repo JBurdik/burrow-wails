@@ -208,8 +208,9 @@ final class BurrowClient: NSObject, @unchecked Sendable {
                 c?.resume(returning: f["result"])
             }
         case "welcome":
-            // ponytail: no rev check; this client speaks rev 1 and the core
-            // still serves minClientRev 1. Add the check at the first bump.
+            // ponytail: no rev check. Rev 2 only changed pty bytes to base64,
+            // which ptyBytes (Terminals.swift) reads either way. Add the check
+            // at the first break this client can't absorb.
             isOpen = true
             if lastSeq == 0 { lastSeq = (f["seq"] as? NSNumber)?.int64Value ?? 0 }
             emit("open", nil)

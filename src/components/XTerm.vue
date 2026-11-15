@@ -21,7 +21,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useUIStore } from "@/stores/ui";
 import { appTransport } from "@/lib/wailsCompat/core";
-import { createPtyStream, type PtyChunk } from "@/runtime/ptyStream";
+import { createPtyStream, decodePtyChunk, type PtyWireChunk } from "@/runtime/ptyStream";
 import { compact as phone } from "@/lib/viewport";
 import "@xterm/xterm/css/xterm.css";
 
@@ -489,8 +489,8 @@ onMounted(async () => {
   // only after `await invoke("create_pty", ...)` resolved dropped that replay
   // silently, showing a blank terminal until the next live byte arrived.
   // Every PTY byte reaches xterm through here, once, in order (ptyStream).
-  const renderBytes = (data: number[]) => {
-    const bytes = new Uint8Array(data);
+  const renderBytes = (data: Uint8Array | number[]) => {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
     // Capture stick BEFORE the write grows the buffer; re-pin in the parse
     // callback so a fast agent flood can't leave the viewport stranded.
     const stick = isAtBottom();
@@ -542,7 +542,7 @@ onMounted(async () => {
   );
   const ptyStream = createPtyStream({
     write: renderBytes,
-    fetchSince: (since) => invoke<PtyChunk>("pty_since", { id: props.ptyId, since }),
+    fetchSince: async (since) => decodePtyChunk(await invoke<PtyWireChunk>("pty_since", { id: props.ptyId, since })),
     // A disconnect outran the daemon's byte ring: repaint from its screen
     // rather than live on with a hole.
     onLost: (n) => {
@@ -561,7 +561,7 @@ onMounted(async () => {
 
   [unlisten, unlistenExit, unlistenWrite, unlistenSnapReq, unlistenResync] = await Promise.all([
     // Stream output from Rust → xterm
-    listen<PtyChunk>(`pty-data-${props.ptyId}`, (event) => ptyStream.push(event.payload)),
+    listen<PtyWireChunk>(`pty-data-${props.ptyId}`, (event) => ptyStream.push(decodePtyChunk(event.payload))),
     // A new PTY under this id numbers its output from 0 again.
     listen(`pty-exit-${props.ptyId}`, () => ptyStream.reset()),
     // tmux send-keys path: the shim POSTs /write → hook server emits this event →

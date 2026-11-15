@@ -642,7 +642,9 @@ shared and `resumeSince` is a pure function over it.
 **Not ringed** (`notRingable` in `bus.go`): `pty-data-*` and the chat channels — both high-volume *and*
 replayable from their own durable logs. One streaming turn would churn all 512 slots and make every
 reconnect a `resync`. PTY bytes resume by **byte offset** instead: the daemon numbers each PTY's
-output and keeps the last 1 MiB (`internal/ptycore/ring.go`); `pty-data-<id>` is `{off, data}`;
+output and keeps the last 1 MiB (`internal/ptycore/ring.go`); `pty-data-<id>` is `{off, data}` (data base64 since
+protocol rev 2; clients still read a rev-1 number array); `/v2/ws` negotiates permessage-deflate except on the
+desktop's own ui:ack connection;
 `src/runtime/ptyStream.ts` dedupes by offset and, on reconnect or a hole, fetches exactly the gap via
 `pty_since` (never a full replay). Gap past the ring / old daemon ⇒ the hole stays, as before.
 

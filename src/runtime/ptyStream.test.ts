@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { createPtyStream, type PtyChunk } from "./ptyStream";
+import { createPtyStream, decodePtyChunk, type PtyChunk } from "./ptyStream";
 
 const bytes = (s: string) => Array.from(s, (c) => c.charCodeAt(0));
-const text = (b: number[]) => String.fromCharCode(...b);
+const text = (b: ArrayLike<number>) => String.fromCharCode(...Array.from(b));
 
 function setup(log: string) {
   // `log` is the PTY's whole output; fetchSince serves it from offset `ringStart`.
@@ -11,7 +11,7 @@ function setup(log: string) {
   const lost: number[] = [];
   let fetches = 0;
   const s = createPtyStream({
-    write: (b) => out.push(b),
+    write: (b) => out.push(Array.from(b)),
     fetchSince: async (since) => {
       fetches++;
       const from = Math.max(since, ringStart);
@@ -74,7 +74,7 @@ describe("ptyStream", () => {
     const out: number[][] = [];
     let fetches = 0;
     const s = createPtyStream({
-      write: (b) => out.push(b),
+      write: (b) => out.push(Array.from(b)),
       fetchSince: async () => {
         fetches++;
         throw new Error("unknown request kind: since");
@@ -89,7 +89,7 @@ describe("ptyStream", () => {
 
   it("chunks without offsets (old daemon) are written as-is", () => {
     const out: number[][] = [];
-    const s = createPtyStream({ write: (b) => out.push(b), fetchSince: async () => ({ off: null, data: [] }) });
+    const s = createPtyStream({ write: (b) => out.push(Array.from(b)), fetchSince: async () => ({ off: null, data: [] }) });
     s.push({ off: null, data: bytes("a") });
     s.push({ off: null, data: bytes("a") });
     expect(out.map(text).join("")).toBe("aa");
@@ -126,5 +126,13 @@ describe("ptyStream.attach", () => {
     expect(await done).toBe(false);
     t.s.push(t.chunk(4, 6));
     expect(t.rendered()).toBe("cdef");
+  });
+});
+
+describe("decodePtyChunk", () => {
+  it("reads base64 (rev 2) and number arrays (rev 1) alike", () => {
+    expect(Array.from(decodePtyChunk({ off: 3, data: "aGnp" }).data)).toEqual([104, 105, 233]);
+    expect(decodePtyChunk({ off: 3, data: [104, 105] })).toEqual({ off: 3, data: [104, 105] });
+    expect(decodePtyChunk({ off: 0, data: null }).data).toEqual([]);
   });
 });

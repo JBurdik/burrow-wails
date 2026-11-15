@@ -11,10 +11,22 @@
  * Must not import xterm (boundary.test.ts) — the view hands in `write`.
  */
 
-/** The pty-data-<id> payload. `off` is null from a daemon that predates it. */
+/** A decoded pty-data-<id> payload. `off` is null from a daemon that predates it. */
 export interface PtyChunk {
   off: number | null;
-  data: number[];
+  data: Uint8Array | number[];
+}
+
+/** pty-data-<id> / pty_since as they arrive: `data` is base64 since protocol
+ *  rev 2, a number array from an older core. */
+export interface PtyWireChunk {
+  off: number | null;
+  data: string | number[] | null;
+}
+
+export function decodePtyChunk(c: PtyWireChunk): PtyChunk {
+  const d = c.data ?? [];
+  return { off: c.off, data: typeof d === "string" ? Uint8Array.from(atob(d), (ch) => ch.charCodeAt(0)) : d };
 }
 
 export interface PtyStream {
@@ -36,7 +48,7 @@ export interface PtyStream {
 }
 
 export function createPtyStream(opts: {
-  write: (bytes: number[]) => void;
+  write: (bytes: Uint8Array | number[]) => void;
   fetchSince: (since: number) => Promise<PtyChunk>;
   /** The daemon's ring no longer held `bytes` of the gap — they are gone
    *  (or, from `pty_attach`, about to be repainted from a snapshot). */

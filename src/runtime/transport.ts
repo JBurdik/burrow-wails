@@ -67,7 +67,9 @@ export interface Transport {
  * wire change (frame tags, command names / argument shapes, event names /
  * payloads); additive changes don't count.
  */
-export const PROTOCOL_REV = 1;
+export const PROTOCOL_REV = 2;
+// Rev 2 = pty-data / pty_since bytes as base64; decodePtyChunk still reads a
+// rev-1 core's number arrays, so an older core stays usable.
 export const MIN_SERVER_REV = 1;
 
 /** "client-old": this bundle predates what the core requires (reload / restart
