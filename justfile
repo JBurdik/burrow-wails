@@ -104,6 +104,11 @@ check:
     pnpm test
     cd src-wails && go vet ./... && go build ./... && go test ./...
 
+# Probe a running core's chat wire: subscribe, send one probe message to chat
+# ID, print splice / tail / rev timings. `just probe-chat 42 --suffix dev`.
+probe-chat *ARGS:
+    node scripts/probe-chat.mjs {{ARGS}}
+
 # End-to-end smoke of the phone's remote path over loopback: pair → ticket →
 # /v2/ws → calls → events + resume → revoke.
 smoke-remote:
