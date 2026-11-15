@@ -132,6 +132,7 @@ final class AppModel {
     /// Messages typed while offline (Offline.swift), per paired machine.
     var outbox: [OutboxItem] = []
     @ObservationIgnored var flushing = false
+    @ObservationIgnored var flushAgain = false
     /// list_chats as received, for the launch cache.
     @ObservationIgnored var rawChats: [[String: Any]] = []
     @ObservationIgnored var pageCache: [Int: [String: Any]] = [:]
@@ -207,7 +208,9 @@ final class AppModel {
         case "open":
             connected = true
             sendPushToken()
-            Task { await loadSnapshot(); await flushOutbox() }
+            // The flush needs nothing from the snapshot (chat_queue_add by id).
+            Task { await flushOutbox() }
+            Task { await loadSnapshot() }
         case "resync":
             Task { await loadSnapshot() }
         case "chats-changed":
@@ -323,10 +326,9 @@ final class AppModel {
     }
 
     func send(_ chat: Int, _ text: String) async throws {
-        guard online else { enqueue(chat, text); return }
         // Into a running turn chat_send would steer; queue it instead, like the desktop composer.
         let cmd = phase(chat).inFlight ? "chat_queue_add" : "chat_send"
-        try await client?.call(cmd, ["chatId": chat, "text": text, "images": [String]()])
+        if try await sendOrHold(chat, cmd, text, []) { return }
         nudgeChat(chat)
         if let c = self.chat(chat) { startActivity(c) }
     }

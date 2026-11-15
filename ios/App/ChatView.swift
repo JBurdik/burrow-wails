@@ -8,6 +8,8 @@ struct Message: Identifiable, Hashable {
     var failed: Bool
     var toolOutput: String
     var toolTarget: String
+    /// Echoes only: transcript length when sent. Go's copy lands at or after it.
+    var after = 0
 
     init(_ d: [String: Any], index: Int) {
         id = (d["id"] as? NSNumber)?.intValue ?? index
@@ -39,6 +41,10 @@ struct ChatView: View {
     @State private var eventToken: UUID?
     /// Own sends not yet in the transcript (shown greyed until Go's copy lands).
     @State private var echoes: [Message] = []
+    /// Splices received while a load() is in flight, re-applied on top of its page
+    /// (which may predate them). Logged only while `loads > 0`.
+    @State private var loads = 0
+    @State private var spliceLog: [(from: Int, rows: [Message])] = []
     /// Set by an own send: the next transcript change scrolls down whatever
     /// atBottom says (the composer / keyboard often hide the bottom marker).
     @State private var pinBottom = false
@@ -69,8 +75,8 @@ struct ChatView: View {
                         .buttonBorderShape(.roundedRectangle(radius: 8))
                         .frame(maxWidth: .infinity)
                     }
-                    ForEach(shown) { MessageRow(message: $0) }
-                    ForEach(echoes) { MessageRow(message: $0).opacity(0.6) }
+                    ForEach(shown) { MessageRow(message: $0).equatable() }
+                    ForEach(echoes) { MessageRow(message: $0).equatable().opacity(0.6) }
                     if phase.state == "running" {
                         HStack(spacing: 8) {
                             Image(systemName: "ellipsis").symbolEffect(.variableColor.iterative, options: .repeating)
@@ -204,15 +210,25 @@ struct ChatView: View {
         guard let text else { echoes.removeAll(); return }
         var m = Message(["role": "user", "text": text], index: 0)
         m.id = -1 - echoes.count // never a transcript id
+        m.after = earlier + raw.count
         echoes.append(m)
         pinBottom = true
     }
 
-    /// Drop the echoes Go's transcript now carries (matched by text, in order).
+    /// Drop the echoes Go's transcript now carries: a user row with the same text
+    /// that landed after the echo was made, each row settling one echo (so a second
+    /// "ok" isn't cleared by the first).
     private func settleEchoes() {
         guard !echoes.isEmpty else { return }
-        let landed = raw.suffix(20).filter { $0.role == "user" }.map(\.text)
-        echoes.removeAll { e in landed.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == e.text } }
+        var used = Set<Int>()
+        echoes.removeAll { e in
+            guard let i = raw.indices.first(where: { i in
+                !used.contains(i) && earlier + i >= e.after && raw[i].role == "user"
+                    && raw[i].text.trimmingCharacters(in: .whitespacesAndNewlines) == e.text
+            }) else { return false }
+            used.insert(i)
+            return true
+        }
     }
 
     /// Older pages loaded on demand + the live newest page, deduped by id.
@@ -250,6 +266,10 @@ struct ChatView: View {
     /// splices, a reset, and once per turn end (restores image stubs, which the
     /// splice doesn't apply).
     private func load() async {
+        if loads == 0 { spliceLog = [] }
+        let base = spliceLog.count
+        loads += 1
+        defer { loads -= 1; if loads == 0 { spliceLog = [] } }
         let live = try? await model.client?.call("load_chat_messages_page",
                                                  ["chatId": chatId, "before": -1, "limit": 150]) as? [String: Any]
         // Launch cache (Offline.swift): remember the live page, paint the cached one while offline.
@@ -267,6 +287,12 @@ struct ChatView: View {
         }
         earlier = start
         raw = rows.enumerated().map { Message($1, index: earlier + $0) }
+        // Splices that arrived while this page was on the way, in order; one past
+        // the page's end means it's older still, read again.
+        for s in spliceLog[base...] {
+            guard let next = Self.splice(raw, start: earlier, from: s.from, s.rows) else { scheduleReload(); break }
+            raw = next
+        }
         settleEchoes()
         // A settled chat's page is complete: an echo still unmatched (text
         // reshaped on the way) would otherwise linger as a duplicate.
@@ -278,10 +304,10 @@ struct ChatView: View {
     /// increment, so no client-side projection of chat-event deltas is needed.
     private func applySplice(_ payload: Any?) {
         guard let d = payload as? [String: Any], let from = (d["fromIndex"] as? NSNumber)?.intValue,
-              let rows = d["messages"] as? [[String: Any]],
-              let next = Self.splice(raw, start: earlier, from: from,
-                                     rows.enumerated().map { Message($1, index: from + $0) })
-        else { scheduleReload(); return }
+              let rows = d["messages"] as? [[String: Any]] else { scheduleReload(); return }
+        let new = rows.enumerated().map { Message($1, index: from + $0) }
+        if loads > 0 { spliceLog.append((from, new)) }
+        guard let next = Self.splice(raw, start: earlier, from: from, new) else { scheduleReload(); return }
         raw = next
         settleEchoes()
     }
@@ -308,8 +334,11 @@ struct ChatView: View {
     }
 }
 
-struct MessageRow: View {
+/// Equatable + `.equatable()`: a streamed update re-renders only the rows that
+/// changed, not ~150 rows re-parsing their Markdown.
+struct MessageRow: View, Equatable {
     let message: Message
+    static func == (a: Self, b: Self) -> Bool { a.message == b.message }
     @State private var open = false
 
     var body: some View {

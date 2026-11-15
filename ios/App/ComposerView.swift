@@ -343,16 +343,20 @@ extension AppModel {
     /// changed on the way (a refused steer lands in the queue instead).
     @MainActor
     func composerSend(_ chat: Int, _ text: String, _ images: [String], steer: Bool) async throws -> String? {
-        guard let client, client.isOpen else {
+        let held = "Held — it will be delivered when Burrow reconnects."
+        guard let client, client.isOpen, !outbox.contains(where: { $0.chatId == chat }) else {
+            // Offline, or earlier messages for this chat still wait in the outbox: go behind them.
             enqueue(chat, text, images)
-            return "Offline — it will be queued when Burrow reconnects."
+            return online ? "Queued behind messages still waiting to be delivered." : held
         }
         let args: [String: Any] = ["chatId": chat, "text": text, "images": images]
         let p = phase(chat)
         var notice: String?
         if !p.inFlight {
             localSend(chat, text)
-            do { try await client.call("chat_send", args) } catch { localSend(chat, nil); throw error }
+            do {
+                if try await sendOrHold(chat, "chat_send", text, images) { localSend(chat, nil); return held }
+            } catch { localSend(chat, nil); throw error }
             if let c = self.chat(chat) { startActivity(c) }
         } else if steer && p.state == "running" {
             do {
@@ -360,11 +364,11 @@ extension AppModel {
             } catch {
                 // chatsteer.go refuses outside a running turn and on generic ACP:
                 // the message is not lost, it waits in the queue.
-                try await client.call("chat_queue_add", args)
+                if try await sendOrHold(chat, "chat_queue_add", text, images) { return held }
                 notice = "Couldn't steer (\(error.localizedDescription)) — queued instead."
             }
         } else {
-            try await client.call("chat_queue_add", args)
+            if try await sendOrHold(chat, "chat_queue_add", text, images) { return held }
             if steer { notice = "Waiting on you, not running — queued instead." }
         }
         nudgeChat(chat)

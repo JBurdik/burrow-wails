@@ -151,7 +151,8 @@ struct QueuePanel: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         } catch {
             let reason = error.localizedDescription
-            if let back = try? await client.call("chat_queue_add", ["chatId": chatId, "text": text, "images": item.attachments]) as? [String: Any] {
+            if let back = try? await client.call("chat_queue_add", ["chatId": chatId, "text": text, "images": item.attachments,
+                                                                 "clientId": UUID().uuidString]) as? [String: Any] {
                 var ids = items.map(\.id).filter { $0 != int(back["id"]) }
                 ids.insert(int(back["id"]), at: min(index, ids.count))
                 _ = try? await client.call("chat_queue_reorder", ["chatId": chatId, "ids": ids])

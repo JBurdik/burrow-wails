@@ -23,7 +23,8 @@ enum LocalStore {
     }
 }
 
-/// A message typed while offline; delivered via chat_queue_add on the next open.
+/// A message held for delivery (offline, behind earlier held ones, or a reply lost
+/// to a drop); delivered via chat_queue_add on the next open, `id` as its clientId.
 struct OutboxItem: Codable, Identifiable, Hashable {
     var id = UUID()
     var chatId: Int
@@ -137,9 +138,12 @@ extension AppModel {
 
     // MARK: outbox
 
-    func enqueue(_ chat: Int, _ text: String, _ images: [String] = []) {
-        outbox.append(OutboxItem(chatId: chat, text: text, images: images))
+    /// `id` is also the item's `clientId` on the wire: every retry carries the same
+    /// one, so Go drops a repeat (a reply lost to a drop no longer means two copies).
+    func enqueue(_ chat: Int, _ text: String, _ images: [String] = [], id: UUID = UUID()) {
+        outbox.append(OutboxItem(id: id, chatId: chat, text: text, images: images))
         saveOutbox()
+        if online { Task { await flushOutbox() } }
     }
 
     func removePending(_ id: UUID) {
@@ -152,27 +156,51 @@ extension AppModel {
         try? d.write(to: dir.appendingPathComponent("outbox.json"), options: .atomic)
     }
 
-    /// On every socket open: each pending item in order through chat_queue_add (Go
-    /// delivers it once the chat settles). Removed only after the call succeeded;
-    /// a refusal stays with its error, a dropped socket stops the pass.
-    // ponytail: a reply lost to a drop after Go queued it means a second copy on
-    // the next open; an idempotency key in chat_queue_add would fix that.
-    @MainActor func flushOutbox() async {
-        guard !flushing else { return }
-        flushing = true; defer { flushing = false }
-        for id in outbox.map(\.id) {
-            guard let client, client.isOpen, let item = outbox.first(where: { $0.id == id }) else { return }
-            do {
-                try await client.call("chat_queue_add", ["chatId": item.chatId, "text": item.text, "images": item.images])
-                outbox.removeAll { $0.id == id }
-                nudgeChat(item.chatId)
-            } catch BurrowError.closed {
-                return
-            } catch {
-                if let i = outbox.firstIndex(where: { $0.id == id }) { outbox[i].error = error.localizedDescription }
-            }
-            saveOutbox()
+    /// One user message with an idempotency key (`clientId`). Held in the outbox,
+    /// under the same key, when offline, when this chat already has items waiting
+    /// there (a new message must not overtake them), or when the socket dropped
+    /// mid-call (the reply is lost, the request may have landed: the retry is
+    /// deduped by Go). Returns true when held. A refusal throws.
+    @MainActor func sendOrHold(_ chat: Int, _ cmd: String, _ text: String, _ images: [String]) async throws -> Bool {
+        let cid = UUID()
+        guard let client, client.isOpen, !outbox.contains(where: { $0.chatId == chat }) else {
+            enqueue(chat, text, images, id: cid); return true
         }
+        do {
+            try await client.call(cmd, ["chatId": chat, "text": text, "images": images, "clientId": cid.uuidString])
+            return false
+        } catch BurrowError.closed {
+            enqueue(chat, text, images, id: cid); return true
+        }
+    }
+
+    /// On every socket open (and after an enqueue while online): each pending item
+    /// in order through chat_queue_add (Go delivers it once the chat settles), with
+    /// its clientId. Removed only after success; a refusal keeps its error and holds
+    /// that chat's later items back (others go on); a dropped socket stops the pass.
+    @MainActor func flushOutbox() async {
+        if flushing { flushAgain = true; return }
+        flushing = true; defer { flushing = false }
+        repeat {
+            flushAgain = false
+            var blocked = Set<Int>()
+            for id in outbox.map(\.id) {
+                guard let client, client.isOpen else { return }
+                guard let item = outbox.first(where: { $0.id == id }), !blocked.contains(item.chatId) else { continue }
+                do {
+                    try await client.call("chat_queue_add", ["chatId": item.chatId, "text": item.text, "images": item.images,
+                                                             "clientId": item.id.uuidString])
+                    outbox.removeAll { $0.id == id }
+                    nudgeChat(item.chatId)
+                } catch BurrowError.closed {
+                    return
+                } catch {
+                    blocked.insert(item.chatId)
+                    if let i = outbox.firstIndex(where: { $0.id == id }) { outbox[i].error = error.localizedDescription }
+                }
+                saveOutbox()
+            }
+        } while flushAgain
     }
 
     /// Tap on the banner: reconnect now, skipping the backoff.

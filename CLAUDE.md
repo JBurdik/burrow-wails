@@ -740,8 +740,10 @@ wildcard dev profile (no Xcode account needed), which can't carry App Groups. `j
 `codesign` → `<app-data>/ios/Burrow.ipa`; the core serves an `itms-services` install page at `/ios`
 (`iosinstall.go`; behind a `tailscale serve` path mount the page passes its prefix as `?p=`). **Offline** (`Offline.swift`):
 a per-machine folder `<Application Support>/burrow/<sha256(baseURL)>/` holds the **outbox** (sends while the socket is
-down, shown in the chat's QueuePanel as "Waiting for connection", delivered in order via `chat_queue_add` on each `open`,
-removed only after success, deletable) and the **launch cache** (snapshot + `list_chats` rows, written after a snapshot
+down, sends whose reply a drop lost, and anything for a chat that already has items there — never overtaken; shown in
+the chat's QueuePanel as "Waiting for connection", delivered in order via `chat_queue_add` on each `open` (not after the
+snapshot), removed only after success, deletable; a refusal holds back only that chat's later items). Every user send
+carries a `clientId` (UUID; an outbox item's id), reused by every retry, so Go's dedupe makes the retry safe and the **launch cache** (snapshot + `list_chats` rows, written after a snapshot
 and on background; ≤ 20 chats × 150 messages of `load_chat_messages_page`, kept in memory per load, written on
 background) painted before the socket opens; unpair clears the cache, not the outbox. `ConnectionBanner` above the
 split view: nothing while connected, "Reconnecting…" after 1.5 s, "Offline" after 3 s; tap = `reconnect()` (skips the
