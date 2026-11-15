@@ -43,6 +43,16 @@ targets:
     dependencies:
       - target: BurrowWidgets
       - target: BurrowShare
+  BurrowTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agenticide.burrow.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Burrow
   BurrowWidgets:
     type: app-extension
     platform: iOS
@@ -86,3 +96,10 @@ targets:
       path: Share/Share.entitlements
       properties:
         keychain-access-groups: [$(AppIdentifierPrefix)com.agenticide.burrow.shared]
+schemes:
+  Burrow:
+    build:
+      targets:
+        Burrow: all
+    test:
+      targets: [BurrowTests]

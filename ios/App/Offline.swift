@@ -124,7 +124,8 @@ extension AppModel {
         return p
     }
 
-    /// Kept in memory on every load (it runs per streamed line); written to disk by saveCache.
+    /// Kept in memory on a page load, a settled turn and leaving the chat; written to disk by
+    /// saveCache. `rev` lets the next open catch up with chat_subscribe from it.
     func cachePage(_ chat: Int, _ page: [String: Any]) {
         var msgs = page["messages"] as? [[String: Any]] ?? []
         let drop = max(0, msgs.count - Self.cachedMessages)
@@ -132,7 +133,7 @@ extension AppModel {
             guard let out = m["toolOutput"] as? String, out.count > 2000 else { return m }
             var m = m; m["toolOutput"] = String(out.prefix(2000)); return m // the row shows 1500
         }
-        pageCache[chat] = ["start": int(page["start"]) + drop, "messages": msgs]
+        pageCache[chat] = ["start": int(page["start"]) + drop, "messages": msgs, "rev": page["rev"] ?? 0]
         dirtyPages.insert(chat)
     }
 

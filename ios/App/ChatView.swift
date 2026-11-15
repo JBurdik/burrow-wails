@@ -32,24 +32,22 @@ struct Message: Identifiable, Hashable {
 struct ChatView: View {
     let chatId: Int
     @Environment(AppModel.self) private var model
-    /// Unfiltered newest window of the transcript; raw[0] is transcript index `earlier`.
-    @State private var raw: [Message] = []
-    @State private var earlier = 0
+    /// Unfiltered newest window of the transcript, built by Go's revisioned
+    /// splices (TranscriptWindow); nil until the first page / cached page.
+    @State private var win: TranscriptWindow?
     @State private var older: [Message] = []
     @State private var olderStart = 0
     @State private var loadingOlder = false
     @State private var error: String?
-    @State private var reloadTask: Task<Void, Never>?
     @State private var showDetails = false
     @State private var showPanel = false
     @State private var atBottom = true
     @State private var eventToken: UUID?
     /// Own sends not yet in the transcript (shown greyed until Go's copy lands).
     @State private var echoes: [Message] = []
-    /// Splices received while a load() is in flight, re-applied on top of its page
-    /// (which may predate them). Logged only while `loads > 0`.
-    @State private var loads = 0
-    @State private var spliceLog: [(from: Int, rows: [Message])] = []
+    /// chat_subscribe is single-flight: a gap during one asks for another round.
+    @State private var catching = false
+    @State private var catchAgain = false
     /// Set by an own send: the next transcript change scrolls down whatever
     /// atBottom says (the composer / keyboard often hide the bottom marker).
     @State private var pinBottom = false
@@ -199,23 +197,29 @@ struct ChatView: View {
             model.unsubscribe(eventToken) // a second onAppear without onDisappear
             eventToken = model.subscribe { name, payload in
                 if name == "chat-local-send-\(chatId)" { localEcho(payload as? [String: Any]) }
-                else if name == "chat-messages-changed-\(chatId)" { applySplice(payload) }
-                // nil payload = AppModel.nudgeChat after a send / outbox delivery: the
-                // user's own message may arrive with no splice, so re-read the page.
-                else if name == "chat-event-\(chatId)", payload == nil || Self.endsTurn(payload) { scheduleReload() }
+                else if name == "chat-messages-changed-\(chatId)" { feed { $0.apply(splice: payload as? [String: Any] ?? [:]) } }
+                else if name == "chat-tail-\(chatId)" { feed { $0.apply(tail: payload as? [String: Any] ?? [:]) } }
+                // nil payload = AppModel.nudgeChat after a send / outbox delivery: a
+                // no-op subscribe when nothing was missed.
+                else if name == "chat-event-\(chatId)", payload == nil { Task { await catchUp() } }
             }
         }
         .onDisappear {
             if model.viewing == chatId { model.viewing = nil }
             model.unsubscribe(eventToken)
+            if let win { model.cachePage(chatId, win.page) }
         }
-        .onChange(of: model.connected) { _, c in if c { Task { await load() } } }
-        // Safety net that needs no event subscription of its own: the chat's phase
-        // is observed model state, and a send flips it (running), as does a turn
-        // end. A page read then shows whatever a missed splice would have.
-        .onChange(of: phase.state) { _, _ in scheduleReload() }
+        .onChange(of: model.connected) { _, c in if c { Task { await catchUp() } } }
+        // ponytail: cheap insurance — a phase change (send, turn end) costs one
+        // chat_subscribe that returns nothing when no splice was missed.
+        .onChange(of: phase.state) { _, _ in
+            Task { await catchUp() }
+            if !phase.inFlight, let win { model.cachePage(chatId, win.page) }
+        }
     }
 
+    private var raw: [Message] { win?.rows ?? [] }
+    private var earlier: Int { win?.start ?? 0 }
     private var messages: [Message] { Self.visible(raw) }
 
     /// One unanimated scroll after this update has laid out. Animated scrollTo
@@ -285,96 +289,56 @@ struct ChatView: View {
         }
     }
 
-    private func scheduleReload() {
-        reloadTask?.cancel()
-        reloadTask = Task {
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            if !Task.isCancelled { await load() }
+    /// One live event on the held window; a gap asks Go for what was missed.
+    private func feed(_ op: (inout TranscriptWindow) -> TranscriptWindow.Outcome) {
+        guard var w = win else { return } // load() subscribes once its page is in
+        switch op(&w) {
+        case .applied: adopt(w)
+        case .gap: Task { await catchUp() }
+        case .ignored: break
         }
     }
 
-    /// Full read of the newest page: first open, reconnect, a hole in the
-    /// splices, a reset, and once per turn end (restores image stubs, which the
-    /// splice doesn't apply).
+    /// Take a new window. Older pages end at the previous window start: when the
+    /// window moved forward contiguously, keep the rows in between; when it moved
+    /// back (clear / rewind) or jumped past a gap, the older pages are stale.
+    private func adopt(_ w: TranscriptWindow) {
+        if let prev = win, !older.isEmpty, w.start != prev.start {
+            if w.start < prev.start || w.start > prev.start + prev.rows.count { older = []; olderStart = 0 }
+            else { older += Self.visible(Array(prev.rows.prefix(w.start - prev.start))) }
+        }
+        win = w
+        settleEchoes()
+    }
+
+    /// chat_subscribe(heldRev): the splices missed since (or one authoritative
+    /// splice) + the streaming row's text so far. Reconnect, a gap, a nudge.
+    private func catchUp() async {
+        guard let held = win else { await load(); return }
+        if catching { catchAgain = true; return }
+        catching = true; defer { catching = false }
+        repeat {
+            catchAgain = false
+            guard let reply = try? await model.client?.call("chat_subscribe", ["chatId": chatId, "sinceRev": win?.rev ?? held.rev]) as? [String: Any],
+                  var w = win else { return }
+            // A reply that doesn't chain (the ring moved under it): read the page again.
+            guard w.apply(subscribe: reply) == .applied else { await load(); return }
+            adopt(w)
+        } while catchAgain
+    }
+
+    /// First open: the newest page (with its rev), then chat_subscribe from that
+    /// rev to close the race with splices sent while the page was on the way.
     private func load() async {
-        if loads == 0 { spliceLog = [] }
-        let base = spliceLog.count
-        loads += 1
-        defer { loads -= 1; if loads == 0 { spliceLog = [] } }
         let live = try? await model.client?.call("load_chat_messages_page",
                                                  ["chatId": chatId, "before": -1, "limit": 150]) as? [String: Any]
         // Launch cache (Offline.swift): remember the live page, paint the cached one while offline.
         if let live { model.cachePage(chatId, live) }
-        guard let page = live ?? (raw.isEmpty ? model.cachedPage(chatId) : nil) else { return }
-        let rows = page["messages"] as? [[String: Any]] ?? []
-        let start = int(page["start"])
-        // Older pages end at the previous window start: when the newest page
-        // moved forward (a turn grew the transcript), keep the rows in between
-        // or they fall into a gap no "Load earlier" can reach. A window that
-        // moved back (clear / rewind) makes the older pages stale.
-        if !older.isEmpty {
-            if start < earlier { older = []; olderStart = 0 }
-            else if start > earlier { older += Self.visible(Array(raw.prefix(start - earlier))) }
-        }
-        earlier = start
-        raw = rows.enumerated().map { Message($1, index: earlier + $0) }
-        // Splices that arrived while this page was on the way, in order; one past
-        // the page's end means it's older still, read again.
-        // A splice that arrived during the request may also be OLDER than the page
-        // (sent before Go read it): replaying that one cut the page's newer tail —
-        // a just-sent / steered message vanished until the next wide splice.
-        for s in spliceLog[base...] where !Self.isStale(raw, start: earlier, from: s.from, s.rows) {
-            guard let next = Self.splice(raw, start: earlier, from: s.from, s.rows) else { scheduleReload(); break }
-            raw = next
-        }
-        settleEchoes()
-        // A settled chat's page is complete: an echo still unmatched (text
-        // reshaped on the way) would otherwise linger as a duplicate.
-        if live != nil, !phase.inFlight { echoes.removeAll() }
-    }
-
-    /// While a turn streams, Go's fold (chattranscript.go) emits the changed tail
-    /// as `chat-messages-changed-<id>` {fromIndex, messages}; splicing it is the
-    /// increment, so no client-side projection of chat-event deltas is needed.
-    private func applySplice(_ payload: Any?) {
-        guard let d = payload as? [String: Any], let from = (d["fromIndex"] as? NSNumber)?.intValue,
-              let rows = d["messages"] as? [[String: Any]] else { scheduleReload(); return }
-        let new = rows.enumerated().map { Message($1, index: from + $0) }
-        if loads > 0 { spliceLog.append((from, new)) }
-        guard let next = Self.splice(raw, start: earlier, from: from, new) else { scheduleReload(); return }
-        raw = next
-        settleEchoes()
-    }
-
-    /// `raw` starts at transcript index `start`; replace everything from `from`
-    /// on with `new`. nil = a hole (a splice was missed), caller reloads.
-    /// A splice reaching back past the window keeps only the part inside it.
-    static func splice(_ raw: [Message], start: Int, from: Int, _ new: [Message]) -> [Message]? {
-        if from > start + raw.count { return nil }
-        if from < start { return Array(new.dropFirst(start - from)) }
-        return Array(raw.prefix(from - start)) + new
-    }
-
-    /// Whether a splice is behind what `raw` already holds: it would drop rows
-    /// (ends before raw's end) or put back an older version of one (shorter
-    /// text / output, or partial again). Only for replaying over a fresh page;
-    /// a live splice always applies.
-    static func isStale(_ raw: [Message], start: Int, from: Int, _ new: [Message]) -> Bool {
-        if from + new.count < start + raw.count { return true }
-        for (k, n) in new.enumerated() {
-            let i = from + k - start
-            guard i >= 0, i < raw.count else { continue }
-            let o = raw[i]
-            if o.id != n.id { continue }
-            if n.text.count < o.text.count || n.toolOutput.count < o.toolOutput.count || (n.partial && !o.partial) { return true }
-        }
-        return false
-    }
-
-    /// A chat-event batch that closes the turn or resets the session.
-    static func endsTurn(_ payload: Any?) -> Bool {
-        let events = (payload as? [String: Any])?["events"] as? [[String: Any]] ?? []
-        return events.contains { ["turn.completed", "turn.failed", "session.reset", "session.exited"].contains($0["type"] as? String ?? "") }
+        guard let page = live ?? (win == nil ? model.cachedPage(chatId) : nil) else { return }
+        adopt(TranscriptWindow(page: page))
+        guard let reply = try? await model.client?.call("chat_subscribe", ["chatId": chatId, "sinceRev": win?.rev ?? 0]) as? [String: Any],
+              var w = win else { return }
+        if w.apply(subscribe: reply) == .applied { adopt(w) }
     }
 
     private func send(_ raw: String) async {
