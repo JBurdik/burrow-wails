@@ -175,6 +175,7 @@ struct ChatView: View {
             // Own subscription, not the single chatListeners slot: two views of the
             // same chat (split view, a sub-agent pushed in a sheet) used to clear
             // each other's listener on disappear, and the chat stopped updating.
+            model.unsubscribe(eventToken) // a second onAppear without onDisappear
             eventToken = model.subscribe { name, payload in
                 if name == "chat-local-send-\(chatId)" { localEcho(payload as? String) }
                 else if name == "chat-messages-changed-\(chatId)" { applySplice(payload) }
@@ -255,7 +256,16 @@ struct ChatView: View {
         if let live { model.cachePage(chatId, live) }
         guard let page = live ?? (raw.isEmpty ? model.cachedPage(chatId) : nil) else { return }
         let rows = page["messages"] as? [[String: Any]] ?? []
-        earlier = int(page["start"])
+        let start = int(page["start"])
+        // Older pages end at the previous window start: when the newest page
+        // moved forward (a turn grew the transcript), keep the rows in between
+        // or they fall into a gap no "Load earlier" can reach. A window that
+        // moved back (clear / rewind) makes the older pages stale.
+        if !older.isEmpty {
+            if start < earlier { older = []; olderStart = 0 }
+            else if start > earlier { older += Self.visible(Array(raw.prefix(start - earlier))) }
+        }
+        earlier = start
         raw = rows.enumerated().map { Message($1, index: earlier + $0) }
         settleEchoes()
         // A settled chat's page is complete: an echo still unmatched (text

@@ -137,9 +137,13 @@ final class BurrowClient: NSObject, @unchecked Sendable {
                 comps.scheme = comps.scheme == "http" ? "ws" : "wss"
                 comps.path += "/v2/ws"
                 comps.queryItems = [URLQueryItem(name: "ticket", value: t)]
+                // stop() while the ticket was in flight (AppModel.connect() replacing
+                // this client on foreground): don't open a ghost socket next to the new one.
+                if stopped { return }
                 let ws = URLSession.shared.webSocketTask(with: comps.url!)
                 ws.maximumMessageSize = 64 << 20
                 task = ws
+                if stopped { ws.cancel(with: .goingAway, reason: nil); return }
                 ws.resume()
                 if lastSeq > 0 { try await send(["t": "resume", "since": lastSeq]) }
                 delay = 1
@@ -206,7 +210,9 @@ final class BurrowClient: NSObject, @unchecked Sendable {
     }
 
     private func emit(_ name: String, _ payload: Any?) {
-        DispatchQueue.main.async { self.onEvent?(name, payload) }
+        // A stopped client's late events (its "close" above all) must not flip the
+        // model's state under the client that replaced it.
+        DispatchQueue.main.async { if !self.stopped { self.onEvent?(name, payload) } }
     }
 
     /// A dead socket after the app was suspended often still reads `.running`;

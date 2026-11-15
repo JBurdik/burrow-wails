@@ -168,6 +168,7 @@ final class AppModel {
             Task { _ = try? await old.call("push_unsubscribe_apns", ["token": t]); old.stop() }
         } else { client?.stop() }
         client = nil
+        connected = false // the stopped client's "close" is dropped (BurrowClient.emit)
         clearCache()
         CredentialStore.clear()
         creds = nil
@@ -177,6 +178,7 @@ final class AppModel {
     func connect() {
         guard let creds else { return }
         client?.stop()
+        connected = false // the stopped client's "close" is dropped; the new one's "open" sets it
         let c = BurrowClient(creds)
         c.onEvent = { [weak self] name, payload in self?.event(name, payload) }
         c.onRevoked = { [weak self] in self?.unpair(); self?.error = BurrowError.revoked.localizedDescription }
