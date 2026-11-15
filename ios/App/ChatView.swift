@@ -95,11 +95,9 @@ struct ChatView: View {
             // Follow new output only while already at the bottom; reading back
             // up the transcript must not be yanked down by every streamed line.
             .onChange(of: messages.last) { _, _ in
-                if atBottom || pinBottom { pinBottom = false; withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                if atBottom || pinBottom { pinBottom = false; scrollToEnd(proxy) }
             }
-            .onChange(of: echoes.count) { old, new in
-                if new > old { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            }
+            .onChange(of: echoes.count) { old, new in if new > old { scrollToEnd(proxy) } }
             .overlay(alignment: .bottomTrailing) {
                 if !atBottom {
                     Button { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } label: {
@@ -123,12 +121,10 @@ struct ChatView: View {
                 bottomBeforeKeyboard = atBottom
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
-                if bottomBeforeKeyboard { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                if bottomBeforeKeyboard { scrollToEnd(proxy) }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in
-                if atBottom || bottomBeforeKeyboard {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { proxy.scrollTo("bottom", anchor: .bottom) }
-                }
+                if atBottom || bottomBeforeKeyboard { scrollToEnd(proxy) }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -191,6 +187,13 @@ struct ChatView: View {
     }
 
     private var messages: [Message] { Self.visible(raw) }
+
+    /// One unanimated scroll after this update has laid out. Animated scrollTo
+    /// calls racing a LazyVStack's content change (echo in, real row in, echo
+    /// out) left it blank — a white transcript until the user scrolled.
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
+    }
 
     private func localEcho(_ text: String?) {
         guard let text else { echoes.removeAll(); return }
