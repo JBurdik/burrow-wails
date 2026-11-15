@@ -770,7 +770,11 @@ chat stores seed from `cachedRead()` before the live call. A cached snapshot is 
 `/v2/ws` client like the phone PWA (pair → device token in the Keychain → ticket → socket), same command table and
 events — no app-specific Go surface. Module per file: `AppModel` (snapshot, `list_chats`, phases, shared `seen_receipts`,
 Inbox/Working/Pinned/projects/Settled grouping = `settledFor` + `displayStatus`), `Requests`, `Queue`, `ComposerView`,
-`ThreadDetails`, `Terminals`, `ThreadActions`/`Archive`/`Search`; widget + Live Activity (`Widgets/`) and a share
+`ThreadDetails`, `Terminals`, `ThreadActions`/`Archive`/`Search`. **Transcript** = `TranscriptWindow` (pure, XCTest
+`BurrowTests`: `xcodebuild test -scheme Burrow`): page (+ `rev`) → `chat_subscribe(rev)`; splices apply on `baseRev ==
+rev` or `authoritative`, `chat-tail-<id>` by UTF-16 offset on the same rev; a gap, reconnect, nudge or phase change =
+`chat_subscribe(heldRev)` (single-flight), never a page reload; the launch cache keeps `rev`. Echoes settle by `clientId`
+(text only for rows without one); widget + Live Activity (`Widgets/`) and a share
 extension (`Share/`) share data through a **Keychain access group, not an App Group** — the build signs with the team's
 wildcard dev profile (no Xcode account needed), which can't carry App Groups. `just ios-native` = unsigned build +
 `codesign` → `<app-data>/ios/Burrow.ipa`; the core serves an `itms-services` install page at `/ios`
