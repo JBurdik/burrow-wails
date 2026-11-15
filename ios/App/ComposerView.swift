@@ -343,7 +343,10 @@ extension AppModel {
     /// changed on the way (a refused steer lands in the queue instead).
     @MainActor
     func composerSend(_ chat: Int, _ text: String, _ images: [String], steer: Bool) async throws -> String? {
-        guard let client else { throw BurrowError.closed }
+        guard let client, client.isOpen else {
+            enqueue(chat, text, images)
+            return "Offline — it will be queued when Burrow reconnects."
+        }
         let args: [String: Any] = ["chatId": chat, "text": text, "images": images]
         let p = phase(chat)
         var notice: String?

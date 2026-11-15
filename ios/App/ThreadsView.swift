@@ -59,7 +59,7 @@ struct ThreadsView: View {
             .listStyle(.insetGrouped)
             .refreshable { await model.loadSnapshot() }
             .overlay {
-                if !model.connected { ProgressView("Connecting…") }
+                if !model.connected && model.threads.isEmpty { ProgressView("Connecting…") }
             }
             .navigationTitle("Threads")
             .chatSearch { id in selected = id }

@@ -9,13 +9,15 @@ struct BurrowApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if model.creds == nil { PairView() } else { ThreadsView() }
+                if model.creds == nil { PairView() } else { ThreadsView().safeAreaInset(edge: .top, spacing: 0) { ConnectionBanner() } }
             }
             .environment(model)
             // iOS 26 draws bordered buttons as capsules; keep rounded rects app-wide.
             .buttonBorderShape(.roundedRectangle(radius: 10))
             .onAppear { push.model = model }
-            .onChange(of: scenePhase) { _, p in if p == .active { model.foreground() } }
+            .onChange(of: scenePhase) { _, p in
+                if p == .active { model.foreground() } else if p == .background { model.saveCache() }
+            }
             .onOpenURL { url in
                 // burrow://chat/<id> from the widget / Live Activity
                 if url.host == "chat", let id = Int(url.lastPathComponent) { model.openChat = id }

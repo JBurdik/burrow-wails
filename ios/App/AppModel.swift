@@ -129,6 +129,13 @@ final class AppModel {
     var seen: [Int: Double] = [:]      // chat id → seen_at (Go clock, ms)
     var error: String?
     var openChat: Int?
+    /// Messages typed while offline (Offline.swift), per paired machine.
+    var outbox: [OutboxItem] = []
+    @ObservationIgnored var flushing = false
+    /// list_chats as received, for the launch cache.
+    @ObservationIgnored var rawChats: [[String: Any]] = []
+    @ObservationIgnored var pageCache: [Int: [String: Any]] = [:]
+    @ObservationIgnored var dirtyPages: Set<Int> = []
     /// Chat on screen: its finished turns are read as they land.
     var viewing: Int?
     /// APNs device token (hex), from PushDelegate; sent on every socket open.
@@ -146,11 +153,12 @@ final class AppModel {
     }
     func unsubscribe(_ id: UUID?) { if let id { subscribers[id] = nil } }
 
-    init() { if creds != nil { connect() } }
+    init() { if creds != nil { restoreLocal(); connect() } }
 
     func paired(_ c: Credentials) {
         CredentialStore.save(c)
         creds = c
+        restoreLocal()
         connect()
     }
 
@@ -160,6 +168,7 @@ final class AppModel {
             Task { _ = try? await old.call("push_unsubscribe_apns", ["token": t]); old.stop() }
         } else { client?.stop() }
         client = nil
+        clearCache()
         CredentialStore.clear()
         creds = nil
         chats = []; workspaces = []; phases = [:]; seen = [:]
@@ -196,7 +205,7 @@ final class AppModel {
         case "open":
             connected = true
             sendPushToken()
-            Task { await loadSnapshot() }
+            Task { await loadSnapshot(); await flushOutbox() }
         case "resync":
             Task { await loadSnapshot() }
         case "chats-changed":
@@ -222,22 +231,16 @@ final class AppModel {
     func loadSnapshot() async {
         guard let client, let snap = try? await client.call("shell_snapshot") as? [String: Any] else { return }
         client.noteSeq((snap["seq"] as? NSNumber)?.int64Value ?? 0)
-        workspaces = (snap["workspaces"] as? [[String: Any]] ?? []).map {
-            Workspace(id: int($0["id"]), name: $0["name"] as? String ?? "", parentId: ($0["parent_id"] as? NSNumber)?.intValue,
-                      path: $0["path"] as? String ?? "", icon: $0["icon"] as? String)
-        }
+        workspaces = (snap["workspaces"] as? [[String: Any]] ?? []).map(Workspace.init)
         CachedWorkspace.save(workspaces.filter { $0.parentId == nil }.map { CachedWorkspace(id: $0.id, name: $0.name) })
-        var ph: [Int: Phase] = [:]
-        for (k, v) in snap["phases"] as? [String: Any] ?? [:] where k.hasPrefix("chat:") {
-            if let id = Int(k.dropFirst(5)), let d = v as? [String: Any] { ph[id] = Phase(d) }
-        }
-        phases = ph
+        phases = Self.parsePhases(snap["phases"])
         if let list = try? await client.call("seen_list") as? [[String: Any]] {
             var s: [Int: Double] = [:]
             for r in list { if let k = r["key"] as? String, k.hasPrefix("chat:"), let id = Int(k.dropFirst(5)) { s[id] = dbl(r["at"]) } }
             seen = s
         }
         await loadChats()
+        saveCache()
     }
 
     @MainActor
@@ -245,6 +248,7 @@ final class AppModel {
         // list_chats, not the snapshot's slim phone shape: turn_needs, snooze,
         // settle, parent and launch settings are all on the full row.
         guard let list = try? await client?.call("list_chats") as? [[String: Any]] else { return }
+        rawChats = list
         chats = list.map(Chat.init)
         phasesChanged(changed: nil)
     }
@@ -317,6 +321,7 @@ final class AppModel {
     }
 
     func send(_ chat: Int, _ text: String) async throws {
+        guard online else { enqueue(chat, text); return }
         // Into a running turn chat_send would steer; queue it instead, like the desktop composer.
         let cmd = phase(chat).inFlight ? "chat_queue_add" : "chat_send"
         try await client?.call(cmd, ["chatId": chat, "text": text, "images": [String]()])

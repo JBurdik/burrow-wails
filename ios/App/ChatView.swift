@@ -213,8 +213,11 @@ struct ChatView: View {
     /// splices, a reset, and once per turn end (restores image stubs, which the
     /// splice doesn't apply).
     private func load() async {
-        guard let page = try? await model.client?.call("load_chat_messages_page",
-                                                       ["chatId": chatId, "before": -1, "limit": 150]) as? [String: Any] else { return }
+        let live = try? await model.client?.call("load_chat_messages_page",
+                                                 ["chatId": chatId, "before": -1, "limit": 150]) as? [String: Any]
+        // Launch cache (Offline.swift): remember the live page, paint the cached one while offline.
+        if let live { model.cachePage(chatId, live) }
+        guard let page = live ?? (raw.isEmpty ? model.cachedPage(chatId) : nil) else { return }
         let rows = page["messages"] as? [[String: Any]] ?? []
         earlier = int(page["start"])
         raw = rows.enumerated().map { Message($1, index: earlier + $0) }

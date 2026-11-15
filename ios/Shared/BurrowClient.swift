@@ -101,6 +101,7 @@ final class BurrowClient: NSObject, @unchecked Sendable {
     private var pending: [Int: CheckedContinuation<Any?, Error>] = [:]
     private var lastSeq: Int64 = 0
     private var stopped = false
+    private var wake = false
     private(set) var isOpen = false
     private let lock = NSLock()
 
@@ -152,8 +153,9 @@ final class BurrowClient: NSObject, @unchecked Sendable {
             isOpen = false
             failPending()
             if stopped { return }
-            try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
-            delay = min(delay * 2, 15)
+            // Backoff, cut short by reconnect().
+            for _ in 0..<(delay * 10) where !wake && !stopped { try? await Task.sleep(nanoseconds: 100_000_000) }
+            if wake { wake = false; delay = 1 } else { delay = min(delay * 2, 15) }
         }
     }
 
@@ -219,7 +221,8 @@ final class BurrowClient: NSObject, @unchecked Sendable {
     }
 
     /// Drops the current socket so connectLoop reconnects (and resumes by seq).
-    func reconnect() { task?.cancel(with: .goingAway, reason: nil) }
+    /// Also skips a backoff wait in progress (the banner's tap).
+    func reconnect() { wake = true; task?.cancel(with: .goingAway, reason: nil) }
 
     func noteSeq(_ seq: Int64) { if seq > lastSeq { lastSeq = seq } }
 

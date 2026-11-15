@@ -727,7 +727,14 @@ Inbox/Working/Pinned/projects/Settled grouping = `settledFor` + `displayStatus`)
 extension (`Share/`) share data through a **Keychain access group, not an App Group** — the build signs with the team's
 wildcard dev profile (no Xcode account needed), which can't carry App Groups. `just ios-native` = unsigned build +
 `codesign` → `<app-data>/ios/Burrow.ipa`; the core serves an `itms-services` install page at `/ios`
-(`iosinstall.go`; behind a `tailscale serve` path mount the page passes its prefix as `?p=`). Live Activity / widget
+(`iosinstall.go`; behind a `tailscale serve` path mount the page passes its prefix as `?p=`). **Offline** (`Offline.swift`):
+a per-machine folder `<Application Support>/burrow/<sha256(baseURL)>/` holds the **outbox** (sends while the socket is
+down, shown in the chat's QueuePanel as "Waiting for connection", delivered in order via `chat_queue_add` on each `open`,
+removed only after success, deletable) and the **launch cache** (snapshot + `list_chats` rows, written after a snapshot
+and on background; ≤ 20 chats × 150 messages of `load_chat_messages_page`, kept in memory per load, written on
+background) painted before the socket opens; unpair clears the cache, not the outbox. `ConnectionBanner` above the
+split view: nothing while connected, "Reconnecting…" after 1.5 s, "Offline" after 3 s; tap = `reconnect()` (skips the
+backoff). Live Activity / widget
 update only while the app holds the socket (no Live Activity pushes). **Push** (`Push.swift`): asks permission, registers,
 sends the token on every socket open; sandbox = the embedded profile's `aps-environment`; a tap opens `chat=<id>` of the
 payload's `url`. Needs `APP_PROFILE=<explicit App ID profile with Push>` for `release.sh` — the wildcard profile can't

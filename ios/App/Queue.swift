@@ -27,11 +27,14 @@ struct QueuePanel: View {
 
     var body: some View {
         Group {
-            if !items.isEmpty {
+            if !items.isEmpty || model.outbox.contains(where: { $0.chatId == chatId }) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("Queued · sent when the turn ends", systemImage: "text.line.first.and.arrowtriangle.forward")
-                        .font(.caption2).foregroundStyle(.secondary)
+                    if !items.isEmpty {
+                        Label("Queued · sent when the turn ends", systemImage: "text.line.first.and.arrowtriangle.forward")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                     ForEach(Array(items.enumerated()), id: \.element.id) { i, item in row(item, index: i) }
+                    PendingOutboxRows(chatId: chatId)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(.bar)
