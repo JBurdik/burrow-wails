@@ -89,7 +89,9 @@ extension Message {
         var d: [String: Any] = ["id": id, "role": role, "text": text]
         if partial { d["partial"] = true }
         if failed { d["toolFailed"] = true }
-        if !toolOutput.isEmpty { d["toolOutput"] = toolOutput }
+        if role == "tool" ? !running : !toolOutput.isEmpty { d["toolOutput"] = toolOutput }
+        if rawName { d["toolRawName"] = true }
+        if plumbing { d["plumbing"] = true }
         if !toolTarget.isEmpty { d["toolInput"] = ["command": toolTarget] }
         if !images.isEmpty { d["images"] = images }
         if !clientId.isEmpty { d["clientId"] = clientId }

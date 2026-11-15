@@ -19,43 +19,63 @@ enum TranscriptRow: Identifiable, Equatable {
     }
 }
 
+/// The one rule, mirrored from src/lib/transcriptRows.ts and pinned for both by
+/// fixtures/transcript-rows.json (TranscriptRowsTests).
 enum Transcript {
     static func isWork(_ m: Message) -> Bool { m.role == "tool" || m.role == "thinking" }
 
+    /// Rows without Go's `plumbing` flag were folded before it existed: same rule
+    /// as chatfold.go isPlumbingCall.
+    static func isLegacyPlumbing(_ m: Message) -> Bool {
+        guard m.role == "tool", !m.failed, !m.running else { return false }
+        if m.rawName { return ["mcp__burrow__end_turn", "mcp__burrow__end_turn_pending", "ToolSearch"].contains(m.text) }
+        return m.text.trimmingCharacters(in: .whitespaces)
+            .range(of: #"^burrow[:\s]+end_turn(_pending)?$"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// Never shown: legacy `queued` rows, plumbing calls, empty thinking.
+    static func isVisible(_ m: Message) -> Bool {
+        m.role != "queued" && !m.plumbing && !isLegacyPlumbing(m) && !(m.role == "thinking" && m.text.isEmpty)
+    }
+
     /// - foldOverride: the user's explicit fold choice per turn (user message id).
     /// - settledLast: the chat is not in flight, so the last turn is settled too.
-    static func rows(_ msgs: [Message], foldOverride: [Int: Bool], settledLast: Bool) -> [TranscriptRow] {
+    static func rows(_ all: [Message], foldOverride: [Int: Bool], settledLast: Bool) -> [TranscriptRow] {
+        let msgs = all.filter(isVisible)
         var out: [TranscriptRow] = []
         var i = 0
         // Rows before the first user message (a window starting mid-turn) are not folded.
-        while i < msgs.count, msgs[i].role != "user" { out += grouped(Array(msgs[i...i])); i += 1 }
+        while i < msgs.count, msgs[i].role != "user" { i += 1 }
+        out += grouped(Array(msgs[0..<i]), atEnd: i == msgs.count)
         while i < msgs.count {
             let user = msgs[i]; i += 1
             out.append(.message(user))
             var turn: [Message] = []
             while i < msgs.count, msgs[i].role != "user" { turn.append(msgs[i]); i += 1 }
             let hasLater = i < msgs.count
-            let settled = hasLater || settledLast
-            let toolCount = turn.filter { $0.role == "tool" }.count
-            guard settled, turn.contains(where: isWork) else { out += grouped(turn); continue }
+            guard hasLater || settledLast, turn.contains(where: isWork) else { out += grouped(turn, atEnd: !hasLater); continue }
             let folded = foldOverride[user.id] ?? hasLater
+            let toolCount = turn.filter { $0.role == "tool" }.count
             var emitted = false
             var pending: [Message] = []
             for m in turn {
                 if isWork(m) {
-                    if !emitted { out.append(.worked(turn: user.id, tools: toolCount, folded: folded)); emitted = true }
+                    if !emitted {
+                        out += grouped(pending, atEnd: false); pending = []
+                        out.append(.worked(turn: user.id, tools: toolCount, folded: folded)); emitted = true
+                    }
                     if folded { continue }
                 }
                 pending.append(m)
             }
-            out += grouped(pending)
+            out += grouped(pending, atEnd: !hasLater)
         }
         return out
     }
 
-    /// Folds runs of 2+ consecutive tool rows into one group; a trailing run
-    /// whose last call is still running stays open so the live call shows.
-    static func grouped(_ msgs: [Message]) -> [TranscriptRow] {
+    /// Folds runs of 2+ consecutive tool rows into one group; a run that ends
+    /// the transcript (`atEnd`) whose last call still runs stays open so the live call shows.
+    static func grouped(_ msgs: [Message], atEnd: Bool) -> [TranscriptRow] {
         var out: [TranscriptRow] = []
         var i = 0
         while i < msgs.count {
@@ -63,19 +83,24 @@ enum Transcript {
             let start = i
             while i < msgs.count, msgs[i].role == "tool" { i += 1 }
             let run = Array(msgs[start..<i])
-            let live = i == msgs.count && run.last?.partial == true
+            let live = atEnd && i == msgs.count && run.last?.running == true
             if run.count < 2 || live { out += run.map(TranscriptRow.message) }
             else { out.append(.tools(id: "\(run[0].id)", items: run)) }
         }
         return out
     }
 
+    /// A shell command, as opposed to any other tool.
+    static func isCommand(_ m: Message) -> Bool {
+        m.rawName ? m.text == "Bash" : m.text.range(of: #"^(run|execut|bash|\$)"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     static func groupLabel(_ items: [Message]) -> String {
-        let n = items.count, bash = items.filter { $0.text == "Bash" }.count
+        let n = items.count, cmds = items.filter(isCommand).count
         let s = { (c: Int) in c == 1 ? "" : "s" }
-        if bash == n { return "Ran \(n) command\(s(n))" }
-        if bash == 0 { return "Used \(n) tool\(s(n))" }
-        return "Used \(n) tools and ran \(bash) command\(s(bash))"
+        if cmds == n { return "Ran \(n) command\(s(n))" }
+        if cmds == 0 { return "Used \(n) tool\(s(n))" }
+        return "Used \(n) tools and ran \(cmds) command\(s(cmds))"
     }
 }
 
@@ -92,7 +117,7 @@ struct ToolGroupRow: View, Equatable {
             Button { open = !isOpen } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right").font(.caption2).rotationEffect(.degrees(isOpen ? 90 : 0))
-                    Image(systemName: items.allSatisfy { $0.text == "Bash" } ? "terminal" : "wrench.and.screwdriver").font(.caption)
+                    Image(systemName: items.allSatisfy(Transcript.isCommand) ? "terminal" : "wrench.and.screwdriver").font(.caption)
                     Text(Transcript.groupLabel(items)).font(.caption.weight(.medium))
                     if failed { Image(systemName: "exclamationmark.triangle").font(.caption2).foregroundStyle(.red) }
                 }

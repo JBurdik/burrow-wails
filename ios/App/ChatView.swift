@@ -8,6 +8,12 @@ struct Message: Identifiable, Hashable {
     var failed: Bool
     var toolOutput: String
     var toolTarget: String
+    /// Tool rows: `text` is a raw tool name (native transport), not a human title.
+    var rawName: Bool
+    /// Go's fold: a finished plumbing call (taken end_turn, ToolSearch) — never shown.
+    var plumbing: Bool
+    /// Tool rows: no result yet (no `toolOutput` on the wire, not failed).
+    var running: Bool
     var images: [String]
     /// User rows: the submit client id (Go's chat_submit) — what an echo settles by.
     var clientId: String
@@ -21,6 +27,9 @@ struct Message: Identifiable, Hashable {
         partial = d["partial"] as? Bool ?? false
         failed = d["toolFailed"] as? Bool ?? false
         toolOutput = d["toolOutput"] as? String ?? ""
+        rawName = d["toolRawName"] as? Bool ?? false
+        plumbing = d["plumbing"] as? Bool ?? false
+        running = role == "tool" && !failed && d["toolOutput"] == nil
         images = d["images"] as? [String] ?? []
         clientId = d["clientId"] as? String ?? ""
         let input = d["toolInput"] as? [String: Any] ?? [:]
@@ -281,13 +290,7 @@ struct ChatView: View {
         olderStart = start
     }
 
-    static func visible(_ ms: [Message]) -> [Message] {
-        // Plumbing calls aren't work (chatPlumbing.ts): a taken end_turn / end_turn_pending, ToolSearch.
-        ms.filter {
-            $0.role != "queued" && !($0.role == "thinking" && $0.text.isEmpty)
-                && !($0.role == "tool" && !$0.failed && ($0.text.hasPrefix("mcp__burrow__end_turn") || $0.text == "ToolSearch"))
-        }
-    }
+    static func visible(_ ms: [Message]) -> [Message] { ms.filter(Transcript.isVisible) }
 
     /// One live event on the held window; a gap asks Go for what was missed.
     private func feed(_ op: (inout TranscriptWindow) -> TranscriptWindow.Outcome) {

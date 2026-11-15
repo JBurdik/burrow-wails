@@ -46,7 +46,11 @@ targets:
   BurrowTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [Tests]
+    sources:
+      - Tests
+      # Shared with vitest (src/lib/transcriptRows.test.ts).
+      - path: ../fixtures/transcript-rows.json
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.agenticide.burrow.ios.tests

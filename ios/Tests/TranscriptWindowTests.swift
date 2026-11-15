@@ -168,32 +168,3 @@ final class TranscriptWindowTests: XCTestCase {
         XCTAssertEqual(back, w)
     }
 }
-
-final class TranscriptRowsTests: XCTestCase {
-    private func msgs(_ rows: [[String: Any]]) -> [Message] {
-        rows.enumerated().map { Message($1, index: $0) }
-    }
-
-    func testSettledTurnFoldsWork() {
-        let m = msgs([row(0, "user", "q"), row(1, "thinking", "hmm"), row(2, "tool", "Bash"), row(3, "assistant", "done"),
-                      row(4, "user", "q2"), row(5, "assistant", "a2")])
-        let rows = Transcript.rows(m, foldOverride: [:], settledLast: true)
-        XCTAssertEqual(rows.map(\.id), ["m0", "w0", "m3", "m4", "m5"])
-        guard case .worked(_, let tools, let folded) = rows[1] else { return XCTFail("no worked row") }
-        XCTAssertEqual(tools, 1)
-        XCTAssertTrue(folded)
-    }
-
-    func testFoldOverrideOpensTurn() {
-        let m = msgs([row(0, "user", "q"), row(1, "tool", "Bash"), row(2, "assistant", "a"), row(3, "user", "next")])
-        let rows = Transcript.rows(m, foldOverride: [0: false], settledLast: true)
-        XCTAssertEqual(rows.map(\.id), ["m0", "w0", "m1", "m2", "m3"])
-    }
-
-    func testInFlightLastTurnNotFolded() {
-        let m = msgs([row(0, "user", "q"), row(1, "tool", "Bash"), row(2, "tool", "Read")])
-        let rows = Transcript.rows(m, foldOverride: [:], settledLast: false)
-        XCTAssertFalse(rows.contains { if case .worked = $0 { true } else { false } })
-        XCTAssertEqual(rows.first?.id, "m0")
-    }
-}
