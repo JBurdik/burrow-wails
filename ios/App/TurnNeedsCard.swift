@@ -1,0 +1,138 @@
+import SwiftUI
+
+/// end_turn's card: Needs you = one ask at a time with options; Done = follow-ups.
+struct TurnNeedsCard: View {
+    @Environment(AppModel.self) private var model
+    let needs: TurnNeeds
+    let chatId: Int
+    let send: (String) -> Void
+    @State private var answers: [Int: Set<String>] = [:]
+    @State private var confirmRun: Int?
+    @State private var starting: Int?
+    @State private var runError: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if needs.needsYou {
+                Label("Needs you", systemImage: "questionmark.bubble.fill").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                ForEach(Array(needs.asks.enumerated()), id: \.offset) { i, ask in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(ask.question).font(.subheadline.weight(.medium))
+                        if let run = ask.run { runBlock(i, run) }
+                        ForEach(Array(ask.options.enumerated()), id: \.offset) { j, opt in
+                            option(i, ask, j, opt)
+                        }
+                    }
+                }
+                if needs.asks.contains(where: { !$0.options.isEmpty }) {
+                    Button("Send answers") { send(composed) }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.roundedRectangle(radius: 10))
+                        .disabled(answers.values.allSatisfy(\.isEmpty) && !needs.asks.contains { !($0.run?.reply ?? "").isEmpty })
+                }
+            } else {
+                Label("Done", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
+                ForEach(needs.next, id: \.self) { n in
+                    Button { send(n) } label: {
+                        HStack { Text(n).multilineTextAlignment(.leading); Spacer(); Image(systemName: "arrow.up.right") }
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle(radius: 10))
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .confirmationDialog("Run this command on the Mac?", isPresented: Binding(get: { confirmRun != nil }, set: { if !$0 { confirmRun = nil } }),
+                            titleVisibility: .visible, presenting: confirmRun) { i in
+            Button("Run") { Task { await run(i) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { i in
+            Text(needs.asks.indices.contains(i) ? needs.asks[i].run?.command ?? "" : "")
+        }
+    }
+
+    /// The command, where it runs, and Run / its result (TurnNeedsCard.vue's needs-run).
+    private func runBlock(_ i: Int, _ run: TurnRun) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(run.command).font(.caption.monospaced()).textSelection(.enabled).fixedSize()
+            }
+            .padding(8)
+            .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+            HStack(spacing: 8) {
+                if run.state == "done" {
+                    Label("exit \(run.exit) · \(run.reply.isEmpty ? "result sent" : "goes with your answers")",
+                          systemImage: run.exit == 0 ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                        .font(.caption).foregroundStyle(run.exit == 0 ? .green : .red)
+                } else {
+                    Button { confirmRun = i } label: {
+                        if run.state == "running" || starting == i {
+                            HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Running…") }
+                        } else {
+                            Label("Run", systemImage: "play.fill")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .buttonBorderShape(.roundedRectangle(radius: 8))
+                    .disabled(run.state == "running" || starting != nil)
+                    if run.interrupted { Text("Interrupted by a restart").font(.caption).foregroundStyle(.orange) }
+                }
+                Spacer(minLength: 0)
+            }
+            if let runError { Text(runError).font(.caption).foregroundStyle(.red) }
+        }
+    }
+
+    /// chat_run_ask: Go runs the stored command in the chat's folder and either
+    /// sends the output as the reply or keeps it on the card (state comes back
+    /// through chats-changed).
+    private func run(_ i: Int) async {
+        guard let client = model.client else { runError = BurrowError.closed.localizedDescription; return }
+        starting = i; runError = nil
+        defer { starting = nil }
+        do { try await client.call("chat_run_ask", ["chatId": chatId, "index": i]) }
+        catch { runError = error.localizedDescription }
+    }
+
+    private func option(_ i: Int, _ ask: TurnAsk, _ j: Int, _ opt: String) -> some View {
+        let picked = answers[i, default: []].contains(opt)
+        return Button {
+            var s = answers[i, default: []]
+            if ask.multi { if picked { s.remove(opt) } else { s.insert(opt) } } else { s = picked ? [] : [opt] }
+            answers[i] = s
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: picked ? (ask.multi ? "checkmark.square.fill" : "largecircle.fill.circle") : (ask.multi ? "square" : "circle"))
+                    .foregroundStyle(picked ? Color.accentColor : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(opt).font(.subheadline)
+                        if ask.suggested == j { Text("suggested").font(.caption2).foregroundStyle(.secondary) }
+                    }
+                    if j < ask.details.count, !ask.details[j].isEmpty {
+                        Text(ask.details[j]).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// composeAnswers in src/lib/turnNeeds.ts.
+    private var composed: String {
+        let answered = needs.asks.enumerated().compactMap { i, a -> (String, String)? in
+            let picked = a.options.filter { answers[i, default: []].contains($0) }
+            if !picked.isEmpty { return (a.question, picked.joined(separator: ", ")) }
+            // A run ask whose result was kept on the card answers itself with it.
+            let reply = (a.run?.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return reply.isEmpty ? nil : (a.question, reply)
+        }
+        if needs.asks.count == 1, let one = answered.first { return one.1 }
+        return answered.map { "> \($0.0.replacingOccurrences(of: "\n", with: "\n> "))\n\($0.1)" }.joined(separator: "\n\n")
+    }
+}
