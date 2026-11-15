@@ -372,6 +372,21 @@ the queue drain via `ChatViewHooks.send`), `notice`, `suppressDoneToast`, `reque
 (`turnStartedAt` → `turnMs`) is the session's too. Deps (`invoke`, `listen`, host) are injectable:
 `chatSession.test.ts` drives it **only** through that interface and fake listeners.
 
+**Splices are versioned** (ADR 0001 phase B, `chatsplice.go`): `chat-messages-changed-<id>` =
+`{baseRev, rev, fromIndex, messages, authoritative?}`, rev = the chat's `folded_ord` (kept strictly increasing); apply
+only when `baseRev ==` the held rev or `authoritative` (rewind = from the cut, clear = from 0, subscribe ring miss).
+Stream `ord` never resets (`chat_clear` is a cut to nothing; `loadMaxOrdLocked` never goes below `folded_ord`). Pure
+text growth of the streaming row is **not** a splice: `chat-tail-<id>` `{rev, index, offset, append, kind}` (offset =
+UTF-16 length before the append), ≤ 1 per 100 ms per chat, never rev'd / ringed (`notRingable`), dropped first under
+`/v2/ws` backpressure; the next splice reaches back over every row tails touched. `chat_subscribe(chatId, sinceRev)` →
+`{rev, splices, inProgress}` from a 64-splice in-memory ring per chat, else one authoritative splice of the newest 60
+rows. `load_chat_messages_page` carries `rev`. **Images by reference** (`chatimages.go`): a user line's / note's data
+URLs go to `chat_images(chat_id, hash)` when recorded; lines and `chat_messages` hold `burrow-img:<sha256>`, splices /
+pages / `load_chat_messages` send `burrow-image://<index>/<n>` (`load_chat_image` resolves); the CLI still gets the full
+data; `chat-event` user.delta is re-inflated for the desktop's own fold (transitional). Go stamps `turnMs` on a turn's
+user row at turn end and writes permission receipts (`chatreceipts.go`) on `claude_respond_control` /
+`acp_respond_permission`.
+
 Every agent line is appended to SQLite `chat_stream(chat_id, ord, kind, line)` *before* it is emitted;
 `chat_stream_state.folded_ord` records how far the frontend folded it into `chat_messages`, so a trim
 can't delete an unrendered line. `replayChatStream()` catches a chat up after restart.
