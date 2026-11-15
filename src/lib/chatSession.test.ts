@@ -770,15 +770,6 @@ describe("a windowed transcript", () => {
     expect(texts(s)).toEqual(["m0", "Could not copy", "later"]);
     dropChatSession(98);
   });
-
-  it("hides the /context report row (it is shown as a card)", async () => {
-    const f = fakeDeps();
-    const s = chatSession(99, f.deps);
-    fakeGo(f, { messages: [msg("assistant", "## Context\nEstimated usage by category\n| x | 1k | 1% |")], rev: 1 });
-    await s.loadTranscript();
-    expect(s.messages.value).toEqual([]);
-    dropChatSession(99);
-  });
 });
 
 describe("images left out of a transcript page", () => {

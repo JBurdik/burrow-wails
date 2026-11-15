@@ -890,7 +890,7 @@ import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/co
 import PasteChip from "@/components/composer/PasteChip.vue";
 import SecretRequestCard from "@/components/SecretRequestCard.vue";
 import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
-import { isPlumbingTool } from "@/lib/chatPlumbing";
+import { isCommandTool, isVisibleRow, toolGroupLabel as groupLabel, transcriptRows } from "@/lib/transcriptRows";
 import { panelTerminals } from "@/lib/rpTerminals";
 import { useNotificationsStore } from "@/stores/notifications";
 import ThreadFindBar from "@/components/ThreadFindBar.vue";
@@ -1820,19 +1820,8 @@ interface ToolGroupHeader {
 }
 const toolGroupExpanded = reactive<Record<string, boolean>>({});
 const thinkingExpanded = reactive<Record<number, boolean>>({});
-function isBashTool(msg: ChatMessage): boolean {
-  return toolIconFor(msg) === PhTerminalWindow;
-}
-function groupLabel(items: ChatMessage[]): string {
-  const n = items.length;
-  const bash = items.filter(isBashTool).length;
-  const s = (c: number) => (c === 1 ? "" : "s");
-  if (bash === n) return `Ran ${n} command${s(n)}`;
-  if (bash === 0) return `Used ${n} tool${s(n)}`;
-  return `Used ${n} tools and ran ${bash} command${s(bash)}`;
-}
 function groupIcon(items: ChatMessage[]): unknown {
-  return items.every(isBashTool) ? PhTerminalWindow : PhWrench;
+  return items.every(isCommandTool) ? PhTerminalWindow : PhWrench;
 }
 function groupHasFailure(items: ChatMessage[]): boolean {
   return items.some((m) => m.toolFailed);
@@ -1840,30 +1829,18 @@ function groupHasFailure(items: ChatMessage[]): boolean {
 function groupIsRunning(items: ChatMessage[]): boolean {
   return items.some((m) => toolStatus(m) === "running");
 }
+// The grouping + turn fold rule lives in src/lib/transcriptRows.ts (shared
+// fixtures with iOS). Queued, plumbing and empty-thinking rows are hidden there.
+const transcript = computed(() => transcriptRows(messages.value, { settledLast: !busy.value, foldOverride: foldedTurns }));
 const grouping = computed(() => {
-  const display: (ChatMessage | ToolGroupHeader)[] = [];
   const groupIdByMsgId = new Map<number, string>();
   const groupsById = new Map<string, ToolGroupHeader>();
-  // Queued follow-ups render pinned below the live turn (like Claude desktop),
-  // not at their array position — streamed output lands after them.
-  // Plumbing tool calls (a taken end_turn, ToolSearch) aren't work: hidden.
-  const msgs = messages.value.filter((m) => m.role !== "queued" && !isPlumbingTool(m));
-  let i = 0;
-  while (i < msgs.length) {
-    const m = msgs[i];
-    if (m.role !== "tool") { display.push(m); i++; continue; }
-    const start = i;
-    while (i < msgs.length && msgs[i].role === "tool") i++;
-    const run = msgs.slice(start, i);
-    const trailingLive = i === msgs.length && toolStatus(run[run.length - 1]) === "running";
-    if (run.length < 2 || trailingLive) { display.push(...run); continue; }
-    const groupId = String(run[0].toolUseId ?? run[0].id);
-    const header: ToolGroupHeader = { role: "tool-group-header", id: `hdr-${groupId}`, groupId, items: run };
-    display.push(header);
-    groupsById.set(groupId, header);
-    for (const item of run) { display.push(item); groupIdByMsgId.set(item.id, groupId); }
+  for (const r of transcript.value) {
+    if (r.kind !== "tools") continue;
+    groupsById.set(r.id, { role: "tool-group-header", id: `hdr-${r.id}`, groupId: r.id, items: r.items });
+    for (const item of r.items) groupIdByMsgId.set(item.id, r.id);
   }
-  return { display, groupIdByMsgId, groupsById };
+  return { groupIdByMsgId, groupsById };
 });
 // Inline diff card. The first file starts open; a click flips it.
 const diffToggles = reactive<Record<string, boolean>>({});
@@ -1901,7 +1878,6 @@ interface TurnFoldRow { role: "turn-fold"; id: string; turnKey: number; label: s
 interface ChangedFilesRow { role: "changed-files"; id: string; files: FileEdit[]; added: number; removed: number; partial?: false }
 type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow;
 
-const WORK_ROLES = new Set(["thinking", "tool", "tool-group-header"]);
 const foldedTurns = reactive<Record<number, boolean>>({});
 
 // The display row the "New" divider sits above: the first one holding a
@@ -1916,56 +1892,55 @@ const watermarkRowId = computed(() => {
   return row?.id ?? null;
 });
 
-const displayItems = computed<DisplayRow[]>(() => {
-  const src = grouping.value.display;
-  const out: DisplayRow[] = [];
-  let i = 0;
-  while (i < src.length) {
-    const row = src[i];
-    if (row.role !== "user") { out.push(row); i++; continue; }
-    const user = row as ChatMessage;
-    out.push(user);
-    i++;
-    const turnRows: (ChatMessage | ToolGroupHeader)[] = [];
-    while (i < src.length && src[i].role !== "user") { turnRows.push(src[i]); i++; }
-    const hasLaterTurn = i < src.length;
-    // The last turn is settled only once the chat is idle; earlier ones always are.
-    const settled = hasLaterTurn || !busy.value;
-    const folded = settled && (foldedTurns[user.id] ?? hasLaterTurn);
-    const label = user.turnMs ? `Worked ${fmtDuration(user.turnMs)}` : "Worked";
-    const toolCount = turnRows.filter((r) => r.role === "tool").length;
-    const projectEdit = (r: ChatMessage | ToolGroupHeader) => {
-      if (r.role !== "tool") return null;
-      const e = editOf((r as ChatMessage).toolInput);
-      return e && isProjectPath(e.path, props.cwd) ? e : null;
-    };
-    const fileCount = new Set(turnRows.map((r) => projectEdit(r)?.path).filter(Boolean)).size;
-
-    const edits: FileEdit[] = [];
-    let foldEmitted = false;
-    for (const r of turnRows) {
-      const e = projectEdit(r);
-      if (e) edits.push(e);
-      if (settled && WORK_ROLES.has(r.role)) {
-        if (!foldEmitted) {
-          out.push({ role: "turn-fold", id: `fold-${user.id}`, turnKey: user.id, label, folded, toolCount, fileCount });
-          foldEmitted = true;
-        }
-        if (folded) continue;
-      }
-      out.push(r);
+// Per turn (its user row id): the project files its tool calls edited, and
+// whether it is settled — for the fold row's count and the changed-files card.
+const turnEdits = computed(() => {
+  const out = new Map<number, { edits: FileEdit[]; settled: boolean }>();
+  const msgs = messages.value.filter(isVisibleRow);
+  let cur: { edits: FileEdit[]; settled: boolean } | null = null;
+  for (const m of msgs) {
+    if (m.role === "user") {
+      if (cur) cur.settled = true; // a later turn exists
+      cur = { edits: [], settled: !busy.value };
+      out.set(m.id, cur);
+      continue;
     }
-    if (settled && edits.length > 0) {
-      const files = mergeEdits(edits);
-      out.push({
-        role: "changed-files",
-        id: `cf-${user.id}`,
-        files,
-        added: files.reduce((n, f) => n + f.added, 0),
-        removed: files.reduce((n, f) => n + f.removed, 0),
-      });
+    if (!cur || m.role !== "tool") continue;
+    const e = editOf(m.toolInput);
+    if (e && isProjectPath(e.path, props.cwd)) cur.edits.push(e);
+  }
+  return out;
+});
+
+const displayItems = computed<DisplayRow[]>(() => {
+  const out: DisplayRow[] = [];
+  const byId = new Map(messages.value.map((m) => [m.id, m]));
+  let turn: number | null = null;
+  const endTurn = () => {
+    const t = turn === null ? undefined : turnEdits.value.get(turn);
+    if (!t?.settled || !t.edits.length) return;
+    const files = mergeEdits(t.edits);
+    out.push({
+      role: "changed-files",
+      id: `cf-${turn}`,
+      files,
+      added: files.reduce((n, f) => n + f.added, 0),
+      removed: files.reduce((n, f) => n + f.removed, 0),
+    });
+  };
+  for (const r of transcript.value) {
+    if (r.kind === "message") {
+      if (r.message.role === "user") { endTurn(); turn = r.message.id; }
+      out.push(r.message);
+    } else if (r.kind === "tools") {
+      out.push(grouping.value.groupsById.get(r.id)!, ...r.items);
+    } else {
+      const turnMs = byId.get(r.turn)?.turnMs;
+      const fileCount = new Set(turnEdits.value.get(r.turn)?.edits.map((e) => e.path)).size;
+      out.push({ role: "turn-fold", id: `fold-${r.turn}`, turnKey: r.turn, label: turnMs ? `Worked ${fmtDuration(turnMs)}` : "Worked", folded: r.folded, toolCount: r.tools, fileCount });
     }
   }
+  endTurn();
   return out;
 });
 // Consecutive same-role bubbles (user asking two things in a row, or an

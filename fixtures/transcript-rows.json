@@ -1,0 +1,719 @@
+[
+ {
+  "name": "groups 2+ finished tool calls, a single one stays a row",
+  "settledLast": false,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 2,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t2",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 3,
+    "role": "assistant",
+    "text": "ok"
+   },
+   {
+    "id": 4,
+    "role": "tool",
+    "text": "Read",
+    "toolUseId": "t4",
+    "toolRawName": true,
+    "toolOutput": "done"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "tools": [
+     1,
+     2
+    ],
+    "label": "Ran 2 commands",
+    "failed": false
+   },
+   {
+    "message": 3
+   },
+   {
+    "message": 4
+   }
+  ]
+ },
+ {
+  "name": "a trailing run whose last call runs stays open",
+  "settledLast": false,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 2,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t2",
+    "toolRawName": true
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "message": 1
+   },
+   {
+    "message": 2
+   }
+  ]
+ },
+ {
+  "name": "label mixes tools and commands, failure marks the group",
+  "settledLast": false,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 2,
+    "role": "tool",
+    "text": "Read",
+    "toolUseId": "t2",
+    "toolRawName": true,
+    "toolOutput": "boom",
+    "toolFailed": true
+   },
+   {
+    "id": 3,
+    "role": "tool",
+    "text": "Run tests",
+    "toolUseId": "t3",
+    "toolOutput": "done"
+   },
+   {
+    "id": 4,
+    "role": "assistant",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "tools": [
+     1,
+     2,
+     3
+    ],
+    "label": "Used 3 tools and ran 2 commands",
+    "failed": true
+   },
+   {
+    "message": 4
+   }
+  ]
+ },
+ {
+  "name": "no commands: Used N tools",
+  "settledLast": false,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Read",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 2,
+    "role": "tool",
+    "text": "Grep",
+    "toolUseId": "t2",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 3,
+    "role": "assistant",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "tools": [
+     1,
+     2
+    ],
+    "label": "Used 2 tools",
+    "failed": false
+   },
+   {
+    "message": 3
+   }
+  ]
+ },
+ {
+  "name": "settled turns fold their work, the last stays open",
+  "settledLast": true,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "assistant",
+    "text": "looking"
+   },
+   {
+    "id": 2,
+    "role": "thinking",
+    "text": "hmm"
+   },
+   {
+    "id": 3,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t3",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 4,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t4",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 5,
+    "role": "assistant",
+    "text": "ok"
+   },
+   {
+    "id": 6,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 7,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t7",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 8,
+    "role": "assistant",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "message": 1
+   },
+   {
+    "worked": 0,
+    "tools": 2,
+    "folded": true
+   },
+   {
+    "message": 5
+   },
+   {
+    "message": 6
+   },
+   {
+    "worked": 6,
+    "tools": 1,
+    "folded": false
+   },
+   {
+    "message": 7
+   },
+   {
+    "message": 8
+   }
+  ]
+ },
+ {
+  "name": "fold override per user row",
+  "settledLast": true,
+  "foldOverride": {
+   "0": false,
+   "6": true
+  },
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "assistant",
+    "text": "looking"
+   },
+   {
+    "id": 2,
+    "role": "thinking",
+    "text": "hmm"
+   },
+   {
+    "id": 3,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t3",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 4,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t4",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 5,
+    "role": "assistant",
+    "text": "ok"
+   },
+   {
+    "id": 6,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 7,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t7",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 8,
+    "role": "assistant",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "message": 1
+   },
+   {
+    "worked": 0,
+    "tools": 2,
+    "folded": false
+   },
+   {
+    "message": 2
+   },
+   {
+    "tools": [
+     3,
+     4
+    ],
+    "label": "Ran 2 commands",
+    "failed": false
+   },
+   {
+    "message": 5
+   },
+   {
+    "message": 6
+   },
+   {
+    "worked": 6,
+    "tools": 1,
+    "folded": true
+   },
+   {
+    "message": 8
+   }
+  ]
+ },
+ {
+  "name": "the last turn in flight is not folded",
+  "settledLast": false,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "assistant",
+    "text": "looking"
+   },
+   {
+    "id": 2,
+    "role": "thinking",
+    "text": "hmm"
+   },
+   {
+    "id": 3,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t3",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 4,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t4",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 5,
+    "role": "assistant",
+    "text": "ok"
+   },
+   {
+    "id": 6,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 7,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t7",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 8,
+    "role": "assistant",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "message": 1
+   },
+   {
+    "worked": 0,
+    "tools": 2,
+    "folded": true
+   },
+   {
+    "message": 5
+   },
+   {
+    "message": 6
+   },
+   {
+    "message": 7
+   },
+   {
+    "message": 8
+   }
+  ]
+ },
+ {
+  "name": "a turn with no work has no fold",
+  "settledLast": true,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "assistant",
+    "text": "ok"
+   },
+   {
+    "id": 2,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 3,
+    "role": "assistant",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "message": 1
+   },
+   {
+    "message": 2
+   },
+   {
+    "message": 3
+   }
+  ]
+ },
+ {
+  "name": "rows before the first user row are grouped, not folded",
+  "settledLast": true,
+  "rows": [
+   {
+    "id": 0,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t0",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 2,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 3,
+    "role": "assistant",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "tools": [
+     0,
+     1
+    ],
+    "label": "Ran 2 commands",
+    "failed": false
+   },
+   {
+    "message": 2
+   },
+   {
+    "message": 3
+   }
+  ]
+ },
+ {
+  "name": "hidden: plumbing flag, legacy plumbing, queued, empty thinking; a failed end_turn shows",
+  "settledLast": false,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "mcp__burrow__end_turn",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done",
+    "plumbing": true
+   },
+   {
+    "id": 2,
+    "role": "tool",
+    "text": "ToolSearch",
+    "toolUseId": "t2",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 3,
+    "role": "tool",
+    "text": "burrow: end_turn",
+    "toolUseId": "t3",
+    "toolOutput": "done"
+   },
+   {
+    "id": 4,
+    "role": "tool",
+    "text": "mcp__burrow__end_turn",
+    "toolUseId": "t4",
+    "toolRawName": true,
+    "toolOutput": "no",
+    "toolFailed": true
+   },
+   {
+    "id": 5,
+    "role": "queued",
+    "text": "later"
+   },
+   {
+    "id": 6,
+    "role": "thinking",
+    "text": ""
+   },
+   {
+    "id": 7,
+    "role": "assistant",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "message": 4
+   },
+   {
+    "message": 7
+   }
+  ]
+ },
+ {
+  "name": "a running call that ends an earlier turn is grouped",
+  "settledLast": false,
+  "foldOverride": {
+   "0": false
+  },
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done"
+   },
+   {
+    "id": 2,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t2",
+    "toolRawName": true
+   },
+   {
+    "id": 3,
+    "role": "user",
+    "text": "do it"
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "worked": 0,
+    "tools": 2,
+    "folded": false
+   },
+   {
+    "tools": [
+     1,
+     2
+    ],
+    "label": "Ran 2 commands",
+    "failed": false
+   },
+   {
+    "message": 3
+   }
+  ]
+ },
+ {
+  "name": "an unfinished legacy end_turn call is not hidden",
+  "settledLast": false,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "do it"
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "mcp__burrow__end_turn",
+    "toolUseId": "t1",
+    "toolRawName": true
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "message": 1
+   }
+  ]
+ }
+]

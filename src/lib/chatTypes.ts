@@ -36,6 +36,8 @@ export interface ChatMessage {
   subagentAgent?: string;
   /** system-info row that opens this Right Panel surface when clicked. */
   surface?: string;
+  /** Go's fold: a finished plumbing call (taken end_turn, ToolSearch) — not shown. */
+  plumbing?: boolean;
 }
 
 /** A user prompt held until the active turn reaches a terminal boundary. */

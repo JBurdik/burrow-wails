@@ -560,10 +560,9 @@ function pushLocal(s: InternalSession, row: Omit<ChatMessage, "id">): number {
   return id;
 }
 
-/** Rows Go keeps that this client does not show: legacy `queued` rows, and the /context report (shown as a card). */
+/** Rows Go keeps that this client does not show: legacy `queued` rows. */
 function shown(m: ChatMessage): boolean {
-  if (m.role === "queued") return false;
-  return !(m.role === "assistant" && m.text.includes("Estimated usage by category"));
+  return m.role !== "queued";
 }
 
 /**
@@ -1139,7 +1138,7 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
       if (event.clientId) s.pendingSends.delete(event.clientId);
       continue;
     }
-    // The /context report the card asked for (its transcript row is hidden, `shown`).
+    // The /context report the card asked for (Go's fold keeps it out of the transcript).
     if (s.awaitingContextReport.value && event.type === "text.delta") {
       const rows = parseContextReport(event.text ?? "");
       if (rows) {
