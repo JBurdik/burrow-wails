@@ -5,11 +5,12 @@ struct TurnNeedsCard: View {
     @Environment(AppModel.self) private var model
     let needs: TurnNeeds
     let chatId: Int
-    let send: (String) -> Void
     @State private var answers: [Int: Set<String>] = [:]
     @State private var confirmRun: Int?
     @State private var starting: Int?
     @State private var runError: String?
+    @State private var sending = false
+    @State private var sendError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -25,22 +26,24 @@ struct TurnNeedsCard: View {
                     }
                 }
                 if needs.asks.contains(where: { !$0.options.isEmpty }) {
-                    Button("Send answers") { send(composed) }
+                    Button("Send answers") { Task { await answer(picks) } }
                         .buttonStyle(.borderedProminent)
                         .buttonBorderShape(.roundedRectangle(radius: 10))
-                        .disabled(answers.values.allSatisfy(\.isEmpty) && !needs.asks.contains { !($0.run?.reply ?? "").isEmpty })
+                        .disabled(sending || answers.values.allSatisfy(\.isEmpty) && !needs.asks.contains { !($0.run?.reply ?? "").isEmpty })
                 }
             } else {
                 Label("Done", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
                 ForEach(needs.next, id: \.self) { n in
-                    Button { send(n) } label: {
+                    Button { Task { await answer([["index": 0, "options": [n]]]) } } label: {
                         HStack { Text(n).multilineTextAlignment(.leading); Spacer(); Image(systemName: "arrow.up.right") }
                             .font(.subheadline)
                     }
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.roundedRectangle(radius: 10))
+                    .disabled(sending)
                 }
             }
+            if let sendError { Text(sendError).font(.caption).foregroundStyle(.red) }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,16 +126,25 @@ struct TurnNeedsCard: View {
         .buttonStyle(.plain)
     }
 
-    /// composeAnswers in src/lib/turnNeeds.ts.
-    private var composed: String {
-        let answered = needs.asks.enumerated().compactMap { i, a -> (String, String)? in
-            let picked = a.options.filter { answers[i, default: []].contains($0) }
-            if !picked.isEmpty { return (a.question, picked.joined(separator: ", ")) }
-            // A run ask whose result was kept on the card answers itself with it.
-            let reply = (a.run?.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return reply.isEmpty ? nil : (a.question, reply)
+    /// Per ask: the picked options (Go joins them, in card order).
+    private var picks: [[String: Any]] {
+        needs.asks.indices.compactMap { i in
+            let picked = needs.asks[i].options.filter { answers[i, default: []].contains($0) }
+            return picked.isEmpty ? nil : ["index": i, "options": picked]
         }
-        if needs.asks.count == 1, let one = answered.first { return one.1 }
-        return answered.map { "> \($0.0.replacingOccurrences(of: "\n", with: "\n> "))\n\($0.1)" }.joined(separator: "\n\n")
+    }
+
+    /// chat_answer_turn: Go composes the message from the stored card (kept run
+    /// replies included) and submits it; the composer's draft goes with it.
+    private func answer(_ picks: [[String: Any]]) async {
+        guard let client = model.client else { sendError = BurrowError.closed.localizedDescription; return }
+        sending = true; sendError = nil
+        defer { sending = false }
+        let extra = Drafts.text[chatId] ?? ""
+        do {
+            _ = try await client.call("chat_answer_turn", ["chatId": chatId, "picks": picks, "extra": extra, "clientId": UUID().uuidString])
+            if !extra.isEmpty { NotificationCenter.default.post(name: Drafts.taken, object: chatId) }
+            model.nudgeChat(chatId)
+        } catch { sendError = error.localizedDescription }
     }
 }

@@ -104,7 +104,7 @@ struct ChatView: View {
                             .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                     }
                     if !phase.inFlight, let needs = chat?.turnNeeds {
-                        TurnNeedsCard(needs: needs, chatId: chatId) { text in Task { await send(text) } }
+                        TurnNeedsCard(needs: needs, chatId: chatId)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                         .onAppear { atBottom = true }
@@ -341,11 +341,6 @@ struct ChatView: View {
         if w.apply(subscribe: reply) == .applied { adopt(w) }
     }
 
-    private func send(_ raw: String) async {
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        do { try await model.send(chatId, text); error = nil } catch { self.error = error.localizedDescription }
-    }
 }
 
 /// Equatable + `.equatable()`: a streamed update re-renders only the rows that

@@ -27,9 +27,12 @@ struct ComposerImage: Identifiable {
 
 /// Drafts outlive the chat screen (ChatView is torn down on back), per chat.
 /// ponytail: in memory only — survives navigation, not an app kill.
-private enum Drafts {
+enum Drafts {
     static var text: [Int: String] = [:]
     static var images: [Int: [ComposerImage]] = [:]
+    /// Posted (object = chat id) when the end_turn card sent the draft text
+    /// with its answer: the composer empties as for its own send.
+    static let taken = Notification.Name("burrow.draft.taken")
 }
 
 private struct Suggestion: Identifiable {
@@ -110,6 +113,9 @@ struct Composer: View {
             images = Drafts.images[chatId] ?? []
         }
         .onChange(of: draft) { _, v in Drafts.text[chatId] = v.isEmpty ? nil : v }
+        .onReceive(NotificationCenter.default.publisher(for: Drafts.taken)) { n in
+            if n.object as? Int == chatId { draft = "" }
+        }
         .onChange(of: images.map(\.id)) { _, _ in Drafts.images[chatId] = images.isEmpty ? nil : images }
         .onChange(of: phase.state) { _, s in if s != "running" { steer = false } }
         .task(id: chat?.workspaceId) {
