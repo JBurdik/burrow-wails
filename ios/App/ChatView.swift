@@ -9,6 +9,8 @@ struct Message: Identifiable, Hashable {
     var toolOutput: String
     var toolTarget: String
     var images: [String]
+    /// User rows: the submit client id (Go's chat_submit) — what an echo settles by.
+    var clientId: String
     /// Echoes only: transcript length when sent. Go's copy lands at or after it.
     var after = 0
 
@@ -20,6 +22,7 @@ struct Message: Identifiable, Hashable {
         failed = d["toolFailed"] as? Bool ?? false
         toolOutput = d["toolOutput"] as? String ?? ""
         images = d["images"] as? [String] ?? []
+        clientId = d["clientId"] as? String ?? ""
         let input = d["toolInput"] as? [String: Any] ?? [:]
         toolTarget = ["command", "file_path", "path", "pattern", "url", "description"]
             .lazy.compactMap { input[$0] as? String }.first ?? ""
@@ -195,7 +198,7 @@ struct ChatView: View {
             // each other's listener on disappear, and the chat stopped updating.
             model.unsubscribe(eventToken) // a second onAppear without onDisappear
             eventToken = model.subscribe { name, payload in
-                if name == "chat-local-send-\(chatId)" { localEcho(payload as? String) }
+                if name == "chat-local-send-\(chatId)" { localEcho(payload as? [String: Any]) }
                 else if name == "chat-messages-changed-\(chatId)" { applySplice(payload) }
                 // nil payload = AppModel.nudgeChat after a send / outbox delivery: the
                 // user's own message may arrive with no splice, so re-read the page.
@@ -222,24 +225,28 @@ struct ChatView: View {
         DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
     }
 
-    private func localEcho(_ text: String?) {
-        guard let text else { echoes.removeAll(); return }
-        var m = Message(["role": "user", "text": text], index: 0)
+    /// `{clientId, text}` adds an echo; `{clientId}` alone drops that one.
+    private func localEcho(_ p: [String: Any]?) {
+        let cid = p?["clientId"] as? String ?? ""
+        guard let text = p?["text"] as? String else { echoes.removeAll { $0.clientId == cid }; return }
+        var m = Message(["role": "user", "text": text, "clientId": cid], index: 0)
         m.id = -1 - echoes.count // never a transcript id
         m.after = earlier + raw.count
         echoes.append(m)
         pinBottom = true
     }
 
-    /// Drop the echoes Go's transcript now carries: a user row with the same text
-    /// that landed after the echo was made, each row settling one echo (so a second
-    /// "ok" isn't cleared by the first).
+    /// Drop the echoes Go's transcript now carries: the user row with the echo's
+    /// client id. Fallback for rows without one (an older core): a user row with
+    /// the same text that landed after the echo was made, each row settling one
+    /// echo (so a second "ok" isn't cleared by the first).
     private func settleEchoes() {
         guard !echoes.isEmpty else { return }
         var used = Set<Int>()
         echoes.removeAll { e in
+            if !e.clientId.isEmpty, raw.contains(where: { $0.role == "user" && $0.clientId == e.clientId }) { return true }
             guard let i = raw.indices.first(where: { i in
-                !used.contains(i) && earlier + i >= e.after && raw[i].role == "user"
+                !used.contains(i) && earlier + i >= e.after && raw[i].role == "user" && raw[i].clientId.isEmpty
                     && raw[i].text.trimmingCharacters(in: .whitespacesAndNewlines) == e.text
             }) else { return false }
             used.insert(i)

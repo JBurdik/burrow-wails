@@ -147,7 +147,8 @@ struct QueuePanel: View {
         }
         items.removeAll { $0.id == item.id }
         do {
-            try await client.call("chat_steer", ["chatId": chatId, "text": text, "images": item.attachments])
+            try await client.call("chat_steer", ["chatId": chatId, "text": text, "images": item.attachments,
+                                                 "clientId": UUID().uuidString])
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         } catch {
             let reason = error.localizedDescription

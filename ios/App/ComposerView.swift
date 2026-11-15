@@ -344,35 +344,41 @@ extension AppModel {
     @MainActor
     func composerSend(_ chat: Int, _ text: String, _ images: [String], steer: Bool) async throws -> String? {
         let held = "Held — it will be delivered when Burrow reconnects."
+        let cid = UUID() // the message's client id, reused by every retry
         guard let client, client.isOpen, !outbox.contains(where: { $0.chatId == chat }) else {
             // Offline, or earlier messages for this chat still wait in the outbox: go behind them.
-            enqueue(chat, text, images)
+            enqueue(chat, text, images, id: cid)
             return online ? "Queued behind messages still waiting to be delivered." : held
         }
-        let args: [String: Any] = ["chatId": chat, "text": text, "images": images]
         let p = phase(chat)
         var notice: String?
-        if !p.inFlight {
-            localSend(chat, text)
+        if steer && p.state == "running" {
             do {
-                if try await sendOrHold(chat, "chat_send", text, images) { localSend(chat, nil); return held }
-            } catch { localSend(chat, nil); throw error }
-            if let c = self.chat(chat) { startActivity(c) }
-        } else if steer && p.state == "running" {
-            do {
-                try await client.call("chat_steer", args)
+                try await client.call("chat_steer", ["chatId": chat, "text": text, "images": images, "clientId": cid.uuidString])
+                nudgeChat(chat)
+                return nil
             } catch {
                 // chatsteer.go refuses outside a running turn and on generic ACP:
-                // the message is not lost, it waits in the queue.
-                if try await sendOrHold(chat, "chat_queue_add", text, images) { return held }
+                // the message is not lost, it goes through the submit door.
                 notice = "Couldn't steer (\(error.localizedDescription)) — queued instead."
             }
-        } else {
-            if try await sendOrHold(chat, "chat_queue_add", text, images) { return held }
-            if steer { notice = "Waiting on you, not running — queued instead." }
+        } else if steer {
+            notice = "Waiting on you, not running — queued instead."
         }
+        // Go decides send vs queue (chat_submit). The echo is only a guess for a
+        // settled chat; Go's row with the same client id replaces it.
+        let echo = !p.inFlight
+        if echo { localSend(chat, text, clientId: cid) }
+        let r: Submitted
+        do { r = try await submitOrHold(chat, text, images, cid: cid) } catch {
+            if echo { localSend(chat, nil, clientId: cid) }
+            throw error
+        }
+        if echo && r != .sent { localSend(chat, nil, clientId: cid) }
+        if r == .held { return held }
+        if r == .sent, let c = self.chat(chat) { startActivity(c) }
         nudgeChat(chat)
-        return notice
+        return r == .queued ? notice : nil
     }
 
     func composerRestart(_ chat: Int) async throws {

@@ -24,7 +24,7 @@ enum LocalStore {
 }
 
 /// A message held for delivery (offline, behind earlier held ones, or a reply lost
-/// to a drop); delivered via chat_queue_add on the next open, `id` as its clientId.
+/// to a drop); delivered via chat_submit on the next open, `id` as its clientId.
 struct OutboxItem: Codable, Identifiable, Hashable {
     var id = UUID()
     var chatId: Int
@@ -156,26 +156,27 @@ extension AppModel {
         try? d.write(to: dir.appendingPathComponent("outbox.json"), options: .atomic)
     }
 
-    /// One user message with an idempotency key (`clientId`). Held in the outbox,
-    /// under the same key, when offline, when this chat already has items waiting
-    /// there (a new message must not overtake them), or when the socket dropped
-    /// mid-call (the reply is lost, the request may have landed: the retry is
-    /// deduped by Go). Returns true when held. A refusal throws.
-    @MainActor func sendOrHold(_ chat: Int, _ cmd: String, _ text: String, _ images: [String]) async throws -> Bool {
-        let cid = UUID()
+    enum Submitted { case sent, queued, held }
+
+    /// One user message through chat_submit (Go sends it to a settled chat, else
+    /// queues it) with its client id `cid`. Held in the outbox, under the same id,
+    /// when offline, when this chat already has items waiting there (a new message
+    /// must not overtake them), or when the socket dropped mid-call (the reply is
+    /// lost, the request may have landed: the retry is deduped by Go). A refusal throws.
+    @MainActor func submitOrHold(_ chat: Int, _ text: String, _ images: [String], cid: UUID = UUID()) async throws -> Submitted {
         guard let client, client.isOpen, !outbox.contains(where: { $0.chatId == chat }) else {
-            enqueue(chat, text, images, id: cid); return true
+            enqueue(chat, text, images, id: cid); return .held
         }
         do {
-            try await client.call(cmd, ["chatId": chat, "text": text, "images": images, "clientId": cid.uuidString])
-            return false
+            let r = try await client.call("chat_submit", ["chatId": chat, "text": text, "images": images, "clientId": cid.uuidString])
+            return (r as? [String: Any])?["sent"] as? Bool == false ? .queued : .sent
         } catch BurrowError.closed {
-            enqueue(chat, text, images, id: cid); return true
+            enqueue(chat, text, images, id: cid); return .held
         }
     }
 
     /// On every socket open (and after an enqueue while online): each pending item
-    /// in order through chat_queue_add (Go delivers it once the chat settles), with
+    /// in order through chat_submit (Go sends it or queues it), with
     /// its clientId. Removed only after success; a refusal keeps its error and holds
     /// that chat's later items back (others go on); a dropped socket stops the pass.
     @MainActor func flushOutbox() async {
@@ -188,8 +189,8 @@ extension AppModel {
                 guard let client, client.isOpen else { return }
                 guard let item = outbox.first(where: { $0.id == id }), !blocked.contains(item.chatId) else { continue }
                 do {
-                    try await client.call("chat_queue_add", ["chatId": item.chatId, "text": item.text, "images": item.images,
-                                                             "clientId": item.id.uuidString])
+                    try await client.call("chat_submit", ["chatId": item.chatId, "text": item.text, "images": item.images,
+                                                          "clientId": item.id.uuidString])
                     outbox.removeAll { $0.id == id }
                     nudgeChat(item.chatId)
                 } catch BurrowError.closed {

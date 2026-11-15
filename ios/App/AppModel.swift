@@ -347,9 +347,8 @@ final class AppModel {
     }
 
     func send(_ chat: Int, _ text: String) async throws {
-        // Into a running turn chat_send would steer; queue it instead, like the desktop composer.
-        let cmd = phase(chat).inFlight ? "chat_queue_add" : "chat_send"
-        if try await sendOrHold(chat, cmd, text, []) { return }
+        // Go decides send vs queue (chat_submit).
+        if try await submitOrHold(chat, text, []) == .held { return }
         nudgeChat(chat)
         if let c = self.chat(chat) { startActivity(c) }
     }
@@ -357,8 +356,13 @@ final class AppModel {
     /// Re-read an open chat now, without waiting for its stream: the user's own
     /// message must show the moment it is sent.
     /// The composer's own send, echoed to the open ChatView before the core has
-    /// it (waking a slept chat takes seconds). nil text = the send failed.
-    func localSend(_ chat: Int, _ text: String?) { event("chat-local-send-\(chat)", text) }
+    /// it (waking a slept chat takes seconds), matched to Go's row by `clientId`.
+    /// nil text = drop that echo (the send failed, or Go queued it).
+    func localSend(_ chat: Int, _ text: String?, clientId: UUID) {
+        var p: [String: Any] = ["clientId": clientId.uuidString]
+        if let text { p["text"] = text }
+        event("chat-local-send-\(chat)", p)
+    }
 
     func nudgeChat(_ chat: Int) {
         event("chat-event-\(chat)", nil)

@@ -93,7 +93,7 @@ struct ShareView: View {
             // ponytail: heuristic title only — the extension is gone before a model
             // title (up to minutes) could come back. Rename on the Mac if it matters.
             await client.nameThread(chatId: id, current: row?["title"] as? String ?? "", cwd: "", text: text, heuristicOnly: true)
-            try await client.call("chat_send", ["chatId": id, "text": text, "images": [String](), "clientId": UUID().uuidString])
+            try await client.call("chat_submit", ["chatId": id, "text": text, "images": [String](), "clientId": UUID().uuidString])
             SharedStore.put("share.lastWorkspace", workspace)
             done()
         } catch { self.error = error.localizedDescription }
