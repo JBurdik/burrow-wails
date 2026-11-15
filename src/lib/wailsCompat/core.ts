@@ -112,8 +112,29 @@ export function desktopTransport(): Transport {
  * the credentials appear.
  */
 export function remoteTransport(): Transport {
-  if (!remote) remote = watchIncompatible(createTransport(remoteEndpointSource(loadRemoteCredentials)), false);
+  if (!remote) {
+    remote = watchIncompatible(createTransport(remoteEndpointSource(loadRemoteCredentials)), false);
+    wakeOnReturn();
+  }
   return remote;
+}
+
+/**
+ * iOS kills a backgrounded PWA's socket without a close event; coming back,
+ * the app sat on a dead "connected" socket (or a 10 s backoff) until a call
+ * timed out. Coming back to the foreground or online wakes the transport.
+ */
+let wakeHooked = false;
+function wakeOnReturn(): void {
+  if (wakeHooked || typeof window === "undefined") return;
+  wakeHooked = true;
+  const wake = () => remote?.wake();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") wake();
+  });
+  window.addEventListener("pageshow", wake);
+  window.addEventListener("online", wake);
+  window.addEventListener("focus", wake);
 }
 
 /**

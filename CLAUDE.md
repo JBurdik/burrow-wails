@@ -510,7 +510,7 @@ that reshape args.
 - **`src/runtime/transport.ts`** is the client half and the *only* place desktop and phone differ (via
   the `EndpointSource`; `boundary.test.ts` keeps `src/runtime` from importing components/stores/xterm).
   It queues pre-open calls, keeps its listener map across reconnects, asks for a fresh ticket on every attempt,
-  and **rejects queued calls rather than replaying them** on a real drop.
+  and **rejects queued calls rather than replaying them** on a real drop. **`wake()`** (remote transport only, `core.ts` `wakeOnReturn`: `visibilitychange` / `pageshow` / `online` / `focus`): down ⇒ reconnect now, skipping the backoff; "up" ⇒ a `__probe` call (any reply, `unknown_command` included, = alive), and no reply in 2.5 s ⇒ the socket is dropped without waiting for a close event iOS never sends for a backgrounded PWA.
 - **Protocol revision** (`protocolRev` / `minClientRev` in `remoteproto.go`, mirrored as `PROTOCOL_REV` /
   `MIN_SERVER_REV` in `transport.ts`): `welcome` carries `rev` + `minClientRev`; the **client** compares
   (`checkProtocolRev`; a welcome without them = rev 1). Mismatch ⇒ the transport stops for good, rejects calls and
