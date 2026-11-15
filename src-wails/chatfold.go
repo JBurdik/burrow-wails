@@ -34,6 +34,9 @@ type ChatMessage struct {
 
 	Images  []string `json:"images,omitempty"`
 	Partial bool     `json:"partial,omitempty"`
+	// ClientID: a user row's submit client id (chatsubmit.go) — dedupe after a
+	// core restart and the client's echo match.
+	ClientID string `json:"clientId,omitempty"`
 
 	ToolInput    map[string]any `json:"toolInput,omitempty"`
 	ToolOutput   string         `json:"toolOutput,omitempty"`
@@ -101,7 +104,23 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 		return appendChunk(st, "thinking", ev, true)
 	case EvtUserDelta:
 		// A replayed user turn is never "partial" — it finished long ago.
-		return appendChunk(st, "user", ev, false)
+		if !appendChunk(st, "user", ev, false) {
+			return false
+		}
+		if ev.ClientID != "" || len(ev.Images) > 0 {
+			for i := len(st.messages) - 1; i >= 0; i-- {
+				if m := &st.messages[i]; m.Role == "user" && m.AcpMsgID == ev.MessageID {
+					if ev.ClientID != "" {
+						m.ClientID = ev.ClientID
+					}
+					if len(m.Images) == 0 {
+						m.Images = ev.Images
+					}
+					break
+				}
+			}
+		}
+		return true
 
 	case EvtMessageNote:
 		// A client-authored row (system-info marker, permission receipt).

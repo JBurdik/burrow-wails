@@ -412,6 +412,7 @@ var remoteAllowed = map[string]remoteCmd{
 	// restarts and reconfigures a chat through these, by chat id. The process
 	// is Go's to start — claude_start/claude_send are in remoteDenied.
 	"chat_send":             {Method: "ChatSend", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
+	"chat_submit":           {Method: "ChatSubmit", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
 	"chat_restart":          {Method: "ChatRestart", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_clear":            {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_sleep":            {Method: "ChatSleep", Args: []string{"chatId"}, Scope: scopeOrchOperate},
@@ -436,7 +437,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_fork":                {Method: "ChatFork", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_side_create":         {Method: "ChatSideCreate", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_interrupt":           {Method: "ChatInterrupt", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"chat_steer":               {Method: "ChatSteer", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_steer":               {Method: "ChatSteer", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
 	"chat_stop_task":           {Method: "ChatStopTask", Args: []string{"chatId", "taskId"}, Scope: scopeOrchOperate},
 	"chat_set_launch_settings": {Method: "ChatSetLaunchSettings", Args: []string{"chatId", "patch"}, Scope: scopeOrchOperate},
 	"spawn_subagent_chat": {Method: "SpawnSubagentChat", Args: []string{

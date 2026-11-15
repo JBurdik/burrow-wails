@@ -151,7 +151,7 @@ func (a *App) deliverSubagentNotices(now time.Time, send func(chatID int64, text
 		return nil
 	}
 	var delivered []int64
-	a.runDeliveries(a.noticeDeliveries(now, func(c int64, t string, _ []string) error { return send(c, t) }, &delivered))
+	a.runDeliveries(a.noticeDeliveries(now, func(c int64, t string, _ []string, _ string) error { return send(c, t) }, &delivered))
 	return delivered
 }
 
@@ -221,7 +221,7 @@ func (a *App) noticeDeliveries(now time.Time, send chatSender, delivered *[]int6
 				now.UnixMilli(), n.childID, n.key); err != nil {
 				return false
 			}
-			if err := send(n.parentID, text, nil); err != nil {
+			if err := send(n.parentID, text, nil, ""); err != nil {
 				if errors.Is(err, errChatBusy) {
 					_, _ = a.db.Exec(`UPDATE subagent_notices SET delivered_at = 0 WHERE child_id = ? AND key = ?`, n.childID, n.key)
 					return false

@@ -26,7 +26,7 @@ const (
 )
 
 // chatSender is ChatSend's shape; production wires chatSendSettled.
-type chatSender func(chatID int64, text string, images []string) error
+type chatSender func(chatID int64, text string, images []string, clientID string) error
 
 type pendingDelivery struct {
 	ChatID    int64
@@ -90,7 +90,7 @@ var errChatBusy = errors.New("chat has a turn in flight")
 // chatSendSettled is ChatSend that re-checks "settled" under the chat lock: a
 // user's own ChatSend may be mid-start (phase still idle while the process
 // spawns), and a delivery racing it must not become a steer.
-func (a *App) chatSendSettled(chatID int64, text string, images []string) error {
+func (a *App) chatSendSettled(chatID int64, text string, images []string, clientID string) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func (a *App) chatSendSettled(chatID int64, text string, images []string) error 
 	if !a.chatSettled(id) {
 		return errChatBusy
 	}
-	return a.chatSendLocked(c, id, text, images)
+	return a.chatSendLocked(c, id, text, images, clientID)
 }
 
 // kickChatDelivery runs a pass shortly after a turn settles (or an item is

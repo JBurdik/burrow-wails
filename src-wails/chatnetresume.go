@@ -162,7 +162,7 @@ func (a *App) netResumeDeliveries(now time.Time, send chatSender, resumed *[]int
 			if n, _ := res.RowsAffected(); n == 0 {
 				return false
 			}
-			if err := send(r.id, netResumeText, nil); err != nil {
+			if err := send(r.id, netResumeText, nil, ""); err != nil {
 				log.Printf("chat %d: network resume not sent: %v", r.id, err)
 				return false
 			}

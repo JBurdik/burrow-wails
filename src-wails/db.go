@@ -225,6 +225,8 @@ func migrate(db *sql.DB) error {
 	}
 	alters = append(alters, chatSchedulesAlters()...)
 	alters = append(alters, chatNetResumeAlters()...)
+	// The submit door's client id rides a queued item to its user line (ADR 0001).
+	alters = append(alters, `ALTER TABLE chat_queue ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`)
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
 			return fmt.Errorf("%s: %w", s, err)

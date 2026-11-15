@@ -1198,7 +1198,7 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 			return rpc, fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
 		}
 		a.applyChatPhase(id, agentphase.Event{Kind: agentphase.HookRunning})
-		a.emitChatLine(id, chatUserKind, text)
+		a.emitUserLine(id, text, images, a.sendingClientID(id))
 		return rpc, nil
 	}
 
@@ -1227,7 +1227,7 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		sess.mu.Unlock()
 		return rpc, fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
 	}
-	a.emitChatLine(id, chatUserKind, text)
+	a.emitUserLine(id, text, images, a.sendingClientID(id))
 	return rpc, nil
 }
 

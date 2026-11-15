@@ -39,7 +39,7 @@ type imgSink struct {
 	err  error
 }
 
-func (s *imgSink) send(chatID int64, text string, _ []string) error {
+func (s *imgSink) send(chatID int64, text string, _ []string, _ string) error {
 	if s.err != nil {
 		return s.err
 	}

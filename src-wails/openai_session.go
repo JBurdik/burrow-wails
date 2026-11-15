@@ -227,7 +227,7 @@ func (s *openAISession) send(rpc int64, text string, images []string) error {
 	cfg := s.config
 	s.mu.Unlock()
 	// Publish the human turn before the goroutine can emit any model output.
-	s.app.emitChatLine(s.chatID, chatUserKind, text)
+	s.app.emitUserLine(s.chatID, text, images, s.app.sendingClientID(s.chatID))
 	content := any(text)
 	if len(images) > 0 {
 		parts := []any{map[string]any{"type": "text", "text": text}}

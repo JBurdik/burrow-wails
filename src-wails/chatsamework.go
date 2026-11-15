@@ -101,7 +101,7 @@ func (a *App) findSameWork(chatID int64, text string) []sameWorkHit {
 		if rows.Scan(&h.ID, &ws, &h.Title, &h.Recap, &first) != nil {
 			continue
 		}
-		h.Score = sameWorkScore(mine, sameWorkTokens(h.Title+" "+h.Recap+" "+first))
+		h.Score = sameWorkScore(mine, sameWorkTokens(h.Title+" "+h.Recap+" "+decodeUserLine(first).Text))
 		if h.Score > 0 && repoOf(ws) == myRepo {
 			h.Score += 0.15
 		}

@@ -27,9 +27,10 @@ import (
 // ACP (acp.go). Each starts from the row the same way whoever asked.
 
 type chatRuntime struct {
-	locks  sync.Map // chat id string → *sync.Mutex
-	active sync.Map // chat id string → time.Time of last activity (chatsleep.go)
-	moved  sync.Map // chat id string → struct{}: live process runs in the old cwd (chatmove.go)
+	locks   sync.Map // chat id string → *sync.Mutex
+	active  sync.Map // chat id string → time.Time of last activity (chatsleep.go)
+	moved   sync.Map // chat id string → struct{}: live process runs in the old cwd (chatmove.go)
+	sending sync.Map // chat id string → client id of the send in progress (chatsubmit.go)
 
 	ctrlSeq     atomic.Int64
 	ctrlMu      sync.Mutex
@@ -162,19 +163,24 @@ func (a *App) ChatSend(chatID int64, text string, images []string, clientID stri
 	if err != nil {
 		return err
 	}
-	_, finish, dup := a.clientIDs.claim(chatID, clientID)
+	_, finish, dup := a.claimClientID(chatID, clientID)
 	if dup {
 		return nil
 	}
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
-	err = a.chatSendLocked(c, id, text, images)
+	err = a.chatSendLocked(c, id, text, images, clientID)
 	finish(err == nil, nil)
 	return err
 }
 
 // chatSendLocked is ChatSend's body; the caller holds the chat lock.
-func (a *App) chatSendLocked(c Chat, id, text string, images []string) error {
+// clientID rides to the recorded user line (chatsubmit.go).
+func (a *App) chatSendLocked(c Chat, id, text string, images []string, clientID string) error {
+	return a.withSendingClientID(id, clientID, func() error { return a.chatSendBody(c, id, text, images) })
+}
+
+func (a *App) chatSendBody(c Chat, id, text string, images []string) error {
 	chatID := c.ID
 	a.chatRT.touchChat(id, time.Now())
 	if t := chatTransport(c); t != "claude-cli" {

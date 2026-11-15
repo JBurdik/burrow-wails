@@ -272,7 +272,7 @@ func (a *App) limitResumeDeliveries(now time.Time, send chatSender, resumed *[]i
 				return false
 			}
 			busEmit("chats-changed", nil)
-			if err := send(r.id, limitResumeText, nil); err != nil {
+			if err := send(r.id, limitResumeText, nil, ""); err != nil {
 				if errors.Is(err, errChatBusy) {
 					_, _ = a.db.Exec(`UPDATE chats SET limit_resume_at = ?, limit_reset_at = ?, limit_resumed_key = '' WHERE id = ?`,
 						r.resumeAt, r.resetAt, r.id)

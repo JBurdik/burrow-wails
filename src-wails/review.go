@@ -186,6 +186,6 @@ func (a *App) codexReview(c Chat, base string) error {
 		return fmt.Errorf("start review: %w", err)
 	}
 	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.HookRunning})
-	a.emitChatLine(id, chatUserKind, reviewLabel(base))
+	a.emitUserLine(id, reviewLabel(base), nil, "")
 	return nil
 }

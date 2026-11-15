@@ -28,7 +28,7 @@ func (r chatControlAdapter) ChatParent(chatID int64) (int64, error) {
 }
 func (r chatControlAdapter) Interrupt(chatID int64) error { return r.a.ChatInterrupt(chatID) }
 func (r chatControlAdapter) Steer(chatID int64, text string) error {
-	return r.a.ChatSteer(chatID, text, nil)
+	return r.a.ChatSteer(chatID, text, nil, "")
 }
 func (r chatControlAdapter) Queue(chatID int64, text string) error {
 	_, err := r.a.ChatQueueAdd(chatID, text, nil, "")
