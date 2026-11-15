@@ -258,7 +258,7 @@
               <button class="message-copy-btn" aria-label="Edit" title="Edit — put this text back in the composer" @click="editMessage(msg)">
                 <PhPencilSimple :size="13" />
               </button>
-              <template v-if="canBranch">
+              <template v-if="canBranch && msg.id >= 0">
                 <button class="message-copy-btn" aria-label="Rewind to here" title="Rewind to here — drop this message and everything after it, then edit and resend" @click="rewindTo(msg)">
                   <PhArrowCounterClockwise :size="13" />
                 </button>
@@ -902,7 +902,7 @@ import ComposerPill, { type ComposerPillItem } from "@/components/composer/Compo
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
 import { isImageStub } from "@/lib/chatImages";
-import { chatSession, canSteer, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
+import { chatSession, canSteer } from "@/lib/chatSession";
 import { linkDown } from "@/lib/offline";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
 import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
@@ -2028,31 +2028,6 @@ interface AccountInfo {
   status_text: string;        // raw `claude status` stdout
 }
 
-// Legacy per-chat localStorage key prefix (kept only for the one-time migration below).
-
-// Transcripts live in SQLite (chat_messages), not config.json: one row per
-// message means saving a turn writes that turn, where the old config-backed
-// version re-serialised every chat's history — 5.6 MB per saved message once a
-// few dozen chats had accumulated. Migration of existing histories happens once
-// in Go at startup.
-async function loadMessages(chatId: number): Promise<{ messages: ChatMessage[]; hiddenBefore: number }> {
-  // The newest window only — the rest is one "Load earlier" away. An older
-  // backend without the paged call falls back to reading everything.
-  try {
-    const page = await invoke<ChatMessagesPage>("load_chat_messages_page", { chatId, before: -1, limit: TRANSCRIPT_PAGE });
-    if (Array.isArray(page?.messages)) return { messages: page.messages, hiddenBefore: page.start };
-  } catch { /* fall through */ }
-  try {
-    const raw = await invoke<string>("load_chat_messages", { chatId });
-    const parsed = JSON.parse(raw);
-    return { messages: Array.isArray(parsed) ? (parsed as ChatMessage[]) : [], hiddenBefore: 0 };
-  } catch {
-    return { messages: [], hiddenBefore: 0 };
-  }
-}
-
-
-
 const DRAFT_KEY = computed(() => `burrow.draft.chat.${props.chatId}`);
 const inputText = ref(localStorage.getItem(DRAFT_KEY.value) ?? "");
 watch(inputText, (val) => {
@@ -2708,7 +2683,6 @@ async function copyMessage(msg: ChatMessage) {
     }, 1_200);
   } catch (e) {
     S.notice(`Could not copy message: ${e}`);
-    S.save();
   }
 }
 
@@ -3048,27 +3022,6 @@ function onWindowKeydown(e: KeyboardEvent) {
 function migrateLegacyChatConfig() {
   const MISSING = Symbol("missing");
 
-  // Legacy per-chat transcripts: burrow.claude.msgs.<id>. These now go straight
-  // to SQLite — routing them through config.json's chatMessageHistory would drop
-  // them silently, since Go's config→SQLite migration has already run by the
-  // time this executes and nothing reads that key any more.
-  {
-    const re = /^burrow\.claude\.msgs\.(\d+)$/;
-    const keys = Object.keys(localStorage).filter((k) => re.test(k));
-    for (const k of keys) {
-      const id = Number(k.match(re)![1]);
-      const raw = localStorage.getItem(k);
-      if (raw === null) continue;
-      try {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) continue;
-        void invoke("save_chat_messages", { chatId: id, messages: JSON.stringify(parsed) })
-          .then(() => localStorage.removeItem(k))
-          .catch(() => { /* keep the key so the next launch retries */ });
-      } catch { /* skip malformed entry */ }
-    }
-  }
-
   // chatAcpSettings: burrow.acpMode.<id> / burrow.acpModel.<id> / burrow.acpEffort.<id>
   if (getConfig<unknown>("chatAcpSettings", MISSING) === MISSING) {
     const reMode = /^burrow\.acpMode\.(\d+)$/;
@@ -3195,24 +3148,15 @@ onMounted(async () => {
     const cached = getAcpCapabilities(props.chatId, agentKind.value);
     if (cached) S.seedAcpCapabilities(cached.modes, cached.configOptions);
   }
-  // Only read the transcript back from SQLite when the session has none. A
-  // non-empty session is the LIVE copy — it kept receiving while this view was
-  // unmounted, so it is ahead of the DB, and assigning over it would throw the
-  // newer part away (exactly the hole this plan is about).
-  if (messages.value.length === 0) {
-    try {
-      const loaded = await loadMessages(props.chatId);
-      if (unmounted) return;
-      S.hydrate({ messages: loaded.messages, hiddenBefore: loaded.hiddenBefore });
-    } finally {
-      transcriptLoading.value = false;
-    }
-    // Catch up on anything the agent said after that transcript was written —
-    // i.e. a turn that was in flight when the app was last closed or crashed.
-    await replayChatStream(props.chatId);
-    if (unmounted) return;
+  // Go's transcript: the newest page the first time, then chat_subscribe from
+  // its rev (a session that kept its window behind an unmounted view only
+  // catches up). Splices keep it current from here on.
+  try {
+    await S.loadTranscript();
+  } finally {
+    transcriptLoading.value = false;
   }
-  transcriptLoading.value = false;
+  if (unmounted) return;
   // A remount is how you come back to a chat now (fáze 3 unmounts hidden chat
   // leaves), so land on the newest message. The activeByWs watcher below cannot
   // do it: the active id is already this chat before the fresh instance mounts,

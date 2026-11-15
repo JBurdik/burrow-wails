@@ -266,10 +266,11 @@ is whether the component exists rather than a predicate someone can forget.
 
 Backing it, every agent line is also appended to SQLite `chat_stream(chat_id,
 ord, kind, line)` before it is emitted, and the event payload is `{ord, kind,
-line}`. `chat_stream_state.folded_ord` records how far the frontend has folded
-that log into `chat_messages` (written in the same transaction as the messages),
-so the trim can never delete a line nobody rendered. After a restart,
-`replayChatStream()` catches a chat up from `folded_ord`.
+line}`. `chat_stream_state.folded_ord` records how far Go has folded that log
+into `chat_messages` (written in the same transaction as the messages), so the
+trim can never delete an unfolded line. Clients never fold or save: they render
+Go's versioned splices (ADR 0001, `src/lib/transcriptSplice.ts`) and catch up with
+`chat_subscribe(sinceRev)` after a page read, a gap or a reconnect.
 
 ### Provider protocol is parsed in Go (`src-wails/providerruntime.go`)
 
@@ -286,11 +287,10 @@ The frontend previously had **three** partial parsers (`onLine` in
 get a correct transcript without re-implementing the protocol to its own depth.
 The parse belongs to whoever owns the process.
 
-What is left on the frontend is rendering: `src/lib/chatProjection.ts` turns
-events into `ChatMessage[]` (append-to-partial, tool-result matching), and
-`AgentChat.onEvents` does what only a mounted view can — scroll, notify, account
-for the turn. `LoadChatEventsSince` replays the recorded log as events, which is
-what `replayChatStream()` uses.
+The fold into `ChatMessage[]` (append-to-partial, tool-result matching) is Go's
+too (`chatfold.go`) since ADR 0001: a client-side copy of it drifted from Go's and
+was a second transcript writer. What is left on the frontend is live state from the
+events — `chatSession.onEvents` keeps busy, notifications and turn accounting.
 
 **Still on the raw channel, deliberately** — these are UI decisions, not
 transcript: the control/permission protocol, Claude `system/init`, the ACP
@@ -445,8 +445,7 @@ the PTY keeps running server-side for the next reattach) and `send_float_snapsho
 `notify_float_grid`/`open_git_panel_window` (stay on Wails bindings because they answer
 over `runtime.EventsEmit`, which only the native window ever receives, or serve the
 removed float-window feature outright) — plus a few cases that reshape args before
-forwarding (`list_pty_sessions` normalizes daemon ids into session records,
-`save_chat_messages` restores the `foldedOrd ?? -1` sentinel the old switch supplied).
+forwarding (`list_pty_sessions` normalizes daemon ids into session records).
 
 **`remoteapi.go`'s `remoteAllowed`** is the security boundary: wire command name → `App`
 method + positional argument names + a `remoteScope`. Argument names live in the table,
@@ -574,8 +573,8 @@ resumes exactly as well as one it just dropped.
 high-volume **and** already replayable from a durable log of its own: `pty-data-*` (the
 daemon numbers and rings it per PTY, below) and the chat channels
 `claude-data-*`, `acp-data-*`, `acp-req-*`, `chat-event-*` (persisted to `chat_stream`
-with an `ord` before they are ever emitted; `replayChatStream`/`LoadChatEventsSince` catch
-a client up from `chat_stream_state.folded_ord`). This is not only about the cost of
+with an `ord` before they are ever emitted; a client catches its transcript up with
+`chat_subscribe(sinceRev)`). This is not only about the cost of
 ringing them — it is what makes resume work at all. One streaming agent emits hundreds of
 chat lines per turn, so ringing them would churn all 512 slots in seconds and every
 reconnect would come back a `resync`, making the ring dead weight. What is left is shell

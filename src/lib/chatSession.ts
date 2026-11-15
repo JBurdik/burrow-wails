@@ -5,11 +5,14 @@ import type {
   AcpConfigOption, AcpModes, AcpPermReq, CanUseToolReq, ChatMessage, CodexUserInputReq, QueuedChatMessage, TurnStats,
 } from "@/lib/chatTypes";
 import { acpOption } from "@/lib/chatTypes";
+import type { ChatEventBatch } from "@/lib/chatProjection";
 import {
-  applyChatEvent, isProjectedEvent, settleTranscript, type ChatEventBatch, type ChatProjectionState,
-} from "@/lib/chatProjection";
+  applySplice, applySubscribe, applyTail, mergeLocal, prependPage, windowFromPage,
+  type ChatSplice, type ChatSubscribeReply, type ChatTail, type LocalRow, type TranscriptWindow,
+} from "@/lib/transcriptSplice";
 import { parseAcpPermRequest } from "@/lib/acpParser";
-import { isImageStub, parseImageStub } from "@/lib/chatImages";
+import { parseImageStub } from "@/lib/chatImages";
+import { appTransport } from "@/lib/wailsCompat/core";
 import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import { appChatHost, type ChatHost } from "@/lib/chatHost";
 import { dropHeld, heldFor, holdMessage, isOfflineError, newClientId, type HeldMessage } from "@/lib/offline";
@@ -67,6 +70,20 @@ export interface ChatSessionDeps {
     hold(chatId: number, text: string, images?: string[], clientId?: string): boolean;
     drop(id: string): void;
   };
+  /** Calls `cb` each time the socket comes back after a drop (chat channels are not ringed). */
+  onReconnect?(cb: () => void): () => void;
+}
+
+function onReconnect(cb: () => void): () => void {
+  try {
+    let wasUp = true;
+    return appTransport().onState((up) => {
+      if (up && !wasUp) cb();
+      wasUp = up;
+    });
+  } catch {
+    return () => {};
+  }
 }
 
 const appDeps: ChatSessionDeps = {
@@ -74,6 +91,7 @@ const appDeps: ChatSessionDeps = {
   listen: tauriListen,
   host: appChatHost,
   outbox: { list: heldFor, hold: holdMessage, drop: dropHeld },
+  onReconnect,
 };
 
 /** Match keys for "Allow always" rules. Bash gets a command-prefix key so
@@ -111,19 +129,21 @@ export type PendingAnswer =
   /** Codex requestUserInput — answers keyed by question id; all-empty dismisses it. */
   | { kind: "codexInput"; answers: Record<string, string[]> };
 
-// Remembered per chat, because replayChatStream only replays from folded_ord —
-// the usage that filled the context ring is usually behind that mark, so
-// nothing would re-emit it and the ring would vanish until the next turn.
-// Stale after an external /clear, and self-healing on the next turn.
-// ponytail: one unpruned map; revisit if someone keeps thousands of chats.
 /** Messages per window when a transcript is read back (`load_chat_messages_page`). */
 export const TRANSCRIPT_PAGE = 60;
-/** One window of a transcript: rows [start, start+messages.length) of `total`. */
+/** One window of a transcript: rows [start, start+messages.length) of `total`, as of splice revision `rev`. */
 export interface ChatMessagesPage {
   messages: ChatMessage[];
   start: number;
   total: number;
+  rev?: number;
 }
+
+// Remembered per chat: the usage that filled the context ring is not in the
+// transcript, so nothing would re-emit it after a restart and the ring would
+// vanish until the next turn. Stale after an external /clear, self-healing on
+// the next turn.
+// ponytail: one unpruned map; revisit if someone keeps thousands of chats.
 
 const CTX_STORE_KEY = "burrow.ctxTokens";
 type CtxEntry = { tokens: number; window: number; split?: CtxSplit | null };
@@ -142,12 +162,10 @@ function hasFocus(): boolean {
  */
 interface SessionState {
   // ── transcript ──
-  messages: Ref<ChatMessage[]>;
   /**
-   * How many EARLIER messages exist in storage that `messages` does not hold
-   * (a long chat is opened from its tail, `loadEarlier` fetches the rest).
-   * While it is > 0, `messages` is a window, so nothing may write it back as
-   * the whole transcript — see `save`.
+   * How many EARLIER rows exist that the window does not hold (a long chat is
+   * opened from its tail, `loadEarlier` fetches the rest) — the window's start
+   * index in the transcript.
    */
   hiddenBefore: Ref<number>;
   loadingEarlier: Ref<boolean>;
@@ -155,7 +173,7 @@ interface SessionState {
   // ── turn state ──
   busy: Ref<boolean>;
   lastActivityAt: Ref<number>;
-  /** Set while busy; stamped onto the turn's user message as turnMs when it settles. */
+  /** Set while busy (the composer's turn clock; Go stamps turnMs on the row). */
   turnStartedAt: Ref<number>;
   sessionId: Ref<string>;
   turnStats: Ref<TurnStats | null>;
@@ -219,9 +237,15 @@ export interface SubmitOutcome { id: number; queued: boolean }
  * idle invariant (no pending request, not busy → evictable) true, since the
  * only code that can break it is in this file.
  */
-export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">> {
+export interface ChatSession extends ReadonlyRefs<SessionState> {
   readonly chatId: number;
-  /** Read-only: rows are added by the reducers and the intents below. */
+  /**
+   * What the transcript shows: Go's rows (a window fed only by pages, splices,
+   * tails and chat_subscribe — `transcriptSplice.ts`; a row's id is its
+   * transcript index) with this client's own rows interleaved — the echo of a
+   * just-submitted prompt, pending-request markers, error notices (negative
+   * ids, never saved).
+   */
   readonly messages: Readonly<Ref<readonly ChatMessage[]>>;
 
   /**
@@ -265,9 +289,12 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   respond(answer: PendingAnswer): Promise<boolean>;
 
   // ── intents ──
-  /** An app-authored assistant row (a failed action, an error) — saved with the transcript. */
+  /** An app-authored assistant row (a failed action, an error) — this client's only, never saved. */
   notice(text: string): void;
-  /** Show the user's prompt and claim its echo. Returns the bubble's id. Does not start the turn. */
+  /**
+   * Show the user's prompt as an echo until Go's row with the same client id
+   * arrives in a splice. Returns the bubble's id. Does not start the turn.
+   */
   postUserMessage(prompt: UserPrompt): number;
   /** The prompt is on its way: the chat is busy until a turn boundary. */
   startTurn(): void;
@@ -315,8 +342,14 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   suppressDoneToast(): void;
   /** Ask the CLI for `/context` out of band; its report is lifted out of the stream. */
   requestContextReport(): Promise<void>;
-  /** First paint from storage, for a session that has no transcript yet. */
-  hydrate(state: { messages?: ChatMessage[]; hiddenBefore?: number; sessionId?: string }): void;
+  /** The agent session id known from storage, before the process reports one. */
+  hydrate(state: { sessionId?: string }): void;
+  /**
+   * Make the window current: the newest page (with its rev) the first time,
+   * then `chat_subscribe(sinceRev)` to close the race with splices emitted in
+   * between. Resolves false when the page could not be read.
+   */
+  loadTranscript(): Promise<boolean>;
   /** Fetch the next page of older messages into the window (`load_chat_messages_page`). */
   loadEarlier(): Promise<void>;
   /**
@@ -330,9 +363,7 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
   // ── lifecycle ──
   /** Point the session's hooks at this view. Replaces any previous view's. */
   attachView(view: ChatViewHooks): void;
-  /** Persist the transcript (fire-and-forget), with the folded stream mark. */
-  save(): void;
-  /** Mirror busy / message count into the chat list and the remote mirror. */
+  /** Mirror busy / message count into the chat list. */
   sync(): void;
   /** Attach the domain-event listener (idempotent). Both transports use it. */
   listenEvents(): Promise<void>;
@@ -367,17 +398,19 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
 }
 
 interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionState> {
-  /** Monotonic id generator for messages; plain field, never rendered. */
-  nextMsgId: number;
-  /**
-   * Highest chat_stream ord this session has actually put through a reducer.
-   * `foldedOrd` handed to save_chat_messages is this + 1 — "everything up to
-   * and including lastOrd is now in chat_messages", which is what lets the
-   * backend trim safely (chatstream.go).
-   */
-  lastOrd: number;
-  /** True once a restart replay has run (or been ruled out) for this session. */
-  replayed: boolean;
+  /** Go's rows, transcript indices [hiddenBefore, hiddenBefore + length). */
+  rows: Ref<ChatMessage[]>;
+  /** Splice revision the window is at; -1 until the first page is read. */
+  rev: number;
+  /** This client's own rows (echoes, markers, notices). */
+  local: Ref<LocalRow[]>;
+  /** Next id for a local row; negative so it never collides with a transcript index. */
+  nextLocalId: number;
+  /** clientId → the composer's displayText (paste chips), put back on Go's row. */
+  echoDisplay: Map<string, string>;
+  loading: Promise<boolean> | null;
+  catchingUp: boolean;
+  catchUpAgain: boolean;
   suppressNextDone: Ref<boolean>;
   /** A `/context` was sent out of band; its report is lifted out of the stream. */
   awaitingContextReport: Ref<boolean>;
@@ -388,11 +421,7 @@ interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionS
   /** Go's queue as last seen (`chat-queue-changed` / `chat_queue_list`). */
   queue: Ref<QueuedChatMessage[]>;
   queueUL: UnlistenFn | null;
-  /** A prompt this client is about to send (its client id, else its text) — drop its echo when Go publishes it. */
-  expectEcho(key: string): void;
-  /** Settle partial rows and stuck tool spinners (a turn ended somehow). */
-  settleTranscript(failedTools?: boolean): void;
-  /** Remove a system-info marker row by id. */
+  /** Remove a local row (marker / echo) by id. */
   removeFeedMarker(id: number | null): void;
   /** Record a native control request as answered (a replay must not reopen it). */
   settleControlRequest(requestId: string): void;
@@ -400,7 +429,7 @@ interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionS
   respondControl(requestId: string, response: Record<string, unknown>): Promise<void>;
   deps: ChatSessionDeps;
   view: ChatViewHooks | null;
-  /** Prompts this client sent and has not yet seen echoed back (see expectEcho). */
+  /** Client ids of prompts this client sent and Go has not yet echoed (user.delta). */
   pendingSends: Set<string>;
   /** Detached scope for the session's own watchers, so `create()` being called
    *  from a view's setup() does not hand its effects to that view's scope —
@@ -409,6 +438,9 @@ interface InternalSession extends SessionState, Omit<ChatSession, keyof SessionS
   refCount: number;
   evictTimer: ReturnType<typeof setTimeout> | null;
   eventsUL: UnlistenFn | null;
+  spliceUL: UnlistenFn | null;
+  tailUL: UnlistenFn | null;
+  reconnectUL: (() => void) | null;
   phaseUL: UnlistenFn | null;
   claudeUL: UnlistenFn | null;
   acpDataUL: UnlistenFn | null;
@@ -436,40 +468,102 @@ const sessions = new Map<number, InternalSession>();
 /** What the Go side puts on `claude-data-*` / `acp-data-*` / `acp-req-*`. */
 export interface StreamEvent { ord: number; kind: string; line: string }
 
-/** Record the ord, then reduce the bare line. */
+/** Reduce the bare line (the ord only orders the stream). */
 function feed(s: InternalSession, ev: StreamEvent, reduce: (s: InternalSession, line: string) => void) {
-  if (ev.ord > s.lastOrd) s.lastOrd = ev.ord;
   reduce(s, ev.line);
 }
 
-/**
- * Re-feed the lines that arrived after the last transcript save — the case
- * being covered is an app restart (or crash) mid-turn, where the session is
- * new but the agent's output is already recorded in chat_stream.
- *
- * Only runs when the backend has a folded mark: without one, "replay from 0"
- * would re-play a whole history that chat_messages already holds. Chats from
- * before folded_ord existed therefore behave exactly as they did.
- */
-export async function replayChatStream(chatId: number): Promise<void> {
-  const s = sessions.get(chatId);
-  if (!s || s.replayed) return;
-  s.replayed = true;
-  try {
-    const folded = await s.deps.invoke<number>("chat_folded_ord", { chatId });
-    if (!folded) return;
-    // Domain events, not raw lines: a replay should rebuild the transcript and
-    // nothing else. Re-feeding raw would also re-open permission requests that
-    // were answered before the restart.
-    const batches = await s.deps.invoke<ChatEventBatch[]>("load_chat_events_since", { chatId, since: folded });
-    for (const batch of batches) {
-      if (batch.ord > s.lastOrd) s.lastOrd = batch.ord;
-      onEvents(s, batch);
-    }
-  } catch {
-    // Replay is best-effort recovery: a chat that cannot be caught up is still
-    // usable, and the next save re-anchors folded_ord.
+// ── transcript window ─────────────────────────────────────────────────────
+
+function windowOf(s: InternalSession): TranscriptWindow {
+  return { start: s.hiddenBefore.value, rows: s.rows.value, rev: s.rev };
+}
+
+/** Write an updated window back, and retire the echoes Go's rows now carry. */
+function commit(s: InternalSession, w: TranscriptWindow) {
+  for (const row of w.rows) {
+    if (row.role !== "user" || !row.clientId) continue;
+    const shown = s.echoDisplay.get(row.clientId);
+    if (shown) row.displayText = shown;
+    s.pendingSends.delete(row.clientId);
   }
+  const ids = new Set(w.rows.filter((r) => r.role === "user" && r.clientId).map((r) => r.clientId));
+  if (s.local.value.some((l) => l.row.clientId && ids.has(l.row.clientId))) {
+    s.local.value = s.local.value.filter((l) => !(l.row.clientId && ids.has(l.row.clientId)));
+  }
+  s.rows.value = w.rows;
+  s.hiddenBefore.value = w.start;
+  s.rev = w.rev;
+}
+
+function onSplice(s: InternalSession, sp: ChatSplice) {
+  const w = windowOf(s);
+  const res = applySplice(w, sp);
+  if (res === "gap") { void catchUp(s); return; }
+  if (res !== "applied") return;
+  commit(s, w);
+  s.lastActivityAt.value = Date.now();
+  s.view?.scrollToBottom();
+}
+
+function onTail(s: InternalSession, t: ChatTail) {
+  if (applyTail(windowOf(s), t)) {
+    s.lastActivityAt.value = Date.now();
+    s.view?.scrollToBottom();
+  }
+}
+
+/** chat_subscribe(sinceRev = held rev): the splices missed, or one authoritative page. One at a time. */
+async function catchUp(s: InternalSession): Promise<void> {
+  if (s.rev < 0) return;
+  if (s.catchingUp) { s.catchUpAgain = true; return; }
+  s.catchingUp = true;
+  try {
+    // ponytail: bounded retries; a gap inside Go's own reply is a Go bug, not a loop to spin in.
+    for (let i = 0; i < 3; i++) {
+      s.catchUpAgain = false;
+      const reply = await s.deps.invoke<ChatSubscribeReply>("chat_subscribe", { chatId: s.chatId, sinceRev: s.rev });
+      if (!reply) return;
+      const w = windowOf(s);
+      const res = applySubscribe(w, reply);
+      commit(s, w);
+      if (res !== "gap" && !s.catchUpAgain) break;
+    }
+    s.view?.scrollToBottom();
+  } catch {
+    // Best effort: the next splice's gap check (or reconnect) tries again.
+  } finally {
+    s.catchingUp = false;
+  }
+}
+
+async function loadTranscript(s: InternalSession): Promise<boolean> {
+  await s.listenEvents();
+  if (s.rev >= 0) { await catchUp(s); return true; }
+  try {
+    const page = await s.deps.invoke<ChatMessagesPage>("load_chat_messages_page", {
+      chatId: s.chatId, before: -1, limit: TRANSCRIPT_PAGE,
+    });
+    if (!page || !Array.isArray(page.messages)) return false;
+    if (s.rev < 0) commit(s, windowFromPage(page));
+  } catch {
+    return false;
+  }
+  await catchUp(s);
+  return true;
+}
+
+/** Push a client-only row at the transcript's current end. Returns its id. */
+function pushLocal(s: InternalSession, row: Omit<ChatMessage, "id">): number {
+  const id = s.nextLocalId--;
+  s.local.value = [...s.local.value, { row: { ...row, id }, after: s.hiddenBefore.value + s.rows.value.length }];
+  return id;
+}
+
+/** Rows Go keeps that this client does not show: legacy `queued` rows, and the /context report (shown as a card). */
+function shown(m: ChatMessage): boolean {
+  if (m.role === "queued") return false;
+  return !(m.role === "assistant" && m.text.includes("Estimated usage by category"));
 }
 
 /**
@@ -498,12 +592,17 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     deps,
     view: null,
     pendingSends: new Set<string>(),
-    messages: ref<ChatMessage[]>([]),
+    rows: ref<ChatMessage[]>([]),
+    rev: -1,
+    local: ref<LocalRow[]>([]),
+    nextLocalId: -1,
+    echoDisplay: new Map<string, string>(),
+    loading: null,
+    catchingUp: false,
+    catchUpAgain: false,
+    messages: computed(() => mergeLocal({ start: s.hiddenBefore.value, rows: s.rows.value.filter(shown) }, s.local.value)),
     hiddenBefore: ref(0),
     loadingEarlier: ref(false),
-    nextMsgId: 0,
-    lastOrd: -1,
-    replayed: false,
 
     busy: ref(false),
     lastActivityAt: ref(Date.now()),
@@ -559,24 +658,27 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     respond: (answer) => respond(s, answer),
 
     notice(text) {
-      pushRow(s, "assistant", text);
+      pushLocal(s, { role: "assistant", text });
     },
-    postUserMessage({ text, images, displayText, clientId }) {
-      const id = s.nextMsgId++;
-      s.messages.value.push({
-        id, role: "user", text,
-        ...(images?.length ? { images } : {}), ...(displayText ? { displayText } : {}), ...(clientId ? { clientId } : {}),
-      });
+    postUserMessage({ text, images, displayText, clientId = newClientId() }) {
       // Claim the echo before the send goes out — a loopback round trip can
-      // land user.delta before the caller's next line runs.
-      s.expectEcho(clientId ?? text);
-      return id;
+      // land Go's row before the caller's next line runs.
+      s.pendingSends.add(clientId);
+      if (displayText) {
+        s.echoDisplay.set(clientId, displayText);
+        // ponytail: bounded by count; only the last few sends can still be echoing.
+        if (s.echoDisplay.size > 50) s.echoDisplay.delete(s.echoDisplay.keys().next().value!);
+      }
+      return pushLocal(s, {
+        role: "user", text, clientId,
+        ...(images?.length ? { images } : {}), ...(displayText ? { displayText } : {}),
+      });
     },
     startTurn() {
       s.busy.value = true;
     },
     failTurn(error) {
-      pushRow(s, "assistant", `Error: ${error}`);
+      pushLocal(s, { role: "assistant", text: `Error: ${error}` });
       s.busy.value = false;
       s.sync();
     },
@@ -590,14 +692,12 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       const dropEcho = () => {
         if (id === null) return;
         s.pendingSends.delete(clientId);
-        s.messages.value = s.messages.value.filter((m) => !(m.id === id && m.role === "user"));
+        s.removeFeedMarker(id);
         s.busy.value = false;
-        s.save();
         s.sync();
       };
       if (id !== null) {
         s.startTurn();
-        s.save();
         s.sync();
         s.view?.scrollToBottom(true);
       }
@@ -641,7 +741,6 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.queue.value = s.queue.value.filter((q) => q.id !== queuedId);
       const prompt = { text: entry.text, images: entry.images, clientId: newClientId() };
       const id = s.postUserMessage(prompt);
-      s.save();
       s.sync();
       s.view?.scrollToBottom(true);
       try {
@@ -651,8 +750,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         // Nothing was sent or recorded: un-claim the echo and put the entry
         // back where it was (Go drains it once the turn settles).
         s.pendingSends.delete(prompt.clientId);
-        s.messages.value = s.messages.value.filter((m) => !(m.id === id && m.role === "user"));
-        s.save();
+        s.removeFeedMarker(id);
         console.warn("[chat] steer refused, left queued:", e);
         const back = await s.enqueueMessage(entry.text, entry.images);
         if (back) {
@@ -677,26 +775,21 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       await s.deps.invoke("chat_clear", { chatId }).catch((e: unknown) => s.notice(`Could not clear the chat: ${e}`));
     },
     async rewind(message) {
-      const before = s.messages.value;
-      const index = before.findIndex((m) => m.id === message.id && m.role === message.role);
-      if (index < 0) return false;
-      // Cut first: a save racing the call must write the truncated transcript,
-      // not put the dropped turns back. Queued follow-ups (Go's) stay queued.
-      s.messages.value = before.slice(0, index);
+      // A Go row's id is its transcript index; a local row (negative id) is not in the transcript.
+      if (message.id < 0) return false;
+      // Go cuts and publishes an authoritative splice from the cut. Queued follow-ups (Go's) stay queued.
       try {
-        await s.deps.invoke("chat_rewind", { chatId, index: index + s.hiddenBefore.value, text: message.text });
+        await s.deps.invoke("chat_rewind", { chatId, index: message.id, text: message.text });
         return true;
       } catch (e) {
-        s.messages.value = before;
         s.notice(`Could not rewind: ${e}`);
         return false;
       }
     },
     async fork(message) {
-      const index = s.messages.value.findIndex((m) => m.id === message.id && m.role === message.role);
-      if (index < 0) return null;
+      if (message.id < 0) return null;
       try {
-        const chat = await s.deps.invoke<{ id: number }>("chat_fork", { chatId, index: index + s.hiddenBefore.value, text: message.text });
+        const chat = await s.deps.invoke<{ id: number }>("chat_fork", { chatId, index: message.id, text: message.text });
         return chat.id;
       } catch (e) {
         s.notice(`Could not fork: ${e}`);
@@ -739,9 +832,8 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       const ref = parseImageStub(src);
       if (!ref) return src;
       const data = await s.deps.invoke<string>("load_chat_image", { chatId, index: ref.index, image: ref.image });
-      // The row the view holds is this session's own object — replace the stub
-      // in place so every reader (the bubble, ↑-to-edit, a later save) sees the image.
-      const row = s.messages.value.find((m) => m.id === message.id && m.role === message.role);
+      // Replace the stub in the window's row so every reader (the bubble, ↑-to-edit) sees the image.
+      const row = s.rows.value.find((m) => m.id === message.id && m.role === message.role);
       if (row?.images?.[i] === src) row.images[i] = data;
       return data;
     },
@@ -752,35 +844,22 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         const page = await s.deps.invoke<ChatMessagesPage>("load_chat_messages_page", {
           chatId, before: s.hiddenBefore.value, limit: TRANSCRIPT_PAGE,
         });
-        const older = page.messages;
-        const have = new Set(s.messages.value.map((m) => `${m.role}:${m.id}`));
-        s.messages.value = [...older.filter((m) => !have.has(`${m.role}:${m.id}`)), ...s.messages.value];
-        s.hiddenBefore.value = page.start;
+        const w = windowOf(s);
+        prependPage(w, page);
+        s.rows.value = w.rows;
+        s.hiddenBefore.value = w.start;
       } catch (e) {
         s.notice(`Could not load earlier messages: ${e}`);
       } finally {
         s.loadingEarlier.value = false;
       }
     },
-    hydrate({ messages, hiddenBefore, sessionId }) {
-      if (messages && s.messages.value.length === 0) {
-        // Follow-ups queued by an older build sit in the transcript as
-        // `queued` rows: hand them to Go's queue, in order, once.
-        const legacy = messages.filter((m) => m.role === "queued");
-        if (legacy.length) {
-          messages = messages.filter((m) => m.role !== "queued");
-          void (async () => {
-            for (const m of legacy) await s.enqueueMessage(m.text, m.images);
-            s.save();
-          })();
-        }
-        s.messages.value = messages;
-        s.hiddenBefore.value = hiddenBefore ?? 0;
-        // Ids must continue past the loaded history, or new messages collide
-        // with old ones on the same `:key`.
-        s.nextMsgId = messages.reduce((max, m) => Math.max(max, m.id + 1), s.nextMsgId);
-      }
+    hydrate({ sessionId }) {
       if (sessionId) s.sessionId.value = sessionId;
+    },
+    loadTranscript() {
+      s.loading ??= loadTranscript(s).finally(() => { s.loading = null; });
+      return s.loading;
     },
     async enqueueMessage(text, images) {
       const clientId = newClientId();
@@ -830,6 +909,9 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     refCount: 0,
     evictTimer: null,
     eventsUL: null,
+    spliceUL: null,
+    tailUL: null,
+    reconnectUL: null,
     phaseUL: null,
     claudeUL: null,
     acpDataUL: null,
@@ -838,64 +920,15 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     attachView(view) {
       s.view = view;
     },
-    expectEcho(key) {
-      s.pendingSends.add(key);
-    },
-    save() {
-      // A window is not the transcript: save_chat_messages replaces the whole
-      // chat, so writing this would delete everything above it. Go folds and
-      // persists the stream itself (chattranscript.go); what this skips is only
-      // client-made rows (notes), which are not worth a truncated history.
-      if (s.hiddenBefore.value > 0) return;
-      // Same for a transcript still holding image stubs: they would replace the stored images.
-      if (s.messages.value.some((m) => m.images?.some(isImageStub))) return;
-      // Partial messages are mid-stream and get re-sent; the cap only guards
-      // against a pathological chat, not storage (a row per message is cheap).
-      const toSave = s.messages.value.filter((m) => !m.partial).slice(-2000);
-      // foldedOrd: this transcript accounts for every stream line up to
-      // lastOrd, which is what makes the chat_stream trim safe (chatstream.go).
-      // -1 while nothing has streamed yet: "don't move the mark".
-      const foldedOrd = s.lastOrd >= 0 ? s.lastOrd + 1 : -1;
-      void s.deps.invoke("save_chat_messages", { chatId, messages: JSON.stringify(toSave), foldedOrd }).catch(() => {});
-    },
     sync() {
       s.deps.host.syncChat(chatId, {
         busy: s.busy.value,
-        messageCount: s.messages.value.filter((m) => m.role !== "tool").length + s.hiddenBefore.value,
+        messageCount: s.rows.value.filter((m) => m.role !== "tool").length + s.hiddenBefore.value,
       });
-      // The remote mirror is discovery + reconnect history only; incremental
-      // updates travel over the stream itself.
-      const chat = s.deps.host.chat(chatId);
-      if (!chat) return;
-      s.deps.invoke("remote_sync_chat", {
-        chat: {
-          id: chatId,
-          workspaceId: chat.workspaceId,
-          title: chat.title,
-          busy: s.busy.value,
-          status: chat.status ?? null,
-          agentKind: chat.agentKind ?? null,
-          transport: chat.transport ?? "claude-cli",
-          claudeSessionId: s.sessionId.value,
-          messages: s.messages.value.filter((message) => !message.partial).slice(-200),
-        },
-      }).catch(() => {}); // best-effort: a failed push must never disrupt the UI
-    },
-    settleTranscript(failedTools = false) {
-      settleTranscript(projectionOf(s));
-      // Safety net for a tool row that never got its matching update — a
-      // dropped status line otherwise leaves the spinner running forever.
-      for (const m of s.messages.value) {
-        if (m.role === "tool" && m.toolOutput === undefined) {
-          m.toolOutput = "";
-          if (failedTools) m.toolFailed = true;
-        }
-      }
     },
     removeFeedMarker(id) {
       if (id === null) return;
-      const idx = s.messages.value.findIndex((m) => m.id === id);
-      if (idx !== -1) s.messages.value.splice(idx, 1);
+      s.local.value = s.local.value.filter((l) => l.row.id !== id);
     },
     settleControlRequest(requestId) {
       if (!requestId) return;
@@ -914,11 +947,15 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     },
     async listenEvents() {
       if (!s.eventsUL) {
-        s.eventsUL = await s.deps.listen<ChatEventBatch>(`chat-event-${chatId}`, (e) => {
-          if (e.payload.ord > s.lastOrd) s.lastOrd = e.payload.ord;
-          onEvents(s, e.payload);
-        });
+        s.eventsUL = await s.deps.listen<ChatEventBatch>(`chat-event-${chatId}`, (e) => onEvents(s, e.payload));
       }
+      if (!s.spliceUL) {
+        s.spliceUL = await s.deps.listen<ChatSplice>(`chat-messages-changed-${chatId}`, (e) => onSplice(s, e.payload));
+      }
+      if (!s.tailUL) {
+        s.tailUL = await s.deps.listen<ChatTail>(`chat-tail-${chatId}`, (e) => onTail(s, e.payload));
+      }
+      s.reconnectUL ??= s.deps.onReconnect?.(() => void catchUp(s)) ?? null;
       if (!s.phaseUL) {
         s.phaseUL = await s.deps.listen<{ state?: string }>(`phase-chat:${chatId}`, (e) => applyPhase(s, e.payload?.state));
         applyPhase(s, s.deps.host.phase?.(chatId));
@@ -962,6 +999,9 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     detach() {
       if (s.evictTimer) { clearTimeout(s.evictTimer); s.evictTimer = null; }
       s.eventsUL?.(); s.eventsUL = null;
+      s.spliceUL?.(); s.spliceUL = null;
+      s.tailUL?.(); s.tailUL = null;
+      s.reconnectUL?.(); s.reconnectUL = null;
       s.phaseUL?.(); s.phaseUL = null;
       s.queueUL?.(); s.queueUL = null;
       s.claudeUL?.(); s.claudeUL = null;
@@ -997,19 +1037,10 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       // session, and the next mount finds the result already here.
     },
   };
-  // Turn clock: stamped onto the user message that opened the turn when it
-  // settles, so it persists with the history and the fold row can say
-  // "Worked for 26s" after a reload.
+  // Turn clock for the composer. Go stamps the finished turn's turnMs on its user row.
   scope.run(() => watch(s.busy, (running) => {
-    if (running) {
-      s.lastActivityAt.value = Date.now();
-      s.turnStartedAt.value = Date.now();
-      return;
-    }
-    if (!s.turnStartedAt.value) return;
-    const lastUser = [...s.messages.value].reverse().find((m) => m.role === "user");
-    if (lastUser) lastUser.turnMs = Date.now() - s.turnStartedAt.value;
-    s.turnStartedAt.value = 0;
+    s.turnStartedAt.value = running ? Date.now() : 0;
+    if (running) s.lastActivityAt.value = Date.now();
   }, { flush: "sync" }));
   return s;
 }
@@ -1044,16 +1075,6 @@ export function liveChatSessionIds(): number[] {
 // Everything a stream line can change, in one place. Ported from AgentChat.vue,
 // where these ran as closures over whichever instance had mounted last.
 
-/** The projection mutates a plain {messages, nextMsgId}; this adapter keeps
- *  lib/chatProjection.ts free of Vue. */
-function projectionOf(s: InternalSession): ChatProjectionState {
-  return {
-    get messages() { return s.messages.value; },
-    get nextMsgId() { return s.nextMsgId; },
-    set nextMsgId(v: number) { s.nextMsgId = v; },
-  };
-}
-
 /** Is the user looking at this chat right now — a mounted view and a focused window. */
 function watchingNow(s: InternalSession): boolean {
   return s.refCount > 0 && hasFocus();
@@ -1081,8 +1102,6 @@ function applyPhase(s: InternalSession, state: string | undefined) {
   if (PHASE_IN_FLIGHT.has(state)) { markActive(s); return; }
   if (!s.busy.value || s.pendingSends.size > 0) return;
   s.busy.value = false;
-  s.settleTranscript();
-  s.save();
   s.sync();
   s.maybeEvict();
 }
@@ -1098,8 +1117,6 @@ function markActive(s: InternalSession) {
  *  emits it after the response to its own prompt. */
 function finishTurn(s: InternalSession) {
   s.busy.value = false;
-  s.settleTranscript();
-  s.save();
   s.sync();
   s.view?.scrollToBottom();
   // An `exit` from an intentional restart (mode switch / abort) is not a real
@@ -1116,18 +1133,13 @@ function finishTurn(s: InternalSession) {
 function onEvents(s: InternalSession, batch: ChatEventBatch) {
   const { host } = s.deps;
   for (const event of batch.events) {
-    // Our own prompt coming back. Consumed before the projection sees it, so
-    // it neither duplicates the bubble nor counts as agent activity.
-    // Matched by client id: the projection hands Go's identity to the echo row.
+    // The transcript itself comes from Go's splices; events drive live state only.
+    // Our own prompt reached Go: the phase may now be trusted again (applyPhase).
     if (event.type === "user.delta") {
-      if (event.clientId && s.pendingSends.delete(event.clientId)) {
-        applyChatEvent(projectionOf(s), event);
-        continue;
-      }
-      if (s.pendingSends.delete(event.text ?? "")) continue;
+      if (event.clientId) s.pendingSends.delete(event.clientId);
+      continue;
     }
-    // The /context report the card asked for, lifted out of the stream before
-    // the projection can turn it into a wall of a message.
+    // The /context report the card asked for (its transcript row is hidden, `shown`).
     if (s.awaitingContextReport.value && event.type === "text.delta") {
       const rows = parseContextReport(event.text ?? "");
       if (rows) {
@@ -1137,21 +1149,15 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
         continue;
       }
     }
-    if (isProjectedEvent(event.type)) {
-      const before = s.messages.value.length;
-      if (applyChatEvent(projectionOf(s), event)) s.view?.scrollToBottom();
-      // Arrival time for the visit watermark — the same stamp Go's fold puts on its copy.
-      for (const m of s.messages.value.slice(before)) m.at ??= Date.now();
-      if (event.type === "tool.started" && event.toolCallId && (event.name === "Task" || event.name === "Agent")) {
-        host.subagentStarted(s.chatId, event.toolCallId, event.input);
-      }
-      if (event.type === "tool.completed" && event.toolCallId) {
-        host.subagentCompleted(event.toolCallId, event.failed === true);
-      }
-      continue;
-    }
-
     switch (event.type) {
+      case "tool.started":
+        if (event.toolCallId && (event.name === "Task" || event.name === "Agent")) {
+          host.subagentStarted(s.chatId, event.toolCallId, event.input);
+        }
+        break;
+      case "tool.completed":
+        if (event.toolCallId) host.subagentCompleted(event.toolCallId, event.failed === true);
+        break;
       case "turn.completed":
       case "turn.failed":
         s.awaitingContextReport.value = false;
@@ -1196,12 +1202,7 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
         // it on purpose (reset: restart, interrupt, clear, a launch-settings
         // change). Either way the next send spawns a replacement, nothing the
         // old process asked is answerable any more, and no turn is running.
-        {
-          const cleared = event.type === "session.reset" && event.cleared === true;
-          resetRuntime(s, cleared);
-          // Go restarted the stream's numbering with it.
-          if (cleared) s.lastOrd = batch.ord;
-        }
+        resetRuntime(s, event.type === "session.reset" && event.cleared === true);
         break;
     }
   }
@@ -1209,26 +1210,20 @@ function onEvents(s: InternalSession, batch: ChatEventBatch) {
 
 /**
  * The process is gone — nothing it asked is answerable any more and no turn is
- * running. `cleared` also empties the transcript and the turn accounting.
+ * running. `cleared` also drops this client's own rows and the turn accounting
+ * (Go's authoritative splice empties the transcript).
  */
 function resetRuntime(s: InternalSession, cleared: boolean) {
   dropPendingRequests(s);
   if (cleared) {
-    s.messages.value = [];
-    s.hiddenBefore.value = 0;
+    s.local.value = [];
     s.sessionId.value = "";
     s.turnStats.value = null;
     s.sessionCost.value = 0;
     s.claudeGeneratedTitle.value = false;
   }
-  if (s.busy.value) {
-    // Died mid-turn with no boundary of its own — settle it here or the
-    // spinner runs forever.
-    s.busy.value = false;
-    s.settleTranscript(true);
-  } else {
-    s.settleTranscript();
-  }
+  // Died mid-turn with no boundary of its own — settle it here or the spinner runs forever.
+  s.busy.value = false;
   s.sync();
   s.maybeEvict();
 }
@@ -1314,17 +1309,11 @@ function onLine(s: InternalSession, line: string) {
     if (s.settledControlRequestIds.has(cr.requestId) || hasActiveControlRequest(s, cr.requestId)) return;
     // Auto-allow when an "always" rule matches — no UI.
     if (s.deps.host.hasPermissionRule(ruleKeys(cr.toolName, cr.input))) {
-      void s.respondControl(cr.requestId, { behavior: "allow", updatedInput: cr.input }).catch((e) => {
-        s.messages.value.push({ id: s.nextMsgId++, role: "assistant", text: `Control response failed: ${e}` });
-        s.save();
-      });
+      void s.respondControl(cr.requestId, { behavior: "allow", updatedInput: cr.input })
+        .catch((e) => s.notice(`Control response failed: ${e}`));
       return;
     }
-    const marker = (text: string) => {
-      const id = s.nextMsgId++;
-      s.messages.value.push({ id, role: "system-info", text });
-      return id;
-    };
+    const marker = (text: string) => pushLocal(s, { role: "system-info", text });
     if (cr.toolName === "AskUserQuestion") {
       s.view?.onQuestionOpened();
       s.pendingQuestion.value = cr;
@@ -1386,13 +1375,6 @@ function onAcpData(s: InternalSession, raw: string) {
     s.acpModes.value = (msg.modes as AcpModes) ?? null;
     s.acpConfigOptions.value = (msg.configOptions as AcpConfigOption[]) ?? [];
     s.view?.onAcpSession();
-    // Finalize messages rendered from a session/load replay (no turn-done
-    // fires for a load) and persist the restored history.
-    if (s.messages.value.some((m) => m.partial)) {
-      s.settleTranscript();
-      s.save();
-      s.view?.scrollToBottom();
-    }
     s.view?.restoreAcpSelections();
     return;
   }
@@ -1454,20 +1436,13 @@ function onAcpReq(s: InternalSession, raw: string) {
     rawInput: perm.rawInput,
   };
   const isPlan = typeof perm.rawInput?.plan === "string";
-  const id = s.nextMsgId++;
-  s.acpPermMsgId.value = id;
-  s.messages.value.push({ id, role: "system-info", text: isPlan ? "📋 Plan ready for review" : `⚡ Permission: ${perm.title}` });
+  s.acpPermMsgId.value = pushLocal(s, { role: "system-info", text: isPlan ? "📋 Plan ready for review" : `⚡ Permission: ${perm.title}` });
   s.deps.host.notifyPermission(s.chatId, { requestId: String(perm.rpcId), toolName: perm.title, input: perm.rawInput, suggestions: [] } as CanUseToolReq);
   s.sync();
   s.view?.scrollToBottom();
 }
 
 // ── answering ─────────────────────────────────────────────────────────────
-
-function pushRow(s: InternalSession, role: ChatMessage["role"], text: string) {
-  s.messages.value.push({ id: s.nextMsgId++, role, text });
-  s.save();
-}
 
 /**
  * Write a native control response and drop the prompt it answered. The prompt
@@ -1487,7 +1462,7 @@ async function resolveNative(
     clear();
     return true;
   } catch (e) {
-    pushRow(s, "assistant", `Control response failed: ${e}`);
+    s.notice(`Control response failed: ${e}`);
     clear();
     return false;
   } finally {
@@ -1509,8 +1484,6 @@ async function respond(s: InternalSession, answer: PendingAnswer): Promise<boole
     case "permission": {
       const cr = s.pendingPermission.value ?? s.pendingDiff.value;
       if (!cr) return false;
-      const detail = (cr.input.command ?? cr.input.file_path ?? cr.input.path ?? cr.description ?? "") as string;
-      const detailStr = detail ? ` — ${detail.length > 80 ? detail.slice(0, 80) + "…" : detail}` : "";
       const ok = await resolveNative(s, cr.requestId, answer.allow
         ? { behavior: "allow", updatedInput: answer.updatedInput ?? cr.input }
         : { behavior: "deny", message: answer.message || "User denied this action." }, () => {
@@ -1522,8 +1495,7 @@ async function respond(s: InternalSession, answer: PendingAnswer): Promise<boole
         const keys = ruleKeys(cr.toolName, cr.input);
         s.deps.host.addPermissionRule(keys[keys.length - 1]);
       }
-      const label = answer.allow ? (answer.always ? "✓ Always allowed" : "✓ Allowed") : "✗ Denied";
-      pushRow(s, "permission", `${label}: ${cr.toolName}${detailStr}`);
+      // The "✓ Allowed: …" receipt row is Go's (chatreceipts.go).
       return true;
     }
     case "question": {
@@ -1549,11 +1521,10 @@ async function respond(s: InternalSession, answer: PendingAnswer): Promise<boole
       try {
         await s.deps.invoke("acp_respond_permission", { id: chatId, rpcId: r.rpcId, optionId: answer.optionId });
       } catch (e) {
-        pushRow(s, "assistant", `Permission response failed: ${e}`);
+        s.notice(`Permission response failed: ${e}`);
         s.permissionResponsePending.value = false; // stays on screen, retryable
         return false;
       }
-      pushRow(s, "permission", `${answer.reject ? "✗" : "✓"} ${answer.label}: ${r.title}`);
       // Codex acknowledges with serverRequest/resolved (onAcpData clears the
       // prompt then). A generic ACP adapter sends nothing of the sort — its
       // prompt used to sit on screen, and block eviction, forever.
@@ -1575,7 +1546,7 @@ async function respond(s: InternalSession, answer: PendingAnswer): Promise<boole
         s.codexUserInput.value = null;
         return true;
       } catch (e) {
-        s.messages.value.push({ id: s.nextMsgId++, role: "assistant", text: `Unable to submit Codex input: ${e}` });
+        s.notice(`Unable to submit Codex input: ${e}`);
         s.codexUserInputPending.value = false;
         return false;
       } finally {

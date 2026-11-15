@@ -175,7 +175,7 @@ import DecisionsList from "@/components/DecisionsList.vue";
 import { openMiniChat } from "@/lib/miniChat";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { Select } from "@/components/ui/select";
-import { chatSession, TRANSCRIPT_PAGE, type ChatMessagesPage, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";
+import { chatSession, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";
 import { useUIStore } from "@/stores/ui";
 import { smartTitle } from "@/lib/chatTitle";
 import { newClientId } from "@/lib/offline";
@@ -263,10 +263,8 @@ function textClass(status: TermStatus): string {
 // holds that session — the same one a mounted AgentChat would use — so an
 // answer goes through respond(): same "Always" rules, same transcript row.
 //
-// LOAD-BEARING: the session must hold the transcript before it can answer.
-// respond() appends a row and save() replaces the whole stored transcript, so
-// an empty, unhydrated session would wipe the chat's history. A failed or
-// empty read ⇒ no inline answer, the row only opens the thread.
+// The session reads Go's transcript first, for the inline view. A failed read
+// ⇒ no inline answer, the row only opens the thread.
 const held = new Map<number, ChatSession>();
 const answerable = ref(new Set<number>());
 async function holdSession(chatId: number) {
@@ -274,12 +272,8 @@ async function holdSession(chatId: number) {
   const S = chatSession(chatId);
   S.retain();
   held.set(chatId, S);
-  if (S.messages.value.length === 0) {
-    const page = await invoke<ChatMessagesPage>("load_chat_messages_page", { chatId, before: -1, limit: TRANSCRIPT_PAGE }).catch(() => null);
-    if (!held.has(chatId)) return; // released while loading
-    if (!page || !Array.isArray(page.messages) || (page.messages.length === 0 && page.start === 0)) return;
-    if (S.messages.value.length === 0) S.hydrate({ messages: page.messages, hiddenBefore: page.start });
-  }
+  const ok = await S.loadTranscript();
+  if (!held.has(chatId) || !ok) return; // released while loading, or unreadable
   await S.listenClaude();
   await S.listenAcp();
   await S.recoverPendingRequests();

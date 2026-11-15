@@ -356,9 +356,18 @@ Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatT
 ### Chat stream ownership (`src/lib/chatSession.ts` + `src-wails/chatstream.go`)
 
 A chat's stream is owned by a **session registry keyed by chat id**, not by `AgentChat.vue`: the
-session holds transcript, turn state, blocking requests and the `claude-data-{id}` / `acp-data-{id}` /
-`acp-req-{id}` listeners, **and reduces the stream itself** (`onEvents`/`onLine`/`onAcpData`/`onAcpReq`,
-turn end, queue drain, notifications via `ChatHost` in `src/lib/chatHost.ts`). A component
+session holds the transcript window, turn state, blocking requests and the `claude-data-{id}` / `acp-data-{id}` /
+`acp-req-{id}` listeners, and reduces the **live state** of the stream (`onEvents`/`onLine`/`onAcpData`/`onAcpReq`:
+turn end, busy, pending requests, notifications via `ChatHost` in `src/lib/chatHost.ts`). **It never folds the
+transcript and never saves it** (ADR 0001 phase B2): `messages` = Go's rows, fed only by
+`load_chat_messages_page` + splices + tails + `chat_subscribe` through the pure `src/lib/transcriptSplice.ts`
+(table-tested; a row's `id` is its transcript index, which `chat_rewind` / `chat_fork` take), with the client's own
+rows interleaved at the index they happened (`mergeLocal`, negative ids, never persisted): the **echo** of a
+just-submitted prompt (gone when a splice carries a user row with its `clientId` — never by text or timer; a
+`chat_submit` → `sent:false` drops it and the QueuePanel shows the item), pending-request markers and error
+notices. `loadTranscript()` = page (its `rev`) then `chat_subscribe(sinceRev)` (closes the race); a splice whose
+`baseRev` isn't the held rev, and every socket reconnect (`onReconnect`, chat channels aren't ringed), catch up the
+same way. Go's legacy `queued` rows and the `/context` report row are hidden (the report is the card). A component
 `attachView(ChatViewHooks)`s on mount — scroll, question/plan draft resets, ACP selector restore, `send`
 for the drain — and `release()`s on unmount; the last view's hooks stay installed. A session is only torn
 down when **idle** (`pendingRequests` — a typed `PendingRequest` union — empty and not busy; every answer
@@ -368,8 +377,8 @@ streaming behind an unmounted view). That's what lets chat leaves render with `v
 closed**: `ChatSession` hands every ref back `Readonly` (writable `SessionState` is module-private) plus
 intents — **`send` / `restart` / `interrupt` / `clear`** (forward to `chat_*`; the one door for AgentChat,
 the queue drain via `ChatViewHooks.send`), `notice`, `suppressDoneToast`, `requestContextReport`,
-`hydrate`, … — so nothing outside can break the idle invariant. The turn clock
-(`turnStartedAt` → `turnMs`) is the session's too. Deps (`invoke`, `listen`, host) are injectable:
+`loadTranscript`, … — so nothing outside can break the idle invariant. The composer's turn clock
+(`turnStartedAt`) is the session's; `turnMs` on the row is Go's. Deps (`invoke`, `listen`, host) are injectable:
 `chatSession.test.ts` drives it **only** through that interface and fake listeners.
 
 **Splices are versioned** (ADR 0001 phase B, `chatsplice.go`): `chat-messages-changed-<id>` =
@@ -383,25 +392,25 @@ UTF-16 length before the append), ≤ 1 per 100 ms per chat, never rev'd / ringe
 rows. `load_chat_messages_page` carries `rev`. **Images by reference** (`chatimages.go`): a user line's / note's data
 URLs go to `chat_images(chat_id, hash)` when recorded; lines and `chat_messages` hold `burrow-img:<sha256>`, splices /
 pages / `load_chat_messages` send `burrow-image://<index>/<n>` (`load_chat_image` resolves); the CLI still gets the full
-data; `chat-event` user.delta is re-inflated for the desktop's own fold (transitional). Go stamps `turnMs` on a turn's
+data; `chat-event` user.delta is still re-inflated, though no client folds it any more. Go stamps `turnMs` on a turn's
 user row at turn end and writes permission receipts (`chatreceipts.go`) on `claude_respond_control` /
 `acp_respond_permission`.
 
 Every agent line is appended to SQLite `chat_stream(chat_id, ord, kind, line)` *before* it is emitted;
-`chat_stream_state.folded_ord` records how far the frontend folded it into `chat_messages`, so a trim
-can't delete an unrendered line. `replayChatStream()` catches a chat up after restart.
+`chat_stream_state.folded_ord` records how far Go folded it into `chat_messages`, so a trim
+can't delete an unfolded line.
 
 ### Provider protocol is parsed in Go (`src-wails/providerruntime.go`)
 
 Claude stream-json and ACP JSON-RPC are parsed in **one** place (Go) and re-emitted as neutral
 `ProviderRuntimeEvent`s on `chat-event-{chatId}` (`{ord, events}`): `text.delta` · `thinking.delta` ·
 `user.delta` · `tool.started` · `tool.completed` · `turn.completed` · `turn.failed` · `session.title` ·
-`session.id` · `session.exited`. The frontend only renders (`src/lib/chatProjection.ts` → `ChatMessage[]`,
-`AgentChat.onEvents` for scroll/notify/accounting); `LoadChatEventsSince` replays the log as events.
+`session.id` · `session.exited`. Go folds them into the transcript (`chatfold.go`); clients use the events
+for live state only (`chatSession.onEvents`: busy, notify, accounting; types in `src/lib/chatProjection.ts`).
 
 **Deliberately still on the raw channel** (UI decisions, not transcript): the control/permission
 protocol, Claude `system/init`, the ACP handshake, selector replies, `serverRequest/resolved`.
-`chat_messages` is still written by the frontend.
+`chat_messages` is written by Go only — no client calls `save_chat_messages` (the desktop's last caller is gone).
 
 ### PTY / Agent phase (`src-wails/internal/agentphase`, `phasestore.go`, `phasepoll.go`)
 

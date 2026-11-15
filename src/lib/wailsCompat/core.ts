@@ -246,17 +246,6 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
         .map((pty_id) => ({ pty_id, cwd: "", title: "", alive: true })) as T;
     }
 
-    // foldedOrd -1 is the "don't know" sentinel, which leaves the existing
-    // fold mark alone (chatstore.go writes it only when >= 0). An absent
-    // argument is the zero value 0 on the Go side — a real ordinal — and one
-    // call site (AgentChat's localStorage migration) omits it, so the
-    // sentinel has to be supplied here, exactly as the old switch did.
-    case "save_chat_messages":
-      return t.invoke<T>("save_chat_messages", {
-        ...args,
-        foldedOrd: args.foldedOrd ?? -1,
-      });
-
     // The desktop-only snapshot/window protocol stays on the Wails bindings —
     // the only calls that still do, apart from LocalEndpoint above, which is
     // the socket's own bootstrap rather than an app action.
