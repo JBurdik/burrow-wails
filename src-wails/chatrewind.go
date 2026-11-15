@@ -95,7 +95,7 @@ func messageCount(msgs []ChatMessage) int {
 }
 
 func (a *App) chatTranscript(chatID int64) ([]ChatMessage, error) {
-	raw, err := a.LoadChatMessages(int(chatID))
+	raw, err := a.chatMessagesRaw(int(chatID))
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +161,7 @@ func (a *App) ChatRewind(chatID int64, index int, text string) error {
 		return err
 	}
 	a.emitChatLine(id, chatRuntimeKind, "reset")
+	a.emitAuthoritativeSplice(id, cut)
 	busEmit("chats-changed", nil)
 	return nil
 }
@@ -168,8 +169,8 @@ func (a *App) ChatRewind(chatID int64, index int, text string) error {
 // truncateChatTranscript replaces the transcript with keep and drops every
 // stream line recorded so far. folded_ord moves to the next ord in the same
 // transaction, so nothing already in chat_stream (or still queued for it) is
-// ever folded or replayed back on top of the cut. Ords are NOT restarted, unlike
-// a clear: the marker only ever moves forward.
+// ever folded or replayed back on top of the cut. Ords are NOT restarted (nor by
+// a clear, which is this with nothing kept): the marker only ever moves forward.
 func (a *App) truncateChatTranscript(id string, keep []ChatMessage) error {
 	w := a.chatStream()
 	if w == nil {
@@ -259,5 +260,6 @@ func (a *App) ChatFork(chatID int64, index int, text string) (Chat, error) {
 	if err := a.SaveChatMessages(int(child.ID), string(payload), -1); err != nil {
 		return Chat{}, err
 	}
+	a.copyChatImages(chatID, child.ID)
 	return child, nil
 }

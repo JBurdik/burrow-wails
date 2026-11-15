@@ -144,7 +144,9 @@ func decodeUserLine(line string) userLine {
 
 // emitUserLine records what the human sent (see chatUserKind).
 func (a *App) emitUserLine(id, text string, images []string, clientID string) {
-	a.emitChatLine(id, chatUserKind, encodeUserLine(text, images, clientID))
+	// The CLI already has the images; the recorded line keeps refs only
+	// (chatimages.go).
+	a.emitChatLine(id, chatUserKind, encodeUserLine(text, a.storeChatImages(id, images), clientID))
 }
 
 // withSendingClientID makes clientID the id the transport's user line carries

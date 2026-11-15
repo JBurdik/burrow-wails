@@ -135,6 +135,7 @@ func migrate(db *sql.DB) error {
 		)`,
 	}
 	stmts = append(stmts, chatMessagesSchema()...)
+	stmts = append(stmts, chatImagesSchema()...)
 	stmts = append(stmts, chatStreamSchema()...)
 	stmts = append(stmts, remoteDevicesSchema()...)
 	stmts = append(stmts, pushSchema()...)

@@ -311,13 +311,20 @@ func (a *App) ChatClear(chatID int64) error {
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
 	a.stopProcess(id)
-	if err := a.DeleteChatMessages(int(chatID)); err != nil {
+	// A cut to nothing, not a delete: the stream ord (= the splice revision
+	// clients hold) keeps counting, and clients get an authoritative splice.
+	if _, err := a.db.Exec(`DELETE FROM openai_sessions WHERE chat_id = ?`, chatID); err != nil {
 		return err
 	}
+	if err := a.truncateChatTranscript(id, []ChatMessage{}); err != nil {
+		return err
+	}
+	a.deleteChatImages(int(chatID))
 	if _, err := a.db.Exec(`UPDATE chats SET claude_session_id = '', resume_at = '', message_count = 0 WHERE id = ?`, chatID); err != nil {
 		return err
 	}
 	a.emitChatLine(id, chatRuntimeKind, "clear")
+	a.emitAuthoritativeSplice(id, 0)
 	busEmit("chats-changed", nil)
 	return nil
 }

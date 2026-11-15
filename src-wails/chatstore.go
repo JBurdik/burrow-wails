@@ -44,7 +44,28 @@ func chatMessagesSchema() []string {
 // authoritative while the app runs, and the table lags it by up to one
 // coalescing window. Reading the table instead would show a client a
 // transcript a second old for no reason.
+//
+// Stored image refs go out as "burrow-image://" stubs (chatimages.go); old
+// inline data URLs stay inline here, as they always did.
 func (a *App) LoadChatMessages(chatID int) (string, error) {
+	raw, err := a.chatMessagesRaw(chatID)
+	if err != nil || !strings.Contains(raw, chatImageRefPrefix) {
+		return raw, err
+	}
+	var msgs []ChatMessage
+	if err := json.Unmarshal([]byte(raw), &msgs); err != nil {
+		return "", err
+	}
+	for i := range msgs {
+		msgs[i] = stubRowImages(msgs[i], i, true)
+	}
+	out, err := json.Marshal(msgs)
+	return string(out), err
+}
+
+// chatMessagesRaw is the transcript as stored, refs and all — for Go's own
+// readers (rewind, fork) that copy rows rather than show them.
+func (a *App) chatMessagesRaw(chatID int) (string, error) {
 	if w := a.chatStream(); w != nil {
 		if msgs := w.chatTailMessages(strconv.Itoa(chatID)); msgs != nil {
 			out, err := json.Marshal(msgs)
@@ -60,10 +81,14 @@ func (a *App) LoadChatMessages(chatID int) (string, error) {
 // ChatMessagesPage is one window of a transcript: Messages are the rows
 // [Start, Start+len), Total is the whole transcript's length. A client that
 // holds only a window must treat Start as "this many earlier messages exist".
+//
+// Rev is the splice revision the window is current as of (chatsplice.go): the
+// next chat-messages-changed splice with baseRev == Rev applies on top of it.
 type ChatMessagesPage struct {
 	Messages []json.RawMessage `json:"messages"`
 	Start    int               `json:"start"`
 	Total    int               `json:"total"`
+	Rev      int64             `json:"rev"`
 }
 
 // LoadChatMessagesPage returns up to `limit` messages ending just before index
@@ -79,7 +104,7 @@ func (a *App) LoadChatMessagesPage(chatID int, before int, limit int) (ChatMessa
 	if limit <= 0 {
 		limit = 60
 	}
-	msgs, start, total, err := a.chatMessagesWindow(chatID, func(total int) (int, int) {
+	msgs, start, total, rev, err := a.chatMessagesWindowRev(chatID, func(total int) (int, int) {
 		end := total
 		if before >= 0 && before < total {
 			end = before
@@ -92,7 +117,7 @@ func (a *App) LoadChatMessagesPage(chatID int, before int, limit int) (ChatMessa
 	for i, m := range msgs {
 		msgs[i] = stubChatImages(m, start+i)
 	}
-	return ChatMessagesPage{Messages: msgs, Start: start, Total: total}, nil
+	return ChatMessagesPage{Messages: msgs, Start: start, Total: total, Rev: rev}, nil
 }
 
 // chatImageStubPrefix marks an image the page left out: "<prefix><index>/<n>"
@@ -120,7 +145,7 @@ func stubChatImages(raw json.RawMessage, index int) json.RawMessage {
 	}
 	changed := false
 	for i, img := range images {
-		if len(img) >= chatImageStubMin && strings.HasPrefix(img, "data:") {
+		if strings.HasPrefix(img, chatImageRefPrefix) || (len(img) >= chatImageStubMin && strings.HasPrefix(img, "data:")) {
 			images[i] = fmt.Sprintf("%s%d/%d", chatImageStubPrefix, index, i)
 			changed = true
 		}
@@ -160,50 +185,58 @@ func (a *App) LoadChatImage(chatID int, index int, image int) (string, error) {
 	if image < 0 || image >= len(m.Images) {
 		return "", fmt.Errorf("message %d has no image %d", index, image)
 	}
-	return m.Images[image], nil
+	return a.resolveChatImage(chatID, m.Images[image])
 }
 
 // chatMessagesWindow reads rows [start, end) as `pick` chooses them from the
 // transcript's length — from the live fold when this process has one (it is
 // ahead of the table, same precedence as LoadChatMessages), else the table.
 func (a *App) chatMessagesWindow(chatID int, pick func(total int) (start, end int)) (msgs []json.RawMessage, start, total int, err error) {
+	msgs, start, total, _, err = a.chatMessagesWindowRev(chatID, pick)
+	return
+}
+
+// chatMessagesWindowRev is chatMessagesWindow plus the splice revision the
+// rows are current as of, read under the same lock as a live fold's rows.
+func (a *App) chatMessagesWindowRev(chatID int, pick func(total int) (start, end int)) (msgs []json.RawMessage, start, total int, rev int64, err error) {
 	if w := a.chatStream(); w != nil {
-		if live := w.chatTailMessages(strconv.Itoa(chatID)); live != nil {
+		if live, liveRev, ok := w.chatTailSnapshot(strconv.Itoa(chatID)); ok {
 			start, end := pick(len(live))
 			out := make([]json.RawMessage, 0, end-start)
 			for _, m := range live[start:end] {
 				raw, err := json.Marshal(m)
 				if err != nil {
-					return nil, 0, 0, err
+					return nil, 0, 0, 0, err
 				}
 				out = append(out, raw)
 			}
-			return out, start, len(live), nil
+			return out, start, len(live), liveRev, nil
 		}
 	}
 	if a.db == nil {
-		return []json.RawMessage{}, 0, 0, nil
+		return []json.RawMessage{}, 0, 0, 0, nil
 	}
+	rev = a.chatRev(strconv.Itoa(chatID))
 	if err := a.db.QueryRow(`SELECT COUNT(*) FROM chat_messages WHERE chat_id = ?`, chatID).Scan(&total); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
 	start, end := pick(total)
 	rows, err := a.db.Query(
 		`SELECT payload_json FROM chat_messages WHERE chat_id = ? AND ord >= ? AND ord < ? ORDER BY ord`,
 		chatID, start, end)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
 	defer rows.Close()
 	out := make([]json.RawMessage, 0, end-start)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, err
 		}
 		out = append(out, json.RawMessage(payload))
 	}
-	return out, start, total, rows.Err()
+	return out, start, total, rev, rows.Err()
 }
 
 // loadStoredChatMessages reads the table, ignoring any in-memory fold. This is
@@ -324,6 +357,7 @@ func (a *App) DeleteChatMessages(chatID int) error {
 	if _, err := a.db.Exec(`DELETE FROM chat_messages WHERE chat_id = ?`, chatID); err != nil {
 		return err
 	}
+	a.deleteChatImages(chatID)
 	return a.deleteChatStream(strconv.Itoa(chatID))
 }
 

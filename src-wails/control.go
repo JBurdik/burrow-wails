@@ -34,6 +34,7 @@ func (a *App) ClaudeRespondControl(id, requestID string, response map[string]any
 	}
 	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.Resume})
 	a.emitChatLine(id, "claude-data", claudeAnsweredLine(requestID))
+	a.claudePermissionReceipt(id, requestID, response)
 	return nil
 }
 
@@ -74,9 +75,13 @@ func (a *App) AcpRespondPermission(id string, rpcID int64, optionID string) erro
 		case "codex:acceptForSession":
 			decision = "acceptForSession"
 		}
-		return sess.write(map[string]any{
+		if err := sess.write(map[string]any{
 			"jsonrpc": "2.0", "id": rpcID, "result": map[string]any{"decision": decision},
-		})
+		}); err != nil {
+			return err
+		}
+		a.acpPermissionReceipt(id, rpcID, optionID)
+		return nil
 	}
 	outcome := map[string]any{"outcome": "cancelled"}
 	if optionID != "" {
@@ -87,6 +92,7 @@ func (a *App) AcpRespondPermission(id string, rpcID int64, optionID string) erro
 	}))
 	if err == nil {
 		a.emitChatLine(id, "acp-data", acpAnsweredLine(rpcID))
+		a.acpPermissionReceipt(id, rpcID, optionID)
 	}
 	return err
 }

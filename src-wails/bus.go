@@ -133,6 +133,9 @@ var notRingable = []string{
 	// durably logged with an ord — a reconnecting client re-reads the
 	// transcript (or replays from folded_ord) rather than resuming these.
 	chatMessagesChangedPrefix,
+	// Streaming text appends (chatsplice.go): transient by design — the next
+	// rev'd splice replaces them and chat_subscribe hands back inProgress.
+	chatTailPrefix,
 	// A one-shot UI gesture: replaying a stale drop on resume would insert the
 	// files into the composer a second time.
 	"file-drop",

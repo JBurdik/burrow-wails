@@ -116,6 +116,7 @@ type chatStreamWriter struct {
 	// it is never taken while a chatTail's own mu is held (see the t.mu →
 	// w.mu lock-order note on lockChatTail in chattranscript.go).
 	tails       map[string]*chatTail
+	splices     map[string]*chatSpliceLog // chatsplice.go
 	dropped     int
 	hardCapHits map[string]int
 }
@@ -127,6 +128,7 @@ func newChatStreamWriter(db *sql.DB) *chatStreamWriter {
 		nextOrd:     map[string]int64{},
 		appends:     map[string]int{},
 		tails:       map[string]*chatTail{},
+		splices:     map[string]*chatSpliceLog{},
 		hardCapHits: map[string]int{},
 	}
 	go w.run()
@@ -178,16 +180,20 @@ func (w *chatStreamWriter) flush() {
 
 // loadMaxOrdLocked resumes a chat's numbering across app restarts, so a replay
 // after a crash sees one continuous sequence. Runs once per chat per run.
+//
+// Never below folded_ord: a clear or rewind deletes every stream line, and
+// the ord (= the splice revision clients hold, chatsplice.go) must keep
+// counting past them, not restart at 0.
 func (w *chatStreamWriter) loadMaxOrdLocked(chatID string) int64 {
-	var max sql.NullInt64
-	if err := w.db.QueryRow(`SELECT MAX(ord) FROM chat_stream WHERE chat_id = ?`, chatID).Scan(&max); err != nil {
+	var next sql.NullInt64
+	if err := w.db.QueryRow(
+		`SELECT MAX(COALESCE((SELECT MAX(ord) + 1 FROM chat_stream WHERE chat_id = ?), 0),
+		            COALESCE((SELECT folded_ord FROM chat_stream_state WHERE chat_id = ?), 0))`,
+		chatID, chatID).Scan(&next); err != nil {
 		log.Printf("chat stream: max ord for %s: %v", chatID, err)
 		return 0
 	}
-	if !max.Valid {
-		return 0
-	}
-	return max.Int64 + 1
+	return next.Int64
 }
 
 func (w *chatStreamWriter) run() {
@@ -329,7 +335,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 	// instead of in one flip. The remote client is the first that wants it — it
 	// has been re-implementing the protocol to a shallower depth.
 	if events := NormalizeChatLine(kind, line, ord); len(events) > 0 {
-		busEmit("chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: events})
+		busEmit("chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: a.inflateEventImages(chatID, events)})
 
 		if a.phases != nil {
 			for _, e := range events {
@@ -436,6 +442,7 @@ func (a *App) PublishChatNote(chatID string, note string) error {
 	if normalizeChatNote(note, 0) == nil {
 		return fmt.Errorf("publish_chat_note: not a valid chat note: %s", note)
 	}
+	note = a.noteImagesByRef(chatID, note)
 	a.emitChatLine(chatID, chatNoteKind, note)
 	return nil
 }
@@ -458,7 +465,7 @@ func (a *App) LoadChatEventsSince(chatID string, since int64) ([]ChatEventBatch,
 	out := []ChatEventBatch{}
 	for _, l := range lines {
 		if events := NormalizeChatLine(l.Kind, l.Line, l.Ord); len(events) > 0 {
-			out = append(out, ChatEventBatch{Ord: l.Ord, Events: events})
+			out = append(out, ChatEventBatch{Ord: l.Ord, Events: a.inflateEventImages(chatID, events)})
 		}
 	}
 	return out, nil
@@ -522,6 +529,7 @@ func (a *App) deleteChatStream(chatID string) error {
 		// removed tail can no longer persist — persistChatTail checks that
 		// its tail is still the map's.
 		delete(w.tails, chatID)
+		w.dropSpliceLogLocked(chatID)
 		w.mu.Unlock()
 	}
 	_, err := a.db.Exec(`DELETE FROM chat_stream WHERE chat_id = ?`, chatID)

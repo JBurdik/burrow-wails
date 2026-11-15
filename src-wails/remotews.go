@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -374,6 +375,11 @@ func (h *remoteWS) handle(w http.ResponseWriter, r *http.Request) {
 		// A numbered event travels as a shell frame so the client can record
 		// where it got to; pty-data has no number and stays on the
 		// unnumbered channel.
+		// Streaming chat-tail appends go first under backpressure: the next
+		// splice (or chat_subscribe's inProgress) carries their text anyway.
+		if strings.HasPrefix(ev.Name, chatTailPrefix) && len(out) >= cap(out)*3/4 {
+			return
+		}
 		fr := eventFrame(ev.Name, ev.Payload)
 		if ev.Seq > 0 {
 			fr = shellFrame([]shellEvent{ev})
