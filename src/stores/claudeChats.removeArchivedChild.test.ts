@@ -29,6 +29,7 @@ if (typeof globalThis.localStorage === "undefined") {
 const deletedChatIds: number[] = [];
 
 vi.mock("@tauri-apps/api/core", () => ({
+  cachedRead: () => null,
   invoke: async (cmd: string, args: Record<string, unknown>) => {
     if (cmd === "delete_chat") {
       deletedChatIds.push(args.id as number);

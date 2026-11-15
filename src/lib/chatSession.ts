@@ -12,6 +12,7 @@ import { parseAcpPermRequest } from "@/lib/acpParser";
 import { isImageStub, parseImageStub } from "@/lib/chatImages";
 import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import { appChatHost, type ChatHost } from "@/lib/chatHost";
+import { dropHeld, heldFor, holdMessage, isOfflineError, type HeldMessage } from "@/lib/offline";
 
 // Who owns a chat's stream — the answer used to be "whichever AgentChat.vue is
 // mounted", which is what made the component un-unmountable: its
@@ -59,9 +60,20 @@ export interface ChatSessionDeps {
   invoke: typeof tauriInvoke;
   listen: typeof tauriListen;
   host: ChatHost;
+  /** Paired-device offline outbox (src/lib/offline.ts); absent = no holding (tests, and inert on the desktop). */
+  outbox?: {
+    list(chatId: number): HeldMessage[];
+    hold(chatId: number, text: string, images?: string[]): boolean;
+    drop(id: string): void;
+  };
 }
 
-const appDeps: ChatSessionDeps = { invoke: tauriInvoke, listen: tauriListen, host: appChatHost };
+const appDeps: ChatSessionDeps = {
+  invoke: tauriInvoke,
+  listen: tauriListen,
+  host: appChatHost,
+  outbox: { list: heldFor, hold: holdMessage, drop: dropHeld },
+};
 
 /** Match keys for "Allow always" rules. Bash gets a command-prefix key so
  *  allowing `git` once doesn't blanket-allow every Bash call. */
@@ -214,8 +226,21 @@ export interface ChatSession extends ReadonlyRefs<Omit<SessionState, "messages">
    * update the mirror optimistically; the next event is the truth.
    */
   messageQueue: ComputedRef<QueuedChatMessage[]>;
-  /** Append to Go's queue. Null when Go refused (already reported in the transcript). */
+  /**
+   * Append to Go's queue. Null when Go refused (already reported in the
+   * transcript). When the paired device lost its connection mid-call the
+   * message is held instead (see `hold`) and the entry's id is -1.
+   */
   enqueueMessage(text: string, images?: string[]): Promise<QueuedChatMessage | null>;
+  /**
+   * Messages typed while a paired device was offline, persisted per machine
+   * and delivered in order via `chat_queue_add` on reconnect (src/lib/offline.ts).
+   */
+  held: ComputedRef<HeldMessage[]>;
+  /** Hold a message for delivery on reconnect. False when it could not be held (not remote / storage full). */
+  hold(text: string, images?: string[]): boolean;
+  /** Delete a held message before it is delivered. */
+  dropHeld(id: string): void;
   removeQueuedMessage(id: number): void;
   /** Rewrite a queued follow-up's text in place (position kept); an empty text is ignored. Never touches the running turn. */
   editQueuedMessage(id: number, text: string): void;
@@ -553,6 +578,15 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         await s.deps.invoke("chat_send", { chatId, text: prompt.text, images: prompt.images ?? [] });
         return id;
       } catch (e) {
+        // The socket dropped under the send: take the bubble back and hold the
+        // message for the reconnect instead of reporting a failed turn.
+        if (isOfflineError(e) && s.deps.outbox?.hold(chatId, prompt.text, prompt.images)) {
+          s.messages.value = s.messages.value.filter((m) => m.id !== id);
+          s.busy.value = false;
+          s.save();
+          s.sync();
+          return null;
+        }
         s.failTurn(e);
         return null;
       }
@@ -719,10 +753,14 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         if (!s.queue.value.some((q) => q.id === entry.id)) s.queue.value = [...s.queue.value, entry];
         return entry;
       } catch (e) {
+        if (isOfflineError(e) && s.deps.outbox?.hold(chatId, text, images)) return { id: -1, text, ...(images?.length ? { images } : {}) };
         s.notice(`Could not queue the message: ${e}`);
         return null;
       }
     },
+    held: computed(() => s.deps.outbox?.list(chatId) ?? []),
+    hold: (text, images) => s.deps.outbox?.hold(chatId, text, images) ?? false,
+    dropHeld: (id) => s.deps.outbox?.drop(id),
     removeQueuedMessage(id) {
       s.queue.value = s.queue.value.filter((q) => q.id !== id);
       void s.deps.invoke("chat_queue_remove", { id }).catch(() => {});

@@ -1,6 +1,7 @@
 import { computed, effectScope, onScopeDispose, ref, watch, type EffectScope } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { cachedRead } from "@/lib/wailsCompat/core";
 import { displayStatus, type Phase } from "@/runtime/displayStatus";
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
@@ -116,7 +117,9 @@ function seenAt(): Record<string, number> {
 function createFeed() {
   const chats = useClaudeChatsStore();
   const workspaces = useWorkspaceStore();
-  const snap = ref<ShellSnapshotData | null>(null);
+  // First paint from the last snapshot this paired device saw (never noteSeq'd:
+  // it is only a picture until load() replaces it).
+  const snap = ref<ShellSnapshotData | null>(cachedRead<ShellSnapshotData>("shell_snapshot"));
   const perms = ref<PtyPermRequest[]>([]);
   const now = ref(Date.now());
 

@@ -21,6 +21,7 @@ if (typeof globalThis.localStorage === "undefined") {
 }
 
 vi.mock("@tauri-apps/api/core", () => ({
+  cachedRead: () => null,
   invoke: async (cmd: string) => {
     if (cmd === "list_chats") return [];
     if (cmd === "read_config") return "{}";

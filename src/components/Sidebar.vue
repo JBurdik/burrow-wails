@@ -174,6 +174,8 @@
 
     </div>
 
+    <!-- Paired browser only: says so when the link to the Mac is down. -->
+    <LinkStatus class="mx-2 mb-1 self-start" />
     <!-- Docked at the foot: Snoozed, then Archived (Working moved up top). -->
     <div v-if="dockedSections.length || archiveItems.length" class="flex max-h-[45%] shrink-0 flex-col overflow-y-auto border-t border-border px-2 pb-1.5 pt-0.5" @scroll="cancelHoverCard">
       <div
@@ -636,6 +638,7 @@
 </template>
 
 <script setup lang="ts">
+import LinkStatus from "@/components/LinkStatus.vue";
 import { canOpenWindows as canOpenWindowsFn, openWindow } from "@/lib/windows";
 import { ref, reactive, computed, shallowRef, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
 import {

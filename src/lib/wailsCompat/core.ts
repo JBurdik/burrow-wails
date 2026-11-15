@@ -16,7 +16,8 @@ import {
 } from "./bindings/burrow/desktopservice";
 import { isDesktop } from "./desktop";
 import { createTransport, type Incompatible, type Transport } from "@/runtime/transport";
-import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource, setActiveEnvironment } from "@/runtime/remoteEndpoint";
+import { activeEnvironmentId, desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource, setActiveEnvironment } from "@/runtime/remoteEndpoint";
+import { CACHED_READS, cacheClear, cacheRead, cacheWrite } from "@/runtime/remoteCache";
 
 type Args = Record<string, any>;
 
@@ -145,10 +146,30 @@ function wakeOnReturn(): void {
  * cannot miss one.
  */
 export function switchEnvironment(id: string | null, reload: () => void = () => location.reload()): void {
+  const prev = activeEnvironmentId();
+  if (prev) cacheClear(prev);
   setActiveEnvironment(id);
   remote?.close();
   remote = null;
   reload();
+}
+
+/** True when this context talks to a paired machine over the network (the
+ *  phone, or a desktop window driving another Mac) — the only case where the
+ *  offline outbox, the read cache and the connection indicator apply. */
+export function remoteActive(): boolean {
+  const t = activeTransport();
+  return t !== null && t === remote;
+}
+
+/**
+ * The last reply of a `CACHED_READS` read from the active paired machine, for
+ * a first paint before the socket opens; null on the desktop's own backend.
+ * Never a substitute for the live call — callers seed with it, then load.
+ */
+export function cachedRead<T>(cmd: string): T | null {
+  const env = remoteActive() ? activeEnvironmentId() : null;
+  return env ? cacheRead<T>(env, cmd) : null;
 }
 
 /** Which transport this context can use, or null before pairing. */
@@ -269,5 +290,12 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
       return NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows) as unknown as Promise<T>;
   }
 
+  if (CACHED_READS.has(cmd) && t === remote) {
+    const env = activeEnvironmentId();
+    return t.invoke<T>(cmd, args).then((v) => {
+      if (env && env === activeEnvironmentId()) cacheWrite(env, cmd, v);
+      return v;
+    });
+  }
   return t.invoke<T>(cmd, args);
 }

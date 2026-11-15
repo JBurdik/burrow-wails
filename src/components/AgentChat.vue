@@ -550,7 +550,7 @@
         <!-- Queued follow-ups live inside the composer (Ghostex-style): one row
              each, drag to reorder, play = interrupt and send now, pencil = take
              it back into the input. -->
-        <div v-if="messageQueue.length" class="flex flex-col gap-1.5 px-2.5 pt-2.5">
+        <div v-if="messageQueue.length || held.length" class="flex flex-col gap-1.5 px-2.5 pt-2.5">
           <div v-if="messageQueue.length > 1" class="flex items-center gap-2 text-[11px] text-muted-foreground">
             <button v-if="messageQueue.length > 3" class="queue-act" style="width:auto;padding:0 6px" :title="queueCollapsed ? 'Expand queued messages' : 'Collapse queued messages'" @click="queueCollapsed = !queueCollapsed">
               <component :is="queueCollapsed ? PhCaretRight : PhCaretDown" :size="11" /><span class="ml-1">{{ messageQueue.length }} queued</span>
@@ -590,6 +590,18 @@
             <button class="queue-act" title="Remove from queue" @click="removeQueued(q.id)"><PhX :size="12" /></button>
           </div>
           </template>
+          <!-- Typed while a paired device was offline: kept on this device and
+               handed to Go's queue on reconnect (src/lib/offline.ts). -->
+          <div
+            v-for="h in held"
+            :key="h.id"
+            class="queue-row flex items-center gap-2 rounded-[9px] border border-dashed border-border px-2.5 py-1.5 text-[13px] text-secondary-foreground"
+          >
+            <PhClock :size="13" class="flex-shrink-0 text-muted-foreground" />
+            <span class="min-w-0 flex-1 truncate">{{ h.text }}</span>
+            <span class="flex-shrink-0 text-[11px]" :class="h.error ? 'text-destructive' : 'text-muted-foreground'" :title="h.error">{{ h.error ? "Not delivered" : "Waiting for connection" }}</span>
+            <button class="queue-act" title="Delete this message" @click="S.dropHeld(h.id)"><PhX :size="12" /></button>
+          </div>
         </div>
         <!-- Working indicator — sits above the textarea, only for tool activity.
              Thinking has its own bubble in the chat body, so it's not duplicated here. -->
@@ -850,7 +862,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode, PhWifiSlash } from "@phosphor-icons/vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode, PhWifiSlash, PhClock } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { compact as phone, isWeb } from "@/lib/viewport";
@@ -891,6 +903,7 @@ import { useComposerCompletion } from "@/lib/composerCompletion";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
 import { isImageStub } from "@/lib/chatImages";
 import { chatSession, canSteer, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
+import { linkDown } from "@/lib/offline";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
 import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
 import { acpOption } from "@/lib/chatTypes";
@@ -1296,6 +1309,7 @@ const {
   contextTokens, contextWindow, contextSplit, contextReport, contextReportPending,
   claudeGeneratedTitle,
   enqueueMessage, removeQueuedMessage, editQueuedMessage, clearQueuedMessages, moveQueuedMessage,
+  held,
 } = S;
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
@@ -2764,6 +2778,19 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     feedbackSendError.value = "";
   };
   const images = [...pendingImages.value, ...(extraImages ?? [])];
+  // A paired device with its socket down: keep the message on this device and
+  // let the reconnect hand it to Go's queue, rather than a send that would sit
+  // in the transport for ~15 s and then fail.
+  if (linkDown()) {
+    if (!S.hold(text, images)) {
+      S.notice("Offline, and the message could not be saved on this device.");
+      return null;
+    }
+    acceptFeedback();
+    pendingImages.value = [];
+    inputText.value = "";
+    return null;
+  }
   // A follow-up is always a separate turn.  In particular, do not rely on an
   // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
   // as steering, and generic adapters have no negotiated queue capability.

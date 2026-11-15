@@ -183,6 +183,7 @@ import ProjectScreen from "@/components/phone/ProjectScreen.vue";
 import MoreScreen from "@/components/phone/MoreScreen.vue";
 import { isPhoneOnlyRoute, phoneScreen, showsBottomNav } from "@/lib/phoneNav";
 import { compact, isWeb } from "@/lib/viewport";
+import { startOffline } from "@/lib/offline";
 import AnimatedBackdrop from "@/components/AnimatedBackdrop.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import Terminal from "@/components/Terminal.vue";
@@ -854,6 +855,8 @@ function playStartupChime() {
 }
 
 onMounted(async () => {
+  // Paired device: connection indicator + delivery of messages held offline.
+  startOffline();
   await ws.load();
   hideSplash();
   void pendingReleaseNotes().then((n) => { whatsNew.value = n; }).catch(() => {});

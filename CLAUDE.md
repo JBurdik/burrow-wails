@@ -719,6 +719,17 @@ not the mounted Terminals, since a phone mounts one workspace; the desktop Sideb
 gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the browser's own
 `localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's. Read receipts are shared via Go (`seen_receipts`, above).
 
+**Offline on a paired device** (remote transport only; `remoteActive()` in `core.ts`, inert on the desktop's own backend):
+`LinkStatus.vue` (phone header, Sidebar foot) shows Reconnecting after 1.5 s down and Offline after 3 s (pure
+`src/runtime/linkStatus.ts`), tap = `wake()`. A message sent while the socket is down (or whose `chat_send` /
+`chat_queue_add` fails with disconnected / transport unreachable) is **held** in localStorage `burrow.outbox.<envId>`
+(`src/lib/offline.ts`, session intents `hold` / `held` / `dropHeld`), shown in the composer as "Waiting for connection",
+and on reconnect handed to Go via `chat_queue_add` oldest first (`drainOutbox` in `src/runtime/remoteCache.ts`): removed
+only after success; a non-network refusal marks it and blocks only that chat. **Read cache**: `invoke` tees
+`shell_snapshot` / `list_chats` / `list_workspaces` into `burrow.cache.<envId>.<cmd>`; threadFeed and the workspace /
+chat stores seed from `cachedRead()` before the live call. A cached snapshot is never `noteSeq`'d. Cleared on
+`removeEnvironment` (unpair / 401) and `switchEnvironment`; the outbox survives both.
+
 **Native iOS app** (`ios/`, SwiftUI, XcodeGen `project.yml`; separate from the older WebView shell in `src-ios/`): a
 `/v2/ws` client like the phone PWA (pair → device token in the Keychain → ticket → socket), same command table and
 events — no app-specific Go surface. Module per file: `AppModel` (snapshot, `list_chats`, phases, shared `seen_receipts`,

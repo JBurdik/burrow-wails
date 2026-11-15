@@ -8,7 +8,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage, onConfigChanged } from "@/lib/config";
 import { listen } from "@tauri-apps/api/event";
-import { appTransport } from "@/lib/wailsCompat/core";
+import { appTransport, cachedRead } from "@/lib/wailsCompat/core";
 import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
 import { childrenOf as childrenOfSessions, allChildrenOf as allChildrenOfSessions } from "@/stores/chatTree";
@@ -283,6 +283,8 @@ export function isActivitySync(
     // Calls run concurrently server-side, so replies can arrive out of order:
     // an older list landing last would drop a chat a newer one already showed.
     const gen = ++reloadGen;
+    // A paired device paints the last list it saw while the socket opens.
+    if (!sessions.value.length) sessions.value = (cachedRead<ChatRow[]>("list_chats") ?? []).map(sessionFromRow);
     let rows: ChatRow[];
     try {
       rows = await invoke<ChatRow[]>("list_chats");
