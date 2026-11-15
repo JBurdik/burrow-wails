@@ -132,7 +132,9 @@ card opens, `chat_prs_refresh(cwd)` after a push from `git.push`; Sidebar rows s
 wire, `remoteDenied` for the setter) — `needs` you|nothing, `asks` (question + ≤ 6 options, each `{label, description}` or a bare string — stored as `options` + parallel `details` + `suggested`), `next` (≤ 3
 follow-ups). `applyChatPhase` clears it on the **transition into flight** (not on every Running line: the call is made
 mid-turn). AgentChat shows the card only while not busy: Needs you = buttons / Something else, one ask at a time, sent
-as one message with the composer text (`composeAnswers`); Done = Archive + follow-ups + **loose ends**
+with the composer text through **`chat_answer_turn(chatId, picks, extra, clientId)`** (`chatanswerturn.go`): clients send
+only picks (`[{index, options?, text?}]`; Done card = the picked `next`), Go validates them against the stored card, adds
+kept run replies, composes the one message (`composeTurnAnswer`, table-tested) and submits it like `chat_submit`; Done = Archive + follow-ups + **loose ends**
 (`chat_loose_ends`: uncommitted files, commits on no remote, open PR, sub-agents in flight, pending check-ins — Go's own
 checks, never the agent's word). **Run on the card:** an ask's `run` (checked by `control.RunCommandProblem`: no
 control / bidi / zero-width chars, ≤ 8000) gets a Run button; `chat_run_ask(chatId, index)` runs the **stored** command
