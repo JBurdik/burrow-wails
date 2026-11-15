@@ -53,6 +53,10 @@ where:
 
 # ── dev ───────────────────────────────────────────────────────────────────────
 
+# Native SwiftUI iOS app (ios/): development-signed IPA, served by the core at https://<mac>.ts.net/ios
+ios-native:
+    ios/release.sh
+
 # Native dev window (hot-reload)
 dev:
     cd src-wails && BURROW_DATA_SUFFIX="${BURROW_DATA_SUFFIX:-dev}" wails3 task dev

@@ -119,6 +119,8 @@ func (s *HTTPServer) mux() *http.ServeMux {
 	// open. They carry no data — the shell is a static bundle that then has to
 	// pair like any other client.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("/ios", s.handleIOS)
+	mux.HandleFunc("/ios/", s.handleIOS)
 	mux.HandleFunc("/", s.handleAssets)
 	return mux
 }

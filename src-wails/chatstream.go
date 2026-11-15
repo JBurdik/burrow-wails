@@ -591,7 +591,24 @@ scan:
 			if strings.Contains(l.Line, `"_burrow":"turn"`) {
 				break scan
 			}
+			// Codex resolves its own requests (and acpAnsweredLine stands in
+			// for generic ACP); walking back, the resolution comes first.
+			var m struct {
+				Method string `json:"method"`
+				Params struct {
+					RequestID json.RawMessage `json:"requestId"`
+				} `json:"params"`
+			}
+			if json.Unmarshal([]byte(l.Line), &m) == nil && m.Method == "serverRequest/resolved" {
+				cancelled["acp:"+string(m.Params.RequestID)] = true
+			}
 		case "acp-req":
+			var m struct {
+				ID json.RawMessage `json:"id"`
+			}
+			if json.Unmarshal([]byte(l.Line), &m) == nil && cancelled["acp:"+string(m.ID)] {
+				continue
+			}
 			found = append(found, l)
 		}
 	}

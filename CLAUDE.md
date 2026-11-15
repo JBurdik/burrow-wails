@@ -719,6 +719,17 @@ not the mounted Terminals, since a phone mounts one workspace; the desktop Sideb
 gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the browser's own
 `localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's. Read receipts are shared via Go (`seen_receipts`, above).
 
+**Native iOS app** (`ios/`, SwiftUI, XcodeGen `project.yml`; separate from the older WebView shell in `src-ios/`): a
+`/v2/ws` client like the phone PWA (pair → device token in the Keychain → ticket → socket), same command table and
+events — no app-specific Go surface. Module per file: `AppModel` (snapshot, `list_chats`, phases, shared `seen_receipts`,
+Inbox/Working/Pinned/projects/Settled grouping = `settledFor` + `displayStatus`), `Requests`, `Queue`, `ComposerView`,
+`ThreadDetails`, `Terminals`, `ThreadActions`/`Archive`/`Search`; widget + Live Activity (`Widgets/`) and a share
+extension (`Share/`) share data through a **Keychain access group, not an App Group** — the build signs with the team's
+wildcard dev profile (no Xcode account needed), which can't carry App Groups. `just ios-native` = unsigned build +
+`codesign` → `<app-data>/ios/Burrow.ipa`; the core serves an `itms-services` install page at `/ios`
+(`iosinstall.go`; behind a `tailscale serve` path mount the page passes its prefix as `?p=`). Live Activity / widget
+update only while the app holds the socket (no APNs).
+
 **Release channel is decided by the serving binary, not the bundle** (`src-wails/channel.go`): `buildChannel` is
 `dev` under `wails3 dev` (`channel_dev.go`, the `dev` build tag — Taskfile `build DEV=true` passes it) and `beta` via `just build-beta`'s
 `-ldflags -X main.buildChannel=beta`. `handleAssets` rewrites `mobile.html` (`data-channel`, title, icons) and the
