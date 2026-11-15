@@ -41,6 +41,10 @@ _Avoid_: status (reserved for the displayed status)
 What a dot shows, derived per client from the phase, the read receipt and whether the user is watching; `review` exists only here.
 _Avoid_: phase
 
+**Settled**:
+A thread that needs no attention now (snoozed, settled by hand, or 3 days quiet with no open ask); Go computes when it starts (`settled_since`), a client adds only "not while in flight". Settled threads leave the active lists; archived is a separate, explicit step.
+_Avoid_: done, idle
+
 **Read receipt**:
 The per-client, per-subject record of when the user last saw a PTY or chat, used to turn `done` into `review`.
 _Avoid_: seen flag, unread

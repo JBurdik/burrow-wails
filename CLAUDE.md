@@ -434,7 +434,9 @@ a hard requirement of remote access. `XTerm.vue` has no status emits left; it on
   and emit against out-of-order writes; the whole publish tail runs under a dedicated `emitMu` (taken
   after `s.mu` is released) so the loser can't emit last. `CreatePty` `Forget`s a phase the daemon
   doesn't list — **PTY ids are reused**, so without that a fresh tab wore the old one's review dot.
-  `PhaseStore.Apply` is the **only** writer of `terminal_tabs.status`.
+  `PhaseStore.Apply` is the **only** writer of `terminal_tabs.status`. **Pruning:** the poll `Forget`s a PTY the daemon no longer
+  lists once its phase is idle, or anything not in flight a week after it last changed (`prunablePtyPhase`);
+  `DeleteChat` forgets its chats' phases; startup (`prunePhaseRows`) drops deleted chats' rows and unprefixed ids.
 - **Three inputs:** (1) persistent hooks — Claude's live in the burrow plugin's `hooks/hooks.json`
   (`hooks` key, PTY-scoped via `CLAUDE_CODE_PLUGIN_DIRS`, so chats and non-Burrow sessions never run
   them); `installStatusHooks` still merges a hook into Codex's global config non-destructively and
@@ -488,6 +490,14 @@ a finished unread turn whose end_turn said `nothing` gets a green **tick**, the 
 foot: Snoozed, and **Archived** = settled + archived threads of every project, one folded sub-group per project (newest first,
 Bring back / Delete with Undo; "Archive" replaced "Settle" in the UI — a settled thread keeps its tab, an archived one
 reopens through `/ws/<ws>?chat=<id>`).
+
+**Thread attention is Go's** (`chatattention.go`, pure `chatAttentionFor`, table-tested with the old TS cases): every
+`list_chats` row carries computed `settled_since` (unix ms from which the thread is settled — 1 = snoozed / settled by
+hand, else last activity + 3 days, 0 = never: manual "active" or an end_turn that asked), `needs_you` and `said_done`
+(end_turn's needs). Clients only add the in-flight gate + their clock (`settledFor`: `!inFlight && now >= settled_since`
+— a timestamp, so the 3-day flip needs no event), the receipt and watching. TS `settledFor` and Swift
+`AppModel.settled/needsYou/quietDone` read these; never re-derive the rule. The store mirrors its own settle / unsettle /
+snooze / activity into `settledSince` optimistically (its own `chats-changed` echo is skipped).
 
 ### Control API + `burrow` CLI (`src-wails/internal/control`, `src-wails/bin/burrow`)
 
@@ -691,7 +701,9 @@ desktop's own ui:ack connection;
 `pty_since` (never a full replay). Gap past the ring / old daemon ⇒ the hole stays, as before.
 
 **`shell_snapshot`** (`scopeOrchRead`) is the first paint in one round trip: workspaces, tabs for
-*every* workspace, all phases, chats, and the `seq` it's current as of — **`seq` read first, before any
+*every* workspace, the phases of **live PTYs (daemon-listed) and unarchived chats only** (`snapshotKeepsPhase`; the rest
+read idle anyway and were ~90 % of the map), unarchived chats in a slim shape + an `archived_chats` count (every client
+reads chats from `list_chats`), and the `seq` it's current as of — **`seq` read first, before any
 data** (the other order loses an event for good; this order at worst repeats one). Collections marshal
 empty, never null. Deliberately excludes transcripts and scrollback.
 
@@ -758,7 +770,9 @@ devtools) and `ConnectView.vue`.
 Phone width (`compact` in `src/lib/viewport.ts`, ≤ 767 px) switches `App.vue` to the phone shell
 (`src/components/phone/`: bottom nav Threads / Project / More; Threads is `ThreadsScreen.vue` over `src/lib/threadFeed.ts` —
 the tray panel's feed: every project's active threads grouped Needs you / Working / Unread / Recent from Go's phases,
-not the mounted Terminals, since a phone mounts one workspace; the desktop Sidebar stays hidden there). A phone
+not the mounted Terminals, since a phone mounts one workspace; one `shell_snapshot`, then events — phases,
+`terminal-tabs-changed {workspaceId}` (`SaveTerminalTabs`; the feed re-reads that workspace's `list_terminal_tabs`),
+`workspaces-changed`, resync, focus — and a 5 min safety re-read (was every 15 s); the desktop Sidebar stays hidden there). A phone
 **mirrors** a terminal, never resizes it: `XTerm.vue` takes the grid the desktop gave the PTY (`pty_size` /
 `pty-size-<id>`, remembered in Go by `ResizePty`/`CreatePty`, in memory) and CSS-scales it to its width — resizing to
 45 columns re-laid the Mac's TUI out; unknown size ⇒ falls back to fitting. Only the visible tab keeps an XTerm

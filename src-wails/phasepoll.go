@@ -75,6 +75,9 @@ func (p *phasePoller) tick() {
 		}
 		seen[id] = true
 		p.pollOne(id, alive[id])
+		if prunablePtyPhase(p.phases.Get(key), alive[id], time.Now().UnixMilli()) {
+			p.phases.Forget(key)
+		}
 	}
 	for _, id := range ids {
 		if !seen[id] {
@@ -244,4 +247,19 @@ func startPhasePoll(ctx context.Context, ps *PhaseStore, list func() ([]string, 
 		}
 	}()
 	return p
+}
+
+// prunablePtyPhase: the daemon no longer lists this PTY and its phase holds
+// nothing a client still shows — idle, or anything else (stale, an unread
+// done / failed) a week after it last changed. Without it pty_phase kept every
+// PTY ever opened (~600 rows), all shipped in shell_snapshot and polled here
+// every 2 s. A reused id starts clean either way (CreatePty forgets it).
+func prunablePtyPhase(ph agentphase.Phase, alive bool, now int64) bool {
+	if alive || ph.InFlight() {
+		return false
+	}
+	if ph.State == agentphase.Idle || ph.State == "" {
+		return true
+	}
+	return now-ph.UpdatedAt > 7*24*60*60*1000
 }

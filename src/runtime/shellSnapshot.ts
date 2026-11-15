@@ -30,6 +30,8 @@ export interface ShellSnapshotData {
   /** Keyed exactly as the server keys a phase: `pty:<id>` or `chat:<id>`. */
   phases: Record<string, Phase>;
   chats: Record<string, unknown>[];
+  /** Archived chats are only counted (shellsnapshot.go); list_chats has them. */
+  archived_chats?: number;
 }
 
 export interface ShellEvent {

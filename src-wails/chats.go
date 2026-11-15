@@ -108,6 +108,9 @@ type Chat struct {
 	// restart waits to carry on by itself; reason network | restart.
 	NetWaitAt     int64  `json:"net_wait_at"`
 	NetWaitReason string `json:"net_wait_reason"`
+	// Computed, not columns (chatattention.go): the thread-attention facts
+	// every client used to derive itself. Read-only on the wire.
+	ChatAttention
 }
 
 func chatsSchema() []string {
@@ -209,6 +212,7 @@ func (a *App) ListChats() ([]Chat, error) {
 	if a.db == nil {
 		return out, nil
 	}
+	now := time.Now().UnixMilli()
 	rows, err := a.db.Query(`SELECT ` + chatColumns + ` FROM chats ORDER BY id`)
 	if err != nil {
 		return out, err
@@ -219,6 +223,7 @@ func (a *App) ListChats() ([]Chat, error) {
 		if err != nil {
 			return out, err
 		}
+		c.ChatAttention = chatAttentionFor(c, now)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -352,6 +357,11 @@ func (a *App) DeleteChat(id int64) error {
 	}
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		return sql.ErrNoRows
+	}
+	if a.phases != nil {
+		for _, c := range ids {
+			a.phases.Forget("chat:" + strconv.FormatInt(c, 10))
+		}
 	}
 	busEmit("chats-changed", nil)
 	return nil

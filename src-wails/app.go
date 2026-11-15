@@ -234,6 +234,7 @@ func (a *App) startup(ctx context.Context) {
 	} else {
 		a.push.apns = s
 	}
+	prunePhaseRows(db)
 	if ps, err := NewPhaseStore(db); err != nil {
 		log.Printf("phase store: %v", err)
 	} else {

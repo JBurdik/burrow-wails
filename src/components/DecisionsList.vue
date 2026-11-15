@@ -44,7 +44,7 @@ const ws = useWorkspaceStore();
 const sending = reactive(new Set<number>());
 const items = computed(() =>
   chats.sessions
-    .filter((s) => s.turnNeeds?.needs === "you" && !s.archivedAt && s.kind !== "side" && s.status !== "running")
+    .filter((s) => s.needsYou && s.turnNeeds && !s.archivedAt && s.kind !== "side" && s.status !== "running")
     .filter((s) => props.repoId == null || repoOf(s.workspaceId) === props.repoId)
     .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)),
 );

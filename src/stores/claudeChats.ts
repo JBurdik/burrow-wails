@@ -85,33 +85,26 @@ export interface ClaudeSession {
   // (src-wails/chatnetresume.go). Server-owned like collectedAt.
   netWaitAt?: number;
   netWaitReason?: "network" | "restart";
+  // Thread attention, computed by Go (src-wails/chatattention.go) — never
+  // derived here. settledSince: unix ms from which the thread is settled
+  // (0 = not by any rule); needsYou / saidDone: the last end_turn's needs.
+  settledSince?: number;
+  needsYou?: boolean;
+  saidDone?: boolean;
 }
 
-/** t3code's own default for "Days of inactivity before auto-settle"
- *  (`sf.sidebarAutoSettleAfterDays ?? 3` in its settings panel). */
-export const AUTO_SETTLE_AFTER_DAYS = 3;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
- * Whether a chat needs no more attention right now. Ported from t3code's
- * settle decision: pending work always wins (not settled), then a manual pin,
- * then — only past AUTO_SETTLE_AFTER_DAYS of inactivity — auto-settled. A chat
- * that just finished is NOT settled yet; it ages into the shelf.
- *
- * Module-level and `now`-injected so it is testable without a store, which
- * matters more since Terminal.vue stopped filtering empty chats out of the
- * restore: this is now the only thing keeping an untouched chat from sitting
- * in the active list forever.
+ * Whether a chat needs no more attention right now. The rule (snooze, manual
+ * pin, a pending ask, 3 quiet days) is Go's — `settledSince` on the row
+ * (src-wails/chatattention.go, shared with the iOS app); this adds only what
+ * is live here: work in flight is never settled. `now`-injected so the 3-day
+ * flip happens on this clock with no event.
  */
 export function settledFor(s: ClaudeSession | undefined, now: number): boolean {
   if (!s) return false;
   if (s.busy || s.status === "running" || s.status === "waiting" || s.status === "permission") return false;
-  if ((s.snoozedUntil ?? 0) > now) return true;
-  if (s.settledOverride === "settled") return true;
-  if (s.settledOverride === "active") return false;
-  // A turn that ended asking the user (end_turn) waits for them, however old.
-  if (s.turnNeeds?.needs === "you") return false;
-  return now - (s.lastActivityAt ?? 0) >= AUTO_SETTLE_AFTER_DAYS * DAY_MS;
+  const since = s.settledSince ?? 0;
+  return since > 0 && now >= since;
 }
 
 /**
@@ -163,6 +156,10 @@ interface ChatRow {
   turn_needs?: string;
   net_wait_at?: number;
   net_wait_reason?: string;
+  // Computed by Go (chatattention.go), read-only.
+  settled_since?: number;
+  needs_you?: boolean;
+  said_done?: boolean;
 }
 
 /**
@@ -209,6 +206,9 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     turnNeeds: parseTurnNeeds(r.turn_needs),
     netWaitAt: r.net_wait_at || undefined,
     netWaitReason: (r.net_wait_reason || undefined) as ClaudeSession["netWaitReason"],
+    settledSince: r.settled_since ?? 0,
+    needsYou: !!r.needs_you,
+    saidDone: !!r.said_done,
     busy: false,
   };
 }
@@ -598,6 +598,7 @@ export function isActivitySync(
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
     s.settledOverride = "settled";
+    s.settledSince = 1; // optimistic: our own save's chats-changed is skipped
     persist();
     // Manual settle only: stop the process now (Go refuses unless the phase is settled).
     void invoke("chat_sleep", { chatId: id }).catch(() => {});
@@ -607,6 +608,7 @@ export function isActivitySync(
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
     s.settledOverride = "active";
+    s.settledSince = 0;
     persist();
     if (s.snoozedUntil) snooze(id, 0); // "Move back to active" wins over a snooze
   }
@@ -616,6 +618,7 @@ export function isActivitySync(
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
     s.snoozedUntil = until || undefined;
+    if (until) s.settledSince = 1; // an unsnooze waits for Go's re-read (chat_snooze emits chats-changed)
     void invoke("chat_snooze", { chatId: id, untilMs: until }).catch(() => {});
   }
 
@@ -660,7 +663,12 @@ export function isActivitySync(
     // restamped every thread to now, so yesterday's threads all read "Last
     // activity now". Same rule setModel already states for itself.
     const isActivity = isActivitySync(s, patch);
-    if (isActivity) s.lastActivityAt = Date.now();
+    if (isActivity) {
+      s.lastActivityAt = Date.now();
+      // ponytail: fresh activity = not settled until Go's next row says when
+      // (its 3-day clock restarts from this save; our own echo is skipped).
+      s.settledSince = 0;
+    }
     Object.assign(s, patch);
     if (isActivity || patch.claudeSessionId !== undefined || patch.title !== undefined || patch.messageCount !== undefined || patch.agentKind !== undefined || patch.transport !== undefined) {
       persist();

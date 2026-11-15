@@ -1,7 +1,7 @@
 import { computed, effectScope, onScopeDispose, ref, watch, type EffectScope } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { cachedRead } from "@/lib/wailsCompat/core";
+import { appTransport, cachedRead } from "@/lib/wailsCompat/core";
 import { displayStatus, type Phase } from "@/runtime/displayStatus";
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
@@ -131,9 +131,10 @@ function createFeed() {
   watch(perms, (v) => { lastPerms = v; });
   const now = ref(Date.now());
 
-  // One shell_snapshot for the first paint, then the phase events of exactly
-  // the chats and agent tabs listed, plus pty-permissions. A slow re-read only
-  // catches what has no event of its own (a tab opened, a workspace renamed).
+  // One shell_snapshot for the first paint, then events: the phases of exactly
+  // the chats and agent tabs listed, pty-permissions, terminal-tabs-changed
+  // (one workspace's tabs), workspaces-changed. A re-read only on resync,
+  // focus / visibility and a rare safety tick (it used to be every 15 s).
   async function load() {
     if (document.visibilityState === "hidden") return;
     now.value = Date.now();
@@ -188,7 +189,23 @@ function createFeed() {
   const permsOff = listen("pty-permissions", () => {
     void invoke<PtyPermRequest[]>("list_pty_permissions").then((p) => { perms.value = p ?? []; }).catch(() => {});
   });
-  const resync = window.setInterval(load, 15_000);
+  const tabsOff = listen<{ workspaceId: number }>("terminal-tabs-changed", (e) => {
+    const wsId = e.payload?.workspaceId;
+    if (!wsId) return;
+    void invoke<ShellSnapshotData["tabs"][number]>("list_terminal_tabs", { workspaceId: wsId }).then((tabs) => {
+      if (snap.value) snap.value = { ...snap.value, tabs: { ...snap.value.tabs, [wsId]: tabs ?? [] } };
+    }).catch(() => {});
+  });
+  const wsOff = listen("workspaces-changed", () => void load());
+  let offResync = () => {};
+  try {
+    offResync = appTransport().onResync(() => void load());
+  } catch {
+    // no backend (tests, browser-only dev)
+  }
+  // ponytail: safety net for anything without an event; also moves `now` for
+  // the 3-day settle flip. Drop when nothing is found missing.
+  const resync = window.setInterval(load, 5 * 60_000);
   window.addEventListener("focus", load);
   window.addEventListener("storage", tick);
   const offSeen = onSeenChanged(tick);
@@ -201,6 +218,9 @@ function createFeed() {
     offSeen();
     document.removeEventListener("visibilitychange", load);
     void permsOff.then((f) => f());
+    void tabsOff.then((f) => f());
+    void wsOff.then((f) => f());
+    offResync();
     for (const off of phaseListeners.values()) void off.then((f) => f());
   });
 

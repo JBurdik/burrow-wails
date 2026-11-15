@@ -87,10 +87,15 @@ struct Chat: Identifiable, Hashable {
     var parentChatId: Int
     var kind: String
     var snoozedUntil: Double
-    var settledOverride: String
     var recap: String
     var slept: Bool
     var turnNeeds: TurnNeeds?
+    /// Thread attention, computed by Go (src-wails/chatattention.go), shared
+    /// with the desktop: settled from this unix ms on (0 = not by any rule),
+    /// the last end_turn asked the user / said nothing is left.
+    var settledSince: Double
+    var asksYou: Bool
+    var saidDone: Bool
 
     init(_ d: [String: Any]) {
         id = int(d["id"]); workspaceId = int(d["workspace_id"])
@@ -104,10 +109,12 @@ struct Chat: Identifiable, Hashable {
         parentChatId = int(d["parent_chat_id"])
         kind = d["kind"] as? String ?? ""
         snoozedUntil = dbl(d["snoozed_until"])
-        settledOverride = d["settled_override"] as? String ?? ""
         recap = d["recap"] as? String ?? ""
         slept = int(d["slept_at"]) > 0
         turnNeeds = TurnNeeds(d["turn_needs"] as? String ?? "")
+        settledSince = dbl(d["settled_since"])
+        asksYou = d["needs_you"] as? Bool ?? false
+        saidDone = d["said_done"] as? Bool ?? false
     }
 
     var isCodex: Bool { agentKind == "codex" }
@@ -307,24 +314,20 @@ final class AppModel {
 
     /// A finished unread turn whose end_turn said nothing is left: a tick, not a dot.
     func quietDone(_ chat: Chat) -> Bool {
-        status(chat.id) == .unread && chat.turnNeeds?.needsYou == false && chat.turnNeeds?.next.isEmpty == true
+        status(chat.id) == .unread && chat.saidDone
     }
 
     func needsYou(_ chat: Chat) -> Bool {
         let s = status(chat.id)
-        return s.needsYou || (!s.isRunning && chat.turnNeeds?.needsYou == true)
+        return s.needsYou || (!s.isRunning && chat.asksYou)
     }
 
-    /// settledFor in claudeChats.ts: snoozed, settled by hand, or quiet for 3 days.
+    /// settledFor in claudeChats.ts: the rule is Go's (settled_since); only the
+    /// in-flight gate and the clock are ours.
     func settled(_ chat: Chat) -> Bool {
         let s = status(chat.id)
         if s == .running || s == .waiting || s == .permission { return false }
-        let now = Date().timeIntervalSince1970 * 1000
-        if chat.snoozedUntil > now { return true }
-        if chat.settledOverride == "settled" { return true }
-        if chat.settledOverride == "active" { return false }
-        if chat.turnNeeds?.needsYou == true { return false }
-        return now - chat.lastActivityAt >= 3 * 86_400_000
+        return chat.settledSince > 0 && Date().timeIntervalSince1970 * 1000 >= chat.settledSince
     }
 
     /// Top-level threads the sidebar lists (no sub-agents, side chats, archive).

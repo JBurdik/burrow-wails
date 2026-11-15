@@ -1839,7 +1839,7 @@ onMounted(async () => {
   // hid every chat created from the phone, which by definition has no session
   // id and no messages yet. An empty thread showing up empty is correct;
   // clutter is what `isSettled` is for, and an untouched one settles on its
-  // own after AUTO_SETTLE_AFTER_DAYS.
+  // own after 3 quiet days (Go's settled_since).
   for (const s of chatsStore.sessionsForWs(props.workspaceId)) {
     openClaudeChat(s.id);
   }

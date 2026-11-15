@@ -190,5 +190,11 @@ func (a *App) SaveTerminalTabs(workspaceID int64, tabs []TerminalTab) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// The thread feed (tray panel, phone) follows tabs off this instead of
+	// re-reading shell_snapshot on a timer.
+	busEmit("terminal-tabs-changed", map[string]int64{"workspaceId": workspaceID})
+	return nil
 }

@@ -1015,12 +1015,12 @@ const topGroups = computed(() =>
 // something. Running rows already sit in the Working shelf.
 // Threadbear's tick: a finished turn whose end_turn said nothing is needed.
 function saidDone(row: ActivityRow): boolean {
-  return row.tab.chatId != null && chats.sessions.find((s) => s.id === row.tab.chatId)?.turnNeeds?.needs === "nothing";
+  return row.tab.chatId != null && !!chats.sessions.find((s) => s.id === row.tab.chatId)?.saidDone;
 }
 function needsYou(row: ActivityRow): boolean {
   if (attentionState(row) === "needs-input") return true;
   if (row.tab.chatId == null || row.tab.status === "running") return false;
-  return chats.sessions.find((s) => s.id === row.tab.chatId)?.turnNeeds?.needs === "you";
+  return !!chats.sessions.find((s) => s.id === row.tab.chatId)?.needsYou;
 }
 // Global Inbox (Settings → General, uiPrefs.sidebarInbox): needs-you + unread
 // rows from every project lifted into one group on top (Pinned stays put);
