@@ -279,6 +279,10 @@ export function isActivitySync(
    * from here.
    */
   let reloadGen = 0;
+  // False while `sessions` is only the paired device's cached picture: persist()
+  // upserts every held row, and a days-old cached row written back would undo
+  // what happened since (un-archive, an old claude_session_id, a stale title).
+  let liveLoaded = false;
   async function reload() {
     // Calls run concurrently server-side, so replies can arrive out of order:
     // an older list landing last would drop a chat a newer one already showed.
@@ -292,6 +296,7 @@ export function isActivitySync(
       return; // no backend (browser-only dev) — leave whatever is loaded
     }
     if (gen !== reloadGen) return;
+    liveLoaded = true;
     const next: ClaudeSession[] = [];
     for (const row of rows) {
       const existing = sessions.value.find((s) => s.id === row.id);
@@ -376,6 +381,8 @@ export function isActivitySync(
    * (`delete_chat`, from remove()).
    */
   function persist() {
+    setConfig(ACTIVE_KEY, activeByWs.value);
+    if (!liveLoaded) return;
     selfWrites++;
     void invoke("save_chats", { chats: sessions.value.map(rowFromSession) })
       .catch(() => {
@@ -385,7 +392,6 @@ export function isActivitySync(
       .finally(() => {
         selfWrites--;
       });
-    setConfig(ACTIVE_KEY, activeByWs.value);
   }
 
   // Threads only: a sub-agent (`parentChatId` set) is reached through

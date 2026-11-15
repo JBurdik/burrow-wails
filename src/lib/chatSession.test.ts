@@ -850,3 +850,28 @@ describe("steer", () => {
     dropChatSession(72);
   });
 });
+
+// A send the socket dropped under is held for the reconnect. Its echo claim
+// must go with the bubble: the held text is delivered later through Go's
+// queue, and a left-over claim swallowed that user.delta — the message never
+// showed in the transcript.
+describe("send held offline", () => {
+  it("releases the echo claim, so the delivered message still shows", async () => {
+    const f = fakeDeps();
+    const hold = vi.fn(() => true);
+    (f.deps as ChatSessionDeps).outbox = { list: () => [], hold, drop: vi.fn() };
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_send") throw new Error("disconnected");
+      return undefined;
+    });
+    const s = chatSession(91, f.deps);
+    await s.listenEvents();
+    expect(await s.send({ text: "hello" })).toBeNull();
+    expect(hold).toHaveBeenCalledWith(91, "hello", undefined);
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    // Reconnect: Go's queue sends it, Go echoes it.
+    f.emit("chat-event-91", { ord: 1, events: [{ type: "user.delta", messageId: "u1", text: "hello" }] });
+    expect(s.messages.value.filter((m) => m.role === "user").map((m) => m.text)).toEqual(["hello"]);
+    dropChatSession(91);
+  });
+});

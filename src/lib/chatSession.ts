@@ -581,6 +581,9 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         // The socket dropped under the send: take the bubble back and hold the
         // message for the reconnect instead of reporting a failed turn.
         if (isOfflineError(e) && s.deps.outbox?.hold(chatId, prompt.text, prompt.images)) {
+          // The held text comes back as a user.delta once Go's queue sends it;
+          // a claim left here would swallow it (and pin applyPhase's busy).
+          s.pendingSends.delete(prompt.text);
           s.messages.value = s.messages.value.filter((m) => m.id !== id);
           s.busy.value = false;
           s.save();
