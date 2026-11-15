@@ -33,6 +33,26 @@ struct TurnAsk: Hashable {
     var details: [String]
     var suggested: Int
     var multi: Bool
+    var run: TurnRun?
+}
+
+/// An ask's command for the user to run (control.TurnRun): Go runs the STORED
+/// command via chat_run_ask, never text from the client.
+struct TurnRun: Hashable {
+    var command: String
+    var state: String      // "" | running | done
+    var exit: Int
+    var interrupted: Bool
+    var reply: String      // kept on a card with other asks; goes with the answers
+
+    init?(_ d: [String: Any]?) {
+        guard let d, let cmd = d["command"] as? String, !cmd.isEmpty else { return nil }
+        command = cmd
+        state = d["state"] as? String ?? ""
+        exit = int(d["exit"])
+        interrupted = d["interrupted"] as? Bool ?? false
+        reply = d["reply"] as? String ?? ""
+    }
 }
 
 struct TurnNeeds: Hashable {
@@ -46,7 +66,8 @@ struct TurnNeeds: Hashable {
         needsYou = needs == "you"
         asks = (d["asks"] as? [[String: Any]] ?? []).map {
             TurnAsk(question: $0["question"] as? String ?? "", options: $0["options"] as? [String] ?? [],
-                    details: $0["details"] as? [String] ?? [], suggested: int($0["suggested"], -1), multi: $0["multi"] as? Bool ?? false)
+                    details: $0["details"] as? [String] ?? [], suggested: int($0["suggested"], -1), multi: $0["multi"] as? Bool ?? false,
+                    run: TurnRun($0["run"] as? [String: Any]))
         }
         next = d["next"] as? [String] ?? []
     }
