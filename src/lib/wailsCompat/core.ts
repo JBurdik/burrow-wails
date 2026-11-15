@@ -136,6 +136,12 @@ function wakeOnReturn(): void {
   window.addEventListener("pageshow", wake);
   window.addEventListener("online", wake);
   window.addEventListener("focus", wake);
+  // A socket can also die while the page stays in front (Wi-Fi → cellular, a
+  // NAT timeout): nothing fires, calls hang, events stop. Probe every 10 s
+  // while visible; wake() drops a socket that doesn't answer in 2.5 s.
+  setInterval(() => {
+    if (document.visibilityState === "visible") wake();
+  }, 10_000);
 }
 
 /**

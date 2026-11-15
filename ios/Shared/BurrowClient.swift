@@ -104,6 +104,9 @@ final class BurrowClient: NSObject, @unchecked Sendable {
     private var wake = false
     private(set) var isOpen = false
     private let lock = NSLock()
+    /// Last frame read. A socket that died in the foreground (Wi-Fi → cellular,
+    /// a NAT timeout) reads nothing and errors nothing: only a ping notices.
+    private var lastInbound = Date()
 
     init(_ creds: Credentials) { self.creds = creds }
 
@@ -145,8 +148,11 @@ final class BurrowClient: NSObject, @unchecked Sendable {
                 task = ws
                 if stopped { ws.cancel(with: .goingAway, reason: nil); return }
                 ws.resume()
+                lastInbound = Date()
                 if lastSeq > 0 { try await send(["t": "resume", "since": lastSeq]) }
                 delay = 1
+                let beat = Task { await heartbeat(ws) }
+                defer { beat.cancel() }
                 try await readLoop(ws)
             } catch BurrowError.revoked {
                 stopped = true
@@ -163,9 +169,23 @@ final class BurrowClient: NSObject, @unchecked Sendable {
         }
     }
 
+    /// While the socket is quiet, ping it every 10 s; no pong in 3 s = dead,
+    /// cancel it so connectLoop reconnects and resumes. Without this a silently
+    /// dead socket hung every call and dropped every event until the app was
+    /// backgrounded and reopened (foreground()'s ping).
+    private func heartbeat(_ ws: URLSessionWebSocketTask) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            if Task.isCancelled || task !== ws { return }
+            if Date().timeIntervalSince(lastInbound) < 10 { continue }
+            if await !ping() { ws.cancel(with: .goingAway, reason: nil); return }
+        }
+    }
+
     private func readLoop(_ ws: URLSessionWebSocketTask) async throws {
         while true {
             let msg = try await ws.receive()
+            lastInbound = Date()
             let data: Data
             switch msg {
             case .string(let s): data = Data(s.utf8)
@@ -250,7 +270,25 @@ final class BurrowClient: NSObject, @unchecked Sendable {
                     c?.resume(throwing: error)
                 }
             }
+            Task { await watch(id) }
         }
+    }
+
+    /// A call with no reply after 6 s: ping. Alive = a slow call (waking a slept
+    /// chat takes seconds), keep waiting; dead = fail it as .closed (callers hold
+    /// and retry — clientId makes that safe) and reconnect. Gives up at 2 min.
+    private func watch(_ id: Int) async {
+        for _ in 0..<20 {
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            lock.lock(); let open = pending[id] != nil; lock.unlock()
+            if !open { return }
+            if await ping() { continue }
+            break
+        }
+        lock.lock(); let c = pending.removeValue(forKey: id); lock.unlock()
+        guard let c else { return }
+        c.resume(throwing: BurrowError.closed)
+        reconnect()
     }
 
     /// Waits for the socket to be up, for one-shot users (share extension).

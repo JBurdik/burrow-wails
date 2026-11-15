@@ -195,6 +195,10 @@ struct ChatView: View {
             model.unsubscribe(eventToken)
         }
         .onChange(of: model.connected) { _, c in if c { Task { await load() } } }
+        // Safety net that needs no event subscription of its own: the chat's phase
+        // is observed model state, and a send flips it (running), as does a turn
+        // end. A page read then shows whatever a missed splice would have.
+        .onChange(of: phase.state) { _, _ in scheduleReload() }
     }
 
     private var messages: [Message] { Self.visible(raw) }
