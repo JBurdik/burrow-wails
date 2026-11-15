@@ -8,6 +8,7 @@ struct Message: Identifiable, Hashable {
     var failed: Bool
     var toolOutput: String
     var toolTarget: String
+    var images: [String]
     /// Echoes only: transcript length when sent. Go's copy lands at or after it.
     var after = 0
 
@@ -18,6 +19,7 @@ struct Message: Identifiable, Hashable {
         partial = d["partial"] as? Bool ?? false
         failed = d["toolFailed"] as? Bool ?? false
         toolOutput = d["toolOutput"] as? String ?? ""
+        images = d["images"] as? [String] ?? []
         let input = d["toolInput"] as? [String: Any] ?? [:]
         toolTarget = ["command", "file_path", "path", "pattern", "url", "description"]
             .lazy.compactMap { input[$0] as? String }.first ?? ""
@@ -146,6 +148,7 @@ struct ChatView: View {
                 if atBottom || bottomBeforeKeyboard { scrollToEnd(proxy) }
             }
         }
+        .environment(\.chatId, chatId)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 PendingRequestsView(chatId: chatId)
@@ -384,12 +387,19 @@ struct MessageRow: View, Equatable {
     var body: some View {
         switch message.role {
         case "user":
-            HStack {
-                Spacer(minLength: 40)
-                Text(message.text)
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 16))
-                    .contextMenu { Button { UIPasteboard.general.string = message.text } label: { Label("Copy", systemImage: "doc.on.doc") } }
+            VStack(alignment: .trailing, spacing: 6) {
+                if !message.images.isEmpty {
+                    HStack { Spacer(minLength: 40); ChatImageStrip(images: message.images).fixedSize(horizontal: true, vertical: true) }
+                }
+                if !message.text.isEmpty {
+                    HStack {
+                        Spacer(minLength: 40)
+                        Text(message.text)
+                            .padding(.horizontal, 12).padding(.vertical, 9)
+                            .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 16))
+                            .contextMenu { Button { UIPasteboard.general.string = message.text } label: { Label("Copy", systemImage: "doc.on.doc") } }
+                    }
+                }
             }
         case "assistant":
             MarkdownText(text: message.text)
