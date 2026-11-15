@@ -246,12 +246,12 @@ func TestImagesTravelByReference(t *testing.T) {
 			t.Fatalf("load_chat_image %d: %v (%d bytes)", n, err, len(got))
 		}
 	}
-	// The desktop still renders chat-event images itself: those stay inflated.
+	// No client folds chat-event any more: its user.delta carries refs, not data.
 	r.mu.Lock()
 	ev := r.events[0]
 	r.mu.Unlock()
-	if len(ev.Images) != 2 || ev.Images[0] != img {
-		t.Fatal("chat-event user.delta lost its image data")
+	if len(ev.Images) != 2 || !strings.HasPrefix(ev.Images[0], chatImageRefPrefix) {
+		t.Fatalf("chat-event user.delta images = %.80v", ev.Images)
 	}
 	// An old row with an inline data URL is stubbed in splices too.
 	a.PublishChatNote("8", `{"form":"row","role":"system-info","text":"x","images":["`+img+`"]}`)
@@ -299,5 +299,51 @@ func TestPermissionReceiptWrittenByGo(t *testing.T) {
 	}
 	if len(receipts) != 1 || receipts[0] != "✓ Allowed: Bash — ls -la" {
 		t.Fatalf("receipts = %q", receipts)
+	}
+}
+
+// A line recorded before images went by reference replays with refs: the
+// raw replay and the event replay both.
+func TestStreamReplayRefsOldInlineImages(t *testing.T) {
+	a := newTestApp(t)
+	img := "data:image/png;base64," + strings.Repeat("QUJD", 2000)
+	a.db.Exec(`INSERT INTO chat_stream (chat_id, ord, kind, line) VALUES ('5', 0, ?, ?), ('5', 1, ?, ?)`,
+		chatUserKind, encodeUserLine("old", []string{img}, "c9"),
+		chatNoteKind, `{"form":"row","role":"system-info","text":"n","images":["`+img+`"]}`)
+	lines, err := a.LoadChatStreamSince("5", 0)
+	if err != nil || len(lines) != 2 {
+		t.Fatalf("replay: %v %d", err, len(lines))
+	}
+	for _, l := range lines {
+		if strings.Contains(l.Line, "base64") || !strings.Contains(l.Line, chatImageRefPrefix) {
+			t.Fatalf("%s replays data: %.120s", l.Kind, l.Line)
+		}
+	}
+	if u := decodeUserLine(lines[0].Line); u.Text != "old" || u.ClientID != "c9" {
+		t.Fatalf("user line mangled: %+v", u)
+	}
+	evs, _ := a.LoadChatEventsSince("5", 0)
+	if b, _ := json.Marshal(evs); strings.Contains(string(b), "base64") {
+		t.Fatalf("event replay carries data: %.200s", b)
+	}
+	if got, err := a.resolveChatImage(5, decodeUserLine(lines[0].Line).Images[0]); err != nil || got != img {
+		t.Fatalf("stored ref does not resolve: %v", err)
+	}
+}
+
+// The ring is bounded by bytes too: big rows evict the oldest splices, and
+// the newest one always stays.
+func TestSpliceRingBoundedByBytes(t *testing.T) {
+	lg := &chatSpliceLog{tailFrom: -1}
+	big := strings.Repeat("x", chatSpliceRingBytes/3)
+	for i := range 5 {
+		lg.push(ChatSplice{BaseRev: int64(i), Rev: int64(i + 1), Messages: []ChatMessage{{Role: "tool", ToolOutput: big}}})
+	}
+	if len(lg.ring) != 2 || lg.ring[0].Rev != 4 || lg.bytes > chatSpliceRingBytes {
+		t.Fatalf("ring = %d splices, %d bytes, oldest rev %d", len(lg.ring), lg.bytes, lg.ring[0].Rev)
+	}
+	lg.push(ChatSplice{BaseRev: 5, Rev: 6, Messages: []ChatMessage{{Role: "tool", ToolOutput: strings.Repeat("y", 2*chatSpliceRingBytes)}}})
+	if len(lg.ring) != 1 || lg.ring[0].Rev != 6 || len(lg.sizes) != 1 {
+		t.Fatalf("an oversized splice should be kept alone: %d", len(lg.ring))
 	}
 }

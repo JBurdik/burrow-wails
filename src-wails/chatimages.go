@@ -97,42 +97,29 @@ func (a *App) noteImagesByRef(chatID, note string) string {
 	return string(b)
 }
 
-// inflateEventImages puts the data back into the events that go out on
-// chat-event-<id> (and its replay): the desktop still folds those itself and
-// renders images[] as img src.
+// lineImagesByRef swaps the inline data-URL images of a recorded chat-user /
+// chat-note line for stored refs — what LoadChatStreamSince replays, so a line
+// recorded before images went by reference doesn't ship its base64 again.
+// Storing on read is idempotent (INSERT OR IGNORE, content-addressed).
 //
-// ponytail: transitional — remove once every client renders from splices.
-func (a *App) inflateEventImages(chatID string, events []ProviderRuntimeEvent) []ProviderRuntimeEvent {
-	var out []ProviderRuntimeEvent
-	id, _ := strconv.Atoi(chatID)
-	for i, ev := range events {
-		hasRef := false
-		for _, img := range ev.Images {
-			if strings.HasPrefix(img, chatImageRefPrefix) {
-				hasRef = true
-				break
-			}
-		}
-		if !hasRef {
-			continue
-		}
-		if out == nil {
-			out = append([]ProviderRuntimeEvent(nil), events...)
-		}
-		imgs := make([]string, len(ev.Images))
-		for j, img := range ev.Images {
-			if data, err := a.resolveChatImage(id, img); err == nil {
-				imgs[j] = data
-			} else {
-				imgs[j] = img
-			}
-		}
-		out[i].Images = imgs
+// ponytail: provider raw lines (a Claude stream-json user record with an image
+// block, a tool_result screenshot) still replay inline; ref them if a replay
+// client shows up that is not the desktop's own bus.
+func (a *App) lineImagesByRef(chatID, kind, line string) string {
+	if !strings.Contains(line, `"data:`) {
+		return line
 	}
-	if out == nil {
-		return events
+	switch kind {
+	case chatNoteKind:
+		return a.noteImagesByRef(chatID, line)
+	case chatUserKind:
+		u := decodeUserLine(line)
+		if len(u.Images) == 0 {
+			return line
+		}
+		return encodeUserLine(u.Text, a.storeChatImages(chatID, u.Images), u.ClientID)
 	}
-	return out
+	return line
 }
 
 // stubRowImages replaces a row's stored refs — and, unless refsOnly, its large

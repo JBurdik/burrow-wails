@@ -28,9 +28,10 @@ import (
 const (
 	chatTailPrefix = "chat-tail-"
 	// chatSpliceRing is how many recent splices per chat chat_subscribe can
-	// replay. ponytail: count-bounded only; a turn of huge tool outputs makes
-	// the ring a few MB per busy chat. Bound by bytes if that shows up.
-	chatSpliceRing = 64
+	// replay; chatSpliceRingBytes caps their encoded size, so a burst of huge
+	// tool outputs can't pin unbounded memory. The newest splice always stays.
+	chatSpliceRing      = 64
+	chatSpliceRingBytes = 2 << 20
 	// chatSubscribePage is the window an authoritative subscribe splice sends.
 	chatSubscribePage = 60
 )
@@ -85,7 +86,9 @@ type chatSpliceLog struct {
 	mu       sync.Mutex
 	rev      int64 // rev of the last splice emitted
 	ring     []ChatSplice
-	tailFrom int // lowest row index a tail touched since the last splice, -1 none
+	sizes    []int // encoded size of each ring entry
+	bytes    int   // sum of sizes
+	tailFrom int   // lowest row index a tail touched since the last splice, -1 none
 	pend     *ChatTail
 	timer    *time.Timer
 }
@@ -158,13 +161,28 @@ func (a *App) emitSplice(w *chatStreamWriter, chatID string, t *chatTail, from i
 		rows[i] = stubRowImages(rows[i], from+i, false)
 	}
 	sp := ChatSplice{BaseRev: lg.rev, Rev: rev, FromIndex: from, Messages: rows, Authoritative: authoritative}
-	lg.ring = append(lg.ring, sp)
-	if len(lg.ring) > chatSpliceRing {
-		lg.ring = append([]ChatSplice(nil), lg.ring[len(lg.ring)-chatSpliceRing:]...)
-	}
+	lg.push(sp)
 	lg.rev = rev
 	lg.tailFrom = -1
 	busEmit(chatMessagesChangedPrefix+chatID, sp)
+}
+
+// push adds sp to the ring, dropping the oldest past the count or byte cap.
+func (lg *chatSpliceLog) push(sp ChatSplice) {
+	b, _ := json.Marshal(sp)
+	lg.ring = append(lg.ring, sp)
+	lg.sizes = append(lg.sizes, len(b))
+	lg.bytes += len(b)
+	drop := 0
+	for len(lg.ring)-drop > 1 && (len(lg.ring)-drop > chatSpliceRing || lg.bytes > chatSpliceRingBytes) {
+		lg.bytes -= lg.sizes[drop]
+		drop++
+	}
+	if drop > 0 {
+		// Copy, so the dropped splices' rows can be collected.
+		lg.ring = append([]ChatSplice(nil), lg.ring[drop:]...)
+		lg.sizes = append([]int(nil), lg.sizes[drop:]...)
+	}
 }
 
 // addTail queues text appended to the streaming row at index (whose text was

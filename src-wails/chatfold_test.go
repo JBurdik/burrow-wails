@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // Every case here is ported from src/lib/chatProjection.test.ts, plus the
 // extra cases the controller called out: a tool.completed with no matching
@@ -284,5 +287,51 @@ func TestFoldEventsIsPureAndDeterministic(t *testing.T) {
 		if a[i].ID != b[i].ID || a[i].Role != b[i].Role || a[i].Text != b[i].Text {
 			t.Fatalf("fold %d differs: %+v vs %+v", i, a[i], b[i])
 		}
+	}
+}
+
+// The rule for which rows are plumbing lives here, once: clients hide by the flag.
+func TestFoldMarksPlumbingCalls(t *testing.T) {
+	call := func(id, name string, raw, failed bool) []ProviderRuntimeEvent {
+		return []ProviderRuntimeEvent{
+			ev(EvtToolStarted, func(e *ProviderRuntimeEvent) {
+				e.ToolCallID, e.Name = id, name
+				if raw {
+					e.Input = map[string]any{}
+				}
+			}),
+			ev(EvtToolCompleted, func(e *ProviderRuntimeEvent) { e.ToolCallID, e.Output, e.Failed = id, "ok", failed }),
+		}
+	}
+	var evs []ProviderRuntimeEvent
+	evs = append(evs, call("a", "mcp__burrow__end_turn", true, false)...)
+	evs = append(evs, call("b", "mcp__burrow__end_turn_pending", true, false)...)
+	evs = append(evs, call("c", "ToolSearch", true, false)...)
+	evs = append(evs, call("d", "burrow: end_turn", false, false)...)
+	evs = append(evs, call("e", "mcp__burrow__end_turn", true, true)...) // failed: work
+	evs = append(evs, call("f", "Bash", true, false)...)
+	evs = append(evs, call("g", "burrow: pin", false, false)...)
+	evs = append(evs, ev(EvtToolStarted, func(e *ProviderRuntimeEvent) { e.ToolCallID, e.Name, e.Input = "h", "ToolSearch", map[string]any{} })) // running
+	got := []bool{}
+	for _, m := range foldEvents(evs) {
+		got = append(got, m.Plumbing)
+	}
+	want := []bool{true, true, true, true, false, false, false, false}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("plumbing = %v, want %v", got, want)
+	}
+}
+
+// Claude's /context answer is the context card's, never a transcript row.
+func TestFoldKeepsContextReportOutOfTranscript(t *testing.T) {
+	msgs := foldEvents([]ProviderRuntimeEvent{
+		ev(EvtUserDelta, func(e *ProviderRuntimeEvent) { e.MessageID = "u1"; e.Text = "/context" }),
+		ev(EvtTextDelta, func(e *ProviderRuntimeEvent) {
+			e.Text = "## Context Usage\n### Estimated usage by category\n| System prompt | 3k | 1% |"
+		}),
+		ev(EvtTextDelta, func(e *ProviderRuntimeEvent) { e.Text = "after" }),
+	})
+	if len(msgs) != 2 || msgs[0].Role != "user" || msgs[1].Text != "after" {
+		t.Fatalf("got %+v", msgs)
 	}
 }

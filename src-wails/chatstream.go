@@ -335,7 +335,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 	// instead of in one flip. The remote client is the first that wants it — it
 	// has been re-implementing the protocol to a shallower depth.
 	if events := NormalizeChatLine(kind, line, ord); len(events) > 0 {
-		busEmit("chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: a.inflateEventImages(chatID, events)})
+		busEmit("chat-event-"+chatID, ChatEventBatch{Ord: ord, Events: events})
 
 		if a.phases != nil {
 			for _, e := range events {
@@ -465,7 +465,7 @@ func (a *App) LoadChatEventsSince(chatID string, since int64) ([]ChatEventBatch,
 	out := []ChatEventBatch{}
 	for _, l := range lines {
 		if events := NormalizeChatLine(l.Kind, l.Line, l.Ord); len(events) > 0 {
-			out = append(out, ChatEventBatch{Ord: l.Ord, Events: a.inflateEventImages(chatID, events)})
+			out = append(out, ChatEventBatch{Ord: l.Ord, Events: events})
 		}
 	}
 	return out, nil
@@ -494,7 +494,14 @@ func (a *App) LoadChatStreamSince(chatID string, since int64) ([]ChatStreamLine,
 		}
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close() // storing images below writes; don't hold the read open
+	for i := range out {
+		out[i].Line = a.lineImagesByRef(chatID, out[i].Kind, out[i].Line)
+	}
+	return out, nil
 }
 
 // ChatFoldedOrd is where a client resumes replay from after an app restart:
