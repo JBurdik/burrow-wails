@@ -56,12 +56,23 @@ function commit(next: HeldMessage[]): boolean {
   return true;
 }
 
-/** Persist a message for later delivery. False = not held (not remote, or storage full). */
-export function holdMessage(chatId: number, text: string, images?: string[]): boolean {
+/** A typed message's idempotency key: chat_send / chat_queue_add take it as
+ *  `clientId`, and Go accepts each id once (src-wails/chatclientid.go). */
+export function newClientId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * Persist a message for later delivery; `clientId` (the held id) rides along on
+ * every retry, so a call that already reached Go before the socket dropped is
+ * not delivered twice. False = not held (not remote, or storage full).
+ */
+export function holdMessage(chatId: number, text: string, images?: string[], clientId = newClientId()): boolean {
   startOffline();
   if (!started || !env) return false;
-  const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return commit(outboxAdd(outboxRead(env), { id, chatId, text, ...(images?.length ? { images } : {}), at: Date.now() }));
+  if (!commit(outboxAdd(outboxRead(env), { id: clientId, chatId, text, ...(images?.length ? { images } : {}), at: Date.now() }))) return false;
+  if (up) void deliverHeld();
+  return true;
 }
 
 export function dropHeld(id: string): void {
@@ -69,15 +80,25 @@ export function dropHeld(id: string): void {
 }
 
 let draining: Promise<number> | null = null;
+let again = false;
 /** Deliver everything held, in order, through Go's queue (it sends once the chat settles). */
 export function deliverHeld(): Promise<number> {
   if (!started || !env) return Promise.resolve(0);
-  draining ??= drainOutbox({
+  if (draining) {
+    // Held while a pass runs: it may already have looked past the new tail.
+    again = true;
+    return draining;
+  }
+  again = false;
+  draining = drainOutbox({
     read: () => outboxRead(env),
-    send: async (m) => { await invoke("chat_queue_add", { chatId: m.chatId, text: m.text, images: m.images ?? [] }); },
+    send: async (m) => { await invoke("chat_queue_add", { chatId: m.chatId, text: m.text, images: m.images ?? [], clientId: m.id }); },
     remove: (id) => { commit(outboxRemove(outboxRead(env), id)); },
     fail: (id, error) => { commit(outboxRead(env).map((m) => (m.id === id ? { ...m, error } : m))); },
-  }).finally(() => { draining = null; });
+  }).finally(() => {
+    draining = null;
+    if (again && up) void deliverHeld();
+  });
   return draining;
 }
 

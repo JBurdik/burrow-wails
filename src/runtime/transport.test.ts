@@ -278,6 +278,29 @@ describe("createTransport", () => {
       ws.deliver({ t: "reply", id: ws.lastCall().id, result: "ok" });
       await expect(p).resolves.toBe("ok");
     });
+
+    it("fires resync once it recovers, so loads that failed while unreachable re-run", async () => {
+      FakeWS.instances = [];
+      let url = "";
+      const t = createTransport(async () => ({ wsUrl: url, ticket: "t" }), {
+        WebSocketImpl: FakeWS as unknown as typeof WebSocket,
+        backoff: fastBackoff(),
+        maxConnectFailures: 2,
+      });
+      const resyncs = vi.fn();
+      t.onResync(resyncs);
+      await drain();
+      await expect(t.invoke("boot-load")).rejects.toThrow(/unreachable/i);
+      url = "ws://x/v2/ws";
+      await drain(5);
+      FakeWS.instances[FakeWS.instances.length - 1].open();
+      expect(resyncs).toHaveBeenCalledTimes(1);
+      // A plain drop + reconnect (never unreachable) resumes instead.
+      FakeWS.instances[FakeWS.instances.length - 1].close();
+      await drain(5);
+      FakeWS.instances[FakeWS.instances.length - 1].open();
+      expect(resyncs).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("rejects invoke() called after close() instead of leaving it pending", async () => {
@@ -573,6 +596,9 @@ describe("wake (app back from background)", () => {
       await vi.advanceTimersByTimeAsync(WAKE_PROBE_MS);
       await rejected;
       expect(FakeWS.instances).toHaveLength(2);
+      // The dead socket's late frames and close are not dispatched any more.
+      expect(dead.onmessage).toBeNull();
+      expect(dead.onclose).toBeNull();
       const fresh = FakeWS.instances[1];
       fresh.open();
       const states: boolean[] = [];

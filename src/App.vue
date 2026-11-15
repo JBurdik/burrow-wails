@@ -184,6 +184,7 @@ import MoreScreen from "@/components/phone/MoreScreen.vue";
 import { isPhoneOnlyRoute, phoneScreen, showsBottomNav } from "@/lib/phoneNav";
 import { compact, isWeb } from "@/lib/viewport";
 import { startOffline } from "@/lib/offline";
+import { appTransport } from "@/lib/wailsCompat/core";
 import AnimatedBackdrop from "@/components/AnimatedBackdrop.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import Terminal from "@/components/Terminal.vue";
@@ -818,6 +819,7 @@ let unlistenMenuNavigate: UnlistenFn | null = null;
 let unlistenMenuMiniChat: UnlistenFn | null = null;
 let stopCoreLink: (() => void) | null = null;
 let unlistenControl: (() => void) | undefined;
+let unlistenResync: (() => void) | undefined;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
 let unlistenWorktreesCleaned: UnlistenFn | null = null;
 
@@ -857,7 +859,11 @@ function playStartupChime() {
 onMounted(async () => {
   // Paired device: connection indicator + delivery of messages held offline.
   startOffline();
-  await ws.load();
+  // A paired device cold-started offline: list_workspaces fails once the
+  // transport gives up (~15 s). The rest of startup must still run; the
+  // transport's resync after it recovers (transport.ts onopen) re-reads.
+  await ws.load().catch((e) => console.warn("workspaces load failed:", e));
+  unlistenResync = appTransport().onResync(() => void ws.load().catch(() => {}));
   hideSplash();
   void pendingReleaseNotes().then((n) => { whatsNew.value = n; }).catch(() => {});
   // Startup lands on the composer ("/"), never on the last session's thread —
@@ -930,6 +936,7 @@ onBeforeUnmount(() => {
   unlistenWorkspacesChanged?.();
   unlistenWorktreesCleaned?.();
   unlistenControl?.();
+  unlistenResync?.();
 });
 
 // One handler per rebindable app-scope command; the keybindings store owns the

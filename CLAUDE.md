@@ -276,7 +276,10 @@ run by the 15 s sweep **and** kicked 300 ms after a turn settles (`emitChatLine`
 settled chat. Production send is `chatSendSettled` — re-checks `chatSettled` **under the chat lock**, so a
 drain racing the user's own mid-start `ChatSend` returns `errChatBusy` instead of steering. An item is claimed
 by being **deleted in the read's transaction**; a failed send re-inserts it at the head under its old id
-(5 failures park the head until edited). Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
+(5 failures park the head until edited). **`clientId`** (optional last arg of `chat_send` / `chat_queue_add`,
+`chatclientid.go`): an id already accepted for the chat (by either call, only after success; a duplicate in flight waits
+for the first) is a no-op success — `chat_queue_add` returns the earlier item. In memory, 1 h TTL / 500 per chat, so a
+core restart forgets them. Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
 
 **Usage-limit resume** (`chatlimit.go`): the normalizer marks a turn that failed on a usage / rate limit
 (`turn.failed{usageLimit}` — Claude's `is_error` result with the limit text or a 429, which used to read as
@@ -725,7 +728,12 @@ gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the
 `chat_queue_add` fails with disconnected / transport unreachable) is **held** in localStorage `burrow.outbox.<envId>`
 (`src/lib/offline.ts`, session intents `hold` / `held` / `dropHeld`), shown in the composer as "Waiting for connection",
 and on reconnect handed to Go via `chat_queue_add` oldest first (`drainOutbox` in `src/runtime/remoteCache.ts`): removed
-only after success; a non-network refusal marks it and blocks only that chat. **Read cache**: `invoke` tees
+only after success; a non-network refusal marks it and blocks only that chat. **Idempotent:** every typed message gets a
+`clientId` (`newClientId`), reused by `chat_send`, the hold (= the held id) and the drain's `chat_queue_add`, so a
+"disconnected" call that already reached Go is safe to retry; while a chat has anything held, a new message for it is held
+behind (and the drain kicked) instead of overtaking via `chat_send`. A transport that **recovers from unreachable** fires
+its resync handlers (boot loads failed fast: chats, config, workspaces re-read; App.vue's `ws.load()` failure no longer
+aborts startup); `dropSocket` detaches the dead socket's handlers. **Read cache**: `invoke` tees
 `shell_snapshot` / `list_chats` / `list_workspaces` into `burrow.cache.<envId>.<cmd>`; threadFeed and the workspace /
 chat stores seed from `cachedRead()` before the live call. A cached snapshot is never `noteSeq`'d. Cleared on
 `removeEnvironment` (unpair / 401) and `switchEnvironment`; the outbox survives both.

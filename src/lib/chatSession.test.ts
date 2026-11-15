@@ -592,7 +592,7 @@ describe("process intents", () => {
     expect(id).not.toBeNull();
     expect(s.busy.value).toBe(true);
     expect(s.messages.value.map((m) => [m.role, m.text])).toEqual([["user", "go"]]);
-    expect(f.invoke).toHaveBeenCalledWith("chat_send", { chatId: 80, text: "go", images: ["data:x"] });
+    expect(f.invoke).toHaveBeenCalledWith("chat_send", { chatId: 80, text: "go", images: ["data:x"], clientId: expect.any(String) });
     dropChatSession(80);
   });
 
@@ -867,11 +867,46 @@ describe("send held offline", () => {
     const s = chatSession(91, f.deps);
     await s.listenEvents();
     expect(await s.send({ text: "hello" })).toBeNull();
-    expect(hold).toHaveBeenCalledWith(91, "hello", undefined);
+    expect(hold).toHaveBeenCalledWith(91, "hello", undefined, expect.any(String));
     expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
     // Reconnect: Go's queue sends it, Go echoes it.
     f.emit("chat-event-91", { ord: 1, events: [{ type: "user.delta", messageId: "u1", text: "hello" }] });
     expect(s.messages.value.filter((m) => m.role === "user").map((m) => m.text)).toEqual(["hello"]);
     dropChatSession(91);
+  });
+});
+
+// Every typed message carries one clientId: the send, the hold and the
+// reconnect's chat_queue_add all reuse it, so Go accepts it once.
+describe("clientId + outbox ordering", () => {
+  it("holds a failed send under the clientId the send carried", async () => {
+    const f = fakeDeps();
+    const hold = vi.fn(() => true);
+    (f.deps as ChatSessionDeps).outbox = { list: () => [], hold, drop: vi.fn() };
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_send") throw new Error("disconnected");
+      return undefined;
+    });
+    const s = chatSession(93, f.deps);
+    await s.send({ text: "hi" });
+    const sent = f.invoke.mock.calls.find((c) => c[0] === "chat_send")![1] as { clientId: string };
+    expect(sent.clientId).toBeTruthy();
+    expect(hold).toHaveBeenCalledWith(93, "hi", undefined, sent.clientId);
+    dropChatSession(93);
+  });
+
+  it("queues behind held messages instead of overtaking them", async () => {
+    const f = fakeDeps();
+    const hold = vi.fn(() => true);
+    const held = [{ id: "h1", chatId: 94, text: "earlier", at: 1 }];
+    (f.deps as ChatSessionDeps).outbox = { list: () => held, hold, drop: vi.fn() };
+    const s = chatSession(94, f.deps);
+    expect(await s.send({ text: "later" })).toBeNull();
+    expect(await s.enqueueMessage("later2")).toMatchObject({ id: -1, text: "later2" });
+    expect(f.invoke).not.toHaveBeenCalledWith("chat_send", expect.anything());
+    expect(f.invoke).not.toHaveBeenCalledWith("chat_queue_add", expect.anything());
+    expect(hold.mock.calls.map((c) => (c as unknown[])[1])).toEqual(["later", "later2"]);
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    dropChatSession(94);
   });
 });

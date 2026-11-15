@@ -12,7 +12,7 @@ import { parseAcpPermRequest } from "@/lib/acpParser";
 import { isImageStub, parseImageStub } from "@/lib/chatImages";
 import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import { appChatHost, type ChatHost } from "@/lib/chatHost";
-import { dropHeld, heldFor, holdMessage, isOfflineError, type HeldMessage } from "@/lib/offline";
+import { dropHeld, heldFor, holdMessage, isOfflineError, newClientId, type HeldMessage } from "@/lib/offline";
 
 // Who owns a chat's stream — the answer used to be "whichever AgentChat.vue is
 // mounted", which is what made the component un-unmountable: its
@@ -63,7 +63,8 @@ export interface ChatSessionDeps {
   /** Paired-device offline outbox (src/lib/offline.ts); absent = no holding (tests, and inert on the desktop). */
   outbox?: {
     list(chatId: number): HeldMessage[];
-    hold(chatId: number, text: string, images?: string[]): boolean;
+    /** Holds behind anything already held for the chat and kicks the drain while up. */
+    hold(chatId: number, text: string, images?: string[], clientId?: string): boolean;
     drop(id: string): void;
   };
 }
@@ -569,18 +570,23 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.sync();
     },
     async send(prompt) {
+      const clientId = newClientId();
+      // Messages already held for this chat go first: this one waits behind
+      // them in the outbox instead of overtaking them through chat_send.
+      if (s.deps.outbox?.list(chatId).length && s.deps.outbox.hold(chatId, prompt.text, prompt.images, clientId)) return null;
       const id = s.postUserMessage(prompt);
       s.startTurn();
       s.save();
       s.sync();
       s.view?.scrollToBottom(true);
       try {
-        await s.deps.invoke("chat_send", { chatId, text: prompt.text, images: prompt.images ?? [] });
+        await s.deps.invoke("chat_send", { chatId, text: prompt.text, images: prompt.images ?? [], clientId });
         return id;
       } catch (e) {
         // The socket dropped under the send: take the bubble back and hold the
-        // message for the reconnect instead of reporting a failed turn.
-        if (isOfflineError(e) && s.deps.outbox?.hold(chatId, prompt.text, prompt.images)) {
+        // message for the reconnect instead of reporting a failed turn. Safe
+        // even if the send reached Go: the retry carries the same clientId.
+        if (isOfflineError(e) && s.deps.outbox?.hold(chatId, prompt.text, prompt.images, clientId)) {
           // The held text comes back as a user.delta once Go's queue sends it;
           // a claim left here would swallow it (and pin applyPhase's busy).
           s.pendingSends.delete(prompt.text);
@@ -750,13 +756,16 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       if (sessionId) s.sessionId.value = sessionId;
     },
     async enqueueMessage(text, images) {
+      const clientId = newClientId();
+      const held = { id: -1, text, ...(images?.length ? { images } : {}) };
+      if (s.deps.outbox?.list(chatId).length && s.deps.outbox.hold(chatId, text, images, clientId)) return held;
       try {
-        const item = await s.deps.invoke<GoQueueItem>("chat_queue_add", { chatId, text, images: images ?? [] });
+        const item = await s.deps.invoke<GoQueueItem>("chat_queue_add", { chatId, text, images: images ?? [], clientId });
         const entry = fromGo(item);
         if (!s.queue.value.some((q) => q.id === entry.id)) s.queue.value = [...s.queue.value, entry];
         return entry;
       } catch (e) {
-        if (isOfflineError(e) && s.deps.outbox?.hold(chatId, text, images)) return { id: -1, text, ...(images?.length ? { images } : {}) };
+        if (isOfflineError(e) && s.deps.outbox?.hold(chatId, text, images, clientId)) return held;
         s.notice(`Could not queue the message: ${e}`);
         return null;
       }

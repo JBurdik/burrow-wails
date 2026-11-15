@@ -239,6 +239,9 @@ export function createTransport(
       ws = socket;
 
       socket.onopen = () => {
+        // Calls made while unreachable failed fast (a cold start offline for
+        // ~15 s lost every boot load): tell the resync handlers to re-read.
+        const recovered = unreachable;
         connectFailures = 0;
         unreachable = false;
         backoff.reset();
@@ -249,6 +252,7 @@ export function createTransport(
         if (lastSeq > 0) socket.send(JSON.stringify({ t: "resume", since: lastSeq }));
         flush();
         setState(true);
+        if (recovered) for (const h of resyncHandlers) h();
       };
       socket.onmessage = (ev: MessageEvent) => handleFrame(String(ev.data));
       socket.onclose = () => {
@@ -287,6 +291,9 @@ export function createTransport(
   function dropSocket() {
     const dead = ws;
     ws = null;
+    // A slow "dead" socket can still deliver late frames: they must not be
+    // dispatched next to the replacement's.
+    if (dead) dead.onopen = dead.onmessage = dead.onclose = dead.onerror = null;
     clearProbe();
     setState(false);
     failPending("disconnected");
