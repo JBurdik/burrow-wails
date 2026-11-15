@@ -11,6 +11,8 @@ struct BurrowApp: App {
                 if model.creds == nil { PairView() } else { ThreadsView() }
             }
             .environment(model)
+            // iOS 26 draws bordered buttons as capsules; keep rounded rects app-wide.
+            .buttonBorderShape(.roundedRectangle(radius: 10))
             .onChange(of: scenePhase) { _, p in if p == .active { model.foreground() } }
             .onOpenURL { url in
                 // burrow://chat/<id> from the widget / Live Activity

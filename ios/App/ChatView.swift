@@ -55,6 +55,7 @@ struct ChatView: View {
                             .font(.caption.weight(.medium))
                         }
                         .buttonStyle(.bordered).controlSize(.small)
+                        .buttonBorderShape(.roundedRectangle(radius: 8))
                         .frame(maxWidth: .infinity)
                     }
                     ForEach(shown) { MessageRow(message: $0) }
@@ -145,11 +146,7 @@ struct ChatView: View {
             }
         }
         .sheet(isPresented: $showDetails) { ThreadDetailsView(chatId: chatId) }
-        // iPad: the panel sits beside the chat like the desktop RP; iPhone: a sheet.
-        .inspector(isPresented: sizeClass == .regular ? $showPanel : .constant(false)) {
-            RightPanelView(chatId: chatId).inspectorColumnWidth(min: 320, ideal: 420, max: 560)
-        }
-        .sheet(isPresented: sizeClass == .regular ? .constant(false) : $showPanel) { RightPanelView(chatId: chatId) }
+        .modifier(PanelPresentation(chatId: chatId, isPresented: $showPanel, regular: sizeClass == .regular))
         // Swipe in from the right edge opens the panel (the RP lives on the right).
         .overlay(alignment: .trailing) {
             Color.clear.frame(width: 18).contentShape(Rectangle())
@@ -403,6 +400,7 @@ struct TurnNeedsCard: View {
                 if needs.asks.contains(where: { !$0.options.isEmpty }) {
                     Button("Send answers") { send(composed) }
                         .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.roundedRectangle(radius: 10))
                         .disabled(answers.values.allSatisfy(\.isEmpty))
                 }
             } else {
@@ -413,6 +411,7 @@ struct TurnNeedsCard: View {
                             .font(.subheadline)
                     }
                     .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle(radius: 10))
                 }
             }
         }
@@ -455,5 +454,24 @@ struct TurnNeedsCard: View {
         }
         if needs.asks.count == 1, let one = answered.first { return one.1 }
         return answered.map { "> \($0.0.replacingOccurrences(of: "\n", with: "\n> "))\n\($0.1)" }.joined(separator: "\n\n")
+    }
+}
+
+/// iPad: the panel sits beside the chat like the desktop RP (inspector); iPhone: a sheet.
+/// Only one of the two is attached: an attached-but-closed inspector still put the
+/// panel's toolbar (surface picker, Done) into the chat's navigation bar on iPhone.
+struct PanelPresentation: ViewModifier {
+    let chatId: Int
+    @Binding var isPresented: Bool
+    let regular: Bool
+
+    func body(content: Content) -> some View {
+        if regular {
+            content.inspector(isPresented: $isPresented) {
+                RightPanelView(chatId: chatId).inspectorColumnWidth(min: 320, ideal: 420, max: 560)
+            }
+        } else {
+            content.sheet(isPresented: $isPresented) { RightPanelView(chatId: chatId) }
+        }
     }
 }
