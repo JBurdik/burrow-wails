@@ -20,7 +20,7 @@ check-then-act race between send and queue.
   via `publish_chat_note`). Every client applies Go's splices and nothing else.
 - **Splices carry a revision**: the chat's `folded_ord`. Stream `ord` never resets
   (`chat_clear` keeps counting). Rewind and clear send an authoritative splice from the
-  cut. Go coalesces a chat's splices to at most one per ~100 ms (latest wins).
+  cut. Streaming text goes as transient tail appends (below), coalesced to ~100 ms.
 - **One submit door**, `chat_submit(chatId, text, images, clientId)`: Go decides under
   the chat lock (settled → send, else queue). Steer stays a separate explicit call and
   also takes a `clientId`.
@@ -29,6 +29,26 @@ check-then-act race between send and queue.
   match by id.
 - Additive on the wire: `chat_send` / `chat_queue_add` stay for one release; no
   `minClientRev` raise.
+
+## Wire shape (phase B, after comparing with threadbear)
+
+Threadbear (a similar product) keeps a per-thread gap-free `seq` and replays from the
+last one a client saw; it has no message identity (matches echoes by text + time, which
+is its weak spot). Taken from it:
+
+- **Gap check**: every splice is `{baseRev, rev, fromIndex, rows}`. A client applies it
+  only when `baseRev == its rev` (or the splice is authoritative: `fromIndex <= its
+  window start`, e.g. rewind / clear); otherwise it drops it and catches up.
+- **`chat_subscribe(chatId, sinceRev)`** → the splices since `sinceRev` (or one
+  authoritative splice when they are gone) **plus `inProgress`**: the text streamed so far
+  for the unfinished tail row, so a reconnect mid-stream loses nothing.
+- **Streaming tail as an append**: while a row streams, Go sends transient
+  `chat-tail-<id>` `{rev, index, append}` events (text appended to the row at `index`),
+  coalesced to ≤ 1 per ~100 ms per chat, which never bump `rev`; the next rev'd splice
+  replaces whatever they built. Under backpressure tail events are dropped first.
+- **Images by reference**: no base64 in splices, `chat-user` lines or pages: a row
+  carries `burrow-image://<index>/<n>` refs (or a stored-attachment id) and clients fetch
+  each once (`load_chat_image`).
 
 ## Consequences
 
