@@ -6,7 +6,6 @@ struct ThreadsView: View {
     @State private var selected: Int?
     @State private var composing = false
     @AppStorage("expandedProjects") private var expandedRaw = ""
-    @State private var showSettled = false
 
     private var expanded: Set<Int> { Set(expandedRaw.split(separator: ",").compactMap { Int($0) }) }
 
@@ -19,7 +18,8 @@ struct ThreadsView: View {
                 let pinned = all.filter { model.isPinned($0) && !inbox.contains($0) && !working.contains($0) }
                 let shown = Set((inbox + working + pinned).map(\.id))
                 let rest = all.filter { !shown.contains($0.id) && !model.settled($0) }
-                let settled = all.filter { !shown.contains($0.id) && model.settled($0) }
+                let now = Date().timeIntervalSince1970 * 1000
+                let snoozed = all.filter { !shown.contains($0.id) && $0.snoozedUntil > now }
 
                 if !inbox.isEmpty {
                     Section { ForEach(inbox) { row($0, showProject: true) } } header: { header("Inbox", inbox.count, "tray.full") }
@@ -46,13 +46,9 @@ struct ThreadsView: View {
                         }
                     }
                 } header: { header("Projects", nil, "folder") }
-                if !settled.isEmpty {
-                    Section {
-                        DisclosureGroup("Settled · \(settled.count)", isExpanded: $showSettled) {
-                            ForEach(settled.prefix(50)) { row($0, showProject: true) }
-                        }
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    }
+                // Desktop's docked shelves: Snoozed, then Archived (settled + archived, by project).
+                if !snoozed.isEmpty {
+                    Section { ForEach(snoozed) { row($0, showProject: true) } } header: { header("Snoozed", snoozed.count, "moon.zzz") }
                 }
                 ArchivedSection()
             }
