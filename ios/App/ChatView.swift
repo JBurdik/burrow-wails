@@ -48,6 +48,8 @@ struct ChatView: View {
     /// Set by an own send: the next transcript change scrolls down whatever
     /// atBottom says (the composer / keyboard often hide the bottom marker).
     @State private var pinBottom = false
+    /// The user's fold choice per settled turn (its user message id).
+    @State private var foldOverride: [Int: Bool] = [:]
     @State private var bottomBeforeKeyboard = false
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -75,7 +77,14 @@ struct ChatView: View {
                         .buttonBorderShape(.roundedRectangle(radius: 8))
                         .frame(maxWidth: .infinity)
                     }
-                    ForEach(shown) { MessageRow(message: $0).equatable() }
+                    ForEach(rows) { row in
+                        switch row {
+                        case .message(let m): MessageRow(message: m).equatable()
+                        case .tools(_, let items): ToolGroupRow(items: items).equatable()
+                        case .worked(let turn, let tools, let folded):
+                            WorkedRow(tools: tools, folded: folded) { foldOverride[turn] = !folded }
+                        }
+                    }
                     ForEach(echoes) { MessageRow(message: $0).equatable().opacity(0.6) }
                     if phase.state == "running" {
                         HStack(spacing: 8) {
@@ -242,6 +251,10 @@ struct ChatView: View {
     }
     private var remaining: Int { older.isEmpty ? earlier : olderStart }
 
+    private var rows: [TranscriptRow] {
+        Transcript.rows(shown, foldOverride: foldOverride, settledLast: !phase.inFlight)
+    }
+
     private func loadOlder() async {
         let before = older.isEmpty ? earlier : olderStart
         guard before > 0, !loadingOlder else { return }
@@ -255,7 +268,11 @@ struct ChatView: View {
     }
 
     static func visible(_ ms: [Message]) -> [Message] {
-        ms.filter { $0.role != "queued" && $0.role != "thinking" && !($0.role == "tool" && $0.text.hasPrefix("mcp__burrow__end_turn")) }
+        // Plumbing calls aren't work (chatPlumbing.ts): a taken end_turn / end_turn_pending, ToolSearch.
+        ms.filter {
+            $0.role != "queued" && !($0.role == "thinking" && $0.text.isEmpty)
+                && !($0.role == "tool" && !$0.failed && ($0.text.hasPrefix("mcp__burrow__end_turn") || $0.text == "ToolSearch"))
+        }
     }
 
     private func scheduleReload() {
@@ -293,7 +310,10 @@ struct ChatView: View {
         raw = rows.enumerated().map { Message($1, index: earlier + $0) }
         // Splices that arrived while this page was on the way, in order; one past
         // the page's end means it's older still, read again.
-        for s in spliceLog[base...] {
+        // A splice that arrived during the request may also be OLDER than the page
+        // (sent before Go read it): replaying that one cut the page's newer tail —
+        // a just-sent / steered message vanished until the next wide splice.
+        for s in spliceLog[base...] where !Self.isStale(raw, start: earlier, from: s.from, s.rows) {
             guard let next = Self.splice(raw, start: earlier, from: s.from, s.rows) else { scheduleReload(); break }
             raw = next
         }
@@ -323,6 +343,22 @@ struct ChatView: View {
         if from > start + raw.count { return nil }
         if from < start { return Array(new.dropFirst(start - from)) }
         return Array(raw.prefix(from - start)) + new
+    }
+
+    /// Whether a splice is behind what `raw` already holds: it would drop rows
+    /// (ends before raw's end) or put back an older version of one (shorter
+    /// text / output, or partial again). Only for replaying over a fresh page;
+    /// a live splice always applies.
+    static func isStale(_ raw: [Message], start: Int, from: Int, _ new: [Message]) -> Bool {
+        if from + new.count < start + raw.count { return true }
+        for (k, n) in new.enumerated() {
+            let i = from + k - start
+            guard i >= 0, i < raw.count else { continue }
+            let o = raw[i]
+            if o.id != n.id { continue }
+            if n.text.count < o.text.count || n.toolOutput.count < o.toolOutput.count || (n.partial && !o.partial) { return true }
+        }
+        return false
     }
 
     /// A chat-event batch that closes the turn or resets the session.
@@ -358,6 +394,8 @@ struct MessageRow: View, Equatable {
         case "assistant":
             MarkdownText(text: message.text)
                 .contextMenu { Button { UIPasteboard.general.string = message.text } label: { Label("Copy", systemImage: "doc.on.doc") } }
+        case "thinking":
+            ThinkingRow(message: message)
         case "tool":
             VStack(alignment: .leading, spacing: 6) {
                 Button { open.toggle() } label: {
