@@ -24,6 +24,11 @@ struct TranscriptWindow: Equatable {
     /// when authoritative: rewind, clear, a subscribe ring miss).
     mutating func apply(splice d: [String: Any]) -> Outcome {
         let auth = d["authoritative"] as? Bool ?? false
+        // Already seen (a live splice that a subscribe reply also carried, or a
+        // replay after a reconnect): ignore, never roll the window back. Same
+        // rule as applySplice in transcriptSplice.ts.
+        let spRev = Self.i64(d["rev"])
+        if auth ? spRev < rev : spRev <= rev { return .ignored }
         guard auth || Self.i64(d["baseRev"]) == rev else { return .gap }
         let from = Self.int(d["fromIndex"])
         let new = (d["messages"] as? [[String: Any]] ?? []).enumerated().map { Message($1, index: from + $0) }
