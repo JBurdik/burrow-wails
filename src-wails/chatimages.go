@@ -125,7 +125,13 @@ func (a *App) lineImagesByRef(chatID, kind, line string) string {
 // stubRowImages replaces a row's stored refs — and, unless refsOnly, its large
 // inline data URLs (old rows) — with "burrow-image://<index>/<n>". Never
 // mutates the row's own slice: it belongs to the fold.
+//
+// It is also every outbound row's door, so it marks an old `/context` report
+// as plumbing (isContextReportRow) — the clients' existing hide applies.
 func stubRowImages(m ChatMessage, index int, refsOnly bool) ChatMessage {
+	if isContextReportRow(m) {
+		m.Plumbing = true
+	}
 	var imgs []string
 	for n, img := range m.Images {
 		stub := strings.HasPrefix(img, chatImageRefPrefix) ||

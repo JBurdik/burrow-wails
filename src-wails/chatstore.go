@@ -49,7 +49,7 @@ func chatMessagesSchema() []string {
 // inline data URLs stay inline here, as they always did.
 func (a *App) LoadChatMessages(chatID int) (string, error) {
 	raw, err := a.chatMessagesRaw(chatID)
-	if err != nil || !strings.Contains(raw, chatImageRefPrefix) {
+	if err != nil || (!strings.Contains(raw, chatImageRefPrefix) && !strings.Contains(raw, contextReportMarker)) {
 		return raw, err
 	}
 	var msgs []ChatMessage
@@ -132,6 +132,9 @@ const chatImageStubMin = 4096
 // Messages without images — nearly all of them — are returned untouched
 // without being parsed.
 func stubChatImages(raw json.RawMessage, index int) json.RawMessage {
+	if bytes.Contains(raw, []byte(contextReportMarker)) {
+		raw = markContextReportRaw(raw)
+	}
 	if !bytes.Contains(raw, []byte(`"images"`)) {
 		return raw
 	}
@@ -159,6 +162,21 @@ func stubChatImages(raw json.RawMessage, index int) json.RawMessage {
 		return raw
 	}
 	return out
+}
+
+// markContextReportRaw is isContextReportRow → plumbing for a raw row
+// (field-preserving: only "plumbing" is added).
+func markContextReportRaw(raw json.RawMessage) json.RawMessage {
+	var m ChatMessage
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil || !isContextReportRow(m) || json.Unmarshal(raw, &fields) != nil {
+		return raw
+	}
+	fields["plumbing"] = json.RawMessage("true")
+	if out, err := json.Marshal(fields); err == nil {
+		return out
+	}
+	return raw
 }
 
 // LoadChatImage returns image `image` of the message at transcript `index` as

@@ -82,6 +82,13 @@ type ChatMessage struct {
 // live from the chat-event text.delta (chatSession.ts requestContextReport).
 const contextReportMarker = "Estimated usage by category"
 
+// isContextReportRow: an assistant row holding a `/context` report, folded
+// before the fold dropped them. Old transcripts are not refolded, so the read
+// path marks it plumbing instead (stubRowImages) — the index stays.
+func isContextReportRow(m ChatMessage) bool {
+	return m.Role == "assistant" && strings.Contains(m.Text, contextReportMarker)
+}
+
 // plumbingTools are tool calls that are plumbing, not work (as threadbear
 // hides them): a taken end_turn — the card under the turn already says what
 // it said — the Stop gate's end_turn_pending, and ToolSearch, which only
