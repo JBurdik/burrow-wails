@@ -5,6 +5,7 @@ import SwiftUI
 struct MainTabs: View {
     @Environment(AppModel.self) private var model
     @State private var tab = Pane.threads
+    @State private var query = ""
 
     enum Pane: Hashable { case threads, project, more, search }
 
@@ -16,10 +17,19 @@ struct MainTabs: View {
                     .badge(needsCount)
                 Tab("Project", systemImage: "arrow.triangle.branch", value: Pane.project) { ProjectView() }
                 Tab("More", systemImage: "ellipsis", value: Pane.more) { MoreView() }
-                Tab(value: Pane.search, role: .search) {
-                    ChatSearchScreen { id in model.openChat = id; tab = .threads }
+                if #available(iOS 27, *) {
+                    // iOS 27 detaches only a .prominent tab beside the bar (Phone's look); the field then
+                    // lives on the screen itself, since a TabView .searchable needs the .search role.
+                    Tab("Search", systemImage: "magnifyingglass", value: Pane.search, role: .prominent) {
+                        ChatSearchScreen(query: $query, ownField: true) { id in model.openChat = id; tab = .threads }
+                    }
+                } else {
+                    Tab(value: Pane.search, role: .search) {
+                        ChatSearchScreen(query: $query) { id in model.openChat = id; tab = .threads }
+                    }
                 }
             }
+            .modifier(TabSearchField(query: $query))
         } else {
             TabView(selection: $tab) {
                 ThreadsView()
@@ -220,5 +230,13 @@ struct ProjectSubagentsView: View {
                 ContentUnavailableView("No sub-agents", systemImage: "person.2", description: Text("Threads in this project have not spawned any."))
             }
         }
+    }
+}
+
+/// iOS 18–26: the search tab's field is the TabView's (only then iOS 26 puts it in the bottom bar).
+private struct TabSearchField: ViewModifier {
+    @Binding var query: String
+    func body(content: Content) -> some View {
+        if #available(iOS 27, *) { content } else { content.searchable(text: $query, prompt: "Search chats") }
     }
 }

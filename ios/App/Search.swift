@@ -4,9 +4,14 @@ import SwiftUI
 /// iOS 18+: the search tab (`ChatSearchScreen`); iOS 17: a drawer on the Threads list.
 struct ChatSearchModifier: ViewModifier {
     let open: (Int) -> Void
-    var standalone = false
+    /// Set by the search tab: its field is the TabView's `.searchable`, so the query comes from there.
+    var external: Binding<String>? = nil
     @Environment(AppModel.self) private var model
-    @State private var query = ""
+    @State private var own = ""
+    private var query: String {
+        get { external?.wrappedValue ?? own }
+        nonmutating set { if let external { external.wrappedValue = newValue } else { own = newValue } }
+    }
     @State private var hits: [Hit] = []
     @State private var task: Task<Void, Never>?
 
@@ -18,12 +23,12 @@ struct ChatSearchModifier: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        if standalone {
-            results(content.searchable(text: $query, prompt: "Search chats"))
+        if external != nil {
+            results(content)
         } else if #available(iOS 18, *) {
             content // the search tab has it
         } else {
-            results(content.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search chats"))
+            results(content.searchable(text: $own, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search chats"))
         }
     }
 
@@ -88,16 +93,28 @@ extension View {
     func chatSearch(open: @escaping (Int) -> Void) -> some View { modifier(ChatSearchModifier(open: open)) }
 }
 
-/// The search tab's screen (role `.search`): the field sits in the bottom bar on iOS 26.
+/// The search tab's screen (role `.search`). The field is `.searchable` on the TabView (MainTabs):
+/// only there does iOS 26 put it in the bottom bar, beside the tabs, like Phone.
 struct ChatSearchScreen: View {
+    @Binding var query: String
+    var ownField = false
     let open: (Int) -> Void
 
     var body: some View {
         NavigationStack {
             ContentUnavailableView("Search chats", systemImage: "magnifyingglass",
                                    description: Text("Every message of every thread."))
-                .modifier(ChatSearchModifier(open: open, standalone: true))
+                .modifier(ChatSearchModifier(open: open, external: $query))
+                .modifier(OwnField(on: ownField, query: $query))
                 .navigationTitle("Search")
         }
+    }
+}
+
+private struct OwnField: ViewModifier {
+    let on: Bool
+    @Binding var query: String
+    func body(content: Content) -> some View {
+        if on { content.searchable(text: $query, prompt: "Search chats") } else { content }
     }
 }
