@@ -99,14 +99,22 @@ extension AppModel {
     /// Launch / pair: outbox + last snapshot of this machine, before the socket opens.
     func restoreLocal() {
         guard let dir = LocalStore.dir(creds) else { return }
-        outbox = (try? Data(contentsOf: dir.appendingPathComponent("outbox.json")))
-            .flatMap { try? JSONDecoder().decode([OutboxItem].self, from: $0) } ?? []
+        outbox = (try? Data(contentsOf: dir.appendingPathComponent("outbox.json"))).map(Self.decodeOutbox) ?? []
         guard let d = LocalStore.read(dir.appendingPathComponent("snapshot.json")) as? [String: Any] else { return }
         workspaces = (d["workspaces"] as? [[String: Any]] ?? []).map(Workspace.init)
         phases = Self.parsePhases(d["phases"])
         seen = Dictionary(uniqueKeysWithValues: (d["seen"] as? [String: Any] ?? [:]).compactMap { k, v in Int(k).map { ($0, dbl(v)) } })
         rawChats = d["chats"] as? [[String: Any]] ?? []
         chats = rawChats.map(Chat.init)
+    }
+
+    /// One unreadable item (a shape from another build) must not take the whole
+    /// outbox with it: restoreLocal's next save would overwrite the file.
+    static func decodeOutbox(_ data: Data) -> [OutboxItem] {
+        guard let arr = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return [] }
+        return arr.compactMap { el in
+            (try? JSONSerialization.data(withJSONObject: el)).flatMap { try? JSONDecoder().decode(OutboxItem.self, from: $0) }
+        }
     }
 
     static func parsePhases(_ raw: Any?) -> [Int: Phase] {

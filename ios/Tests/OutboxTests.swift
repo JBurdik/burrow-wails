@@ -23,3 +23,13 @@ final class OutboxTests: XCTestCase {
         XCTAssertNil(items[0].answer)
     }
 }
+
+final class OutboxDecodeTests: XCTestCase {
+    func testBadItemDoesNotDropTheRest() throws {
+        let good = try JSONEncoder().encode(OutboxItem(chatId: 3, text: "hi", images: []))
+        let json = "[\(String(decoding: good, as: UTF8.self)), {\"chatId\": \"oops\"}]"
+        let items = AppModel.decodeOutbox(Data(json.utf8))
+        XCTAssertEqual(items.map(\.text), ["hi"])
+        XCTAssertEqual(AppModel.decodeOutbox(Data("garbage".utf8)), [])
+    }
+}
