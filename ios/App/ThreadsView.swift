@@ -327,8 +327,8 @@ struct NewThreadView: View {
         do {
             let id = try await model.createChat(workspace: workspace, agent: agent, model: agent == "codex" ? "" : modelId,
                                                 effort: effort, permission: permission, text: text)
-            dismiss()
             opened(id)
+            dismiss()
         } catch { self.error = error.localizedDescription }
     }
 }

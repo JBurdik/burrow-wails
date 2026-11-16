@@ -171,6 +171,8 @@ final class AppModel {
     var seen: [Int: Double] = [:]      // chat id → seen_at (Go clock, ms)
     var error: String?
     var openChat: Int?
+    /// First prompt of a just-created thread, sent by its ChatView when it appears (createChat).
+    var pendingFirst: [Int: String] = [:]
     /// Messages typed while offline (Offline.swift), per paired machine.
     var outbox: [OutboxItem] = []
     @ObservationIgnored var flushing = false
@@ -445,8 +447,11 @@ final class AppModel {
             let cwd = self.workspace(workspace)?.path ?? ""
             Task { await client.nameThread(chatId: id, current: current, cwd: cwd, text: text) }
         }
-        await loadChats()
-        try await send(id, text)
+        // Show the thread now and let ChatView send the first prompt (pendingFirst): it echoes the
+        // message at once, and a slow agent start no longer keeps the New thread sheet open.
+        chats.append(Chat(row ?? [:]))
+        pendingFirst[id] = text
+        Task { await loadChats() }
         return id
     }
 

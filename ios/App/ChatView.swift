@@ -223,6 +223,13 @@ struct ChatView: View {
                 // lands inside one SwiftUI update, so catch up on the events themselves.
                 else if name == "open" || name == "resync" { Task { await catchUp() } }
             }
+            // A new thread's first prompt: sent here, after the subscription above, so its echo shows.
+            if let first = model.pendingFirst.removeValue(forKey: chatId) {
+                Task {
+                    do { _ = try await model.composerSend(chatId, first, [], steer: false) }
+                    catch { self.error = error.localizedDescription }
+                }
+            }
         }
         .onDisappear {
             if model.viewing == chatId { model.viewing = nil }
