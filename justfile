@@ -106,8 +106,9 @@ check:
 
 # Probe a running core's chat wire: subscribe, send one probe message to chat
 # ID, print splice / tail / rev timings. `just probe-chat 42 --suffix dev`.
+[positional-arguments]
 probe-chat *ARGS:
-    node scripts/probe-chat.mjs {{ARGS}}
+    node scripts/probe-chat.mjs "$@"
 
 # End-to-end smoke of the phone's remote path over loopback: pair → ticket →
 # /v2/ws → calls → events + resume → revoke.
