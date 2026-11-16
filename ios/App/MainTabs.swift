@@ -45,24 +45,8 @@ struct ProjectView: View {
             List {
                 if let cur = current {
                     Section {
-                        Menu {
-                            Picker("Project", selection: Binding(get: { cur.id }, set: { selected = $0 })) {
-                                ForEach(rows) { r in
-                                    // a worktree wears its repo's icon
-                                    ProjectOptionLabel(name: (r.depth > 0 ? "↳ " : "") + r.name, workspaceId: model.workspace(r.id)?.repoId ?? r.id).tag(r.id)
-                                }
-                            }.pickerStyle(.inline)
-                        } label: {
-                            HStack {
-                                ProjectBadge(name: cur.name, workspaceId: cur.id)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(cur.name).font(.headline).foregroundStyle(.primary)
-                                    Text(cur.path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
+                        ProjectPickerField(choices: rows.map { ProjectChoice(id: $0.id, name: $0.name, path: $0.path, depth: $0.depth) },
+                                           selection: Binding(get: { cur.id }, set: { selected = $0 }))
                     }
                     Section {
                         NavigationLink { GitSurface(cwdOverride: cur.path).navigationTitle("Changes").navigationBarTitleDisplayMode(.inline) } label: {

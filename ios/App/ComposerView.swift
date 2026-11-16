@@ -53,6 +53,7 @@ struct Composer: View {
     @State private var error: String?
     @State private var notice: String?
     @State private var steer = false
+    @State private var launchSheet = false
     @State private var sending = false
     @State private var sent = 0
     @State private var pickerOpen = false
@@ -250,27 +251,19 @@ struct Composer: View {
         let tint: Color = perm == "bypassPermissions" ? .red : .secondary
         let summary = [chat.isCodex ? nil : Catalog.modelLabel(chat.model), Catalog.effortLabel(chat.effort), p.label]
             .compactMap { $0 }.joined(separator: " · ")
-        return Menu {
-            if !chat.isCodex {
-                Picker(selection: launch(chat.model) { try await model.setLaunch(chatId, model: $0) }) {
-                    ForEach(Catalog.claudeModels, id: \.id) { Text($0.label).tag($0.id) }
-                } label: { Label("Model", systemImage: "cpu") }
-                .pickerStyle(.menu)
-            }
-            Picker(selection: launch(chat.effort) { try await model.setLaunch(chatId, effort: $0) }) {
-                ForEach(chat.isCodex ? Catalog.codexEfforts : Catalog.claudeEfforts, id: \.self) { Text(Catalog.effortLabel($0)).tag($0) }
-            } label: { Label("Effort", systemImage: "gauge.with.dots.needle.50percent") }
-            .pickerStyle(.menu)
-            Picker(selection: launch(perm) { try await model.setLaunch(chatId, permission: $0) }) {
-                ForEach(Catalog.permissions, id: \.id) { Label($0.label, systemImage: $0.icon).tag($0.id) }
-            } label: { Label("Permissions", systemImage: p.icon) }
-            .pickerStyle(.menu)
-        } label: {
+        return Button { launchSheet = true } label: {
             Label(summary, systemImage: p.icon)
                 .font(.caption.weight(.medium)).lineLimit(1)
                 .foregroundStyle(tint == .red ? .red : .primary)
                 .padding(.horizontal, 8).padding(.vertical, 5)
                 .background(tint.opacity(0.14), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $launchSheet) {
+            LaunchSheet(isCodex: chat.isCodex,
+                        model: launch(chat.model) { try await model.setLaunch(chatId, model: $0) },
+                        effort: launch(chat.effort) { try await model.setLaunch(chatId, effort: $0) },
+                        permission: launch(perm) { try await model.setLaunch(chatId, permission: $0) })
         }
     }
 

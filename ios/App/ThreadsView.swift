@@ -5,6 +5,8 @@ struct ThreadsView: View {
     @Environment(AppModel.self) private var model
     @State private var selected: Int?
     @State private var composing = false
+    /// Project (repo) filter for the lists; nil = all. Not persisted: a filter left on hides threads.
+    @State private var projectFilter: Int?
     @AppStorage("expandedProjects") private var expandedRaw = ""
 
     private var expanded: Set<Int> { Set(expandedRaw.split(separator: ",").compactMap { Int($0) }) }
@@ -12,7 +14,7 @@ struct ThreadsView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selected) {
-                let all = model.threads
+                let all = model.threads.filter { projectFilter == nil || model.workspace($0.workspaceId)?.repoId == projectFilter }
                 let inbox = all.filter { model.needsYou($0) || model.status($0.id) == .unread }
                 let working = all.filter { model.status($0.id) == .running && !model.needsYou($0) }
                 let pinned = all.filter { model.isPinned($0) && !inbox.contains($0) && !working.contains($0) }
@@ -53,6 +55,7 @@ struct ThreadsView: View {
                 ArchivedSection()
             }
             .listStyle(.insetGrouped)
+            .safeAreaInset(edge: .top, spacing: 0) { projectChips }
             .refreshable { await model.loadSnapshot() }
             .overlay {
                 if !model.connected && model.threads.isEmpty { ProgressView("Connecting…").controlSize(.large) }
@@ -96,6 +99,37 @@ struct ThreadsView: View {
                 }
             }
         }
+    }
+
+    /// One chip per project that has threads, with its icon; tap = filter, tap again = all.
+    @ViewBuilder private var projectChips: some View {
+        let repos = Dictionary(grouping: model.threads) { model.workspace($0.workspaceId)?.repoId ?? $0.workspaceId }
+        let projects = model.workspaces.filter { $0.parentId == nil && repos[$0.id] != nil }
+        if projects.count > 1 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    chip(nil, "All", nil)
+                    ForEach(projects) { chip($0.id, $0.name, $0) }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+            }
+            .background(.bar)
+        }
+    }
+
+    private func chip(_ id: Int?, _ title: String, _ project: Workspace?) -> some View {
+        let on = projectFilter == id
+        return Button { withAnimation(.snappy) { projectFilter = on ? nil : id } } label: {
+            HStack(spacing: 6) {
+                if let project { ProjectBadge(name: project.name, workspaceId: project.id, size: 18) }
+                Text(title).font(.subheadline.weight(.medium)).lineLimit(1)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .foregroundStyle(on ? Color.accentColor : .primary)
+            .background(on ? Color.accentColor.opacity(0.16) : Color(.secondarySystemFill), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: projectFilter)
     }
 
     private var needsCount: Int { model.threads.filter { model.needsYou($0) }.count }
@@ -278,13 +312,9 @@ struct NewThreadView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Project", selection: $workspace) {
-                        ForEach(model.workspaces.filter { $0.parentId == nil }) { ProjectOptionLabel(name: $0.name, workspaceId: $0.id).tag($0.id) }
-                    }
-                    Picker("Agent", selection: $agent) {
-                        Text("Claude").tag("claude")
-                        Text("Codex").tag("codex")
-                    }.pickerStyle(.segmented)
+                    ProjectPickerField(choices: model.workspaces.filter { $0.parentId == nil }.map { ProjectChoice(id: $0.id, name: $0.name, path: $0.path) },
+                                       selection: $workspace)
+                    AgentCards(agent: $agent).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                 }
                 Section {
                     TextField("What should it do?", text: $text, axis: .vertical).lineLimit(5...14).focused($focused)
@@ -327,31 +357,22 @@ struct LaunchBar: View {
     @Binding var effort: String
     @Binding var permission: String
 
+    @State private var sheet = false
+
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                if !isCodex {
-                    Menu {
-                        Picker("Model", selection: $model) {
-                            ForEach(Catalog.claudeModels, id: \.id) { Text($0.label).tag($0.id) }
-                        }
-                    } label: { chip("cpu", Catalog.modelLabel(model)) }
-                }
-                Menu {
-                    Picker("Effort", selection: $effort) {
-                        ForEach(isCodex ? Catalog.codexEfforts : Catalog.claudeEfforts, id: \.self) { Text(Catalog.effortLabel($0)).tag($0) }
-                    }
-                } label: { chip("gauge.with.dots.needle.50percent", Catalog.effortLabel(effort)) }
-                Menu {
-                    Picker("Permissions", selection: $permission) {
-                        ForEach(Catalog.permissions, id: \.id) { Label($0.label, systemImage: $0.icon).tag($0.id) }
-                    }
-                } label: {
-                    let p = Catalog.permission(permission)
+        let p = Catalog.permission(permission)
+        Button { sheet = true } label: {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    if !isCodex { chip("cpu", Catalog.modelLabel(model)) }
+                    chip("gauge.with.dots.needle.50percent", Catalog.effortLabel(effort))
                     chip(p.icon, p.label, tint: permission == "bypassPermissions" ? .red : permission == "plan" || permission == "acceptEdits" ? .accentColor : nil)
                 }
             }
+            .scrollDisabled(true)
         }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $sheet) { LaunchSheet(isCodex: isCodex, model: $model, effort: $effort, permission: $permission) }
     }
 
     private func chip(_ icon: String, _ text: String, tint: Color? = nil) -> some View {
