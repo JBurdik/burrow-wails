@@ -12,10 +12,12 @@ import (
 // and chat_queue_add). Steer stays a separate, explicit call.
 
 // ChatSubmitResult: Sent = the message went to the agent now; else Item is
-// its place in the queue.
+// its place in the queue. Text = the message as sent (what chat_answer_turn
+// composed — the client's echo); empty on a deduped retry.
 type ChatSubmitResult struct {
 	Sent bool           `json:"sent"`
 	Item *ChatQueueItem `json:"item,omitempty"`
+	Text string         `json:"text,omitempty"`
 }
 
 // ChatSubmit sends text now if the chat is settled and nothing is queued
@@ -53,7 +55,7 @@ func (a *App) submit(chatID int64, images []string, clientID string, compose fun
 		if err != nil {
 			return ChatSubmitResult{}, err
 		}
-		return ChatSubmitResult{Sent: true}, nil
+		return ChatSubmitResult{Sent: true, Text: text}, nil
 	}
 	it, err := a.chatQueueInsert(chatID, text, images, clientID)
 	unlock()
@@ -64,7 +66,7 @@ func (a *App) submit(chatID int64, images []string, clientID string, compose fun
 	finish(true, &it)
 	a.emitQueueChanged(chatID)
 	a.kickChatDelivery()
-	return ChatSubmitResult{Item: &it}, nil
+	return ChatSubmitResult{Item: &it, Text: text}, nil
 }
 
 func (a *App) chatQueueLen(chatID int64) int {

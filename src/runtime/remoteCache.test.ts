@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cacheClear, cacheRead, cacheWrite, drainOutbox, isOfflineError, outboxAdd, outboxRead, outboxRemove, outboxWrite,
+  cacheClear, cacheRead, cacheWrite, drainOutbox, heldCall, isOfflineError, outboxAdd, outboxRead, outboxRemove, outboxWrite,
   type HeldMessage,
 } from "./remoteCache";
 
@@ -98,5 +98,15 @@ describe("drainOutbox", () => {
     expect(x.sent).toEqual(["b"]);
     expect(x.failed).toEqual(["a"]);
     expect(x.list.map((m) => m.id)).toEqual(["a", "c"]);
+  });
+});
+
+describe("heldCall", () => {
+  it("delivers a message through chat_submit and an end_turn answer through chat_answer_turn, same client id", () => {
+    expect(heldCall({ id: "c1", chatId: 3, text: "hi", at: 0 })).toEqual(
+      ["chat_submit", { chatId: 3, text: "hi", images: [], clientId: "c1" }]);
+    const picks = [{ index: 0, options: ["Yes"] }];
+    expect(heldCall({ id: "c2", chatId: 3, text: "Yes", images: ["data:x"], at: 0, answer: { picks, extra: "go" } })).toEqual(
+      ["chat_answer_turn", { chatId: 3, picks, extra: "go", images: ["data:x"], clientId: "c2" }]);
   });
 });

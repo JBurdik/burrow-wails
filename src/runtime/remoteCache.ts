@@ -66,6 +66,20 @@ export interface HeldMessage {
   at: number;
   /** Last refusal that was not the network's (e.g. the chat is gone). */
   error?: string;
+  /**
+   * An end_turn card answer: delivered through chat_answer_turn (Go composes
+   * the message from the stored card) instead of chat_submit; `text` is only
+   * the preview shown while it waits. A changed card is a refusal like any other.
+   */
+  answer?: { picks: { index: number; options?: string[]; text?: string }[]; extra: string };
+}
+
+/** The call that delivers a held message, with its id as the clientId. */
+export function heldCall(m: HeldMessage): [string, Record<string, unknown>] {
+  const images = m.images ?? [];
+  return m.answer
+    ? ["chat_answer_turn", { chatId: m.chatId, picks: m.answer.picks, extra: m.answer.extra, images, clientId: m.id }]
+    : ["chat_submit", { chatId: m.chatId, text: m.text, images, clientId: m.id }];
 }
 
 export function outboxRead(env: string, store = local()): HeldMessage[] {

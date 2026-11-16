@@ -30,8 +30,8 @@ struct ComposerImage: Identifiable {
 enum Drafts {
     static var text: [Int: String] = [:]
     static var images: [Int: [ComposerImage]] = [:]
-    /// Posted (object = chat id) when the end_turn card sent the draft text
-    /// with its answer: the composer empties as for its own send.
+    /// Posted (object = chat id) when the end_turn card sent the draft text and
+    /// images with its answer: the composer empties as for its own send.
     static let taken = Notification.Name("burrow.draft.taken")
 }
 
@@ -114,7 +114,7 @@ struct Composer: View {
         }
         .onChange(of: draft) { _, v in Drafts.text[chatId] = v.isEmpty ? nil : v }
         .onReceive(NotificationCenter.default.publisher(for: Drafts.taken)) { n in
-            if n.object as? Int == chatId { draft = "" }
+            if n.object as? Int == chatId { draft = ""; images = [] }
         }
         .onChange(of: images.map(\.id)) { _, _ in Drafts.images[chatId] = images.isEmpty ? nil : images }
         .onChange(of: phase.state) { _, s in if s != "running" { steer = false } }

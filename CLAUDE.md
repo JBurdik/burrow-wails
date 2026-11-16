@@ -134,7 +134,7 @@ follow-ups). `applyChatPhase` clears it on the **transition into flight** (not o
 mid-turn). AgentChat shows the card only while not busy: Needs you = buttons / Something else, one ask at a time, sent
 with the composer text through **`chat_answer_turn(chatId, picks, extra, clientId)`** (`chatanswerturn.go`): clients send
 only picks (`[{index, options?, text?}]`; Done card = the picked `next`), Go validates them against the stored card, adds
-kept run replies, composes the one message (`composeTurnAnswer`, table-tested) and submits it like `chat_submit`; Done = Archive + follow-ups + **loose ends**
+kept run replies, composes the one message (`composeTurnAnswer`, table-tested) and submits it like `chat_submit` (+ the composer's `images`); the reply's `text` = the composed message, which becomes the client's **echo** (preview first; `answerTurn` in `chatSession.ts`, iOS `AppModel.answerTurn`), and offline it is **held** in the outbox as an answer item (`answer: {picks, extra}`, delivered via `chat_answer_turn` with the same clientId — `heldCall` / `OutboxItem.call`; a changed card is a refusal: marked, never retried); Done = Archive + follow-ups + **loose ends**
 (`chat_loose_ends`: uncommitted files, commits on no remote, open PR, sub-agents in flight, pending check-ins — Go's own
 checks, never the agent's word). **Run on the card:** an ask's `run` (checked by `control.RunCommandProblem`: no
 control / bidi / zero-width chars, ≤ 8000) gets a Run button; `chat_run_ask(chatId, index)` runs the **stored** command

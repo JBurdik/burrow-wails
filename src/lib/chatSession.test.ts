@@ -966,3 +966,53 @@ describe("submit door", () => {
     dropChatSession(97);
   });
 });
+
+// The end_turn card's answer behaves like a composer message: echo now, Go's
+// composed text once it replies, retired by Go's row; held offline as an answer.
+describe("answerTurn", () => {
+  it("echoes the preview, then Go's composed text, until Go's row with the client id", async () => {
+    const f = fakeDeps();
+    const s = chatSession(98, f.deps);
+    fakeGo(f, { messages: [], rev: 1 }, undefined, (cmd) => (cmd === "chat_answer_turn" ? { sent: true, text: "> Ship?\nNo" } : undefined));
+    await s.loadTranscript();
+    const p = s.answerTurn({ picks: [{ index: 0, options: ["No"] }], extra: "" });
+    expect(s.messages.value.map((m) => m.text)).toEqual(["No"]);
+    await p;
+    const call = f.invoke.mock.calls.find((c) => c[0] === "chat_answer_turn")![1] as { clientId: string; images: string[] };
+    expect(call.images).toEqual([]);
+    expect(s.messages.value.map((m) => [m.text, m.clientId])).toEqual([["> Ship?\nNo", call.clientId]]);
+    f.emit("chat-messages-changed-98", splice(1, 2, 0, [msg("user", "> Ship?\nNo", { clientId: call.clientId })]));
+    expect(s.messages.value.map((m) => m.id)).toEqual([0]);
+    dropChatSession(98);
+  });
+
+  it("holds an answer the socket dropped under, as an answer, under the same client id", async () => {
+    const f = fakeDeps();
+    const hold = vi.fn(() => true);
+    (f.deps as ChatSessionDeps).outbox = { list: () => [], hold, drop: vi.fn() };
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_answer_turn") throw new Error("disconnected");
+      return undefined;
+    });
+    const s = chatSession(99, f.deps);
+    const picks = [{ index: 0, text: "later" }];
+    await s.answerTurn({ picks, extra: "note", images: ["data:x"] });
+    const call = f.invoke.mock.calls.find((c) => c[0] === "chat_answer_turn")![1] as { clientId: string };
+    expect(hold).toHaveBeenCalledWith(99, "later\n\nnote", ["data:x"], call.clientId, { picks, extra: "note" });
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    expect(s.busy.value).toBe(false);
+    dropChatSession(99);
+  });
+
+  it("throws Go's refusal and drops the echo", async () => {
+    const f = fakeDeps();
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_answer_turn") throw new Error("the card is gone");
+      return undefined;
+    });
+    const s = chatSession(100, f.deps);
+    await expect(s.answerTurn({ picks: [{ index: 0, text: "x" }], extra: "" })).rejects.toThrow("the card is gone");
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    dropChatSession(100);
+  });
+});

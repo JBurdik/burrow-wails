@@ -24,8 +24,10 @@ type TurnPick struct {
 
 // ChatAnswerTurn composes the answer to the chat's stored card and submits it
 // through the submit door (send if settled, else queue; clientId dedupe).
-func (a *App) ChatAnswerTurn(chatID int64, picks []TurnPick, extra string, clientID string) (ChatSubmitResult, error) {
-	return a.submit(chatID, nil, clientID, func(c Chat) (string, error) {
+// Images = the composer's, riding along like extra. The reply's Text is the
+// composed message, which the client shows as its echo.
+func (a *App) ChatAnswerTurn(chatID int64, picks []TurnPick, extra string, images []string, clientID string) (ChatSubmitResult, error) {
+	return a.submit(chatID, images, clientID, func(c Chat) (string, error) {
 		var n control.TurnNeeds
 		if c.TurnNeeds == "" || json.Unmarshal([]byte(c.TurnNeeds), &n) != nil {
 			return "", fmt.Errorf("the card is gone — a new turn has started")

@@ -58,3 +58,14 @@ export function turnPicks(asks: TurnAsk[], answers: (string | undefined)[], type
     return [{ index: i, options: a.multi ? a.options.filter((o) => v.split(", ").includes(o)) : [v] }];
   });
 }
+
+/**
+ * What the echo / a held answer shows until Go's composed text is known
+ * (chat_answer_turn's reply). Only a preview: Go's composeTurnAnswer is the
+ * message (questions quoted, kept run replies added).
+ */
+export function answerPreview(picks: TurnPick[], extra: string): string {
+  return [...picks.map((p) => (p.options?.length ? p.options.join(", ") : (p.text ?? "").trim())), extra.trim()]
+    .filter(Boolean)
+    .join("\n\n");
+}

@@ -60,20 +60,20 @@ func TestChatAnswerTurnSubmits(t *testing.T) {
 	withPhases(t, a)
 	writeConfig(t, map[string]any{"providers": []any{claudeAt("claude", "")}})
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
-	if _, err := a.ChatAnswerTurn(c.ID, []TurnPick{{Index: 0, Text: "x"}}, "", "a-0"); err == nil {
+	if _, err := a.ChatAnswerTurn(c.ID, []TurnPick{{Index: 0, Text: "x"}}, "", nil, "a-0"); err == nil {
 		t.Fatal("answer with no card: want an error")
 	}
 	if err := a.SetTurnNeeds(c.ID, control.TurnNeeds{Needs: "you", Asks: []control.TurnAsk{{Question: "Ship?", Options: []string{"Yes", "No"}}}}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := a.ChatAnswerTurn(c.ID, []TurnPick{{Index: 0, Options: []string{"No"}}}, "wait", "a-1")
-	if err != nil || !res.Sent {
-		t.Fatalf("answer = %+v, %v; want sent", res, err)
+	res, err := a.ChatAnswerTurn(c.ID, []TurnPick{{Index: 0, Options: []string{"No"}}}, "wait", nil, "a-1")
+	if err != nil || !res.Sent || res.Text != "No\n\nwait" {
+		t.Fatalf("answer = %+v, %v; want sent with the composed text", res, err)
 	}
 	if n := countSent(fake.sent, `No\n\nwait`); n != 1 {
 		t.Fatalf("sent %d times", n)
 	}
-	if _, err := a.ChatAnswerTurn(c.ID, []TurnPick{{Index: 0, Options: []string{"No"}}}, "wait", "a-1"); err != nil {
+	if _, err := a.ChatAnswerTurn(c.ID, []TurnPick{{Index: 0, Options: []string{"No"}}}, "wait", nil, "a-1"); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 	if n := countSent(fake.sent, `No\n\nwait`); n != 1 {

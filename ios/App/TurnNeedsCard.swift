@@ -6,6 +6,9 @@ struct TurnNeedsCard: View {
     let needs: TurnNeeds
     let chatId: Int
     @State private var answers: [Int: Set<String>] = [:]
+    /// "Something else": the user's own words for an ask (replaces its options).
+    @State private var other: [Int: String] = [:]
+    @State private var otherOpen: Set<Int> = []
     @State private var confirmRun: Int?
     @State private var starting: Int?
     @State private var runError: String?
@@ -23,18 +26,17 @@ struct TurnNeedsCard: View {
                         ForEach(Array(ask.options.enumerated()), id: \.offset) { j, opt in
                             option(i, ask, j, opt)
                         }
+                        somethingElse(i, ask)
                     }
                 }
-                if needs.asks.contains(where: { !$0.options.isEmpty }) {
-                    Button("Send answers") { Task { await answer(picks) } }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.roundedRectangle(radius: 10))
-                        .disabled(sending || answers.values.allSatisfy(\.isEmpty) && !needs.asks.contains { !($0.run?.reply ?? "").isEmpty })
-                }
+                Button("Send answers") { Task { await answer(picks) } }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: 10))
+                    .disabled(sending || picks.isEmpty && !needs.asks.contains { !($0.run?.reply ?? "").isEmpty })
             } else {
                 Label("Done", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
                 ForEach(needs.next, id: \.self) { n in
-                    Button { Task { await answer([["index": 0, "options": [n]]]) } } label: {
+                    Button { Task { await answer([TurnPickItem(index: 0, options: [n])]) } } label: {
                         HStack { Text(n).multilineTextAlignment(.leading); Spacer(); Image(systemName: "arrow.up.right") }
                             .font(.subheadline)
                     }
@@ -106,6 +108,7 @@ struct TurnNeedsCard: View {
             var s = answers[i, default: []]
             if ask.multi { if picked { s.remove(opt) } else { s.insert(opt) } } else { s = picked ? [] : [opt] }
             answers[i] = s
+            if !s.isEmpty { otherOpen.remove(i) }
         } label: {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: picked ? (ask.multi ? "checkmark.square.fill" : "largecircle.fill.circle") : (ask.multi ? "square" : "circle"))
@@ -126,25 +129,48 @@ struct TurnNeedsCard: View {
         .buttonStyle(.plain)
     }
 
-    /// Per ask: the picked options (Go joins them, in card order).
-    private var picks: [[String: Any]] {
+    /// The desktop card's Something else: a free-text answer instead of the
+    /// options (an ask with no options gets the field straight away).
+    @ViewBuilder private func somethingElse(_ i: Int, _ ask: TurnAsk) -> some View {
+        if ask.options.isEmpty && ask.run == nil || otherOpen.contains(i) {
+            TextField("Your answer", text: Binding(get: { other[i] ?? "" }, set: { other[i] = $0 }), axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .font(.subheadline)
+                .lineLimit(1...4)
+        } else if !ask.options.isEmpty {
+            Button {
+                otherOpen.insert(i)
+                answers[i] = []
+            } label: {
+                Label("Something else", systemImage: "pencil").font(.subheadline)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Per ask: the typed answer, else the picked options (Go joins them, in card order).
+    private var picks: [TurnPickItem] {
         needs.asks.indices.compactMap { i in
+            let typed = (other[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if (otherOpen.contains(i) || needs.asks[i].options.isEmpty), !typed.isEmpty { return TurnPickItem(index: i, text: typed) }
             let picked = needs.asks[i].options.filter { answers[i, default: []].contains($0) }
-            return picked.isEmpty ? nil : ["index": i, "options": picked]
+            return picked.isEmpty ? nil : TurnPickItem(index: i, options: picked)
         }
     }
 
     /// chat_answer_turn: Go composes the message from the stored card (kept run
-    /// replies included) and submits it; the composer's draft goes with it.
-    private func answer(_ picks: [[String: Any]]) async {
-        guard let client = model.client else { sendError = BurrowError.closed.localizedDescription; return }
+    /// replies included) and submits it; the composer's draft text and images go
+    /// with it. Echo + offline hold like a composer send (AppModel.answerTurn).
+    private func answer(_ picks: [TurnPickItem]) async {
         sending = true; sendError = nil
         defer { sending = false }
         let extra = Drafts.text[chatId] ?? ""
+        let images = (Drafts.images[chatId] ?? []).map(\.dataURI)
         do {
-            _ = try await client.call("chat_answer_turn", ["chatId": chatId, "picks": picks, "extra": extra, "clientId": UUID().uuidString])
-            if !extra.isEmpty { NotificationCenter.default.post(name: Drafts.taken, object: chatId) }
-            model.nudgeChat(chatId)
+            _ = try await model.answerTurn(chatId, picks, extra: extra, images: images)
+            Drafts.text[chatId] = nil; Drafts.images[chatId] = nil
+            NotificationCenter.default.post(name: Drafts.taken, object: chatId)
         } catch { sendError = error.localizedDescription }
     }
 }

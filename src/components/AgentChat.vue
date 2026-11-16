@@ -493,8 +493,9 @@
         :chat-id="chatId"
         :archived="!!activeSession?.archivedAt"
         :composer-text="inputText"
+        :composer-images="pendingImages"
         :cwd="cwd"
-        @sent="inputText = ''"
+        @sent="inputText = ''; pendingImages = []"
         @archive="archiveFromCard"
         @open-chat="openSubagentFromTranscript"
       />

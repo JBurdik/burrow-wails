@@ -7,7 +7,7 @@ import { appTransport, invoke, remoteActive } from "@/lib/wailsCompat/core";
 import { activeEnvironmentId } from "@/runtime/remoteEndpoint";
 import { createLinkStatus, type LinkState } from "@/runtime/linkStatus";
 import {
-  drainOutbox, isOfflineError, outboxAdd, outboxKey, outboxRead, outboxRemove, outboxWrite, type HeldMessage,
+  drainOutbox, heldCall, isOfflineError, outboxAdd, outboxKey, outboxRead, outboxRemove, outboxWrite, type HeldMessage,
 } from "@/runtime/remoteCache";
 
 export { isOfflineError, type HeldMessage };
@@ -68,10 +68,13 @@ export function newClientId(): string {
  * every retry, so a call that already reached Go before the socket dropped is
  * not delivered twice. False = not held (not remote, or storage full).
  */
-export function holdMessage(chatId: number, text: string, images?: string[], clientId = newClientId()): boolean {
+export function holdMessage(
+  chatId: number, text: string, images?: string[], clientId = newClientId(), answer?: HeldMessage["answer"],
+): boolean {
   startOffline();
   if (!started || !env) return false;
-  if (!commit(outboxAdd(outboxRead(env), { id: clientId, chatId, text, ...(images?.length ? { images } : {}), at: Date.now() }))) return false;
+  const item: HeldMessage = { id: clientId, chatId, text, ...(images?.length ? { images } : {}), ...(answer ? { answer } : {}), at: Date.now() };
+  if (!commit(outboxAdd(outboxRead(env), item))) return false;
   if (up) void deliverHeld();
   return true;
 }
@@ -82,7 +85,7 @@ export function dropHeld(id: string): void {
 
 let draining: Promise<number> | null = null;
 let again = false;
-/** Deliver everything held, in order, through chat_submit with the held id (Go sends or queues it). */
+/** Deliver everything held, in order, through chat_submit (an end_turn answer: chat_answer_turn) with the held id (Go sends or queues it). */
 export function deliverHeld(): Promise<number> {
   if (!started || !env) return Promise.resolve(0);
   if (draining) {
@@ -93,7 +96,7 @@ export function deliverHeld(): Promise<number> {
   again = false;
   draining = drainOutbox({
     read: () => outboxRead(env),
-    send: async (m) => { await invoke("chat_submit", { chatId: m.chatId, text: m.text, images: m.images ?? [], clientId: m.id }); },
+    send: async (m) => { await invoke(...heldCall(m)); },
     remove: (id) => { commit(outboxRemove(outboxRead(env), id)); },
     fail: (id, error) => { commit(outboxRead(env).map((m) => (m.id === id ? { ...m, error } : m))); },
   }).finally(() => {

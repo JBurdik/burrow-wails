@@ -16,6 +16,7 @@ import { appTransport } from "@/lib/wailsCompat/core";
 import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import { appChatHost, type ChatHost } from "@/lib/chatHost";
 import { dropHeld, heldFor, holdMessage, isOfflineError, newClientId, type HeldMessage } from "@/lib/offline";
+import { answerPreview, type TurnPick } from "@/lib/turnNeeds";
 
 // Who owns a chat's stream — the answer used to be "whichever AgentChat.vue is
 // mounted", which is what made the component un-unmountable: its
@@ -58,6 +59,9 @@ export interface ChatViewHooks {
   usesRpcRuntime(): boolean;
 }
 
+/** An end_turn card's answer: picks + the composer's text and images. */
+export interface TurnAnswer { picks: TurnPick[]; extra: string; images?: string[] }
+
 /** The session's outside world. Injected so tests can run it with no Tauri, no Pinia. */
 export interface ChatSessionDeps {
   invoke: typeof tauriInvoke;
@@ -67,7 +71,7 @@ export interface ChatSessionDeps {
   outbox?: {
     list(chatId: number): HeldMessage[];
     /** Holds behind anything already held for the chat and kicks the drain while up. */
-    hold(chatId: number, text: string, images?: string[], clientId?: string): boolean;
+    hold(chatId: number, text: string, images?: string[], clientId?: string, answer?: HeldMessage["answer"]): boolean;
     drop(id: string): void;
   };
   /** Calls `cb` each time the socket comes back after a drop (chat channels are not ringed). */
@@ -318,6 +322,13 @@ export interface ChatSession extends ReadonlyRefs<SessionState> {
    * refused — and the message is back in the queue at its old position.
    */
   steer(queuedId: number): Promise<boolean>;
+  /**
+   * Answer the end_turn card like a composer message (`chat_answer_turn`): an
+   * echo at once (a preview, then Go's composed text from the reply) until Go's
+   * row with the client id arrives; held in the outbox offline. Throws Go's
+   * refusal (e.g. the card is gone) for the card to show.
+   */
+  answerTurn(answer: TurnAnswer): Promise<void>;
   /** Stop the process; Go publishes session.reset and the next send starts a fresh one. */
   restart(): Promise<void>;
   /** End the running turn (no "finished" toast); Go restarts if the provider can't stop in place. */
@@ -853,6 +864,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         s.loadingEarlier.value = false;
       }
     },
+    answerTurn: (a) => answerTurnVia(s.deps, chatId, a, s),
     hydrate({ sessionId }) {
       if (sessionId) s.sessionId.value = sessionId;
     },
@@ -1055,6 +1067,60 @@ export function chatSession(chatId: number, deps: ChatSessionDeps = appDeps): Ch
     sessions.set(chatId, s);
   }
   return s;
+}
+
+/**
+ * The end_turn card's door: through the chat's session when one is live (it
+ * shows the echo), else straight to Go — DecisionsList answers threads with no
+ * view open; the outbox still holds it offline.
+ */
+export function answerTurn(chatId: number, a: TurnAnswer): Promise<void> {
+  const s = sessions.get(chatId);
+  return s ? s.answerTurn(a) : answerTurnVia(appDeps, chatId, a);
+}
+
+async function answerTurnVia(deps: ChatSessionDeps, chatId: number, a: TurnAnswer, s?: InternalSession): Promise<void> {
+  const clientId = newClientId();
+  const preview = answerPreview(a.picks, a.extra);
+  const answer = { picks: a.picks, extra: a.extra };
+  const hold = () => deps.outbox?.hold(chatId, preview, a.images, clientId, answer) ?? false;
+  // Behind messages already held for this chat, never ahead of them.
+  if (deps.outbox?.list(chatId).length && hold()) return;
+  // Same guess as submit: a settled chat shows the echo now.
+  const id = s && !s.busy.value ? s.postUserMessage({ text: preview, images: a.images, clientId }) : null;
+  const dropEcho = () => {
+    if (!s || id === null) return;
+    s.pendingSends.delete(clientId);
+    s.removeFeedMarker(id);
+    s.busy.value = false;
+    s.sync();
+  };
+  if (s && id !== null) {
+    s.startTurn();
+    s.sync();
+    s.view?.scrollToBottom(true);
+  }
+  let res: { sent: boolean; item?: GoQueueItem; text?: string } | undefined;
+  try {
+    res = await deps.invoke<{ sent: boolean; item?: GoQueueItem; text?: string }>("chat_answer_turn", {
+      chatId, picks: a.picks, extra: a.extra, images: a.images ?? [], clientId,
+    });
+  } catch (e) {
+    dropEcho();
+    if (isOfflineError(e) && hold()) return;
+    throw e;
+  }
+  if (!s) return;
+  if (res?.item) {
+    dropEcho();
+    const entry = fromGo(res.item);
+    if (!s.queue.value.some((q) => q.id === entry.id)) s.queue.value = [...s.queue.value, entry];
+    return;
+  }
+  // The echo now says what Go sent.
+  if (id !== null && res?.text) {
+    s.local.value = s.local.value.map((l) => (l.row.id === id ? { ...l, row: { ...l.row, text: res.text! } } : l));
+  }
 }
 
 /** Forget a chat entirely (chat closed/deleted), listeners included. */

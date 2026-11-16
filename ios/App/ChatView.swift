@@ -238,10 +238,12 @@ struct ChatView: View {
         DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
     }
 
-    /// `{clientId, text}` adds an echo; `{clientId}` alone drops that one.
+    /// `{clientId, text}` adds an echo (or rewrites that one's text — the end_turn
+    /// answer's preview becomes Go's composed text); `{clientId}` alone drops it.
     private func localEcho(_ p: [String: Any]?) {
         let cid = p?["clientId"] as? String ?? ""
         guard let text = p?["text"] as? String else { echoes.removeAll { $0.clientId == cid }; return }
+        if !cid.isEmpty, let i = echoes.firstIndex(where: { $0.clientId == cid }) { echoes[i].text = text; return }
         var m = Message(["role": "user", "text": text, "clientId": cid], index: 0)
         m.id = -1 - echoes.count // never a transcript id
         m.after = earlier + raw.count

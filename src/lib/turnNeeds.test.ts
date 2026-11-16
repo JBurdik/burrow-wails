@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTurnNeeds, turnPicks } from "./turnNeeds";
+import { answerPreview, parseTurnNeeds, turnPicks } from "./turnNeeds";
 
 describe("turnNeeds", () => {
   it("parses only valid rows", () => {
@@ -23,5 +23,12 @@ describe("turnNeeds", () => {
       { index: 3, text: "mine" },
       { index: 4, text: "api" },
     ]);
+  });
+});
+
+describe("answerPreview", () => {
+  it("joins picked options / typed text, then the composer text", () => {
+    expect(answerPreview([{ index: 0, options: ["A", "B"] }, { index: 1, text: " mine " }], " note ")).toBe("A, B\n\nmine\n\nnote");
+    expect(answerPreview([], "")).toBe("");
   });
 });

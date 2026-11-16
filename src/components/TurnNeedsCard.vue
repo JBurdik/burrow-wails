@@ -115,11 +115,11 @@ import {
   PhArchive, PhCaretDown, PhCaretLeft, PhCaretRight, PhCheckCircle, PhCheckSquare, PhClock, PhDotOutline,
   PhGitBranch, PhGitPullRequest, PhHandPalm, PhPencilSimple, PhPlay, PhSquare, PhStar, PhTerminalWindow, PhUsersThree,
 } from "@phosphor-icons/vue";
-import { newClientId } from "@/lib/offline";
+import { answerTurn } from "@/lib/chatSession";
 import { turnPicks, type LooseEnd, type TurnNeeds, type TurnPick } from "@/lib/turnNeeds";
 
-const props = defineProps<{ needs: TurnNeeds; chatId: number; archived: boolean; composerText: string; cwd?: string }>();
-/** sent: Go took the answer (chat_answer_turn) — the composer text went with it. */
+const props = defineProps<{ needs: TurnNeeds; chatId: number; archived: boolean; composerText: string; composerImages?: string[]; cwd?: string }>();
+/** sent: Go took the answer (chat_answer_turn) or the outbox holds it — the composer text and images went with it. */
 const emit = defineEmits<{ sent: []; archive: []; openChat: [id: number] }>();
 
 const LOOSE_ICONS: Record<string, unknown> = {
@@ -243,13 +243,14 @@ async function runIt() {
 }
 
 // Go composes the message from the stored card (chat_answer_turn); the card
-// sends only what was picked, plus the composer text.
+// sends only what was picked, plus the composer text and images. Echo +
+// offline hold: answerTurn (chatSession.ts), like a composer send.
 async function submit(picks: TurnPick[]) {
   if (sending.value) return;
   sending.value = true;
   sendError.value = "";
   try {
-    await invoke("chat_answer_turn", { chatId: props.chatId, picks, extra: props.composerText, clientId: newClientId() });
+    await answerTurn(props.chatId, { picks, extra: props.composerText, images: props.composerImages?.length ? props.composerImages : undefined });
     emit("sent");
   } catch (e) {
     sendError.value = String(e);

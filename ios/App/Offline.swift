@@ -32,6 +32,46 @@ struct OutboxItem: Codable, Identifiable, Hashable {
     var images: [String]
     /// Last server refusal (e.g. the chat is gone); kept for the user to delete.
     var error: String?
+    /// An end_turn card answer: delivered via chat_answer_turn (Go composes the
+    /// message from the stored card); `text` is only its preview. A changed card
+    /// is a refusal like any other.
+    var answer: HeldAnswer?
+
+    /// The call that delivers it, with `id` as the clientId.
+    var call: (String, [String: Any]) {
+        guard let answer else {
+            return ("chat_submit", ["chatId": chatId, "text": text, "images": images, "clientId": id.uuidString])
+        }
+        return ("chat_answer_turn", ["chatId": chatId, "picks": answer.picks.map(\.wire), "extra": answer.extra,
+                                     "images": images, "clientId": id.uuidString])
+    }
+}
+
+/// One ask's answer for chat_answer_turn: picked option labels, else free text.
+struct TurnPickItem: Codable, Hashable {
+    var index: Int
+    var options: [String]?
+    var text: String?
+
+    var wire: [String: Any] {
+        var d: [String: Any] = ["index": index]
+        if let options { d["options"] = options }
+        if let text { d["text"] = text }
+        return d
+    }
+}
+
+struct HeldAnswer: Codable, Hashable {
+    var picks: [TurnPickItem]
+    var extra: String
+
+    /// What the echo / held row shows until Go's composed text is known
+    /// (answerPreview in turnNeeds.ts).
+    var preview: String {
+        (picks.map { $0.options.map { $0.joined(separator: ", ") } ?? ($0.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+            + [extra.trimmingCharacters(in: .whitespacesAndNewlines)])
+            .filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
 }
 
 extension Workspace {
@@ -141,8 +181,8 @@ extension AppModel {
 
     /// `id` is also the item's `clientId` on the wire: every retry carries the same
     /// one, so Go drops a repeat (a reply lost to a drop no longer means two copies).
-    func enqueue(_ chat: Int, _ text: String, _ images: [String] = [], id: UUID = UUID()) {
-        outbox.append(OutboxItem(id: id, chatId: chat, text: text, images: images))
+    func enqueue(_ chat: Int, _ text: String, _ images: [String] = [], id: UUID = UUID(), answer: HeldAnswer? = nil) {
+        outbox.append(OutboxItem(id: id, chatId: chat, text: text, images: images, answer: answer))
         saveOutbox()
         if online { Task { await flushOutbox() } }
     }
@@ -176,8 +216,43 @@ extension AppModel {
         }
     }
 
+    /// The end_turn card's answer, like a composer send: echo (the preview, then
+    /// Go's composed text from the reply) until Go's row with the client id lands;
+    /// held under the same id offline / behind held items / on a mid-call drop.
+    /// A refusal (the card changed) throws.
+    @MainActor func answerTurn(_ chat: Int, _ picks: [TurnPickItem], extra: String, images: [String]) async throws -> Submitted {
+        let cid = UUID()
+        let answer = HeldAnswer(picks: picks, extra: extra)
+        guard let client, client.isOpen, !outbox.contains(where: { $0.chatId == chat }) else {
+            enqueue(chat, answer.preview, images, id: cid, answer: answer); return .held
+        }
+        let echo = !phase(chat).inFlight
+        if echo { localSend(chat, answer.preview, clientId: cid) }
+        let item = OutboxItem(id: cid, chatId: chat, text: answer.preview, images: images, answer: answer)
+        do {
+            let (cmd, args) = item.call
+            let r = try await client.call(cmd, args) as? [String: Any]
+            if r?["sent"] as? Bool == false {
+                if echo { localSend(chat, nil, clientId: cid) }
+                nudgeChat(chat)
+                return .queued
+            }
+            if echo, let t = r?["text"] as? String, !t.isEmpty { localSend(chat, t, clientId: cid) }
+            if let c = self.chat(chat) { startActivity(c) }
+            nudgeChat(chat)
+            return .sent
+        } catch BurrowError.closed {
+            if echo { localSend(chat, nil, clientId: cid) }
+            enqueue(chat, answer.preview, images, id: cid, answer: answer)
+            return .held
+        } catch {
+            if echo { localSend(chat, nil, clientId: cid) }
+            throw error
+        }
+    }
+
     /// On every socket open (and after an enqueue while online): each pending item
-    /// in order through chat_submit (Go sends it or queues it), with
+    /// in order through chat_submit / chat_answer_turn (Go sends it or queues it), with
     /// its clientId. Removed only after success; a refusal keeps its error and holds
     /// that chat's later items back (others go on); a dropped socket stops the pass.
     @MainActor func flushOutbox() async {
@@ -190,8 +265,8 @@ extension AppModel {
                 guard let client, client.isOpen else { return }
                 guard let item = outbox.first(where: { $0.id == id }), !blocked.contains(item.chatId) else { continue }
                 do {
-                    try await client.call("chat_submit", ["chatId": item.chatId, "text": item.text, "images": item.images,
-                                                          "clientId": item.id.uuidString])
+                    let (cmd, args) = item.call
+                    try await client.call(cmd, args)
                     outbox.removeAll { $0.id == id }
                     nudgeChat(item.chatId)
                 } catch BurrowError.closed {
