@@ -276,23 +276,6 @@ struct ProjectBadge: View {
     }
 }
 
-/// A project's icon (or its letter badge) as a menu / picker row image. Menus draw
-/// only a rendered image, not a View, so the badge is rasterised.
-struct ProjectOptionLabel: View {
-    let name: String
-    let workspaceId: Int
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        Label {
-            Text(name)
-        } icon: {
-            let r = ImageRenderer(content: ProjectBadge(name: name, workspaceId: workspaceId, size: 22).environment(model))
-            if let ui = r.uiImage { Image(uiImage: ui).renderingMode(.original) } else { Image(systemName: "folder") }
-        }
-    }
-}
-
 struct NewThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
