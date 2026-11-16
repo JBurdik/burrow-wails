@@ -398,6 +398,12 @@
       @source="htmlSource[act(pi)!] = true"
     />
 
+    <ImageFileSurface
+      v-else-if="act(pi)?.startsWith(FILE_PREFIX) && isImageFile(act(pi)!)"
+      :path="act(pi)!.slice(FILE_PREFIX.length)"
+      :cwd="props.cwd"
+    />
+
     <div v-else-if="act(pi)?.startsWith(FILE_PREFIX)" class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <button
         v-if="isHtmlFile(act(pi)!)"
@@ -764,6 +770,7 @@ import { PhTerminalWindow } from "@phosphor-icons/vue";
 import ProgressSurface from "./ProgressSurface.vue";
 import HighlightsSurface from "./HighlightsSurface.vue";
 import HtmlFileSurface from "./HtmlFileSurface.vue";
+import ImageFileSurface from "./ImageFileSurface.vue";
 import SideChatSurface from "./SideChatSurface.vue";
 import { PhChatsCircle } from "@phosphor-icons/vue";
 import MarkdownDocSurface from "./MarkdownDocSurface.vue";
@@ -824,6 +831,7 @@ const FILE_PREFIX = "file:";
 const htmlSource = reactive<Record<string, boolean>>({});
 const isHtmlFile = (id: string) => /\.html?$/i.test(id);
 const FILES_KEY = "burrow.rpFiles";
+const isImageFile = (id: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(id);
 const isMarkdown = (id: string) => /\.(md|markdown|mdx)$/i.test(id);
 /** Markdown file tabs open rendered; true = switched to the editor. Per surface id, not persisted. */
 const mdEditing = reactive<Record<string, boolean>>({});
