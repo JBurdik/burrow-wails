@@ -822,6 +822,12 @@
               </HoverCardPortal>
             </HoverCardRoot>
             <span v-if="sessionCost > 0 && !busy" class="px-1 font-mono text-[10px] text-muted-foreground">${{ sessionCost.toFixed(4) }}</span>
+            <!-- While a turn runs: queue it for the turn's end, or steer it in now.
+                 Without these a phone (Enter = newline) had only Stop. -->
+            <template v-if="busy && inputText.trim()">
+              <button v-if="steerable" class="composer-send" title="Steer: deliver into the running turn now (⌘↵)" @click="steerNow"><PhArrowRight :size="14" weight="bold" /></button>
+              <button class="composer-send" title="Queue: send when this turn ends (↵)" @click="sendMessage()"><PhArrowUp :size="14" weight="bold" /></button>
+            </template>
             <button
               v-if="busy"
               class="composer-send composer-send-abort"
@@ -1285,6 +1291,10 @@ const effectiveTransport = computed<ChatTransport>(() =>
 const usesRpcRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
 // Steer (chat_steer): a queued follow-up delivered into the running turn.
 const steerable = computed(() => busy.value && canSteer(effectiveTransport.value));
+/** Queue it, then steer the queued item into the running turn (chat_steer). */
+function steerNow() {
+  void sendMessage().then((r) => { if (r?.queued) void S.steer(r.id); });
+}
 // Codex's app-server bridge reports the same modes/configOptions shape, so
 // everything ACP-flavoured (effort, mode, history) applies to it too.
 const isAcpRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
@@ -2912,7 +2922,7 @@ function onKeydown(e: KeyboardEvent) {
   // ⌘/Ctrl+Enter while busy: queue it, then steer it into the running turn.
   if (e.key === "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey) && steerable.value) {
     e.preventDefault();
-    void sendMessage().then((r) => { if (r?.queued) void S.steer(r.id); });
+    steerNow();
     return;
   }
   // On a phone the soft keyboard has no Shift+Enter, so Enter is a newline
