@@ -37,7 +37,8 @@ struct QueuePanel: View {
                     PendingOutboxRows(chatId: chatId)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(.bar)
+                .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .padding(.horizontal, 8).padding(.top, 4)
                 .animation(.default, value: items)
             }
         }
@@ -95,7 +96,7 @@ struct QueuePanel: View {
             .foregroundStyle(.secondary)
         }
         .padding(8)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: wire

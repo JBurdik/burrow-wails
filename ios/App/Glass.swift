@@ -8,6 +8,7 @@ extension View {
             self.glassEffect(makeGlass(interactive: interactive, tint: tint), in: shape)
         } else {
             self.background(.regularMaterial, in: shape)
+                .background(tint.map { shape.fill($0.opacity(0.4)) })
                 .overlay(shape.strokeBorder(Color(.separator).opacity(0.35), lineWidth: 0.5))
         }
     }

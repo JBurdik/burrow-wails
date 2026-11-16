@@ -217,7 +217,8 @@ struct PendingRequestsView: View {
                 .scrollBounceBehavior(.basedOnSize)
                 .frame(maxHeight: 420)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(.bar)
+                .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .padding(.horizontal, 8).padding(.top, 4)
             }
         }
         .disabled(r.busy)
@@ -272,7 +273,7 @@ private struct Card<Content: View>: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .glassSurface(RoundedRectangle(cornerRadius: 14, style: .continuous), tint: tint.opacity(0.3))
     }
 }
 
