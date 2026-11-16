@@ -44,4 +44,14 @@ describe("threadFeed", () => {
     expect(g.recent).toEqual(["chat:4"]);
     expect(feedGroups(rows, 0).find((x) => x.key === "recent")!.rows).toEqual([]);
   });
+
+  it("a settled thread whose end_turn asked is Needs you; a running one stays Working", () => {
+    const asked = { needsYou: true } as Partial<ClaudeSession>;
+    const r = feedRows(snap, [chat(1, 1, asked), chat(3, 1, asked), chat(4, 1, asked)], {}, now);
+    const g = Object.fromEntries(feedGroups(r).map((x) => [x.key, x.rows.map((x) => x.key)]));
+    expect(g.needs.sort()).toEqual(["chat:3", "chat:4"]);
+    expect(g.working.sort()).toEqual(["chat:1", "pty:9"]);
+    expect(g.unread).toEqual([]);
+    expect(g.recent).toEqual([]);
+  });
 });

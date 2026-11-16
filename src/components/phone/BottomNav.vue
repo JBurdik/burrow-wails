@@ -4,11 +4,11 @@ import { useRoute } from "vue-router";
 import { PhChatsCircle, PhGitBranch, PhDotsThreeOutline } from "@phosphor-icons/vue";
 import { router } from "@/router";
 import { phoneScreen } from "@/lib/phoneNav";
-import { needsYou, useThreadFeed } from "@/lib/threadFeed";
+import { rowNeedsYou, useThreadFeed } from "@/lib/threadFeed";
 
 const route = useRoute();
 const { rows } = useThreadFeed();
-const needsCount = computed(() => rows.value.filter((r) => needsYou(r.status)).length);
+const needsCount = computed(() => rows.value.filter(rowNeedsYou).length);
 
 const items = [
   { screen: "threads", path: "/", label: "Threads", icon: PhChatsCircle },

@@ -29,6 +29,8 @@ export interface FeedRow {
   route: string;
   at: number;
   recap?: string;
+  /** Go's `needs_you`: the last end_turn asked the user something. */
+  asksYou?: boolean;
   /** The project's logo (a worktree shows its repo's). */
   icon?: string;
 }
@@ -48,14 +50,18 @@ export interface FeedGroup {
 
 export const needsYou = (st: TermStatus) => st === "permission" || st === "waiting" || st === "error";
 export const unread = (st: TermStatus) => st === "review" || st === "done";
+/** A row needs you: a blocked phase, or a settled turn whose end_turn asked
+ *  (Go's needs_you) — the Sidebar's and iOS `needsYou` rule. Running stays Working. */
+export const rowNeedsYou = (r: FeedRow) => needsYou(r.status) || (r.status !== "running" && !!r.asksYou);
 
 /** Needs you → Working → Unread → Recent (idle, at most `recentCap`). Rows keep their order. */
 export function feedGroups(rows: FeedRow[], recentCap = Infinity): FeedGroup[] {
+  const rest = rows.filter((r) => !rowNeedsYou(r));
   return [
-    { key: "needs", label: "Needs you", rows: rows.filter((r) => needsYou(r.status)) },
-    { key: "working", label: "Working", rows: rows.filter((r) => r.status === "running") },
-    { key: "unread", label: "Unread", rows: rows.filter((r) => unread(r.status)) },
-    { key: "recent", label: "Recent", rows: rows.filter((r) => r.status === "idle").slice(0, recentCap) },
+    { key: "needs", label: "Needs you", rows: rows.filter(rowNeedsYou) },
+    { key: "working", label: "Working", rows: rest.filter((r) => r.status === "running") },
+    { key: "unread", label: "Unread", rows: rest.filter((r) => unread(r.status)) },
+    { key: "recent", label: "Recent", rows: rest.filter((r) => r.status === "idle").slice(0, recentCap) },
   ];
 }
 
@@ -80,7 +86,7 @@ export function feedRows(
       key: `chat:${c.id}`, kind: "chat", id: c.id, workspaceId: c.workspaceId, repoId: repoOf(c.workspaceId),
       title: c.title || `Chat ${c.id}`, workspace: byId.get(c.workspaceId)?.name ?? "",
       detail: status === "permission" || status === "waiting" ? (phase?.detail ?? "") : "",
-      status, route: `/ws/${c.workspaceId}?chat=${c.id}`, recap: c.recap, icon: icons[repoOf(c.workspaceId)],
+      status, route: `/ws/${c.workspaceId}?chat=${c.id}`, recap: c.recap, asksYou: c.needsYou, icon: icons[repoOf(c.workspaceId)],
       at: Math.max(c.lastActivityAt ?? 0, phase?.updated_at ?? 0),
     });
   }

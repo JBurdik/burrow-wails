@@ -371,7 +371,8 @@ just-submitted prompt (gone when a splice carries a user row with its `clientId`
 notices. `loadTranscript()` = page (its `rev`) then `chat_subscribe(sinceRev)` (closes the race); a splice whose
 `baseRev` isn't the held rev, and every socket reconnect (`onReconnect`, chat channels aren't ringed), catch up the
 same way. Go's legacy `queued` rows are hidden; the `/context` answer never becomes a row (the fold drops it, the card reads the
-live `text.delta`). **What the transcript draws** (message / "Ran N commands" tool group / settled turn's "Worked" fold) is
+live `text.delta`); an old row folded before that goes out `plumbing: true` on every read path (`isContextReportRow`,
+marked in `stubRowImages` — the one outbound-row door — and `stubChatImages` for raw pages; index kept). **What the transcript draws** (message / "Ran N commands" tool group / settled turn's "Worked" fold) is
 one pure rule, `src/lib/transcriptRows.ts` = `ios/App/Transcript.swift`, pinned for both by `fixtures/transcript-rows.json`
 (vitest + XCTest); AgentChat adds only the changed-files card and labels. A component
 `attachView(ChatViewHooks)`s on mount — scroll, question/plan draft resets, ACP selector restore, `send`
@@ -769,7 +770,8 @@ devtools) and `ConnectView.vue`.
 
 Phone width (`compact` in `src/lib/viewport.ts`, ≤ 767 px) switches `App.vue` to the phone shell
 (`src/components/phone/`: bottom nav Threads / Project / More; Threads is `ThreadsScreen.vue` over `src/lib/threadFeed.ts` —
-the tray panel's feed: every project's active threads grouped Needs you / Working / Unread / Recent from Go's phases,
+the tray panel's feed: every project's active threads grouped Needs you / Working / Unread / Recent from Go's phases
++ `needs_you` (`rowNeedsYou`: blocked phase, or not running and end_turn asked — same rule as Sidebar / iOS `needsYou`),
 not the mounted Terminals, since a phone mounts one workspace; one `shell_snapshot`, then events — phases,
 `terminal-tabs-changed {workspaceId}` (`SaveTerminalTabs`; the feed re-reads that workspace's `list_terminal_tabs`),
 `workspaces-changed`, resync, focus — and a 5 min safety re-read (was every 15 s); the desktop Sidebar stays hidden there). A phone
