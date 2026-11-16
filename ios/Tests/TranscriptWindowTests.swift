@@ -38,6 +38,25 @@ final class TranscriptWindowTests: XCTestCase {
         XCTAssertEqual(w.rev, 12)
     }
 
+    func testStaleSpliceIsIgnored() {
+        var w = window(["a", "b"])
+        XCTAssertEqual(w.apply(splice: splice(10, 11, from: 1, [row(1, "assistant", "b2")])), .applied)
+        let held = w
+        // The same splice again (live event + subscribe replay), and an older one.
+        XCTAssertEqual(w.apply(splice: splice(10, 11, from: 1, [row(1, "assistant", "b2")])), .ignored)
+        XCTAssertEqual(w.apply(splice: splice(9, 10, from: 1, [row(1, "assistant", "old")])), .ignored)
+        XCTAssertEqual(w, held)
+    }
+
+    func testStaleAuthoritativeSpliceDoesNotRollBack() {
+        var w = window(rev: 20, ["a", "b"])
+        let held = w
+        XCTAssertEqual(w.apply(splice: splice(0, 15, from: 0, [row(0, "assistant", "x")], auth: true)), .ignored)
+        XCTAssertEqual(w, held)
+        // Same rev authoritative is allowed (a ring miss answer for what we hold).
+        XCTAssertEqual(w.apply(splice: splice(0, 20, from: 0, [row(0, "assistant", "x")], auth: true)), .applied)
+    }
+
     func testSpliceGapLeavesWindowAlone() {
         var w = window(["a", "b"])
         let before = w

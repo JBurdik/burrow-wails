@@ -144,6 +144,20 @@ enum Status: Hashable {
     var needsYou: Bool { self == .permission || self == .waiting || self == .error }
 }
 
+/// Overlapping reads of the same thing (snapshot on every open, list_chats on every
+/// chats-changed) can answer out of order: only the read that STARTED last may apply.
+struct LatestWins {
+    private var started = 0, applied = 0
+    mutating func begin() -> Int { started += 1; return started }
+    mutating func accept(_ n: Int) -> Bool { guard n > applied else { return false }; applied = n; return true }
+}
+
+/// A snapshot's phases with the live `phase-chat` events that landed while it was in
+/// flight on top: those are newer than the snapshot, which would wipe them.
+func mergePhases(snapshot: [Int: Phase], live: [Int: Phase]) -> [Int: Phase] {
+    snapshot.merging(live) { _, l in l }
+}
+
 func int(_ v: Any?, _ fallback: Int = 0) -> Int { (v as? NSNumber)?.intValue ?? fallback }
 func dbl(_ v: Any?) -> Double { (v as? NSNumber)?.doubleValue ?? 0 }
 
@@ -163,6 +177,13 @@ final class AppModel {
     @ObservationIgnored var flushAgain = false
     /// list_chats as received, for the launch cache.
     @ObservationIgnored var rawChats: [[String: Any]] = []
+    @ObservationIgnored var snapshotReads = LatestWins()
+    @ObservationIgnored var chatReads = LatestWins()
+    /// Phase events seen while a snapshot is being read (nil = none in flight).
+    @ObservationIgnored var phasesDuringSnapshot: [Int: Phase]?
+    @ObservationIgnored var chatsReloading = false
+    @ObservationIgnored var chatsReloadAgain = false
+    @ObservationIgnored var lastWidget: WidgetSnapshot?
     @ObservationIgnored var pageCache: [Int: [String: Any]] = [:]
     @ObservationIgnored var dirtyPages: Set<Int> = []
     /// Chat on screen: its finished turns are read as they land.
@@ -242,7 +263,7 @@ final class AppModel {
         case "resync":
             Task { await loadSnapshot() }
         case "chats-changed":
-            Task { await loadChats() }
+            reloadChatsCoalesced()
         case "seen-changed":
             if let d = payload as? [String: Any], let key = d["key"] as? String, key.hasPrefix("chat:"), let id = Int(key.dropFirst(5)) {
                 let at = dbl(d["at"])
@@ -251,8 +272,10 @@ final class AppModel {
             }
         default:
             if name.hasPrefix("phase-chat:"), let id = Int(name.dropFirst(11)), let d = payload as? [String: Any] {
-                phases[id] = Phase(d)
-                if viewing == id, !phases[id]!.inFlight { markSeen(id) }
+                let p = Phase(d)
+                phases[id] = p
+                if phasesDuringSnapshot != nil { phasesDuringSnapshot?[id] = p }
+                if viewing == id, !p.inFlight, p.turnEndedAt > (seen[id] ?? 0) { markSeen(id) }
                 phasesChanged(changed: id)
             } else if name.hasPrefix("chat-event-"), let id = Int(name.dropFirst(11)) {
                 chatListeners[id]?()
@@ -262,17 +285,30 @@ final class AppModel {
 
     @MainActor
     func loadSnapshot() async {
-        guard let client, let snap = try? await client.call("shell_snapshot") as? [String: Any] else { return }
+        guard let client else { return }
+        let gen = snapshotReads.begin(), chatGen = chatReads.begin()
+        phasesDuringSnapshot = [:]
+        // Three independent reads: one round trip, not three. `seq` comes from the
+        // snapshot itself, so the order they answer in does not matter.
+        async let snapR = try? client.call("shell_snapshot")
+        async let seenR = try? client.call("seen_list")
+        async let chatsR = try? client.call("list_chats")
+        let (snapV, seenV, chatsV) = await (snapR, seenR, chatsR)
+        // Not the newest read any more: a newer one owns the window and the result.
+        guard snapshotReads.accept(gen) else { return }
+        let live = phasesDuringSnapshot ?? [:]
+        phasesDuringSnapshot = nil
+        guard let snap = snapV as? [String: Any] else { return }
         client.noteSeq((snap["seq"] as? NSNumber)?.int64Value ?? 0)
         workspaces = (snap["workspaces"] as? [[String: Any]] ?? []).map(Workspace.init)
         CachedWorkspace.save(workspaces.filter { $0.parentId == nil }.map { CachedWorkspace(id: $0.id, name: $0.name) })
-        phases = Self.parsePhases(snap["phases"])
-        if let list = try? await client.call("seen_list") as? [[String: Any]] {
+        phases = mergePhases(snapshot: Self.parsePhases(snap["phases"]), live: live)
+        if let list = seenV as? [[String: Any]] {
             var s: [Int: Double] = [:]
             for r in list { if let k = r["key"] as? String, k.hasPrefix("chat:"), let id = Int(k.dropFirst(5)) { s[id] = dbl(r["at"]) } }
             seen = s
         }
-        await loadChats()
+        if let list = chatsV as? [[String: Any]], chatReads.accept(chatGen) { applyChats(list) }
         saveCache()
     }
 
@@ -280,10 +316,26 @@ final class AppModel {
     func loadChats() async {
         // list_chats, not the snapshot's slim phone shape: turn_needs, snooze,
         // settle, parent and launch settings are all on the full row.
-        guard let list = try? await client?.call("list_chats") as? [[String: Any]] else { return }
+        let gen = chatReads.begin()
+        guard let list = try? await client?.call("list_chats") as? [[String: Any]], chatReads.accept(gen) else { return }
+        applyChats(list)
+    }
+
+    private func applyChats(_ list: [[String: Any]]) {
         rawChats = list
         chats = list.map(Chat.init)
         phasesChanged(changed: nil)
+    }
+
+    /// chats-changed fires on every message (last_activity): one list_chats at a
+    /// time, and one more after it if events came in meanwhile.
+    private func reloadChatsCoalesced() {
+        if chatsReloading { chatsReloadAgain = true; return }
+        chatsReloading = true
+        Task { @MainActor in
+            repeat { chatsReloadAgain = false; await loadChats() } while chatsReloadAgain
+            chatsReloading = false
+        }
     }
 
     func phase(_ id: Int) -> Phase { phases[id] ?? Phase() }
@@ -404,9 +456,13 @@ final class AppModel {
         let live = threads
         let waiting = live.filter { needsYou($0) }
         let working = live.filter { status($0.id) == .running }
-        WidgetSnapshot(waiting: waiting.count, working: working.count,
-                       top: (waiting + working).prefix(3).map(\.displayTitle), at: .now).save()
-        WidgetCenter.shared.reloadAllTimelines()
+        let snap = WidgetSnapshot(waiting: waiting.count, working: working.count,
+                                  top: (waiting + working).prefix(3).map(\.displayTitle), at: .now)
+        if !(lastWidget?.sameContent(snap) ?? false) {
+            lastWidget = snap
+            snap.save()
+            WidgetCenter.shared.reloadAllTimelines()
+        }
         if let changed { updateActivities(only: changed) }
     }
 

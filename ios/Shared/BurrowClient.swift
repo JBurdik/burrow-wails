@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Security
 
 /// Shared by the app and both extensions through one Keychain access group.
@@ -75,6 +76,28 @@ func parsePairInput(_ raw: String) -> (base: String, code: String?)? {
     return (base, code)
 }
 
+/// A socket write that failed (a URLError on a connection that just died) is the
+/// same fact as "not connected": callers hold the message and retry on that, and
+/// would otherwise surface a raw URLError as a refusal.
+func wireError(_ e: Error) -> Error { e is BurrowError ? e : BurrowError.closed }
+
+enum PathAction { case none, probe, wake }
+
+/// What a network path update should do to the socket. Pure; see watchNetwork.
+func pathAction(wasSatisfied: Bool, nowSatisfied: Bool, ifacesChanged: Bool, open: Bool) -> PathAction {
+    guard nowSatisfied else { return .none }          // offline: the loops already retry
+    if !open { return .wake }                         // backing off: the network is back, go now
+    return !wasSatisfied || ifacesChanged ? .probe : .none
+}
+
+/// Auth / pairing HTTP hops must not hang for URLSession's 60 s default on a
+/// blackholed network: connectLoop's backoff only runs after they return.
+func httpRequest(_ url: URL, timeout: TimeInterval = 10) -> URLRequest {
+    var r = URLRequest(url: url)
+    r.timeoutInterval = timeout
+    return r
+}
+
 final class BurrowClient: NSObject, @unchecked Sendable {
     static func pair(base: String, code: String, name: String) async throws -> Credentials {
         guard let url = URL(string: base + "/v2/pair") else { throw BurrowError.badURL }
@@ -96,23 +119,54 @@ final class BurrowClient: NSObject, @unchecked Sendable {
     /// Called once when the device token is rejected.
     var onRevoked: (() -> Void)?
 
-    private var task: URLSessionWebSocketTask?
+    // Touched from the read loop, the connect loop, the heartbeat and the main
+    // thread: every one of these goes through `lock`.
+    private var _task: URLSessionWebSocketTask?
+    private var _lastSeq: Int64 = 0
+    private var _stopped = false
+    private var _wake = false
+    private var _isOpen = false
+    private var task: URLSessionWebSocketTask? { get { locked { _task } } set { locked { _task = newValue } } }
+    private var lastSeq: Int64 { get { locked { _lastSeq } } set { locked { _lastSeq = newValue } } }
+    private var stopped: Bool { get { locked { _stopped } } set { locked { _stopped = newValue } } }
+    private var wake: Bool { get { locked { _wake } } set { locked { _wake = newValue } } }
+    private(set) var isOpen: Bool { get { locked { _isOpen } } set { locked { _isOpen = newValue } } }
     private var nextID = 0
     private var pending: [Int: CheckedContinuation<Any?, Error>] = [:]
-    private var lastSeq: Int64 = 0
-    private var stopped = false
-    private var wake = false
-    private(set) var isOpen = false
     private let lock = NSLock()
+    private var monitor: NWPathMonitor?
+    private func locked<T>(_ f: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return f() }
     /// Last frame read. A socket that died in the foreground (Wi-Fi → cellular,
     /// a NAT timeout) reads nothing and errors nothing: only a ping notices.
     private var lastInbound = Date()
 
     init(_ creds: Credentials) { self.creds = creds }
 
-    func start() { stopped = false; Task { await connectLoop() } }
+    func start() { stopped = false; watchNetwork(); Task { await connectLoop() } }
+
+    /// Wi-Fi → cellular, or coming back online: don't wait for the 10 s heartbeat (or
+    /// the backoff) to notice that the socket is gone.
+    private func watchNetwork() {
+        let m = NWPathMonitor()
+        var last: (ok: Bool, ifaces: Set<NWInterface.InterfaceType>)?
+        m.pathUpdateHandler = { [weak self] path in
+            guard let self, !self.stopped else { return }
+            let ifaces = Set(path.availableInterfaces.map(\.type))
+            let ok = path.status == .satisfied
+            defer { last = (ok, ifaces) }
+            guard let prev = last else { return } // the first update is just the current state
+            switch pathAction(wasSatisfied: prev.ok, nowSatisfied: ok, ifacesChanged: prev.ifaces != ifaces, open: self.isOpen) {
+            case .wake: self.wake = true
+            case .probe: Task { if await !self.ping() { self.reconnect() } }
+            case .none: break
+            }
+        }
+        m.start(queue: DispatchQueue(label: "burrow.netpath"))
+        monitor = m
+    }
 
     func stop() {
+        monitor?.cancel(); monitor = nil
         stopped = true
         task?.cancel(with: .goingAway, reason: nil)
         failPending()
@@ -120,7 +174,7 @@ final class BurrowClient: NSObject, @unchecked Sendable {
 
     private func ticket() async throws -> String {
         guard let url = URL(string: creds.baseURL + "/v2/ws-ticket") else { throw BurrowError.badURL }
-        var req = URLRequest(url: url)
+        var req = httpRequest(url)
         req.httpMethod = "POST"
         req.setValue("Bearer " + creds.token, forHTTPHeaderField: "Authorization")
         let (data, res) = try await URLSession.shared.data(for: req)
@@ -251,7 +305,7 @@ final class BurrowClient: NSObject, @unchecked Sendable {
     /// Also skips a backoff wait in progress (the banner's tap).
     func reconnect() { wake = true; task?.cancel(with: .goingAway, reason: nil) }
 
-    func noteSeq(_ seq: Int64) { if seq > lastSeq { lastSeq = seq } }
+    func noteSeq(_ seq: Int64) { locked { if seq > _lastSeq { _lastSeq = seq } } }
 
     private func send(_ obj: [String: Any]) async throws {
         guard let task else { throw BurrowError.closed }
@@ -268,7 +322,7 @@ final class BurrowClient: NSObject, @unchecked Sendable {
             Task {
                 do { try await send(["t": "call", "id": id, "cmd": cmd, "args": args]) } catch {
                     lock.lock(); let c = pending.removeValue(forKey: id); lock.unlock()
-                    c?.resume(throwing: error)
+                    c?.resume(throwing: wireError(error))
                 }
             }
             Task { await watch(id) }
@@ -313,6 +367,9 @@ struct WidgetSnapshot: Codable {
     var working: Int
     var top: [String]
     var at: Date
+
+    /// Everything but the timestamp: an unchanged one needs no Keychain write / timeline reload.
+    func sameContent(_ o: WidgetSnapshot) -> Bool { waiting == o.waiting && working == o.working && top == o.top }
 
     static let key = "widget.snapshot"
     static func load() -> WidgetSnapshot? { SharedStore.get(key, WidgetSnapshot.self) }
