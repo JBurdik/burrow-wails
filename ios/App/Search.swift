@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// Full-text search over every chat's messages (search_chats → chat_fts).
+/// iOS 18+: the search tab (`ChatSearchScreen`); iOS 17: a drawer on the Threads list.
 struct ChatSearchModifier: ViewModifier {
     let open: (Int) -> Void
+    var standalone = false
     @Environment(AppModel.self) private var model
     @State private var query = ""
     @State private var hits: [Hit] = []
@@ -16,8 +18,17 @@ struct ChatSearchModifier: ViewModifier {
     }
 
     func body(content: Content) -> some View {
+        if standalone {
+            results(content.searchable(text: $query, prompt: "Search chats"))
+        } else if #available(iOS 18, *) {
+            content // the search tab has it
+        } else {
+            results(content.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search chats"))
+        }
+    }
+
+    private func results(_ content: some View) -> some View {
         content
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search chats")
             .overlay {
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                     List(hits) { h in
@@ -75,4 +86,18 @@ struct ChatSearchModifier: ViewModifier {
 
 extension View {
     func chatSearch(open: @escaping (Int) -> Void) -> some View { modifier(ChatSearchModifier(open: open)) }
+}
+
+/// The search tab's screen (role `.search`): the field sits in the bottom bar on iOS 26.
+struct ChatSearchScreen: View {
+    let open: (Int) -> Void
+
+    var body: some View {
+        NavigationStack {
+            ContentUnavailableView("Search chats", systemImage: "magnifyingglass",
+                                   description: Text("Every message of every thread."))
+                .modifier(ChatSearchModifier(open: open, standalone: true))
+                .navigationTitle("Search")
+        }
+    }
 }

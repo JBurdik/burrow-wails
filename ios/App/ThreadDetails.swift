@@ -386,7 +386,7 @@ private struct FileRow: View {
     }
 }
 
-private struct StatusGlyph: View {
+struct StatusGlyph: View {
     let status: Status
     var body: some View {
         switch status {
