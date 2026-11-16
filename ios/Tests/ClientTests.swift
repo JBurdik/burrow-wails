@@ -18,3 +18,13 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(httpRequest(URL(string: "https://x.invalid")!).timeoutInterval, 10)
     }
 }
+
+final class PathActionTests: XCTestCase {
+    func testPathActions() {
+        XCTAssertEqual(pathAction(wasSatisfied: true, nowSatisfied: false, ifacesChanged: true, open: true), .none)
+        XCTAssertEqual(pathAction(wasSatisfied: false, nowSatisfied: true, ifacesChanged: true, open: false), .wake)
+        XCTAssertEqual(pathAction(wasSatisfied: true, nowSatisfied: true, ifacesChanged: true, open: true), .probe)
+        XCTAssertEqual(pathAction(wasSatisfied: false, nowSatisfied: true, ifacesChanged: false, open: true), .probe)
+        XCTAssertEqual(pathAction(wasSatisfied: true, nowSatisfied: true, ifacesChanged: false, open: true), .none)
+    }
+}
