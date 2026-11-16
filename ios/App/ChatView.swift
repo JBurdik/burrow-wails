@@ -211,6 +211,10 @@ struct ChatView: View {
                 // nil payload = AppModel.nudgeChat after a send / outbox delivery: a
                 // no-op subscribe when nothing was missed.
                 else if name == "chat-event-\(chatId)", payload == nil { Task { await catchUp() } }
+                // Chat channels aren't ringed: whatever streamed while the socket was down is
+                // only in chat_subscribe. onChange(of: connected) can miss a close→open that
+                // lands inside one SwiftUI update, so catch up on the events themselves.
+                else if name == "open" || name == "resync" { Task { await catchUp() } }
             }
         }
         .onDisappear {

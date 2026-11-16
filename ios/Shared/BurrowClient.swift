@@ -327,6 +327,9 @@ struct WidgetSnapshot: Codable {
     var top: [String]
     var at: Date
 
+    /// Everything but the timestamp: an unchanged one needs no Keychain write / timeline reload.
+    func sameContent(_ o: WidgetSnapshot) -> Bool { waiting == o.waiting && working == o.working && top == o.top }
+
     static let key = "widget.snapshot"
     static func load() -> WidgetSnapshot? { SharedStore.get(key, WidgetSnapshot.self) }
     func save() { SharedStore.put(Self.key, self) }

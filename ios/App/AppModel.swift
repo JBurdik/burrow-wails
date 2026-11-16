@@ -183,7 +183,7 @@ final class AppModel {
     @ObservationIgnored var phasesDuringSnapshot: [Int: Phase]?
     @ObservationIgnored var chatsReloading = false
     @ObservationIgnored var chatsReloadAgain = false
-    @ObservationIgnored var lastWidget: (Int, Int, [String])?
+    @ObservationIgnored var lastWidget: WidgetSnapshot?
     @ObservationIgnored var pageCache: [Int: [String: Any]] = [:]
     @ObservationIgnored var dirtyPages: Set<Int> = []
     /// Chat on screen: its finished turns are read as they land.
@@ -456,9 +456,13 @@ final class AppModel {
         let live = threads
         let waiting = live.filter { needsYou($0) }
         let working = live.filter { status($0.id) == .running }
-        WidgetSnapshot(waiting: waiting.count, working: working.count,
-                       top: (waiting + working).prefix(3).map(\.displayTitle), at: .now).save()
-        WidgetCenter.shared.reloadAllTimelines()
+        let snap = WidgetSnapshot(waiting: waiting.count, working: working.count,
+                                  top: (waiting + working).prefix(3).map(\.displayTitle), at: .now)
+        if !(lastWidget?.sameContent(snap) ?? false) {
+            lastWidget = snap
+            snap.save()
+            WidgetCenter.shared.reloadAllTimelines()
+        }
         if let changed { updateActivities(only: changed) }
     }
 

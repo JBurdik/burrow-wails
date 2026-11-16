@@ -19,3 +19,13 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(merged[2]?.state, "running")
     }
 }
+
+final class WidgetSnapshotTests: XCTestCase {
+    func testTimestampAloneIsNotAChange() {
+        let a = WidgetSnapshot(waiting: 1, working: 2, top: ["x"], at: Date(timeIntervalSince1970: 0))
+        var b = a; b.at = .now
+        XCTAssertTrue(a.sameContent(b))
+        b.top = ["y"]
+        XCTAssertFalse(a.sameContent(b))
+    }
+}
