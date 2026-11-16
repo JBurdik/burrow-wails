@@ -13,6 +13,7 @@ import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
 import { childrenOf as childrenOfSessions, allChildrenOf as allChildrenOfSessions } from "@/stores/chatTree";
 import { parseTurnNeeds, type TurnNeeds } from "@/lib/turnNeeds";
+import { retrying } from "@/lib/retrying";
 
 export interface ClaudeSession {
   id: number;
@@ -291,7 +292,9 @@ export function isActivitySync(
     if (!sessions.value.length) sessions.value = (cachedRead<ChatRow[]>("list_chats") ?? []).map(sessionFromRow);
     let rows: ChatRow[];
     try {
-      rows = await invoke<ChatRow[]>("list_chats");
+      // The socket may still be reopening (wake from sleep, core restart): a single failed
+      // read used to leave the list empty until the next chats-changed or a restart.
+      rows = await retrying(() => invoke<ChatRow[]>("list_chats"));
     } catch {
       return; // no backend (browser-only dev) — leave whatever is loaded
     }

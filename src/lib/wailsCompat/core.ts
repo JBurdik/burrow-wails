@@ -98,6 +98,7 @@ export function desktopTransport(): Transport {
       const info = await LocalEndpoint();
       return { wsUrl: info.ws_url, ticket: info.ticket };
     }), true);
+    wakeOnReturn(); // a Mac that slept leaves the window on a dead "connected" socket too
   }
   return transport;
 }
@@ -129,7 +130,7 @@ let wakeHooked = false;
 function wakeOnReturn(): void {
   if (wakeHooked || typeof window === "undefined") return;
   wakeHooked = true;
-  const wake = () => remote?.wake();
+  const wake = () => (remote ?? transport)?.wake();
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") wake();
   });

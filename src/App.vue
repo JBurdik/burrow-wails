@@ -239,6 +239,7 @@ import { useDiagram } from "@/composables/useDiagram";
 import { useImageLightbox } from "@/composables/useImageLightbox";
 import { configReady, getConfig, setConfig } from "@/lib/config";
 import { useNotificationsStore } from "@/stores/notifications";
+import { retrying } from "@/lib/retrying";
 
 let resizing: 'left' | 'right' | null = null;
 let resizeStartX = 0;
@@ -863,7 +864,7 @@ onMounted(async () => {
   // transport gives up (~15 s). The rest of startup must still run; the
   // transport's resync after it recovers (transport.ts onopen) re-reads.
   await ws.load().catch((e) => console.warn("workspaces load failed:", e));
-  unlistenResync = appTransport().onResync(() => void ws.load().catch(() => {}));
+  unlistenResync = appTransport().onResync(() => void retrying(() => ws.load()).catch(() => {}));
   hideSplash();
   void pendingReleaseNotes().then((n) => { whatsNew.value = n; }).catch(() => {});
   // Startup lands on the composer ("/"), never on the last session's thread —
