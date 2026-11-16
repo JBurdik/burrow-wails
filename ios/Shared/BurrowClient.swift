@@ -75,6 +75,19 @@ func parsePairInput(_ raw: String) -> (base: String, code: String?)? {
     return (base, code)
 }
 
+/// A socket write that failed (a URLError on a connection that just died) is the
+/// same fact as "not connected": callers hold the message and retry on that, and
+/// would otherwise surface a raw URLError as a refusal.
+func wireError(_ e: Error) -> Error { e is BurrowError ? e : BurrowError.closed }
+
+/// Auth / pairing HTTP hops must not hang for URLSession's 60 s default on a
+/// blackholed network: connectLoop's backoff only runs after they return.
+func httpRequest(_ url: URL, timeout: TimeInterval = 10) -> URLRequest {
+    var r = URLRequest(url: url)
+    r.timeoutInterval = timeout
+    return r
+}
+
 final class BurrowClient: NSObject, @unchecked Sendable {
     static func pair(base: String, code: String, name: String) async throws -> Credentials {
         guard let url = URL(string: base + "/v2/pair") else { throw BurrowError.badURL }
@@ -120,7 +133,7 @@ final class BurrowClient: NSObject, @unchecked Sendable {
 
     private func ticket() async throws -> String {
         guard let url = URL(string: creds.baseURL + "/v2/ws-ticket") else { throw BurrowError.badURL }
-        var req = URLRequest(url: url)
+        var req = httpRequest(url)
         req.httpMethod = "POST"
         req.setValue("Bearer " + creds.token, forHTTPHeaderField: "Authorization")
         let (data, res) = try await URLSession.shared.data(for: req)
@@ -268,7 +281,7 @@ final class BurrowClient: NSObject, @unchecked Sendable {
             Task {
                 do { try await send(["t": "call", "id": id, "cmd": cmd, "args": args]) } catch {
                     lock.lock(); let c = pending.removeValue(forKey: id); lock.unlock()
-                    c?.resume(throwing: error)
+                    c?.resume(throwing: wireError(error))
                 }
             }
             Task { await watch(id) }
