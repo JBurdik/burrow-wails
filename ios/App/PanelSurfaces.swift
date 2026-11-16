@@ -534,6 +534,10 @@ struct GitSurface: View {
                 }
                 .buttonStyle(.bordered).buttonBorderShape(.roundedRectangle)
             }
+            Section {
+                NavigationLink { PullRequestsView(cwd: cwd ?? "") } label: { Label("Pull requests", systemImage: "arrow.triangle.pull") }
+                    .disabled(cwd == nil)
+            }
             Section("Commit") {
                 TextField("Message (empty = generate)", text: $message, axis: .vertical).lineLimit(1...6)
                 HStack {
@@ -556,7 +560,7 @@ struct GitSurface: View {
                 Section("Recent commits") {
                     ForEach(commits) { c in
                         NavigationLink {
-                            DiffView(cwd: cwd ?? "", title: c.hash, args: ["show", "--stat", "--patch", c.hash])
+                            GitDiffView(cwd: cwd ?? "", title: c.hash, args: ["show", "--stat", "--patch", c.hash])
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(c.subject).lineLimit(2)
@@ -584,10 +588,10 @@ struct GitSurface: View {
     private func fileSection(_ title: String, _ kind: GitFile.Kind) -> some View {
         let list = of(kind)
         if !list.isEmpty {
-            Section("\(title) (\(list.count))") {
+            Section {
                 ForEach(list) { f in
                     NavigationLink {
-                        DiffView(cwd: cwd ?? "", title: f.path, args: diffArgs(f))
+                        GitDiffView(cwd: cwd ?? "", title: f.path, args: diffArgs(f))
                     } label: {
                         HStack(spacing: 10) {
                             Text(String(f.code)).font(.caption.monospaced().weight(.bold)).foregroundStyle(color(f.code)).frame(width: 14)
@@ -609,6 +613,17 @@ struct GitSurface: View {
                         if kind == .unstaged { Button("Discard", role: .destructive) { discard = f } }
                     }
                 }
+            } header: {
+                HStack {
+                    Text("\(title) (\(list.count))")
+                    Spacer()
+                    if kind == .staged {
+                        Button("Unstage all") { run("Unstaging…") { try await git(["reset", "HEAD"]) } }
+                    } else {
+                        Button("Stage all") { run("Staging…") { try await git(["add", "-A"]) } }
+                    }
+                }
+                .textCase(nil).font(.caption).disabled(busy != nil)
             }
         }
     }
@@ -723,66 +738,5 @@ struct GitSurface: View {
                 return p.count == 4 ? GitCommit(hash: p[0], subject: p[1], author: p[2], when: p[3]) : nil
             }
         }
-    }
-}
-
-/// A colorized unified diff of one `git` command's output.
-private struct DiffView: View {
-    let cwd: String
-    let title: String
-    let args: [String]
-    @Environment(AppModel.self) private var model
-    @State private var lines: [String]?
-    @AppStorage("diff.wrap") private var wrap = false
-
-    var body: some View {
-        ScrollView(wrap ? .vertical : [.vertical, .horizontal]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array((lines ?? []).enumerated()), id: \.offset) { _, l in
-                    Text(l.isEmpty ? " " : l)
-                        .foregroundStyle(fg(l))
-                        .fixedSize(horizontal: !wrap, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(bg(l))
-                }
-            }
-            .font(.system(.caption, design: .monospaced))
-            .textSelection(.enabled)
-            .padding(.vertical, 8)
-        }
-        .overlay {
-            if lines == nil { ProgressView() }
-            else if lines?.isEmpty == true { ContentUnavailableView("No changes", systemImage: "doc.text") }
-        }
-        .navigationTitle((title as NSString).lastPathComponent)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Toggle(isOn: $wrap) { Image(systemName: "text.word.spacing") }.accessibilityLabel("Wrap lines")
-            }
-        }
-        .task {
-            // diff --no-index exits 1 when the files differ: read stdout whatever the code.
-            let out = try? await model.client?.call("run_git", ["cwd": cwd, "args": args]) as? [String: Any]
-            let text = out?["stdout"] as? String ?? ""
-            let err = out?["stderr"] as? String ?? ""
-            let body = text.isEmpty ? err : text
-            lines = body.isEmpty ? [] : body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        }
-    }
-
-    private func fg(_ l: String) -> Color {
-        if l.hasPrefix("+++") || l.hasPrefix("---") || l.hasPrefix("diff ") || l.hasPrefix("index ") { return .secondary }
-        if l.hasPrefix("+") { return .green }
-        if l.hasPrefix("-") { return .red }
-        if l.hasPrefix("@@") { return .purple }
-        return .primary
-    }
-
-    private func bg(_ l: String) -> Color {
-        if l.hasPrefix("+++") || l.hasPrefix("---") { return .clear }
-        if l.hasPrefix("+") { return .green.opacity(0.1) }
-        if l.hasPrefix("-") { return .red.opacity(0.1) }
-        return .clear
     }
 }
