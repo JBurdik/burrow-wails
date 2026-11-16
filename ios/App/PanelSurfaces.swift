@@ -492,7 +492,9 @@ struct GitCommit: Identifiable, Hashable {
 }
 
 struct GitSurface: View {
-    let chatId: Int
+    var chatId: Int = 0
+    /// Set by the Project tab, which has a folder but no thread.
+    var cwdOverride: String? = nil
     @Environment(AppModel.self) private var model
     @State private var cwd: String?
     @State private var branch = ""
@@ -578,7 +580,7 @@ struct GitSurface: View {
         } message: { _ in Text("The uncommitted changes are lost for good.") }
         .refreshable { await refresh() }
         .task {
-            cwd = await workspacePath(model, chatId)
+            cwd = if let cwdOverride { cwdOverride } else { await workspacePath(model, chatId) }
             if cwd == nil { error = "Workspace folder unknown."; loaded = true; return }
             await poll(every: 5) { await refresh() }
         }

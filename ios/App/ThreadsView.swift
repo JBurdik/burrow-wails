@@ -89,6 +89,7 @@ struct ThreadsView: View {
             NavigationStack {
                 if let selected {
                     ChatView(chatId: selected).id(selected)
+                        .toolbar(.hidden, for: .tabBar) // a chat takes the whole screen; the bar is for the lists
                 } else {
                     ContentUnavailableView("Pick a thread", systemImage: "bubble.left.and.text.bubble.right",
                                            description: Text("Or start a new one with ✎"))

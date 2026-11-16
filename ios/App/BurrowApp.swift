@@ -9,7 +9,7 @@ struct BurrowApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if model.creds == nil { PairView() } else { ThreadsView().safeAreaInset(edge: .top, spacing: 0) { ConnectionBanner() } }
+                if model.creds == nil { PairView() } else { MainTabs().safeAreaInset(edge: .top, spacing: 0) { ConnectionBanner() } }
             }
             .environment(model)
             // iOS 26 draws bordered buttons as capsules; keep rounded rects app-wide.
