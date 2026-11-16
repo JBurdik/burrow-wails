@@ -46,11 +46,12 @@ struct ProjectView: View {
                 if let cur = current {
                     Section {
                         Menu {
-                            ForEach(rows) { r in
-                                Button { selected = r.id } label: {
-                                    Label((r.depth > 0 ? "  " : "") + r.name, systemImage: r.id == cur.id ? "checkmark" : (r.depth > 0 ? "arrow.turn.down.right" : "folder"))
+                            Picker("Project", selection: Binding(get: { cur.id }, set: { selected = $0 })) {
+                                ForEach(rows) { r in
+                                    // a worktree wears its repo's icon
+                                    ProjectOptionLabel(name: (r.depth > 0 ? "↳ " : "") + r.name, workspaceId: model.workspace(r.id)?.repoId ?? r.id).tag(r.id)
                                 }
-                            }
+                            }.pickerStyle(.inline)
                         } label: {
                             HStack {
                                 ProjectBadge(name: cur.name, workspaceId: cur.id)

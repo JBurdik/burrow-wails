@@ -242,6 +242,23 @@ struct ProjectBadge: View {
     }
 }
 
+/// A project's icon (or its letter badge) as a menu / picker row image. Menus draw
+/// only a rendered image, not a View, so the badge is rasterised.
+struct ProjectOptionLabel: View {
+    let name: String
+    let workspaceId: Int
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Label {
+            Text(name)
+        } icon: {
+            let r = ImageRenderer(content: ProjectBadge(name: name, workspaceId: workspaceId, size: 22).environment(model))
+            if let ui = r.uiImage { Image(uiImage: ui).renderingMode(.original) } else { Image(systemName: "folder") }
+        }
+    }
+}
+
 struct NewThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -262,7 +279,7 @@ struct NewThreadView: View {
             Form {
                 Section {
                     Picker("Project", selection: $workspace) {
-                        ForEach(model.workspaces.filter { $0.parentId == nil }) { Text($0.name).tag($0.id) }
+                        ForEach(model.workspaces.filter { $0.parentId == nil }) { ProjectOptionLabel(name: $0.name, workspaceId: $0.id).tag($0.id) }
                     }
                     Picker("Agent", selection: $agent) {
                         Text("Claude").tag("claude")
