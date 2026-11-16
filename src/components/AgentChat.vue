@@ -2947,12 +2947,30 @@ function onInput() {
   void completion.update();
 }
 
-function addImageFile(file: File) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    if (typeof reader.result === "string") pendingImages.value.push(reader.result);
+// Downscaled to 1568 px (Claude's own resize threshold) and JPEG'd like the iOS
+// composer: a phone photo is otherwise MBs on the socket, and HEIC isn't accepted.
+// Falls back to the raw file if the browser can't decode it.
+async function addImageFile(file: File) {
+  const raw = () => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") pendingImages.value.push(reader.result);
+    };
+    reader.readAsDataURL(file);
   };
-  reader.readAsDataURL(file);
+  if (file.type === "image/gif" || file.type === "image/svg+xml") return raw();
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale);
+    c.height = Math.round(bmp.height * scale);
+    c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close();
+    pendingImages.value.push(c.toDataURL("image/jpeg", 0.85));
+  } catch {
+    raw();
+  }
 }
 
 function onPaste(e: ClipboardEvent) {
