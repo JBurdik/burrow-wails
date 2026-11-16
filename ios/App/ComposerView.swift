@@ -60,6 +60,7 @@ struct Composer: View {
     @State private var confirmClear = false
     @State private var skills: [(name: String, description: String)] = []
     @FocusState private var focused: Bool
+    @ScaledMetric(relativeTo: .body) private var btn: CGFloat = 36
 
     private var chat: Chat? { model.chat(chatId) }
     private var phase: Phase { model.phase(chatId) }
@@ -89,14 +90,18 @@ struct Composer: View {
                 plusMenu
                 TextField(placeholder, text: $draft, axis: .vertical)
                     .lineLimit(1...8).focused($focused)
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: btn / 2 + 2, style: .continuous))
                 sendButton
             }
         }
-        .padding(.horizontal).padding(.vertical, 10)
-        .background(.bar)
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .glassBar()
+        .animation(.snappy, value: images.count)
+        .animation(.snappy, value: suggestions.count)
         .sensoryFeedback(.impact(weight: .medium), trigger: sent)
+        .sensoryFeedback(.error, trigger: error) { _, new in new != nil }
+        .sensoryFeedback(.selection, trigger: steer)
         .photosPicker(isPresented: $pickerOpen, selection: $picked, maxSelectionCount: 6, matching: .images)
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
@@ -133,8 +138,8 @@ struct Composer: View {
     @ViewBuilder private var sendButton: some View {
         if phase.inFlight && !canSend && !sending {
             Button { Task { await model.interrupt(chatId) } } label: {
-                Image(systemName: "stop.fill").font(.body.bold()).frame(width: 36, height: 36)
-                    .background(Color.red.opacity(0.15), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.red)
+                Image(systemName: "stop.fill").font(.body.bold()).frame(width: btn, height: btn)
+                    .background(Color.red.opacity(0.15), in: Circle()).foregroundStyle(.red)
             }
             .accessibilityLabel("Stop")
         } else {
@@ -144,8 +149,8 @@ struct Composer: View {
                         Image(systemName: phase.inFlight && steer ? "arrow.turn.down.right" : "arrow.up").font(.body.bold())
                     }
                 }
-                .frame(width: 36, height: 36)
-                .background(canSend || sending ? Color.accentColor : Color(.systemGray4), in: RoundedRectangle(cornerRadius: 10))
+                .frame(width: btn, height: btn)
+                .background(canSend || sending ? Color.accentColor : Color(.systemGray4), in: Circle())
                 .foregroundStyle(.white)
             }
             .disabled(!canSend)
@@ -192,8 +197,8 @@ struct Composer: View {
             }
             Button(role: .destructive) { confirmClear = true } label: { Label("Clear Chat…", systemImage: "trash") }
         } label: {
-            Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: 36, height: 36)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: btn, height: btn)
+                .background(Color(.tertiarySystemFill), in: Circle())
         }
         .accessibilityLabel("More")
     }
@@ -265,7 +270,7 @@ struct Composer: View {
                 .font(.caption.weight(.medium)).lineLimit(1)
                 .foregroundStyle(tint == .red ? .red : .primary)
                 .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 7))
+                .background(tint.opacity(0.14), in: Capsule())
         }
     }
 
@@ -319,7 +324,8 @@ struct Composer: View {
                 if s.id != suggestions.last?.id { Divider().padding(.leading, 36) }
             }
         }
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private func apply(_ s: Suggestion) {

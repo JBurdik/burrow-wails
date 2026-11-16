@@ -109,8 +109,8 @@ struct ChatView: View {
                     if phase.state == "waiting_approval" || phase.state == "waiting_input" {
                         Label(phase.detail.isEmpty ? "Waiting for an answer on the Mac" : phase.detail, systemImage: "hand.raised.fill")
                             .font(.callout).foregroundStyle(.orange)
-                            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     if !phase.inFlight, let needs = chat?.turnNeeds {
                         TurnNeedsCard(needs: needs, chatId: chatId)
@@ -123,6 +123,14 @@ struct ChatView: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
+            .overlay {
+                if win == nil {
+                    ProgressView("Loading…").controlSize(.large)
+                } else if rows.isEmpty && echoes.isEmpty && !phase.inFlight {
+                    ContentUnavailableView("No messages yet", systemImage: "bubble.left.and.text.bubble.right",
+                                           description: Text("Write below to start the thread."))
+                }
+            }
             // Follow new output only while already at the bottom; reading back
             // up the transcript must not be yanked down by every streamed line.
             .onChange(of: messages.last) { _, _ in
@@ -133,13 +141,12 @@ struct ChatView: View {
                 if !atBottom {
                     Button { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } label: {
                         Image(systemName: "arrow.down").font(.body.weight(.semibold))
-                            .frame(width: 40, height: 40)
-                            .background(.regularMaterial, in: Circle())
-                            .overlay(Circle().strokeBorder(Color(.separator).opacity(0.4), lineWidth: 0.5))
+                            .frame(width: 44, height: 44)
+                            .glassSurface(Circle(), interactive: true)
                             .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
                     }
                     .buttonStyle(.plain)
-                    .padding(16)
+                    .padding(12)
                     .transition(.scale.combined(with: .opacity))
                     .accessibilityLabel("Scroll to last message")
                 }
@@ -367,7 +374,7 @@ struct MessageRow: View, Equatable {
                         Spacer(minLength: 40)
                         Text(message.text)
                             .padding(.horizontal, 12).padding(.vertical, 9)
-                            .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 16))
+                            .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                             .contextMenu { Button { UIPasteboard.general.string = message.text } label: { Label("Copy", systemImage: "doc.on.doc") } }
                     }
                 }

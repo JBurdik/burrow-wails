@@ -14,11 +14,12 @@ struct TurnNeedsCard: View {
     @State private var runError: String?
     @State private var sending = false
     @State private var sendError: String?
+    @State private var sentOK = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if needs.needsYou {
-                Label("Needs you", systemImage: "questionmark.bubble.fill").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                Label("Needs you", systemImage: "questionmark.bubble.fill").font(.footnote.weight(.semibold)).foregroundStyle(.orange)
                 ForEach(Array(needs.asks.enumerated()), id: \.offset) { i, ask in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(ask.question).font(.subheadline.weight(.medium))
@@ -29,9 +30,12 @@ struct TurnNeedsCard: View {
                         somethingElse(i, ask)
                     }
                 }
-                Button("Send answers") { Task { await answer(picks) } }
+                Button { Task { await answer(picks) } } label: {
+                    Group { if sending { ProgressView().tint(.white) } else { Text("Send answers").fontWeight(.semibold) } }
+                        .frame(maxWidth: .infinity, minHeight: 28)
+                }
                     .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 10))
+                    .buttonBorderShape(.roundedRectangle(radius: 12))
                     .disabled(sending || picks.isEmpty && !needs.asks.contains { !($0.run?.reply ?? "").isEmpty })
             } else {
                 Label("Done", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
@@ -41,15 +45,18 @@ struct TurnNeedsCard: View {
                             .font(.subheadline)
                     }
                     .buttonStyle(.bordered)
-                    .buttonBorderShape(.roundedRectangle(radius: 10))
+                    .buttonBorderShape(.roundedRectangle(radius: 12))
                     .disabled(sending)
                 }
             }
             if let sendError { Text(sendError).font(.caption).foregroundStyle(.red) }
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .cardBackground()
+        .sensoryFeedback(.success, trigger: sentOK)
+        .sensoryFeedback(.error, trigger: sendError) { _, new in new != nil }
+        .sensoryFeedback(.selection, trigger: answers)
         .confirmationDialog("Run this command on the Mac?", isPresented: Binding(get: { confirmRun != nil }, set: { if !$0 { confirmRun = nil } }),
                             titleVisibility: .visible, presenting: confirmRun) { i in
             Button("Run") { Task { await run(i) } }
@@ -124,9 +131,14 @@ struct TurnNeedsCard: View {
                 }
                 Spacer(minLength: 0)
             }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .frame(minHeight: 44)
+            .background(picked ? Color.accentColor.opacity(0.14) : Color(.tertiarySystemFill),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(picked ? .isSelected : [])
     }
 
     /// The desktop card's Something else: a free-text answer instead of the
@@ -171,6 +183,7 @@ struct TurnNeedsCard: View {
             _ = try await model.answerTurn(chatId, picks, extra: extra, images: images)
             Drafts.text[chatId] = nil; Drafts.images[chatId] = nil
             NotificationCenter.default.post(name: Drafts.taken, object: chatId)
+            sentOK += 1
         } catch { sendError = error.localizedDescription }
     }
 }

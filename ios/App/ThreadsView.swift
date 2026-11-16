@@ -55,7 +55,11 @@ struct ThreadsView: View {
             .listStyle(.insetGrouped)
             .refreshable { await model.loadSnapshot() }
             .overlay {
-                if !model.connected && model.threads.isEmpty { ProgressView("Connecting…") }
+                if !model.connected && model.threads.isEmpty { ProgressView("Connecting…").controlSize(.large) }
+                else if model.threads.isEmpty {
+                    ContentUnavailableView("No threads yet", systemImage: "tray",
+                                           description: Text("Start one with the pencil button."))
+                }
             }
             .navigationTitle("Threads")
             .chatSearch { id in selected = id }
