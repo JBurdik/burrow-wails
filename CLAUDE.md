@@ -987,6 +987,12 @@ Per-provider contracts (`generateTextJSONContext`), 180 s budget each:
   --output-schema <file> --output-last-message <file> -`. **`--output-schema` is what makes Codex answer
   in JSON at all.** Effort defaults to `low`.
 - **Gemini / OpenCode** — prose-tolerant: `extractGeneratedJSON` digs the object out.
+- **Apple** (`apple::apple::system`) — on-device Foundation Model via the **`burrow-fm`** Swift sidecar
+  (`cmd/burrow-fm/main.swift`, `swiftc` in the Taskfile, signed with the other sidecars; looked up next to
+  the executable, else `PATH`): prompt on stdin, `--schema` JSON Schema → `DynamicGenerationSchema` (guided
+  generation), `--check` = model ready. 8192-token context: a prompt > `appleMaxPromptChars` (12 000) goes
+  straight to `claude-haiku-5-5`, and any failure falls back there too (`textGenFallback`). Settings offers it
+  only when `text_gen_apple_available` (= `--check`) says so, or while it is the current choice.
 
 Every generated string passes a sanitizer (`sanitizeCommitSubject`, `sanitizePrTitle`,
 `sanitizeChatTitle`, `sanitizeBranchFragment`) — the output goes straight into `git worktree add -b`.

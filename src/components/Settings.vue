@@ -1497,8 +1497,16 @@ const textGenModelOptions = computed(() =>
         value: textGenerationValue(agent.kind, agent.providerId, model.id),
         label: `${agent.name} · ${model.label}`,
       })),
+  ).concat(
+    // On-device, no provider instance: the core's burrow-fm sidecar (macOS 26+, Apple Intelligence on).
+    // Kept while selected even if unavailable, so the picker never shows blank (Go falls back to Claude).
+    appleTextGen.value || textGenSelection.value.providerId === "apple"
+      ? [{ value: textGenerationValue("apple", "apple", "system"), label: "Apple Intelligence · On-device" }]
+      : [],
   ),
 );
+const appleTextGen = ref(false);
+invoke<boolean>("text_gen_apple_available").then((ok) => { appleTextGen.value = ok; }).catch(() => {});
 // The preference is one string ("kind::provider::model::effort"); the two
 // pickers are views on it, so switching model can't leave an effort behind that
 // the new model never published.

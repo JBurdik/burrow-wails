@@ -139,7 +139,7 @@ build-beta:
     ID="{{beta_sign_id}}"
     if [ -n "$ID" ]; then
       # Inner binaries first, then the bundle (it seals the Info.plist edits above).
-      for bin in burrow-daemon burrow-mcp Burrow; do
+      for bin in burrow-daemon burrow-mcp burrow-fm Burrow; do
         codesign --force --sign "$ID" "build/bin/Burrow Beta.app/Contents/MacOS/$bin"
       done
       codesign --force --sign "$ID" "build/bin/Burrow Beta.app"
@@ -192,7 +192,7 @@ sign:
     set -euo pipefail
     ID="{{sign_id}}"
     ENT="src-wails/build/darwin/entitlements.plist"
-    for bin in burrow-daemon burrow-mcp Burrow; do
+    for bin in burrow-daemon burrow-mcp burrow-fm Burrow; do
       codesign --force --timestamp --options runtime --entitlements "$ENT" \
                --sign "$ID" "{{app}}/Contents/MacOS/$bin"
     done
@@ -209,7 +209,7 @@ sign:
 assert-signed:
     #!/usr/bin/env bash
     set -euo pipefail
-    for bin in Burrow burrow-daemon burrow-mcp; do
+    for bin in Burrow burrow-daemon burrow-mcp burrow-fm; do
       out="$(codesign -dv "{{app}}/Contents/MacOS/$bin" 2>&1)"
       grep -q "TeamIdentifier={{APPLE_TEAM_ID}}" <<<"$out" \
         || { echo "❌ $bin is not signed by team {{APPLE_TEAM_ID}} (is 'wails3 dev' running and overwriting build/bin?) — run 'just sign'"; exit 1; }
@@ -370,7 +370,7 @@ verify:
     hr "signature + hardened runtime"
     codesign -dvvv "{{app}}" 2>&1 | grep -E "Authority=|TeamIdentifier=|flags=|Runtime Version" | head
     hr "nested binaries"
-    for b in Burrow burrow-daemon burrow-mcp; do
+    for b in Burrow burrow-daemon burrow-mcp burrow-fm; do
       printf '%-14s ' "$b"; codesign --verify --strict "{{app}}/Contents/MacOS/$b" && echo ok
     done
     hr "Gatekeeper — app (exec)"

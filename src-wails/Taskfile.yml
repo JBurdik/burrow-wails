@@ -55,6 +55,8 @@ tasks:
       - sed "s/LABEL/com.agenticide.wails{{if .CHANNEL}}.{{.CHANNEL}}{{end}}.core/" build/darwin/core.plist > "{{.APP}}/Contents/Library/LaunchAgents/core.plist"
       - PKG_CONFIG_PATH="{{.VT_PC}}" go build -tags "{{.VT_TAG}}" -o "{{.APP}}/Contents/MacOS/burrow-daemon" ./cmd/burrow-daemon
       - go build -ldflags "-X main.buildVersion={{.VERSION}}" -o "{{.APP}}/Contents/MacOS/burrow-mcp" ./cmd/burrow-mcp
+      # Apple Foundation Models sidecar (text generation provider "apple").
+      - swiftc -O -parse-as-library cmd/burrow-fm/main.swift -o "{{.APP}}/Contents/MacOS/burrow-fm"
 
   run:
     summary: Run the dev binary inside an ad-hoc-signed .dev.app (used by `wails3 dev`).
@@ -68,6 +70,7 @@ tasks:
       - PKG_CONFIG_PATH="{{.VT_PC}}" go build -tags "{{.VT_LIB}}" -o "{{.BIN}}/Burrow.dev.app/Contents/MacOS/burrow-daemon" ./cmd/burrow-daemon
       # burrow-mcp too, or dev chats get no burrow MCP tools (spawn, end_turn, …).
       - go build -o "{{.BIN}}/Burrow.dev.app/Contents/MacOS/burrow-mcp" ./cmd/burrow-mcp
+      - swiftc -O -parse-as-library cmd/burrow-fm/main.swift -o "{{.BIN}}/Burrow.dev.app/Contents/MacOS/burrow-fm"
       - codesign --force --sign - "{{.BIN}}/Burrow.dev.app"
       - '"{{.BIN}}/Burrow.dev.app/Contents/MacOS/Burrow"'
 
