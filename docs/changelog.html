@@ -80,11 +80,85 @@
   <h1>Burrow — Changelog</h1>
   <div class="tagline">Historie verzí v češtině. Co se změnilo a proč.</div>
 
+<!-- v1.4.0 -->
+<div class="release">
+  <div class="release-header">
+    <span class="version">v1.4.0</span>
+    <span class="tag tag-latest">nejnovější</span>
+    <span class="date">listopad 2026</span>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Konec tahu (end_turn)</div>
+    <ul>
+      <li><strong>Karta Needs you / Done</strong> — agent na konci každého tahu volá <code>end_turn</code>: buď otázky s tlačítky (i vícenásobný výběr, každá volba s popisem), nebo „hotovo“ s návrhy dalších kroků a <em>loose ends</em> (necommitnuté soubory, nepushnuté commity, otevřené PR, běžící sub-agenti) — ty kontroluje Go samo, ne podle slov agenta.</li>
+      <li><strong>Odpověď skládá Go</strong> — klient posílá jen výběr (<code>chat_answer_turn</code>), Go ho ověří proti uložené kartě a sestaví zprávu; offline se odpověď drží ve frontě jako běžná zpráva.</li>
+      <li><strong>Run na kartě</strong> — otázka může nést příkaz s tlačítkem Run; spustí se uložený příkaz (nikdy text od klienta) ve vlastní process group s 10min limitem a výstup jde agentovi jako odpověď.</li>
+      <li><strong>Stop gate</strong> — Claude tah, který <code>end_turn</code> vynechá, se jednou vrátí zpět; bez toho ho Haiku po AskUserQuestion přeskakoval.</li>
+      <li><strong>Decisions a Inbox</strong> — všechny čekající thready na jednom místě v tray panelu i na telefonu; Sidebar má nahoře Inbox a Working, projekty jsou sbalené, Archived je jeden seznam po projektech.</li>
+      <li><strong>Tichý inbox</strong> — dokončený sub-agent, který nic nepotřebuje a nemá loose ends, se archivuje hned.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Highlights a soubory</div>
+    <ul>
+      <li><strong>Highlights v Right Panelu</strong> — otevřené otázky, piny (<code>burrow pin</code>), soubory a odkazy z celého threadu, změny a sub-agenti na jednom místě; <code>pin --show</code> ho rovnou otevře.</li>
+      <li><strong>HTML soubory se kreslí</strong> — <code>.html</code> se v RP zobrazí jako stránka (Preview / Source), skripty v opaque originu bez sítě; lokální CSS, skripty a obrázky se vloží inline.</li>
+      <li><strong>Obrázky jako obrázky</strong> — obrázkové soubory se v RP otevřou jako náhled, ne text v editoru.</li>
+      <li><strong>Threads already on it</strong> — první prompt nového threadu se porovná s otevřenými thready a agent dostane tip, které si má nejdřív přečíst (duplicitní práce).</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Chat runtime</div>
+    <ul>
+      <li><strong>Transkript vlastní Go</strong> — klient už transkript neskládá ani neukládá; dostává verzované splices (<code>baseRev</code>/<code>rev</code>), textové tails a <code>chat_subscribe</code> pro dohnání. Obrázky putují odkazem, ne jako data URL v každé zprávě.</li>
+      <li><strong>Jedny dveře pro odeslání</strong> — <code>chat_submit</code> rozhodne pod zámkem chatu, jestli zprávu poslat hned, nebo zařadit do fronty; každá zpráva nese <code>clientId</code>, takže opakované odeslání po výpadku se neduplikuje.</li>
+      <li><strong>Rychlejší start nového threadu</strong> — <code>chat_warm</code> spustí CLI už při otevření prázdného threadu a prompt se zapíše (i stav Working) ještě před startem procesu, ne až po něm.</li>
+      <li><strong>Pokračování po výpadku sítě nebo restartu</strong> — tah, který spadl na síti nebo restartu jádra, se po obnovení spojení sám rozjede dál (max. 5 pokusů, banner s Don't).</li>
+      <li><strong>Queue a Steer v composeru</strong> — během běžícího tahu jdou zprávy zařadit nebo poslat rovnou do tahu.</li>
+      <li><strong>Pre-run check u plánovaných úloh</strong> — <code>schedule --check CMD</code> přeskočí běh, když příkaz nic nového nenašel, a jeho výstup přidá do zprávy.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">iOS a telefon</div>
+    <ul>
+      <li><strong>Nativní iOS aplikace</strong> — SwiftUI klient <code>/v2/ws</code> se stejným příkazovým rozhraním: thready, transkript se splices, Right Panel (diff, PR, dev servery, sub-agenti), end_turn karty s Run, spodní tab bar, hledání, Liquid Glass, instalace přes <code>/ios</code>.</li>
+      <li><strong>Offline outbox</strong> — PWA i iOS drží zprávy odeslané bez spojení a po připojení je doručí ve správném pořadí; indikátor Reconnecting / Offline a cache pro první vykreslení.</li>
+      <li><strong>Úspornější spojení</strong> — PTY bajty jako base64 s permessage-deflate, ikony projektů jako náhledy.</li>
+    </ul>
+  </div>
+
+  <div class="section feat">
+    <div class="section-label">Ostatní</div>
+    <ul>
+      <li><strong>Apple on-device model pro generování textu</strong> — commit zprávy, PR, názvy větví a chatů přes Foundation Model (sidecar <code>burrow-fm</code>); dlouhé prompty a chyby padají na Haiku.</li>
+      <li><strong>Mini chat</strong> — malé plovoucí okno pro chat bez projektu (⌘⌥M, tray).</li>
+      <li><strong>Server-side terminálový emulátor</strong> — <code>burrow-daemon</code> drží obrazovku každého PTY (libghostty-vt), takže připojení obnoví obrazovku i historii a <code>tab_output</code> funguje bez okna (beta/dev).</li>
+    </ul>
+  </div>
+
+  <div class="section fix">
+    <div class="section-label">Opravy</div>
+    <ul>
+      <li><strong>Výběr na end_turn kartě mizel</strong> — watch byl klíčovaný na nové pole při každém refreshi <code>list_chats</code>, takže reset smazal výběr hned po kliknutí; teď je klíč string.</li>
+      <li><strong>Běžící thread nebyl Working po reconnectu</strong> — fáze chodí jen při změně, takže neúspěšný počáteční seed nechal thread idle do konce tahu; <code>chatAttention</code> ho teď opakuje a po resync znovu načte.</li>
+      <li><strong>Desktop po výpadku jádra</strong> — načtení chatů a workspaců se opakuje a desktopový transport dostal wake probe.</li>
+      <li><strong>Enter v úzkých oknech</strong> — v mini chatu a tray panelu Enter odesílá.</li>
+      <li><strong>Resize panelu nad iframem</strong> — mouseup v iframe ukončí tažení.</li>
+      <li><strong>Obrázky z composeru</strong> — vložené obrázky se zmenší na 1568 px JPEG.</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider" />
+
 <!-- v1.3.0 -->
 <div class="release">
   <div class="release-header">
     <span class="version">v1.3.0</span>
-    <span class="tag tag-latest">nejnovější</span>
     <span class="date">listopad 2026</span>
   </div>
 
