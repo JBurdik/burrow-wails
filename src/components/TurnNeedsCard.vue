@@ -158,9 +158,11 @@ const pickedNext = computed(() => next.value.filter((_, i) => picked.value[i]));
 
 // A new end_turn (or another chat) starts clean. Keyed on the questions, not
 // the whole card: a run finishing rewrites the card's JSON (state, exit,
-// reply) and must not throw away the answers already picked.
+// reply) and must not throw away the answers already picked. A string key, not
+// an array: a fresh array is a change every time a parent re-parses `needs`
+// (list_chats refresh), which wiped the pick right after the click.
 watch(
-  () => [props.chatId, props.needs.needs, JSON.stringify((props.needs.asks ?? []).map((a) => [a.question, a.options])), JSON.stringify(props.needs.next ?? [])],
+  () => JSON.stringify([props.chatId, props.needs.needs, (props.needs.asks ?? []).map((a) => [a.question, a.options]), props.needs.next ?? []]),
   () => {
     collapsed.value = false;
     current.value = 0;

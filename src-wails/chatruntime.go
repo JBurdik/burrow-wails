@@ -31,6 +31,9 @@ type chatRuntime struct {
 	active  sync.Map // chat id string → time.Time of last activity (chatsleep.go)
 	moved   sync.Map // chat id string → struct{}: live process runs in the old cwd (chatmove.go)
 	sending sync.Map // chat id string → client id of the send in progress (chatsubmit.go)
+	// chat id string → struct{}: chatSendBody already recorded the prompt, so
+	// the transport must not record it again (recordSentUserLine).
+	recorded sync.Map
 
 	ctrlSeq     atomic.Int64
 	ctrlMu      sync.Mutex
@@ -174,6 +177,27 @@ func (a *App) ChatSend(chatID int64, text string, images []string, clientID stri
 	return err
 }
 
+// ChatWarm starts a fresh thread's process ahead of its first prompt, so the
+// CLI's own startup (MCP servers, hooks: seconds) overlaps the user typing
+// instead of following the send. Never sends; a live process is a no-op. An
+// unused warm process is stopped by auto-sleep like any idle one (chatsleep.go).
+func (a *App) ChatWarm(chatID int64) error {
+	c, err := a.chatByID(chatID)
+	if err != nil {
+		return err
+	}
+	if c.ArchivedAt != 0 {
+		return nil
+	}
+	id := strconv.FormatInt(chatID, 10)
+	defer a.chatRT.lock(id)()
+	a.chatRT.touchChat(id, time.Now())
+	if t := chatTransport(c); t != "claude-cli" {
+		return a.ensureRPC(c, t)
+	}
+	return a.ensureClaude(c)
+}
+
 // chatSendLocked is ChatSend's body; the caller holds the chat lock.
 // clientID rides to the recorded user line (chatsubmit.go).
 func (a *App) chatSendLocked(c Chat, id, text string, images []string, clientID string) error {
@@ -183,6 +207,30 @@ func (a *App) chatSendLocked(c Chat, id, text string, images []string, clientID 
 func (a *App) chatSendBody(c Chat, id, text string, images []string) error {
 	chatID := c.ID
 	a.chatRT.touchChat(id, time.Now())
+	// Before the recorded line exists: it is what makes the next send not the first.
+	first := c.ParentChatID == 0 && c.Kind != "side" && a.firstUserSend(chatID)
+	// The prompt is recorded BEFORE the process starts (threadbear's startTurn),
+	// so every client shows it and a running phase at once instead of after the
+	// CLI's startup (seconds: MCP servers, hooks). A failed start or write ends
+	// the turn with a turn.failed marker, so no caller waits on a turn nothing
+	// will answer — the reason the transports used to record only after a write.
+	// A moved chat restarts only while settled — decide before the phase says running.
+	a.restartIfMoved(id)
+	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.HookRunning})
+	a.emitUserLine(id, text, images, a.sendingClientID(id))
+	a.chatRT.recorded.Store(id, struct{}{})
+	defer a.chatRT.recorded.Delete(id)
+	err := a.chatStartAndSend(c, id, text, images, first)
+	if err != nil {
+		if b, mErr := json.Marshal(acpTurnEnd(err.Error())); mErr == nil {
+			a.emitChatLine(id, "acp-data", string(b))
+		}
+	}
+	return err
+}
+
+func (a *App) chatStartAndSend(c Chat, id, text string, images []string, first bool) error {
+	chatID := c.ID
 	if t := chatTransport(c); t != "claude-cli" {
 		if err := a.ensureRPC(c, t); err != nil {
 			return fmt.Errorf("start %s: %w", t, err)
@@ -199,7 +247,7 @@ func (a *App) chatSendBody(c Chat, id, text string, images []string) error {
 	// like the same work (chatsamework.go). Threads only — a sub-agent or a
 	// side chat was started on purpose.
 	var hits []sameWorkHit
-	if c.ParentChatID == 0 && c.Kind != "side" && a.firstUserSend(chatID) {
+	if first {
 		hits = a.findSameWork(chatID, text)
 	}
 	hidden := ""

@@ -17,6 +17,7 @@ import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { PhArrowClockwise, PhCode } from "@phosphor-icons/vue";
 import { pageSrcdoc } from "@/lib/chatBlocks";
+import { inlineLocalAssets } from "@/lib/htmlInline";
 
 const props = defineProps<{ path: string; cwd: string }>();
 const emit = defineEmits<{ source: [] }>();
@@ -30,7 +31,12 @@ function abs(p: string): string {
 async function load() {
   error.value = "";
   try {
-    html.value = await invoke<string>("read_text_file", { path: abs(props.path) });
+    const path = abs(props.path);
+    html.value = await inlineLocalAssets(
+      await invoke<string>("read_text_file", { path }), path,
+      (p) => invoke<string>("read_text_file", { path: p }),
+      (p) => invoke<string>("read_file_base64", { path: p }),
+    );
     nonce.value++;
   } catch (e) {
     error.value = `Could not read ${props.path}: ${e}`;

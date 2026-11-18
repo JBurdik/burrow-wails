@@ -926,6 +926,7 @@ import { linkifyFileRefs } from "@/lib/localLink";
 import { cachedMermaid, renderMermaid } from "@/lib/mermaidRender";
 import { useDiagram } from "@/composables/useDiagram";
 import HtmlPageModal from "./HtmlPageModal.vue";
+import { inlineLocalAssets } from "@/lib/htmlInline";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import {
   getAcpCapabilities, getAcpChatSetting, getLastAcpSetting, rpcLaunchSeed,
@@ -1073,7 +1074,11 @@ async function openPage(path: string, title: string) {
   const abs = path.startsWith("/") ? path : `${props.cwd}/${path}`;
   let html: string;
   try {
-    html = await invoke<string>("read_text_file_checked", { path: abs });
+    html = await inlineLocalAssets(
+      await invoke<string>("read_text_file_checked", { path: abs }), abs,
+      (p) => invoke<string>("read_text_file", { path: p }),
+      (p) => invoke<string>("read_file_base64", { path: p }),
+    );
   } catch (e) {
     html = `<p style="font:13px system-ui;color:#b91c1c;padding:16px">Could not read ${escapeHtml(abs)}: ${escapeHtml(e)}</p>`;
   }
@@ -1481,7 +1486,7 @@ async function persistLaunch(patch: LaunchSettingsPatch) {
     S.notice(`Couldn't save the chat settings: ${e}`);
   });
 }
-function seedLaunchRow() {
+async function seedLaunchRow() {
   const row = chatRow();
   if (!row) return;
   const patch: LaunchSettingsPatch = { row_only: true };
@@ -1489,7 +1494,7 @@ function seedLaunchRow() {
   if (!row.effort) patch.effort = selectedEffort.value;
   if (!row.permissionMode) patch.permission_mode = permMode.value;
   if (!row.profileId && selectedProfileId.value) patch.profile_id = selectedProfileId.value;
-  if (Object.keys(patch).length > 1) void persistLaunch(patch);
+  if (Object.keys(patch).length > 1) return persistLaunch(patch);
 }
 // Codex / ACP twin: pins the welcome composer's picks on a fresh row before the
 // first send (rpcLaunchSeed in lib/acpSettings.ts says why).
@@ -2767,11 +2772,12 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   const displayText = text === strippedBaseline && hasPasteMarkers(raw) ? raw.trim() : undefined;
   // This is the durable start receipt. It captures the recovery checkpoint and
   // creates one audit row; provider completion freezes its final diff.
-  await invoke("start_turn_audit", {
+  // Started now, awaited inside submit after the echo is on screen.
+  const audit = invoke("start_turn_audit", {
     cwd: props.cwd,
     subjectId: `chat:${props.chatId}`,
     label: text.slice(0, 60),
-  }).catch(() => {});
+  });
 
   // Auto-title from first user message (only if still at default and Claude hasn't set one yet)
   if (!claudeGeneratedTitle.value) {
@@ -2784,7 +2790,7 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
 
   pendingImages.value = [];
   syncStore();
-  const res = await S.submit({ text, images: msgImages, displayText });
+  const res = await S.submit({ text, images: msgImages, displayText }, audit);
   if (res === null) return null;
   visitSeenAt.value = null;
   acceptFeedback();
@@ -3166,8 +3172,13 @@ onMounted(async () => {
   // Pin what this device resolved (its "last used" defaults) onto the row on
   // first mount: the row is what Go starts the process with, and it must not
   // start a different model than the picker shows.
-  if (!usesRpcRuntime.value) seedLaunchRow();
+  if (!usesRpcRuntime.value) await seedLaunchRow();
   else await seedRpcLaunchRow();
+  // A fresh thread: start its process now (after the row holds the launch
+  // settings), so the CLI's own startup overlaps the typing / the checkpoint
+  // instead of following the first prompt.
+  const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
+  if (!stored && S.messages.value.length === 0) void invoke("chat_warm", { chatId: props.chatId }).catch(() => {});
 
   // Mounted normally means visible (Terminal.isChatVisible), but a chat spawned
   // with a prompt can mount unwatched — marking that one seen would clear a dot
@@ -3179,7 +3190,6 @@ onMounted(async () => {
   // control calls (focus/list/new-tab/spawn) don't prompt every time. User can
   // still tighten via the perm-mode switch / Deny.
   if (props.compact) chats.addPermissionRule("Bash:burrow");
-  const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
   if (stored) S.hydrate({ sessionId: stored });
   S.sync();
   // The raw listeners are JS-only and free — attach both, so a cold chat
@@ -3187,12 +3197,11 @@ onMounted(async () => {
   // immediately.
   await S.listenClaude();
   await S.listenAcp();
+  // As soon as the raw listeners exist — a fresh chat has no pending request to recover.
+  if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
   // A request that arrived before these listeners existed (a view mounted late —
   // slow link, chat started elsewhere) is not replayed by the stream; ask for it.
   await S.recoverPendingRequests();
-  // No drain here: it already ran above, unconditionally. Two drains in one
-  // mount each take their own message and send both turns at once.
-  if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
 
   // Load account info (plan, 5h window) — non-blocking.
   invoke<AccountInfo>("claude_get_account", { cwd: props.cwd })

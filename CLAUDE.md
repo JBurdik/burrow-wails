@@ -201,7 +201,7 @@ resolves them + profile (`providers`) + project `claude_config_dir` into Claude 
 Every chat's process is Go's, keyed by chat id — **all three transports** (claude-cli, Codex app-server,
 generic ACP); no mounted view needed (`spawn`, the phone, `chat_send` all work with the desktop closed).
 `chat_send` **ensures the process itself** (start from the row + resume `claude_session_id` — Go captures it
-from Claude `system/init` and from the ACP/Codex handshake; covers a send after `ReapIdle`), then sends; a
+from Claude `system/init` and from the ACP/Codex handshake; covers a send after `ReapIdle`), then sends; **`chat_warm`** = the same ensure without a send — AgentChat calls it on mounting a fresh thread (no session, no rows) so the CLI's startup overlaps typing, and `start_turn_audit`'s checkpoint is awaited inside `submit` *after* the echo; `chatSendBody` records the prompt (`chat-user`) + a running phase **before** the ensure (threadbear's startTurn), the transports skip their own record (`recordSentUserLine`), and a failed start/write emits a `turn.failed` marker so nothing waits on that turn; a
 per-chat lock makes concurrent ensures one start. Codex/ACP resolve the row's `agent_kind` as a provider
 instance (`resolveRPCLaunch`: binary, `transportArgs`, env, project `env_file` / `claude_config_dir`) and
 then push the row's model / effort / permission mode into the fresh session — the **mode fails closed**

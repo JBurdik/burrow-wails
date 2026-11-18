@@ -311,7 +311,7 @@ export interface ChatSession extends ReadonlyRefs<SessionState> {
    * takes its place. Resolves what happened, or null when it failed (already
    * reported) or was held offline.
    */
-  submit(prompt: UserPrompt): Promise<SubmitOutcome | null>;
+  submit(prompt: UserPrompt, before?: Promise<unknown>): Promise<SubmitOutcome | null>;
   /** `submit`, resolving the bubble's (or queue item's) id. */
   send(prompt: UserPrompt): Promise<number | null>;
   /**
@@ -692,7 +692,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
       s.busy.value = false;
       s.sync();
     },
-    async submit(prompt) {
+    async submit(prompt, before) {
       const clientId = newClientId();
       // Messages already held for this chat go first: this one waits behind
       // them in the outbox instead of overtaking them.
@@ -711,6 +711,9 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
         s.sync();
         s.view?.scrollToBottom(true);
       }
+      // `before` (the turn's checkpoint) must land before Go sends, but the echo
+      // above must not wait for it: a git snapshot of a big repo takes seconds.
+      await before?.catch(() => {});
       try {
         const res = await s.deps.invoke<{ sent: boolean; item?: GoQueueItem }>("chat_submit", {
           chatId, text: prompt.text, images: prompt.images ?? [], clientId,

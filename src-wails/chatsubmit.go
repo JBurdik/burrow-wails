@@ -163,6 +163,15 @@ func (a *App) emitUserLine(id, text string, images []string, clientID string) {
 	a.emitChatLine(id, chatUserKind, encodeUserLine(text, a.storeChatImages(id, images), clientID))
 }
 
+// recordSentUserLine is the transports' emitUserLine after a successful write,
+// skipped when chatSendBody already recorded the prompt ahead of the start.
+func (a *App) recordSentUserLine(id, text string, images []string) {
+	if _, pre := a.chatRT.recorded.Load(id); pre {
+		return
+	}
+	a.emitUserLine(id, text, images, a.sendingClientID(id))
+}
+
 // withSendingClientID makes clientID the id the transport's user line carries
 // for the send fn performs. Callers hold the chat lock, so one send per chat
 // at a time.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -552,5 +553,48 @@ func TestRPCSessionIDLandsOnRow(t *testing.T) {
 	a.emitSession("1", "sess-acp", nil, nil)
 	if row, _ := a.chatByID(c.ID); row.ClaudeSessionID != "sess-acp" {
 		t.Fatalf("session id not recorded: %+v", row)
+	}
+}
+
+func TestChatWarmStartsWithoutSending(t *testing.T) {
+	a, fake, wsID, _ := runtimeApp(t)
+	writeConfig(t, map[string]any{"providers": []any{claudeAt("claude", "")}})
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli", Model: "claude-opus-x"})
+	if err := a.ChatWarm(c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if fake.startCount() != 1 || len(fake.sent) != 0 || !hasArgPair(fake.lastStart().args, "--model", "claude-opus-x") {
+		t.Fatalf("warm: starts=%d sent=%v", fake.startCount(), fake.sent)
+	}
+	if err := a.ChatSend(c.ID, "hello", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if fake.startCount() != 1 || len(fake.sent) != 1 {
+		t.Fatalf("send after warm must reuse the process: starts=%d sent=%d", fake.startCount(), len(fake.sent))
+	}
+}
+
+// The prompt is recorded before the start; a start that fails ends that turn
+// (turn.failed marker) instead of leaving a turn nothing will answer.
+func TestChatSendRecordsPromptBeforeStartAndFailsTheTurn(t *testing.T) {
+	a, fake, wsID, _ := runtimeApp(t)
+	broken := claudeAt("claude", "")
+	broken["binary"] = "/nonexistent/claude"
+	writeConfig(t, map[string]any{"providers": []any{broken}})
+	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
+	if err := a.ChatSend(c.ID, "hello", nil, ""); err == nil {
+		t.Fatal("want a start error")
+	}
+	if fake.startCount() != 0 {
+		t.Fatalf("starts = %d", fake.startCount())
+	}
+	id := strconv.FormatInt(c.ID, 10)
+	drainChatStream(t, a, id)
+	lines, err := a.LoadChatStreamSince(id, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 2 || lines[0].Kind != chatUserKind || !strings.Contains(lines[1].Line, `"_burrow":"turn"`) || !strings.Contains(lines[1].Line, `"error"`) {
+		t.Fatalf("want prompt then failed-turn marker, got %v", lines)
 	}
 }
