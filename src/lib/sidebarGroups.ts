@@ -253,6 +253,16 @@ export function nextNeedsYou<T>(rows: T[], needsYou: (row: T) => boolean, isActi
 }
 
 /**
+ * After archiving the open row `current`: the Inbox row after it (wrapping),
+ * else any other row that needs you. null = inbox zero.
+ */
+export function nextAfterArchive<T>(inbox: T[], all: T[], current: T, needsYou: (row: T) => boolean): T | null {
+  const at = inbox.indexOf(current);
+  const order = at < 0 ? inbox : [...inbox.slice(at + 1), ...inbox.slice(0, at)];
+  return order[0] ?? all.find((r) => r !== current && needsYou(r)) ?? null;
+}
+
+/**
  * The global Inbox (threadbear): rows that need you, then unread ones, lifted
  * out of their project groups (never out of `keep`, e.g. Pinned) in feed
  * order. A group left empty by the lift goes; one that was already empty

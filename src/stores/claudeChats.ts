@@ -607,11 +607,12 @@ export function isActivitySync(
     void invoke("chat_sleep", { chatId: id }).catch(() => {});
   }
 
-  function unsettle(id: number) {
+  // `prev` (archive Undo) puts back the state from before settle() instead of pinning it active.
+  function unsettle(id: number, prev?: Pick<ClaudeSession, "settledOverride" | "settledSince">) {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
-    s.settledOverride = "active";
-    s.settledSince = 0;
+    s.settledOverride = prev ? prev.settledOverride : "active";
+    s.settledSince = prev ? prev.settledSince : 0;
     persist();
     if (s.snoozedUntil) snooze(id, 0); // "Move back to active" wins over a snooze
   }

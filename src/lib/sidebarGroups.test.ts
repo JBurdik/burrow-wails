@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { reorderProjects } from "./projectOrder";
 import {
   buildActivityRows, groupByRepo, groupDot, rowRecedes, parseShortstat, resolveSidebarSection, splitSections, stepWorkingShelf,
-  routeRowOnly, EMPTY_WORKING_SHELF, WORKING_EXIT_GRACE_MS, type ActivityRow, type SectionInput,
+  routeRowOnly, nextAfterArchive, EMPTY_WORKING_SHELF, WORKING_EXIT_GRACE_MS, type ActivityRow, type SectionInput,
 } from "./sidebarGroups";
 import type { Workspace } from "@/stores/workspace";
 import type { TabSummary } from "@/stores/terminalTabs";
@@ -239,4 +239,19 @@ describe("project order", () => {
     expect(reorderProjects([1, 2, 3], 1, 3)).toEqual([2, 1, 3]);
     expect(reorderProjects([1, 2], 1, 9)).toEqual([1, 2]); // unknown target: unchanged
   });
+});
+
+describe("nextAfterArchive", () => {
+  const needs = (r: string) => r.startsWith("!");
+  const cases: { name: string; inbox: string[]; all: string[]; current: string; want: string | null }[] = [
+    { name: "row after the current one", inbox: ["a", "b", "c"], all: ["a", "b", "c"], current: "b", want: "c" },
+    { name: "wraps to the top", inbox: ["a", "b", "c"], all: ["a", "b", "c"], current: "c", want: "a" },
+    { name: "current not in the Inbox: its first row", inbox: ["a", "b"], all: ["a", "b", "x"], current: "x", want: "a" },
+    { name: "only the current row: needs-you fallback", inbox: ["a"], all: ["a", "p", "!q"], current: "a", want: "!q" },
+    { name: "fallback never picks the current row", inbox: [], all: ["!a"], current: "!a", want: null },
+    { name: "nothing waits: inbox zero", inbox: ["a"], all: ["a", "p"], current: "a", want: null },
+  ];
+  for (const c of cases) {
+    it(c.name, () => expect(nextAfterArchive(c.inbox, c.all, c.current, needs)).toBe(c.want));
+  }
 });

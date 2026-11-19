@@ -1,5 +1,6 @@
 <template>
   <div class="welcome surface-glow drop-zone">
+    <p v-if="inboxZero" class="welcome-caught-up"><PhCheck :size="14" weight="bold" />All caught up. Nothing waits on you.</p>
     <template v-if="target">
       <h1 class="welcome-title">
         What should we build in
@@ -162,7 +163,8 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch, nextTick, onMounted } from "vue";
-import { PhFolder, PhGitBranch, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhSparkle, PhPencilSimple, PhListChecks, PhFastForward, PhShieldWarning } from "@phosphor-icons/vue";
+import { PhFolder, PhGitBranch, PhFolderOpen, PhCaretDown, PhArrowUp, PhShieldCheck, PhTerminal, PhChatCenteredText, PhSparkle, PhPencilSimple, PhListChecks, PhFastForward, PhShieldWarning, PhCheck } from "@phosphor-icons/vue";
+import { inboxZero } from "@/lib/archiveFlow";
 import { useWorkspaceStore, type Workspace } from "@/stores/workspace";
 import { useTerminalTabsStore } from "@/stores/terminalTabs";
 import { useUIStore } from "@/stores/ui";
@@ -709,6 +711,15 @@ async function submit() {
 }
 .welcome-crumb:hover { color: var(--text-secondary); background: var(--bg-hover); }
 
+.welcome-caught-up {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.welcome-caught-up svg { color: var(--green); }
 .welcome-title {
   font-size: 20px;
   font-weight: 500;

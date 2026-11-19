@@ -50,6 +50,7 @@
              xterm on a ring-only daemon starts blank. With an emulator daemon
              (beta/dev, plan 010) Terminal.vue unmounts the xterms that are not on
              screen (`shown`) and a remount rebuilds them from pty_attach. -->
+        <ArchiveUndo />
         <div v-show="ui.mode === 'terminal'" class="terminal-host">
           <WelcomeScreen ref="welcomeEl" v-show="showWelcome" @open-folder="openNewWorkspace" />
           <Terminal
@@ -201,6 +202,7 @@ import PtyPermissionToasts from "@/components/PtyPermissionToasts.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
+import ArchiveUndo from "@/components/ArchiveUndo.vue";
 import ThreadDetailsCard from "@/components/ThreadDetailsCard.vue";
 import { detailsLaneInset } from "@/lib/threadDetails";
 import Onboarding from "@/components/Onboarding.vue";

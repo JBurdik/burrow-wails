@@ -48,10 +48,12 @@
       <button class="ml-auto text-muted-foreground hover:text-foreground" title="Show all projects" @click="filterProjectId = null"><PhX :size="11" weight="bold" /></button>
     </div>
 
-    <div class="flex-1 overflow-y-auto pb-2" @scroll="cancelHoverCard">
+    <div class="flex-1 overflow-y-auto overflow-x-hidden pb-2" @scroll="cancelHoverCard">
       <!-- Live feed, grouped by project (Ghostex-style): a header per repo with
            its uncommitted diffstat, one compact line per thread, a thread's
            sub-agents indented under it. Branch/model/PR live in the hover card. -->
+      <!-- Leave hooks only: a row (or a group it empties) slides off when it went to Archived. -->
+      <TransitionGroup :css="false" @leave="onRowLeave">
       <div
         v-for="group in inboxGroups"
         :key="group.repoId"
@@ -93,8 +95,8 @@
           </span>
           <button class="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground group-hover/hdr:block" title="New thread in this project" @click.stop="repoById(group.repoId) && pickProject(repoById(group.repoId)!, false)"><PhPlus :size="13" /></button>
         </div>
-        <div v-if="!isCollapsed(group)">
-          <div v-for="(row, i) in group.rows" :key="rowKey(row)">
+        <TransitionGroup v-if="!isCollapsed(group)" tag="div" :css="false" @leave="onRowLeave">
+          <div v-for="(row, i) in group.rows" :key="rowKey(row)" :data-row-key="rowKey(row)" :data-chat="row.tab.chatId ?? undefined">
             <div v-if="group.needs && i === 0" class="sb-inbox-label">Needs you</div>
             <div v-else-if="group.needs && i === group.needs && group.repoId === INBOX" class="sb-inbox-label !text-[var(--blue)]">Unread</div>
             <div v-else-if="group.needs && i === group.needs" class="sb-inbox-sep" />
@@ -109,10 +111,12 @@
             </div>
             <div
               class="sb-row group relative mt-px flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-[7px]"
-              :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`, rowRecedes(row.tab.status, isActiveRow(row)) && 'sb-recede']"
+              :class="[isActiveRow(row) && 'sb-row-active', row.tab.isAgent && `agent-state-${attentionState(row)}`, rowRecedes(row.tab.status, isActiveRow(row)) && 'sb-recede', swipe.live && swipe.key === rowKey(row) && 'sb-swiping']"
+              :style="swipe.key === rowKey(row) ? { transform: `translateX(${-swipe.dx}px)` } : undefined"
               @click="onRowClick(row)"
               @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
-              @pointerdown="startLongPress(row, $event)"
+              @wheel="onRowWheel(row, $event)"
+              @pointerdown="onRowPointerDown(row, $event)"
               @pointermove="moveLongPress"
               @pointerup="cancelLongPress"
               @pointercancel="cancelLongPress"
@@ -158,12 +162,15 @@
               </span>
               <!-- Touch has no hover and no right click: this opens the same menu. -->
               <button class="sb-row-more sb-row-act" title="More" aria-label="Thread actions" @click.stop="openRowMenu(row.ws, row.tab, $event)"><PhDotsThree :size="16" weight="bold" /></button>
+              <!-- The space a left swipe uncovers (the row is translated, so left:100% is that space). -->
+              <div v-if="swipe.key === rowKey(row)" class="sb-swipe-bg" :class="swipePast && 'is-past'" :style="{ width: `${swipe.dx}px` }"><PhArchive :size="14" /></div>
             </div>
             <!-- Recap and sub-agents live in the hover card and the Right Panel's
                  Agents; the row keeps one line (the sub-agent count chip stays). -->
           </div>
-        </div>
+        </TransitionGroup>
       </div>
+      </TransitionGroup>
 
       <div v-if="!allRows.length" class="m-2 rounded-lg border border-dashed border-border/60 px-5 py-7 text-center text-[11.5px] leading-[1.7] text-muted-foreground">
         <template v-if="store.workspaces.length === 0">No projects.<br />Open a folder to start.</template>
@@ -716,11 +723,13 @@ import {
   type ActivityRow,
   needsYouFirst,
   nextNeedsYou,
+  nextAfterArchive,
   liftInbox,
 } from "@/lib/sidebarGroups";
 import { useKeybindingsStore } from "@/stores/keybindings";
 import { childrenOf, activeChatIdFor } from "@/stores/chatTree";
 import { toggleTabSettled } from "@/lib/settledTabs";
+import { archiveNotice, inboxZero } from "@/lib/archiveFlow";
 import { formatWakeTime, snoozePresets } from "@/lib/snoozePresets";
 import { getProjectSettings } from "@/lib/projectSettings";
 
@@ -1203,11 +1212,15 @@ function closeTab(wsId: number, tab: TabSummary) {
   });
 }
 function toggleSettled(tab: TabSummary, wsId: number) {
-  // Settling the tab the user is currently looking at leaves nothing to show
-  // in its place — send them back to the composer. Settling any other row is
-  // a background action: the view must not move.
-  const wasFocused = store.active?.id === wsId && termTabs.activeByWs[wsId] === tab.id;
+  // Archiving the thread on screen moves on to the next Inbox thread, or to
+  // the composer saying the Inbox is empty. Archiving any other row is a
+  // background action: the view must not move.
+  const wasFocused = ui.viewingTabs && store.active?.id === wsId && termTabs.activeByWs[wsId] === tab.id;
   const wasSettled = tab.settled;
+  const chat = tab.chatId != null ? chats.sessions.find((c) => c.id === tab.chatId) : undefined;
+  const prev = chat && { settledOverride: chat.settledOverride, settledSince: chat.settledSince };
+  // Picked before settling: the row's place in the Inbox is gone after.
+  const next = !wasSettled && wasFocused ? nextInboxRow(`${wsId}:${tab.id}`) : null;
   if (tab.isChat) {
     if (tab.chatId == null) return;
     if (wasSettled) chats.unsettle(tab.chatId);
@@ -1215,7 +1228,146 @@ function toggleSettled(tab: TabSummary, wsId: number) {
   } else {
     toggleTabSettled(wsId, tab.id);
   }
-  if (!wasSettled && wasFocused) ui.openWelcome();
+  if (wasSettled) return;
+  const route = tab.id < 0 ? `/ws/${wsId}?chat=${tab.chatId}` : `/ws/${wsId}/tab/${tab.id}`;
+  archiveNotice.value = {
+    title: tab.title,
+    undo: () => {
+      if (tab.isChat && tab.chatId != null) chats.unsettle(tab.chatId, prev);
+      else toggleTabSettled(wsId, tab.id);
+      if (wasFocused) void router.push(route);
+    },
+  };
+  if (!wasFocused) return;
+  if (next) selectTab(next);
+  else {
+    inboxZero.value = true;
+    ui.openWelcome();
+  }
+}
+
+// After archiving the open thread: the Inbox row after it (wrapping), else
+// any thread that needs you. null = inbox zero.
+function nextInboxRow(skip: string): ActivityRow | null {
+  const top = inboxGroups.value[0];
+  const all = inboxGroups.value.flatMap((g) => g.rows);
+  const current = all.find((r) => rowKey(r) === skip);
+  return nextAfterArchive(top?.repoId === INBOX ? top.rows : [], all, current as ActivityRow, needsYou);
+}
+watch(() => ui.welcomeVisible, (on) => { if (!on) inboxZero.value = false; });
+
+// ── archive motion ───────────────────────────────────────────────────────────
+// A row that left the live list *for Archived* slides off, whatever archived
+// it (button, ⌘E, menu, swipe, another device's chats-changed); any other
+// leave (moving between groups) is instant.
+const archivedKeys = computed(() => new Set(archiveItems.value.flatMap((it) => (it.chatId != null ? [it.key, `c${it.chatId}`] : [it.key]))));
+function wentToArchive(el: HTMLElement): boolean {
+  const rows = el.dataset.rowKey ? [el] : [...el.querySelectorAll<HTMLElement>("[data-row-key]")];
+  return rows.some((r) => archivedKeys.value.has(`s${r.dataset.rowKey}`) || (!!r.dataset.chat && archivedKeys.value.has(`c${r.dataset.chat}`)));
+}
+function onRowLeave(el: Element, done: () => void) {
+  const box = el as HTMLElement;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !wentToArchive(box)) return done();
+  const h = `${box.offsetHeight}px`;
+  box.style.overflow = "hidden";
+  box.animate(
+    [
+      { height: h, opacity: 1, transform: "none" },
+      { height: h, opacity: 0, transform: "translateX(-60%)", offset: 0.6 },
+      { height: "0px", opacity: 0, transform: "translateX(-60%)", paddingTop: "0px" },
+    ],
+    { duration: 280, easing: "ease-in" },
+  ).onfinish = done;
+}
+
+// ── swipe left to archive ────────────────────────────────────────────────────
+// Two-finger trackpad swipe (wheel deltaX) or a mouse drag. A gesture's axis
+// is fixed by its first move, so a mostly vertical one stays a scroll.
+const SWIPE_PAST = 0.4; // share of the row's width that commits on release
+const SWIPE_GAP_MS = 250; // no wheel event for this long = a new gesture
+const swipe = reactive({ key: "", dx: 0, w: 1, live: false });
+const swipePast = computed(() => swipe.dx >= swipe.w * SWIPE_PAST);
+let swipeAxis: "x" | "y" | null = null;
+let swipeLastWheel = 0;
+let swipeLocked = false; // after a commit, until the gesture (and its momentum) ends
+let swipeFlick = false;
+let swipeEndTimer: number | undefined;
+function swipeBegin(row: ActivityRow, el: HTMLElement) {
+  if (swipe.key !== rowKey(row)) Object.assign(swipe, { key: rowKey(row), dx: 0, w: el.offsetWidth || 1 });
+  swipe.live = true;
+  cancelHoverCard();
+}
+function swipeTo(dx: number) {
+  swipe.dx = Math.max(0, Math.min(swipe.w, dx));
+}
+function swipeEnd(row: ActivityRow) {
+  swipe.live = false;
+  const commit = swipePast.value || (swipeFlick && swipe.dx > 24);
+  swipeFlick = false;
+  if (!commit) {
+    Object.assign(swipe, { key: "", dx: 0 });
+    return;
+  }
+  swipeLocked = true;
+  swipe.dx = swipe.w;
+  toggleSettled(row.tab, row.ws.id);
+  // The row is unmounted by now unless it stayed (e.g. pinned): then it slides back.
+  window.setTimeout(() => { if (swipe.key === rowKey(row)) Object.assign(swipe, { key: "", dx: 0 }); }, 400);
+}
+function onRowWheel(row: ActivityRow, e: WheelEvent) {
+  if (e.timeStamp - swipeLastWheel > SWIPE_GAP_MS) { swipeAxis = null; swipeLocked = false; }
+  swipeLastWheel = e.timeStamp;
+  if (!swipeAxis && (e.deltaX || e.deltaY)) swipeAxis = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? "x" : "y";
+  if (swipeAxis !== "x" || swipeLocked || (swipe.key && swipe.key !== rowKey(row))) return;
+  e.preventDefault();
+  swipeBegin(row, e.currentTarget as HTMLElement);
+  // Fingers moving left: positive deltaX with natural scrolling, negative
+  // without. WebKit says which; absent, assume natural scrolling.
+  const inverted = (e as WheelEvent & { webkitDirectionInvertedFromDevice?: boolean }).webkitDirectionInvertedFromDevice;
+  const left = inverted === false ? -e.deltaX : e.deltaX;
+  if (left > 40) swipeFlick = true;
+  swipeTo(swipe.dx + left);
+  window.clearTimeout(swipeEndTimer);
+  swipeEndTimer = window.setTimeout(() => swipeEnd(row), 150);
+}
+let mouseDrag: { row: ActivityRow; el: HTMLElement; x: number; y: number; lastX: number; t: number; v: number; on: boolean } | null = null;
+function onRowPointerDown(row: ActivityRow, e: PointerEvent) {
+  startLongPress(row, e);
+  if (e.pointerType !== "mouse" || e.button !== 0) return;
+  mouseDrag = { row, el: e.currentTarget as HTMLElement, x: e.clientX, y: e.clientY, lastX: e.clientX, t: e.timeStamp, v: 0, on: false };
+  window.addEventListener("pointermove", onMouseDragMove);
+  window.addEventListener("pointerup", onMouseDragUp);
+}
+function onMouseDragMove(e: PointerEvent) {
+  const d = mouseDrag;
+  if (!d) return;
+  const dx = d.x - e.clientX;
+  const dy = Math.abs(e.clientY - d.y);
+  if (!d.on) {
+    if (dy > 8 && dy >= Math.abs(dx)) return stopMouseDrag();
+    if (dx < 8 || dx < dy * 1.5) return;
+    d.on = true;
+    window.getSelection()?.removeAllRanges();
+    swipeBegin(d.row, d.el);
+  }
+  if (e.timeStamp > d.t) d.v = (d.lastX - e.clientX) / (e.timeStamp - d.t);
+  d.t = e.timeStamp;
+  d.lastX = e.clientX;
+  swipeTo(dx);
+}
+function onMouseDragUp() {
+  const d = mouseDrag;
+  stopMouseDrag();
+  if (!d?.on) return;
+  swipeFlick = d.v > 0.8; // px/ms at release
+  swallowClick = true; // the click this pointerup fires must not open the row
+  window.setTimeout(() => (swallowClick = false), 0);
+  swipeEnd(d.row);
+}
+function stopMouseDrag() {
+  mouseDrag = null;
+  window.removeEventListener("pointermove", onMouseDragMove);
+  window.removeEventListener("pointerup", onMouseDragUp);
 }
 
 type SectionKey = "snoozed" | "settled" | "archived";
@@ -1662,6 +1814,14 @@ function onKeydown(e: KeyboardEvent) {
     goNextInbox();
     return;
   }
+  if (keys.matches(e, "archiveThread")) {
+    const row = feed.value.live.find(isActiveRow);
+    if (row && !row.tab.settled) { e.preventDefault(); toggleSettled(row.tab, row.ws.id); }
+    return;
+  }
+  // Thread history = router history (Back / Forward in the TitleBar).
+  if (keys.matches(e, "historyBack")) { e.preventDefault(); router.back(); return; }
+  if (keys.matches(e, "historyForward")) { e.preventDefault(); router.forward(); return; }
   if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
     const row = jumpRows.value[Number(e.code.slice(5)) - 1];
     if (row) { e.preventDefault(); selectTab(row); }
@@ -1672,11 +1832,17 @@ function onKeydown(e: KeyboardEvent) {
 function onKeyup(e: KeyboardEvent) {
   if (e.key === "Meta") hideJumpHints();
 }
+// Mouse side buttons: 3 = back, 4 = forward.
+function onMouseNav(e: MouseEvent) {
+  if (e.button === 3) router.back();
+  else if (e.button === 4) router.forward();
+}
 
 onMounted(() => {
   document.addEventListener("click", onDocClick);
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("keyup", onKeyup);
+  window.addEventListener("mouseup", onMouseNav);
   window.addEventListener("blur", hideJumpHints);
   mountSections();
   refreshAllBranches();
@@ -1693,6 +1859,8 @@ onMounted(() => {
 });
 onUnmounted(() => {
   document.removeEventListener("keyup", onKeyup);
+  window.removeEventListener("mouseup", onMouseNav);
+  stopMouseDrag();
   window.removeEventListener("blur", hideJumpHints);
   hideJumpHints();
   if (prTimer) clearInterval(prTimer);
@@ -1886,7 +2054,12 @@ async function confirmCreate() {
 .sb-icon { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 7px; color: var(--text-muted); transition: background-color .12s, color .12s; }
 .sb-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
 .sb-repo-tile { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; font-size: 10px; font-weight: 700; color: #fff; }
-.sb-row { transition: background-color .12s; border: 1px solid transparent; -webkit-touch-callout: none; }
+.sb-row { transition: background-color .12s, transform .18s ease; border: 1px solid transparent; -webkit-touch-callout: none; }
+.sb-row.sb-swiping { transition: background-color .12s; user-select: none; }
+.sb-swipe-bg { position: absolute; top: -1px; bottom: -1px; left: 100%; display: flex; align-items: center; justify-content: flex-end; padding-right: 12px; overflow: hidden; border-radius: 8px; pointer-events: none; color: var(--text-primary); background: color-mix(in srgb, var(--accent) 28%, transparent); transition: width .18s ease, background-color .12s; }
+.sb-swiping .sb-swipe-bg { transition: background-color .12s; }
+.sb-swipe-bg.is-past { background: var(--accent); color: var(--bg-base); }
+@media (prefers-reduced-motion: reduce) { .sb-row, .sb-swipe-bg { transition: none !important; } }
 .sb-row-more { display: none; }
 /* Finger, no hover: the ⋮ replaces the hover-only buttons, and the settled
    row's restore button replaces its age. */
@@ -1901,7 +2074,7 @@ async function confirmCreate() {
 /* t3code: a row that needs nothing from you recedes; hover / unread / blocked stay full. */
 .sb-jump-hint { flex-shrink: 0; min-width: 22px; padding: 0 4px; border-radius: 4px; font: 600 10px/16px var(--font-sans, inherit); text-align: center; color: var(--text-primary); background: var(--bg-selected); border: 1px solid color-mix(in srgb, var(--text-primary) 14%, transparent); }
 .sb-drop-before { box-shadow: inset 0 2px 0 var(--accent); }
-.sb-recede { opacity: .62; transition: opacity .12s, background-color .12s; }
+.sb-recede { opacity: .62; transition: opacity .12s, background-color .12s, transform .18s ease; }
 .sb-recede:hover { opacity: 1; }
 .sb-row-active { background: var(--bg-selected); border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
 .sb-row-act { display: flex; padding: 3px; border-radius: 5px; color: var(--text-muted); }
