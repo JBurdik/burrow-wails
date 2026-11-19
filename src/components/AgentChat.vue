@@ -969,7 +969,6 @@ import {
   getAcpCapabilities, getAcpChatSetting, getLastAcpSetting, rpcLaunchSeed,
   setAcpCapabilities, setAcpChatSetting, type AcpChatSettings,
 } from "@/lib/acpSettings";
-import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 import TranscriptComments from "./review/TranscriptComments.vue";
 import TranscriptFeedbackBar from "./review/TranscriptFeedbackBar.vue";
 import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
@@ -1476,7 +1475,6 @@ const {
   permissionResponsePending, codexUserInput, codexUserInputPending,
   nativeControlResponsePending,
   contextTokens, contextWindow, contextSplit, contextReport, contextReportPending,
-  claudeGeneratedTitle,
   removeQueuedMessage, editQueuedMessage, clearQueuedMessages, moveQueuedMessage,
   held,
 } = S;
@@ -2693,29 +2691,6 @@ async function copyCatchUp() {
 }
 watch(() => props.chatId, () => Object.assign(catchUp, { open: false, summary: "", items: [], error: "" }));
 
-// Upgrade the heuristic title with a model-written one (headless `claude -p`,
-// same cheap model as the commit-message button). Fire-and-forget: the
-// heuristic title is already on screen, so a failure or a slow answer costs
-// nothing. Bails if anything better claimed the title meanwhile.
-async function refineTitle(chatId: number, text: string) {
-  const heuristic = smartTitle(text);
-  let title = "";
-  try {
-    title = await invoke<string>("generate_chat_title", {
-      cwd: props.cwd,
-      model: uiStore.textGenerationModel,
-      policy: uiStore.textGenerationPolicy,
-      text,
-    });
-  } catch {
-    return;
-  }
-  // chatId, not props.chatId: the view may show another thread by now.
-  if (!title) return;
-  const session = chats.sessions.find((s) => s.id === chatId);
-  if (!session || session.pinnedTitle || session.title !== heuristic) return;
-  chats.sync(chatId, { title });
-}
 
 
 
@@ -2914,16 +2889,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     pendingImages.value = [];
     inputText.value = "";
     return null;
-  }
-  // Auto-title from the first user message (still at default, Claude hasn't
-  // named it). Before the busy branch: a fresh chat whose CLI is still warming
-  // reads busy, and titling only on the idle path left it "Chat N".
-  if (!claudeGeneratedTitle.value) {
-    const session = chats.sessions.find((s) => s.id === sendingChatId);
-    if (session && isDefaultTitle(session.title)) {
-      chats.sync(sendingChatId, { title: smartTitle(text) });
-      void refineTitle(sendingChatId, text);
-    }
   }
   // A follow-up is always a separate turn, queued in Go behind the running one
   // (chat_submit decides). `busy` here only skips the new-turn bookkeeping.

@@ -210,6 +210,9 @@ func (a *App) chatSendBody(c Chat, id, text string, images []string) error {
 	a.chatRT.touchChat(id, time.Now())
 	// Before the recorded line exists: it is what makes the next send not the first.
 	first := c.ParentChatID == 0 && c.Kind != "side" && a.firstUserSend(chatID)
+	if first {
+		a.autoTitleChat(c, text)
+	}
 	// The prompt is recorded BEFORE the process starts (threadbear's startTurn),
 	// so every client shows it and a running phase at once instead of after the
 	// CLI's startup (seconds: MCP servers, hooks). A failed start or write ends

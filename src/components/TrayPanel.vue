@@ -176,8 +176,6 @@ import { openMiniChat } from "@/lib/miniChat";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { Select } from "@/components/ui/select";
 import { chatSession, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";
-import { useUIStore } from "@/stores/ui";
-import { smartTitle } from "@/lib/chatTitle";
 import { newClientId } from "@/lib/offline";
 import { feedGroups, needsYou, permTarget, useThreadFeed, type FeedRow } from "@/lib/threadFeed";
 
@@ -187,7 +185,6 @@ type View = { kind: "list" } | { kind: "chat"; chatId: number } | { kind: "compo
 
 const chats = useClaudeChatsStore();
 const workspaces = useWorkspaceStore();
-const ui = useUIStore();
 const { rows, perms, now, answerPerm: answer, permsFor } = useThreadFeed();
 const view = ref<View>({ kind: "list" });
 const pinned = ref(false);
@@ -366,7 +363,6 @@ async function sendCompose() {
     });
     await chats.reload();
     await invoke("chat_submit", { chatId: row.id, text, images: [], clientId: newClientId() });
-    nameThread(row.id, Number(composeWs.value), text);
     composeText.value = "";
     view.value = { kind: "chat", chatId: row.id };
   } catch (e) {
@@ -374,20 +370,6 @@ async function sendCompose() {
   } finally {
     composing.value = false;
   }
-}
-
-// remote_create_chat titles the row "Chat N (phone)"; give it the welcome
-// composer's titles instead: the prompt heuristic now, a model's when it answers.
-function nameThread(chatId: number, wsId: number, text: string) {
-  const heuristic = smartTitle(text);
-  chats.sync(chatId, { title: heuristic });
-  const cwd = workspaces.workspaces.find((w) => w.id === wsId)?.path ?? "";
-  void invoke<string>("generate_chat_title", { cwd, model: ui.textGenerationModel, policy: ui.textGenerationPolicy, text })
-    .then((title) => {
-      const s = chats.sessions.find((c) => c.id === chatId);
-      if (title && s && !s.pinnedTitle && s.title === heuristic) chats.sync(chatId, { title });
-    })
-    .catch(() => {});
 }
 
 // ── Pinning + window size ───────────────────────────────────────────────────

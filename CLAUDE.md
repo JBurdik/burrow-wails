@@ -115,6 +115,11 @@ A settled, seen, **collected** (`collected_at`, read-only on `Chat`) sub-agent i
 30 min by `chatAttention`'s desktop sweep (`subagentArchivable` in `chatTree.ts`) — client-side because
 "watching" is client-side. No Archived shelf for sub-agents: it just leaves the RP list.
 
+**Titles** (`chattitle.go`): a top-level thread's first prompt (`chatSendBody`'s `first`) renames a row still at
+"Chat N" / "Chat N (phone)" to a heuristic, then async to `GenerateChatTitle` — both conditional UPDATEs (title unchanged,
+not pinned), so every door (desktop, tray, phone, CLI) gets one and a rename wins. `SaveChats` never lets a default title
+overwrite a real one (a client still holding "Chat N" saves per streamed message).
+
 **Snooze** (`chatsnooze.go`): `chats.snoozed_until` (unix ms, 0 = none, read-only on the wire) keeps a chat
 in Settled until then (`settledFor`); `ChatSnooze` / `chat_snooze` sets or clears it, and `chatScheduleLoop`'s
 sweep wakes it — clears the column and the settle pin, bumps `last_activity_at`, emits `chat-snooze-woke`

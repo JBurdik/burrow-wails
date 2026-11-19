@@ -292,7 +292,17 @@ func (a *App) SaveChats(chats []Chat) error {
 		if c.ID <= 0 {
 			continue
 		}
-		if _, err := stmt.Exec(c.Title, c.PinnedTitle, c.ClaudeSessionID,
+		// A default title never overwrites a real one: Go titles a thread on
+		// its first prompt (chattitle.go), and a client still holding
+		// "Chat N" saves on every streamed message.
+		title := c.Title
+		if isDefaultChatTitle(title) {
+			var cur string
+			if tx.QueryRow(`SELECT title FROM chats WHERE id = ?`, c.ID).Scan(&cur) == nil && !isDefaultChatTitle(cur) {
+				title = cur
+			}
+		}
+		if _, err := stmt.Exec(title, c.PinnedTitle, c.ClaudeSessionID,
 			c.MessageCount, c.AgentKind, c.Transport, c.Model,
 			c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID, c.ID); err != nil {
 			return err
