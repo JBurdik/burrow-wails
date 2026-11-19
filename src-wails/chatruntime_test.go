@@ -211,7 +211,7 @@ func TestChatSendStartsLazilyWithRowSettings(t *testing.T) {
 	}
 	s := fake.lastStart()
 	if s.cmd != "/bin/sh" || !hasArgPair(s.args, "--resume", "sess-1") || !hasArgPair(s.args, "--model", "claude-opus-x") ||
-		!hasArgPair(s.args, "--effort", "max") || !hasArgPair(s.args, "--permission-mode", "default") || !slices.Contains(s.args, "--x") {
+		!hasArgPair(s.args, "--effort", "max") || !hasArgPair(s.args, "--permission-mode", "plan") || !slices.Contains(s.args, "--x") {
 		t.Fatalf("start did not use the row + profile: %s %v", s.cmd, s.args)
 	}
 	if !slices.Contains(s.env, "CLAUDE_CONFIG_DIR=/cfg/work") {
@@ -520,7 +520,7 @@ func TestChatSetLaunchSettings(t *testing.T) {
 	}
 	_ = a.ChatSend(c.ID, "third", nil, "")
 	s := fake.lastStart()
-	if !hasArgPair(s.args, "--effort", "high") || !hasArgPair(s.args, "--model", "claude-sonnet-x") || !hasArgPair(s.args, "--permission-mode", "default") {
+	if !hasArgPair(s.args, "--effort", "high") || !hasArgPair(s.args, "--model", "claude-sonnet-x") || !hasArgPair(s.args, "--permission-mode", "plan") {
 		t.Fatalf("restart did not pick up the row: %v", s.args)
 	}
 }

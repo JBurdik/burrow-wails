@@ -193,6 +193,13 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		inherit = parent
 	}
 
+	// A sub-agent runs headless: plan mode parks it on an ExitPlanMode only the
+	// user can answer. Agents asked for it on "read-only" tasks (the task text
+	// says read-only), so an agent's plan means "the parent's mode". A profile
+	// the user set to plan still applies.
+	if req.PermissionMode == "plan" {
+		req.PermissionMode = ""
+	}
 	if req.PermissionMode != "" {
 		if permRank(req.PermissionMode) < 0 {
 			return none, fmt.Errorf("Unknown permission mode %q. Use plan, default, acceptEdits, auto, dontAsk or full-access.", req.PermissionMode)

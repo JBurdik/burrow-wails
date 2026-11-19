@@ -130,7 +130,7 @@ func claudePermMode(permissionMode string) string {
 		return "auto"
 	case "full-access", "bypassPermissions":
 		return "bypassPermissions"
-	case "acceptEdits", "dontAsk":
+	case "acceptEdits", "dontAsk", "plan":
 		return permissionMode
 	}
 	return "default"

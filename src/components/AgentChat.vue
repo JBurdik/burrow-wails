@@ -428,9 +428,9 @@
         </template>
       </div>
 
-      <!-- Working line (Ghostex-style): a slowly spinning spark, a playful verb, the clock. -->
+      <!-- Working line: a running dachshund, a playful verb, the clock. -->
       <div v-if="busy" class="flex items-center gap-2 px-4 py-2">
-        <PhSparkle :size="15" weight="fill" class="working-spark" />
+        <span class="working-dog" aria-hidden="true" />
         <span class="text-[13px] text-secondary-foreground">{{ workingVerb }}…</span>
         <span class="text-[12px] tabular-nums text-muted-foreground">{{ workingElapsed }}</span>
       </div>
@@ -3497,6 +3497,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 :deep(.mention-pill) {
   --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></svg>');
 }
+:deep(.thread-chip) {
+  cursor: pointer;
+  --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"/></svg>');
+}
 
 /* The user bubble is a quiet neutral surface (--bg-selected), so fences and
    chips inside it only need a faint tint of the text color. */
@@ -3511,10 +3515,6 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 18%, transparent);
   color: inherit;
   cursor: pointer;
-}
-:deep(.thread-chip) {
-  cursor: pointer;
-  --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"/></svg>');
 }
 
 /* Tool row — quiet activity-log line, expandable */
@@ -3729,9 +3729,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .worked-bar { display: flex; width: 100%; align-items: center; gap: 9px; padding: 9px 14px; border: none; border-radius: 12px; font-size: 13.5px; text-align: left; cursor: pointer; background: color-mix(in srgb, var(--chat-text) 4%, var(--chat-bg)); }
 .worked-bar:hover { background: color-mix(in srgb, var(--chat-text) 7%, var(--chat-bg)); }
 .worked-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--chat-border); font-size: 11.5px; color: var(--chat-text-secondary); }
-.working-spark { color: #E0876A; animation: working-spin 9s linear infinite, working-pulse 1.6s ease-in-out infinite; }
-@keyframes working-spin { to { transform: rotate(360deg); } }
-@keyframes working-pulse { 50% { opacity: .55; } }
+/* 8 frames of 40x20 in one strip (assets/dachshund-run.png). */
+.working-dog { width: 40px; height: 20px; flex-shrink: 0; background: url("../assets/dachshund-run.png") 0 0 / 320px 20px no-repeat; image-rendering: pixelated; animation: working-dog-run .8s steps(8) infinite reverse; /* the strip's leg cycle runs backwards */ }
+@keyframes working-dog-run { to { background-position: -320px 0; } }
+@media (prefers-reduced-motion: reduce) { .working-dog { animation: none; } }
 
 /* Inline diff card (changed-files row). */
 .diff-card { border: 1px solid var(--chat-border); border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }

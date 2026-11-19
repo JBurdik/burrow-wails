@@ -64,6 +64,14 @@ func TestSpawnSubagentRunsInGo(t *testing.T) {
 			t.Fatalf("reviewer under %s parent: %q, want %q", parentMode, child.PermissionMode, want)
 		}
 	}
+	// An agent's "plan" is ignored: the child runs in the parent's mode.
+	got, err = a.spawnSubagent(control.SpawnRequest{Task: "x", PermissionMode: "plan", ParentChatID: parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child, _ := a.chatByID(got.ChatID); child.PermissionMode != "acceptEdits" {
+		t.Fatalf("agent-requested plan: %q, want the parent's acceptEdits", child.PermissionMode)
+	}
 	for _, mode := range []string{"full-access", "dontAsk", "yolo"} {
 		if _, err := a.spawnSubagent(control.SpawnRequest{Task: "x", PermissionMode: mode, ParentChatID: parent.ID}); err == nil {
 			t.Fatalf("mode %q must be refused under an acceptEdits parent", mode)
