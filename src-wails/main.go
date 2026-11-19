@@ -79,6 +79,7 @@ func main() {
 	})
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		app.restoreWindowState(mainWin)
+		fixAXSize(mainWin)
 	})
 
 	go watchUIBinary()

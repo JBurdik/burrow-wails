@@ -9,3 +9,4 @@ func setTrayPanelMovable(*application.WebviewWindow, bool) {}
 func prepareTrayToast(*application.WebviewWindow)          {}
 func registerTrayHotkey(*App)                              {}
 func setTrayHotkey(string) error                           { return nil }
+func fixAXSize(*application.WebviewWindow)                 {}
