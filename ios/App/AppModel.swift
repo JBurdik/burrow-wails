@@ -442,11 +442,6 @@ final class AppModel {
                                                                "model": model, "effort": effort, "permissionMode": permission]) as? [String: Any]
         let id = int(row?["id"])
         guard id > 0 else { throw BurrowError.server("Could not create the thread.") }
-        if let client {
-            let current = row?["title"] as? String ?? ""
-            let cwd = self.workspace(workspace)?.path ?? ""
-            Task { await client.nameThread(chatId: id, current: current, cwd: cwd, text: text) }
-        }
         // Show the thread now and let ChatView send the first prompt (pendingFirst): it echoes the
         // message at once, and a slow agent start no longer keeps the New thread sheet open.
         chats.append(Chat(row ?? [:]))
