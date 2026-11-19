@@ -152,6 +152,15 @@ build-beta:
 
 # Build + install the beta locally on this Mac (personal signature, not released).
 beta: build-beta
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Stop the running beta (UI, then core) before swapping the bundle: a core
+    # that sees its binary change restarts itself while the new UI starts its
+    # own, and the two race over the tray panel. Same as tray → Quit.
+    osascript -e 'quit app id "com.agenticide.wails.beta"' 2>/dev/null || true
+    core="Burrow Beta.app/Contents/MacOS/Burrow --core"
+    pkill -TERM -f "$core" || true
+    for _ in $(seq 50); do pgrep -f "$core" >/dev/null || break; sleep 0.2; done
     rm -rf "/Applications/Burrow Beta.app"
     cp -R "src-wails/build/bin/Burrow Beta.app" /Applications/
     open "/Applications/Burrow Beta.app"
