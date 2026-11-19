@@ -33,8 +33,8 @@ func activityVerbs(c *Core) []Verb {
 		Name:    "activity",
 		Summary: "Read the user's activity log (opt-in, Settings → General: clicks, routes, shortcuts, sends; plus UI hangs). --summary = counts of what is used most",
 		Args: []Arg{
-			{Name: "summary", Type: "bool", Desc: "Counts by kind + label instead of entries"},
-			{Name: "days", Type: "int", Desc: "How many days back, today included (default 1, ≤ 30)"},
+			{Name: "summary", Type: "boolean", Desc: "Counts by kind + label instead of entries"},
+			{Name: "days", Type: "integer", Desc: "How many days back, today included (default 1, ≤ 30)"},
 		},
 		Scope: ScopeLocal,
 		Fn: func(_ context.Context, p Params) (any, error) {
