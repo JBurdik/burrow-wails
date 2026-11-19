@@ -408,6 +408,8 @@
                 @resolve="transcriptFeedback.setResolved"
                 @follow-up="jumpToFeedback"
                 @quote="quoteIntoComposer"
+                :can-explain="!compact && !phone && sideChatAvailable"
+                @explain="explainSelection"
               >
                 <!-- eslint-disable-next-line vue/no-v-html -->
                 <div class="md-body" v-html="renderAssistantMd(msg)" @click="onRichBlockClick" />
@@ -889,7 +891,7 @@ import type { Phase } from "@/runtime/displayStatus";
 import { chatAsleep, useClaudeChatsStore } from "@/stores/claudeChats";
 import { childrenOf } from "@/stores/chatTree";
 import { canSideChat } from "@/stores/chatTree";
-import { newSideChat } from "@/lib/sideChat";
+import { explainInSideChat, newSideChat } from "@/lib/sideChat";
 import { PhChatsCircle } from "@phosphor-icons/vue";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { visitWatermark } from "@/lib/visitWatermark";
@@ -1706,6 +1708,14 @@ const sideChatAvailable = computed(() => !!activeSession.value?.claudeSessionId 
 async function openSideChat() {
   try {
     await newSideChat(props.chatId);
+    openRightPanelSurface("side-chat", props.workspaceId);
+  } catch (e) {
+    S.notice(`Could not start a side chat: ${e}`);
+  }
+}
+async function explainSelection(quote: string) {
+  try {
+    await explainInSideChat(props.chatId, quote);
     openRightPanelSurface("side-chat", props.workspaceId);
   } catch (e) {
     S.notice(`Could not start a side chat: ${e}`);

@@ -60,3 +60,15 @@ export function insertQuote(text: string, caret: number, quote: string, ask = fa
   const tail = after && !after.startsWith("\n") ? `\n${after}` : after;
   return { text: head + insert + tail, caret: head.length + insert.length };
 }
+
+/** Longest quote an Explain side chat carries; the rest is cut with "…". */
+export const EXPLAIN_MAX_QUOTE = 1200;
+
+/** First prompt of an Explain side chat: explain `quote` (words selected in a
+ *  reply) in this conversation's context, briefly, touching nothing. */
+export function explainPrompt(quote: string): string {
+  let q = quote.trim();
+  if (q.length > EXPLAIN_MAX_QUOTE) q = `${q.slice(0, EXPLAIN_MAX_QUOTE).trimEnd()}…`;
+  const block = q.split("\n").map((line) => line.trim() ? `> ${line}` : ">").join("\n");
+  return `Explain what these words from your earlier reply mean in the context of this conversation. Keep it short. Do not change any files or run anything that changes state.\n\n${block}`;
+}
