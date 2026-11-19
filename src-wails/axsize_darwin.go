@@ -15,20 +15,22 @@ package main
 // NSWindow — TextEdit and a bare test window do it too; Chromium apps use their
 // own AX window and don't). Window managers and screen streamers (Sill) do
 // exactly position → size → position, so Burrow kept its width. After AppKit's
-// handler runs, apply the size it was asked for, keeping the top-left corner
-// as AXSize means, clamped to the window's min/max.
+// handler runs, fix the width — but ONLY in that shape: height taken, width
+// off by more than a point (usually the old width; on a display narrower than
+// the window, some screen-fitted width instead). Anything else is AppKit's own
+// legitimate adjustment (pixel rounding, the vertical screen constraint);
+// overriding those made a tiler's every resize jump twice.
 static IMP origAXSet;
 static void axSetValue(NSWindow *self, SEL cmd, id value, NSString *attr) {
 	((void (*)(id, SEL, id, NSString *))origAXSet)(self, cmd, value, attr);
 	if (![attr isEqualToString:NSAccessibilitySizeAttribute] || ![value isKindOfClass:[NSValue class]]) return;
 	NSSize want = [value sizeValue];
-	NSSize lo = self.minSize, hi = self.maxSize;
-	want.width = MIN(MAX(want.width, lo.width), hi.width);
-	want.height = MIN(MAX(want.height, lo.height), hi.height);
+	want.width = MIN(MAX(want.width, self.minSize.width), self.maxSize.width);
 	NSRect f = self.frame;
-	if (NSEqualSizes(f.size, want)) return;
-	f.origin.y += f.size.height - want.height;
-	f.size = want;
+	BOOL widthIgnored = fabs(f.size.width - want.width) > 1;
+	BOOL heightTaken = fabs(f.size.height - want.height) <= 1;
+	if (!widthIgnored || !heightTaken) return;
+	f.size.width = round(want.width);
 	[self setFrame:f display:YES];
 }
 
