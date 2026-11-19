@@ -336,7 +336,7 @@ func (a *App) fireDueSchedules(now time.Time, send func(chatID int64, text strin
 		return nil
 	}
 	var fired []int64
-	a.runDeliveries(a.scheduleDeliveries(now, func(c int64, t string, _ []string, _ string) error { return send(c, t) }, &fired))
+	a.runDeliveries(a.scheduleDeliveries(now, func(c int64, t string, _ []string, _ string, _ *autoSend) error { return send(c, t) }, &fired))
 	return fired
 }
 
@@ -425,7 +425,7 @@ func (a *App) scheduleDeliveries(now time.Time, send chatSender, fired *[]int64)
 				}
 				var c Chat
 				if c, err = a.startScheduledChat(it, now); err == nil {
-					if err = send(c.ID, text, nil, ""); err != nil {
+					if err = send(c.ID, text, nil, "", nil); err != nil {
 						_ = a.DeleteChat(c.ID) // a row whose process never started
 					}
 				}
@@ -441,7 +441,7 @@ func (a *App) scheduleDeliveries(now time.Time, send chatSender, fired *[]int64)
 				if !runCheck(a.chatCwd(c)) {
 					return true
 				}
-				err = send(it.ChatID, text, nil, "")
+				err = send(it.ChatID, text, nil, "", scheduleAuto(it))
 			}
 			if err != nil {
 				if errors.Is(err, errChatBusy) {
@@ -538,4 +538,13 @@ func (a *App) scheduleCwd(p control.ScheduledPrompt) string {
 		return ""
 	}
 	return a.chatCwd(c)
+}
+
+// scheduleAuto is the divider a scheduled run into its chat draws (userLine.Auto).
+func scheduleAuto(it control.ScheduledPrompt) *autoSend {
+	label := "scheduled wake-up"
+	if n := strings.TrimSpace(it.Name); n != "" {
+		label = n
+	}
+	return &autoSend{Kind: "schedule", Label: label}
 }

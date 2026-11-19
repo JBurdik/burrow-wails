@@ -335,3 +335,16 @@ func TestFoldKeepsContextReportOutOfTranscript(t *testing.T) {
 		t.Fatalf("got %+v", msgs)
 	}
 }
+
+// A Go-initiated prompt keeps its auto marker through the recorded line, the
+// normalizer and the fold — what the transcript's wait divider reads.
+func TestFoldCarriesAutoSendMarker(t *testing.T) {
+	line := `{"text":"Sub-agent done","auto":{"kind":"subagent","label":"Fix CI finished"}}`
+	msgs := foldEvents(normalizeUserPrompt(line, 3))
+	if len(msgs) != 1 || msgs[0].Auto == nil || *msgs[0].Auto != (autoSend{Kind: "subagent", Label: "Fix CI finished"}) {
+		t.Fatalf("auto not folded onto the row: %+v", msgs)
+	}
+	if m := foldEvents(normalizeUserPrompt(`{"text":"hi"}`, 4)); m[0].Auto != nil {
+		t.Fatalf("a typed prompt got an auto marker")
+	}
+}

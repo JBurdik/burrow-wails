@@ -129,15 +129,18 @@ var netProbe struct {
 
 // netResumeDeliveries offers a continue prompt for every waiting chat.
 func (a *App) netResumeDeliveries(now time.Time, send chatSender, resumed *[]int64) []pendingDelivery {
-	type row struct{ id, waitAt, tries int64 }
-	rows, err := a.db.Query(`SELECT id, net_wait_at, net_resume_tries FROM chats WHERE net_wait_at != 0 AND archived_at = 0`)
+	type row struct {
+		id, waitAt, tries int64
+		reason            string
+	}
+	rows, err := a.db.Query(`SELECT id, net_wait_at, net_resume_tries, net_wait_reason FROM chats WHERE net_wait_at != 0 AND archived_at = 0`)
 	if err != nil {
 		return nil
 	}
 	var due []row
 	for rows.Next() {
 		var r row
-		if rows.Scan(&r.id, &r.waitAt, &r.tries) == nil {
+		if rows.Scan(&r.id, &r.waitAt, &r.tries, &r.reason) == nil {
 			due = append(due, r)
 		}
 	}
@@ -162,7 +165,7 @@ func (a *App) netResumeDeliveries(now time.Time, send chatSender, resumed *[]int
 			if n, _ := res.RowsAffected(); n == 0 {
 				return false
 			}
-			if err := send(r.id, netResumeText, nil, ""); err != nil {
+			if err := send(r.id, netResumeText, nil, "", netResumeAuto(r.reason)); err != nil {
 				log.Printf("chat %d: network resume not sent: %v", r.id, err)
 				return false
 			}
@@ -173,4 +176,12 @@ func (a *App) netResumeDeliveries(now time.Time, send chatSender, resumed *[]int
 		}})
 	}
 	return out
+}
+
+// netResumeAuto is the divider a network / restart resume draws (userLine.Auto).
+func netResumeAuto(reason string) *autoSend {
+	if reason == "restart" {
+		return &autoSend{Kind: "restart", Label: "Burrow restarted"}
+	}
+	return &autoSend{Kind: "net", Label: "connection came back"}
 }

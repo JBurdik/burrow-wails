@@ -9,6 +9,7 @@ final class TranscriptRowsTests: XCTestCase {
         case .message(let m): ["message": m.id]
         case .tools(_, let items): ["tools": items.map(\.id), "label": Transcript.groupLabel(items), "failed": items.contains(where: \.failed)]
         case .worked(let turn, let tools, let folded): ["worked": turn, "tools": tools, "folded": folded]
+        case .gap(let m, let label): ["gap": m.id, "label": label]
         }
     }
 

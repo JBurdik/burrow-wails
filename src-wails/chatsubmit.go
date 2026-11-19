@@ -133,6 +133,16 @@ type userLine struct {
 	Text     string   `json:"text"`
 	Images   []string `json:"images,omitempty"`
 	ClientID string   `json:"clientId,omitempty"`
+	// Auto: Go sent this on its own (chatdelivery.go), not the user — the
+	// transcript draws it as a wait divider inside the previous reply.
+	Auto *autoSend `json:"auto,omitempty"`
+}
+
+// autoSend says why Go sent a prompt by itself: kind subagent | schedule |
+// limit | net | restart; label is what the divider shows ("Fix CI finished").
+type autoSend struct {
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
 }
 
 func encodeUserLine(text string, images []string, clientID string) string {
@@ -143,14 +153,15 @@ func encodeUserLine(text string, images []string, clientID string) string {
 func decodeUserLine(line string) userLine {
 	if strings.HasPrefix(line, "{") {
 		var v struct {
-			Text     *string  `json:"text"`
-			Images   []string `json:"images"`
-			ClientID string   `json:"clientId"`
+			Text     *string   `json:"text"`
+			Images   []string  `json:"images"`
+			ClientID string    `json:"clientId"`
+			Auto     *autoSend `json:"auto"`
 		}
 		// "text" must be present: a plain prompt that merely looks like JSON
 		// stays the prompt.
 		if json.Unmarshal([]byte(line), &v) == nil && v.Text != nil {
-			return userLine{Text: *v.Text, Images: v.Images, ClientID: v.ClientID}
+			return userLine{Text: *v.Text, Images: v.Images, ClientID: v.ClientID, Auto: v.Auto}
 		}
 	}
 	return userLine{Text: line}
@@ -160,7 +171,12 @@ func decodeUserLine(line string) userLine {
 func (a *App) emitUserLine(id, text string, images []string, clientID string) {
 	// The CLI already has the images; the recorded line keeps refs only
 	// (chatimages.go).
-	a.emitChatLine(id, chatUserKind, encodeUserLine(text, a.storeChatImages(id, images), clientID))
+	u := userLine{Text: text, Images: a.storeChatImages(id, images), ClientID: clientID}
+	if v, ok := a.chatRT.auto.Load(id); ok {
+		u.Auto = v.(*autoSend)
+	}
+	b, _ := json.Marshal(u)
+	a.emitChatLine(id, chatUserKind, string(b))
 }
 
 // recordSentUserLine is the transports' emitUserLine after a successful write,

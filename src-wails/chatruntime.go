@@ -30,6 +30,7 @@ type chatRuntime struct {
 	locks   sync.Map // chat id string → *sync.Mutex
 	active  sync.Map // chat id string → time.Time of last activity (chatsleep.go)
 	moved   sync.Map // chat id string → struct{}: live process runs in the old cwd (chatmove.go)
+	auto    sync.Map // chat id string → *autoSend of the Go-initiated send in progress (chatSendSettled)
 	sending sync.Map // chat id string → client id of the send in progress (chatsubmit.go)
 	// chat id string → struct{}: chatSendBody already recorded the prompt, so
 	// the transport must not record it again (recordSentUserLine).

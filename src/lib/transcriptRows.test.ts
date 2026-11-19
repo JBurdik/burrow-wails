@@ -10,6 +10,7 @@ function normalize(r: TranscriptRow) {
     case "message": return { message: r.message.id };
     case "tools": return { tools: r.items.map((m) => m.id), label: toolGroupLabel(r.items), failed: r.items.some((m) => !!m.toolFailed) };
     case "worked": return { worked: r.turn, tools: r.tools, folded: r.folded };
+    case "gap": return { gap: r.message.id, label: r.label };
   }
 }
 

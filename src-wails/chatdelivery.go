@@ -25,8 +25,9 @@ const (
 	deliverSchedule                          // scheduled prompts / wake-ups, by due time
 )
 
-// chatSender is ChatSend's shape; production wires chatSendSettled.
-type chatSender func(chatID int64, text string, images []string, clientID string) error
+// chatSender is ChatSend's shape; production wires chatSendSettled. auto
+// marks a send Go made on its own (nil = the user's words, e.g. their queue).
+type chatSender func(chatID int64, text string, images []string, clientID string, auto *autoSend) error
 
 type pendingDelivery struct {
 	ChatID    int64
@@ -90,7 +91,7 @@ var errChatBusy = errors.New("chat has a turn in flight")
 // chatSendSettled is ChatSend that re-checks "settled" under the chat lock: a
 // user's own ChatSend may be mid-start (phase still idle while the process
 // spawns), and a delivery racing it must not become a steer.
-func (a *App) chatSendSettled(chatID int64, text string, images []string, clientID string) error {
+func (a *App) chatSendSettled(chatID int64, text string, images []string, clientID string, auto *autoSend) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
 		return err
@@ -99,6 +100,10 @@ func (a *App) chatSendSettled(chatID int64, text string, images []string, client
 	defer a.chatRT.lock(id)()
 	if !a.chatSettled(id) {
 		return errChatBusy
+	}
+	if auto != nil {
+		a.chatRT.auto.Store(id, auto)
+		defer a.chatRT.auto.Delete(id)
 	}
 	return a.chatSendLocked(c, id, text, images, clientID)
 }

@@ -715,5 +715,287 @@
     "message": 1
    }
   ]
+ },
+ {
+  "name": "an automatic follow-up joins the turn's Worked fold behind a wait divider",
+  "settledLast": true,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "fix it",
+    "at": 1000
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done",
+    "at": 2000
+   },
+   {
+    "id": 2,
+    "role": "assistant",
+    "text": "waiting on the sub-agent",
+    "at": 3000
+   },
+   {
+    "id": 3,
+    "role": "user",
+    "text": "Sub-agent Fix CI (#9) finished: ...",
+    "at": 363000,
+    "auto": {
+     "kind": "subagent",
+     "label": "Fix CI finished"
+    }
+   },
+   {
+    "id": 4,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t4",
+    "toolRawName": true,
+    "toolOutput": "done",
+    "at": 364000
+   },
+   {
+    "id": 5,
+    "role": "assistant",
+    "text": "CI is green",
+    "at": 365000
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "worked": 0,
+    "tools": 2,
+    "folded": false
+   },
+   {
+    "message": 1
+   },
+   {
+    "message": 2
+   },
+   {
+    "gap": 3,
+    "label": "6 min later · Fix CI finished"
+   },
+   {
+    "message": 4
+   },
+   {
+    "message": 5
+   }
+  ]
+ },
+ {
+  "name": "a typed message breaks the chain; the chain folds as one turn",
+  "settledLast": true,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "fix it",
+    "at": 1000
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done",
+    "at": 2000
+   },
+   {
+    "id": 2,
+    "role": "assistant",
+    "text": "waiting on the sub-agent",
+    "at": 3000
+   },
+   {
+    "id": 3,
+    "role": "user",
+    "text": "Sub-agent Fix CI (#9) finished: ...",
+    "at": 363000,
+    "auto": {
+     "kind": "subagent",
+     "label": "Fix CI finished"
+    }
+   },
+   {
+    "id": 4,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t4",
+    "toolRawName": true,
+    "toolOutput": "done",
+    "at": 364000
+   },
+   {
+    "id": 5,
+    "role": "assistant",
+    "text": "CI is green",
+    "at": 365000
+   },
+   {
+    "id": 6,
+    "role": "user",
+    "text": "thanks",
+    "at": 400000
+   },
+   {
+    "id": 7,
+    "role": "assistant",
+    "text": "np",
+    "at": 401000
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "worked": 0,
+    "tools": 2,
+    "folded": true
+   },
+   {
+    "message": 2
+   },
+   {
+    "gap": 3,
+    "label": "6 min later · Fix CI finished"
+   },
+   {
+    "message": 5
+   },
+   {
+    "message": 6
+   },
+   {
+    "message": 7
+   }
+  ]
+ },
+ {
+  "name": "a running follow-up: the settled part folds, the follow-up stays live",
+  "settledLast": false,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "fix it",
+    "at": 1000
+   },
+   {
+    "id": 1,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t1",
+    "toolRawName": true,
+    "toolOutput": "done",
+    "at": 2000
+   },
+   {
+    "id": 2,
+    "role": "assistant",
+    "text": "waiting on the sub-agent",
+    "at": 3000
+   },
+   {
+    "id": 3,
+    "role": "user",
+    "text": "Sub-agent Fix CI (#9) finished: ...",
+    "at": 363000,
+    "auto": {
+     "kind": "subagent",
+     "label": "Fix CI finished"
+    }
+   },
+   {
+    "id": 4,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t4",
+    "toolRawName": true
+   },
+   {
+    "id": 5,
+    "role": "tool",
+    "text": "Bash",
+    "toolUseId": "t5",
+    "toolRawName": true
+   }
+  ],
+  "expect": [
+   {
+    "message": 0
+   },
+   {
+    "worked": 0,
+    "tools": 1,
+    "folded": false
+   },
+   {
+    "message": 1
+   },
+   {
+    "message": 2
+   },
+   {
+    "gap": 3,
+    "label": "6 min later · Fix CI finished"
+   },
+   {
+    "message": 4
+   },
+   {
+    "message": 5
+   }
+  ]
+ },
+ {
+  "name": "an automatic row without times or a turn before it is a bare divider",
+  "settledLast": true,
+  "rows": [
+   {
+    "id": 0,
+    "role": "user",
+    "text": "Scheduled: check the deploy",
+    "auto": {
+     "kind": "schedule",
+     "label": "scheduled wake-up"
+    }
+   },
+   {
+    "id": 1,
+    "role": "assistant",
+    "text": "deploy is fine"
+   },
+   {
+    "id": 2,
+    "role": "user",
+    "text": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "gap": 0,
+    "label": "scheduled wake-up"
+   },
+   {
+    "message": 1
+   },
+   {
+    "message": 2
+   }
+  ]
  }
 ]

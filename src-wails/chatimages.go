@@ -117,7 +117,9 @@ func (a *App) lineImagesByRef(chatID, kind, line string) string {
 		if len(u.Images) == 0 {
 			return line
 		}
-		return encodeUserLine(u.Text, a.storeChatImages(chatID, u.Images), u.ClientID)
+		u.Images = a.storeChatImages(chatID, u.Images)
+		b, _ := json.Marshal(u)
+		return string(b)
 	}
 	return line
 }

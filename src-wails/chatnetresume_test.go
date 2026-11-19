@@ -37,7 +37,10 @@ func TestNetResumeWaitsForNetworkThenContinues(t *testing.T) {
 	netReachable = func() bool { return online }
 	t.Cleanup(func() { netReachable = prev })
 	var sent []string
-	send := func(_ int64, text string, _ []string, _ string) error { sent = append(sent, text); return nil }
+	send := func(_ int64, text string, _ []string, _ string, _ *autoSend) error {
+		sent = append(sent, text)
+		return nil
+	}
 
 	a.runDeliveries(a.netResumeDeliveries(time.Now(), send, nil))
 	if len(sent) != 0 {

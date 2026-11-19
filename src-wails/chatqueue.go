@@ -280,7 +280,7 @@ func (a *App) queueDeliveries(send chatSender, delivered *[]int64) []pendingDeli
 					return false // removed / steered meanwhile
 				}
 				a.emitQueueChanged(it.ChatID)
-				if err := send(it.ChatID, it.Text, it.Attachments, it.ClientID); err != nil {
+				if err := send(it.ChatID, it.Text, it.Attachments, it.ClientID, nil); err != nil {
 					busy := errors.Is(err, errChatBusy)
 					attempts := it.Attempts
 					if !busy {

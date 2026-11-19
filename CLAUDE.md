@@ -374,7 +374,12 @@ same way. Go's legacy `queued` rows are hidden; the `/context` answer never beco
 live `text.delta`); an old row folded before that goes out `plumbing: true` on every read path (`isContextReportRow`,
 marked in `stubRowImages` — the one outbound-row door — and `stubChatImages` for raw pages; index kept). **What the transcript draws** (message / "Ran N commands" tool group / settled turn's "Worked" fold) is
 one pure rule, `src/lib/transcriptRows.ts` = `ios/App/Transcript.swift`, pinned for both by `fixtures/transcript-rows.json`
-(vitest + XCTest); AgentChat adds only the changed-files card and labels. A component
+(vitest + XCTest); AgentChat adds only the changed-files card and labels. **One reply** (threadbear's wait gap): a
+prompt Go sends on its own — sub-agent notice, a schedule into its chat, limit / net / restart resume, never the user's
+queue — carries `auto: {kind, label}` on its `chat-user` line (`chatSendSettled`'s `chatSender` arg → `chatRT.auto` →
+`emitUserLine`), copied onto the row by the fold; the rule draws it as a `gap` divider ("6 min later · X finished", wait
+from the rows' `at`, click = the sent text) inside the turn, whose Worked fold spans the whole chain; only a typed row
+opens a turn. Additive: no protocolRev bump; rows without `auto` render as before. A component
 `attachView(ChatViewHooks)`s on mount — scroll, question/plan draft resets, ACP selector restore, `send`
 for the drain — and `release()`s on unmount; the last view's hooks stay installed. A session is only torn
 down when **idle** (`pendingRequests` — a typed `PendingRequest` union — empty and not busy; every answer

@@ -272,6 +272,21 @@ trim can never delete an unfolded line. Clients never fold or save: they render
 Go's versioned splices (ADR 0001, `src/lib/transcriptSplice.ts`) and catch up with
 `chat_subscribe(sinceRev)` after a page read, a gap or a reconnect.
 
+**One reply across automatic follow-ups** (from threadbear's wait gap,
+`~/threadbear/docs/wait-gap-design`). A thread that waits on a sub-agent writes "still
+running", then minutes later — in a turn Go started by itself — "it's back". Drawn as
+two turns, the notice Go sent sat in a user bubble between them and each half got its
+own Worked fold, so the thread read as a conversation the user never had. Go now marks
+every prompt it sends on its own (sub-agent notice, a schedule into its chat, the limit /
+network / restart resumes) with `auto: {kind, label}` on the `chat-user` line; the
+user's queued follow-ups stay unmarked because the user typed them. The transcript rule
+(`transcriptRows.ts` = `Transcript.swift`, `fixtures/transcript-rows.json`) treats only
+an unmarked user row as the start of a turn: a marked one is a thin divider with the
+wait (from the rows' `at`) and the label, its text one click away, and the follow-up's
+work joins the same Worked fold. While the follow-up runs, the fold covers what settled
+before its divider and the rest stays live. Older rows have no marker and render as
+before, so nothing is refolded.
+
 ### Provider protocol is parsed in Go (`src-wails/providerruntime.go`)
 
 Claude stream-json and ACP JSON-RPC are read in **one** place, on the Go side,

@@ -17,6 +17,10 @@ struct Message: Identifiable, Hashable {
     var images: [String]
     /// User rows: the submit client id (Go's chat_submit) — what an echo settles by.
     var clientId: String
+    /// Epoch ms the row arrived live (Go's fold); 0 on older rows.
+    var at: Int
+    /// User rows Go sent on its own (`auto.label`): drawn as a wait divider, not a bubble.
+    var autoLabel: String?
     /// Echoes only: transcript length when sent. Go's copy lands at or after it.
     var after = 0
 
@@ -32,6 +36,8 @@ struct Message: Identifiable, Hashable {
         running = role == "tool" && !failed && d["toolOutput"] == nil
         images = d["images"] as? [String] ?? []
         clientId = d["clientId"] as? String ?? ""
+        at = (d["at"] as? NSNumber)?.intValue ?? 0
+        autoLabel = (d["auto"] as? [String: Any]).map { $0["label"] as? String ?? "" }
         let input = d["toolInput"] as? [String: Any] ?? [:]
         toolTarget = ["command", "file_path", "path", "pattern", "url", "description"]
             .lazy.compactMap { input[$0] as? String }.first ?? ""
@@ -95,6 +101,7 @@ struct ChatView: View {
                         case .tools(_, let items): ToolGroupRow(items: items).equatable()
                         case .worked(let turn, let tools, let folded):
                             WorkedRow(tools: tools, folded: folded) { foldOverride[turn] = !folded }
+                        case .gap(let m, let label): GapRow(message: m, label: label)
                         }
                     }
                     ForEach(echoes) { MessageRow(message: $0).equatable().opacity(0.6) }

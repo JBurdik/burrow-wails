@@ -9,12 +9,16 @@ enum TranscriptRow: Identifiable, Equatable {
     case tools(id: String, items: [Message])
     /// A settled turn's work (thinking + tools) folded behind one row.
     case worked(turn: Int, tools: Int, folded: Bool)
+    /// A prompt Go sent on its own (sub-agent finished, schedule, resume):
+    /// a divider inside the turn, not a new turn ("6 min later · Fix CI finished").
+    case gap(Message, label: String)
 
     var id: String {
         switch self {
         case .message(let m): "m\(m.id)"
         case .tools(let id, _): "g\(id)"
         case .worked(let t, _, _): "w\(t)"
+        case .gap(let m, _): "m\(m.id)"
         }
     }
 }
@@ -23,6 +27,23 @@ enum TranscriptRow: Identifiable, Equatable {
 /// fixtures/transcript-rows.json (TranscriptRowsTests).
 enum Transcript {
     static func isWork(_ m: Message) -> Bool { m.role == "tool" || m.role == "thinking" }
+    /// A user row that opens a turn: typed by the user, not sent by Go on its own.
+    static func opensTurn(_ m: Message) -> Bool { m.role == "user" && m.autoLabel == nil }
+
+    static func fmtWait(_ ms: Int) -> String {
+        let s = Int((Double(ms) / 1000).rounded())
+        if s < 60 { return "\(s)s" }
+        let m = Int((Double(s) / 60).rounded())
+        if m < 60 { return "\(m) min" }
+        return m % 60 != 0 ? "\(m / 60) h \(m % 60) min" : "\(m / 60) h"
+    }
+
+    /// "6 min later · Fix CI finished"; the wait only when both rows carry `at`.
+    static func gapLabel(_ row: Message, prev: Message?) -> String {
+        let label = row.autoLabel ?? ""
+        guard row.at > 0, let p = prev, p.at > 0, row.at >= p.at else { return label }
+        return ["\(fmtWait(row.at - p.at)) later", label].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
 
     /// Rows without Go's `plumbing` flag were folded before it existed: same rule
     /// as chatfold.go isPlumbingCall.
@@ -42,18 +63,26 @@ enum Transcript {
     /// - settledLast: the chat is not in flight, so the last turn is settled too.
     static func rows(_ all: [Message], foldOverride: [Int: Bool], settledLast: Bool) -> [TranscriptRow] {
         let msgs = all.filter(isVisible)
+        var prev: [Int: Message] = [:]
+        for k in msgs.indices.dropFirst() { prev[msgs[k].id] = msgs[k - 1] }
         var out: [TranscriptRow] = []
         var i = 0
         // Rows before the first user message (a window starting mid-turn) are not folded.
-        while i < msgs.count, msgs[i].role != "user" { i += 1 }
-        out += grouped(Array(msgs[0..<i]), atEnd: i == msgs.count)
+        while i < msgs.count, !opensTurn(msgs[i]) { i += 1 }
+        out += grouped(Array(msgs[0..<i]), atEnd: i == msgs.count, prev: prev)
         while i < msgs.count {
             let user = msgs[i]; i += 1
             out.append(.message(user))
             var turn: [Message] = []
-            while i < msgs.count, msgs[i].role != "user" { turn.append(msgs[i]); i += 1 }
+            while i < msgs.count, !opensTurn(msgs[i]) { turn.append(msgs[i]); i += 1 }
             let hasLater = i < msgs.count
-            guard hasLater || settledLast, turn.contains(where: isWork) else { out += grouped(turn, atEnd: !hasLater); continue }
+            // A follow-up still running: fold what settled before its gap, draw the rest live.
+            var live: [Message] = []
+            if !(hasLater || settledLast) {
+                let g = turn.lastIndex(where: { $0.role == "user" }) ?? 0
+                live = Array(turn[g...]); turn = Array(turn[..<g])
+            }
+            guard turn.contains(where: isWork) else { out += grouped(turn + live, atEnd: !hasLater, prev: prev); continue }
             let folded = foldOverride[user.id] ?? hasLater
             let toolCount = turn.filter { $0.role == "tool" }.count
             var emitted = false
@@ -61,24 +90,27 @@ enum Transcript {
             for m in turn {
                 if isWork(m) {
                     if !emitted {
-                        out += grouped(pending, atEnd: false); pending = []
+                        out += grouped(pending, atEnd: false, prev: prev); pending = []
                         out.append(.worked(turn: user.id, tools: toolCount, folded: folded)); emitted = true
                     }
                     if folded { continue }
                 }
                 pending.append(m)
             }
-            out += grouped(pending, atEnd: !hasLater)
+            out += grouped(pending, atEnd: !hasLater && live.isEmpty, prev: prev) + grouped(live, atEnd: !hasLater, prev: prev)
         }
         return out
     }
 
     /// Folds runs of 2+ consecutive tool rows into one group; a run that ends
     /// the transcript (`atEnd`) whose last call still runs stays open so the live call shows.
-    static func grouped(_ msgs: [Message], atEnd: Bool) -> [TranscriptRow] {
+    static func grouped(_ msgs: [Message], atEnd: Bool, prev: [Int: Message]) -> [TranscriptRow] {
         var out: [TranscriptRow] = []
         var i = 0
         while i < msgs.count {
+            if msgs[i].role == "user", msgs[i].autoLabel != nil {
+                out.append(.gap(msgs[i], label: gapLabel(msgs[i], prev: prev[msgs[i].id]))); i += 1; continue
+            }
             guard msgs[i].role == "tool" else { out.append(.message(msgs[i])); i += 1; continue }
             let start = i
             while i < msgs.count, msgs[i].role == "tool" { i += 1 }
@@ -155,6 +187,33 @@ struct WorkedRow: View {
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// "6 min later · Fix CI finished": a thin line between two replies of one turn;
+/// tap it to read what Go sent.
+struct GapRow: View {
+    let message: Message
+    let label: String
+    @State private var open = false
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Button { open.toggle() } label: {
+                HStack(spacing: 8) {
+                    Rectangle().frame(height: 0.5)
+                    Text(label).font(.caption).lineLimit(1).fixedSize()
+                    Rectangle().frame(height: 0.5)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            if open {
+                Text(message.text).font(.caption).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 }
 

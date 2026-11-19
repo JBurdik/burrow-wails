@@ -211,6 +211,17 @@
           </div>
         </template>
 
+        <!-- A prompt Go sent on its own (sub-agent finished, schedule, resume):
+             a thin wait line inside the turn; click to read what was sent. -->
+        <template v-else-if="msg.role === 'turn-gap'">
+          <div class="px-4 py-1">
+            <button class="flex w-full items-center gap-3 text-[11px] text-muted-foreground hover:text-foreground" :aria-expanded="!!gapOpen[msg.id]" @click="gapOpen[msg.id] = !gapOpen[msg.id]">
+              <span class="h-px flex-1 bg-border" /><span class="truncate">{{ msg.label }}</span><span class="h-px flex-1 bg-border" />
+            </button>
+            <div v-if="gapOpen[msg.id]" class="mx-auto mt-1 max-w-[720px] whitespace-pre-wrap text-[12px] text-muted-foreground">{{ msg.text }}</div>
+          </div>
+        </template>
+
         <!-- Files this turn edited: a diffstat card whose rows expand into the
              edit's own before/after lines (Ghostex-style inline diff). -->
         <template v-else-if="msg.role === 'changed-files'">
@@ -1892,9 +1903,11 @@ function diffBlocks(added: number, removed: number): string[] {
 // when scrolling back over a long session.
 interface TurnFoldRow { role: "turn-fold"; id: string; turnKey: number; label: string; folded: boolean; toolCount: number; fileCount: number; partial?: false }
 interface ChangedFilesRow { role: "changed-files"; id: string; files: FileEdit[]; added: number; removed: number; partial?: false }
-type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow;
+interface TurnGapRow { role: "turn-gap"; id: string; label: string; text: string; partial?: false }
+type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow | TurnGapRow;
 
 const foldedTurns = reactive<Record<number, boolean>>({});
+const gapOpen = reactive<Record<string, boolean>>({});
 
 // The display row the "New" divider sits above: the first one holding a
 // message at or after the watermark. ponytail: a watermark inside a folded
@@ -1911,13 +1924,14 @@ const watermarkRowId = computed(() => {
 // Per turn (its user row id): the project files its tool calls edited, and
 // whether it is settled — for the fold row's count and the changed-files card.
 const turnEdits = computed(() => {
-  const out = new Map<number, { edits: FileEdit[]; settled: boolean }>();
+  const out = new Map<number, { edits: FileEdit[]; settled: boolean; ms: number }>();
   const msgs = messages.value.filter(isVisibleRow);
-  let cur: { edits: FileEdit[]; settled: boolean } | null = null;
+  let cur: { edits: FileEdit[]; settled: boolean; ms: number } | null = null;
   for (const m of msgs) {
+    if (m.role === "user" && m.auto && cur) { cur.ms += m.turnMs ?? 0; continue; } // one turn with Go's follow-ups
     if (m.role === "user") {
       if (cur) cur.settled = true; // a later turn exists
-      cur = { edits: [], settled: !busy.value };
+      cur = { edits: [], settled: !busy.value, ms: m.turnMs ?? 0 };
       out.set(m.id, cur);
       continue;
     }
@@ -1930,7 +1944,6 @@ const turnEdits = computed(() => {
 
 const displayItems = computed<DisplayRow[]>(() => {
   const out: DisplayRow[] = [];
-  const byId = new Map(messages.value.map((m) => [m.id, m]));
   let turn: number | null = null;
   const endTurn = () => {
     const t = turn === null ? undefined : turnEdits.value.get(turn);
@@ -1950,8 +1963,10 @@ const displayItems = computed<DisplayRow[]>(() => {
       out.push(r.message);
     } else if (r.kind === "tools") {
       out.push(grouping.value.groupsById.get(r.id)!, ...r.items);
+    } else if (r.kind === "gap") {
+      out.push({ role: "turn-gap", id: `gap-${r.message.id}`, label: r.label, text: r.message.text });
     } else {
-      const turnMs = byId.get(r.turn)?.turnMs;
+      const turnMs = turnEdits.value.get(r.turn)?.ms;
       const fileCount = new Set(turnEdits.value.get(r.turn)?.edits.map((e) => e.path)).size;
       out.push({ role: "turn-fold", id: `fold-${r.turn}`, turnKey: r.turn, label: turnMs ? `Worked ${fmtDuration(turnMs)}` : "Worked", folded: r.folded, toolCount: r.tools, fileCount });
     }
@@ -1987,7 +2002,7 @@ function revealForFind(id: number) {
   const msg = messages.value[i];
   if (msg?.role !== "tool" && msg?.role !== "thinking") return;
   for (let u = i - 1; u >= 0; u--) {
-    if (messages.value[u].role === "user") { foldedTurns[messages.value[u].id] = false; break; }
+    if (messages.value[u].role === "user" && !messages.value[u].auto) { foldedTurns[messages.value[u].id] = false; break; }
   }
   const group = groupIdOf(id);
   if (group) toolGroupExpanded[group] = true;

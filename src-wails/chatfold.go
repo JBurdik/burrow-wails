@@ -42,6 +42,9 @@ type ChatMessage struct {
 	// ClientID: a user row's submit client id (chatsubmit.go) — dedupe after a
 	// core restart and the client's echo match.
 	ClientID string `json:"clientId,omitempty"`
+	// Auto: a user row Go sent on its own (userLine.Auto) — drawn as a wait
+	// divider, not a bubble (transcriptRows.ts).
+	Auto *autoSend `json:"auto,omitempty"`
 
 	ToolInput    map[string]any `json:"toolInput,omitempty"`
 	ToolOutput   string         `json:"toolOutput,omitempty"`
@@ -150,11 +153,14 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 		if !appendChunk(st, "user", ev, false) {
 			return false
 		}
-		if ev.ClientID != "" || len(ev.Images) > 0 {
+		if ev.ClientID != "" || len(ev.Images) > 0 || ev.Auto != nil {
 			for i := len(st.messages) - 1; i >= 0; i-- {
 				if m := &st.messages[i]; m.Role == "user" && m.AcpMsgID == ev.MessageID {
 					if ev.ClientID != "" {
 						m.ClientID = ev.ClientID
+					}
+					if ev.Auto != nil {
+						m.Auto = ev.Auto
 					}
 					if len(m.Images) == 0 {
 						m.Images = ev.Images

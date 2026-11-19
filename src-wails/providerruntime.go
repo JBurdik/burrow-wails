@@ -81,7 +81,9 @@ type ProviderRuntimeEvent struct {
 	// user.delta: the client id the submitting client gave the message
 	// (chatsubmit.go) — how its echo finds this row.
 	ClientID string `json:"clientId,omitempty"`
-	TurnMs int      `json:"turnMs,omitempty"` // message.patch_user
+	// user.delta: Go sent the prompt on its own (userLine.Auto)
+	Auto   *autoSend `json:"auto,omitempty"`
+	TurnMs int       `json:"turnMs,omitempty"` // message.patch_user
 	// message.note "spawned sub-agent" row: which child chat it opens.
 	SubagentChatID int64  `json:"subagentChatId,omitempty"`
 	SubagentAgent  string `json:"subagentAgent,omitempty"`
@@ -677,6 +679,7 @@ func normalizeUserPrompt(line string, ord int64) []ProviderRuntimeEvent {
 		Text:      u.Text,
 		Images:    u.Images,
 		ClientID:  u.ClientID,
+		Auto:      u.Auto,
 	}}
 }
 

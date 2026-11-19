@@ -11,11 +11,17 @@ import type { ChatMessage } from "@/lib/chatTypes";
 // - worked: a settled turn's thinking + tool rows behind one row, at the
 //   position of its first work row. Folded by default except the last turn;
 //   `foldOverride[userId]` is the user's choice.
+// - gap: a user row Go sent on its own (`auto`: a sub-agent finished, a
+//   schedule, a resume) is not a new turn: it is a divider inside the turn
+//   ("6 min later · Fix CI finished"), and the follow-up's work joins the same
+//   Worked fold — one reply. Only a row the user typed opens a turn. While the
+//   follow-up still runs, the fold covers the settled part before its gap.
 
 export type TranscriptRow =
   | { kind: "message"; message: ChatMessage }
   | { kind: "tools"; id: string; items: ChatMessage[] }
-  | { kind: "worked"; turn: number; tools: number; folded: boolean };
+  | { kind: "worked"; turn: number; tools: number; folded: boolean }
+  | { kind: "gap"; message: ChatMessage; label: string };
 
 export interface TranscriptRowsOptions {
   /** The chat is not in flight, so its last turn is settled too. */
@@ -59,13 +65,32 @@ export function toolGroupLabel(items: ChatMessage[]): string {
 }
 
 const isWork = (m: ChatMessage) => m.role === "tool" || m.role === "thinking";
+/** A user row that opens a turn: typed by the user, not sent by Go on its own. */
+const opensTurn = (m: ChatMessage) => m.role === "user" && !m.auto;
+
+function fmtWait(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min`;
+  return m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`;
+}
+
+/** "6 min later · Fix CI finished"; the wait only when both rows carry `at`. */
+export function gapLabel(row: ChatMessage, prev: ChatMessage | undefined): string {
+  const label = row.auto?.label ?? "";
+  if (!row.at || !prev?.at || row.at < prev.at) return label;
+  return [`${fmtWait(row.at - prev.at)} later`, label].filter(Boolean).join(" · ");
+}
 
 /** Groups runs of 2+ tool rows; `atEnd`: this slice ends the transcript (a live trailing run stays open). */
-function grouped(msgs: ChatMessage[], atEnd: boolean): TranscriptRow[] {
+function grouped(msgs: ChatMessage[], atEnd: boolean, prev: Map<number, ChatMessage>): TranscriptRow[] {
   const out: TranscriptRow[] = [];
   let i = 0;
   while (i < msgs.length) {
-    if (msgs[i].role !== "tool") { out.push({ kind: "message", message: msgs[i++] }); continue; }
+    const m = msgs[i];
+    if (m.role === "user" && m.auto) { out.push({ kind: "gap", message: m, label: gapLabel(m, prev.get(m.id)) }); i++; continue; }
+    if (m.role !== "tool") { out.push({ kind: "message", message: msgs[i++] }); continue; }
     const start = i;
     while (i < msgs.length && msgs[i].role === "tool") i++;
     const run = msgs.slice(start, i);
@@ -78,19 +103,29 @@ function grouped(msgs: ChatMessage[], atEnd: boolean): TranscriptRow[] {
 
 export function transcriptRows(all: readonly ChatMessage[], opts: TranscriptRowsOptions): TranscriptRow[] {
   const msgs = all.filter(isVisibleRow);
+  const prev = new Map(msgs.slice(1).map((m, k) => [m.id, msgs[k]]));
   const out: TranscriptRow[] = [];
   let i = 0;
   // Rows before the first user message (a window starting mid-turn) are not folded.
-  while (i < msgs.length && msgs[i].role !== "user") i++;
-  out.push(...grouped(msgs.slice(0, i), i === msgs.length));
+  while (i < msgs.length && !opensTurn(msgs[i])) i++;
+  out.push(...grouped(msgs.slice(0, i), i === msgs.length, prev));
   while (i < msgs.length) {
     const user = msgs[i++];
     out.push({ kind: "message", message: user });
     const start = i;
-    while (i < msgs.length && msgs[i].role !== "user") i++;
-    const turn = msgs.slice(start, i);
+    while (i < msgs.length && !opensTurn(msgs[i])) i++;
+    let turn = msgs.slice(start, i);
     const hasLater = i < msgs.length;
-    if (!(hasLater || opts.settledLast) || !turn.some(isWork)) { out.push(...grouped(turn, !hasLater)); continue; }
+    // A follow-up still running: fold what settled before its gap, draw the rest live.
+    let live: ChatMessage[] = [];
+    if (!(hasLater || opts.settledLast)) {
+      let g = turn.length;
+      while (g > 0 && turn[g - 1].role !== "user") g--;
+      g = Math.max(g - 1, 0); // the last gap row, or 0: the whole turn runs
+      live = turn.slice(g);
+      turn = turn.slice(0, g);
+    }
+    if (!turn.some(isWork)) { out.push(...grouped([...turn, ...live], !hasLater, prev)); continue; }
     const folded = opts.foldOverride?.[user.id] ?? hasLater;
     const tools = turn.filter((m) => m.role === "tool").length;
     let pending: ChatMessage[] = [];
@@ -98,7 +133,7 @@ export function transcriptRows(all: readonly ChatMessage[], opts: TranscriptRows
     for (const m of turn) {
       if (isWork(m)) {
         if (!emitted) {
-          out.push(...grouped(pending, false));
+          out.push(...grouped(pending, false, prev));
           pending = [];
           out.push({ kind: "worked", turn: user.id, tools, folded });
           emitted = true;
@@ -107,7 +142,7 @@ export function transcriptRows(all: readonly ChatMessage[], opts: TranscriptRows
       }
       pending.push(m);
     }
-    out.push(...grouped(pending, !hasLater));
+    out.push(...grouped(pending, !hasLater && !live.length, prev), ...grouped(live, !hasLater, prev));
   }
   return out;
 }
