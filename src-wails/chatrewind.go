@@ -160,6 +160,7 @@ func (a *App) ChatRewind(chatID int64, index int, text string) error {
 		 WHERE id = ?`, resumeAt, messageCount(keep), resumeAt, chatID); err != nil {
 		return err
 	}
+	a.dropActionPresses(chatID, cut)
 	a.emitChatLine(id, chatRuntimeKind, "reset")
 	a.emitAuthoritativeSplice(id, cut)
 	busEmit("chats-changed", nil)

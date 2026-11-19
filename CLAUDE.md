@@ -184,6 +184,16 @@ past the last all side by side; hold Space / Current = `current`; wheel/pinch zo
 double-click / Esc reset; HTML via `pageSrcdoc`. Media read through the existing `read_file_base64` / `read_text_file`
 (no new surface). Send = `chat_submit` + clientId (window) / `sendMessage` (overlay): `Picked: B (label)` or `None of them: note`.
 
+**Reply buttons** (`chatactions.go`, `src/lib/replyActions.ts`, threadbear's): an ```action block `{label, kind:
+new_thread|send, brief, chat_id?}` in a reply renders as a button (closed fences only, numbered in document order — an
+invalid block keeps its index, same in Go and TS). `chat_press_action(chatId, msgIndex, actionIndex)` — Go reads the
+**stored** reply (never client text), claims `chat_action_presses` by INSERT/CAS (runs once; a `failed` press may retry),
+applies `capabilityProblem` with the **writing** chat as caller at press time, then `spawnSubagent` (new_thread = a
+sub-agent of the writer; refused from a sub-agent) or `ChatSubmit` (send), stores `result_chat_id`, emits
+`chat-action-presses {chat_id, presses}`; `chat_action_presses` lists. Done = green ✓, click opens the thread. The
+user's next `submit` to the writer gets `[Pressed: <label>]` lines appended (once, `reported`). Rewind / clear / delete
+drop presses at ≥ the cut. iOS native: not rendered (stays a code block).
+
 **Threads already on it** (`chatsamework.go`, threadbear's sameWork): a top-level thread's **first** Claude prompt is
 compared (word overlap, `sameWorkTokens` / `sameWorkScore`, no model) with open top-level threads' title + recap + first
 prompt, same repo boosted; ≤ 3 hits ride as a **hidden** extra text block on that prompt (`claudeSend(..., hidden)` —

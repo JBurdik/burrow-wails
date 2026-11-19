@@ -955,6 +955,7 @@ import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { IMAGE_MIME, escapeHtml, formatAnswers, renderChatMd } from "@/lib/chatBlocks";
+import { pressKey, withActions, type ActionPress } from "@/lib/replyActions";
 import { linkifyFileRefs } from "@/lib/localLink";
 import { cachedMermaid, renderMermaid } from "@/lib/mermaidRender";
 import { useDiagram } from "@/composables/useDiagram";
@@ -991,13 +992,59 @@ const answeredMsgIds = computed(() => {
   return ids;
 });
 function renderAssistantMd(msg: ChatMessage): string {
-  return DOMPurify.sanitize(linkifyFileRefs(renderChatMd(msg.text, answeredMsgIds.value.has(msg.id))));
+  const md = () => renderChatMd(msg.text, answeredMsgIds.value.has(msg.id));
+  // ```action buttons need the row's transcript index (Go's id); a local row has none.
+  const html = msg.id >= 0 ? withActions(msg.id, actionPresses.value, chatTitleOf, md) : md();
+  return DOMPurify.sanitize(linkifyFileRefs(html));
+}
+
+// Reply buttons (replyActions.ts, src-wails/chatactions.go): press state is Go's,
+// read once per chat and kept current by chat-action-presses.
+const actionPresses = ref(new Map<string, ActionPress>());
+function setActionPresses(list: ActionPress[] | null | undefined) {
+  actionPresses.value = new Map((list ?? []).map((p) => [pressKey(p.msg_index, p.action_index), p]));
+}
+watch(() => props.chatId, (id) => {
+  void invoke<ActionPress[]>("chat_action_presses", { chatId: id }).then(setActionPresses, () => {});
+}, { immediate: true });
+let offActionPresses: (() => void) | undefined;
+let actionPressesUnmounted = false;
+void listen<{ chat_id: number; presses: ActionPress[] }>("chat-action-presses", (e) => {
+  if (e.payload?.chat_id === props.chatId) setActionPresses(e.payload.presses);
+}).then((un) => { if (actionPressesUnmounted) un(); else offActionPresses = un; });
+onBeforeUnmount(() => { actionPressesUnmounted = true; offActionPresses?.(); });
+function chatTitleOf(id: number): string {
+  return chats.sessions.find((s) => s.id === id)?.title ?? "";
+}
+async function pressAction(btn: HTMLButtonElement) {
+  const result = Number(btn.dataset.caResult);
+  if (btn.classList.contains("ca-done")) {
+    if (!result) return;
+    if (btn.dataset.caKind === "new_thread") openSubagentFromTranscript(result);
+    else {
+      const ws = chats.sessions.find((s) => s.id === result)?.workspaceId;
+      if (ws != null) void router.push({ path: `/ws/${ws}`, query: { chat: String(result) } });
+    }
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await invoke("chat_press_action", {
+      chatId: props.chatId, msgIndex: Number(btn.dataset.caMsg), actionIndex: Number(btn.dataset.caIndex),
+    });
+  } catch (e) {
+    S.notice(`Button failed: ${e}`);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // The questions form is v-html, so its clicks are delegated: selection state
 // lives in the DOM (aria-pressed) until Send reads it back.
 function onRichBlockClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
+  const ca = target.closest<HTMLButtonElement>("button.ca");
+  if (ca) { if (!ca.disabled) void pressAction(ca); return; }
   const cm = target.closest<HTMLElement>("[data-cm-action]");
   if (cm) {
     const src = decodeURIComponent(cm.closest<HTMLElement>(".cm-mermaid")?.dataset.mermaidSrc ?? "");

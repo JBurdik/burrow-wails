@@ -432,6 +432,8 @@ var remoteAllowed = map[string]remoteCmd{
 	"chat_net_dismiss":      {Method: "ChatNetDismiss", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_quiet_archivable": {Method: "ChatQuietArchivable", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"chat_pins_list":        {Method: "ChatPinsList", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_press_action":     {Method: "ChatPressAction", Args: []string{"chatId", "msgIndex", "actionIndex"}, Scope: scopeOrchOperate},
+	"chat_action_presses":   {Method: "ChatActionPresses", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"chat_pin_remove":       {Method: "ChatPinRemove", Args: []string{"id"}, Scope: scopeOrchOperate},
 	// Runs the command stored on the card (never one sent here), once.
 	"chat_run_ask":             {Method: "ChatRunAsk", Args: []string{"chatId", "index"}, Scope: scopeOrchOperate},

@@ -216,6 +216,28 @@ spoofed User-Agent: Burrow is not a first-party client. Codex: a short-lived
 after failure); a provider routed through Bedrock / Vertex / an API key in
 `~/.claude/settings.json` is reported as not applicable.
 
+### Reply buttons (`src-wails/chatactions.go`, `src/lib/replyActions.ts`)
+
+An agent's ```action block becomes a button in its reply (threadbear's reply buttons). Why each piece:
+
+- **Go presses, from the stored reply.** The client sends only `(chatId, msgIndex, actionIndex)`; Go re-reads the
+  transcript row and parses the block itself. A client (or a paired phone) can't make a button run a brief or reach a
+  target the agent never wrote.
+- **Same numbering on both sides.** Every *closed* ```action fence counts, also one that doesn't parse (it renders as a
+  code block but keeps its index) — otherwise one malformed block would shift every later button onto the wrong job.
+  An unclosed fence is still streaming and counts nowhere.
+- **Once, by CAS.** `chat_action_presses (chat_id, msg_index, action_index)` is the claim: INSERT, or flip a `failed`
+  row back to `running`; zero rows affected = already pressed. No in-memory lock, so it holds across windows, the phone
+  and a restart.
+- **The writer's authority, at press time.** `capabilityProblem` runs with the chat that wrote the button as caller —
+  pressing must not hand a default-mode thread what its own `spawn` / `chat_send` would be refused. `new_thread` is a
+  sub-agent of the writer (the spawn verb's shape: result notices come back, depth stays one level).
+- **The agent hears it.** `submit` appends `[Pressed: <label>]` for unreported done presses, so "go ahead" after a
+  press doesn't start the same job twice.
+- **Indexes are transcript indexes**, so rewind / clear / delete drop presses at or after the cut.
+
+iOS native doesn't render buttons yet (the block shows as code).
+
 ### Transcript search (`src-wails/chatsearch.go`)
 
 Spotlight's "IN CHATS" section is `SearchChats(query, limit)` over an FTS5 table `chat_fts`.

@@ -19,6 +19,7 @@
 
 import { Marked, type Tokens } from "marked";
 import { renderOptions } from "@/lib/optionsBlock";
+import { renderActionBlock } from "@/lib/replyActions";
 
 const plainMarked = new Marked({ gfm: true });
 
@@ -370,6 +371,7 @@ const chatMarked = new Marked({
       const lang = (token.lang ?? "").trim().split(/\s+/)[0];
       if (lang === "visual") return renderVisual(token.text) ?? false;
       if (lang === "questions") return renderQuestions(token.text, answeredCtx) ?? false;
+      if (lang === "action" && fenceClosed(token.raw)) return renderActionBlock(token.text) ?? false;
       if (lang === "options" && fenceClosed(token.raw)) return renderOptions(token.text, answeredCtx) ?? false;
       if (lang === "mermaid" && token.text.trim() && fenceClosed(token.raw)) return renderMermaidPlaceholder(token.text);
       if (isHtmlBlock(lang, token.text) && fenceClosed(token.raw)) return renderHtmlBlock(token.text);

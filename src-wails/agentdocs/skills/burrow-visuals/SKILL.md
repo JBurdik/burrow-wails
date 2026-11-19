@@ -1,6 +1,6 @@
 ---
 name: burrow-visuals
-description: Show charts, stat tiles, tables, screenshots/images and mermaid diagrams inline in a Burrow chat (```visual / ```mermaid blocks), link an HTML page you wrote as an openable card, ask the user several questions at once as a clickable form with a ```questions block, or offer 2+ looks (images, videos, HTML pages) to compare and pick from with an ```options block. Use only inside a Burrow chat (the BURROW_CHAT_ID environment variable is set), when a chart, table or set of numbers says it better than prose, or when you need the user's decisions on two or more questions, or when you aren't sure how something should look.
+description: Show charts, stat tiles, tables, screenshots/images and mermaid diagrams inline in a Burrow chat (```visual / ```mermaid blocks), link an HTML page you wrote as an openable card, ask the user several questions at once as a clickable form with a ```questions block, or offer 2+ looks (images, videos, HTML pages) to compare and pick from with an ```options block. A reply can also carry one-press buttons (```action) that start a sub-agent with your brief or send a message to another chat. Use only inside a Burrow chat (the BURROW_CHAT_ID environment variable is set), when a chart, table or set of numbers says it better than prose, or when you need the user's decisions on two or more questions, or when you aren't sure how something should look.
 ---
 
 # burrow-visuals
@@ -151,3 +151,21 @@ adds a note and sends.
   `Picked: B (Airy)` (several joined with ", "), a note on the following lines,
   or `None of them: <note>`.
 
+## ```action
+
+A button in your reply, drawn where the block is (put it under the line it is
+about). Nothing runs until the user presses it, and it runs once.
+
+```action
+{"label": "Fill in the form", "kind": "new_thread", "brief": "Fill in the signup form at ... and report what failed."}
+```
+
+- `kind: "new_thread"` starts a sub-agent of this thread with `brief` as its
+  task (its result comes back to you like any sub-agent's). A sub-agent's
+  buttons can't start threads.
+- `kind: "send"` + `"chat_id": N` sends `brief` to chat N as a message.
+- Hovering shows the brief, so write it as the full task, not a title.
+- Presses are checked against this thread's own permission mode, as if you
+  had called `spawn` / `chat_send` yourself.
+- The user's next message ends with one `[Pressed: <label>]` line per button
+  pressed since; that job is already running, so don't start it again.

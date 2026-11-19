@@ -372,6 +372,7 @@ func (a *App) ChatClear(chatID int64) error {
 	if _, err := a.db.Exec(`UPDATE chats SET claude_session_id = '', resume_at = '', message_count = 0 WHERE id = ?`, chatID); err != nil {
 		return err
 	}
+	a.dropActionPresses(chatID, 0)
 	a.emitChatLine(id, chatRuntimeKind, "clear")
 	a.emitAuthoritativeSplice(id, 0)
 	busEmit("chats-changed", nil)

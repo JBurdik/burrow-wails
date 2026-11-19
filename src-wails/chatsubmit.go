@@ -45,6 +45,8 @@ func (a *App) submit(chatID int64, images []string, clientID string, compose fun
 		finish(false, nil)
 		return ChatSubmitResult{}, err
 	}
+	note, reported := a.takePressedNote(chatID)
+	text += note
 	id := strconv.FormatInt(chatID, 10)
 	unlock := a.chatRT.lock(id)
 	// A non-empty queue goes first: sending now would overtake it.
@@ -55,6 +57,7 @@ func (a *App) submit(chatID int64, images []string, clientID string, compose fun
 		if err != nil {
 			return ChatSubmitResult{}, err
 		}
+		reported()
 		return ChatSubmitResult{Sent: true, Text: text}, nil
 	}
 	it, err := a.chatQueueInsert(chatID, text, images, clientID)
@@ -64,6 +67,7 @@ func (a *App) submit(chatID int64, images []string, clientID string, compose fun
 		return ChatSubmitResult{}, err
 	}
 	finish(true, &it)
+	reported()
 	a.emitQueueChanged(chatID)
 	a.kickChatDelivery()
 	return ChatSubmitResult{Item: &it, Text: text}, nil
