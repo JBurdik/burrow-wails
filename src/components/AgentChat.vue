@@ -140,7 +140,7 @@
 
     <div class="relative flex min-h-0 flex-1">
     <ThreadFindBar :messages="messages" :container="scrollEl" @reveal="revealForFind" />
-    <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
+    <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" @dragover="onThreadDragOver" @drop="onThreadDrop" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <!-- A remount starts with no messages until the transcript is read back, which on
            a slow link (remote client) takes long enough to read as an empty conversation. -->
@@ -295,7 +295,7 @@
                   />
                 </template>
               </div>
-              <div class="md-body">
+              <div class="md-body" @click="onThreadChipClick">
                 <template v-for="(seg, segIdx) in userMsgSegments(msg)" :key="segIdx">
                   <PasteChip v-if="seg.paste" :text="seg.text" />
                   <span v-else v-html="renderUserMd(seg.text)" />
@@ -905,8 +905,9 @@ import { agentIconComp } from "@/lib/agentIcons";
 import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } from "reka-ui";
 import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
+import { router } from "@/router";
 import { promptHistory, recalling, stepPromptHistory, type PromptHistoryPos } from "@/lib/composerPromptHistory";
-import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
+import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments, splitThreadRefs, THREAD_DRAG_TYPE, threadRefFromDrag } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
 import SecretRequestCard from "@/components/SecretRequestCard.vue";
 import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
@@ -1115,7 +1116,52 @@ function userMsgSegments(msg: ChatMessage) {
 // every message, whatever the role, through the same markdown formatter).
 function renderUserMd(text: string): string {
   const html = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }) as string);
-  return pillifyMentions(html);
+  return chipThreadRefs(pillifyMentions(html));
+}
+
+// A thread reference (threadRef in composerDom.ts) → a chip with its title;
+// clicking it opens that thread. Same text-node walk as the mentions.
+function chipThreadRefs(html: string): string {
+  if (!html.includes("[thread ")) return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const targets: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if ((n as Text).data.includes("[thread ")) targets.push(n as Text);
+  for (const node of targets) {
+    const parts = splitThreadRefs(node.data);
+    if (!parts.some((p) => p.ref)) continue;
+    const frag = doc.createDocumentFragment();
+    for (const p of parts) {
+      if (!p.ref) { frag.append(doc.createTextNode(p.text)); continue; }
+      const chip = doc.createElement("span");
+      chip.className = "mention-pill thread-chip";
+      chip.dataset.chatId = String(p.id);
+      chip.title = "Open this thread";
+      chip.textContent = p.title || `Thread ${p.id}`;
+      frag.append(chip);
+    }
+    node.replaceWith(frag);
+  }
+  return doc.body.innerHTML;
+}
+
+function onThreadChipClick(e: MouseEvent) {
+  const id = Number((e.target as HTMLElement).closest<HTMLElement>(".thread-chip")?.dataset.chatId);
+  const ws = id ? chats.sessions.find((s) => s.id === id)?.workspaceId : undefined;
+  if (ws != null) void router.push({ path: `/ws/${ws}`, query: { chat: String(id) } });
+}
+
+// A thread row dragged from the Sidebar (THREAD_DRAG_TYPE) onto the transcript
+// goes into the composer at its caret; the composer handles a drop on itself.
+function onThreadDragOver(e: DragEvent) {
+  if (e.dataTransfer?.types.includes(THREAD_DRAG_TYPE)) e.preventDefault();
+}
+function onThreadDrop(e: DragEvent) {
+  const ref = threadRefFromDrag(e.dataTransfer?.getData(THREAD_DRAG_TYPE));
+  if (!ref) return;
+  e.preventDefault();
+  inputEl.value?.insertText(ref);
+  inputEl.value?.focus();
 }
 
 // `@path` → pill. Done as a DOM walk over the ALREADY-sanitized output instead
@@ -3455,6 +3501,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 18%, transparent);
   color: inherit;
   cursor: pointer;
+}
+:deep(.thread-chip) {
+  cursor: pointer;
+  --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"/></svg>');
 }
 
 /* Tool row — quiet activity-log line, expandable */

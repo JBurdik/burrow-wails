@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  chipSignature, flatOffset, locateOffset, nodeLength, serializeNodes, stripPasteMarkers, tokenize, wrapPaste,
+  chipSignature, flatOffset, locateOffset, nodeLength, serializeNodes, splitThreadRefs, stripPasteMarkers, threadRef, tokenize, wrapPaste,
   type FlatNode,
 } from "./composerDom";
 
@@ -183,5 +183,21 @@ describe("paste chip", () => {
 
   it("stripPasteMarkers removes the markers but keeps the content", () => {
     expect(stripPasteMarkers(wrapPaste("hello\nworld"))).toBe("hello\nworld");
+  });
+});
+
+describe("thread references", () => {
+  const ref = threadRef(42, 'Fix "share"\nbutton');
+  it("is readable and self-contained", () => {
+    expect(ref).toBe(`[thread "Fix 'share' button" — chat id 42, read with chat_read]`);
+  });
+  it("is one chip in the composer that round-trips", () => {
+    const nodes = tokenize(`see ${ref} now`, {});
+    expect(nodes).toEqual([{ kind: "text", text: "see " }, { kind: "thread", text: ref }, { kind: "text", text: " now" }]);
+    expect(serializeNodes(nodes)).toBe(`see ${ref} now`);
+    expect(nodeLength(nodes[1])).toBe(ref.length);
+  });
+  it("splits a sent message", () => {
+    expect(splitThreadRefs(`a ${ref}`)).toEqual([{ ref: false, text: "a " }, { ref: true, id: 42, title: "Fix 'share' button" }]);
   });
 });

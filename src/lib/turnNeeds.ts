@@ -43,6 +43,8 @@ export interface TurnPick {
   index: number;
   options?: string[];
   text?: string;
+  /** Done card: these follow-ups are asked about, not ticked. */
+  ask?: boolean;
 }
 
 /**
@@ -65,7 +67,7 @@ export function turnPicks(asks: TurnAsk[], answers: (string | undefined)[], type
  * message (questions quoted, kept run replies added).
  */
 export function answerPreview(picks: TurnPick[], extra: string): string {
-  return [...picks.map((p) => (p.options?.length ? p.options.join(", ") : (p.text ?? "").trim())), extra.trim()]
+  return [...picks.map((p) => (p.ask ? (p.options ?? []).map((o) => `What do you mean by: ${o}?`).join("\n") : p.options?.length ? p.options.join(", ") : (p.text ?? "").trim())), extra.trim()]
     .filter(Boolean)
     .join("\n\n");
 }

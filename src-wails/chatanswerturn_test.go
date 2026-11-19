@@ -43,6 +43,10 @@ func TestComposeTurnAnswer(t *testing.T) {
 		{"nothing at all", one, nil, " ", "", true},
 		{"one follow-up", done, []TurnPick{{Options: []string{"Open PR"}}}, "", "Open PR", false},
 		{"follow-ups as list + extra", done, []TurnPick{{Options: []string{"Deploy", "Open PR"}}}, "thanks", "- Open PR\n- Deploy\n\nthanks", false},
+		{"asked only", done, []TurnPick{{Options: []string{"Deploy"}, Ask: true}}, "", "What do you mean by: Deploy?", false},
+		{"ticked + asked + extra", done, []TurnPick{{Options: []string{"Open PR"}}, {Options: []string{"Deploy", "Add tests"}, Ask: true}}, "go",
+			"Open PR\n\nWhat do you mean by: Add tests?\nWhat do you mean by: Deploy?\n\ngo", false},
+		{"unknown asked follow-up", done, []TurnPick{{Options: []string{"Nope"}, Ask: true}}, "", "", true},
 		{"unknown follow-up", done, []TurnPick{{Options: []string{"Nope"}}}, "", "", true},
 	}
 	for _, c := range cases {

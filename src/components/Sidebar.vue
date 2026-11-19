@@ -115,6 +115,8 @@
               :style="swipe.key === rowKey(row) ? { transform: `translateX(${-swipe.dx}px)` } : undefined"
               @click="onRowClick(row)"
               @contextmenu.prevent.stop="openRowMenu(row.ws, row.tab, $event)"
+              :draggable="row.tab.chatId != null"
+              @dragstart="onThreadDragStart(row, $event)"
               @wheel="onRowWheel(row, $event)"
               @pointerdown="onRowPointerDown(row, $event)"
               @pointermove="moveLongPress"
@@ -441,6 +443,7 @@
         <button class="menu-item" @click="withMenu((ws, tab) => startTabRename(ws.id, tab!))">Rename tab…</button>
         <button v-if="canOpenWindows()" class="menu-item" @click="withMenu((ws, tab) => termTabs.popOut(ws.id, tab!.id))">Open in window</button>
         <button v-if="rowMenu.tab.isChat" class="menu-item" @click="withMenu((ws, tab) => regenerateTitle(ws, tab!))">Regenerate title</button>
+        <button v-if="rowMenu.tab.chatId != null" class="menu-item" @click="withMenu((_ws, tab) => copyThreadRef(tab!))">Copy thread reference</button>
         <button v-if="rowMenu.tab.chatId != null" class="menu-item" @click="withMenu((_ws, tab) => toggleChatPin(tab!.chatId!))">
           <PhPushPin :size="15" class="mr-1.5 shrink-0" :weight="isChatPinned(rowMenu.tab.chatId) ? 'fill' : 'regular'" />
           {{ isChatPinned(rowMenu.tab.chatId) ? "Unpin thread" : "Pin thread to top" }}
@@ -647,6 +650,7 @@
 </template>
 
 <script setup lang="ts">
+import { threadRef, THREAD_DRAG_TYPE } from "@/lib/composerDom";
 import LinkStatus from "@/components/LinkStatus.vue";
 import { canOpenWindows as canOpenWindowsFn, openWindow } from "@/lib/windows";
 import { ref, reactive, computed, shallowRef, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
@@ -1363,6 +1367,20 @@ function onMouseDragUp() {
   swallowClick = true; // the click this pointerup fires must not open the row
   window.setTimeout(() => (swallowClick = false), 0);
   swipeEnd(d.row);
+}
+// Dragging a thread row anywhere but left (that's the archive swipe) drags a
+// reference to it, which the open chat takes as a chip (AgentChat / composer).
+function onThreadDragStart(row: ActivityRow, e: DragEvent) {
+  const d = mouseDrag;
+  if (d && d.x - e.clientX > 0 && d.x - e.clientX >= Math.abs(e.clientY - d.y)) return e.preventDefault();
+  stopMouseDrag();
+  if (row.tab.chatId == null || !e.dataTransfer) return;
+  e.dataTransfer.setData(THREAD_DRAG_TYPE, JSON.stringify({ id: row.tab.chatId, title: row.tab.title }));
+  e.dataTransfer.setData("text/plain", threadRef(row.tab.chatId, row.tab.title)); // a drop outside the app
+  e.dataTransfer.effectAllowed = "copy";
+}
+function copyThreadRef(tab: TabSummary) {
+  void navigator.clipboard.writeText(threadRef(tab.chatId!, tab.title)).catch(() => {});
 }
 function stopMouseDrag() {
   mouseDrag = null;

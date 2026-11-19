@@ -52,11 +52,14 @@ struct TurnPickItem: Codable, Hashable {
     var index: Int
     var options: [String]?
     var text: String?
+    /// Done card: ask what these follow-ups mean instead of picking them.
+    var ask: Bool? = nil
 
     var wire: [String: Any] {
         var d: [String: Any] = ["index": index]
         if let options { d["options"] = options }
         if let text { d["text"] = text }
+        if ask == true { d["ask"] = true }
         return d
     }
 }

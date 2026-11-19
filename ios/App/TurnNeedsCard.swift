@@ -40,12 +40,18 @@ struct TurnNeedsCard: View {
             } else {
                 Label("Done", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
                 ForEach(needs.next, id: \.self) { n in
-                    Button { Task { await answer([TurnPickItem(index: 0, options: [n])]) } } label: {
-                        HStack { Text(n).multilineTextAlignment(.leading); Spacer(); Image(systemName: "arrow.up.right") }
-                            .font(.subheadline)
+                    HStack {
+                        Button { Task { await answer([TurnPickItem(index: 0, options: [n])]) } } label: {
+                            HStack { Text(n).multilineTextAlignment(.leading); Spacer(); Image(systemName: "arrow.up.right") }
+                                .font(.subheadline)
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.roundedRectangle(radius: 12))
+                        Button { Task { await answer([TurnPickItem(index: 0, options: [n], ask: true)]) } } label: {
+                            Image(systemName: "questionmark.circle")
+                        }
+                        .accessibilityLabel("Ask what this means")
                     }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.roundedRectangle(radius: 12))
                     .disabled(sending)
                 }
             }

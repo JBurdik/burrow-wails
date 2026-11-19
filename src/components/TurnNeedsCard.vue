@@ -78,12 +78,15 @@
       <div v-else-if="!isYou" class="needs-body">
         <template v-if="next.length">
           <div class="needs-label">Or carry on</div>
-          <button v-for="(s, i) in next" :key="i" class="needs-next" :class="{ picked: picked[i] }" @click="picked[i] = !picked[i]">
-            <component :is="picked[i] ? PhCheckSquare : PhSquare" :size="14" class="mt-px shrink-0" />
-            <span class="text-left">{{ s }}</span>
-          </button>
-          <div v-if="pickedNext.length" class="mt-1.5 flex justify-end">
-            <button class="needs-btn is-primary" :disabled="sending" @click="sendNext">Send {{ pickedNext.length > 1 ? `${pickedNext.length} follow-ups` : 'follow-up' }}</button>
+          <div v-for="(s, i) in next" :key="i" class="flex items-start gap-1">
+            <button class="needs-next" :class="{ picked: picked[i] }" @click="picked[i] = !picked[i]">
+              <component :is="picked[i] ? PhCheckSquare : PhSquare" :size="14" class="mt-px shrink-0" />
+              <span class="text-left">{{ s }}</span>
+            </button>
+            <button class="needs-ask" :class="{ picked: asked[i] }" title="Ask what this means" @click="asked[i] = !asked[i]">?</button>
+          </div>
+          <div v-if="pickedNext.length || askedNext.length" class="mt-1.5 flex justify-end">
+            <button class="needs-btn is-primary" :disabled="sending" @click="sendNext">Send {{ pickedNext.length + askedNext.length > 1 ? `${pickedNext.length + askedNext.length} follow-ups` : 'follow-up' }}</button>
           </div>
           <p v-if="sendError" class="mt-1 text-[11.5px] text-[var(--red)]">{{ sendError }}</p>
         </template>
@@ -145,6 +148,7 @@ const other = ref<string[]>([]);
 const otherOpen = ref<boolean[]>([]);
 const otherEl = ref<HTMLInputElement | null>(null);
 const picked = ref<boolean[]>([]);
+const asked = ref<boolean[]>([]);
 const loose = ref<LooseEnd[] | null>(null);
 const running = ref(false);
 const runError = ref("");
@@ -155,6 +159,7 @@ const ask = computed(() => asks.value[current.value]);
 // A run whose result waits on the card counts as answered: it goes with the rest.
 const answeredCount = computed(() => asks.value.filter((a, i) => answers.value[i]?.trim() || a.run?.reply).length);
 const pickedNext = computed(() => next.value.filter((_, i) => picked.value[i]));
+const askedNext = computed(() => next.value.filter((_, i) => asked.value[i]));
 
 // A new end_turn (or another chat) starts clean. Keyed on the questions, not
 // the whole card: a run finishing rewrites the card's JSON (state, exit,
@@ -170,6 +175,7 @@ watch(
     other.value = [];
     otherOpen.value = [];
     picked.value = [];
+    asked.value = [];
     loose.value = null;
     running.value = false;
     runError.value = "";
@@ -266,7 +272,10 @@ function send() {
 }
 
 function sendNext() {
-  if (pickedNext.value.length) void submit([{ index: 0, options: pickedNext.value }]);
+  const picks: TurnPick[] = [];
+  if (pickedNext.value.length) picks.push({ index: 0, options: pickedNext.value });
+  if (askedNext.value.length) picks.push({ index: 0, options: askedNext.value, ask: true });
+  if (picks.length) void submit(picks);
 }
 </script>
 
@@ -296,6 +305,9 @@ function sendNext() {
 .needs-input:focus { border-color: var(--chat-info); }
 .needs-next { display: flex; width: 100%; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 12.5px; line-height: 1.45; color: var(--chat-text-secondary); }
 .needs-next:hover, .needs-next.picked { color: var(--chat-text); }
+.needs-ask { flex-shrink: 0; width: 18px; height: 18px; margin-top: 4px; border-radius: 50%; font-size: 11px; line-height: 1; color: var(--chat-text-secondary); border: 1px solid var(--chat-border); }
+.needs-ask:hover, .needs-ask.picked { color: var(--chat-info); border-color: var(--chat-info); }
+.needs-ask.picked { background: color-mix(in srgb, var(--chat-info) 14%, transparent); }
 .needs-run { border: 1px solid var(--chat-border); border-radius: 10px; background: var(--chat-bg); overflow: hidden; }
 .needs-run-cmd { margin: 0; padding: 6px 10px 8px; max-height: 160px; overflow: auto; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--chat-text); }
 .needs-loose { display: flex; width: 100%; align-items: center; gap: 7px; padding: 2px 0; font-size: 12.5px; color: var(--chat-text); text-align: left; }

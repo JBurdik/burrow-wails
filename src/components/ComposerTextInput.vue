@@ -12,6 +12,8 @@
     @input="onInput"
     @keydown="onKeydown"
     @paste="onPaste"
+    @dragover="onDragOver"
+    @drop="onDrop"
     @compositionstart="composing = true"
     @compositionend="onCompositionEnd"
   />
@@ -21,8 +23,8 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import {
-  chipSignature, flatOffset, isChip, locateOffset, serializeNodes, tokenize, wrapPaste,
-  PASTE_CHIP_ICON_PATH, PASTE_COLLAPSE_LINES,
+  chipSignature, flatOffset, isChip, locateOffset, serializeNodes, splitThreadRefs, threadRefFromDrag, tokenize, wrapPaste, THREAD_DRAG_TYPE,
+  PASTE_CHIP_ICON_PATH, PASTE_COLLAPSE_LINES, THREAD_CHIP_ICON_PATH,
   type ChipKind, type FlatNode,
 } from "@/lib/composerDom";
 import PasteTextDialog from "@/components/composer/PasteTextDialog.vue";
@@ -68,13 +70,14 @@ const composing = ref(false);
 // ComposerSuggestions.vue and FileTreeNode.vue already use elsewhere. Chips
 // are built with raw DOM calls rather than Vue's render tree, so the path
 // data is inlined instead of mounting a live icon component per chip.
-const CHIP_ICON_PATH: Partial<Record<ChipKind | "paste", string>> = {
+const CHIP_ICON_PATH: Partial<Record<ChipKind | "paste" | "thread", string>> = {
+  thread: THREAD_CHIP_ICON_PATH,
   command: "M120,137,48,201A12,12,0,1,1,32,183l61.91-55L32,73A12,12,0,1,1,48,55l72,64A12,12,0,0,1,120,137Zm96,43H120a12,12,0,0,0,0,24h96a12,12,0,0,0,0-24Z",
   file: "M216.49,79.52l-56-56A12,12,0,0,0,152,20H56A20,20,0,0,0,36,40V216a20,20,0,0,0,20,20H200a20,20,0,0,0,20-20V88A12,12,0,0,0,216.49,79.52ZM160,57l23,23H160ZM60,212V44h76V92a12,12,0,0,0,12,12h48V212Z",
   // Shared with the transcript's read-only PasteChip.vue.
   paste: PASTE_CHIP_ICON_PATH,
 };
-function chipIconSvg(kind: ChipKind | "paste"): string | null {
+function chipIconSvg(kind: ChipKind | "paste" | "thread"): string | null {
   const path = CHIP_ICON_PATH[kind];
   if (!path) return null;
   return `<svg class="composer-chip-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="${path}"/></svg>`;
@@ -100,6 +103,10 @@ function readNodes(): FlatNode[] {
     const el = node as HTMLElement;
     if (el.dataset?.chip === "paste") {
       out.push({ kind: "paste", text: el.dataset.pasteText ?? "" });
+      return;
+    }
+    if (el.dataset?.chip === "thread") {
+      out.push({ kind: "thread", text: el.dataset.ref ?? "" });
       return;
     }
     const name = el.dataset?.skill;
@@ -206,6 +213,11 @@ function render(keepCaret = true) {
       chip.addEventListener("click", () => { pasteDialogText.value = node.text; });
       text = `Pasted text (${node.text.split("\n").length} lines)`;
       icon = chipIconSvg("paste");
+    } else if (node.kind === "thread") {
+      chip.dataset.ref = node.text;
+      const r = splitThreadRefs(node.text)[0];
+      text = r?.ref ? r.title || `Thread ${r.id}` : node.text;
+      icon = chipIconSvg("thread");
     } else {
       chip.dataset.skill = node.name;
       // A command's name IS `/compact` — dropping the slash would make it read
@@ -272,9 +284,8 @@ function applySnapshot(snap: Snapshot) {
   });
 }
 
-/** Replace the current selection with `text`, in the model. */
-function insertText(text: string) {
-  const [from, to] = selectionRange();
+/** Replace the current selection (or [from, to]) with `text`, in the model. */
+function insertText(text: string, [from, to] = selectionRange()) {
   const next = model.value.slice(0, from) + text + model.value.slice(to);
   const at = from + text.length;
   pushHistory(next, at, false);
@@ -352,6 +363,24 @@ function onPaste(e: ClipboardEvent) {
   insertText(collapse ? wrapPaste(plain) : plain);
 }
 
+// A Sidebar thread row: inserted here ourselves, at the drop point (else the
+// caret) — WKWebView's own text drop into a contenteditable is not relied on.
+function onDragOver(e: DragEvent) {
+  if (e.dataTransfer?.types.includes(THREAD_DRAG_TYPE)) e.preventDefault();
+}
+function onDrop(e: DragEvent) {
+  const ref = threadRefFromDrag(e.dataTransfer?.getData(THREAD_DRAG_TYPE));
+  if (!ref) return;
+  e.preventDefault();
+  e.stopPropagation(); // the transcript's own drop handler would insert it again
+  const at = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+  const range: [number, number] | undefined = at && rootEl.value?.contains(at.startContainer)
+    ? [modelOffset(at.startContainer, at.startOffset), modelOffset(at.startContainer, at.startOffset)]
+    : undefined;
+  focus();
+  insertText(ref, range);
+}
+
 const pasteDialogText = ref<string | null>(null);
 
 function focus() {
@@ -383,5 +412,5 @@ onMounted(() => {
   if (props.autofocus) nextTick(focus);
 });
 
-defineExpose({ focus, caret, setCaret, element: rootEl });
+defineExpose({ focus, caret, setCaret, insertText, element: rootEl });
 </script>

@@ -15,11 +15,13 @@ import (
 
 // TurnPick is one ask's answer: Options = picked option labels (one unless the
 // ask is multi), else Text = a free-text answer. On a Done card (needs
-// "nothing") Index is ignored and Options are the picked `next` follow-ups.
+// "nothing") Index is ignored and Options are the picked `next` follow-ups;
+// Ask marks them as asked about ("What do you mean by: …?") instead of ticked.
 type TurnPick struct {
 	Index   int      `json:"index"`
 	Options []string `json:"options,omitempty"`
 	Text    string   `json:"text,omitempty"`
+	Ask     bool     `json:"ask,omitempty"`
 }
 
 // ChatAnswerTurn composes the answer to the chat's stored card and submits it
@@ -39,7 +41,8 @@ func (a *App) ChatAnswerTurn(chatID int64, picks []TurnPick, extra string, image
 // composeTurnAnswer: Needs you = each answered question quoted with its
 // answer (a single ask answered alone = just the answer); a run ask with a
 // kept reply answers itself with it. Done = the picked follow-ups (one = as
-// is, several = a list). The composer text goes last, after a blank line.
+// is, several = a list), then one "What do you mean by: X?" per asked
+// follow-up. The composer text goes last, after a blank line.
 func composeTurnAnswer(n control.TurnNeeds, picks []TurnPick, extra string) (string, error) {
 	var body string
 	if n.Needs == "you" {
@@ -90,17 +93,24 @@ func composeTurnAnswer(n control.TurnNeeds, picks []TurnPick, extra string) (str
 			body = strings.Join(blocks, "\n\n")
 		}
 	} else {
-		var want []string
+		var want, asked []string
 		for _, p := range picks {
-			want = append(want, p.Options...)
+			if p.Ask {
+				asked = append(asked, p.Options...)
+			} else {
+				want = append(want, p.Options...)
+			}
 		}
-		var picked []string
+		var picked, questions []string
 		for _, s := range n.Next {
 			if slices.Contains(want, s) {
 				picked = append(picked, s)
 			}
+			if slices.Contains(asked, s) {
+				questions = append(questions, "What do you mean by: "+s+"?")
+			}
 		}
-		if len(picked) != len(want) {
+		if len(picked) != len(want) || len(questions) != len(asked) {
 			return "", fmt.Errorf("no such follow-up on the card")
 		}
 		if len(picked) == 1 {
@@ -110,6 +120,9 @@ func composeTurnAnswer(n control.TurnNeeds, picks []TurnPick, extra string) (str
 				picked[i] = "- " + picked[i]
 			}
 			body = strings.Join(picked, "\n")
+		}
+		if len(questions) > 0 {
+			body = strings.TrimSpace(body + "\n\n" + strings.Join(questions, "\n"))
 		}
 	}
 	out := strings.Join(slices.DeleteFunc([]string{body, strings.TrimSpace(extra)}, func(s string) bool { return s == "" }), "\n\n")
