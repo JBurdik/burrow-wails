@@ -176,6 +176,14 @@ the whole stored transcript (`load_chat_messages`, once per thread) merged with 
 opens drawn in the RP (`HtmlFileSurface`: `read_text_file` → `pageSrcdoc`, scripts in an opaque origin, no-network CSP;
 Source flips to the editor, Preview back) — like `.md` files (`MarkdownDocSurface`).
 
+**Options compare** (`src/lib/optionsBlock.ts`, `OptionsCompare.vue`, threadbear's review window): a closed ```options fence
+`{question?, options:[{label, note?, media:[paths]}], current?:[paths]}` (image / video / `.html`, cwd-relative or absolute;
+taught in the burrow-visuals skill) renders a thumbnail card; Compare opens WindowApp kind `options` (spec in the route,
+one window per chat + spec hash), on the phone a full-screen overlay in AgentChat. ←/→ every shot, ↑/↓ option to option,
+past the last all side by side; hold Space / Current = `current`; wheel/pinch zoom at the pointer, drag pans, ⌘0 /
+double-click / Esc reset; HTML via `pageSrcdoc`. Media read through the existing `read_file_base64` / `read_text_file`
+(no new surface). Send = `chat_submit` + clientId (window) / `sendMessage` (overlay): `Picked: B (label)` or `None of them: note`.
+
 **Threads already on it** (`chatsamework.go`, threadbear's sameWork): a top-level thread's **first** Claude prompt is
 compared (word overlap, `sameWorkTokens` / `sameWorkScore`, no model) with open top-level threads' title + recap + first
 prompt, same repo boosted; ≤ 3 hits ride as a **hidden** extra text block on that prompt (`claudeSend(..., hidden)` —

@@ -32,6 +32,17 @@
         @open-panel="() => {}"
       />
       <GitWindow v-else-if="kind === 'git' && ready" :initial-ws-id="wsId || undefined" class="absolute inset-0" />
+      <!-- ```options compare view (src/lib/optionsBlock.ts). -->
+      <OptionsCompare
+        v-else-if="kind === 'options' && optionsSpec && chatId != null"
+        class="absolute inset-0"
+        :spec="optionsSpec"
+        :cwd="cwd"
+        :start="Number(params.get('start') ?? 0)"
+        :answered="params.get('answered') === '1'"
+        @send="sendOptions"
+        @close="closeSelf"
+      />
       <AgentChat
         v-else-if="kind === 'chat' && chatId != null && ready"
         :chat-id="chatId"
@@ -53,6 +64,9 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { readFollow, RP_FOLLOW_KEY, type RpFollow } from "@/lib/rpWindow";
 import { PhPlus, PhPushPin } from "@phosphor-icons/vue";
 import { miniChat } from "@/lib/miniChat";
+import { invoke } from "@tauri-apps/api/core";
+import { parseOptions } from "@/lib/optionsBlock";
+import { newClientId } from "@/lib/offline";
 
 // A secondary window: "#/window/<kind>/<id>?<params>" (src/lib/windows.ts).
 const Settings = defineAsyncComponent(() => import("@/components/Settings.vue"));
@@ -62,6 +76,7 @@ const GitWindow = defineAsyncComponent(() => import("@/components/git/GitWindow.
 const RightPanel = defineAsyncComponent(() => import("@/components/RightPanel.vue"));
 const TrayPanel = defineAsyncComponent(() => import("@/components/TrayPanel.vue"));
 const TrayToast = defineAsyncComponent(() => import("@/components/TrayToast.vue"));
+const OptionsCompare = defineAsyncComponent(() => import("@/components/OptionsCompare.vue"));
 
 const [path, query = ""] = location.hash.slice(1).split("?");
 const parts = path.split("/").filter(Boolean); // ["window", kind, id?]
@@ -71,7 +86,7 @@ const params = new URLSearchParams(query);
 const wsId = Number(params.get("ws") ?? 0);
 const chatId = params.has("chat") ? Number(params.get("chat")) : null;
 const cwd = params.get("cwd") ?? "";
-const title = kind === "settings" ? "Settings" : kind === "git" ? "Git" : kind === "rightpanel" ? "Right panel" : (params.get("title") ?? "Burrow");
+const title = kind === "settings" ? "Settings" : kind === "git" ? "Git" : kind === "rightpanel" ? "Right panel" : (params.get("title") ?? (kind === "options" ? "Compare options" : "Burrow"));
 
 // kind "rightpanel": what the main window has active, kept current by its writes.
 const follow = ref<RpFollow>(readFollow());
@@ -81,6 +96,18 @@ function onStorage(e: StorageEvent) {
 if (kind === "rightpanel") window.addEventListener("storage", onStorage);
 onBeforeUnmount(() => window.removeEventListener("storage", onStorage));
 const ready = ref(false);
+
+// kind "options": the spec rides in the route; Send = the thread's submit door
+// (queued by Go while a turn runs), then the window closes.
+const optionsSpec = kind === "options" ? parseOptions(params.get("spec") ?? "") : null;
+async function sendOptions(text: string) {
+  try {
+    await invoke("chat_submit", { chatId, text, images: [], clientId: newClientId() });
+    closeSelf();
+  } catch (e) {
+    alert(`Could not send: ${e}`);
+  }
+}
 
 // Mini chat window: pin state is per device, re-applied on every open.
 const mini = params.get("mini") === "1";

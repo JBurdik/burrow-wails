@@ -1,6 +1,6 @@
 ---
 name: burrow-visuals
-description: Show charts, stat tiles, tables, screenshots/images and mermaid diagrams inline in a Burrow chat (```visual / ```mermaid blocks), link an HTML page you wrote as an openable card, or ask the user several questions at once as a clickable form with a ```questions block. Use only inside a Burrow chat (the BURROW_CHAT_ID environment variable is set), when a chart, table or set of numbers says it better than prose, or when you need the user's decisions on two or more questions.
+description: Show charts, stat tiles, tables, screenshots/images and mermaid diagrams inline in a Burrow chat (```visual / ```mermaid blocks), link an HTML page you wrote as an openable card, ask the user several questions at once as a clickable form with a ```questions block, or offer 2+ looks (images, videos, HTML pages) to compare and pick from with an ```options block. Use only inside a Burrow chat (the BURROW_CHAT_ID environment variable is set), when a chart, table or set of numbers says it better than prose, or when you need the user's decisions on two or more questions, or when you aren't sure how something should look.
 ---
 
 # burrow-visuals
@@ -122,3 +122,32 @@ buttons.
   your next user message, in this shape:
   `Answers:\n1. <question>\n   → <choices>`. `(skipped)` means the user left
   that question blank, so decide it yourself and don't ask it again.
+
+## ```options
+
+Use this when you aren't sure how something should look: render 2 or more
+versions (screenshots, short screen recordings, or HTML mockups) and let the
+user compare them. The reply shows thumbnails and a Compare button that opens
+a big side-by-side viewer where the user ticks one or more options (or None),
+adds a note and sends.
+
+```options
+{"question": "Which sidebar density?",
+ "options": [
+   {"label": "Dense", "note": "8px rows", "media": ["shots/dense.png", "shots/dense-drag.mp4"]},
+   {"label": "Airy", "media": ["shots/airy.png"]},
+   {"label": "Cards", "media": ["mockups/cards.html"]}
+ ],
+ "current": ["shots/today.png"]}
+```
+
+- `media`: image (png, jpg, gif, webp, svg, avif), video (mp4, webm, mov) or
+  `.html` files, relative to your cwd or absolute. An option's several media are
+  its shots (overview, mid-interaction, a detail).
+- `current` (optional): today's version, which the user can flick to while
+  comparing.
+- HTML runs sandboxed with no network: inline its CSS/JS/images or use local files.
+- End your turn after the block. The answer arrives as your next user message:
+  `Picked: B (Airy)` (several joined with ", "), a note on the following lines,
+  or `None of them: <note>`.
+

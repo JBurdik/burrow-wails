@@ -884,6 +884,15 @@
     </div><!-- end .chat-main -->
 
     <HtmlPageModal v-if="pageView" v-bind="pageView" @close="pageView = null" />
+    <Teleport v-if="optionsView" to="body">
+      <div class="fixed inset-0 z-[1000] flex flex-col bg-[var(--terminal-bg)] pt-[env(safe-area-inset-top)]">
+        <div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-[13px] font-semibold">
+          <span class="min-w-0 flex-1 truncate">{{ optionsView.spec.question || "Compare options" }}</span>
+          <button class="rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" aria-label="Close" @click="optionsView = null"><PhX :size="16" /></button>
+        </div>
+        <OptionsCompare class="min-h-0 flex-1" :spec="optionsView.spec" :cwd="cwd" :start="optionsView.start" :answered="optionsView.answered" @close="optionsView = null" @send="sendOptionsReply" />
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -950,6 +959,9 @@ import { linkifyFileRefs } from "@/lib/localLink";
 import { cachedMermaid, renderMermaid } from "@/lib/mermaidRender";
 import { useDiagram } from "@/composables/useDiagram";
 import HtmlPageModal from "./HtmlPageModal.vue";
+import OptionsCompare from "./OptionsCompare.vue";
+import { parseOptions, type OptionsSpec } from "@/lib/optionsBlock";
+import { canOpenWindows, openWindow } from "@/lib/windows";
 import { inlineLocalAssets } from "@/lib/htmlInline";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import {
@@ -1000,6 +1012,8 @@ function onRichBlockClick(event: MouseEvent) {
     pageView.value = { title: "HTML preview", path: "", html: decodeURIComponent(ch.closest<HTMLElement>(".cm-html")?.dataset.htmlSrc ?? "") };
     return;
   }
+  const coOpen = target.closest<HTMLElement>("[data-co-open]");
+  if (coOpen) { openOptions(coOpen); return; }
   const img = target.closest<HTMLImageElement>("img[data-cv-image]");
   if (img?.src) { showImage(img.src); return; }
   const page = target.closest<HTMLElement>("[data-cv-page]");
@@ -1090,6 +1104,29 @@ watch(() => [useUIStore().theme, useUIStore().themeMode], () => nextTick(() => {
   scrollEl.value?.querySelectorAll<HTMLElement>(".cm-mermaid[data-cm-state='ok']").forEach((el) => delete el.dataset.cmState);
   hydrateMermaid();
 }));
+
+// ```options cards: Compare opens OptionsCompare in its own window; on the
+// phone (no native windows) a full-screen overlay. Send = sendMessage.
+const optionsView = ref<{ spec: OptionsSpec; start: number; answered: boolean } | null>(null);
+function openOptions(btn: HTMLElement) {
+  const card = btn.closest<HTMLElement>("[data-chat-options]");
+  const raw = decodeURIComponent(card?.dataset.chatOptions ?? "");
+  const spec = parseOptions(raw);
+  if (!spec) return;
+  const start = Number(btn.dataset.coOpen ?? 0);
+  const answered = card?.dataset.coAnswered === "1";
+  if (!canOpenWindows()) { optionsView.value = { spec, start, answered }; return; }
+  let hash = 0;
+  for (const c of raw) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+  const title = spec.question || "Compare options";
+  const q = new URLSearchParams({ chat: String(props.chatId), cwd: props.cwd, spec: raw, start: String(start), title, ...(answered ? { answered: "1" } : {}) });
+  void openWindow(`options:${props.chatId}:${hash >>> 0}`, `/window/options/0?${q}`, title, 1200, 800);
+}
+
+function sendOptionsReply(text: string) {
+  optionsView.value = null;
+  void sendMessage(text);
+}
 
 // Page cards (```visual {"page": …}): the agent's HTML file opens in a
 // sandboxed iframe modal, never inline in the transcript.

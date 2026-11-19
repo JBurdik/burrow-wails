@@ -18,6 +18,7 @@
 // DOMPurify like any other markdown, so every value is escaped on the way in.
 
 import { Marked, type Tokens } from "marked";
+import { renderOptions } from "@/lib/optionsBlock";
 
 const plainMarked = new Marked({ gfm: true });
 
@@ -369,6 +370,7 @@ const chatMarked = new Marked({
       const lang = (token.lang ?? "").trim().split(/\s+/)[0];
       if (lang === "visual") return renderVisual(token.text) ?? false;
       if (lang === "questions") return renderQuestions(token.text, answeredCtx) ?? false;
+      if (lang === "options" && fenceClosed(token.raw)) return renderOptions(token.text, answeredCtx) ?? false;
       if (lang === "mermaid" && token.text.trim() && fenceClosed(token.raw)) return renderMermaidPlaceholder(token.text);
       if (isHtmlBlock(lang, token.text) && fenceClosed(token.raw)) return renderHtmlBlock(token.text);
       if (SHELL_LANGS.has(lang) && token.text.trim() && fenceClosed(token.raw)) return renderShellBlock(lang, token.text);
