@@ -119,6 +119,7 @@ import {
   PhGitBranch, PhGitPullRequest, PhHandPalm, PhPencilSimple, PhPlay, PhSquare, PhStar, PhTerminalWindow, PhUsersThree,
 } from "@phosphor-icons/vue";
 import { answerTurn } from "@/lib/chatSession";
+import { compact as phone } from "@/lib/viewport";
 import { turnPicks, type LooseEnd, type TurnNeeds, type TurnPick } from "@/lib/turnNeeds";
 
 const props = defineProps<{ needs: TurnNeeds; chatId: number; archived: boolean; composerText: string; composerImages?: string[]; cwd?: string }>();
@@ -141,7 +142,8 @@ const heading = computed(() => {
   return asks.value.length > 0 && asks.value.every((a) => a.options?.length) ? "Decisions needed" : "Needs you";
 });
 
-const collapsed = ref(false);
+// A phone starts a Done card folded: open, it took half the screen above the composer.
+const collapsed = ref(phone.value && !isYou.value);
 const current = ref(0);
 const answers = ref<(string | undefined)[]>([]);
 const other = ref<string[]>([]);
@@ -169,7 +171,7 @@ const askedNext = computed(() => next.value.filter((_, i) => asked.value[i]));
 watch(
   () => JSON.stringify([props.chatId, props.needs.needs, (props.needs.asks ?? []).map((a) => [a.question, a.options]), props.needs.next ?? []]),
   () => {
-    collapsed.value = false;
+    collapsed.value = phone.value && !isYou.value;
     current.value = 0;
     answers.value = [];
     other.value = [];

@@ -61,7 +61,7 @@ const subtitle = (r: FeedRow) => [activeFilter.value == null ? r.workspace : "",
       </template>
     </PhoneHeader>
 
-    <nav v-if="projects.length > 1" class="project-chips flex shrink-0 gap-1.5 overflow-x-auto border-b border-border px-3 py-2" aria-label="Project">
+    <nav v-if="projects.length > 1" class="project-chips flex shrink-0 gap-1.5 overflow-x-auto border-b border-border px-3 py-1.5" aria-label="Project">
       <button class="chip" :class="activeFilter == null && 'chip--on'" @click="filter = null">All</button>
       <button v-for="p in projects" :key="p.id" class="chip" :class="activeFilter === p.id && 'chip--on'" @click="filter = p.id">
         <img v-if="ws.icons[p.id]" :src="ws.icons[p.id]" class="size-4 rounded-[4px] object-cover" alt="" />
@@ -76,12 +76,12 @@ const subtitle = (r: FeedRow) => [activeFilter.value == null ? r.workspace : "",
       </div>
       <DecisionsList class="px-2" :repo-id="activeFilter" @open="(s) => router.push(`/ws/${s.workspaceId}?chat=${s.id}`)" />
       <section v-for="g in groups" :key="g.key">
-        <h2 class="px-4 pb-1 pt-4 text-[12px] font-semibold text-muted-foreground">{{ g.label }}</h2>
+        <h2 class="px-4 pb-0.5 pt-3 text-[12px] font-semibold text-muted-foreground">{{ g.label }}</h2>
         <div v-for="r in g.rows" :key="r.key" class="border-b border-border/60">
-          <button class="flex min-h-[60px] w-full items-center gap-3 px-4 py-2 text-left active:bg-hover" @click="router.push(r.route)">
-            <span class="relative flex size-6 shrink-0 items-center justify-center">
-              <img v-if="r.icon" :src="r.icon" class="size-6 rounded-[6px] object-cover" alt="" />
-              <component :is="r.kind === 'chat' ? PhChatCircle : PhTerminalWindow" v-else :size="21" class="text-secondary-foreground" />
+          <button class="flex min-h-[54px] w-full items-center gap-3 px-4 py-1.5 text-left active:bg-hover" @click="router.push(r.route)">
+            <span class="relative flex size-5 shrink-0 items-center justify-center">
+              <img v-if="r.icon" :src="r.icon" class="size-5 rounded-[5px] object-cover" alt="" />
+              <component :is="r.kind === 'chat' ? PhChatCircle : PhTerminalWindow" v-else :size="19" class="text-secondary-foreground" />
               <span v-if="dot[r.status]" class="absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-[var(--bg-base)]" :class="dot[r.status]" />
             </span>
             <span class="flex min-w-0 flex-1 flex-col">
@@ -112,7 +112,7 @@ const subtitle = (r: FeedRow) => [activeFilter.value == null ? r.workspace : "",
   flex-shrink: 0;
   align-items: center;
   gap: 6px;
-  height: 32px;
+  height: 28px;
   padding: 0 10px;
   border-radius: 8px;
   border: 1px solid var(--border);

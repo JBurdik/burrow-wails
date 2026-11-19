@@ -173,6 +173,7 @@ export const NTFY_EVENTS: { id: NtfyEvent; label: string }[] = [
 // the whole UI relative to it, so the default uiFontSize being above the
 // baseline makes the default UI render slightly larger.
 const BASE_FONT_SIZE = 13;
+const PHONE_FONT_SIZE = 14;
 
 // Haiku is the cheap default t3code picks too (their
 // DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER). Three-part = the CLI's own
@@ -512,7 +513,9 @@ export const useUIStore = defineStore("ui", () => {
   // Whole-UI zoom factor applied to #app. The terminal must counter-zoom by 1/this
   // and scale its own font by this instead — CSS `zoom` on an ancestor breaks
   // xterm.js mouse-selection coordinate math (selection lands on the wrong rows).
-  const effectiveScale = computed(() => uiScale.value * (uiFontSize.value / BASE_FONT_SIZE));
+  // A phone ignores the desk font size: the stylesheets' px at 16/13 made every row,
+  // card and button a quarter bigger than the native iOS app's. uiScale still applies.
+  const effectiveScale = computed(() => uiScale.value * ((compact.value ? PHONE_FONT_SIZE : uiFontSize.value) / BASE_FONT_SIZE));
 
   // Apply the active theme's colors as CSS custom properties on :root, so all
   // chrome styled via var(--bg-base) etc. repaints. Font + layout vars are left
@@ -732,6 +735,7 @@ export const useUIStore = defineStore("ui", () => {
     app.style.height = scale === 1 ? "" : `${window.innerHeight / scale}px`;
   }
   window.addEventListener("resize", applyAppScale);
+  watch(compact, applyAppScale);
 
   // Which Settings nav section to land on. Set by callers that deep-link
   // (palette → "Keybindings"/"Appearance"); Settings.vue reads it on mount.

@@ -132,7 +132,7 @@ function forget(id: string, name: string) {
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 52px;
+  min-height: 46px;
   padding: 0 16px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   font-size: 15px;

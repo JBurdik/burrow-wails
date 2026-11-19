@@ -298,12 +298,18 @@ body {
 .is-compact .chat-messages pre { max-width: 100%; overflow-x: auto; }
 .is-compact .chat-messages .md-body { min-width: 0; overflow-wrap: anywhere; }
 .is-compact .chat-message .bubble-user { max-width: 88%; }
-.is-compact .minimap-rail { display: none; }
+/* Phone density (the iOS app's rhythm): tighter text and message spacing. */
+.is-compact .chat-messages .md-body { line-height: 1.55; }
+.is-compact .chat-message > .group { padding-top: 8px; padding-bottom: 2px; }
+.is-compact .chat-input-box { border-radius: 14px; }
+.is-compact .composer-toolbar { padding-top: 4px; padding-bottom: 6px; }
+/* The model/effort/permission pills in the phone's bottom sheet. */
+.composer-pillbar.phone-launch { gap: 8px; padding: 6px 16px 10px; }
+.composer-pillbar.phone-launch .composer-pill { height: 36px; padding: 0 12px; font-size: 14px; border-color: var(--border); }
 /* A split tab on a phone: one pane, full size (Terminal.vue phoneLeafId). */
 .is-compact .pane.phone-solo { left: 0 !important; top: 0 !important; width: 100% !important; height: 100% !important; }
 .is-compact .pane.phone-off,
 .is-compact .pane-titlebar { display: none !important; }
-.is-compact .catchup-btn { display: none; }
 /* Phone: a tapped file's diff opens full screen instead of a 220px strip
    below the commit box, i.e. off screen. */
 .is-compact .rp-diff { position: fixed; inset: 0; z-index: 60; max-height: none; background: var(--bg-base); padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }

@@ -48,7 +48,7 @@ function goBack() {
     <!-- Root screens carry the release-channel artwork up under the status bar
          (viewport-fit=cover + black-translucent); the Sidebar's own copy is off on a phone. -->
     <StageBackdrop v-if="!props.back" style="height: calc(80px + env(safe-area-inset-top, 0px))" />
-    <div v-if="props.back" class="flex h-12 items-center gap-1 px-1">
+    <div v-if="props.back" class="flex h-11 items-center gap-1 px-1">
       <button class="phone-icon-btn" aria-label="Back" @click="goBack"><PhCaretLeft :size="22" /></button>
       <div class="flex min-w-0 flex-1 flex-col">
         <span class="truncate text-[15px] font-semibold leading-tight text-foreground">{{ props.title }}</span>

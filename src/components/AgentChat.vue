@@ -457,7 +457,7 @@
     </div>
     <!-- Minimap (after Ghostex): one dash per prompt you sent, longer for
          longer prompts; hover previews it, click jumps to it. -->
-    <div v-if="minimapPrompts.length >= 2" class="minimap-rail" @mouseleave="minimapHover = null">
+    <div v-if="!phone && minimapPrompts.length >= 2" class="minimap-rail" @mouseleave="minimapHover = null">
       <button
         v-for="(p, i) in minimapPrompts"
         :key="p.id"
@@ -702,7 +702,13 @@
             <input ref="imagePicker" type="file" accept="image/*" multiple hidden @change="onPickImages" />
             <button class="composer-pill" :class="{ 'text-foreground': phoneSettingsOpen }" title="Model and permissions" @click="phoneSettingsOpen = !phoneSettingsOpen"><PhSlidersHorizontal :size="16" /></button>
           </template>
-          <div v-show="!phone || phoneSettingsOpen" class="composer-pillbar">
+          <!-- Phone: the pills open in a bottom sheet instead of wrapping inside the composer. -->
+          <component
+            :is="phone ? PhoneSheet : SlotOnly"
+            v-if="!phone || phoneSettingsOpen"
+            v-bind="phone ? { title: 'Model and permissions', onClose: () => (phoneSettingsOpen = false) } : {}"
+          >
+          <div class="composer-pillbar" :class="{ 'phone-launch': phone }">
             <button
               v-if="editorCtx.selection"
               class="composer-pill"
@@ -777,8 +783,9 @@
               @select="acpSelectMode"
             />
           </div>
+          </component>
 
-          <span v-if="phone && !phoneSettingsOpen" class="flex-1" />
+          <span v-if="phone" class="flex-1" />
           <!-- Right: cost badge + abort/send -->
           <div class="composer-sendgroup">
             <ComposerStash ref="stashEl" v-model:text="inputText" v-model:images="pendingImages" />
@@ -881,11 +888,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject, type Slots } from "vue";
 import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode, PhWifiSlash, PhClock } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
 import { compact as phone, isWeb } from "@/lib/viewport";
+import PhoneSheet from "@/components/phone/PhoneSheet.vue";
+// Renders its slot with no element: the desk composer's pillbar stays where it was.
+const SlotOnly = (_: unknown, { slots }: { slots: Slots }) => slots.default?.();
 import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
 import { chatAsleep, useClaudeChatsStore } from "@/stores/claudeChats";
@@ -2566,7 +2576,7 @@ const CATCH_UP_MESSAGES = 30;
 const CATCH_UP_LABELS: Record<string, string> = {
   needs_you: "Needs you", blocked: "Blocked", in_progress: "In progress", done: "Done", untested: "Untested",
 };
-const showCatchUpBtn = computed(() => !inputText.value.trim() && messages.value.length > 2 && !catchUp.open);
+const showCatchUpBtn = computed(() => !phone.value && !inputText.value.trim() && messages.value.length > 2 && !catchUp.open);
 const catchUp = reactive({
   open: false, loading: false, error: "", copied: false, summary: "",
   items: [] as { tag: string; text: string }[],
