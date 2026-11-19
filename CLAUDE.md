@@ -513,12 +513,26 @@ HTTP/MCP/Wails — it takes capabilities as interfaces (`Deps`). Transports:
 
 | Transport | Client | Auth | Verbs |
 |-----------|--------|------|-------|
-| loopback HTTP `POST /v1/<verb>` (hook server's port) | `burrow` CLI, `burrow-mcp` | `control.token` (0600), Bearer | all |
+| loopback HTTP `POST /v1/<verb>` (hook server's port) | `burrow` CLI, `burrow-mcp` | challenge-response over `control.token` (0600) or a caller key | all |
 | tailnet HTTP (`httpserver.go`) | mobile / PWA | device token + pairing | `ScopeRemote` only |
 | Wails bindings | desktop UI | in-process | as needed |
 
 `Scope` is a field on the verb and a verb is **local-only unless it opts in**. The registry is also
 the source of the MCP tool schemas (`/v1/_verbs`) and `burrow help`.
+
+**Loopback auth never sends the token** (`controlauth.go`, `internal/ctlauth`, threadbear's): `POST /v1/_challenge` →
+single-use nonce (30 s); the client sends `Authorization: Burrow-Proof <sn> <cn> <HMAC(key, "burrow-ctl-v1 client\n"+sn+"\n"+cn+"\n"+port)> [caller]`
+and trusts a reply only with `X-Burrow-Proof` (same, `server`) — so whoever holds the port while the core is down learns
+nothing. burrow-mcp / the UI process: `ctlauth.Client.Do`; `bin/burrow` does the HMAC in sh + `openssl dgst` (key never
+in argv, header on fd 3). Bearer still accepted, logged as deprecated, **removed after 2027-01-31**. `/hook`,
+`/session-id`, `/agent-done` carry no token and stay unauthenticated. **Caller keys:** every chat process gets
+`BURROW_CALLER_TOKEN = HMAC(token, "caller:chat:<id>")` (`addBurrowEnvForChat`, `claudechat.go`), every PTY
+`caller:pty:<id>` (`CreatePty`); stateless, the core recomputes it. A keyed call **is** that caller (`bindCaller`: a
+`parent_chat_id` / `caller_pty_id` hint that disagrees → 403). A chat key whose mode is below full-access goes through
+the pure `capabilityProblem` (`controlcaps.go`, table-tested): no spawn / permission_mode freer than its own, no detached
+spawn, no `new_chat` / `--check` schedule, and no chat_send / answer / interrupt / move / schedule on a chat that runs freer,
+on another thread's sub-agent, or close_chat beyond its own children; refusals say "ask the user". Master token = full
+authority. Ceiling: a full-access agent can read `control.token` (0600) anyway.
 
 **UI-performed verbs** (open a tab, focus a workspace, read scrollback) call `UIBridge.Do`, which emits
 `control:action` and **blocks for the frontend's ack** (`AckControlAction`, 15 s).
@@ -910,7 +924,7 @@ running `burrow hook`. A second `PermissionRequest` group in that array runs `bu
 A Claude tab's tool-permission prompt can be answered from Burrow (toast with Allow / Always / Deny **plus**
 a banner above that tab's xterm showing the oldest request and a `+N` counter) while the TUI prompt stays
 up. The second `PermissionRequest` hook (`burrow approve`, `timeout: 86400`) long-polls loopback
-`POST /v1/permission_request?pty_id=` (control.token auth); `permRegistry` parks it, keyed by
+`POST /v1/permission_request?pty_id=` (signed; a tab key only for its own pty); `permRegistry` parks it, keyed by
 `pty_id` + hash(`tool_name`,`tool_input`) (the payload has no `tool_use_id`), and publishes the pty's whole
 pending list as `pty-permissions` (state, not delta). **Never falls back to allow:** every path that is not an
 explicit answer — app down, any error, hook disconnect, phase leaving `waiting_approval`, `AskUserQuestion` /

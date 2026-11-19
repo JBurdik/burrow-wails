@@ -181,14 +181,13 @@ func TestPermissionHandlerSkipsUnansweredTools(t *testing.T) {
 
 func runApprove(t *testing.T, ptyID, stdin string, handler http.HandlerFunc) (string, int) {
 	t.Helper()
-	srv := httptest.NewServer(handler)
-	t.Cleanup(srv.Close)
+	srv := signedStub(t, handler)
 	port := srv.URL[strings.LastIndex(srv.URL, ":")+1:]
 	home := t.TempDir()
 	_ = os.WriteFile(filepath.Join(home, "hook.port"), []byte(port+"\n1"), 0o644)
-	_ = os.WriteFile(filepath.Join(home, "control.token"), []byte("tok123"), 0o600)
+	_ = os.WriteFile(filepath.Join(home, "control.token"), []byte(testToken), 0o600)
 	cmd := exec.Command("sh", "bin/burrow", "approve")
-	cmd.Env = append(os.Environ(), "BURROW_HOME_DIR="+home, "BURROW_HOOK_PORT=", "BURROW_PTY_ID="+ptyID)
+	cmd.Env = append(os.Environ(), "BURROW_HOME_DIR="+home, "BURROW_HOOK_PORT=", "BURROW_CALLER_TOKEN=", "BURROW_PTY_ID="+ptyID)
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.Output()
 	code := 0
@@ -218,7 +217,7 @@ func TestApproveCLI(t *testing.T) {
 	if out, code := runApprove(t, "7", bash, answer(200, verdict)); out != verdict || code != 0 {
 		t.Errorf("verbatim: %q %d", out, code)
 	}
-	if gotPath != "/v1/permission_request?pty_id=7" || gotAuth != "Bearer tok123" || gotBody != bash {
+	if gotPath != "/v1/permission_request?pty_id=7" || !strings.HasPrefix(gotAuth, "Burrow-Proof ") || gotBody != bash {
 		t.Errorf("request: %s %s %s", gotPath, gotAuth, gotBody)
 	}
 	// 204, 500, 401: no decision, exit 0, never a made-up allow.

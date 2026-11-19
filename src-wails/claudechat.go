@@ -226,7 +226,8 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 	// thread to attribute it to (see addBurrowEnvForChat) — omitted, not "0",
 	// when id doesn't parse, same reasoning as there.
 	if chatID := chatIDOf(id); chatID > 0 {
-		env = append(env, "BURROW_CHAT_ID="+strconv.FormatInt(chatID, 10))
+		env = append(env, "BURROW_CHAT_ID="+strconv.FormatInt(chatID, 10),
+			"BURROW_CALLER_TOKEN="+a.callerKeyEnv("chat", chatID))
 	}
 
 	return a.claudeMgr().Start(id, bin, args, cwd, env,

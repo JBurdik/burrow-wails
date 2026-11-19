@@ -409,6 +409,9 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	if a.hookSrv != nil {
 		env = append(env, fmt.Sprintf("BURROW_HOOK_PORT=%d", a.hookSrv.port))
 	}
+	if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+		env = append(env, "BURROW_CALLER_TOKEN="+a.callerKeyEnv("pty", n))
+	}
 	// Loads the burrow mod into any Claude Code started in this tab, on top of
 	// whatever plugin dirs the user already names.
 	if a.claudeModDir != "" {
