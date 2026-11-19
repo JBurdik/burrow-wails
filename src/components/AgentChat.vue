@@ -2697,7 +2697,7 @@ watch(() => props.chatId, () => Object.assign(catchUp, { open: false, summary: "
 // same cheap model as the commit-message button). Fire-and-forget: the
 // heuristic title is already on screen, so a failure or a slow answer costs
 // nothing. Bails if anything better claimed the title meanwhile.
-async function refineTitle(text: string) {
+async function refineTitle(chatId: number, text: string) {
   const heuristic = smartTitle(text);
   let title = "";
   try {
@@ -2710,10 +2710,11 @@ async function refineTitle(text: string) {
   } catch {
     return;
   }
-  if (!title || claudeGeneratedTitle.value) return;
-  const session = chats.sessions.find((s) => s.id === props.chatId);
+  // chatId, not props.chatId: the view may show another thread by now.
+  if (!title) return;
+  const session = chats.sessions.find((s) => s.id === chatId);
   if (!session || session.pinnedTitle || session.title !== heuristic) return;
-  chats.sync(props.chatId, { title });
+  chats.sync(chatId, { title });
 }
 
 
@@ -2914,6 +2915,16 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     inputText.value = "";
     return null;
   }
+  // Auto-title from the first user message (still at default, Claude hasn't
+  // named it). Before the busy branch: a fresh chat whose CLI is still warming
+  // reads busy, and titling only on the idle path left it "Chat N".
+  if (!claudeGeneratedTitle.value) {
+    const session = chats.sessions.find((s) => s.id === sendingChatId);
+    if (session && isDefaultTitle(session.title)) {
+      chats.sync(sendingChatId, { title: smartTitle(text) });
+      void refineTitle(sendingChatId, text);
+    }
+  }
   // A follow-up is always a separate turn, queued in Go behind the running one
   // (chat_submit decides). `busy` here only skips the new-turn bookkeeping.
   if (busy.value) {
@@ -2943,15 +2954,6 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     subjectId: `chat:${props.chatId}`,
     label: text.slice(0, 60),
   });
-
-  // Auto-title from first user message (only if still at default and Claude hasn't set one yet)
-  if (!claudeGeneratedTitle.value) {
-    const session = chats.sessions.find((s) => s.id === props.chatId);
-    if (session && isDefaultTitle(session.title)) {
-      chats.sync(props.chatId, { title: smartTitle(text) });
-      void refineTitle(text);
-    }
-  }
 
   pendingImages.value = [];
   syncStore();
