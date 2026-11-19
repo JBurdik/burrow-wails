@@ -242,6 +242,8 @@ import { useImageLightbox } from "@/composables/useImageLightbox";
 import { configReady, getConfig, setConfig } from "@/lib/config";
 import { useNotificationsStore } from "@/stores/notifications";
 import { retrying } from "@/lib/retrying";
+import { startActivityLog } from "@/lib/activityLog";
+import { remoteActive } from "@/lib/wailsCompat/core";
 
 let resizing: 'left' | 'right' | null = null;
 let resizeStartX = 0;
@@ -859,9 +861,13 @@ function playStartupChime() {
   }
 }
 
+// Activity log + hang watch (src/lib/activityLog.ts): this Mac's own window only.
+let stopActivityLog: (() => void) | undefined;
+onBeforeUnmount(() => stopActivityLog?.());
 onMounted(async () => {
   // Paired device: connection indicator + delivery of messages held offline.
   startOffline();
+  if (!remoteActive()) stopActivityLog = startActivityLog(router, { invoke: (c, a) => invoke(c, a), enabled: () => ui.activityLog });
   // A paired device cold-started offline: list_workspaces fails once the
   // transport gives up (~15 s). The rest of startup must still run; the
   // transport's resync after it recovers (transport.ts onopen) re-reads.

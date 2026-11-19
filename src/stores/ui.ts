@@ -122,6 +122,7 @@ interface Prefs {
   worktreeCleanupInactive: boolean; // remove idle worktrees with no chats/tabs (same)
   worktreeCleanupInactiveDays: number; // idle threshold for the rule above, 0 = off
   holdToQuit: boolean; // ⌘Q must be held ~1 s to quit (read by Go, src-wails/quithold.go)
+  activityLog: boolean; // note clicks/routes/shortcuts/sends into <app-data>/activity (src/lib/activityLog.ts); never typed text
   floatPopouts: boolean; // popped-out terminal/chat windows open floating (no zoom button, tiling WMs float them)
   sidebarInbox: boolean; // a global Inbox (needs you + unread) above the per-project groups
   trayHotkey: string; // global shortcut for the tray panel, "⌥Space" style (src-wails/trayhotkey.go); "" = off
@@ -238,6 +239,7 @@ const DEFAULT_PREFS: Prefs = {
   subagentAutoDeliver: true,
   coreAtLogin: false,
   floatPopouts: false,
+  activityLog: false,
   sidebarInbox: true,
   holdToQuit: true,
   trayHotkey: "⌥Space",
@@ -393,6 +395,7 @@ export const useUIStore = defineStore("ui", () => {
   const subagentAutoDeliver = ref<boolean>(loaded.subagentAutoDeliver ?? true);
   const coreAtLogin = ref<boolean>(loaded.coreAtLogin ?? false);
   const floatPopouts = ref<boolean>(loaded.floatPopouts ?? false);
+  const activityLog = ref<boolean>(loaded.activityLog ?? false);
   const sidebarInbox = ref<boolean>(loaded.sidebarInbox ?? true);
   const holdToQuit = ref<boolean>(loaded.holdToQuit ?? true);
   const trayHotkey = ref<string>(loaded.trayHotkey ?? "⌥Space");
@@ -470,6 +473,7 @@ export const useUIStore = defineStore("ui", () => {
     subagentAutoDeliver.value = p.subagentAutoDeliver ?? true;
     coreAtLogin.value = p.coreAtLogin ?? false;
     floatPopouts.value = p.floatPopouts ?? false;
+    activityLog.value = p.activityLog ?? false;
     sidebarInbox.value = p.sidebarInbox ?? true;
     holdToQuit.value = p.holdToQuit ?? true;
     trayHotkey.value = p.trayHotkey ?? "⌥Space";
@@ -671,6 +675,7 @@ export const useUIStore = defineStore("ui", () => {
         subagentAutoDeliver: subagentAutoDeliver.value,
         coreAtLogin: coreAtLogin.value,
         floatPopouts: floatPopouts.value,
+        activityLog: activityLog.value,
         sidebarInbox: sidebarInbox.value,
         holdToQuit: holdToQuit.value,
         trayHotkey: trayHotkey.value,
@@ -696,7 +701,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, coreAtLogin, floatPopouts, sidebarInbox, holdToQuit, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, coreAtLogin, floatPopouts, activityLog, sidebarInbox, holdToQuit, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -1015,6 +1020,7 @@ export const useUIStore = defineStore("ui", () => {
     subagentAutoDeliver,
     coreAtLogin,
     floatPopouts,
+    activityLog,
     sidebarInbox,
     holdToQuit,
     trayHotkey,

@@ -163,6 +163,13 @@
               </div>
               <Switch :checked="ui.sidebarInbox" @update:checked="(v: boolean) => ui.sidebarInbox = v" />
             </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Keep an activity log</span>
+                <span class="text-[11px] text-muted-foreground">Notes what you click, open and send (never what you type) in the app data's activity folder, a file a day, kept 30 days and never sent anywhere. Agents read it with <code>burrow activity</code>.</span>
+              </div>
+              <Switch :checked="ui.activityLog" @update:checked="(v: boolean) => ui.activityLog = v" />
+            </div>
             <div v-if="canOpenWindows()" class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Float popped-out windows</span>

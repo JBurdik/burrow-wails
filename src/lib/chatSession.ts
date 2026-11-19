@@ -17,6 +17,7 @@ import { parseContextReport, type CtxReportRow } from "@/lib/contextReport";
 import { appChatHost, type ChatHost } from "@/lib/chatHost";
 import { dropHeld, heldFor, holdMessage, isOfflineError, newClientId, type HeldMessage } from "@/lib/offline";
 import { answerPreview, type TurnPick } from "@/lib/turnNeeds";
+import { noteActivity } from "@/lib/activityLog";
 
 // Who owns a chat's stream — the answer used to be "whichever AgentChat.vue is
 // mounted", which is what made the component un-unmountable: its
@@ -694,6 +695,7 @@ function create(chatId: number, deps: ChatSessionDeps): InternalSession {
     },
     async submit(prompt, before) {
       const clientId = newClientId();
+      noteActivity({ kind: "send", images: prompt.images?.length || undefined, mode: s.busy.value ? "while running" : undefined });
       // Messages already held for this chat go first: this one waits behind
       // them in the outbox instead of overtaking them.
       if (s.deps.outbox?.list(chatId).length && s.deps.outbox.hold(chatId, prompt.text, prompt.images, clientId)) return null;
@@ -1083,6 +1085,7 @@ export function answerTurn(chatId: number, a: TurnAnswer): Promise<void> {
 }
 
 async function answerTurnVia(deps: ChatSessionDeps, chatId: number, a: TurnAnswer, s?: InternalSession): Promise<void> {
+  noteActivity({ kind: "answer", label: "turn card", images: a.images?.length || undefined });
   const clientId = newClientId();
   const preview = answerPreview(a.picks, a.extra);
   const answer = { picks: a.picks, extra: a.extra };
@@ -1547,6 +1550,7 @@ function clearSlot(s: InternalSession, request: Ref<CanUseToolReq | null>, marke
 }
 
 async function respond(s: InternalSession, answer: PendingAnswer): Promise<boolean> {
+  noteActivity({ kind: "answer", label: answer.kind });
   const { chatId } = s;
   switch (answer.kind) {
     case "permission": {

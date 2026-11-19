@@ -938,6 +938,17 @@ leaving `waiting_approval` (`PhaseStore.onChange` → `permRegistry.phaseChanged
 ever observed only a turn end closes it, because the status hook races the approve hook), not by the
 disconnect.
 
+### Activity log + hang watch (`src-wails/activity.go`, `internal/control/verbs_activity.go`, `src/lib/activityLog.ts`)
+
+Threadbear's activity log. Opt-in `uiPrefs.activityLog` (Settings → General, off by default): the main window (not
+WindowApp, not a paired device) notes clicks on controls (aria-label / title / innerText ≤ 80 + surface from a selector
+map), route changes, shortcuts (keymap id, noted in `keybindings.matches`), sends (`chatSession.submit`: images count,
+mode — **never text**) and answers (`respond` kind / turn card). The **hang watch** is always on: longtask observer, else a
+250 ms timer measuring lateness (WKWebView has no longtask), stalls ≥ 1 s, ≤ 1 per 10 s, with route + last entry.
+Batched, flushed every 5 s via `activity_append` (re-encoded through `control.ActivityEntry`, unknown fields dropped,
+strings clipped) into `<app-data>/activity/YYYY-MM-DD.jsonl`; files > 30 days pruned once a day. Read by the local-only
+verb `activity [--summary] [--days N]`. Never sent anywhere.
+
 ### Agent secret requests (`src-wails/secretrequests.go`, `internal/control/verbs_secret.go`)
 
 `burrow secret-request --name NAME --reason TEXT` (verb `secret_request`, **local only**, also an MCP tool) parks a

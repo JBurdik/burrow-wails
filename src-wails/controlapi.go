@@ -222,6 +222,7 @@ func (a *App) initControl(dataDir string) {
 		Secrets:           a,
 		TurnNeeds:         a,
 		Pins:              a,
+		ActivityDir:       filepath.Join(dataDir, "activity"),
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")
 }

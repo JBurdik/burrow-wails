@@ -274,6 +274,8 @@ type Deps struct {
 	TurnNeeds TurnNeedsStore
 	// Pins backs pin. nil = it refuses.
 	Pins Pins
+	// ActivityDir is <app-data>/activity, read by the activity verb. "" = it refuses.
+	ActivityDir string
 }
 
 // Core is the verb registry plus the dependencies verbs run against.
@@ -292,6 +294,7 @@ func New(deps Deps) *Core {
 	c.register(chatVerbs(c)...)
 	c.register(secretVerbs(c)...)
 	c.register(turnVerbs(c)...)
+	c.register(activityVerbs(c)...)
 	return c
 }
 
