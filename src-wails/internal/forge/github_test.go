@@ -197,3 +197,17 @@ func TestCheckoutFetchRefs(t *testing.T) {
 		t.Error("azure claims HeadFetcher")
 	}
 }
+
+// gh exits with a usage error when merging non-interactively without a method.
+func TestGithubMergePassesAMethod(t *testing.T) {
+	for squash, want := range map[bool]string{false: "--merge", true: "--squash"} {
+		s := &stubRunner{out: ""}
+		f, _ := New(GitHub, s.run)
+		if err := f.Merge("/repo", 30, squash); err != nil {
+			t.Fatal(err)
+		}
+		if argv := strings.Join(s.calls[0], " "); !strings.Contains(argv, "pr merge 30 "+want) {
+			t.Errorf("squash=%v: unexpected argv: %s", squash, argv)
+		}
+	}
+}

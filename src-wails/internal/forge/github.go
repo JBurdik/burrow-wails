@@ -163,8 +163,11 @@ func (g *githubForge) Create(cwd string, o CreateOpts) (PullRequest, error) {
 
 func (g *githubForge) Merge(cwd string, number int, squash bool) error {
 	args := []string{"pr", "merge", itoa(number)}
+	// gh refuses a non-interactive merge without an explicit method.
 	if squash {
 		args = append(args, "--squash")
+	} else {
+		args = append(args, "--merge")
 	}
 	_, err := g.exec(cwd, args)
 	return err
